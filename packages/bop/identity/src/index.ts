@@ -1,11 +1,19 @@
 export {
+  assertGuestSessionReceiptReadable,
   assertGuestSessionUsable,
   createGuestSession,
   createGuestSessionRecord,
+  guestSessionAbsoluteLifetimeMs,
+  guestSessionClosureLifetimeMs,
   guestSessionCookie,
+  guestSessionCookieMaxAgeSeconds,
   guestSessionErrorCodes,
+  guestSessionIdleLifetimeMs,
+  serializeGuestSessionCookie,
   GuestSessionError,
   parseGuestAdmissionEvidence,
+  parseGuestDiningAdmissionEvidence,
+  parseGuestDiningAdmissionReference,
   parseGuestEntryRequestReference,
   parseGuestOperationReference,
   parseGuestRawCredential,
@@ -82,8 +90,11 @@ export {
   parsePurposeCode,
   parseSessionReference,
   parseSessionVersion,
+  recordSessionActivity,
   revocationReasons,
+  sessionActivityWriteIntervalSeconds,
   sessionPolicies,
+  slidingIdleExpiry,
   type AuthenticationSession,
   type AuthenticationSessionStatus,
   type CorrelationReference,
@@ -131,9 +142,11 @@ export {
   type SelectorHash,
 } from "./contracts/browser-session.js";
 export {
+  type BrowserSessionActivityResult,
   type BrowserSessionStorePort,
   type ConsumeAuthorizationTransactionCommand,
   type CreateBrowserSessionCommand,
+  type RecordBrowserSessionActivityCommand,
   type RevokeBrowserSessionCommand,
   type RotateBrowserSessionCommand,
 } from "./application/ports/browser-session-store-port.js";
@@ -219,6 +232,7 @@ export * from "./application/api-client-service.js";
 export * from "./application/ports/api-client-ports.js";
 export {
   createPostgresGuestSessionEntryStore,
+  createPostgresFencedGuestSessionEntryStore,
   createPostgresGuestSessionLegacyInspector,
   type GuestSessionEntryStore,
   type GuestSessionLegacyClassification,
@@ -226,3 +240,164 @@ export {
   type GuestSessionEntryTransactionRunner,
 } from "./infrastructure/persistence/guest-session-entry-store.js";
 export { createGuestSessionCredentialProvider } from "./infrastructure/crypto/guest-session-credential-provider.js";
+
+export {
+  prepareGuestBinding,
+  parseGuestBindingPreparation,
+  acknowledgeGuestBinding,
+  activateGuestBinding,
+  completeGuestBinding,
+  type GuestBindingPreparation,
+  type GuestBindingProof,
+  type GuestBindingOwnerEvidence,
+  type GuestBindingHashEquals,
+} from "./contracts/guest-binding-preparation.js";
+export { createGuestBindingCredentialProvider } from "./infrastructure/crypto/guest-binding-credential-provider.js";
+
+export {
+  createPostgresGuestBindingStore,
+  type GuestBindingAuditPort,
+  type GuestBindingAuditDescriptor,
+} from "./infrastructure/persistence/guest-binding-store.js";
+
+export { createGuestBindingService } from "./application/guest-binding-service.js";
+export type {
+  GuestBindingStorePort,
+  GuestBindingServiceOptions,
+  GuestBindingOwnerPort,
+  GuestBindingTargetReceipt,
+  GuestBindingCompletion,
+} from "./application/ports/guest-binding-ports.js";
+
+export * from "./contracts/guest-dining-binding-preparation.js";
+
+export * from "./infrastructure/persistence/guest-dining-binding-store.js";
+
+export * from "./application/guest-dining-binding-service.js";
+export * from "./application/ports/guest-dining-binding-ports.js";
+export * from "./infrastructure/crypto/guest-dining-binding-credential-provider.js";
+
+export * from "./infrastructure/persistence/current-browser-session-source.js";
+
+export * from "./infrastructure/persistence/oidc-authorization-store.js";
+
+export * from "./infrastructure/persistence/browser-session-store.js";
+
+export * from "./infrastructure/persistence/browser-session-selection-store.js";
+export * from "./infrastructure/persistence/browser-brand-session-selection-store.js";
+
+export { createPostgresCurrentWorkforceMfaSource } from "./infrastructure/persistence/current-workforce-mfa-source.js";
+export * from "./infrastructure/persistence/workforce-mfa-step-up-store.js";
+export * from "./infrastructure/crypto/workforce-totp.js";
+// WP-2423 Q18 option A: device-bound staff PIN (registered tablets, PIN credentials, PIN sessions).
+export * from "./contracts/staff-pin.js";
+export * from "./infrastructure/crypto/staff-pin-kdf.js";
+export * from "./infrastructure/persistence/staff-pin-store.js";
+// WP-2423 DEC-COGNITO-STORE-STAFF: Store staff invitations, their Cognito accounts and sign-in.
+export * from "./infrastructure/persistence/store-staff-account-store.js";
+export * from "./infrastructure/cognito-store-workforce-provider.js";
+export * from "./infrastructure/cognito-pool-mfa-policy.js";
+
+export * from "./infrastructure/persistence/guest-entry-admission-store.js";
+
+export * from "./application/guest-session-request-admission.js";
+export * from "./infrastructure/crypto/guest-session-abuse-keys.js";
+
+export {
+  platformAuthorizationCookie,
+  platformSessionCookie,
+  parsePlatformActor,
+  parsePlatformSessionMfa,
+  assertPlatformSessionCurrent,
+  type PlatformBrowserCookieMutation,
+  type PlatformBrowserSessionStorePort,
+  type PlatformOidcProviderPort,
+  type PlatformSessionMfa,
+  type PlatformTotpVerification,
+  type ReplacePlatformSessionCommand,
+} from "./contracts/platform-browser-session.js";
+export {
+  PlatformBrowserSessionService,
+  type PlatformBrowserSessionServiceOptions,
+} from "./application/platform-browser-session-service.js";
+export { createPostgresCurrentPlatformBrowserSessionSource } from "./infrastructure/persistence/current-platform-browser-session-source.js";
+export {
+  createCognitoPlatformProvider,
+  type CognitoPlatformProviderOptions,
+} from "./infrastructure/cognito-platform-provider.js";
+export {
+  createCognitoPlatformSubjectStatus,
+  type CognitoPlatformSubjectStatusOptions,
+} from "./infrastructure/cognito-platform-subject-status.js";
+export {
+  createCognitoPlatformIdentity,
+  type CognitoPlatformIdentityOptions,
+} from "./infrastructure/cognito-platform-identity.js";
+export * from "./contracts/platform-actor-directory.js";
+export {
+  createPostgresPlatformActorDirectorySource,
+  type PlatformActorDirectorySourceOptions,
+  type PlatformActorDirectoryTransaction,
+} from "./infrastructure/persistence/platform-actor-directory-store.js";
+export {
+  createPostgresPlatformActorDirectoryProvisioner,
+  type PlatformActorDirectoryProvisionerOptions,
+  type PlatformActorDirectoryApprovalPort,
+} from "./infrastructure/persistence/platform-actor-directory-provisioner.js";
+export * from "./infrastructure/brand-initial-provisioning-operator.js";
+export * from "./infrastructure/persistence/current-workforce-invitation-source.js";
+
+export * from "./contracts/current-workforce-account.js";
+export * from "./contracts/workforce-account-binding.js";
+export {
+  createPostgresWorkforceAccountBindingProvisioner,
+  createPostgresWorkforceAccountBindingAcceptanceWriter,
+  workforceAccountBindingCodec,
+  workforceAccountBindingSubjectHash,
+  type WorkforceAccountBindingTransaction,
+  type WorkforceAccountBindingAuthorityPort,
+  type WorkforceAccountBindingProvisionerOptions,
+  type WorkforceAccountBindingAcceptanceWriterOptions,
+} from "./infrastructure/persistence/workforce-account-binding-provisioner.js";
+export * from "./infrastructure/persistence/current-workforce-account-source.js";
+export * from "./infrastructure/workforce-account-binding-approval-files.js";
+
+export {
+  workforceAuthorizationCookie,
+  workforceSessionCookie,
+  parseWorkforceActor,
+  parseWorkforceSessionMfa,
+  assertWorkforceSessionCurrent,
+  type WorkforceBrowserCookieMutation,
+  type WorkforceBrowserSessionStorePort,
+  type WorkforceOidcProviderPort,
+  type WorkforceSessionMfa,
+  type WorkforceTotpVerification,
+  type ReplaceWorkforceSessionCommand,
+} from "./contracts/workforce-browser-session.js";
+export {
+  WorkforceBrowserSessionService,
+  type WorkforceBrowserSessionServiceOptions,
+} from "./application/workforce-browser-session-service.js";
+export {
+  createCognitoWorkforceProvider,
+  type CognitoWorkforceProviderOptions,
+} from "./infrastructure/cognito-workforce-provider.js";
+export * from "./infrastructure/persistence/workforce-authentication-source.js";
+export * from "./infrastructure/persistence/workforce-invitation-store.js";
+export * from "./infrastructure/cognito-workforce-invitation.js";
+
+export {
+  createCognitoWorkforceIdentity,
+  type CognitoWorkforceIdentityOptions,
+} from "./infrastructure/cognito-workforce-identity.js";
+
+export * from "./contracts/workforce-onboarding-operation.js";
+export * from "./contracts/workforce-onboarding-invitation.js";
+export * from "./application/ports/workforce-onboarding-browser-port.js";
+export * from "./infrastructure/cognito-workforce-onboarding-authentication.js";
+export * from "./infrastructure/persistence/workforce-onboarding-invitation-source.js";
+export * from "./infrastructure/persistence/workforce-onboarding-operation-store.js";
+// DEC-PILOT-NOTIFICATIONS R1 (IDR-0031): one-time order recovery link.
+export * from "./application/order-recovery-service.js";
+export * from "./infrastructure/persistence/order-recovery-store.js";

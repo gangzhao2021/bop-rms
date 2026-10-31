@@ -20,3 +20,14 @@ Thumbs.db
 .vscode/
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# Local browser sessions can contain private transaction references.
+output/playwright/
+
+# Windows download metadata is not part of the shared source document.
+/BOP-RMS Complete Handoff Package.md:Zone.Identifier
+
+# Local agent configuration and worktrees; never committed. Project skills are shared
+# (Owner 2026-10-27 "都按建议做").
+.claude/*
+!.claude/skills/

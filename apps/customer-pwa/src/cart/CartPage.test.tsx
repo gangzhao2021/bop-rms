@@ -3,7 +3,8 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { CartPage } from "./CartPage.js";
 import type { CartState, CartStateController } from "./cart-state.js";
-import type { CartView } from "./types.js";
+import { checkoutInProgressMessage, type CartView } from "./types.js";
+import { cartText } from "../journey/messages.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -75,6 +76,55 @@ function renderPage(state: CartState): string {
 }
 
 describe("CUST-CART page contract", () => {
+  it("explains foreign ownership, disables all row controls and suppresses a supplied foreign note", () => {
+    const base = cart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const shared: CartView = {
+      ...base,
+      cart: {
+        ...base.cart,
+        orderType: "DineIn",
+        serviceMode: "DineIn",
+        items: [
+          {
+            ...item,
+            warnings: ["OTHER_PARTICIPANT_ITEM"],
+            customerNote: "Synthetic restricted foreign note",
+          },
+        ],
+      },
+    };
+    const html = renderPage({ status: "ready", cart: shared });
+    expect(html).toContain("Added by another guest. Only they can change this item.");
+    expect(html).not.toContain("Synthetic restricted foreign note");
+    expect(html).not.toContain("OTHER_PARTICIPANT_ITEM");
+    expect(
+      html.match(new RegExp(`aria-describedby="cart-item-ownership-${id(2)}" disabled=""`, "gu")),
+    ).toHaveLength(3);
+  });
+  it("keeps current-participant notes and controls available", () => {
+    const base = cart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const html = renderPage({
+      status: "ready",
+      cart: {
+        ...base,
+        cart: {
+          ...base.cart,
+          orderType: "DineIn",
+          serviceMode: "DineIn",
+          items: [{ ...item, warnings: [], customerNote: "Synthetic own note" }],
+        },
+      },
+    });
+    expect(html).toContain("Synthetic own note");
+    expect(html).not.toContain("Added by another guest");
+    expect(html).toContain('type="button" aria-label="Increase Synthetic tea quantity"');
+    expect(html).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+  });
+
   it("renders exact Cart fields, Quote, boundaries and accessible controls", () => {
     const html = renderPage({ status: "ready", cart: cart() });
     expect(html).toContain("Your cart");
@@ -82,22 +132,24 @@ describe("CUST-CART page contract", () => {
     expect(html).toContain("Synthetic Store");
     expect(html).toContain("Synthetic tea");
     expect(html).toContain("Synthetic size");
-    expect(html).toContain("CAD 1130 minor units");
-    expect(html).toContain("Cart version 3");
+    expect(html).toContain("$11.30");
+    expect(html).not.toContain("Cart version");
+    expect(html).not.toContain("Quote v");
+    expect(html).not.toContain("SYNTHETIC_WARNING");
     expect(html).toContain("Continue shopping");
-    expect(html).toContain("Clear cart");
-    expect(html).toContain("Review checkout");
-    expect(html).toContain("Clear cart requires an atomic server command and is unavailable.");
-    expect(html).toContain("Payment remains unavailable until the Provider gate is closed.");
-    expect(html).toContain("disabled");
+    expect(html).not.toContain("Clear cart");
+    expect(html).toContain(">Checkout</a>");
+    expect(html).toContain('aria-label="Customer journey"');
+    expect(html).toContain('<span aria-current="page">Cart</span>');
+    expect(html).toContain("<h1>Synthetic Store</h1>");
     expect(html).toContain('aria-label="Increase Synthetic tea quantity"');
-    expect(html).toContain('href="#cart-content"');
+    expect(html).toContain('href="#main-content"');
     expect(html).not.toMatch(/localStorage|sessionStorage|indexedDB|serviceWorker/u);
   });
 
   it("renders offline as explicit read-only with no enabled mutation", () => {
     const html = renderPage({ status: "offline-readonly", cart: cart() });
-    expect(html).toContain("Offline read-only");
+    expect(html).toContain("You’re offline");
     expect(html).toContain("nothing will replay on reconnect");
     expect(html).toContain("Refresh after reconnecting");
     expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
@@ -111,28 +163,45 @@ describe("CUST-CART page contract", () => {
         status: "ready",
         cart: { ...disabled, cart: { ...disabled.cart, warnings: ["FEATURE_DISABLED"] } },
       }),
-    ).toContain("Cart ordering is not enabled");
+    ).toContain("Cart ordering isn’t enabled");
     const expired = cart();
     expect(
       renderPage({
         status: "ready",
         cart: { ...expired, cart: { ...expired.cart, warnings: ["QUOTE_EXPIRED"] } },
       }),
-    ).toContain("Quote expired");
+    ).toContain("Prices have expired");
+  });
+
+  it("WP-2423: names the item and how many the store can make when more was asked", () => {
+    const html = renderPage({
+      status: "validation",
+      cart: cart(),
+      issueCodes: ["ITEM_SHORT"],
+      retryAfterSeconds: null,
+      canRetrySameOperation: false,
+      shortItem: { cartItemReference: id(2), available: 2 },
+    });
+    expect(html).toContain("Not enough left");
+    expect(html).toContain(
+      "Only 2 Synthetic tea (Synthetic size) can be made right now, so we couldn’t add more. Your cart is unchanged.",
+    );
+    expect(html).not.toContain("can’t be ordered as selected");
   });
 
   it.each([
     ["loading", "Loading cart"],
     ["empty", "Your cart is empty"],
+    ["replacement-forbidden", "Cart replacement not permitted"],
     ["session-expired", "Session expired"],
-    ["not-found", "Cart unavailable"],
+    ["not-found", "Cart not found"],
     ["conflict", "Cart changed"],
     ["validation", "Review this item"],
     ["rate-limited", "Please wait"],
     ["expired", "Cart expired"],
     ["abandoned", "Cart closed"],
     ["command-failed", "Outcome not confirmed"],
-    ["unavailable", "Cart temporarily unavailable"],
+    ["unavailable", "We couldn’t load your cart"],
   ] as const)("renders the %s state", (status, message) => {
     const state: CartState =
       status === "loading" || status === "empty"
@@ -144,6 +213,254 @@ describe("CUST-CART page contract", () => {
             retryAfterSeconds: status === "rate-limited" ? 5 : null,
             canRetrySameOperation: status === "command-failed",
           };
-    expect(renderPage(state)).toContain(message);
+    const html = renderPage(state);
+    expect(html).toContain(message);
+    // The screen-reader status says what happened in plain words, never the state's name.
+    expect(html).toContain(`aria-live="polite">${cartText.stateAnnouncement[status]}</div>`);
+    expect(html).not.toContain("Cart state");
   });
+});
+
+it("disables superseding Cart changes while retaining explicit retry", () => {
+  const html = renderPage({
+    status: "command-failed",
+    cart: cart(),
+    issueCodes: [],
+    retryAfterSeconds: null,
+    canRetrySameOperation: true,
+  });
+  expect(html).toContain("Outcome not confirmed");
+  expect(html).toContain("Retry the same operation");
+  expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
+  expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+  expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Remove<\/button>/u);
+});
+
+it.each(["Pickup", "DineIn"] as const)(
+  "shows the empty %s server Cart without checkout",
+  (orderType) => {
+    const empty = cart();
+    const state: CartState = {
+      status: "ready",
+      cart: {
+        ...empty,
+        cart: { ...empty.cart, orderType, serviceMode: orderType, items: [], quote: null },
+      },
+    };
+    const html = renderPage(state);
+    expect(html).toContain("Your cart is empty");
+    expect(html).toContain("Browse menu");
+    expect(html).not.toContain("cart-checkout-link");
+    expect(state.cart.cart.cartReference).toBe(id(1));
+  },
+);
+it.each(["FEATURE_DISABLED", "PROJECTION_STALE"])(
+  "preserves %s for an empty server Cart",
+  (warning) => {
+    const empty = cart();
+    const html = renderPage({
+      status: "ready",
+      cart: { ...empty, cart: { ...empty.cart, items: [], warnings: [warning] } },
+    });
+    expect(html).not.toContain("Your cart is empty");
+    expect(html).toContain(
+      warning === "FEATURE_DISABLED" ? "Ordering is paused" : "may be out of date",
+    );
+  },
+);
+it.each(["command-pending", "offline-readonly", "command-failed"] as const)(
+  "does not hide %s behind the empty Cart state",
+  (status) => {
+    const empty = cart();
+    const html = renderPage({
+      status,
+      cart: { ...empty, cart: { ...empty.cart, items: [] } },
+      issueCodes: [],
+      retryAfterSeconds: null,
+      canRetrySameOperation: true,
+    });
+    expect(html).not.toContain("Your cart is empty");
+    if (status === "command-failed") expect(html).toContain("Outcome not confirmed");
+    if (status === "offline-readonly") expect(html).toContain("You’re offline");
+  },
+);
+
+it.each(["Expired", "Abandoned"] as const)(
+  "shows terminal %s from a successful load without checkout",
+  (status) => {
+    for (const empty of [false, true]) {
+      const base = cart();
+      const html = renderPage({
+        status: "ready",
+        cart: {
+          ...base,
+          cart: {
+            ...base.cart,
+            lifecycle: { ...base.cart.lifecycle, status },
+            items: empty ? [] : base.cart.items,
+          },
+        },
+      });
+      expect(html).toContain(status === "Expired" ? "Cart expired" : "Cart closed");
+      expect(html).toContain("Ask staff for help continuing your order.");
+      expect(html).not.toContain("Your cart is empty");
+      expect(html).not.toContain("cart-checkout-link");
+      expect(html).not.toContain("Requote");
+      expect(html).not.toContain("Continue shopping");
+    }
+  },
+);
+
+it("shows terminal Dining continuation with offline and unknown-outcome guards", () => {
+  const terminal: CartView = {
+    ...cart(),
+    cart: {
+      ...cart().cart,
+      orderType: "DineIn",
+      lifecycle: { ...cart().cart.lifecycle, status: "Expired" },
+    },
+  };
+  for (const status of ["ready", "offline-readonly", "command-pending"] as const) {
+    const state = { status, cart: terminal };
+    const supplied = { ...controller(state), replaceExpiredCart: async () => undefined };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CartPage controller={supplied} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Start an empty cart");
+    // WP-2423: anyone at the table may continue past a timed-out cart.
+    expect(html).toContain("Anyone at your table can start an empty cart to keep ordering.");
+    expect(html).toContain("Items that weren’t ordered aren’t copied.");
+    expect(html).not.toContain("table host");
+    if (status !== "ready")
+      expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Start an empty cart/);
+  }
+});
+
+it("shows rescan/staff guidance without retry for a known replacement refusal", () => {
+  const current = cart();
+  const state: CartState = {
+    status: "replacement-forbidden",
+    cart: {
+      ...current,
+      cart: {
+        ...current.cart,
+        orderType: "DineIn",
+        lifecycle: { ...current.cart.lifecycle, status: "Expired" },
+      },
+    },
+    issueCodes: [],
+    retryAfterSeconds: null,
+    canRetrySameOperation: false,
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage controller={{ ...controller(state), replaceExpiredCart: async () => undefined }} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Scan the table QR code again or ask staff for help.");
+  expect(html).not.toContain("Retry the same operation");
+  expect(html).not.toContain("Outcome not confirmed");
+  expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Start an empty cart/);
+});
+
+it("WP-2423: an Abandoned dine-in cart stays with the person who started the table", () => {
+  const terminal: CartView = {
+    ...cart(),
+    cart: {
+      ...cart().cart,
+      orderType: "DineIn",
+      lifecycle: { ...cart().cart.lifecycle, status: "Abandoned" },
+    },
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage
+        controller={{
+          ...controller({ status: "ready", cart: terminal }),
+          replaceExpiredCart: async () => undefined,
+        }}
+      />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Cart closed");
+  expect(html).toContain("The person who started the table can start an empty cart");
+});
+
+it("WP-2423: a dine-in cart that timed out during a change points back to the menu", () => {
+  const current = cart();
+  const state: CartState = {
+    status: "expired",
+    cart: { ...current, cart: { ...current.cart, orderType: "DineIn" } },
+    issueCodes: [],
+    retryAfterSeconds: null,
+    canRetrySameOperation: false,
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage controller={controller(state)} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("your table continues with a new cart");
+  expect(html).not.toContain("Ask staff for help continuing your order.");
+  expect(html).toContain("Return to menu");
+});
+
+it("WP-2423: a replacement held back by the table's last order says so, not a dropped connection", () => {
+  const current = cart();
+  const state: CartState = {
+    status: "order-processing",
+    cart: {
+      ...current,
+      cart: {
+        ...current.cart,
+        orderType: "DineIn",
+        lifecycle: { ...current.cart.lifecycle, status: "Expired" },
+      },
+    },
+    issueCodes: [],
+    retryAfterSeconds: 10,
+    canRetrySameOperation: false,
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage controller={{ ...controller(state), replaceExpiredCart: async () => undefined }} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain(
+    "Your table’s last order is still being processed. Try again in a moment.",
+  );
+  expect(html).not.toContain("The connection dropped");
+});
+
+it("WP-2423: says another guest at the table is checking out, with the wait", () => {
+  const state: CartState = {
+    status: "checkout-in-progress",
+    cart: cart(),
+    issueCodes: [],
+    retryAfterSeconds: 90,
+    canRetrySameOperation: false,
+  };
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <CartPage controller={controller(state)} />
+    </MemoryRouter>,
+  );
+  expect(html).toContain("Another guest is checking out");
+  expect(html).toContain(
+    "Another guest at your table is paying for this order. Try again in about 2 minutes.",
+  );
+  expect(html).toContain("Refresh cart");
+  expect(html).not.toContain("checkout_in_progress");
+});
+
+it("WP-2423: words the checkout-in-progress wait like the order-processing one", () => {
+  const base = "Another guest at your table is paying for this order.";
+  expect(checkoutInProgressMessage(null)).toBe(`${base} Try again shortly.`);
+  expect(checkoutInProgressMessage(1)).toBe(`${base} Try again in a moment.`);
+  expect(checkoutInProgressMessage(60)).toBe(`${base} Try again in a moment.`);
+  expect(checkoutInProgressMessage(61)).toBe(`${base} Try again in about 2 minutes.`);
+  expect(checkoutInProgressMessage(3600)).toBe(`${base} Try again in about 60 minutes.`);
+  expect(checkoutInProgressMessage(120)).toBe(`${base} Try again in about 2 minutes.`);
 });

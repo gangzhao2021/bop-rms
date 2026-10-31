@@ -235,6 +235,55 @@ async function prove(context) {
         "2026-08-11T18:20:00.000Z",
       ],
     );
+    // A second explicit verification of a still-valid generation has its own evidence.
+    await client.query(
+      `INSERT INTO rms_fulfillment.pickup_proof_verification (
+       pickup_proof_verification_id,brand_id,store_id,fulfillment_id,capability_id,generation,
+       verification_method,validation_status,verified_at,correlation_id,data_classification
+       ) VALUES ($1,$2,$3,$4,$5,2,'HumanCode','Validated',$6,$7,'IndirectIdentifier')`,
+      [id(155), id(2), id(3), id(100), id(140), "2026-08-11T18:21:00.000Z", id(156)],
+    );
+    const verificationSql = `INSERT INTO rms_fulfillment.pickup_proof_operation (
+       pickup_proof_operation_id,brand_id,store_id,fulfillment_id,capability_id,verification_id,
+       idempotency_id,correlation_id,operation_kind,generation,aggregate_version_before,
+       aggregate_version_after,occurred_at,data_classification
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Verify',2,NULL,NULL,$9,'IndirectIdentifier')`;
+    await client.query(verificationSql, [
+      id(157),
+      id(2),
+      id(3),
+      id(100),
+      id(140),
+      id(155),
+      id(158),
+      id(156),
+      "2026-08-11T18:21:00.000Z",
+    ]);
+    await assert.rejects(
+      client.query(verificationSql, [
+        id(159),
+        id(2),
+        id(3),
+        id(100),
+        id(140),
+        id(155),
+        id(158),
+        id(156),
+        "2026-08-11T18:21:00.000Z",
+      ]),
+      /pickup_proof_operation_idempotency_unique/u,
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_proof_operation (
+         pickup_proof_operation_id,brand_id,store_id,fulfillment_id,capability_id,
+         idempotency_id,correlation_id,operation_kind,generation,aggregate_version_before,
+         aggregate_version_after,occurred_at,data_classification
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'Regenerate',2,3,4,$8,'IndirectIdentifier')`,
+        [id(160), id(2), id(3), id(100), id(140), id(161), id(162), "2026-08-11T18:21:00.000Z"],
+      ),
+      /pickup_proof_operation_issue_generation_unique/u,
+    );
     const current = await client.query(
       `SELECT capability_id,generation FROM rms_fulfillment.pickup_proof_generation
        WHERE brand_id=$1 AND store_id=$2 AND fulfillment_id=$3
@@ -308,6 +357,92 @@ async function prove(context) {
       1,
     );
 
+    // WP-2423: a handoff after in-person verification references the verification, never a proof.
+    await seedReadyPickup(client, id(3), 500);
+    await client.query(
+      `INSERT INTO rms_fulfillment.pickup_in_person_verification (
+         pickup_in_person_verification_id,brand_id,store_id,fulfillment_id,verified_by_actor_id,
+         identity_check,reason,verified_at,correlation_id,data_classification
+       ) VALUES ($1,$2,$3,$4,$5,'OrderNumberAndName','ProofNotIssued',$6,$7,'IndirectIdentifier')`,
+      [id(530), id(2), id(3), id(500), id(531), "2026-08-11T20:00:00.000Z", id(532)],
+    );
+    const handoffRow = (handoffId, method, proofVerification, inPersonVerification) =>
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_handoff_record (
+           pickup_handoff_id,brand_id,store_id,fulfillment_id,pickup_location_id,
+           pickup_proof_verification_id,pickup_in_person_verification_id,verification_method,
+           recipient_type,recipient_display_mask,actor_id,device_id,handed_over_at,
+           validation_status,data_classification
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Customer','S***',$9,$10,$11,'Validated','Confidential')`,
+        [
+          handoffId,
+          id(2),
+          id(3),
+          id(500),
+          id(533),
+          proofVerification,
+          inPersonVerification,
+          method,
+          id(531),
+          id(534),
+          "2026-08-11T20:00:01.000Z",
+        ],
+      );
+    await assert.rejects(handoffRow(id(535), "InPerson", id(150), id(530)), /verification_method/u);
+    await assert.rejects(handoffRow(id(536), "HumanCode", null, id(530)), /verification_method/u);
+    await assert.rejects(handoffRow(id(537), "InPerson", null, id(599)), /in_person_fkey/u);
+    await handoffRow(id(538), "InPerson", null, id(530));
+    await assert.rejects(
+      client.query(
+        "UPDATE rms_fulfillment.pickup_in_person_verification SET reason='ProofExpired' WHERE pickup_in_person_verification_id=$1",
+        [id(530)],
+      ),
+    );
+    await assert.rejects(
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_in_person_verification (
+           pickup_in_person_verification_id,brand_id,store_id,fulfillment_id,verified_by_actor_id,
+           identity_check,reason,verified_at,correlation_id,data_classification
+         ) VALUES ($1,$2,$3,$4,$5,'LooksFamiliar','ProofNotIssued',$6,$7,'IndirectIdentifier')`,
+        [id(539), id(2), id(3), id(500), id(531), "2026-08-11T20:00:00.000Z", id(540)],
+      ),
+      /identity_check/u,
+    );
+    // WP-2423: closing a pickup nobody collected: once per fulfillment, only after the hold.
+    await seedReadyPickup(client, id(3), 600);
+    const closeRow = (closureId, idempotency, closedAt) =>
+      client.query(
+        `INSERT INTO rms_fulfillment.pickup_not_collected_record (
+           pickup_not_collected_id,brand_id,store_id,fulfillment_id,actor_id,reason,ready_at,
+           closed_at,idempotency_id,correlation_id,aggregate_version_before,data_classification
+         ) VALUES ($1,$2,$3,$4,$5,'NotCollected',$6,$7,$8,$9,2,'IndirectIdentifier')`,
+        [
+          closureId,
+          id(2),
+          id(3),
+          id(600),
+          id(631),
+          "2026-08-11T18:01:00.000Z",
+          closedAt,
+          idempotency,
+          id(closureId === id(630) ? 632 : 642),
+        ],
+      );
+    await assert.rejects(
+      closeRow(id(640), id(641), "2026-08-11T18:30:00.000Z"),
+      /pickup_not_collected_record_hold_check/u,
+    );
+    await closeRow(id(630), id(633), "2026-08-11T19:05:00.000Z");
+    await assert.rejects(
+      closeRow(id(640), id(641), "2026-08-11T19:10:00.000Z"),
+      /pickup_not_collected_record_fulfillment_unique/u,
+    );
+    await assert.rejects(
+      client.query(
+        "UPDATE rms_fulfillment.pickup_not_collected_record SET closed_at=closed_at WHERE pickup_not_collected_id=$1",
+        [id(630)],
+      ),
+    );
     await seedReadyPickup(client, id(99), 200);
     await insertGeneration(client, {
       capabilityId: id(230),
@@ -327,6 +462,24 @@ async function prove(context) {
     );
     for (const table of tables)
       await client.query(`GRANT SELECT ON rms_fulfillment.${table} TO ${role}`);
+    await client.query(`GRANT SELECT ON rms_fulfillment.pickup_in_person_verification TO ${role}`);
+    await client.query(`GRANT SELECT ON rms_fulfillment.pickup_not_collected_record TO ${role}`);
+    assert.equal(
+      await scopedCount(client, role, id(3), "rms_fulfillment.pickup_not_collected_record"),
+      1,
+    );
+    assert.equal(
+      await scopedCount(client, role, id(99), "rms_fulfillment.pickup_not_collected_record"),
+      0,
+    );
+    assert.equal(
+      await scopedCount(client, role, id(3), "rms_fulfillment.pickup_in_person_verification"),
+      1,
+    );
+    assert.equal(
+      await scopedCount(client, role, id(99), "rms_fulfillment.pickup_in_person_verification"),
+      0,
+    );
     assert.equal(
       await scopedCount(client, role, id(3), "rms_fulfillment.pickup_proof_generation"),
       2,

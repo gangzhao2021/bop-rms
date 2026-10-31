@@ -1,3 +1,6 @@
+import { createIdentityActor } from "../../bop/identity/src/index.ts";
+import { createBrand, createStore, createTenantContext } from "../../bop/tenant/src/index.ts";
+import { createPostgresStoreAssigneeCandidates } from "../../bop/membership/src/index.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -134,6 +137,7 @@ async function prove(context) {
     assert.equal((await client.query("SELECT * FROM bop_membership.membership")).rowCount, 1);
     assert.equal((await client.query("SELECT * FROM bop_membership.store_assignment")).rowCount, 0);
     await client.query("ROLLBACK");
+    await proveCandidates(client, role);
   } finally {
     await client.query("RESET ROLE").catch(() => undefined);
     await client.query(`DROP ROLE IF EXISTS ${role}`).catch(() => undefined);
@@ -144,3 +148,119 @@ async function prove(context) {
 it("proves Membership constraints, forced RLS and least privilege", async () => {
   await withIsolatedDatabase({ caseId: "membership", root }, prove);
 });
+
+async function proveCandidates(client, role) {
+  const from = "2026-09-10T10:00:00.000Z",
+    now = "2026-09-10T10:30:00.000Z",
+    future = "2026-09-10T11:00:00.000Z";
+  await client.query("RESET ROLE");
+  for (let n = 0; n < 9; n++) {
+    const brand = n === 5 ? id("10") : id("03"),
+      store = n === 4 ? id("11") : id("06");
+    await client.query(
+      "INSERT INTO bop_membership.membership (membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8,$8)",
+      [
+        id(String(40 + n)),
+        id(String(30 + n)),
+        brand,
+        id(String(70 + n)),
+        n === 3 ? "Suspended" : "Active",
+        n === 8 ? future : from,
+        n === 2 ? now : null,
+        from,
+      ],
+    );
+    await client.query(
+      "INSERT INTO bop_membership.store_assignment (assignment_id,membership_id,actor_id,brand_id,store_id,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$7,$7)",
+      [
+        id(String(50 + n)),
+        id(String(40 + n)),
+        id(String(30 + n)),
+        brand,
+        store,
+        n === 7 ? "Suspended" : "Active",
+        from,
+        n === 6 ? now : null,
+      ],
+    );
+  }
+  const actor = createIdentityActor({
+    actorType: "User",
+    actorReference: id("20"),
+    accountKind: "Workforce",
+    status: "Active",
+    authenticationMethod: "Oidc",
+    verificationLevel: "SingleFactor",
+    authenticatedAt: from,
+    recentMfaAt: null,
+  });
+  const brand = createBrand({
+    brandReference: id("03"),
+    code: "SYNTHETIC",
+    displayName: "Synthetic Brand",
+    defaultLocale: "en-CA",
+    currencyCode: "CAD",
+    lifecycle: "Active",
+    version: 1,
+    createdAt: from,
+    updatedAt: from,
+  });
+  const store = createStore({
+    storeReference: id("06"),
+    brandReference: id("03"),
+    code: "SYNTHETIC",
+    displayName: "Synthetic Store",
+    timeZone: "America/Toronto",
+    locale: "en-CA",
+    currencyCode: "CAD",
+    lifecycle: "Active",
+    version: 1,
+    createdAt: from,
+    updatedAt: from,
+  });
+  const context = createTenantContext(actor, brand, store, now);
+  await client.query("SET ROLE " + role);
+  await client.query("BEGIN");
+  try {
+    let calls = 0,
+      permissionCalls = 0,
+      revoke = false,
+      allowed = true;
+    const tx = {
+      query: async (sql, values) => {
+        calls++;
+        return client.query(sql, [...values]);
+      },
+    };
+    const read = createPostgresStoreAssigneeCandidates({
+      authorize: async (t, c, purpose) => {
+        assert.equal(t, tx);
+        assert.equal(c.store.storeReference, id("06"));
+        assert.equal(purpose, "DiscoverStoreAssignees");
+        permissionCalls++;
+        return allowed && (!revoke || permissionCalls === 1);
+      },
+    });
+    const first = await read(tx, { context, afterActorReference: id("29"), limit: 1 });
+    assert.deepEqual(first, { actorReferences: [id("30")], nextAfterActorReference: id("30") });
+    const second = await read(tx, {
+      context,
+      afterActorReference: first.nextAfterActorReference,
+      limit: 1,
+    });
+    assert.deepEqual(second, { actorReferences: [id("31")], nextAfterActorReference: null });
+    const all = await read(tx, { context, afterActorReference: id("29"), limit: 50 });
+    assert.deepEqual(all.actorReferences, [id("30"), id("31")]);
+    allowed = false;
+    const before = calls;
+    await assert.rejects(read(tx, { context, afterActorReference: null, limit: 50 }));
+    assert.equal(calls, before);
+    allowed = true;
+    revoke = true;
+    permissionCalls = 0;
+    await assert.rejects(read(tx, { context, afterActorReference: null, limit: 50 }));
+    assert.equal(permissionCalls, 2);
+  } finally {
+    await client.query("ROLLBACK");
+  }
+}

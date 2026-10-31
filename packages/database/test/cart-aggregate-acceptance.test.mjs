@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import orderingManifest from "../../rms/ordering/src/module.manifest.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -26,30 +27,17 @@ async function prove(context) {
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = 'rms_ordering' ORDER BY table_name`,
     );
-    assert.deepEqual(tables.rows, [
-      { table_name: "cart" },
-      { table_name: "cart_lifecycle_operation_record" },
-      { table_name: "cart_line" },
-      { table_name: "cart_operation_record" },
-      { table_name: "cart_quote_attachment" },
-      { table_name: "cart_quote_attachment_line" },
-      { table_name: "order_amendment" },
-      { table_name: "order_amendment_change" },
-      { table_name: "order_amendment_operation_record" },
-      { table_name: "order_amendment_state_record" },
-      { table_name: "order_batch" },
-      { table_name: "order_header" },
-      { table_name: "order_item" },
-      { table_name: "order_number_allocation" },
-      { table_name: "order_number_counter" },
-      { table_name: "order_status_projection" },
-      { table_name: "order_status_projection_generation" },
-      { table_name: "order_submission_record" },
-    ]);
+    // Every Ordering table, as the module owns them (module.manifest.ts, held to the
+    // migrations by the module-manifest gate): no table without an owner, none missing.
+    assert.deepEqual(
+      tables.rows.map((row) => row.table_name).sort(),
+      [...orderingManifest.ownedDatabase.tables].sort(),
+    );
     const forced = await admin.query(
       `SELECT relname, relforcerowsecurity FROM pg_class
        WHERE oid IN (
          'rms_ordering.cart'::regclass,
+         'rms_ordering.cart_binding_record'::regclass,
          'rms_ordering.cart_lifecycle_operation_record'::regclass,
          'rms_ordering.cart_line'::regclass,
          'rms_ordering.cart_operation_record'::regclass,

@@ -1,0 +1,165 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import { createCheckoutSessionClient } from "./session-client.js";
+const id = (n: number) => "01909999-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const selected = {
+  cartReference: id(1),
+  cartVersion: 3,
+  quoteReference: id(2),
+  quoteVersion: 2 as const,
+};
+const session = {
+  ...selected,
+  checkoutSessionReference: id(3),
+  createdAt: "2026-09-11T21:00:00.000Z",
+};
+beforeEach(() => setCustomerCsrfCredential("c".repeat(43)));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  setCustomerCsrfCredential(null);
+});
+it("creates and retries with the same caller intent and minimal body", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ schemaVersion: 1, session }, { status: 201 }))
+    .mockResolvedValueOnce(Response.json({ schemaVersion: 1, session }));
+  vi.stubGlobal("fetch", fetch);
+  const client = createCheckoutSessionClient();
+  expect(await client.create(selected, id(4))).toEqual(session);
+  expect(await client.create(selected, id(4))).toEqual(session);
+  for (const [url, init] of fetch.mock.calls) {
+    expect(url).toBe("/api/v1/carts/" + id(1) + "/checkout-sessions");
+    expect(init).toMatchObject({
+      cache: "no-store",
+      credentials: "same-origin",
+      redirect: "error",
+      headers: { "idempotency-key": id(4), "x-csrf-token": "c".repeat(43) },
+      body: JSON.stringify({ cartVersion: 3, quoteReference: id(2) }),
+    });
+  }
+});
+it("reads only the requested session", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValueOnce(Response.json({ schemaVersion: 1, session })),
+  );
+  expect(await createCheckoutSessionClient().read(id(3))).toEqual(session);
+});
+it("rejects mismatched quote binding and undeclared sensitive fields", async () => {
+  for (const change of [{ quoteReference: id(8) }, { clientSecret: "unexpected" }]) {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ schemaVersion: 1, session: { ...session, ...change } }),
+        ),
+    );
+    await expect(createCheckoutSessionClient().create(selected, id(4))).rejects.toThrow();
+  }
+});
+it("discards response after current session credentials change", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      setCustomerCsrfCredential(null);
+      return Response.json({ schemaVersion: 1, session });
+    }),
+  );
+  await expect(createCheckoutSessionClient().create(selected, id(4))).rejects.toMatchObject({
+    code: "unknown",
+  });
+});
+it("WP-2423 Q4: tells a closed Store apart from an ordinary conflict", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json(
+        { schemaVersion: 1, error: { code: "checkout_session_store_closed" } },
+        { status: 409 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      Response.json(
+        { schemaVersion: 1, error: { code: "checkout_session_intent_conflict" } },
+        { status: 409 },
+      ),
+    );
+  vi.stubGlobal("fetch", fetch);
+  const client = createCheckoutSessionClient();
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({ code: "store_closed" });
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({ code: "conflict" });
+});
+it("WP-2423: tells another guest's checkout apart from a conflict and keeps the wait", async () => {
+  const body = {
+    schemaVersion: 1,
+    error: { code: "cart_checkout_in_progress", messageKey: "customer.cart.checkout_in_progress" },
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(body, { status: 409, headers: { "retry-after": "300" } }))
+    .mockResolvedValueOnce(Response.json(body, { status: 409 }));
+  vi.stubGlobal("fetch", fetch);
+  const client = createCheckoutSessionClient();
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "checkout_in_progress",
+    retryAfterSeconds: 300,
+  });
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "checkout_in_progress",
+    retryAfterSeconds: null,
+  });
+});
+it("WP-2423: reads which cart line is short and how many are left (nothing was created)", async () => {
+  const line = id(70);
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          schemaVersion: 1,
+          error: {
+            code: "checkout_session_item_short",
+            line: { cartItemReference: line, available: 1, sharedStock: true },
+          },
+        },
+        { status: 409 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          schemaVersion: 1,
+          error: { code: "checkout_session_item_unavailable", line: { cartItemReference: line } },
+        },
+        { status: 409 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      Response.json(
+        {
+          schemaVersion: 1,
+          error: {
+            code: "checkout_session_item_short",
+            line: { cartItemReference: "not-a-line", available: -1 },
+          },
+        },
+        { status: 409 },
+      ),
+    );
+  vi.stubGlobal("fetch", fetch);
+  const client = createCheckoutSessionClient();
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "item_short",
+    line: { cartItemReference: line, available: 1, sharedStock: true },
+  });
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "item_unavailable",
+    line: { cartItemReference: line, available: null, sharedStock: false },
+  });
+  // A malformed line is never trusted; the guest is still told an item is short.
+  await expect(client.create(selected, id(4))).rejects.toMatchObject({
+    code: "item_short",
+    line: null,
+  });
+});

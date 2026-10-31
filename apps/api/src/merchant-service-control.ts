@@ -1,0 +1,225 @@
+import { createMerchantServicePauseProof } from "./merchant-service-pause-proof.js";
+import { storeConfigurationProofHashing } from "./merchant-store-configuration-proof-hash.js";
+import {
+  appendAuditRecordInTransaction,
+  canonicalizeRfc8785,
+  sha256Hex,
+  type AppendAuditRecordInput,
+} from "@bop/audit";
+import {
+  createPostgresCurrentStorePublicationProof,
+  createPostgresStoreServiceControl,
+  createPostgresStoreServiceControlState,
+  createPostgresStoreBusinessDateSource,
+} from "@rms/store";
+import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
+import {
+  createMerchantStoreBusinessDay,
+  merchantBusinessDayView,
+} from "./merchant-store-business-day.js";
+import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import type { MerchantBffService } from "./merchant-bff.js";
+
+export function createMerchantServiceControl(options: {
+  readonly persistence: PersistentMerchantBffOptions;
+  readonly authentication: Pick<MerchantBffService, "authorize">;
+  readonly audit: Pick<
+    AppendAuditRecordInput,
+    "reasonCode" | "retentionPolicyCode" | "retentionPolicyVersion"
+  >;
+}) {
+  const source = options.persistence;
+  const resolveScope = createMerchantStoreScope(source);
+  const write = async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+    const authorized = await options.authentication.authorize(input);
+    const body = input.command;
+    const keys = [
+      "command",
+      "operationReference",
+      "configurationReference",
+      "expectedVersion",
+      "auditReference",
+      "content",
+    ];
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Object.getPrototypeOf(body) !== Object.prototype ||
+      Reflect.ownKeys(body).length !== keys.length ||
+      keys.some(
+        (key) =>
+          !Object.getOwnPropertyDescriptor(body, key)?.enumerable ||
+          !("value" in (Object.getOwnPropertyDescriptor(body, key) ?? {})),
+      )
+    )
+      throw new Error("STORE_SERVICE_COMMAND_INVALID");
+    const request = body as Record<string, unknown>;
+    if (request.command !== "PauseService" && request.command !== "ResumeService")
+      throw new Error("STORE_SERVICE_COMMAND_INVALID");
+    return source.transactions.run(async (tx) => {
+      const { selected, context, store, actorReference, allowed } = await resolveScope(
+        tx,
+        input.sessionCookie,
+        request.command === "PauseService" ? "store.service.pause" : "store.service.resume",
+        authorized.sessionReference,
+      );
+      const digest = (value: unknown) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
+      return createPostgresStoreServiceControl({
+        brandReference: context.brand.brandReference,
+        storeReference: store.storeReference,
+        now: source.now,
+        run: async (work) => work(tx),
+        authorize: allowed,
+        currentConfiguration: async (transaction, reference, at) =>
+          (
+            await createPostgresCurrentStorePublicationProof({
+              ...source.publication,
+              tenantReference: selected.tenantReference,
+              brandReference: context.brand.brandReference,
+              storeReference: store.storeReference,
+              configurationReference: reference,
+              authorize: allowed,
+              ...storeConfigurationProofHashing,
+            })(transaction, at)
+          ).configuration,
+        hashIntent: (command) =>
+          digest({
+            brandReference: context.brand.brandReference,
+            storeReference: store.storeReference,
+            ...command,
+          }),
+        appendAudit: async (transaction, event) => {
+          await appendAuditRecordInTransaction(transaction, {
+            ...options.audit,
+            auditId: event.command.auditReference,
+            afterSummary: {
+              intentDigest: digest({
+                brandReference: context.brand.brandReference,
+                storeReference: store.storeReference,
+                ...event.command,
+              }),
+              expectedVersion: event.command.expectedVersion,
+              resultingVersion: event.resultingVersion,
+            },
+            brandId: context.brand.brandReference,
+            storeId: store.storeReference,
+            actor: { type: "User", reference: actorReference },
+            actionCode:
+              event.command.command === "PauseService"
+                ? "STORE_SERVICE_PAUSED"
+                : "STORE_SERVICE_RESUMED",
+            targetType: "StoreServiceControl",
+            targetId: event.command.operationReference,
+            correlationId: event.command.operationReference,
+            occurredAt: event.occurredAt,
+            sourceChannel: "MERCHANT_WEB",
+            dataClassification: "Internal",
+          });
+        },
+      })({ ...request, actorReference, purposeCode: "STORE_SERVICE" });
+    });
+  };
+  // WP-2423 L1: the caller is resolved in full once at the start and once before the reply; the
+  // owner reads in between (publication proof, business date, version, and every recorded pause
+  // or resume with its audit binding) take the run's guard. Before, each recorded operation
+  // re-resolved the caller twice (~30 queries each), so the panel's refresh after a pause or
+  // resume grew with the Store's pause history (2.3 s at 20 operations on v15).
+  const read = async (sessionCookie: unknown) =>
+    source.transactions.run((tx) =>
+      withMerchantTransactionAuthorization(
+        {
+          transaction: tx,
+          resolve: async () => {
+            const scope = await resolveScope(tx, sessionCookie, "store.service.read");
+            if ((await scope.allowed()) !== true)
+              throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+            return scope;
+          },
+          recheck: async (scope) => (await scope.allowed()) === true,
+          denied: () => {
+            throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+          },
+        },
+        (authority) => readState(tx, authority.scope, () => authority.guard()),
+      ),
+    );
+  const readState = async (
+    tx: Parameters<Parameters<typeof source.transactions.run>[0]>[0],
+    { selected, context, store }: Awaited<ReturnType<typeof resolveScope>>,
+    allowed: () => Promise<boolean>,
+  ) => {
+    const at = context.resolvedAt;
+    let published:
+      | Awaited<ReturnType<ReturnType<typeof createPostgresCurrentStorePublicationProof>>>
+      | undefined;
+    await createPostgresStoreBusinessDateSource({
+      brandReference: context.brand.brandReference,
+      storeReference: store.storeReference,
+      timeZone: store.timeZone,
+      authorize: allowed,
+      publicationProof: async (transaction, candidate, observedAt) => {
+        published = await createPostgresCurrentStorePublicationProof({
+          ...source.publication,
+          tenantReference: selected.tenantReference,
+          brandReference: context.brand.brandReference,
+          storeReference: store.storeReference,
+          configurationReference: candidate.configurationReference,
+          authorize: allowed,
+          ...storeConfigurationProofHashing,
+        })(transaction, observedAt);
+        return {
+          contentDigest: published.contentDigest,
+          businessDayStartSource: published.businessDayStartSource,
+        };
+      },
+    })(tx, at);
+    if (!published) throw new Error("STORE_SERVICE_CONFIGURATION_UNAVAILABLE");
+    const state = await createPostgresStoreServiceControlState({
+      brandReference: context.brand.brandReference,
+      storeReference: store.storeReference,
+      authorize: allowed,
+      verifyOperation: createMerchantServicePauseProof({
+        brandReference: context.brand.brandReference,
+        storeReference: store.storeReference,
+        authorize: allowed,
+      }),
+    })(tx, at);
+    return Object.freeze({
+      screenId: "STORE-HOURS-SERVICE" as const,
+      storeReference: store.storeReference,
+      configurationReference: published.configuration.configurationReference,
+      enabledServiceModes: published.configuration.enabledServiceModes,
+      timeZone: store.timeZone,
+      hours: Object.freeze({
+        configurationSource: published.configuration.source,
+        effectiveFrom: published.configuration.effectiveFrom,
+        effectiveUntil: published.configuration.effectiveUntil,
+        businessDayStartLocalTime: published.configuration.businessDayStartLocalTime,
+        weeklySchedule: published.configuration.weeklySchedule,
+        exceptions: published.configuration.exceptions,
+      }),
+      ...state,
+    });
+  };
+  // WP-2423 Q21: the selected Store's current business day, for every staff member who may enter.
+  const businessDay = async (sessionCookie: unknown) =>
+    source.transactions.run(async (tx) => {
+      const { selected, context, store, allowed } = await resolveScope(
+        tx,
+        sessionCookie,
+        "merchant.access",
+      );
+      const day = await createMerchantStoreBusinessDay({
+        publication: source.publication,
+        tenantReference: selected.tenantReference,
+        brandReference: context.brand.brandReference,
+        storeReference: store.storeReference,
+        timeZone: store.timeZone,
+        authorize: allowed,
+      })(tx, context.resolvedAt);
+      if (!(await allowed())) throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+      return merchantBusinessDayView(day);
+    });
+  return Object.assign(write, { read, businessDay });
+}

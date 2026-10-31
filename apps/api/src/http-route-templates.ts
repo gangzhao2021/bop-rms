@@ -1,0 +1,153 @@
+import { customerSessionBootstrapRoute } from "./customer-session-bootstrap.js";
+import { customerStoreProfileRoute } from "./customer-store-profile.js";
+import { customerPickupCodeRoute } from "./customer-pickup-code.js";
+import { customerReceiptRoute } from "./customer-receipt.js";
+import { customerContactRemovalRoute } from "./customer-contact-removal.js";
+import {
+  customerOrderMessagingOptionsRoute,
+  customerOrderRecoveryRoute,
+  notificationFeedbackRoute,
+} from "./customer-order-messaging-http.js";
+import { customerOrderStatusRoute } from "./customer-order-status.js";
+import { customerDiningSessionRoute } from "./customer-dining-session.js";
+import { customerDiningInvitationRoute } from "./customer-dining-invitation.js";
+import {
+  customerDiningStaffCallRoute,
+  customerDiningStaffCallWithdrawRoute,
+} from "./customer-dining-staff-call.js";
+import { customerPaymentResultRoute } from "./customer-payment-result.js";
+import { customerPaymentHandoffRoute } from "./customer-payment-handoff.js";
+import { customerPaymentIntentRoute } from "./customer-payment-intent.js";
+import { paymentProviderWebhookRoute } from "./payment-provider-webhook.js";
+import {
+  customerCheckoutSessionRoute,
+  customerCheckoutSessionReadRoute,
+} from "./customer-checkout-session.js";
+import {
+  customerCheckoutDetailsRoute,
+  customerCheckoutDetailsCurrentRoute,
+  customerCheckoutPolicyRoute,
+} from "./customer-checkout-details.js";
+import { customerOrderSubmissionRoute } from "./customer-order-submission.js";
+import { customerDiningJoinRoute, customerDiningQrJoinRoute } from "./customer-dining-join.js";
+import { customerDiningBindingRoutes } from "./customer-dining-binding.js";
+import { customerCartBindingRoutes } from "./customer-cart-binding.js";
+import { customerCartRoutes } from "./customer-cart.js";
+import { merchantCatalogRoutes } from "./merchant-catalog.js";
+import { merchantBrandAdministrationRoutes } from "./merchant-brand-administration-http.js";
+import { platformAuthenticationRoutes } from "./platform-authentication-http.js";
+import { platformTemplateAdministrationRoutes } from "./platform-template-administration-http.js";
+import { merchantBrandApplicationRoutes } from "./merchant-brand-application.js";
+
+export const apiRouteTemplates = Object.freeze([
+  ...merchantBrandApplicationRoutes,
+  customerSessionBootstrapRoute,
+  customerStoreProfileRoute,
+  customerPickupCodeRoute,
+  customerReceiptRoute,
+  customerContactRemovalRoute,
+  customerOrderMessagingOptionsRoute,
+  customerOrderRecoveryRoute,
+  notificationFeedbackRoute,
+  customerPaymentIntentRoute,
+  customerPaymentHandoffRoute,
+  customerPaymentResultRoute,
+  paymentProviderWebhookRoute,
+  "/__acceptance/request-command-event",
+  "/bff/customer/entry",
+  ...Object.values(customerCartBindingRoutes),
+  customerDiningJoinRoute,
+  customerDiningQrJoinRoute,
+  ...Object.values(customerDiningBindingRoutes),
+  customerCartRoutes.current,
+  "/bff/realtime",
+  "/api/v1/public/stores/:store_public_id/menu",
+  customerCartRoutes.create,
+  customerCartRoutes.replacement,
+  customerCartRoutes.read,
+  customerCartRoutes.addItem,
+  customerCartRoutes.updateItem,
+  "/api/v1/carts/:cart_id/quote",
+  customerCheckoutSessionReadRoute,
+  customerCheckoutSessionRoute,
+  customerOrderSubmissionRoute,
+  customerOrderStatusRoute,
+  customerDiningSessionRoute,
+  customerDiningInvitationRoute,
+  customerDiningStaffCallRoute,
+  customerDiningStaffCallWithdrawRoute,
+  customerCheckoutDetailsRoute,
+  customerCheckoutDetailsCurrentRoute,
+  customerCheckoutPolicyRoute,
+  ...Object.values(merchantCatalogRoutes),
+  ...merchantBrandAdministrationRoutes,
+  ...platformAuthenticationRoutes,
+  ...platformTemplateAdministrationRoutes,
+  "/merchant/login",
+  "/merchant/callback",
+  "/merchant/session",
+  "/merchant/session/expiry",
+  "/merchant/session/activity",
+  "/merchant/sign-in-entry",
+  "/merchant/business-day",
+  "/merchant/store-configuration/ordinary",
+  "/merchant/store-configuration/ordinary-command",
+  "/merchant/store-configuration/ordinary-state",
+  "/merchant/store-configuration/ordinary-history",
+  "/merchant/store-setup",
+  "/merchant/store-setup/fee-context-classifications",
+  "/merchant/organization/brands/topology/draft/workspace",
+  "/merchant/organization/brands/topology/draft/save",
+  "/merchant/organization/brands/topology/draft/resolve",
+  "/merchant/tax-config/authoring/scope",
+  "/merchant/tax-config/authoring/classifications",
+  "/merchant/tax-config/authoring/simulate",
+  "/merchant/tax-config/authoring/current",
+  "/merchant/tax-config/authoring/roster",
+  "/merchant/tax-config/authoring/commands",
+  "/merchant/tax-config/authoring/resolve-original",
+  "/merchant/tax-config/authoring/tax-registrant",
+  "/merchant/tax-config/authoring/candidates/current",
+  "/merchant/tax-config/authoring/candidates/roster",
+  "/merchant/tax-config/authoring/candidates/commands",
+  "/merchant/tax-config/authoring/candidates/resolve-original",
+  "/merchant/tax-config/authoring/materials/compare",
+  "/merchant/tax-config/authoring/materials/current",
+  "/merchant/tax-config/authoring/materials/version",
+  "/merchant/tax-config/authoring/materials/roster",
+  "/merchant/tax-config/authoring/materials/commands",
+  "/merchant/tax-config/authoring/materials/resolve-original",
+  "/merchant/dining/item-service",
+  "/merchant/dining/serve",
+  "/merchant/dining/serve-ready",
+  "/merchant/dining/order-progress",
+  "/merchant/dining/table-close-plan",
+  "/merchant/dining/tables",
+  "/merchant/dining/tables/availability",
+  "/merchant/dining/sessions/start",
+  "/merchant/dining/sessions/host-transfer",
+  "/merchant/dining/sessions/host-selection",
+  "/merchant/dining/sessions/join-state",
+  "/merchant/dining/sessions/regenerate",
+  "/merchant/orders/accept",
+  "/merchant/orders/detail",
+  "/merchant/payments/refunds/context",
+  "/merchant/payments/refunds/status",
+  "/merchant/payments/refunds/items",
+  "/merchant/payments/refunds/preview",
+  "/merchant/payments/refunds/request",
+  "/merchant/payments/refunds/prepare",
+  "/merchant/pricing/price-books",
+  "/merchant/catalog/products/lifecycle",
+  "/merchant/catalog/products",
+  "/merchant/catalog/menus/draft",
+  "/merchant/catalog/menus/publication",
+  "/merchant/orders",
+  "/merchant/organization/stores",
+  "/merchant/organization/stores/may-open",
+  "/merchant/store-context",
+  "/merchant/logout",
+  "/health",
+  "/ready",
+  "unmatched",
+] as const);

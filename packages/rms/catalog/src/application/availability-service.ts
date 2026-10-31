@@ -63,13 +63,27 @@ function failure(error: unknown): never {
     throw error;
   throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
 }
+/**
+ * WP-2423: rules are managed with the Section 88 code `catalog.sku.availability.manage`. Brand scope
+ * may write any rule; Store scope (a Store Manager on the floor) may only mark items unavailable at
+ * its own Store and end such marks — it never makes an item available.
+ * WP-2423 Q17: Store scope with `catalog.sku.sold_out.mark` (Kitchen, Front of House) may only create,
+ * activate and end its own Store's sold-out marks that end within the current business day.
+ */
+interface AvailabilityAuthority {
+  readonly brand: CatalogReference;
+  readonly actor: CatalogReference;
+  readonly store: CatalogReference | null;
+  readonly soldOutOnly: boolean;
+  readonly audit: AppendAuditRecordInput;
+}
 async function authorize(
   ports: AvailabilityPorts,
   action: AvailabilityOperationAction,
   operationReference: CatalogReference,
   ruleReference: CatalogReference,
   at: CatalogInstant,
-): Promise<{ brand: CatalogReference; actor: CatalogReference; audit: AppendAuditRecordInput }> {
+): Promise<AvailabilityAuthority> {
   const evidence = await ports.authorization
     .authorize({ action, operationReference, ruleReference, observedAt: at })
     .catch(failure);
@@ -78,14 +92,16 @@ async function authorize(
     const context = revalidateTenantContext(evidence.tenantContext);
     const audit = validateAuditRecord(evidence.audit, Date.parse(at));
     const actor = context.actor.actorReference;
+    const store = context.scopeKind === "Store" ? context.store?.storeReference : undefined;
     if (
-      context.scopeKind !== "Brand" ||
+      (context.scopeKind !== "Brand" && store === undefined) ||
       actor === null ||
       evidence.permission.effect !== "Allow" ||
-      evidence.permission.scopeKind !== "Brand" ||
-      evidence.permission.action !== "catalog.availability.manage" ||
+      evidence.permission.scopeKind !== context.scopeKind ||
+      (evidence.permission.action !== availabilityPermission &&
+        (evidence.permission.action !== soldOutMarkPermission || store === undefined)) ||
       audit.brandId !== String(context.brand.brandReference) ||
-      audit.storeId !== undefined ||
+      (store === undefined ? audit.storeId !== undefined : audit.storeId !== String(store)) ||
       audit.actor.type === "System" ||
       audit.actor.reference !== actor ||
       audit.actionCode !== `CATALOG_AVAILABILITY_${action.toUpperCase()}` ||
@@ -97,11 +113,47 @@ async function authorize(
     return {
       brand: parseCatalogReference(context.brand.brandReference),
       actor: parseCatalogReference(actor),
+      store: store === undefined ? null : parseCatalogReference(store),
+      soldOutOnly: evidence.permission.action === soldOutMarkPermission,
       audit,
     };
   } catch {
     throw new CatalogError("CATALOG_PERMISSION_DENIED");
   }
+}
+export const availabilityPermission = "catalog.sku.availability.manage";
+/** WP-2423 Q17: floor staff mark an item sold out for the rest of today and back in stock. */
+export const soldOutMarkPermission = "catalog.sku.sold_out.mark";
+/** Reason code of a Store's sold-out mark. */
+export const soldOutReasonCode = "SOLD_OUT";
+/** Reason code of the rule offering an item at one Store (shown there; ending it hides it there). */
+export const storeOfferedReasonCode = "STORE_OFFERED";
+/** A Store business day ends at most 25 hours ahead (its start across a daylight-saving change). */
+const soldOutMarkMaxMs = 25 * 3_600_000;
+/**
+ * Store authority covers only unavailability at its own Store, and (DEC-BRAND-MULTI-STORE segment 9,
+ * coordinator 2026-10-31 rule 1) showing or hiding an item there through that Store's own offer
+ * rule; the sold-out mark only today's marks.
+ */
+function withinStore(
+  auth: AvailabilityAuthority,
+  at: CatalogInstant,
+  ...rules: readonly ReturnType<typeof parseAvailabilityRule>[]
+) {
+  if (
+    auth.store !== null &&
+    rules.some(
+      (rule) =>
+        rule.storeReference !== auth.store ||
+        (rule.decision !== "Unavailable" &&
+          (auth.soldOutOnly || rule.reasonCode !== storeOfferedReasonCode)) ||
+        (auth.soldOutOnly &&
+          (rule.reasonCode !== soldOutReasonCode ||
+            rule.effectiveUntil === null ||
+            Date.parse(rule.effectiveUntil) - Date.parse(at) > soldOutMarkMaxMs)),
+    )
+  )
+    throw new CatalogError("CATALOG_PERMISSION_DENIED");
 }
 async function replay(
   ports: AvailabilityPorts,
@@ -234,6 +286,7 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
         createdByActorReference: auth.actor,
         updatedAt: requestedAt,
       });
+      withinStore(auth, requestedAt, aggregate);
       if (
         !(await ports.repository
           .codeAvailable({
@@ -298,6 +351,9 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
         candidate.updatedAt !== requestedAt
       )
         return invalid();
+      // A sold-out mark is created and ended, never rewritten.
+      if (auth.soldOutOnly) throw new CatalogError("CATALOG_PERMISSION_DENIED");
+      withinStore(auth, requestedAt, current, candidate);
       await facts(ports, candidate);
       const record = Object.freeze({
         action: "Replace" as const,
@@ -344,6 +400,16 @@ export function createAvailabilityService(ports: AvailabilityPorts) {
         requestedAt,
       );
       if (auth.brand !== current.brandReference)
+        throw new CatalogError("CATALOG_PERMISSION_DENIED");
+      withinStore(auth, requestedAt, current);
+      // The sold-out mark only activates a new mark or ends an active one.
+      if (
+        auth.soldOutOnly &&
+        !(
+          (current.lifecycle === "Draft" && raw.targetLifecycle === "Active") ||
+          (current.lifecycle === "Active" && raw.targetLifecycle === "Inactive")
+        )
+      )
         throw new CatalogError("CATALOG_PERMISSION_DENIED");
       const aggregate = parseAvailabilityRule({
         ...current,

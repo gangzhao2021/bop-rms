@@ -1,0 +1,678 @@
+import { systemText, t } from "./i18n/i18n.js";
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { SoleOperatorSelfApproval } from "./SoleOperatorSelfApproval.js";
+import { AppFrame, StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
+import { newOperationReference } from "./operation-reference.js";
+import {
+  OptionRecipePageError,
+  microText,
+  optionRecipeStatus,
+  parseOptionRecipeView,
+  unavailableOptionRecipeClient,
+  type OptionRecipeChangeContent,
+  type OptionRecipeChangeKind,
+  type OptionRecipeClient,
+  type OptionRecipeCommand,
+  type OptionRecipeErrorCode,
+  type OptionRecipeRow,
+  type OptionRecipeStatus,
+  type OptionRecipeView,
+} from "./store-option-recipes-page.js";
+import { unitText } from "./recipe-pages.js";
+
+/** WP-2423 slice 4.4: what each option does to a product's recipes, reviewed and published. */
+const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
+  Loading: t("Loading option recipes…"),
+  PermissionDenied: t("You do not have permission for this recipe action at Brand level."),
+  NotFound: t("That option is no longer on the product. Refresh and check."),
+  Conflict: t("This changed since you opened the page, or was already decided. Refresh and check."),
+  NoRecipe: t(
+    "A size of this product has no published recipe. Publish and bind its recipe under Recipes first.",
+  ),
+  IngredientMissing: t("A size's recipe does not use the ingredient to replace or remove."),
+  IngredientPresent: t(
+    "A size's recipe already uses the new ingredient. Choose “Add” to use more of it.",
+  ),
+  UnitMismatch: t(
+    "The ingredients are measured differently (for example weight and volume), so the same amount cannot be used.",
+  ),
+  ItemUnavailable: t("The new ingredient is not an active stock item."),
+  AllergenUndeclared: t(
+    "The new ingredient has no current allergen declaration. Declare it under Allergens first.",
+  ),
+  ReviewRequired: t(
+    "Publishing needs an approved cost review and an approved food-safety review, by two people other than the author.",
+  ),
+  ReviewerNotIndependent: t("The person who saved this change cannot review it."),
+  SoleOperatorNotInEffect: t(
+    "Someone else now also holds recipe review, so another person must review. Refresh to see who.",
+  ),
+  NeedsReverification: t("Confirm it is you with your authenticator code, then review again."),
+  Invalid: t("The change is not valid. Check the amounts."),
+  Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
+  Unavailable: t("Option recipes are unavailable."),
+};
+const statusText: Record<OptionRecipeStatus, string> = {
+  NotSet: t("Not set — customers cannot choose it"),
+  NeedsReview: t("Waiting for reviews"),
+  Rejected: t("Rejected — change and save again"),
+  ReadyToPublish: t("Approved — ready to publish"),
+  Published: t("Published"),
+  NeedsUpdate: t("A recipe changed — save again"),
+};
+const kindText: Record<OptionRecipeChangeKind, string> = {
+  NoChange: t("No change to the recipe"),
+  Replace: t("Replace an ingredient (same amount)"),
+  Add: t("Add an amount of an ingredient per one chosen"),
+  Remove: t("Remove an ingredient"),
+};
+const blank: OptionRecipeChangeContent = {
+  kind: "NoChange",
+  fromItemReference: null,
+  toItemReference: null,
+  quantity: null,
+  unitCostCents: null,
+  lossPercent: "0",
+};
+
+export function StoreOptionRecipesPage({
+  client = unavailableOptionRecipeClient,
+  csrf,
+}: {
+  readonly client?: OptionRecipeClient;
+  /** For the second-factor check of a sole operator's own review. */
+  readonly csrf?: string;
+}) {
+  const [state, setState] = useState<
+    | { readonly kind: "Loading" | OptionRecipeErrorCode }
+    | { readonly kind: "Found"; readonly view: OptionRecipeView }
+  >({ kind: "Loading" });
+  const [generation, setGeneration] = useState(0);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState<OptionRecipeChangeContent>(blank);
+  const [comment, setComment] = useState("");
+  const [pending, setPending] = useState<OptionRecipeCommand | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
+  const reload = useCallback(() => setGeneration((value) => value + 1), []);
+  useEffect(() => {
+    let active = true;
+    void client
+      .load()
+      .then((value) => {
+        if (active) setState({ kind: "Found", view: parseOptionRecipeView(value) });
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setState({ kind: error instanceof OptionRecipePageError ? error.code : "Unavailable" });
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, generation]);
+  if (state.kind !== "Found")
+    return (
+      <StatePanel
+        heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Option recipes")}
+        tone={state.kind === "Loading" ? "neutral" : "error"}
+        status
+      >
+        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
+      </StatePanel>
+    );
+  const view = state.view;
+  const item = (reference: string | null) =>
+    view.ingredients.find((candidate) => candidate.itemReference === reference);
+  const amount = (micro: string | null, reference: string | null) =>
+    micro === null ? "" : `${microText(micro)} ${unitText(item(reference)?.unitCode)}`;
+  const keyOf = (row: OptionRecipeRow) => row.bindingReference + ":" + row.optionReference;
+  const summary = (content: OptionRecipeChangeContent) => {
+    const from = item(content.fromItemReference)?.name ?? "";
+    const to = item(content.toItemReference)?.name ?? "";
+    if (content.kind === "NoChange") return t("No change to the recipe");
+    if (content.kind === "Replace") return t("{from} → {to} (same amount)", { from: from, to: to });
+    if (content.kind === "Remove") return t("Without {from}", { from: from });
+    return t("+ {value} {unitCode} {to} per one chosen", {
+      value: content.quantity ?? "",
+      unitCode: unitText(item(content.toItemReference)?.unitCode),
+      to: to,
+    });
+  };
+  const send = async (command: OptionRecipeCommand, done: string) => {
+    if (!client.command) return;
+    const actual = pending !== null && pending.action === command.action ? pending : command;
+    setBusy(true);
+    setMessage(null);
+    setPending(actual);
+    try {
+      await client.command(actual);
+      setPending(null);
+      setEditing(null);
+      setComment("");
+      try {
+        setState({ kind: "Found", view: parseOptionRecipeView(await client.load()) });
+      } catch {
+        reload();
+      }
+      setMessage({ tone: "neutral", text: done });
+    } catch (error) {
+      const code = error instanceof OptionRecipePageError ? error.code : "Unavailable";
+      if (code !== "Offline" && code !== "Unavailable") setPending(null);
+      const size =
+        error instanceof OptionRecipePageError && error.skuReference !== null
+          ? view.options
+              .flatMap((row) => row.sizes)
+              .find((candidate) => candidate.skuReference === error.skuReference)?.name
+          : undefined;
+      setMessage({ tone: "error", text: copy[code] + (size ? ` (${size})` : "") });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const valid =
+    draft.kind === "NoChange" ||
+    (draft.kind === "Remove" && draft.fromItemReference !== null) ||
+    (draft.kind === "Replace" &&
+      draft.fromItemReference !== null &&
+      draft.toItemReference !== null &&
+      draft.fromItemReference !== draft.toItemReference) ||
+    (draft.kind === "Add" &&
+      draft.toItemReference !== null &&
+      /^\d{1,9}(\.\d{1,6})?$/u.test(draft.quantity ?? "") &&
+      Number(draft.quantity) > 0);
+  const products = [...new Set(view.options.map((row) => row.productName))];
+  const editor = (row: OptionRecipeRow) => (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!valid || busy) return;
+        void send(
+          {
+            action: "Save",
+            operationReference: newOperationReference(),
+            bindingReference: row.bindingReference,
+            optionReference: row.optionReference,
+            expectedVersion: row.change?.version ?? null,
+            change: {
+              ...draft,
+              quantity: draft.kind === "Add" ? draft.quantity : null,
+              unitCostCents:
+                draft.kind === "Replace" || draft.kind === "Add"
+                  ? draft.unitCostCents === ""
+                    ? null
+                    : draft.unitCostCents
+                  : null,
+              lossPercent:
+                draft.kind === "Replace" || draft.kind === "Add" ? draft.lossPercent : "0",
+              fromItemReference:
+                draft.kind === "Replace" || draft.kind === "Remove"
+                  ? draft.fromItemReference
+                  : null,
+              toItemReference:
+                draft.kind === "Replace" || draft.kind === "Add" ? draft.toItemReference : null,
+            },
+          },
+          t("Saved. Two reviewers (cost and food safety) can now approve it."),
+        );
+      }}
+    >
+      <fieldset disabled={busy}>
+        <legend>
+          {t("{setName} · {optionName} on {productName}", {
+            setName: row.setName,
+            optionName: row.optionName,
+            productName: row.productName,
+          })}
+        </legend>
+        <label>
+          {t("What choosing it does")}
+          <select
+            value={draft.kind}
+            onChange={(event) =>
+              setDraft({ ...blank, kind: event.target.value as OptionRecipeChangeKind })
+            }
+          >
+            {(Object.keys(kindText) as OptionRecipeChangeKind[]).map((kind) => (
+              <option key={kind} value={kind}>
+                {kindText[kind]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {draft.kind === "Replace" || draft.kind === "Remove" ? (
+          <label>
+            {draft.kind === "Replace" ? t("Ingredient to replace") : t("Ingredient to remove")}
+            <select
+              value={draft.fromItemReference ?? ""}
+              onChange={(event) =>
+                setDraft({ ...draft, fromItemReference: event.target.value || null })
+              }
+            >
+              <option value="">{t("Choose…")}</option>
+              {view.ingredients.map((choice) => (
+                <option key={choice.itemReference} value={choice.itemReference}>
+                  {choice.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {draft.kind === "Replace" || draft.kind === "Add" ? (
+          <>
+            <label>
+              {draft.kind === "Replace" ? t("Replace with") : t("Ingredient to add")}
+              <select
+                value={draft.toItemReference ?? ""}
+                onChange={(event) => {
+                  const chosen = item(event.target.value);
+                  setDraft({
+                    ...draft,
+                    toItemReference: event.target.value || null,
+                    unitCostCents: chosen?.latestUnitCostCents ?? draft.unitCostCents,
+                  });
+                }}
+              >
+                <option value="">{t("Choose…")}</option>
+                {view.ingredients.map((choice) => (
+                  <option key={choice.itemReference} value={choice.itemReference}>
+                    {choice.name}
+                    {choice.declared ? "" : t(" (no allergen declaration)")}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {draft.kind === "Add" ? (
+              <label>
+                {t("Amount per one chosen ({unitCode})", {
+                  unitCode: unitText(item(draft.toItemReference)?.unitCode),
+                })}
+                <input
+                  inputMode="decimal"
+                  value={draft.quantity ?? ""}
+                  onChange={(event) => setDraft({ ...draft, quantity: event.target.value })}
+                />
+              </label>
+            ) : null}
+            <label>
+              {t("Cost (cents per {unitCode}; empty if unknown)", {
+                unitCode: unitText(item(draft.toItemReference)?.unitCode),
+              })}
+              <input
+                inputMode="decimal"
+                value={draft.unitCostCents ?? ""}
+                onChange={(event) => setDraft({ ...draft, unitCostCents: event.target.value })}
+              />
+            </label>
+          </>
+        ) : null}
+        <p>
+          {t(
+            "Saving applies this to every size's recipe{value}; reviewers see the result for each size.",
+            {
+              value:
+                row.quantities.length > 1
+                  ? t(" and each quantity up to {length}", { length: row.quantities.length })
+                  : "",
+            },
+          )}
+        </p>
+        <button type="submit" disabled={!valid || busy}>
+          {pending?.action === "Save" ? t("Retry") : t("Save change")}
+        </button>
+        <button type="button" onClick={() => setEditing(null)}>
+          {t("Cancel")}
+        </button>
+      </fieldset>
+    </form>
+  );
+  const actions = (row: OptionRecipeRow) => {
+    const change = row.change;
+    const status = optionRecipeStatus(row);
+    const buttons = [];
+    if (view.permissions.mayEdit && editing !== keyOf(row))
+      buttons.push(
+        <button
+          key="edit"
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setEditing(keyOf(row));
+            setDraft(change?.content ?? blank);
+          }}
+        >
+          {change === null ? t("Set") : t("Change")}
+        </button>,
+      );
+    if (change !== null && !change.published && !change.byViewer && view.permissions.mayReview)
+      for (const kind of ["Cost", "FoodSafety"] as const)
+        if (!change.reviews.some((review) => review.kind === kind))
+          buttons.push(
+            <button
+              key={"approve-" + kind}
+              type="button"
+              disabled={busy || change.reviews.some((review) => review.byViewer)}
+              onClick={() =>
+                void send(
+                  {
+                    action: "Review",
+                    operationReference: newOperationReference(),
+                    changeVersionReference: change.changeVersionReference,
+                    kind,
+                    decision: "Approved",
+                    comment: null,
+                  },
+                  kind === "Cost" ? t("Cost review recorded.") : t("Food-safety review recorded."),
+                )
+              }
+            >
+              {kind === "Cost" ? t("Approve cost") : t("Approve food safety")}
+            </button>,
+          );
+    if (status === "ReadyToPublish" && view.permissions.mayPublish && change !== null)
+      buttons.push(
+        <button
+          key="publish"
+          type="button"
+          disabled={busy}
+          onClick={() =>
+            void send(
+              {
+                action: "Publish",
+                operationReference: newOperationReference(),
+                changeVersionReference: change.changeVersionReference,
+              },
+              t("Published. The next menu publication offers this option with its recipe."),
+            )
+          }
+        >
+          {t("Publish")}
+        </button>,
+      );
+    // Spaced apart, so the actions read as separate words (and wrap on narrow screens).
+    return buttons.flatMap((button, index) => (index === 0 ? [button] : [" ", button]));
+  };
+  const rejectable = view.options.filter(
+    (row) =>
+      row.change !== null &&
+      !row.change.published &&
+      !row.change.byViewer &&
+      view.permissions.mayReview &&
+      row.change.reviews.length < 2,
+  );
+  return (
+    <AppFrame title={t("Option recipes")} description="">
+      <header className="screen-heading">
+        <div>
+          <p className="bop-eyebrow">{t("Option recipes · Brand")}</p>
+          <h2>{t("Option recipes")}</h2>
+          <p>
+            {t(
+              "What choosing an option does to each size's recipe — for stock, cost, kitchen and the allergens customers see. A change needs a cost review and a food-safety review by two people other than its author, then publication. Source as of",
+            )}{" "}
+            <SourceTime instant={view.sourceAsOf} />
+          </p>
+        </div>
+        <Link to="/app/commerce/option-sets">{t("Options")}</Link>
+      </header>
+      {message ? (
+        <StatePanel
+          heading={message.tone === "error" ? t("Not done") : t("Done")}
+          tone={message.tone}
+          status
+        >
+          <p>{message.text}</p>
+        </StatePanel>
+      ) : null}
+      {view.options.length === 0 ? (
+        <StatePanel heading={t("No options on products")} status>
+          <p>{t("Add option sets to products on the product page first.")}</p>
+        </StatePanel>
+      ) : null}
+      {products.map((product) => (
+        <section key={product} className="detail-section">
+          <h3>{product}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>{t("Option")}</th>
+                <th>{t("Recipe change")}</th>
+                <th>{t("Status")}</th>
+                <th aria-label={t("Actions")} />
+              </tr>
+            </thead>
+            <tbody>
+              {view.options
+                .filter((row) => row.productName === product)
+                .map((row) => (
+                  <tr key={keyOf(row)}>
+                    <td>
+                      {row.setName} · {row.optionName}
+                      {row.offered ? "" : t(" (not offered)")}
+                    </td>
+                    <td data-label={t("Recipe change")}>
+                      {row.change === null ? "—" : summary(row.change.content)}
+                      {row.change !== null && row.change.lines.length > 0 ? (
+                        <ul
+                          aria-label={t("Result per size for {optionName}", {
+                            optionName: row.optionName,
+                          })}
+                        >
+                          {row.change.lines.map((line) => (
+                            <li key={line.skuReference + ":" + line.quantity}>
+                              {row.sizes.find((size) => size.skuReference === line.skuReference)
+                                ?.name ?? ""}
+                              {row.quantities.length > 1 ? ` ×${line.quantity}` : ""}:{" "}
+                              {line.changes.length === 0
+                                ? t("as recipe")
+                                : line.changes
+                                    .map((change) =>
+                                      change.fromItemReference === change.toItemReference
+                                        ? `${item(change.toItemReference)?.name ?? ""} ${amount(change.fromQuantityMicrounits, change.fromItemReference)} → ${amount(change.toQuantityMicrounits, change.toItemReference)}`
+                                        : [
+                                            change.fromItemReference === null
+                                              ? ""
+                                              : `${item(change.fromItemReference)?.name ?? ""} ${amount(change.fromQuantityMicrounits, change.fromItemReference)}`,
+                                            change.toItemReference === null
+                                              ? "removed"
+                                              : `${item(change.toItemReference)?.name ?? ""} ${amount(change.toQuantityMicrounits, change.toItemReference)}`,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" → "),
+                                    )
+                                    .join("; ")}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </td>
+                    <td data-label={t("Status")}>
+                      {statusText[optionRecipeStatus(row)]}
+                      {row.change !== null ? <ChangeHistory row={row} /> : null}
+                    </td>
+                    <td>{editing === keyOf(row) ? editor(row) : actions(row)}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </section>
+      ))}
+      {(() => {
+        // WP-2423 Q19: changes this reviewer saved, or already reviewed once, that they may only
+        // review alone as sole operator (one remaining kind at a time).
+        const own = view.options.filter(
+          (row) =>
+            row.change !== null &&
+            !row.change.published &&
+            view.permissions.mayReview &&
+            (row.change.byViewer || row.change.reviews.some((review) => review.byViewer)) &&
+            row.change.reviews.length < 2 &&
+            !row.change.reviews.some((review) => review.decision === "Rejected"),
+        );
+        if (own.length === 0) return null;
+        return (
+          <section className="detail-section" aria-labelledby="own-option-reviews">
+            <h3 id="own-option-reviews">{t("Reviews you cannot give as a second person")}</h3>
+            <p>
+              {t(
+                "You saved these changes or already gave one of their reviews, so another person who holds recipe review gives the remaining review — unless Sole operator is on and you are the only one who holds it.",
+              )}
+            </p>
+            {own.map((row) => {
+              const change = row.change;
+              if (change === null) return null;
+              const kind = (["Cost", "FoodSafety"] as const).find(
+                (candidate) => !change.reviews.some((review) => review.kind === candidate),
+              );
+              if (kind === undefined) return null;
+              return (
+                <div key={keyOf(row)}>
+                  <p>
+                    {t(
+                      "{productName} · {setName} · {optionName}: the {value} review is still needed.",
+                      {
+                        productName: row.productName,
+                        setName: row.setName,
+                        optionName: row.optionName,
+                        value: kind === "Cost" ? t("cost") : t("food safety"),
+                      },
+                    )}
+                  </p>
+                  <SoleOperatorSelfApproval
+                    gate={view.soleOperator}
+                    csrf={csrf}
+                    what={t("the {value} of this option change", {
+                      value: kind === "Cost" ? "cost" : "food safety",
+                    })}
+                    permissionName={t("recipe review")}
+                    yourPart={
+                      change.byViewer
+                        ? t("You saved this change")
+                        : kind === "Cost"
+                          ? t("You already gave the food safety review")
+                          : t("You already gave the cost review")
+                    }
+                    busy={busy}
+                    actionLabel={
+                      kind === "Cost"
+                        ? t("Approve cost on my own")
+                        : t("Approve food safety on my own")
+                    }
+                    summary={<p>{summary(change.content)}</p>}
+                    onApprove={() =>
+                      void send(
+                        {
+                          action: "Review",
+                          operationReference: newOperationReference(),
+                          changeVersionReference: change.changeVersionReference,
+                          kind,
+                          decision: "Approved",
+                          comment: null,
+                          approvalMode: "SoleOperator",
+                        },
+                        kind === "Cost"
+                          ? t("Cost review recorded.")
+                          : t("Food-safety review recorded."),
+                      )
+                    }
+                  />
+                </div>
+              );
+            })}
+          </section>
+        );
+      })()}
+      {rejectable.length > 0 ? (
+        <section className="detail-section" aria-labelledby="reject-change">
+          <h3 id="reject-change">{t("Reject a change")}</h3>
+          <p>{t("Tell the author what to fix; they save a corrected change for review.")}</p>
+          <label>
+            {t("Reason")}
+            <input
+              value={comment}
+              maxLength={500}
+              onChange={(event) => setComment(event.target.value)}
+            />
+          </label>
+          <ul>
+            {rejectable.map((row) => (
+              <li key={keyOf(row)}>
+                {row.productName} · {row.setName} · {row.optionName}{" "}
+                {(["Cost", "FoodSafety"] as const)
+                  .filter((kind) => !row.change?.reviews.some((review) => review.kind === kind))
+                  .map((kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      disabled={busy || comment.trim() === ""}
+                      onClick={() =>
+                        row.change &&
+                        void send(
+                          {
+                            action: "Review",
+                            operationReference: newOperationReference(),
+                            changeVersionReference: row.change.changeVersionReference,
+                            kind,
+                            decision: "Rejected",
+                            comment: comment.trim(),
+                          },
+                          t("Rejection recorded."),
+                        )
+                      }
+                    >
+                      {kind === "Cost" ? t("Reject cost") : t("Reject food safety")}
+                    </button>
+                  ))}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </AppFrame>
+  );
+}
+
+/** Who saved the change and when, each review given (by whom, when) and what is still needed. */
+export function ChangeHistory({ row }: { readonly row: OptionRecipeRow }) {
+  const change = row.change;
+  if (change === null) return null;
+  const kindName = (kind: "Cost" | "FoodSafety") =>
+    kind === "Cost" ? t("Cost") : t("Food safety");
+  const missing = (["Cost", "FoodSafety"] as const).filter(
+    (kind) => !change.reviews.some((review) => review.kind === kind),
+  );
+  return (
+    <ul aria-label={t("Reviews for {optionName}", { optionName: row.optionName })}>
+      <li>
+        {t("Saved by {authorLabel} on", { authorLabel: systemText(change.authorLabel) })}{" "}
+        <SourceTime instant={change.recordedAt} />
+      </li>
+      {change.reviews.map((review) => (
+        <li key={review.kind}>
+          {t("{kind}: {value} by {reviewerLabel} on", {
+            kind: kindName(review.kind),
+            value: review.decision === "Approved" ? t("approved") : t("rejected"),
+            reviewerLabel: systemText(review.reviewerLabel),
+          })}{" "}
+          <SourceTime instant={review.reviewedAt} />
+          {review.comment ? ` — ${review.comment}` : ""}
+        </li>
+      ))}
+      {!change.published &&
+      missing.length > 0 &&
+      !change.reviews.some((review) => review.decision === "Rejected") ? (
+        <li>
+          {t("Still needed: {value} review, by someone who holds recipe review{value2}{value3}", {
+            value: missing.map((kind) => kindName(kind).toLowerCase()).join(" and "),
+            value2: change.byViewer
+              ? t(" other than you")
+              : t(" other than the person who saved it"),
+            value3: change.reviews.length > 0 ? t(" and the first reviewer") : "",
+          })}
+        </li>
+      ) : null}
+    </ul>
+  );
+}

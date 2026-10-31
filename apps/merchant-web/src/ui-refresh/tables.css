@@ -1,0 +1,1339 @@
+/* WP-2423 merchant UI refresh (2026-10-21): tables. Loaded after styles.css so it refines the shared baseline. */
+
+/* Tables (/operations/dining) inside the shared workspace frame, benchmarked against a restaurant
+   POS floor grid: compact square-ish tiles grouped by area, the table name large, the state in
+   words, a black outline for occupied tables and warning text for what needs a person; the
+   selected table's details sit beside the floor on desktop and under it on narrow screens. */
+
+.dining-floor {
+  color: var(--bop-color-text-default);
+  font-size: 0.875rem;
+}
+
+/* Page header: counts the floor at a glance (text only; no badges). */
+.dining-floor .dining-floor-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 var(--bop-space-2);
+  font-variant-numeric: tabular-nums;
+}
+.dining-floor .dining-floor-summary > span + span::before {
+  content: "·";
+  margin-right: var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+}
+.dining-floor .dining-floor-summary > [data-attention="true"] {
+  color: var(--bop-color-warning);
+  font-weight: 600;
+}
+
+/* Filters: one compact row, labels carried by the controls. */
+.dining-floor .dining-table-browser {
+  margin: 0;
+}
+.workspace-page.dining-floor .dining-floor-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-2);
+  margin: 0 0 var(--bop-space-4);
+}
+.workspace-page.dining-floor .dining-floor-filters label {
+  display: block;
+  flex: 0 1 12rem;
+  min-width: 0;
+  margin: 0;
+  font-weight: 400;
+}
+.workspace-page.dining-floor .dining-floor-filters label:first-child {
+  flex: 1 1 14rem;
+  max-width: 22rem;
+}
+.workspace-page.dining-floor .dining-floor-filters input,
+.workspace-page.dining-floor .dining-floor-filters select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+}
+.workspace-page.dining-floor .dining-floor-filters input:hover,
+.workspace-page.dining-floor .dining-floor-filters select:hover {
+  border-color: var(--bop-color-text-muted);
+}
+
+/* Floor and details: side by side from the desktop width, stacked below it. */
+.workspace-page.dining-floor .dining-floor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--bop-space-5);
+}
+@media (min-width: 1024px) {
+  .workspace-page.dining-floor .dining-floor-layout {
+    /* The panel narrows at 1024 so the floor keeps three tiles a row. */
+    grid-template-columns: minmax(0, 1fr) clamp(16.5rem, 26vw, 24rem);
+  }
+  .workspace-page.dining-floor .dining-session-detail {
+    position: sticky;
+    top: calc(var(--bop-pinned-top, 0px) + var(--bop-space-4));
+    max-height: calc(100vh - 2rem - var(--bop-pinned-top, 0px));
+    overflow-y: auto;
+  }
+}
+
+.workspace-page.dining-floor .dining-floor-board {
+  display: grid;
+  min-width: 0;
+  gap: var(--bop-space-5);
+}
+.workspace-page.dining-floor .dining-floor-empty {
+  margin: 0;
+  padding: var(--bop-space-8) var(--bop-space-4);
+  border: 1px dashed var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+  color: var(--bop-color-text-muted);
+  text-align: center;
+}
+
+/* Area: a quiet label and count over its tiles. */
+.workspace-page.dining-floor .dining-area-lane {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  container-type: inline-size;
+}
+.workspace-page.dining-floor .dining-area-lane > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--bop-space-2);
+  margin-bottom: var(--bop-space-2);
+  padding-bottom: var(--bop-space-2);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.workspace-page.dining-floor .dining-area-lane > header > h2 {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.workspace-page.dining-floor .dining-area-lane > header > span {
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.workspace-page.dining-floor .dining-table-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9.5rem), 1fr));
+  gap: var(--bop-space-3);
+}
+
+/* Tile: the whole tile selects the table (the button covers it); content sits underneath.
+   2026-10-21 live check: a table name never breaks mid-word ("DEMO-" / "01"). The name and the
+   seats share the first line when both fit; otherwise the seats move under the name, and a name
+   wider than the whole tile ends in an ellipsis (the full name stays in its title and the
+   Select button's label). */
+.workspace-page.dining-floor .dining-table-tile {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-content: flex-start;
+  gap: var(--bop-space-1) var(--bop-space-2);
+  min-width: 0;
+  min-height: 7.5rem;
+  padding: var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-default);
+  box-shadow: none;
+  transition:
+    border-color var(--bop-motion-fast) ease,
+    background-color var(--bop-motion-fast) ease;
+}
+@container (min-width: 21rem) {
+  .workspace-page.dining-floor .dining-table-tile[data-attention="true"] {
+    grid-column: span 2;
+  }
+}
+/* Name and seats on the first line; the state takes the full tile width under them. */
+.workspace-page.dining-floor .dining-table-tile__identity {
+  display: contents;
+}
+.workspace-page.dining-floor .dining-table-tile__identity > h3 {
+  order: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.workspace-page.dining-floor .dining-table-tile__identity > span {
+  order: 2;
+  flex: 1 0 100%;
+}
+.workspace-page.dining-floor .dining-table-tile__identity > h3 {
+  /* The auto margin keeps the seats at the end of the name's line, and at the start of their
+     own line once they wrap under a long name. */
+  margin: 0 auto 0 0;
+  overflow: hidden;
+  color: var(--bop-color-text-default);
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.workspace-page.dining-floor .dining-table-tile__identity > span {
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+/* One fact per line: "Seated", "open 1 h 11 min" (the separator stays in the text). */
+.workspace-page.dining-floor .dining-table-tile__identity > span > span {
+  display: block;
+}
+.workspace-page.dining-floor .dining-table-tile__identity .dining-table-tile__separator {
+  display: none;
+}
+.workspace-page.dining-floor .dining-table-tile__capacity {
+  order: 1;
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page.dining-floor .dining-table-tile__notice {
+  order: 3;
+  flex: 1 0 100%;
+  margin: var(--bop-space-1) 0 0;
+  padding: 0;
+  border: 0;
+  color: var(--bop-color-warning);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.workspace-page.dining-floor .dining-table-tile__notice.order-accept-by[data-tier="ok"] {
+  color: var(--bop-color-text-default);
+}
+.workspace-page.dining-floor .dining-table-tile__notice.order-accept-by[data-tier="urgent"] {
+  color: var(--bop-color-danger);
+}
+
+/* States: free is plain; occupied is outlined black; blocked is greyed and dashed. */
+.workspace-page.dining-floor .dining-table-tile[data-session="linked"] {
+  border-color: var(--bop-color-border-strong);
+  box-shadow: inset 0 0 0 1px var(--bop-color-border-strong);
+  background: var(--bop-color-surface-default);
+}
+.workspace-page.dining-floor
+  .dining-table-tile[data-session="linked"]
+  .dining-table-tile__identity
+  > span {
+  color: var(--bop-color-text-default);
+  font-weight: 600;
+}
+.workspace-page.dining-floor
+  .dining-table-tile[data-floor="LongOpen"]
+  .dining-table-tile__identity
+  > span {
+  color: var(--bop-color-warning);
+}
+.workspace-page.dining-floor .dining-table-tile[data-state="Available"][data-session="none"] {
+  border-color: var(--bop-color-border-default);
+  background: var(--bop-color-surface-default);
+}
+.workspace-page.dining-floor
+  .dining-table-tile[data-state="TemporarilyBlocked"][data-session="none"] {
+  border-style: dashed;
+  border-color: var(--bop-color-text-muted);
+  background: var(--bop-color-surface-raised);
+}
+.workspace-page.dining-floor
+  .dining-table-tile[data-state="TemporarilyBlocked"][data-session="none"]
+  h3 {
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.dining-floor
+  .dining-table-tile:has(.dining-table-tile__select:hover:not(:disabled)) {
+  background: var(--bop-color-surface-raised);
+}
+.workspace-page.dining-floor .dining-table-tile[data-selected="true"] {
+  outline: 2px solid var(--bop-color-border-strong);
+  outline-offset: 2px;
+  background: var(--bop-color-surface-raised);
+}
+
+.workspace-page.dining-floor .dining-table-tile .dining-table-tile__select {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  /* The shared rule aligns tile buttons to the end; an overlay must fill the tile. */
+  align-self: stretch;
+  justify-self: stretch;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+}
+.workspace-page.dining-floor .dining-table-tile .dining-table-tile__select:disabled {
+  cursor: default;
+}
+.workspace-page.dining-floor .dining-table-tile .dining-table-tile__select:focus-visible {
+  outline: 3px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.workspace-page.dining-floor .dining-table-tile:focus-within {
+  border-color: var(--bop-color-border-strong);
+}
+
+/* Details panel. */
+.workspace-page.dining-floor .dining-session-detail {
+  display: grid;
+  gap: var(--bop-space-3);
+  min-width: 0;
+  padding: var(--bop-space-5);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-surface);
+  background: var(--bop-color-surface-default);
+  scroll-margin-top: var(--bop-space-4);
+}
+.workspace-page.dining-floor .dining-session-detail > h2 {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+/* Area · state · time open: plain words in the page font ("open 1 h 11 min", not code caps). */
+.workspace-page.dining-floor .dining-session-detail > .bop-eyebrow {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page.dining-floor .dining-session-detail dl {
+  margin: 0;
+  gap: 0;
+}
+.workspace-page.dining-floor .dining-session-detail dl div {
+  padding-block: var(--bop-space-2);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.workspace-page.dining-floor .dining-session-detail dd {
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page.dining-floor .dining-session-detail .order-accept-by {
+  margin: 0;
+}
+.workspace-page.dining-floor .dining-session-detail section {
+  padding-top: var(--bop-space-3);
+}
+.workspace-page.dining-floor .dining-session-detail section > button,
+.workspace-page.dining-floor .dining-session-detail section > .dining-take-order {
+  justify-self: start;
+}
+.workspace-page.dining-floor .dining-session-detail .dining-take-order {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--bop-space-2) var(--bop-space-4);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+.workspace-page.dining-floor .dining-session-detail .dining-take-order:focus-visible {
+  outline: 3px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.workspace-page.dining-floor .dining-session-detail__empty {
+  display: grid;
+  gap: var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.dining-floor .dining-session-detail__empty p {
+  margin: 0;
+}
+.workspace-page.dining-floor .dining-session-detail__empty p:first-child {
+  color: var(--bop-color-text-default);
+  font-weight: 600;
+}
+.workspace-page.dining-floor .dining-entry-code {
+  padding: var(--bop-space-3) var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-strong);
+  border-left-width: 4px;
+  border-radius: var(--bop-radius-control);
+}
+.workspace-page.dining-floor .dining-entry-code p {
+  margin: 0 0 var(--bop-space-2);
+}
+.workspace-page.dining-floor .dining-entry-code strong {
+  font-size: 1.5rem;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.workspace-page.dining-floor .dining-floor-message {
+  margin: var(--bop-space-3) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 767px) {
+  .workspace-page.dining-floor .dining-floor-filters label,
+  .workspace-page.dining-floor .dining-floor-filters label:first-child {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .workspace-page.dining-floor .dining-floor-filters label:not(:first-child) {
+    flex: 1 1 calc(50% - var(--bop-space-2));
+  }
+  .workspace-page.dining-floor .dining-table-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr));
+  }
+  .workspace-page.dining-floor .dining-session-detail {
+    padding: var(--bop-space-4);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-page.dining-floor .dining-table-tile {
+    transition: none;
+  }
+}
+.workspace-page.dining-floor .dining-session-detail h3 {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 1rem;
+  font-weight: 650;
+}
+/* A retry button after a sentence sits on its own line. */
+.workspace-page.dining-floor .dining-session-detail p > button {
+  display: block;
+  margin-top: var(--bop-space-2);
+}
+
+/*
+ * Figma v1 (2026-10-25) Tables: the staff-call box on top in white with a danger outline, one line
+ * per table with a marker and "Handled" at the end; the details panel stays fixed beside the floor.
+ */
+.workspace-page.dining-floor .dining-staff-calls {
+  margin-block: 0 var(--bop-space-5);
+  padding: var(--bop-space-5);
+  border: 2px solid var(--bop-color-danger-mark);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.workspace-page.dining-floor .dining-staff-calls h2 {
+  margin: 0 0 var(--bop-space-3);
+  font-size: 18px;
+  font-weight: 600;
+}
+.workspace-page.dining-floor .dining-staff-calls li {
+  flex-wrap: nowrap;
+  font-size: 15px;
+}
+.workspace-page.dining-floor .dining-staff-calls li > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-1);
+  min-width: 0;
+}
+.workspace-page.dining-floor .dining-staff-calls li > span::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: var(--bop-space-2);
+  border-radius: 50%;
+  background: var(--bop-color-warning);
+}
+.workspace-page.dining-floor .dining-staff-calls li[data-tier="urgent"] > span::before {
+  background: var(--bop-color-danger-mark);
+}
+.workspace-page.dining-floor .dining-staff-calls button {
+  flex: none;
+  min-width: 6.5rem;
+  border-color: var(--bop-color-brand-primary);
+}
+.workspace-page.dining-floor .dining-session-detail {
+  border-radius: var(--bop-radius-card);
+}
+@media (max-width: 767px) {
+  .workspace-page.dining-floor .dining-staff-calls li {
+    flex-wrap: wrap;
+  }
+}
+
+/*
+ * WP-2423 item 8 ① (Owner decision 2, Figma 44-2 approved 2026-10-27): the Tables page as the
+ * server's main screen in the frozen v3 visuals — white, no boxes, hairlines between rows only;
+ * tables listed by what they need (red dot: needs a person, blue: in progress, green: done), one
+ * next step per row; the selected table beside the list from 1024, under it on a phone.
+ */
+.workspace-page.tables-v3 .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .tables-v3__quiet {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font: inherit;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .tables-v3__quiet:hover:not(:disabled) {
+  color: var(--bop-color-accent);
+}
+.workspace-page.tables-v3 .dining-floor-summary > [data-attention="true"] {
+  color: var(--bop-color-text-default);
+}
+
+/* Tabs: words; the selected one in the accent over a 2px line; counts in grey. */
+.workspace-page.tables-v3 .table-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+  margin: 0 0 8px;
+}
+.workspace-page.tables-v3 .table-tabs button {
+  min-height: 44px;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 16px;
+}
+.workspace-page.tables-v3 .table-tabs button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-tabs__count {
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+
+/* The last step's result, with Undo where it can be taken back. */
+.workspace-page.tables-v3 .table-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin: 0 0 8px;
+  padding: 8px 0;
+  font-size: 14px;
+}
+
+.workspace-page.tables-v3 .dining-floor-layout {
+  gap: 0;
+}
+@media (min-width: 1024px) {
+  .workspace-page.tables-v3 .dining-floor-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(22rem, 44%);
+  }
+  .workspace-page.tables-v3 .table-panel {
+    border-left: 1px solid var(--bop-color-row-divider);
+    padding: 0 0 24px 28px;
+  }
+  .workspace-page.tables-v3 .table-list {
+    padding-right: 20px;
+  }
+}
+
+/* The list: group words, then rows parted by hairlines. */
+.workspace-page.tables-v3 .table-list__group {
+  margin: 16px 0 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-list__calm {
+  margin: 8px 0 16px;
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.tables-v3 .table-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page.tables-v3 .table-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page.tables-v3 .table-row:last-child {
+  border-bottom: 0;
+}
+.workspace-page.tables-v3 .table-row[data-selected="true"] {
+  box-shadow: inset 3px 0 0 var(--bop-color-accent);
+}
+.workspace-page.tables-v3 .table-row__open {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 4px;
+  min-height: 64px;
+  padding: 12px 0 12px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-page.tables-v3 .table-row__open:focus-visible {
+  outline: 2px solid var(--bop-color-accent);
+  outline-offset: -2px;
+}
+.workspace-page.tables-v3 .table-row__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+.workspace-page.tables-v3 .table-row__name strong {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.workspace-page.tables-v3 :is(.table-row__meta, .table-row__detail) {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-row__status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-row__status::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--table-dot, var(--bop-color-border-control));
+  transform: translateY(-1px);
+}
+.workspace-page.tables-v3 [data-tone="action"] {
+  --table-dot: var(--bop-color-danger-mark);
+}
+.workspace-page.tables-v3 [data-tone="progress"] {
+  --table-dot: var(--bop-color-accent);
+}
+.workspace-page.tables-v3 [data-tone="done"] {
+  --table-dot: var(--bop-color-success-mark);
+}
+.workspace-page.tables-v3 .table-row__next {
+  flex: none;
+}
+
+/* Buttons: the accent fill for the one next step, accent words for the rest. */
+.workspace-page.tables-v3 :is(.table-row__step, .table-panel__primary) {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.workspace-page.tables-v3 .table-panel__primary {
+  min-height: 44px;
+}
+.workspace-page.tables-v3 :is(.table-row__text-step, .table-panel__text-step) {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.workspace-page.tables-v3
+  :is(
+    .table-row__step,
+    .table-panel__primary,
+    .table-row__text-step,
+    .table-panel__text-step
+  ):disabled {
+  opacity: 0.45;
+}
+
+/* Free tables: one line of names, each opened in one tap. */
+.workspace-page.tables-v3 .table-free h3 {
+  margin: 16px 0 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-free ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page.tables-v3 .table-free li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.workspace-page.tables-v3 .table-free__name {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+}
+.workspace-page.tables-v3 .table-free__name[aria-pressed="true"] {
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-free__why {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* The selected table: no box; its title, then dishes, checkout and close, then the rest. */
+.workspace-page.tables-v3 .table-panel {
+  gap: 16px;
+  padding: 16px 0 24px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.workspace-page.tables-v3 .table-panel__head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-panel__meta,
+.workspace-page.tables-v3 .table-panel__notice {
+  margin: 4px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-panel__notice[data-tier="urgent"] {
+  color: var(--bop-color-danger);
+}
+.workspace-page.tables-v3 .table-panel__more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page.tables-v3 .table-panel__block {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+.workspace-page.tables-v3 .table-panel__block .dining-table-reason {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-panel__block select {
+  min-height: 44px;
+  font: inherit;
+}
+
+/* Checkout on the panel: tip and method as chips, the selected one a dark pill. */
+.workspace-page.tables-v3 :is(.table-checkout__tip, .table-checkout__method) label {
+  position: relative;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+/* The radio covers its chip (invisible), so a tap anywhere on the chip chooses it. */
+.workspace-page.tables-v3 :is(.table-checkout__tip, .table-checkout__method) input[type="radio"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.workspace-page.tables-v3
+  :is(.table-checkout__tip, .table-checkout__method)
+  label:has(input[type="radio"]:checked) {
+  background: var(--bop-color-text-default);
+  color: var(--bop-color-surface-default);
+}
+.workspace-page.tables-v3
+  :is(.table-checkout__tip, .table-checkout__method)
+  label:has(input[type="radio"]:focus-visible) {
+  outline: 2px solid var(--bop-color-accent);
+  outline-offset: 2px;
+}
+.workspace-page.tables-v3 .table-checkout__confirm {
+  display: grid;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid var(--bop-color-row-divider);
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page.tables-v3 .table-checkout__confirm h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-checkout__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 16px;
+}
+.workspace-page.tables-v3 .table-checkout__confirm .table-checkout__secondary {
+  color: var(--bop-color-accent);
+  text-decoration: none;
+}
+
+@media (max-width: 1023px) {
+  .workspace-page.tables-v3 .table-panel {
+    border-top: 1px solid var(--bop-color-row-divider);
+    margin-top: 16px;
+  }
+}
+@media (max-width: 767px) {
+  .workspace-page.tables-v3 .table-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 0 20px;
+  }
+  .workspace-page.tables-v3 .table-tabs button {
+    flex: none;
+  }
+}
+
+/* v3 inside the table panel: buttons are accent words unless they are the one next step, and
+   amounts sit at the right edge of their row (older Tables rules drew boxes and two columns). */
+.workspace-page.tables-v3 .table-panel button:not([data-variant="destructive"]) {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-panel button:disabled {
+  opacity: 0.45;
+}
+.workspace-page.tables-v3 .table-panel :is(.table-checkout__primary, .table-panel__primary) {
+  justify-self: start;
+  min-height: 44px;
+  padding: 0 24px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__primary:disabled {
+  opacity: 1;
+  background: var(--bop-color-surface-raised, #f2f2f2);
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__secondary {
+  color: var(--bop-color-danger);
+  text-decoration: none;
+}
+.workspace-page.tables-v3 .table-panel :is(.table-checkout__tip, .table-checkout__method) label {
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__totals > div,
+.workspace-page.tables-v3 .table-panel .table-receipt dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 4px;
+  border-bottom: 0;
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__total dt {
+  color: var(--bop-color-text-default);
+}
+.workspace-page.tables-v3 .table-panel .table-checkout__total {
+  font-size: 16px;
+}
+.workspace-page.tables-v3 .table-tabs__count {
+  margin-left: 4px;
+}
+.workspace-page.tables-v3 .table-row[data-urgent="true"] .table-row__detail {
+  color: var(--bop-color-danger);
+}
+@media (min-width: 1024px) {
+  .workspace-page.tables-v3 .table-panel {
+    padding: 0 0 24px 28px;
+    border-left: 1px solid var(--bop-color-row-divider);
+  }
+}
+
+/* WP-2423 item 8 ① segment 2: the manager's comp or discount, one column like the checkout. */
+.workspace-page.tables-v3 .item-comp {
+  display: grid;
+  gap: 16px;
+  padding: 16px 0;
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page.tables-v3 .item-comp p {
+  margin: 0;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .item-comp .pay-later-remove__lines {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page.tables-v3 .item-comp .pay-later-remove__lines label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.workspace-page.tables-v3 .item-comp fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-page.tables-v3 .item-comp legend {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .item-comp fieldset label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+}
+.workspace-page.tables-v3 .item-comp .table-checkout__field {
+  display: grid;
+  gap: 4px;
+  max-width: 240px;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .item-comp .table-checkout__field input {
+  min-height: 44px;
+  font: inherit;
+}
+.workspace-page.tables-v3 .item-comp__note {
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.tables-v3 .table-order-rounds__comps {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .table-order-rounds__comps li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.tables-v3 .table-order-rounds__comp {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-page.tables-v3 .table-checkout__comp {
+  color: var(--bop-color-text-muted);
+}
+
+/* WP-2423 item 8 ① segment 3: what to do while offline, under the read-only notice. */
+.workspace-page.tables-v3 .tables-offline {
+  margin: 0 0 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .tables-offline h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .tables-offline ul {
+  list-style: disc;
+}
+.workspace-page.tables-v3 .tables-offline ol {
+  list-style: decimal;
+}
+.workspace-page.tables-v3 .tables-offline :is(ul, ol) {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+.workspace-page.tables-v3 .tables-offline summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--bop-color-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+.workspace-page.tables-v3 .table-order-rounds__comps .table-order-rounds__owed {
+  padding-top: 4px;
+  border-top: 1px solid var(--bop-color-row-divider);
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* WP-2423 item 8 ③ follow-up: guests' last orders — words with a dot, no box (amber before it,
+   red after it). */
+.tables-v3 .last-orders-notice {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+.tables-v3 .last-orders-notice::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--bop-color-warning);
+  vertical-align: 0.1em;
+}
+.tables-v3 .last-orders-notice[data-tone="past"]::before {
+  background: var(--bop-color-danger-mark);
+}
+
+/* WP-2423 item 8 ④ (Figma "分单 / AA · v3"): how the table pays — tabs in accent words, the
+   parts as rows under hairlines with a status dot, "Collect this part" as accent words. */
+.tables-v3 .table-split {
+  margin: 16px 0;
+}
+.tables-v3 .table-split h4 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.tables-v3 .table-split__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+}
+.tables-v3 .table-split__modes button,
+.tables-v3 .table-split__collect,
+.tables-v3 .table-split__apply,
+.tables-v3 .table-split__people button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.tables-v3 .table-split__modes button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.tables-v3 .table-split__collect,
+.tables-v3 .table-split__apply,
+.tables-v3 .table-split__people button {
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.tables-v3 .table-split__people {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.tables-v3 .table-split__people output {
+  min-width: 2ch;
+  font-weight: 600;
+  text-align: center;
+}
+.tables-v3 .table-split__rounds ul,
+.tables-v3 .table-split__parts {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.tables-v3 .table-split__rounds li,
+.tables-v3 .table-split__parts li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.tables-v3 .table-split__parts li > div {
+  display: grid;
+  gap: 2px;
+}
+.tables-v3 .table-split__parts li[data-selected="true"] strong {
+  color: var(--bop-color-accent);
+}
+.tables-v3 .table-split__status {
+  font-size: 14px;
+}
+.tables-v3 .table-split__status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-border-control);
+  vertical-align: 0.1em;
+}
+.tables-v3 .table-split__status[data-tone="done"]::before {
+  background: var(--bop-color-success-mark);
+}
+.tables-v3 .table-split__status[data-tone="waiting"]::before {
+  background: var(--bop-color-warning);
+}
+.tables-v3 .table-split__progress {
+  margin: 4px 0;
+  font-weight: 600;
+}
+.tables-v3 .table-split__hint {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.tables-v3 .table-checkout__part-title {
+  margin: 16px 0 4px;
+  font-size: 16px;
+}
+.tables-v3 .table-split__locked {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: the phones at the table, pause/resume joining by scan,
+   remove a phone. White, row hairlines, accent words for actions (no boxes). */
+.tables-v3 .table-phones {
+  margin: 16px 0;
+}
+.tables-v3 .table-phones__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.tables-v3 .table-phones__head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.tables-v3 .table-phones__mode {
+  margin: 2px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.tables-v3 .table-phones__new {
+  margin: 0 0 12px;
+  padding: 8px 0 8px 12px;
+  border-left: 3px solid var(--bop-color-accent);
+  font-size: 15px;
+}
+.tables-v3 .table-phones__actions,
+.tables-v3 .table-phones__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+.tables-v3 .table-phones__list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.tables-v3 .table-phones__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+  font-size: 15px;
+}
+.tables-v3 .table-phones button {
+  min-height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tables-v3 .table-phones button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.tables-v3 .table-phones .table-phones__danger {
+  color: var(--bop-color-danger);
+}
+
+/* WP-2423 item 8 ⑤ decisions 5–7: a guest round waiting for staff before the kitchen. The one
+   next step ("Send to kitchen") is the accent fill; cancelling is accent words, asked once more. */
+.tables-v3 .table-held-rounds {
+  margin: 16px 0;
+}
+.tables-v3 .table-held-rounds__round {
+  padding: 8px 0 12px 12px;
+  border-left: 3px solid var(--bop-color-danger-mark);
+}
+.tables-v3 .table-held-rounds__round + .table-held-rounds__round {
+  margin-top: 12px;
+}
+.tables-v3 .table-held-rounds p {
+  margin: 0;
+  font-size: 15px;
+}
+.tables-v3 .table-held-rounds__note {
+  margin-top: 2px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.tables-v3 .table-held-rounds__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+.tables-v3 .table-held-rounds button {
+  min-height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.workspace-page.tables-v3 .table-panel .table-held-rounds .table-held-rounds__send,
+.tables-v3 .table-held-rounds .table-held-rounds__send {
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill, #fff);
+}
+.tables-v3 .table-held-rounds .table-phones__danger {
+  color: var(--bop-color-danger);
+}
+.tables-v3 .table-held-rounds button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.tables-v3 .round-hold-setting {
+  margin: 8px 0 12px;
+  font-size: 15px;
+}
+.tables-v3 .round-hold-setting label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.tables-v3 .round-hold-setting input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--bop-color-accent);
+}
+.tables-v3 .round-hold-setting__note {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+/* WP-2423 item 8 ⑧: move the party to another table. A long reason never widens the panel. */
+.tables-v3 .table-move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin: 8px 0 12px;
+  font-size: 15px;
+}
+.tables-v3 .table-move__field {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 4px;
+  min-width: 0;
+}
+.tables-v3 .table-move select {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: 44px;
+}
+.tables-v3 .table-move button {
+  min-height: 44px;
+}
+.tables-v3 .table-move [role="alert"] {
+  flex-basis: 100%;
+  margin: 0;
+}

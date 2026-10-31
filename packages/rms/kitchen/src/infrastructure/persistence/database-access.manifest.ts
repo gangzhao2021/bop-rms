@@ -3,6 +3,30 @@ const databaseAccessManifestInput = {
   module: { moduleName: "kitchen", packageName: "@rms/kitchen", layer: "RMS" },
   tables: [
     {
+      table: "kitchen_routing_configuration",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      table: "kitchen_creation_record",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier", "personal", "health"],
+    },
+    {
+      table: "kds_operator_shift_event",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
       table: "kds_operator_handover",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/kitchen" },
@@ -81,6 +105,92 @@ const databaseAccessManifestInput = {
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "transactional",
       piiClassification: ["indirect_identifier", "personal", "health"],
+    },
+    {
+      table: "kitchen_rework_item",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      table: "kitchen_rework_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      table: "kitchen_ticket_closure",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
+    },
+    {
+      // WP-2423 item 8 ⑧ (decision 5): the Store's kitchen sections (档口), a versioned list.
+      table: "kitchen_section_list",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑧ (decision 5): the kitchen section of a dish (versioned mark).
+      table: "kitchen_product_section",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑦ (decision 2): a dish the kitchen does not prepare (versioned mark).
+      table: "kitchen_not_prepared_product",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑦: which lines of a round the kitchen did not prepare, fixed at intake.
+      table: "kitchen_batch_preparation_decision",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: a server chased a dish (append-only).
+      table: "kitchen_work_chase",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 item 8 ⑥ part 4: a combo's dish marked done (append-only).
+      table: "kitchen_combo_part_done",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "kitchen_work_cancellation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "personal"],
     },
     {
       table: "kitchen_work_lifecycle_operation",

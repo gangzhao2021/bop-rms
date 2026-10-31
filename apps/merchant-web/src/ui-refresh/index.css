@@ -1,0 +1,20 @@
+/* WP-2423 merchant UI refresh (2026-10-21): daily-use screens benchmarked against restaurant
+   back-office and kitchen-display products, on the shared @bop-rms/ui tokens. Imported after
+   styles.css so these rules refine the shared baseline without re-ordering it. */
+@import "./nav.css";
+@import "./home.css";
+@import "./counter-order.css";
+@import "./kitchen.css";
+@import "./pickup.css";
+@import "./tables.css";
+@import "./exceptions.css";
+@import "./settlement-reports.css";
+@import "./approvals.css";
+@import "./catalog.css";
+@import "./quiet.css";
+/* Orders v2 (2026-10-26) comes last: it replaces the older Orders rules in quiet.css. */
+@import "./orders.css";
+/* Orders v3: a table's order round by round, on Orders and Tables. */
+@import "./dining-rounds.css";
+/* Kitchen v3 (2026-10-26) comes after quiet.css for the same reason. */
+@import "./kitchen-v3.css";

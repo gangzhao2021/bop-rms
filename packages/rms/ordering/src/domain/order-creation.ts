@@ -8,30 +8,36 @@ import {
 } from "./cart.js";
 import {
   parseOrderItemTransactionSnapshot,
+  parseConfiguredOrderItemTransactionSnapshot,
   type OrderItemTransactionSnapshot,
 } from "./order-item-snapshot.js";
 import { createOrderNumberAllocation, type OrderNumberAllocation } from "./order-number.js";
 import { parseOrderAggregate, type OrderAggregate } from "./order.js";
 
-export interface OrderCreationRecord {
+export interface OrderCreationRecord<V extends 1 | 2 = 1> {
   readonly submissionReference: OrderingReference;
   readonly submissionIntentHash: OrderingHash;
   readonly guestSessionReference: OrderingReference;
   readonly order: OrderAggregate;
-  readonly items: readonly OrderItemTransactionSnapshot[];
+  readonly items: readonly OrderItemTransactionSnapshot<V>[];
   readonly orderNumberAllocation: OrderNumberAllocation;
   readonly createdAt: OrderingInstant;
 }
 
-export type CreateOrderResult =
-  | { readonly status: "Created"; readonly record: OrderCreationRecord }
-  | { readonly status: "AlreadyCreated"; readonly record: OrderCreationRecord };
+export type CreateOrderResult<V extends 1 | 2 = 1> =
+  | { readonly status: "Created"; readonly record: OrderCreationRecord<V> }
+  | { readonly status: "AlreadyCreated"; readonly record: OrderCreationRecord<V> };
 
 export const orderCreationErrorCodes = [
   "ORDER_CREATE_INPUT_INVALID",
   "ORDER_CREATE_PERMISSION_DENIED",
   "ORDER_CREATE_IDEMPOTENCY_CONFLICT",
   "ORDER_CREATE_VALIDATION_EXPIRED",
+  /**
+   * WP-2423: the Store's stock could not be reserved for the Order's lines at submission (it ran
+   * out after checkout). Nothing was written; no payment was started.
+   */
+  "ORDER_CREATE_STOCK_SHORT",
   "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
 ] as const;
 
@@ -87,7 +93,7 @@ function exact(value: unknown, fields: readonly string[]): Readonly<Record<strin
   }
 }
 
-export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
+function parseRecord<V extends 1 | 2>(value: unknown, quoteVersion: V): OrderCreationRecord<V> {
   const raw = exact(value, [
     "submissionReference",
     "submissionIntentHash",
@@ -97,13 +103,32 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
     "orderNumberAllocation",
     "createdAt",
   ]);
-  if (!Array.isArray(raw.items) || raw.items.length < 1 || raw.items.length > 100) return invalid();
+  if (
+    !Array.isArray(raw.items) ||
+    Object.getPrototypeOf(raw.items) !== Array.prototype ||
+    raw.items.length < 1 ||
+    raw.items.length > 100 ||
+    Reflect.ownKeys(raw.items).length !== raw.items.length + 1
+  )
+    return invalid();
+  const captured: unknown[] = [];
+  for (let index = 0; index < raw.items.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(raw.items, String(index));
+    if (!descriptor?.enumerable || !("value" in descriptor)) return invalid();
+    captured.push(descriptor.value);
+  }
   try {
     const submissionReference = parseOrderingReference(raw.submissionReference);
     const guestSessionReference = parseOrderingReference(raw.guestSessionReference);
     const createdAt = parseOrderingInstant(raw.createdAt);
     const order = parseOrderAggregate(raw.order);
-    const items = Object.freeze(raw.items.map(parseOrderItemTransactionSnapshot));
+    const items = Object.freeze(
+      captured.map((value) =>
+        quoteVersion === 2
+          ? parseConfiguredOrderItemTransactionSnapshot(value)
+          : parseOrderItemTransactionSnapshot(value),
+      ),
+    ) as readonly OrderItemTransactionSnapshot<V>[];
     const allocationRaw = exact(raw.orderNumberAllocation, [
       "orderReference",
       "brandReference",
@@ -121,8 +146,12 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
       businessDateResolution: allocationRaw.businessDateResolution,
     });
     const batch = order.batches[0];
-    const identities = new Map(batch.items.map((item) => [item.orderItemReference, item]));
+    const quoteInputDigest = items[0]?.pricing.quoteInputDigest;
     if (
+      allocationRaw.brandReference !== allocation.brandReference ||
+      allocationRaw.storeReference !== allocation.storeReference ||
+      allocationRaw.businessDate !== allocation.businessDate ||
+      allocationRaw.orderNumber !== allocation.orderNumber ||
       batch.submissionReference !== submissionReference ||
       order.submittedByActorReference !== guestSessionReference ||
       batch.submittedByActorReference !== guestSessionReference ||
@@ -132,11 +161,21 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
       allocation.brandReference !== order.brandReference ||
       allocation.storeReference !== order.storeReference ||
       allocation.allocatedAt !== createdAt ||
-      items.length !== identities.size ||
-      items.some((item) => {
-        const identity = identities.get(item.orderItemReference);
+      items.length !== batch.items.length ||
+      items.some((item, index) => {
+        const identity = batch.items[index];
         return (
           identity === undefined ||
+          identity.orderItemReference !== item.orderItemReference ||
+          item.catalog.brandReference !== order.brandReference ||
+          item.catalog.storeReference !== order.storeReference ||
+          (quoteVersion === 2 &&
+            "optionPrices" in item.pricing &&
+            (item.pricing.optionPrices as readonly { orderType: string }[]).some(
+              (option) => option.orderType !== order.orderType,
+            )) ||
+          item.pricing.quoteReference !== batch.quoteReference ||
+          item.pricing.quoteInputDigest !== quoteInputDigest ||
           identity.orderBatchReference !== item.orderBatchReference ||
           identity.cartItemReference !== item.cartItemReference ||
           item.orderBatchReference !== batch.orderBatchReference ||
@@ -158,4 +197,11 @@ export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
     if (error instanceof OrderCreationError) throw error;
     return invalid();
   }
+}
+
+export function parseOrderCreationRecord(value: unknown): OrderCreationRecord {
+  return parseRecord(value, 1);
+}
+export function parseConfiguredOrderCreationRecord(value: unknown): OrderCreationRecord<2> {
+  return parseRecord(value, 2);
 }

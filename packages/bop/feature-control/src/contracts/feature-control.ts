@@ -493,6 +493,31 @@ export function evaluateFeatureControl(
   } catch {
     throw new FeatureControlContractError("FEATURE_CONTROL_CONTEXT_INVALID");
   }
+  return evaluateFeatureControlInScope({
+    scope: {
+      brandReference: context.brand.brandReference,
+      storeReference: context.store?.storeReference ?? null,
+    },
+    key: input.key,
+    definitions: input.definitions,
+    rolloutBucket: input.rolloutBucket,
+    evaluatedAt: input.evaluatedAt,
+  });
+}
+
+/** Pure scope evaluation. Caller must establish current authority separately; no login is implied. */
+export function evaluateFeatureControlInScope(input: {
+  readonly scope: Readonly<{ brandReference: string; storeReference: string | null }>;
+  readonly key: string;
+  readonly definitions: readonly FeatureControlDefinition[];
+  readonly rolloutBucket: number;
+  readonly evaluatedAt: string;
+}): FeatureControlEvaluation {
+  const rawScope = plain(input.scope, ["brandReference", "storeReference"]);
+  const currentScope = scope({
+    ...rawScope,
+    kind: rawScope.storeReference === null ? "Brand" : "Store",
+  });
   const key = parseFeatureControlKey(input.key);
   const rolloutBucket = parseRolloutBucket(input.rolloutBucket);
   const evaluatedAt = parseFeatureControlInstant(input.evaluatedAt);
@@ -510,8 +535,8 @@ export function evaluateFeatureControl(
   }
 
   const domainResult = evaluateDomainFeatureControl({
-    brandReference: context.brand.brandReference,
-    storeReference: context.store?.storeReference ?? null,
+    brandReference: currentScope.brandReference,
+    storeReference: currentScope.storeReference,
     key,
     definitions,
     rolloutBucket,

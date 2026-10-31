@@ -42,6 +42,24 @@ afterEach(async () => {
 });
 
 describe("migration connection configuration", () => {
+  it("accepts application module settings without loading them or changing connection authority", async () => {
+    const baseline = await fixture();
+    const configured = await fixture({
+      BOP_RMS_API_CONFIGURATION: ".local/nonexistent-api.mjs",
+      BOP_RMS_WORKER_CONFIGURATION: ".local/nonexistent-worker.mjs",
+    });
+    expect(await loadMigrationConnectionConfig(configured.root, configured.envFile, {})).toEqual(
+      await loadMigrationConnectionConfig(baseline.root, baseline.envFile, {}),
+    );
+  });
+
+  it("continues rejecting unrecognized application settings", async () => {
+    const item = await fixture({ BOP_RMS_API_CONFIGURATON: ".local/typo.mjs" });
+    await expect(loadMigrationConnectionConfig(item.root, item.envFile, {})).rejects.toMatchObject({
+      code: "MIGRATION_CONFIG_UNSAFE",
+    });
+  });
+
   it("loads an explicit local/test target without exposing the secret path", async () => {
     const item = await fixture();
     const config = await loadMigrationConnectionConfig(item.root, item.envFile, {});

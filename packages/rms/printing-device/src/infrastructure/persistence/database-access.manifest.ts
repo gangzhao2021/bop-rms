@@ -3,6 +3,81 @@ const databaseAccessManifestInput = {
   module: { moduleName: "printing-device", packageName: "@rms/printing-device", layer: "RMS" },
   tables: [
     {
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: receipt template sole-operator approval mark.
+      table: "digital_receipt_template_sole_operator_approval",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "digital_receipt_template_lifecycle_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "digital_receipt_template_submit_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+
+    {
+      table: "digital_receipt_template_submission",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+
+    {
+      table: "digital_receipt_template_draft_revision",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "digital_receipt_template_draft_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "digital_receipt_template_artifact_version",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "digital_receipt_template_artifact_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "digital_receipt_template_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/printing-device" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "device",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@rms/printing-device" },
@@ -99,7 +174,230 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "digital-receipt-template-sole-operator-store.digital_receipt_template_sole_operator_approval.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-sole-operator-store.ts",
+    },
+    {
+      id: "digital-receipt-template-sole-operator-store.digital_receipt_template_sole_operator_approval.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-sole-operator-store.ts",
+    },
+    {
+      id: "digital-receipt-template-lifecycle-store.digital_receipt_template_lifecycle_operation.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_lifecycle_operation" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-lifecycle-store.ts",
+    },
+    {
+      id: "digital-receipt-template-lifecycle-store.digital_receipt_template_lifecycle_operation.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_lifecycle_operation" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-lifecycle-store.ts",
+    },
+    {
+      id: "digital-receipt-template-lifecycle-store.digital_receipt_template_submission.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_submission" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-lifecycle-store.ts",
+    },
+    {
+      id: "digital-receipt-template-lifecycle-store.digital_receipt_template_version.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_version" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-lifecycle-store.ts",
+    },
+    {
+      id: "digital-receipt-template-submit-store.operation.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_submit_operation" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-submit-store.ts",
+    },
+    {
+      id: "digital-receipt-template-submit-store.operation.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_submit_operation" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-submit-store.ts",
+    },
+    {
+      id: "digital-receipt-template-submit-store.submission.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_submission" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-submit-store.ts",
+    },
+
+    {
+      id: "digital-receipt-template-submission-store.submission.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_submission" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-submission-store.ts",
+    },
+    {
+      id: "digital-receipt-template-submission-store.submission.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_submission" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-submission-store.ts",
+    },
+    {
+      id: "digital-receipt-template-submission-store.revision.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_draft_revision" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-submission-store.ts",
+    },
+
+    {
+      id: "digital-receipt-template-draft-store.revision.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_draft_revision" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-draft-store.ts",
+    },
+    {
+      id: "digital-receipt-template-draft-store.revision.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_draft_revision" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-draft-store.ts",
+    },
+    {
+      id: "digital-receipt-template-draft-store.operation.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_draft_operation" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-draft-store.ts",
+    },
+    {
+      id: "digital-receipt-template-draft-store.operation.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_draft_operation" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-draft-store.ts",
+    },
+    {
+      id: "digital-receipt-template-artifact-store.version.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_artifact_version" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-artifact-store.ts",
+    },
+    {
+      id: "digital-receipt-template-artifact-store.version.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_artifact_version" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-artifact-store.ts",
+    },
+    {
+      id: "digital-receipt-template-artifact-store.operation.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_artifact_operation" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-artifact-store.ts",
+    },
+    {
+      id: "digital-receipt-template-artifact-store.operation.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_artifact_operation" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-artifact-store.ts",
+    },
+    {
+      id: "digital-receipt-template-store.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_version" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-store.ts",
+    },
+    {
+      id: "digital-receipt-template-store.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_device", table: "digital_receipt_template_version" },
+      principal: { kind: "module", id: "@rms/printing-device" },
+      readPattern: null,
+      source:
+        "packages/rms/printing-device/src/infrastructure/persistence/digital-receipt-template-store.ts",
+    },
+  ],
 } as const;
 
 export const databaseAccessManifest = databaseAccessManifestInput;

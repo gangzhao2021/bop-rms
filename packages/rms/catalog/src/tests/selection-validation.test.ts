@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CatalogError,
+  enumerateCatalogReviewSelections,
   createCatalogSelectionValidationService,
   type CatalogSelectionValidationPorts,
   type CurrentCatalogSelectionSnapshot,
@@ -236,5 +237,282 @@ describe("Catalog current Sellable / Option selection validation", () => {
     await expect(service().validateSelection(hostile)).rejects.toMatchObject({
       code: "CATALOG_INPUT_INVALID",
     });
+  });
+});
+
+describe("closed Catalog selection collections", () => {
+  const paths = ["selections", "rules", "options", "activation", "conflicts"] as const;
+  const shapes = ["map", "getter", "sparse", "extra", "symbol", "prototype"] as const;
+  it.each(paths)("rejects hostile %s collections without executing hooks", async (path) => {
+    for (const shape of shapes) {
+      const hook = vi.fn(() => []);
+      const current = snapshot();
+      const request = command([{ optionReference: ids.base, quantity: 1 }]);
+      const base = current.rules[0];
+      const option = base?.options[0];
+      if (base === undefined || option === undefined) throw new Error("missing fixture");
+      const original =
+        path === "selections"
+          ? request.optionSelections
+          : path === "rules"
+            ? current.rules
+            : path === "options"
+              ? base.options
+              : path === "activation"
+                ? base.activationOptionReferences
+                : option.conflictOptionReferences;
+      const hostile: unknown[] = [...original];
+      if (shape === "map") Object.defineProperty(hostile, "map", { value: hook });
+      if (shape === "getter") Object.defineProperty(hostile, "0", { enumerable: true, get: hook });
+      if (shape === "sparse") hostile.length += 1;
+      if (shape === "extra") Object.defineProperty(hostile, "extra", { value: true });
+      if (shape === "symbol") Object.defineProperty(hostile, Symbol("extra"), { value: true });
+      if (shape === "prototype") Object.setPrototypeOf(hostile, Object.create(Array.prototype));
+      if (path === "selections") request.optionSelections = hostile as never;
+      else if (path === "rules") Object.assign(current, { rules: hostile });
+      else if (path === "options") Object.assign(base, { options: hostile });
+      else if (path === "activation") Object.assign(base, { activationOptionReferences: hostile });
+      else Object.assign(option, { conflictOptionReferences: hostile });
+      const resolveCurrent = vi.fn(async () => current);
+      const validator = createCatalogSelectionValidationService({ snapshots: { resolveCurrent } });
+      await expect(validator.validateSelection(request), `${path}:${shape}`).rejects.toMatchObject({
+        code: "CATALOG_INPUT_INVALID",
+      });
+      expect(hook, `${path}:${shape}`).not.toHaveBeenCalled();
+      if (path === "selections") expect(resolveCurrent).not.toHaveBeenCalled();
+    }
+  });
+  it.each(["sourceChannel", "orderType"])("does not coerce %s", async (field) => {
+    const hook = vi.fn(() => (field === "sourceChannel" ? "Qr" : "DineIn"));
+    const request = { ...command([]), [field]: { toString: hook } };
+    const resolveCurrent = vi.fn(async () => snapshot());
+    const validator = createCatalogSelectionValidationService({ snapshots: { resolveCurrent } });
+    await expect(validator.validateSelection(request)).rejects.toMatchObject({
+      code: "CATALOG_INPUT_INVALID",
+    });
+    expect(hook).not.toHaveBeenCalled();
+    expect(resolveCurrent).not.toHaveBeenCalled();
+  });
+  it("owns selected quantities before the source await", async () => {
+    const selected = { optionReference: ids.base, quantity: 1 };
+    const request = command([selected]);
+    const validator = createCatalogSelectionValidationService({
+      snapshots: {
+        async resolveCurrent() {
+          selected.quantity = 99;
+          request.optionSelections = [{ optionReference: ids.unknown, quantity: 1 }];
+          return snapshot();
+        },
+      },
+    });
+    const result = await validator.validateSelection(request);
+    expect(result).toMatchObject({
+      status: "Accepted",
+      optionSelections: [{ optionReference: ids.base, quantity: 1 }],
+    });
+    if (result.status !== "Accepted") throw new Error("expected synthetic acceptance");
+    expect(Object.isFrozen(result.optionSelections)).toBe(true);
+    expect(Object.isFrozen(result.optionSelections[0])).toBe(true);
+  });
+});
+
+describe("complete review configuration coverage", () => {
+  const budget = { maximumConfigurations: 100, maximumSearchSteps: 10000 };
+  const key = (items: readonly { optionReference: string; quantity: number }[]) =>
+    items
+      .map((item) => item.optionReference + ":" + item.quantity)
+      .sort()
+      .join(",");
+  it("matches live validation for every candidate with quantities, conflicts and conditional groups", async () => {
+    const current = snapshot();
+    const base = current.rules[0];
+    if (!base) throw new Error("fixture");
+    const rich = {
+      ...current,
+      rules: [
+        {
+          ...base,
+          options: base.options.map((option) => ({
+            ...option,
+            maximumQuantity: option.optionReference === ids.base ? 2 : 1,
+          })),
+        },
+        ...current.rules.slice(1),
+      ],
+    };
+    const expected: string[] = [];
+    for (let baseQuantity = 0; baseQuantity <= 2; baseQuantity++)
+      for (let trigger = 0; trigger <= 1; trigger++)
+        for (let conflict = 0; conflict <= 1; conflict++)
+          for (let child = 0; child <= 1; child++) {
+            const candidate = [
+              { optionReference: ids.base, quantity: baseQuantity },
+              { optionReference: ids.trigger, quantity: trigger },
+              { optionReference: ids.conflict, quantity: conflict },
+              { optionReference: ids.child, quantity: child },
+            ].filter((item) => item.quantity > 0);
+            if ((await service(rich).validateSelection(command(candidate))).status === "Accepted")
+              expected.push(key(candidate));
+          }
+    const actual = enumerateCatalogReviewSelections(rich.rules, budget);
+    expect(actual.map(key).sort()).toEqual(expected.sort());
+    expect(actual.some((items) => items.some((item) => item.quantity === 2))).toBe(true);
+    expect(actual.every((items) => items.every((item) => item.bindingReference.length > 0))).toBe(
+      true,
+    );
+    expect(enumerateCatalogReviewSelections([...rich.rules].reverse(), budget)).toEqual(actual);
+  });
+  it("keeps nested groups inactive until a selected active ancestor enables them", () => {
+    const current = snapshot();
+    const rules = [
+      {
+        bindingReference: id(20),
+        optionSetVersionReference: id(21),
+        activationOptionReferences: [ids.child],
+        minimumQuantity: 1,
+        maximumQuantity: 1,
+        options: [{ optionReference: id(22), maximumQuantity: 1, conflictOptionReferences: [] }],
+      },
+      ...current.rules,
+    ];
+    const actual = enumerateCatalogReviewSelections(rules, budget);
+    expect(actual).toHaveLength(5);
+    for (const items of actual) {
+      const selected = new Set(items.map((item) => String(item.optionReference)));
+      expect(selected.has(id(22))).toBe(selected.has(ids.trigger));
+      expect(selected.has(ids.child)).toBe(selected.has(ids.trigger));
+    }
+  });
+  it("respects the existing 100 selected-option request bound", () => {
+    const rules = Array.from({ length: 100 }, (_, index) => ({
+      bindingReference: id(1000 + index),
+      optionSetVersionReference: id(2000 + index),
+      activationOptionReferences: [],
+      minimumQuantity: index === 0 ? 2 : 1,
+      maximumQuantity: index === 0 ? 2 : 1,
+      options: Array.from({ length: index === 0 ? 2 : 1 }, (_, offset) => ({
+        optionReference: id(3000 + index * 2 + offset),
+        maximumQuantity: 1,
+        conflictOptionReferences: [],
+      })),
+    }));
+    expect(() => enumerateCatalogReviewSelections(rules, budget)).toThrowError(
+      expect.objectContaining({ code: "CATALOG_LIFECYCLE_CONFLICT" }),
+    );
+  });
+  it("covers every distinct option set and every option at every quantity, without every combination", () => {
+    const option = (n: number, maximumQuantity: number) => ({
+      optionReference: id(n),
+      maximumQuantity,
+      conflictOptionReferences: [],
+    });
+    const rules = [
+      {
+        bindingReference: id(500),
+        optionSetVersionReference: id(501),
+        activationOptionReferences: [],
+        minimumQuantity: 1,
+        maximumQuantity: 1,
+        options: [option(502, 1), option(503, 1)],
+      },
+      {
+        bindingReference: id(510),
+        optionSetVersionReference: id(511),
+        activationOptionReferences: [],
+        minimumQuantity: 0,
+        maximumQuantity: 4,
+        options: [option(512, 3), option(513, 3)],
+      },
+    ];
+    const set = (items: readonly { optionReference: string }[]) =>
+      items.map((item) => item.optionReference).join(",");
+    const pairs = (
+      configurations: readonly (readonly { optionReference: string; quantity: number }[])[],
+    ) =>
+      [
+        ...new Set(
+          configurations.flatMap((items) =>
+            items.map((item) => item.optionReference + "×" + item.quantity),
+          ),
+        ),
+      ].sort();
+    const every = enumerateCatalogReviewSelections(rules, budget);
+    const distinct = enumerateCatalogReviewSelections(rules, budget, "distinct-options");
+    // 2 milks × (each syrup 0–3, at most 4 in total = 13) quantity combinations…
+    expect(every).toHaveLength(26);
+    // …are covered by fewer: every option set, and every option at every quantity it allows.
+    expect([...new Set(distinct.map(set))].sort()).toEqual([...new Set(every.map(set))].sort());
+    expect(pairs(distinct)).toEqual(pairs(every));
+    expect(distinct.length).toBeLessThan(every.length);
+    expect(
+      distinct.every((items) =>
+        every.some((candidate) => JSON.stringify(candidate) === JSON.stringify(items)),
+      ),
+    ).toBe(true);
+    // The budget counts the configurations returned.
+    expect(
+      enumerateCatalogReviewSelections(
+        rules,
+        { ...budget, maximumConfigurations: distinct.length },
+        "distinct-options",
+      ),
+    ).toHaveLength(distinct.length);
+    expect(() =>
+      enumerateCatalogReviewSelections(rules, {
+        ...budget,
+        maximumConfigurations: distinct.length,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" }));
+    expect(() =>
+      enumerateCatalogReviewSelections(rules, budget, "partial" as "distinct-options"),
+    ).toThrowError();
+  });
+  it("returns the one empty configuration for no rules", () => {
+    expect(enumerateCatalogReviewSelections([], budget)).toEqual([[]]);
+  });
+  it("fails rather than exposing partial coverage when either budget is exhausted", () => {
+    expect(() =>
+      enumerateCatalogReviewSelections(snapshot().rules, {
+        ...budget,
+        maximumConfigurations: 1,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" }));
+    expect(() =>
+      enumerateCatalogReviewSelections(snapshot().rules, {
+        ...budget,
+        maximumSearchSteps: 1,
+      }),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" }));
+  });
+  it("rejects unsatisfiable and cyclic rules", () => {
+    const current = snapshot();
+    const base = current.rules[0],
+      child = current.rules[1];
+    if (!base || !child) throw new Error("fixture");
+    expect(() =>
+      enumerateCatalogReviewSelections(
+        [
+          {
+            ...base,
+            options: [],
+            minimumQuantity: 1,
+            maximumQuantity: 1,
+          },
+        ],
+        budget,
+      ),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_LIFECYCLE_CONFLICT" }));
+    expect(() =>
+      enumerateCatalogReviewSelections(
+        [
+          {
+            ...base,
+            activationOptionReferences: [ids.child],
+          },
+          child,
+        ],
+        budget,
+      ),
+    ).toThrowError(CatalogError);
   });
 });

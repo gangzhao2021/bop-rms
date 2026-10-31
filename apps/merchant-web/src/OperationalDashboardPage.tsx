@@ -1,6 +1,9 @@
+import { t } from "./i18n/i18n.js";
+import { Link } from "react-router";
 import { StatePanel } from "@bop-rms/ui";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { orderTypeLabel, sourceChannelFilterLabel } from "./order-channel.js";
 import {
   OperationalDashboardClientError,
   parseOperationalDashboardView,
@@ -15,11 +18,11 @@ type LoadState =
   | { readonly kind: "Found"; readonly view: OperationalDashboardView };
 
 const sourceLabels = {
-  merchant_order_queue_v1: "Orders",
-  payment_operations_v1: "Payments",
-  kitchen_operations_v1: "Kitchen",
-  fulfillment_operations_v1: "Fulfillment",
-  merchant_order_exception_v1: "Exceptions",
+  merchant_order_queue_v1: t("Orders"),
+  payment_operations_v1: t("Payments"),
+  kitchen_operations_v1: t("Kitchen"),
+  fulfillment_operations_v1: t("Fulfillment"),
+  merchant_order_exception_v1: t("Exceptions"),
 } as const;
 
 export function OperationalDashboardState({
@@ -28,29 +31,37 @@ export function OperationalDashboardState({
   readonly state: Exclude<LoadState["kind"], "Found">;
 }) {
   const values: Record<typeof state, readonly [string, string, "neutral" | "error" | "offline"]> = {
-    Loading: ["Loading dashboard", "Loading authorized operational summaries…", "neutral"],
+    Loading: [t("Loading dashboard"), t("Loading authorized operational summaries…"), "neutral"],
     PermissionDenied: [
-      "Permission denied",
-      "Operational reporting is unavailable for this scope.",
+      t("Permission denied"),
+      t("Operational reporting is unavailable for this scope."),
       "error",
     ],
-    NotFound: ["Dashboard not found", "No authorized operational projection exists.", "neutral"],
-    FeatureDisabled: [
-      "Reporting disabled",
-      "Operational reporting is unavailable for this Store.",
+    NotFound: [
+      t("Dashboard not found"),
+      t("No authorized operational projection exists."),
       "neutral",
     ],
-    Stale: ["Projection stale", "Refresh before relying on operational results.", "offline"],
-    Conflict: ["Scope changed", "Refresh the authorized Store and filter scope.", "offline"],
-    CommandFailed: ["Action failed", "No saved view, export, or schedule was created.", "error"],
+    FeatureDisabled: [
+      t("Reporting disabled"),
+      t("Operational reporting is unavailable for this Store."),
+      "neutral",
+    ],
+    Stale: [t("Projection stale"), t("Refresh before relying on operational results."), "offline"],
+    Conflict: [t("Scope changed"), t("Refresh the authorized Store and filter scope."), "offline"],
+    CommandFailed: [
+      t("Action failed"),
+      t("No saved view, export, or schedule was created."),
+      "error",
+    ],
     Offline: [
-      "Offline read-only",
-      "Cached summaries cannot authorize drill-down or export.",
+      t("Offline read-only"),
+      t("Cached summaries cannot authorize drill-down or export."),
       "offline",
     ],
     Unavailable: [
-      "Dashboard unavailable",
-      "No transaction facts or zero values are inferred.",
+      t("Dashboard unavailable"),
+      t("No transaction facts or zero values are inferred."),
       "error",
     ],
   };
@@ -66,7 +77,7 @@ const money = (minor: string) => {
   const negative = minor.startsWith("-");
   const digits = negative ? minor.slice(1) : minor;
   const padded = digits.padStart(3, "0");
-  return `${negative ? "-" : ""}CAD ${padded.slice(0, -2)}.${padded.slice(-2)}`;
+  return `${negative ? "-" : ""}$${padded.slice(0, -2)}.${padded.slice(-2)}`;
 };
 
 function MetricCard({
@@ -80,7 +91,7 @@ function MetricCard({
 }) {
   return (
     <article className="summary-card">
-      <p className="bop-eyebrow">Metric {version}</p>
+      <p className="bop-eyebrow">{t("Metric {version}", { version: version })}</p>
       <h2>{title}</h2>
       {children}
     </article>
@@ -99,31 +110,40 @@ export function OperationalDashboard({ view }: { readonly view: OperationalDashb
     <main className="page-shell">
       <header className="screen-heading">
         <div>
-          <p className="bop-eyebrow">RPT-OPS-DASHBOARD · Operational reporting</p>
-          <h1>Operational dashboard</h1>
+          <p className="bop-eyebrow">{t("RPT-OPS-DASHBOARD · Operational reporting")}</p>
+          <h1>{t("Operational dashboard")}</h1>
           <p>
-            {view.scope.brandLabel} · {view.scope.storeLabel} · Business Date {view.businessDate} ·{" "}
-            {view.timezone}
+            {t("{brandLabel} · {storeLabel} · Business Date {businessDate} · {timezone}", {
+              brandLabel: view.scope.brandLabel,
+              storeLabel: view.scope.storeLabel,
+              businessDate: view.businessDate,
+              timezone: view.timezone,
+            })}
           </p>
           <p role="status">
-            {view.completenessStatus} · data as of {view.dataAsOfUtc ?? "Unavailable"} · generated{" "}
-            {view.generatedAt}
+            {t("{completenessStatus} · data as of {value} · generated {generatedAt}", {
+              completenessStatus: view.completenessStatus,
+              value: view.dataAsOfUtc ?? t("Unavailable"),
+              generatedAt: view.generatedAt,
+            })}
           </p>
         </div>
         <div className="card-actions">
-          {view.permissions.maySaveView ? <button disabled={readOnly}>Save view</button> : null}
+          {view.permissions.maySaveView ? (
+            <button disabled={readOnly}>{t("Save view")}</button>
+          ) : null}
           {view.permissions.mayExport ? (
-            <button disabled={readOnly}>Create export job</button>
+            <button disabled={readOnly}>{t("Create export job")}</button>
           ) : null}
           {view.permissions.maySchedule ? (
-            <button disabled={readOnly}>Schedule report</button>
+            <button disabled={readOnly}>{t("Schedule report")}</button>
           ) : null}
         </div>
       </header>
       {readOnly ? <OperationalDashboardState state="Stale" /> : null}
-      <form className="list-filters" aria-label="Operational dashboard filters">
+      <form className="list-filters" aria-label={t("Operational dashboard filters")}>
         <label>
-          Authorized Store
+          {t("Authorized Store")}
           <select
             disabled={!view.permissions.mayChangeScope}
             value={view.scope.storeReference}
@@ -137,121 +157,157 @@ export function OperationalDashboard({ view }: { readonly view: OperationalDashb
           </select>
         </label>
         <label>
-          Business Date
+          {t("Business Date")}
           <input type="date" value={view.businessDate} readOnly />
         </label>
         <label>
-          Channel
-          <input value={view.sourceChannel} readOnly />
+          {t("Channel")}
+          <input value={sourceChannelFilterLabel(view.sourceChannel, view.orderType)} readOnly />
         </label>
         <label>
-          Order type
-          <input value={view.orderType} readOnly />
+          {t("Order type")}
+          <input
+            value={view.orderType === "All" ? t("All types") : orderTypeLabel[view.orderType]}
+            readOnly
+          />
         </label>
       </form>
       {noActivity ? (
-        <StatePanel heading="No operational activity" tone="neutral" status>
-          <p>No source facts match this exact authorized scope and filter snapshot.</p>
+        <StatePanel heading={t("No operational activity")} tone="neutral" status>
+          <p>{t("No source facts match this exact authorized scope and filter snapshot.")}</p>
         </StatePanel>
       ) : null}
-      <section className="overview-grid" aria-label="Operational metrics">
-        <MetricCard title="Net captured sales" version={view.metricVersions.sales}>
+      <section className="overview-grid" aria-label={t("Operational metrics")}>
+        <MetricCard title={t("Net captured sales")} version={view.metricVersions.sales}>
           {view.sales === null ? (
-            <p>Unavailable — not zero</p>
+            <p>{t("Unavailable — not zero")}</p>
           ) : (
             <p>
               <strong>{money(view.sales.netCapturedAmountMinor)}</strong>
               <br />
-              Captured {money(view.sales.capturedAmountMinor)} · refunded{" "}
-              {money(view.sales.refundedAmountMinor)}
+              {t("Captured {capturedAmountMinor} · refunded {refundedAmountMinor}", {
+                capturedAmountMinor: money(view.sales.capturedAmountMinor),
+                refundedAmountMinor: money(view.sales.refundedAmountMinor),
+              })}
             </p>
           )}
         </MetricCard>
-        <MetricCard title="Orders" version={view.metricVersions.orders}>
+        <MetricCard title={t("Orders")} version={view.metricVersions.orders}>
           {view.orders === null ? (
-            <p>Unavailable — not zero</p>
+            <p>{t("Unavailable — not zero")}</p>
           ) : (
             <p>
               <strong>{view.orders.total}</strong>
               <br />
-              Open {view.orders.open} · fulfilled {view.orders.fulfilled} · rejected{" "}
-              {view.orders.rejected} · cancelled {view.orders.cancelled}
+              {t(
+                "Open {open} · fulfilled {fulfilled} · rejected {rejected} · cancelled {cancelled}",
+                {
+                  open: view.orders.open,
+                  fulfilled: view.orders.fulfilled,
+                  rejected: view.orders.rejected,
+                  cancelled: view.orders.cancelled,
+                },
+              )}
             </p>
           )}
         </MetricCard>
-        <MetricCard title="Payments" version={view.metricVersions.payments}>
+        <MetricCard title={t("Payments")} version={view.metricVersions.payments}>
           {view.payments === null ? (
-            <p>Unavailable — not zero</p>
+            <p>{t("Unavailable — not zero")}</p>
           ) : (
             <p>
               <strong>{view.payments.attempts}</strong>
               <br />
-              Pending {view.payments.pending} · Provider unknown {view.payments.providerUnknown} ·
-              differences {view.payments.reconciliationDifferences}
+              {t(
+                "Pending {pending} · Provider unknown {providerUnknown} · differences {reconciliationDifferences}",
+                {
+                  pending: view.payments.pending,
+                  providerUnknown: view.payments.providerUnknown,
+                  reconciliationDifferences: view.payments.reconciliationDifferences,
+                },
+              )}
             </p>
           )}
         </MetricCard>
-        <MetricCard title="Kitchen" version={view.metricVersions.kitchen}>
+        <MetricCard title={t("Kitchen")} version={view.metricVersions.kitchen}>
           {view.kitchen === null ? (
-            <p>Unavailable — not zero</p>
+            <p>{t("Unavailable — not zero")}</p>
           ) : (
             <p>
               <strong>{view.kitchen.workItems}</strong>
               <br />
-              Queued {view.kitchen.queued} · in progress {view.kitchen.inProgress} · completed{" "}
-              {view.kitchen.completed} · exceptions {view.kitchen.exceptions}
+              {t(
+                "Queued {queued} · in progress {inProgress} · completed {completed} · exceptions {exceptions}",
+                {
+                  queued: view.kitchen.queued,
+                  inProgress: view.kitchen.inProgress,
+                  completed: view.kitchen.completed,
+                  exceptions: view.kitchen.exceptions,
+                },
+              )}
             </p>
           )}
         </MetricCard>
-        <MetricCard title="Fulfillment" version={view.metricVersions.fulfillment}>
+        <MetricCard title={t("Fulfillment")} version={view.metricVersions.fulfillment}>
           {view.fulfillment === null ? (
-            <p>Unavailable — not zero</p>
+            <p>{t("Unavailable — not zero")}</p>
           ) : (
             <p>
               <strong>{view.fulfillment.fulfillments}</strong>
               <br />
-              Pending {view.fulfillment.pending} · ready {view.fulfillment.ready} · in progress{" "}
-              {view.fulfillment.inProgress} · completed {view.fulfillment.completed} · exceptions{" "}
-              {view.fulfillment.exceptions}
+              {t(
+                "Pending {pending} · ready {ready} · in progress {inProgress} · completed {completed} · exceptions {exceptions}",
+                {
+                  pending: view.fulfillment.pending,
+                  ready: view.fulfillment.ready,
+                  inProgress: view.fulfillment.inProgress,
+                  completed: view.fulfillment.completed,
+                  exceptions: view.fulfillment.exceptions,
+                },
+              )}
             </p>
           )}
         </MetricCard>
-        <MetricCard title="Exceptions" version={view.metricVersions.exceptions}>
+        <MetricCard title={t("Exceptions")} version={view.metricVersions.exceptions}>
           {view.exceptions === null ? (
-            <p>Unavailable — not zero</p>
+            <p>{t("Unavailable — not zero")}</p>
           ) : (
             <p>
               <strong>{view.exceptions.open}</strong>
               <br />
-              Critical {view.exceptions.critical}
+              {t("Critical {critical}", { critical: view.exceptions.critical })}
             </p>
           )}
         </MetricCard>
       </section>
       <section aria-labelledby="dashboard-lineage-heading">
-        <h2 id="dashboard-lineage-heading">Freshness and drill-down lineage</h2>
+        <h2 id="dashboard-lineage-heading">{t("Freshness and drill-down lineage")}</h2>
         <div className="card-list">
           {view.lineage.map((item) => (
             <article className="summary-card" key={item.sourceName}>
               <h3>{sourceLabels[item.sourceName]}</h3>
               <p>
-                {item.status} · as of {item.asOfUtc ?? "Unavailable"}
+                {t("{status} · as of {value}", {
+                  status: item.status,
+                  value: item.asOfUtc ?? t("Unavailable"),
+                })}
               </p>
-              <p>Checkpoint {item.sourceCheckpoint ?? "Unavailable"}</p>
+              <p>{t("Checkpoint {value}", { value: item.sourceCheckpoint ?? t("Unavailable") })}</p>
               {view.permissions.mayDrill &&
               item.drillTarget !== null &&
               item.status !== "Unavailable" ? (
-                <a className="shell-action" href={item.drillTarget}>
-                  Open authorized source facts
-                </a>
+                <Link className="shell-action" to={item.drillTarget}>
+                  {t("Open authorized source facts")}
+                </Link>
               ) : null}
             </article>
           ))}
         </div>
       </section>
       <p role="note">
-        This dashboard is a versioned, permission-trimmed projection. Drill-down opens owning fact
-        pages; it never edits transaction truth.
+        {t(
+          "This dashboard is a versioned, permission-trimmed projection. Drill-down opens owning fact pages; it never edits transaction truth.",
+        )}
       </p>
     </main>
   );

@@ -1,7 +1,9 @@
+import { createPostgresOrderPaymentAcceptanceWaitStore } from "../infrastructure/persistence/order-payment-acceptance-wait-store.js";
+import { parseOrderPaymentAcceptanceWait } from "../application/order-payment-acceptance-wait.js";
 import { createHash } from "node:crypto";
 
 import type { ConsumerTransaction } from "@bop/eventing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createOrderPaymentDispositionBinding,
@@ -216,6 +218,7 @@ function transaction() {
 function fixture(
   options: {
     source?: unknown | null;
+    waiting?: OrderPaymentOutcomeConsumerPorts["waiting"];
     authorized?: boolean;
     committedSucceededEffect?: StoredOrderPaymentOutcomeEffect;
     commitSucceededStatus?: "Created" | "AlreadyCommitted";
@@ -229,8 +232,11 @@ function fixture(
     succeededCommits: 0,
     failedCommits: 0,
   };
+  const sourceTransactions: unknown[] = [];
+  const writeTransactions: unknown[] = [];
   const trace: string[] = [];
   const ports: OrderPaymentOutcomeConsumerPorts = {
+    ...(options.waiting ? { waiting: options.waiting } : {}),
     authorization: {
       async authorize() {
         trace.push("authorize");
@@ -239,7 +245,8 @@ function fixture(
       },
     },
     source: {
-      async loadExact() {
+      async loadExact(input) {
+        sourceTransactions.push(input.transaction);
         trace.push("source");
         calls.source += 1;
         return options.source ?? null;
@@ -252,6 +259,7 @@ function fixture(
         return effects.get(input.paymentEventReference) ?? null;
       },
       async commitSucceeded(input) {
+        writeTransactions.push(input.transaction);
         calls.succeededCommits += 1;
         const existing = effects.get(input.sourceEvent.eventId);
         if (existing !== undefined) return { status: "AlreadyCommitted", effect: existing };
@@ -282,8 +290,11 @@ function fixture(
   };
   return {
     service: createOrderPaymentOutcomeConsumerService(ports),
+    ports,
     calls,
     trace,
+    sourceTransactions,
+    writeTransactions,
     effects,
   };
 }
@@ -328,6 +339,8 @@ describe("WP-1310 Ordering payment outcome", () => {
       },
     });
     expect(state.calls.authorization).toBe(1);
+    expect(state.sourceTransactions).toEqual([tx]);
+    expect(state.writeTransactions).toEqual([tx]);
     await expect(state.service.consume(tx, event)).resolves.toMatchObject({
       consumerOutcome: { status: "duplicate_completed" },
       result: { status: "OrderConfirmed" },
@@ -534,5 +547,103 @@ describe("WP-1310 Ordering payment outcome", () => {
         eventType: "PaymentFailed",
       }),
     ]);
+  });
+});
+
+describe("normal payment acceptance wait source", () => {
+  it("binds waiting work to the original captured event without confirming it", () => {
+    const event = succeeded(),
+      record = disposition(event, "AwaitingAcceptance");
+    expect(parseOrderPaymentAcceptanceWait(event, record, hash).record.disposition).toBe(
+      "AwaitingAcceptance",
+    );
+    for (const invalid of [
+      disposition(event, "Confirmed"),
+      disposition(event, "PaidWithoutFulfillableOrder"),
+      { ...record, paymentEventReference: id(80) },
+      { ...record, storeReference: id(81) },
+      { ...record, sourceDigest: placeholderDigest },
+      { ...record, evaluatedAt: "2026-08-08T14:00:00.000Z" },
+    ])
+      expect(() => parseOrderPaymentAcceptanceWait(event, invalid, hash)).toThrow();
+  });
+});
+
+it("denies waiting storage and listing before SQL or source reads", async () => {
+  const query = vi.fn(),
+    validateCurrent = vi.fn(),
+    audit = vi.fn();
+  const store = createPostgresOrderPaymentAcceptanceWaitStore({
+    brandReference: refs.brand,
+    storeReference: refs.store,
+    sha256: hash,
+    authorize: async () => false,
+    validateCurrent,
+    audit,
+  });
+  const event = succeeded();
+  await expect(
+    store.record({ query }, event, disposition(event, "AwaitingAcceptance")),
+  ).rejects.toMatchObject({ code: "ORDER_PAYMENT_OUTCOME_PERMISSION_DENIED" });
+  await expect(store.listUnresolved({ query }, 20)).rejects.toMatchObject({
+    code: "ORDER_PAYMENT_OUTCOME_PERMISSION_DENIED",
+  });
+  expect(query).not.toHaveBeenCalled();
+  expect(validateCurrent).not.toHaveBeenCalled();
+  expect(audit).not.toHaveBeenCalled();
+});
+
+describe("durable normal acceptance waiting", () => {
+  it.each(["Confirmed", "PaidWithoutFulfillableOrder"] as const)(
+    "persists wait, replays and resumes to %s once",
+    async (final) => {
+      const event = succeeded();
+      let saved: unknown = null;
+      const state = {
+        source: disposition(event, "AwaitingAcceptance"),
+        waiting: {
+          record: vi.fn(async (input: { disposition: unknown }) => {
+            saved ??= input.disposition;
+            return saved;
+          }),
+          load: vi.fn(async () => saved),
+        },
+      };
+      const f = fixture(state),
+        tx = transaction();
+      expect((await f.service.consume(tx, event)).result.status).toBe("AwaitingOrderAcceptance");
+      expect(f.effects.size).toBe(0);
+      expect(f.calls.succeededCommits).toBe(0);
+      const resumed = createOrderPaymentOutcomeConsumerService(f.ports);
+      expect((await resumed.consume(tx, event)).consumerOutcome.status).toBe("duplicate_completed");
+      expect((await resumed.resumePending(tx, event)).status).toBe("AwaitingOrderAcceptance");
+      state.source = disposition(event, final);
+      expect((await resumed.resumePending(tx, event)).status).toBe(
+        final === "Confirmed" ? "OrderConfirmed" : "CompensationRequired",
+      );
+      expect((await resumed.consume(tx, event)).result.status).toBe(
+        final === "Confirmed" ? "OrderConfirmed" : "CompensationRequired",
+      );
+      await resumed.resumePending(tx, event);
+      expect(f.calls.succeededCommits).toBe(1);
+    },
+  );
+  it("never resumes arbitrary captured events without a persisted wait", async () => {
+    const f = fixture({
+      source: disposition(succeeded(), "Confirmed"),
+      waiting: { record: async () => null, load: async () => null },
+    });
+    await expect(f.service.resumePending(transaction(), succeeded())).rejects.toBeDefined();
+    expect(f.calls.source).toBe(0);
+    expect(f.effects.size).toBe(0);
+  });
+  it("does not acknowledge an unpersisted or mismatched waiting record", async () => {
+    const event = succeeded();
+    const f = fixture({
+      source: disposition(event, "AwaitingAcceptance"),
+      waiting: { record: async () => disposition(event, "Confirmed"), load: async () => null },
+    });
+    await expect(f.service.consume(transaction(), event)).rejects.toBeDefined();
+    expect(f.effects.size).toBe(0);
   });
 });

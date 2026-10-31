@@ -1,3 +1,10 @@
-export { AppFrame, type AppFrameProps } from "./AppFrame.js";
+export {
+  AppFrame,
+  SkipLinkProvidedContext,
+  WorkspaceFrameContext,
+  type AppFrameProps,
+} from "./AppFrame.js";
+export { AppErrorBoundary, ErrorFallback } from "./ErrorBoundary.js";
 export { StatePanel, type StatePanelProps } from "./StatePanel.js";
 export { bopPilotNeutralTokenNames } from "./tokens.js";
+export { UiTextContext, englishUiText, useUiText, type UiText } from "./UiText.js";

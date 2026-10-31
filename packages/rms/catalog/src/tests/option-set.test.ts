@@ -270,6 +270,31 @@ describe("Option Set / Option / Product Binding minimum model", () => {
       storeOverrideAllowed: false,
     });
     expect(() => validateProductOptionBinding(binding, created.aggregate)).not.toThrow();
+    for (const lifecycle of ["Draft", "Active", "Inactive", "Archived"] as const) {
+      const changed = parseOptionSetAggregate({
+        ...created.aggregate,
+        draft: {
+          ...created.aggregate.draft,
+          options: created.aggregate.draft.options.map((option) =>
+            option.optionReference === ids.milk ? { ...option, lifecycle } : option,
+          ),
+        },
+      });
+      const validate = () => validateProductOptionBinding(binding, changed);
+      if (lifecycle === "Inactive" || lifecycle === "Archived")
+        expect(validate).toThrowError(expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }));
+      else expect(validate).not.toThrow();
+    }
+    const nonDefaultInactive = parseOptionSetAggregate({
+      ...created.aggregate,
+      draft: {
+        ...created.aggregate.draft,
+        options: created.aggregate.draft.options.map((option) =>
+          option.optionReference === ids.oat ? { ...option, lifecycle: "Inactive" } : option,
+        ),
+      },
+    });
+    expect(() => validateProductOptionBinding(binding, nonDefaultInactive)).not.toThrow();
     expect(() =>
       validateProductOptionBinding({ ...binding, maximumSelectionOverride: 2 }, created.aggregate),
     ).toThrowError(expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }));

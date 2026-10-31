@@ -1,0 +1,1730 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expectNoInternalText } from "./internal-text-guard";
+
+async function tabTo(page: Page, target: Locator): Promise<void> {
+  // A closing dialog hands focus back without keyboard modality; step away and return by key.
+  if (await target.evaluate((element) => document.activeElement === element)) {
+    await page.keyboard.press("Shift+Tab");
+  }
+  for (let index = 0; index < 100; index++) {
+    if (await target.evaluate((element) => document.activeElement === element)) return;
+    await page.keyboard.press("Tab");
+  }
+  throw new Error("Kitchen control was not reachable through keyboard Tab order");
+}
+
+async function expectTouchTarget(control: Locator, label: string): Promise<void> {
+  const box = await control.boundingBox();
+  expect(box?.width, label).toBeGreaterThanOrEqual(44);
+  expect(box?.height, label).toBeGreaterThanOrEqual(44);
+}
+
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+}
+
+// WP-2423 M3: behaviour, copy, accessibility and responsive layout are asserted; pixel sizes and
+// colour palettes are not, so the display can follow the token sheet.
+test("@production Kitchen reads, refreshes and clears denied data with keyboard access", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  let showOrders = false;
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: showOrders
+            ? [
+                {
+                  screenId: "OPS-ORDER-QUEUE",
+                  label: "Orders",
+                  href: "/operations/orders",
+                  permission: "ordering.operate",
+                },
+                {
+                  screenId: "KIT-KITCHEN-QUEUE",
+                  label: "Kitchen",
+                  href: "/operations/kitchen",
+                  permission: "kitchen.operate",
+                },
+              ]
+            : [
+                {
+                  screenId: "KIT-KITCHEN-QUEUE",
+                  label: "Kitchen",
+                  href: "/operations/kitchen",
+                  permission: "kitchen.operate",
+                },
+              ],
+        },
+      },
+    }),
+  );
+  const at = "2026-09-19T12:00:00.000Z";
+  const projectedAt = "2026-09-19T12:18:00.000Z";
+  const item = {
+    workItemReference: id(1),
+    ticketReference: id(2),
+    orderReference: id(3),
+    orderItemReference: id(4),
+    stationReference: id(5),
+    localizedDisplayNames: { "en-CA": "Synthetic rice" },
+    orderLabel: { orderNumber: "14", orderType: "DineIn", tableLabel: "T4" },
+    customerNote: "Synthetic note: no onions",
+    // WP-2423 Q3: the menu's published disclosure for this item (synthetic).
+    allergens: {
+      status: "Declared",
+      items: [
+        { code: "MILK", name: "Milk", classification: "Contains" },
+        { code: "SESAME", name: "Sesame", classification: "CrossContactPossible" },
+      ],
+      forChoices: false,
+    },
+    selectedOptions: [
+      {
+        optionReference: id(11),
+        quantity: 2,
+        localizedNames: { "en-CA": "Extra mushrooms" },
+      },
+    ],
+    status: "Queued",
+    requiredQuantity: 2,
+    completedQuantity: 0,
+    workItemCreatedAt: at,
+    acceptedAt: null,
+    orderItemReadyAt: null,
+    ticketAggregateVersion: "9007199254740993",
+    workItemVersion: "1",
+  };
+  const items = [
+    item,
+    {
+      ...item,
+      workItemReference: id(7),
+      ticketReference: id(12),
+      orderReference: id(13),
+      orderItemReference: id(8),
+      stationReference: id(15),
+      localizedDisplayNames: { "en-CA": "Synthetic stew" },
+      // WP-2423 item 8 ⑧: the party was moved from T3 to T5.
+      orderLabel: {
+        orderNumber: "15",
+        orderType: "DineIn",
+        tableLabel: "T5",
+        movedFromTableLabel: "T3",
+      },
+      status: "In Progress",
+      completedQuantity: 1,
+    },
+    {
+      ...item,
+      workItemReference: id(9),
+      ticketReference: id(14),
+      orderReference: id(15),
+      orderItemReference: id(10),
+      stationReference: id(16),
+      localizedDisplayNames: { "en-CA": "Synthetic bread" },
+      orderLabel: { orderNumber: "16", orderType: "Pickup", tableLabel: null },
+      status: "Completed",
+      completedQuantity: 2,
+    },
+  ];
+  const metadata = {
+    storeReference: scope.storeReference,
+    operatorStatus: "Unverified",
+    projectionName: "kitchen_work_queue_v1",
+    projectionVersion: 1,
+    projectionGenerationReference: id(6),
+    projectedAt,
+    partial: false,
+    stale: false,
+    freshnessStatus: "Fresh",
+  };
+  let denied = false,
+    searchedFilters: Record<string, unknown> | null = null;
+  const queryUrls: string[] = [];
+  await page.route("**/merchant/kitchen/query", (route) => {
+    queryUrls.push(route.request().url());
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["x-bop-csrf"]).toBe("a".repeat(43));
+    const query = route.request().postDataJSON();
+    if (query.kind === "List") searchedFilters = query.filters;
+    const filteredItems =
+      query.kind === "List"
+        ? items.filter(
+            (candidate) =>
+              (query.filters.orderReference === null ||
+                candidate.orderReference === query.filters.orderReference) &&
+              (query.filters.ticketReference === null ||
+                candidate.ticketReference === query.filters.ticketReference),
+          )
+        : items;
+    return route.fulfill(
+      denied
+        ? { headers, status: 403, json: { error: "request_denied" } }
+        : {
+            headers,
+            json:
+              query.kind === "List"
+                ? { ...metadata, items: filteredItems, nextCursor: null }
+                : { ...metadata, item },
+          },
+    );
+  });
+  // Ticket ages follow the device clock; pin it to the projection time so the ages are stable.
+  await page.clock.setFixedTime(new Date(projectedAt));
+  await page.goto("/operations/kitchen");
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  // 2026-10-21 live check: a counter or office sign-in reads the Kitchen inside the shared
+  // workspace frame (grouped sidebar, Switch staff), not a second header with its own links.
+  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
+  await expect(workspaceNav.locator(".workspace-sidebar__store")).toHaveText("Training Store");
+  await expect(page.getByRole("heading", { level: 1, name: "Kitchen", exact: true })).toBeVisible();
+  await expect(page.locator(".bop-shell__header")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+  await expect(page.getByText("Kitchen display", { exact: true })).toHaveCount(0);
+  await expect(workspaceNav.getByRole("button", { name: "Switch staff" }).first()).toBeAttached();
+  await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("KIT-KITCHEN-QUEUE");
+  await expect(page.locator("body")).not.toContainText("OPERATIONS");
+  await expect(page.locator("body")).not.toContainText("Unavailable here");
+  await expect(page.locator("body")).not.toContainText("Refresh from source");
+
+  // Work state is written out, never colour alone; waiting time is tiered on the card.
+  const stateChips = page.locator(".kitchen-work-item__state strong");
+  // WP-2423 Q2: the board opens on active work, which includes completed work awaiting "ready".
+  await expect(stateChips).toHaveText(["Queued", "In progress", "Completed"]);
+  await expect(page.locator(".kitchen-work-item[data-age='late']")).toHaveCount(3);
+  await expect(page.locator(".kitchen-work-item__state span").first()).toHaveText("18 min");
+  await expect(page.locator(".kitchen-work-item__state span").first()).toHaveAttribute(
+    "data-age",
+    "late",
+  );
+  await expect(page.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
+  await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeVisible();
+  // WP-2423: a counter/office sign-in sees the board, view only, with a way to start the kitchen
+  // display on this device; no technical wording.
+  await expect(page.getByText("View only", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start kitchen display here", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Hand over / sign out" })).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("KDS");
+  await expect(page.locator("body")).not.toContainText("device lock");
+  // WP-2423: no internal codes, identifiers or technical words anywhere a staff member reads.
+  await expectNoInternalText(page);
+  // Kitchen v3: each ticket's one main step, disabled for a view-only sign-in.
+  await expect(page.getByRole("button", { name: "Accept order", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Start cooking", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Finished", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toBeDisabled();
+  // WP-2423: filters the source cannot answer are not offered (no "Unavailable" stubs).
+  for (const label of ["Station", "Allergen", "Exception"])
+    await expect(page.getByRole("combobox", { name: label, exact: true })).toHaveCount(0);
+  await expect(page.locator("option").filter({ hasText: "Unavailable" })).toHaveCount(0);
+  // The workspace sidebar lists only what this sign-in may open, with Kitchen as the current page.
+  const sidebarLinks = workspaceNav.locator(".workspace-sidebar__links");
+  await expect(sidebarLinks.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(sidebarLinks.getByRole("link", { name: "Orders" })).toHaveCount(0);
+  // Kitchen v3: "2×" leads each dish; the count is written out only once part of it is done.
+  await expect(page.getByText("Quantity", { exact: true }).first()).toBeAttached();
+  await expect(page.getByText("0 / 2", { exact: true })).toBeAttached();
+  // WP-2423 Q3: menu allergens on every card; no placeholder for cues that have no source.
+  const allergenLine = page.locator('.kitchen-work-item__allergens[data-kind="declared"]');
+  await expect(allergenLine).toHaveCount(3);
+  await expect(allergenLine.first()).toContainText("Contains: Milk");
+  await expect(allergenLine.first()).toContainText("May contain: Sesame");
+  await expect(allergenLine.first()).toContainText("Modifiers may add allergens");
+  await expect(page.locator("body")).not.toContainText("Allergen / exception cues unavailable");
+  await expect(page.locator("body")).not.toContainText("Ticket display reference unavailable");
+  await expect(page.locator("body")).not.toContainText("Order display reference unavailable");
+  await expect(page.locator("body")).not.toContainText(id(2));
+  await expect(page.locator("body")).not.toContainText(id(3));
+
+  // The sound toggle is an explicit operator choice; it never turns itself on.
+  const sound = page.getByRole("button", { name: /^Sound (on|off)$/u });
+  await expect(sound).toHaveText("Sound off");
+  await expect(sound).toHaveAttribute("aria-pressed", "false");
+  await sound.click();
+  await expect(sound).toHaveText("Sound on");
+  await expect(sound).toHaveAttribute("aria-pressed", "true");
+  await sound.click();
+  await expect(sound).toHaveText("Sound off");
+
+  const clearFilters = page.getByRole("button", { name: "Clear filters", exact: true });
+  await expect(clearFilters).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Held");
+  await expect(page.getByRole("heading", { name: "No matching work", exact: true })).toBeVisible();
+  await expect(clearFilters).toBeEnabled();
+  await clearFilters.click();
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  const unnamedStationLanes = page.getByRole("region", { name: /^Station \d station$/u });
+  await expect(unnamedStationLanes).toHaveCount(3);
+  await expect(unnamedStationLanes.first()).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("station labels unavailable");
+  for (const stationReference of [id(5), id(15), id(16)]) {
+    await expect(page.locator("body")).not.toContainText(stationReference);
+  }
+  await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
+  const accept = page.getByRole("button", { name: "Accept order", exact: true });
+  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
+  await expect(accept).toBeDisabled();
+  expect(await accept.evaluate((button) => getComputedStyle(button).backgroundColor)).not.toBe(
+    await refresh.evaluate((button) => getComputedStyle(button).backgroundColor),
+  );
+
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: "test-results/kitchen-board-1024.png", fullPage: true });
+  for (const width of [720, 390, 320]) {
+    await page.setViewportSize({ width, height: width === 390 ? 900 : 844 });
+    await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeHidden();
+    await expect(page.locator(".kitchen-reference-search--desktop")).toBeHidden();
+    // On narrow screens the workspace navigation is the Menu drawer, as on every other page.
+    await expect(workspaceNav.locator(".workspace-sidebar__compact > summary")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+    const filterToggle = page.locator(".kitchen-filter-toggle");
+    await expect(filterToggle).toBeVisible();
+    await expect(filterToggle).toHaveText("Filters · Active work");
+    const mobileQueueCard = page.locator(".kitchen-work-item").first();
+    await expectTouchTarget(refresh, "Queue refresh");
+    await expectTouchTarget(filterToggle, "Queue filters");
+    await expectTouchTarget(
+      mobileQueueCard.locator(".kitchen-work-item__detail-link"),
+      "Queue item detail",
+    );
+    await expectTouchTarget(page.locator(".kitchen-ticket__next").first(), "Queue action");
+    const laneItems = page.locator(".kitchen-station-lane__items").first();
+    const mobileColumns = await laneItems.evaluate(
+      (element) =>
+        getComputedStyle(element)
+          .gridTemplateColumns.split(/\s+/u)
+          .filter((track) => Number.parseFloat(track) > 0).length,
+    );
+    expect(mobileColumns).toBe(1);
+    const lockNotice = page.getByRole("heading", { name: "View only on this screen" });
+    expect((await filterToggle.boundingBox())?.y).toBeLessThan(
+      (await lockNotice.boundingBox())?.y ?? 0,
+    );
+    const filterSheet = page.getByRole("dialog", { name: "Filter Kitchen work" });
+    await expect(filterSheet).not.toBeVisible();
+    await tabTo(page, filterToggle);
+    await expect(filterToggle).toHaveCSS("outline-style", "solid");
+    await page.keyboard.press("Enter");
+    await expect(filterSheet).toBeVisible();
+    await expect(filterSheet.getByRole("combobox", { name: "Work state" })).toBeFocused();
+    if (width <= 390) {
+      // Bottom sheet: full width, anchored to the bottom edge.
+      const sheetBox = await filterSheet.boundingBox();
+      const viewportHeight = await page.evaluate(() => window.innerHeight);
+      expect(sheetBox?.x).toBe(0);
+      expect(sheetBox?.width).toBe(width);
+      expect(
+        Math.abs((sheetBox?.y ?? 0) + (sheetBox?.height ?? 0) - viewportHeight),
+      ).toBeLessThanOrEqual(1);
+    }
+    const mobileFilters = filterSheet.locator(".kitchen-board-filters--mobile");
+    await expect(mobileFilters).toHaveCSS(
+      "grid-template-columns",
+      /\d+(\.\d+)?px\s+\d+(\.\d+)?px/u,
+    );
+    await expect(filterSheet.getByText("Work state", { exact: true })).toBeVisible();
+    for (const label of ["Station", "Allergen", "Exception"])
+      await expect(filterSheet.getByText(label, { exact: true })).toHaveCount(0);
+    await expect(filterSheet).not.toContainText("Unavailable");
+    const clearBox = await filterSheet.getByRole("button", { name: "Clear filters" }).boundingBox();
+    const doneBox = await filterSheet.getByRole("button", { name: "Done" }).boundingBox();
+    expect(clearBox).not.toBeNull();
+    expect(doneBox).not.toBeNull();
+    expect(clearBox?.y).toBe(doneBox?.y);
+    expect(clearBox?.x).toBeLessThan(doneBox?.x ?? 0);
+    await page.screenshot({
+      path: `test-results/kitchen-filter-sheet-${width}.png`,
+      fullPage: true,
+    });
+    await page.keyboard.press("Escape");
+    await expect(filterSheet).not.toBeVisible();
+    await expect(filterToggle).toBeFocused();
+    await filterToggle.click();
+    await expect(filterSheet.getByRole("combobox", { name: "Work state" })).toBeVisible();
+    await expect(filterSheet.getByRole("combobox", { name: "Allergen" })).toHaveCount(0);
+    await expect(filterSheet.getByRole("combobox", { name: "Exception" })).toHaveCount(0);
+    await filterSheet.getByRole("button", { name: "Done" }).click();
+    await expect(filterSheet).not.toBeVisible();
+    await filterToggle.click();
+    const mobileSearch = filterSheet.locator(".kitchen-reference-search--mobile");
+    await expect(mobileSearch).toBeVisible();
+    const mobileSearchButton = mobileSearch.getByRole("button", { name: "Find", exact: true });
+    const mobileClearButton = mobileSearch.getByRole("button", { name: "Clear search" });
+    await expect(mobileClearButton).toHaveText("Clear");
+    await expect(mobileClearButton).toBeDisabled();
+    const searchButtonBox = await mobileSearchButton.boundingBox();
+    const clearSearchButtonBox = await mobileClearButton.boundingBox();
+    expect(searchButtonBox?.y).toBe(clearSearchButtonBox?.y);
+    expect(searchButtonBox?.height).toBeGreaterThanOrEqual(44);
+    // WP-2423: staff find an order by the number on its ticket, in their words.
+    const mobileOrderInput = mobileSearch.getByRole("searchbox", { name: "Order number or table" });
+    await expect(mobileOrderInput).toHaveAttribute("placeholder", "Order number or table");
+    await mobileOrderInput.fill("unsent");
+    await expect(mobileClearButton).toBeEnabled();
+    await mobileClearButton.click();
+    await expect(mobileOrderInput).toHaveValue("");
+    await mobileOrderInput.fill(width === 390 ? "15" : "#16");
+    await mobileSearchButton.click();
+    await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
+    await expect(page.locator(".kitchen-work-item")).toContainText(
+      width === 390 ? "Synthetic stew" : "Synthetic bread",
+    );
+    expect(new URL(page.url()).search).toBe("");
+    expect(searchedFilters).toMatchObject({ orderReference: null, ticketReference: null });
+    await expect(filterToggle).toHaveText("Filters · Applied");
+    await expect(filterSheet).not.toBeVisible();
+    await filterToggle.click();
+    await expect(filterSheet).toBeVisible();
+    await mobileSearch.getByRole("button", { name: "Clear search" }).click();
+    await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
+    await expect(filterSheet).not.toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({ path: `test-results/kitchen-board-${width}.png`, fullPage: true });
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(
+    page.getByRole("navigation", { name: "Workspace" }).locator(".workspace-sidebar__store"),
+  ).toHaveText("Training Store");
+  await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeVisible();
+  await expect(page.locator(".kitchen-filter-toggle")).toBeHidden();
+  await expect(page.locator(".kitchen-queue-count")).toHaveText("3 work items");
+  // Station lanes sit side by side on a desktop display.
+  const laneTops = await page
+    .locator(".kitchen-station-lane")
+    .evaluateAll((lanes) => lanes.map((lane) => Math.round(lane.getBoundingClientRect().y)));
+  expect(laneTops).toHaveLength(3);
+  expect(new Set(laneTops).size).toBe(1);
+  const desktopSearch = page.locator(".kitchen-reference-search--desktop");
+  const orderInput = desktopSearch.getByRole("searchbox", { name: "Order number or table" });
+  await expect(orderInput).toHaveAttribute("placeholder", "Order number or table");
+  await expect(orderInput).toHaveAttribute(
+    "aria-describedby",
+    "kitchen-reference-search-hint-desktop",
+  );
+  await expect(page.locator("#kitchen-reference-search-hint-desktop")).toHaveText(
+    "The number on the ticket or receipt, or the table. Shows only that order's work.",
+  );
+  // Only Work state is offered: the source carries no station names, cues or exceptions.
+  await expect(page.locator(".kitchen-board-filters--desktop select")).toHaveCount(1);
+  await page.screenshot({ path: "test-results/kitchen-board-1440.png", fullPage: true });
+  // WP-2423: by the order number printed on the ticket; nothing is sent or put in the address.
+  await orderInput.fill("Order 14");
+  await page.getByRole("button", { name: "Find", exact: true }).click();
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  await expect(orderInput).toHaveValue("Order 14");
+  expect(new URL(page.url()).search).toBe("");
+  expect(searchedFilters).toMatchObject({ orderReference: null, ticketReference: null });
+  await expect(page.getByRole("button", { name: "Clear search" })).toBeVisible();
+  await page.screenshot({ path: "test-results/kitchen-board-search-1440.png", fullPage: true });
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
+  await expect(orderInput).toHaveValue("");
+  // By table, with Enter.
+  await orderInput.fill("t5");
+  await orderInput.press("Enter");
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Synthetic stew", exact: true })).toBeVisible();
+  // WP-2423 item 8 ⑧: the ticket goes to the party's table now and names the one it came from.
+  await expect(page.getByText("Moved from table T3")).toBeVisible();
+  await page.getByRole("button", { name: "Clear search" }).click();
+  // A match the filters hide is named as such, not reported missing.
+  await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Queued");
+  await orderInput.fill("16");
+  await orderInput.press("Enter");
+  await expect(page.getByRole("heading", { name: "No matching work", exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Order or table “16” has work, but the filters hide it. Clear the filters to see it.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await orderInput.fill("99");
+  await page.getByRole("button", { name: "Find", exact: true }).click();
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(0);
+  await expect(
+    page.getByText(
+      "Nothing on the board for order or table “99”. Clear the search to see the whole queue.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Clear search" }).click();
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
+  await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Queued");
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+
+  // Work item detail by keyboard.
+  const detailsLink = page.getByRole("link", { name: "Synthetic rice", exact: true });
+  await tabTo(page, detailsLink);
+  await expect(detailsLink).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Additional detail", exact: true })).toBeVisible();
+  // WP-2423 Q2: the detail names its Order and table, and shows the Customer's note.
+  await expect(page.getByText("Table T4 · Order 14", { exact: true })).toBeVisible();
+  await expect(page.locator(".kitchen-work-item__note")).toHaveText(
+    "Note: Synthetic note: no onions",
+  );
+  // In the workspace frame (a counter or office sign-in) the item is the page heading.
+  await expect(
+    page.getByRole("heading", { name: "Synthetic rice", exact: true, level: 1 }),
+  ).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("KIT-WORK-ITEM");
+  await expect(page.getByRole("heading", { name: "Modifiers" })).toBeVisible();
+  await expect(page.getByText("Extra mushrooms", { exact: true })).toBeVisible();
+  await expect(page.getByText("× 2", { exact: true })).toBeVisible();
+  await expect(page.getByText(id(11), { exact: true })).toHaveCount(0);
+  // WP-2423: only recorded facts are listed; no "Unavailable" rows.
+  await expect(page.getByText("Work item history", { exact: true })).toBeVisible();
+  for (const detail of ["Recipe & handling snapshots", "Timers & dependencies"])
+    await expect(page.getByText(detail, { exact: true })).toHaveCount(0);
+  const detailsGroup = page.locator(".kitchen-work-item-screen__details dl");
+  await expect(detailsGroup.locator("> div")).toHaveCount(1);
+  await expect(detailsGroup).not.toContainText("Unavailable");
+  await expect(detailsGroup.locator("> div").last()).toContainText("Work item created");
+  await expect(page.getByText("18 min", { exact: true })).toBeVisible();
+  await expect(page.locator(".kitchen-work-item--detail")).toHaveAttribute("data-age", "late");
+  await expect(page.getByText("View only", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Take actions from the queue. Your filters are kept when you return.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  for (const width of [1440, 720, 390, 320]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    await expectTouchTarget(
+      page.getByRole("link", { name: "Return to Kitchen queue" }),
+      "Return link",
+    );
+    await expectTouchTarget(page.getByRole("button", { name: "Refresh", exact: true }), "Refresh");
+    await expect(
+      page.getByRole("heading", { name: "Additional detail", exact: true }),
+    ).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({ path: `test-results/kitchen-detail-${width}.png`, fullPage: true });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const returnLink = page.getByRole("link", { name: "Return to Kitchen queue" });
+  await tabTo(page, returnLink);
+  await expect(returnLink).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/operations\/kitchen$/);
+  await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Work state", exact: true })).toHaveValue(
+    "Queued",
+  );
+
+  // Denied reads clear the board and keep the Store frame; nothing is cached.
+  denied = true;
+  await page.getByRole("link", { name: "Synthetic rice", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
+  // The board already said this is a counter or office sign-in: the workspace frame stays.
+  await expect(workspaceNav).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Work item detail" })).toBeVisible();
+  await page.getByRole("link", { name: "Return to Kitchen queue" }).click();
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
+  denied = false;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Work state", exact: true })).toHaveValue(
+    "Queued",
+  );
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  denied = true;
+  const keyboardRefresh = page.getByRole("button", { name: "Refresh", exact: true });
+  await tabTo(page, keyboardRefresh);
+  await expect(keyboardRefresh).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "No access", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeFocused();
+  denied = false;
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  expect(queryUrls.length).toBeGreaterThan(0);
+  for (const url of queryUrls) expect(url).not.toMatch(/01909985-/u);
+  expect(
+    // Only the display's own sound preference (WP-2423 Q33) stays on the device, never orders.
+    await page.evaluate(() => ({
+      local: Object.keys(localStorage).filter((key) => key !== "bop.kitchen.sound").length,
+      session: sessionStorage.length,
+    })),
+  ).toEqual({ local: 0, session: 0 });
+  showOrders = true;
+  await page.reload();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const menu = workspaceNav.locator(".workspace-sidebar__compact > summary");
+  // Owner 2026-10-26: the phone menu button reads just "Menu"; the page title is on the page.
+  await expect(menu).toHaveText("Menu");
+  await menu.click();
+  const drawer = workspaceNav.locator(".workspace-drawer");
+  await expect(drawer.getByRole("link", { name: "Orders", exact: true })).toBeVisible();
+  await expect(drawer.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await drawer.getByRole("button", { name: "Close menu" }).click();
+  await expectNoHorizontalOverflow(page);
+});
+
+test("@production Kitchen reloads projection after an authorized Store switch", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const stores = [
+    { brandLabel: "Synthetic Brand", storeLabel: "Store One", storeReference: id(99) },
+    { brandLabel: "Synthetic Brand", storeLabel: "Store Two", storeReference: id(98) },
+  ];
+  const storeOne = stores[0];
+  const storeTwo = stores[1];
+  if (!storeOne || !storeTwo) throw new Error("Kitchen Store-switch fixtures are incomplete");
+  let selectedStore = 0;
+  const csrfFor = (index: number) => (index === 0 ? "a" : "b").repeat(43);
+  const workspace = (index: number) => ({
+    screenId: "HOME-OVERVIEW",
+    selectedScope: stores[index],
+    authorizedStores: stores,
+    businessDate: "2026-09-19",
+    storeStatus: "Open",
+    freshness: "Current",
+    dashboardAvailability: "UnavailableUntilWP1905",
+    navigation: [
+      {
+        screenId: "KIT-KITCHEN-QUEUE",
+        label: "Kitchen",
+        href: "/operations/kitchen",
+        permission: "kitchen.operate",
+      },
+    ],
+  });
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: csrfFor(selectedStore),
+        workspace: workspace(selectedStore),
+      },
+    }),
+  );
+  await page.route("**/merchant/store-context", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["x-bop-csrf"]).toBe(csrfFor(selectedStore));
+    expect(route.request().postDataJSON()).toEqual({
+      targetStoreReference: stores[1]?.storeReference,
+    });
+    selectedStore = 1;
+    await route.fulfill({ headers, json: { workspace: workspace(selectedStore) } });
+  });
+  const readStores: string[] = [];
+  await page.route("**/merchant/kitchen/query", (route) => {
+    const query = route.request().postDataJSON();
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["x-bop-csrf"]).toBe(csrfFor(selectedStore));
+    expect(query).not.toHaveProperty("storeReference");
+    const currentStore = selectedStore === 0 ? storeOne : storeTwo;
+    // The store-wide refund warning reads one ticket (limit 1); count the board's own reads.
+    if ((query as { limit?: number }).limit !== 1) readStores.push(currentStore.storeReference);
+    const itemIndex = selectedStore + 1;
+    const projectedAt = "2026-09-19T12:18:00.000Z";
+    const item = {
+      workItemReference: id(10 + itemIndex),
+      ticketReference: id(20 + itemIndex),
+      orderReference: id(30 + itemIndex),
+      orderItemReference: id(40 + itemIndex),
+      stationReference: id(50 + itemIndex),
+      localizedDisplayNames: { "en-CA": `Synthetic work at Store ${itemIndex}` },
+      allergens: { status: "Unavailable" },
+      orderLabel: { orderNumber: "21", orderType: "Pickup", tableLabel: null },
+      customerNote: null,
+      selectedOptions: [],
+      status: "Queued",
+      requiredQuantity: 1,
+      completedQuantity: 0,
+      workItemCreatedAt: "2026-09-19T12:00:00.000Z",
+      acceptedAt: null,
+      orderItemReadyAt: null,
+      ticketAggregateVersion: "1",
+      workItemVersion: "1",
+    };
+    return route.fulfill({
+      headers,
+      json: {
+        storeReference: currentStore.storeReference,
+        operatorStatus: "Unverified",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(60 + itemIndex),
+        projectedAt,
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items: [item],
+        nextCursor: null,
+      },
+    });
+  });
+
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { name: "Store One", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Kitchen", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Synthetic work at Store 1", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator("body")).not.toContainText(storeOne.storeReference);
+
+  await page.goto("/app");
+  await page.getByLabel("Authorized Store").selectOption(storeTwo.storeReference);
+  await page.getByRole("button", { name: "Switch Store", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Store Two", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Kitchen", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Synthetic work at Store 2", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Synthetic work at Store 1", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(storeTwo.storeReference);
+  expect(readStores).toEqual([storeOne.storeReference, storeTwo.storeReference]);
+
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/kitchen-store-switch-${width}.png`,
+      fullPage: true,
+    });
+  }
+});
+
+test("@production Kitchen queue writes out work states and tiers waiting time", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "KIT-KITCHEN-QUEUE",
+              label: "Kitchen",
+              href: "/operations/kitchen",
+              permission: "kitchen.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const at = "2026-09-19T12:00:00.000Z";
+  const minutesAgo = (minutes: number) => new Date(Date.parse(at) - minutes * 60_000).toISOString();
+  const base = {
+    ticketReference: id(2),
+    orderReference: id(3),
+    stationReference: id(5),
+    allergens: { status: "Unavailable" },
+    orderLabel: { orderNumber: "21", orderType: "Pickup", tableLabel: null },
+    customerNote: null,
+    selectedOptions: [],
+    requiredQuantity: 1,
+    completedQuantity: 0,
+    acceptedAt: null,
+    orderItemReadyAt: null,
+    ticketAggregateVersion: "1",
+    workItemVersion: "1",
+  };
+  const items = [
+    {
+      ...base,
+      workItemReference: id(1),
+      orderItemReference: id(11),
+      localizedDisplayNames: { "en-CA": "Synthetic queued" },
+      status: "Queued",
+      workItemCreatedAt: minutesAgo(1),
+    },
+    {
+      ...base,
+      workItemReference: id(4),
+      orderItemReference: id(12),
+      localizedDisplayNames: { "en-CA": "Synthetic in progress" },
+      status: "In Progress",
+      completedQuantity: 1,
+      workItemCreatedAt: minutesAgo(9),
+    },
+    {
+      ...base,
+      workItemReference: id(6),
+      orderItemReference: id(13),
+      localizedDisplayNames: { "en-CA": "Synthetic held" },
+      status: "Held",
+      workItemCreatedAt: minutesAgo(20),
+    },
+    {
+      ...base,
+      workItemReference: id(7),
+      orderItemReference: id(14),
+      localizedDisplayNames: { "en-CA": "Synthetic completed" },
+      status: "Completed",
+      completedQuantity: 1,
+      workItemCreatedAt: minutesAgo(30),
+    },
+    {
+      ...base,
+      workItemReference: id(8),
+      orderItemReference: id(15),
+      localizedDisplayNames: { "en-CA": "Synthetic cancelled" },
+      status: "Cancelled",
+      workItemCreatedAt: minutesAgo(2),
+    },
+  ];
+  const metadata = {
+    storeReference: scope.storeReference,
+    operatorStatus: "Unverified",
+    projectionName: "kitchen_work_queue_v1",
+    projectionVersion: 1,
+    projectionGenerationReference: id(9),
+    projectedAt: at,
+    partial: false,
+    stale: false,
+    freshnessStatus: "Fresh",
+  };
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({ headers, json: { ...metadata, items, nextCursor: null } }),
+  );
+  await page.clock.setFixedTime(new Date(at));
+  await page.goto("/operations/kitchen");
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(4);
+  await page
+    .locator(".kitchen-board-filters--desktop")
+    .getByRole("combobox", { name: "Work state" })
+    .selectOption("All");
+  await expect(page.locator(".kitchen-work-item")).toHaveCount(5);
+  const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
+  const expectations = [
+    ["Synthetic queued", "Queued", "1 min", "ok"],
+    ["Synthetic in progress", "In progress", "9 min", "warning"],
+    ["Synthetic held", "Held", "20 min", "late"],
+    ["Synthetic completed", "Completed", "30 min", "late"],
+    ["Synthetic cancelled", "Cancelled", "Done", "ok"],
+  ] as const;
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+    [320, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    for (const [name, state, waited, tier] of expectations) {
+      const current = card(name);
+      await expect(current.locator(".kitchen-work-item__state strong")).toHaveText(state);
+      await expect(current.locator(".kitchen-work-item__state span")).toHaveText(waited);
+      await expect(current).toHaveAttribute("data-age", tier);
+    }
+    // Kitchen v3: a dish draws no edge; a late ticket (its longest wait) has a red top edge.
+    await expect(card("Synthetic held")).toHaveCSS("border-left-width", "0px");
+    const late = page.locator('.kitchen-ticket[data-age="late"]').first();
+    await expect(late).toHaveCSS("border-top-color", "rgb(191, 85, 82)");
+    await expect(late).toHaveCSS("border-top-width", "4px");
+    // The active state is the one coloured tag (no box, Owner 2026-10-25); every tag carries its
+    // label.
+    const active = card("Synthetic in progress").locator(".kitchen-work-item__state strong");
+    await expect(active).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    // Owner 2026-10-25: tag words are dark; the dot carries the tone.
+    await expect(active).toHaveCSS("color", "rgb(23, 23, 23)");
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: `test-results/kitchen-status-tiers-${width}.png`,
+      fullPage: true,
+    });
+  }
+});
+
+test("@production Kitchen commands preserve intent and wait for projection versions", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "KIT-KITCHEN-QUEUE",
+              label: "Kitchen",
+              href: "/operations/kitchen",
+              permission: "kitchen.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const at = "2026-09-19T12:00:00.000Z";
+  const item = {
+    workItemReference: id(1),
+    ticketReference: id(2),
+    orderReference: id(3),
+    orderItemReference: id(4),
+    stationReference: id(5),
+    localizedDisplayNames: { "en-CA": "Synthetic rice" },
+    allergens: { status: "Unavailable" },
+    orderLabel: { orderNumber: "21", orderType: "Pickup", tableLabel: null },
+    customerNote: null,
+    selectedOptions: [],
+    status: "Queued",
+    requiredQuantity: 2,
+    completedQuantity: 0,
+    workItemCreatedAt: at,
+    acceptedAt: null,
+    orderItemReadyAt: null,
+    ticketAggregateVersion: "9007199254740993",
+    workItemVersion: "1",
+  };
+  const metadata = {
+    storeReference: scope.storeReference,
+    // Synthetic interaction state only; the normal API never supplies Named until its owner source exists.
+    operatorStatus: "Named",
+    projectionName: "kitchen_work_queue_v1",
+    projectionVersion: 1,
+    projectionGenerationReference: id(6),
+    projectedAt: at,
+    partial: false,
+    stale: false,
+    freshnessStatus: "Fresh",
+  };
+
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({ headers, json: { ...metadata, items: [item], nextCursor: null } }),
+  );
+  const commands: Record<string, unknown>[] = [];
+  let conflict = false;
+  let releaseFirstCommand!: () => void;
+  let notifyFirstCommand!: () => void;
+  const firstCommandBarrier = new Promise<void>((resolve) => (releaseFirstCommand = resolve));
+  const firstCommandStarted = new Promise<void>((resolve) => (notifyFirstCommand = resolve));
+  await page.route("**/merchant/kitchen/work", async (route) => {
+    const command = route.request().postDataJSON();
+    commands.push(command);
+    expect(command.authority).toBe("CurrentMerchantSession");
+    expect(command.storeReference).toBe(scope.storeReference);
+    expect(command).not.toHaveProperty("actorReference");
+    if (commands.length === 1) {
+      notifyFirstCommand();
+      await firstCommandBarrier;
+      return route.abort("failed");
+    }
+    // WP-2423 (v15 2026-10-16): the server was busy (a database conflict after its own reruns).
+    if (commands.length === 2)
+      return route.fulfill({ headers, status: 503, json: { error: "retry_later" } });
+    if (conflict)
+      return route.fulfill({ headers, status: 409, json: { error: "version_conflict" } });
+    return route.fulfill({
+      headers,
+      json: {
+        action: command.action,
+        ticketReference: item.ticketReference,
+        workItemReference: item.workItemReference,
+        orderItemReference: item.orderItemReference,
+        ticketVersion: (BigInt(command.expectedTicketVersion) + 1n).toString(),
+        workItemVersion: (BigInt(command.expectedWorkItemVersion) + 1n).toString(),
+        outcome:
+          command.action === "AcceptKitchenWorkItem"
+            ? "Accepted"
+            : command.action === "StartKitchenWorkItem"
+              ? "Started"
+              : "CompletedAndOrderItemReady",
+        // The work item as the command left it (the real API returns these with every result).
+        workItemStatus:
+          command.action === "AcceptKitchenWorkItem"
+            ? "Queued"
+            : command.action === "StartKitchenWorkItem"
+              ? "In Progress"
+              : "Completed",
+        completedQuantity: command.action === "CompleteKitchenWorkItem" ? 2 : 0,
+        requiredQuantity: 2,
+        occurredAt: at,
+        projectionName: "kitchen_work_queue_v1",
+        projectionPending: true,
+      },
+    });
+  });
+  await page.goto("/operations/kitchen");
+  // Kitchen v3: the ticket's one main step at its foot.
+  const accept = page.getByRole("button", { name: "Accept order", exact: true }),
+    start = page.getByRole("button", { name: "Start cooking", exact: true }),
+    complete = page.getByRole("button", { name: "Finished", exact: true }),
+    refresh = page.getByRole("button", { name: "Refresh", exact: true });
+  await expect(accept).toBeEnabled();
+  // WP-2423: the kitchen display sign-in hands over; it is not asked to start the display again.
+  await expect(page.getByRole("button", { name: "Hand over / sign out" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start kitchen display here" })).toHaveCount(0);
+  await expect(page.getByText("Kitchen display", { exact: true }).first()).toBeVisible();
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    if (width < 768) {
+      const filters = page.getByRole("button", { name: "Filters · Active work" });
+      await expect(filters).toBeVisible();
+      await expect(page.getByRole("combobox", { name: "Work state" })).toBeHidden();
+      await filters.click();
+      const sheet = page.getByRole("dialog", { name: "Filter Kitchen work" });
+      await expect(sheet.getByRole("combobox", { name: "Work state" })).toBeVisible();
+      await sheet.getByRole("button", { name: "Done" }).click();
+      await expect(sheet).not.toBeVisible();
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/kitchen-command-board-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await tabTo(page, accept);
+  await expect(accept).toHaveCSS("outline-style", "solid");
+  await page.keyboard.press("Enter");
+  await firstCommandStarted;
+  await tabTo(page, refresh);
+  releaseFirstCommand();
+  await expect(page.getByRole("heading", { name: "Action result unknown" })).toBeVisible();
+  await expect(refresh).toBeFocused();
+  await expect(accept).toBeDisabled();
+  expect(commands).toHaveLength(1);
+  const retry = page.getByRole("button", { name: "Retry same operation" });
+  await tabTo(page, retry);
+  await page.keyboard.press("Enter");
+  // A busy server changed nothing: "try again", never a permission message.
+  await expect(page.getByRole("heading", { name: "Kitchen busy, try again" })).toBeVisible();
+  await expect(page.getByText("Your current permission", { exact: false })).toHaveCount(0);
+  const tryAgain = page.getByRole("button", { name: "Try again", exact: true });
+  await expect(tryAgain).toBeFocused();
+  await page.keyboard.press("Enter");
+  // WP-2423: the confirmed step shows at once, in plain words, before the queue catches up.
+  await expect(
+    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice accepted." }),
+  ).toBeVisible();
+  await expect(page.getByText("The queue now reflects", { exact: false })).toHaveCount(0);
+  expect(commands[1]).toEqual(commands[0]);
+  expect(commands[2]).toEqual(commands[0]);
+  await expect(accept).toHaveCount(0);
+  await expect(start).toBeEnabled();
+  // A re-read of the queue that has not caught up yet does not take the confirmed step back.
+  await refresh.click();
+  await expect(accept).toHaveCount(0);
+  await expect(start).toBeEnabled();
+  Object.assign(item, {
+    acceptedAt: at,
+    ticketAggregateVersion: "9007199254740994",
+    workItemVersion: "2",
+  });
+  await refresh.click();
+  await expect(start).toBeEnabled();
+  conflict = true;
+  await tabTo(page, start);
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("The work item changed.", { exact: false })).toBeVisible();
+  await expect(start).toBeDisabled();
+  await refresh.click();
+  await expect(start).toBeEnabled();
+  conflict = false;
+  await start.click();
+  await expect(
+    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice started." }),
+  ).toBeVisible();
+  await expect(complete).toBeEnabled();
+  Object.assign(item, {
+    status: "In Progress",
+    ticketAggregateVersion: "9007199254740995",
+    workItemVersion: "3",
+  });
+  await refresh.click();
+  await expect(complete).toBeEnabled();
+  await complete.click();
+  await expect(
+    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice done and ready." }),
+  ).toBeVisible();
+  expect(commands[5]?.quantityDelta).toBe(2);
+  Object.assign(item, {
+    status: "Completed",
+    completedQuantity: 2,
+    orderItemReadyAt: at,
+    ticketAggregateVersion: "9007199254740996",
+    workItemVersion: "4",
+  });
+  await refresh.click();
+  await expect(
+    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice done and ready." }),
+  ).toBeVisible();
+  await expect(complete).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toHaveCount(0);
+  expect(new Set(commands.slice(1).map((command) => command.idempotencyKey)).size).toBe(4);
+  expect(
+    // Only the display's own sound preference (WP-2423 Q33) stays on the device, never orders.
+    await page.evaluate(() => ({
+      local: Object.keys(localStorage).filter((key) => key !== "bop.kitchen.sound").length,
+      session: sessionStorage.length,
+    })),
+  ).toEqual({ local: 0, session: 0 });
+});
+
+// WP-2423: a kitchen display sign-in sees the kitchen only, hands over from its header, and stays
+// on the ticket it just worked instead of being thrown to the top of the page.
+test("@production a kitchen display shows the kitchen only and keeps focus on the worked ticket", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  const nav = (screenId: string, label: string, href: string, permission: string) => ({
+    screenId,
+    label,
+    href,
+    permission,
+  });
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          // The person's roles reach the back office; the kitchen display still shows the kitchen.
+          navigation: [
+            nav("OPS-ORDER-QUEUE", "Orders", "/operations/orders", "ordering.operate"),
+            nav("KIT-KITCHEN-QUEUE", "Kitchen", "/operations/kitchen", "kitchen.operate"),
+            nav(
+              "CAT-AVAILABILITY",
+              "Item availability",
+              "/app/commerce/availability",
+              "catalog.sku.read",
+            ),
+            nav("APPROVAL-INBOX", "Approvals", "/app/approvals", "workflow.operate"),
+            nav(
+              "PAY-RECONCILIATION",
+              "Settlement",
+              "/app/operations/payment-reconciliation",
+              "payment.settlement.read",
+            ),
+            nav("RPT-OPS-DASHBOARD", "Reports", "/app/reports/operations", "reporting.sales.read"),
+            nav("IAM-ROLE-LIST", "Roles", "/app/organization/roles", "identity.role.read"),
+          ],
+        },
+      },
+    }),
+  );
+  const at = Date.now() - 4 * 60_000;
+  const ticket = (
+    n: number,
+    name: string,
+    orderNumber: string,
+    extra: Record<string, unknown>,
+  ) => ({
+    workItemReference: id(n),
+    ticketReference: id(n + 100),
+    orderReference: id(n + 200),
+    orderItemReference: id(n + 300),
+    stationReference: id(5),
+    localizedDisplayNames: { "en-CA": name },
+    allergens: { status: "Unavailable" },
+    orderLabel: { orderNumber, orderType: "Pickup", tableLabel: null },
+    customerNote: null,
+    selectedOptions: [],
+    status: "Queued" as string,
+    requiredQuantity: 1,
+    completedQuantity: 0,
+    workItemCreatedAt: new Date(at).toISOString(),
+    acceptedAt: null as string | null,
+    orderItemReadyAt: null as string | null,
+    ticketAggregateVersion: "1",
+    workItemVersion: "1",
+    ...extra,
+  });
+  const items = [
+    ticket(1, "Synthetic rice", "21", {}),
+    ticket(2, "Synthetic soup", "22", {
+      status: "Completed",
+      completedQuantity: 1,
+      acceptedAt: new Date(at).toISOString(),
+      workItemCreatedAt: new Date(at + 60_000).toISOString(),
+    }),
+    ticket(3, "Synthetic bread", "23", {
+      acceptedAt: new Date(at).toISOString(),
+      workItemCreatedAt: new Date(at + 120_000).toISOString(),
+    }),
+  ];
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Named",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: new Date().toISOString(),
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items,
+        nextCursor: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/kitchen/work", (route) => {
+    const command = route.request().postDataJSON();
+    const reference =
+      command.workItemReference ??
+      (command.workItems as { workItemReference: string }[])[0]?.workItemReference;
+    const index = items.findIndex((candidate) => candidate.workItemReference === reference);
+    const current = items[index] as (typeof items)[number];
+    const ticketVersion = (BigInt(current.ticketAggregateVersion) + 1n).toString();
+    const workItemVersion = (BigInt(current.workItemVersion) + 1n).toString();
+    items[index] = {
+      ...current,
+      ticketAggregateVersion: ticketVersion,
+      workItemVersion,
+      ...(command.action === "AcceptKitchenWorkItem"
+        ? { acceptedAt: new Date().toISOString() }
+        : command.action === "StartKitchenWorkItem"
+          ? { status: "In Progress" }
+          : { orderItemReadyAt: new Date().toISOString() }),
+    };
+    return route.fulfill({
+      headers,
+      json: {
+        action: command.action,
+        ticketReference: current.ticketReference,
+        workItemReference: current.workItemReference,
+        orderItemReference: current.orderItemReference,
+        ticketVersion,
+        workItemVersion,
+        outcome:
+          command.action === "AcceptKitchenWorkItem"
+            ? "Accepted"
+            : command.action === "StartKitchenWorkItem"
+              ? "Started"
+              : "OrderItemReady",
+        workItemStatus: command.action === "StartKitchenWorkItem" ? "In Progress" : current.status,
+        completedQuantity: current.completedQuantity,
+        requiredQuantity: current.requiredQuantity,
+        occurredAt: new Date().toISOString(),
+        projectionName: "kitchen_work_queue_v1",
+        projectionPending: true,
+      },
+    });
+  });
+  await page.goto("/operations/kitchen");
+  const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
+  // Kitchen v3: each ticket's one main step sits at its foot.
+  const ticketOf = (name: string) => page.locator(".kitchen-ticket").filter({ has: card(name) });
+  const step = (name: string, label: string) =>
+    ticketOf(name).getByRole("button", { name: label, exact: true });
+  await expect(step("Synthetic rice", "Accept order")).toBeEnabled();
+
+  // The kitchen only: the board and marking an item sold out (Q17), no back-office navigation.
+  const kitchenNav = page.getByRole("navigation", { name: "Primary" });
+  await expect(kitchenNav.getByRole("link")).toHaveText(["Kitchen", "Mark an item sold out"]);
+  // 2026-10-21 live check: the back-office workspace frame is for counter and office sign-ins.
+  await expect(page.getByRole("navigation", { name: "Workspace" })).toHaveCount(0);
+  await expect(kitchenNav.getByRole("link", { name: "Kitchen" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(page.getByRole("link", { name: "Mark an item sold out" })).toHaveAttribute(
+    "href",
+    "/app/commerce/availability?from=kitchen",
+  );
+  for (const label of [
+    "Orders",
+    "Item availability",
+    "Approvals",
+    "Settlement",
+    "Reports",
+    "Roles",
+  ])
+    await expect(page.getByRole("link", { name: label, exact: true })).toHaveCount(0);
+  const handover = page
+    .locator(".bop-shell__header")
+    .getByRole("button", { name: "Hand over / sign out" });
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(handover).toBeVisible();
+    await expectTouchTarget(handover, "Handover");
+    await expectTouchTarget(
+      kitchenNav.getByRole("link", { name: "Mark an item sold out" }),
+      "Kitchen sold-out link",
+    );
+    // Kitchen v3: header controls are accent words, 48px tall.
+    await expect(handover).toHaveCSS("color", "rgb(31, 99, 224)");
+    await expectNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: `test-results/kitchen-display-board-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+
+  const skip = page.getByRole("link", { name: "Skip to main content", exact: true });
+  const skipHidden = async () => {
+    await expect(skip).not.toBeFocused();
+    expect(await skip.evaluate((link) => link.getBoundingClientRect().bottom)).toBeLessThanOrEqual(
+      0,
+    );
+  };
+  // Accepting keeps the cook on the same ticket, now on its next step.
+  await step("Synthetic rice", "Accept order").click();
+  await expect(step("Synthetic rice", "Start cooking")).toBeFocused();
+  await skipHidden();
+  // By keyboard too.
+  await page.keyboard.press("Enter");
+  await expect(step("Synthetic rice", "Finished")).toBeFocused();
+  await skipHidden();
+  // A ticket that leaves the board hands focus to the next ticket's step.
+  await step("Synthetic soup", "Mark ready").click();
+  await expect(card("Synthetic soup")).toHaveCount(0);
+  await expect(step("Synthetic bread", "Start cooking")).toBeFocused();
+  await skipHidden();
+  // The skip link still appears for a keyboard user who reaches it.
+  await page.reload();
+  await expect(card("Synthetic bread")).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(skip).toBeFocused();
+  await expect(skip).toBeInViewport();
+});
+
+for (const supported of [true, false]) {
+  test(`@production WP-2423 Q2: the kitchen board ${supported ? "keeps the screen on" : "says when it cannot keep the screen on"}`, async ({
+    page,
+  }) => {
+    const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+    const scope = {
+      brandLabel: "Training Brand",
+      storeLabel: "Training Store",
+      storeReference: id(99),
+    };
+    const headers = { "cache-control": "no-store" };
+    await page.addInitScript((available) => {
+      const holder = window as unknown as { wakeRequests: number; wakeReleases: number };
+      holder.wakeRequests = 0;
+      holder.wakeReleases = 0;
+      Object.defineProperty(navigator, "wakeLock", {
+        configurable: true,
+        value: available
+          ? {
+              request: async () => {
+                holder.wakeRequests += 1;
+                return {
+                  release: async () => {
+                    holder.wakeReleases += 1;
+                  },
+                };
+              },
+            }
+          : undefined,
+      });
+    }, supported);
+    await page.route("**/merchant/session", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          authenticated: true,
+          csrf: "a".repeat(43),
+          workspace: {
+            screenId: "HOME-OVERVIEW",
+            selectedScope: scope,
+            authorizedStores: [scope],
+            businessDate: "2026-09-19",
+            storeStatus: "Open",
+            freshness: "Current",
+            dashboardAvailability: "UnavailableUntilWP1905",
+            navigation: [
+              {
+                screenId: "KIT-KITCHEN-QUEUE",
+                label: "Kitchen",
+                href: "/operations/kitchen",
+                permission: "kitchen.operate",
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await page.route("**/merchant/kitchen/query", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          storeReference: scope.storeReference,
+          operatorStatus: "Unverified",
+          projectionName: "kitchen_work_queue_v1",
+          projectionVersion: 1,
+          projectionGenerationReference: id(9),
+          projectedAt: "2026-09-19T12:00:00.000Z",
+          partial: false,
+          stale: false,
+          freshnessStatus: "Fresh",
+          items: [],
+          nextCursor: null,
+        },
+      }),
+    );
+    await page.goto("/operations/kitchen");
+    const status = page.locator(".kitchen-screen-awake");
+    if (supported) {
+      await expect(status).toHaveText("Screen kept on");
+      expect(
+        await page.evaluate(() => (window as unknown as { wakeRequests: number }).wakeRequests),
+      ).toBeGreaterThan(0);
+    } else
+      await expect(status).toHaveText(
+        "This browser cannot keep the screen on — set the device to never sleep",
+      );
+  });
+}
+
+// IDR-0039 (Handoff §87.11.1): a lost connection keeps the last tickets visible, read-only, and
+// the board recovers on its own; nothing is queued while offline.
+test("@production Kitchen keeps the last tickets read-only offline and recovers on its own", async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(120_000);
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "KIT-KITCHEN-QUEUE",
+              label: "Kitchen",
+              href: "/operations/kitchen",
+              permission: "kitchen.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const item = {
+    workItemReference: id(1),
+    ticketReference: id(2),
+    orderReference: id(3),
+    orderItemReference: id(4),
+    stationReference: id(5),
+    localizedDisplayNames: { "en-CA": "Synthetic rice" },
+    orderLabel: { orderNumber: "14", orderType: "DineIn", tableLabel: "T4" },
+    customerNote: null,
+    allergens: { status: "Unavailable" },
+    selectedOptions: [],
+    status: "Queued",
+    requiredQuantity: 1,
+    completedQuantity: 0,
+    workItemCreatedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+    acceptedAt: null,
+    orderItemReadyAt: null,
+    ticketAggregateVersion: "1",
+    workItemVersion: "1",
+  };
+  let offline = false,
+    reads = 0,
+    commands = 0;
+  await page.route("**/merchant/kitchen/query", (route) => {
+    reads++;
+    if (offline) return route.abort("internetdisconnected");
+    return route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Named",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: new Date().toISOString(),
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items: [item],
+        nextCursor: null,
+      },
+    });
+  });
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/merchant/kitchen/work") commands++;
+  });
+  const accept = page.getByRole("button", { name: "Accept order", exact: true });
+  const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
+  await page.goto("/operations/kitchen");
+  await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+  await expect(accept).toBeEnabled();
+  // Kitchen v3: the display's one-line bar leaves the refresh rhythm out; it is still stated.
+  await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeAttached();
+
+  // The store system stops answering while the device stays online: the next read fails, the
+  // tickets stay read-only, and it keeps retrying (first after 5 s) until a read succeeds.
+  offline = true;
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(notice).toContainText("Connection lost — showing the last update from");
+  await expect(accept).toBeDisabled();
+  const before = reads;
+  await expect.poll(() => reads, { timeout: 8_000 }).toBeGreaterThan(before);
+  await expect(notice).toBeVisible();
+  offline = false;
+  await expect(notice).toHaveCount(0, { timeout: 15_000 });
+  await expect(accept).toBeEnabled();
+
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1024, height: 768 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(accept).toBeEnabled();
+    // The device loses its network: read-only at once, without waiting for a read to fail.
+    await context.setOffline(true);
+    await expect(notice).toBeVisible({ timeout: 2_000 });
+    await expect(notice).toContainText(
+      /Offline — showing the last update from \d\d:\d\d.*\. Actions are paused until the connection returns\./u,
+    );
+    await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
+    await expect(accept).toBeDisabled();
+    await expect(
+      page.getByText(/^Data may be out of date · last checked \d\d:\d\d/u),
+    ).toBeVisible();
+    await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("You’re offline", { exact: true })).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `no horizontal overflow at ${viewport.width}`,
+    ).toBe(true);
+    // Back online: it re-reads at once and returns to normal.
+    await context.setOffline(false);
+    await expect(notice).toHaveCount(0, { timeout: 5_000 });
+    await expect(accept).toBeEnabled();
+    await expect(page.getByText("Auto-refresh every 10 s", { exact: true })).toBeAttached();
+  }
+  expect(commands).toBe(0);
+});
+
+// WP-2423: a counter/office sign-in opening Kitchen is told how to start the kitchen display on
+// this device; the button signs it out and opens the sign-in where "Start kitchen display" lives.
+test("@production a view-only Kitchen starts the kitchen display on this device", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Training Brand",
+    storeLabel: "Training Store",
+    storeReference: id(99),
+  };
+  const headers = { "cache-control": "no-store" };
+  // Reads of the other screens this navigation lists are not part of this check.
+  await page.route("**/merchant/**", (route) =>
+    route.fulfill({ status: 503, json: { error: "unavailable" } }),
+  );
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-09-19",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          // 2026-10-21 live check: an owner's full navigation (it overflowed a top bar at 1440).
+          navigation: (
+            [
+              ["OPS-ORDER-QUEUE", "Orders", "/operations/orders", "ordering.operate"],
+              [
+                "OPS-ORDER-ENTRY",
+                "Counter order",
+                "/operations/order-entry",
+                "ordering.order.create_staff",
+              ],
+              ["KIT-KITCHEN-QUEUE", "Kitchen", "/operations/kitchen", "kitchen.operate"],
+              ["FUL-PICKUP-QUEUE", "Pickup", "/operations/pickup", "fulfillment.operate"],
+              ["DIN-FLOOR-BOARD", "Tables", "/operations/dining", "dining.operate"],
+              [
+                "OPS-ORDER-EXCEPTION",
+                "Exceptions",
+                "/operations/order-exceptions",
+                "operations.order-exception.manage",
+              ],
+              ["CAT-PRODUCT-LIST", "Products", "/app/commerce/products", "catalog.manage"],
+              [
+                "CAT-AVAILABILITY",
+                "Item availability",
+                "/app/commerce/availability",
+                "catalog.sku.read",
+              ],
+              ["INV-ITEM-LIST", "Inventory items", "/app/supply/items", "inventory.item.read"],
+              ["RPT-OPS-DASHBOARD", "Reports", "/app/reports/operations", "reporting.sales.read"],
+            ] as const
+          ).map(([screenId, label, href, permission]) => ({ screenId, label, href, permission })),
+        },
+      },
+    }),
+  );
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Unverified",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: new Date().toISOString(),
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        items: [],
+        nextCursor: null,
+      },
+    }),
+  );
+  let loggedOut = 0;
+  await page.route("**/merchant/logout", (route) => {
+    loggedOut += 1;
+    return route.fulfill({ status: 204 });
+  });
+  await page.route("**/merchant/sign-in-entry", (route) =>
+    route.fulfill({ headers, json: { path: "/internal-test/staff", testOnly: true } }),
+  );
+  await page.route("**/internal-test/staff", (route) =>
+    route.fulfill({ contentType: "text/html", body: "<h1>DEMO Store staff</h1>" }),
+  );
+  await page.goto("/operations/kitchen");
+  await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Hand over / sign out" })).toHaveCount(0);
+  // The shared workspace frame: grouped navigation, no second header with a row of links.
+  const workspaceNav = page.getByRole("navigation", { name: "Workspace" });
+  await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+  await expect(page.locator(".bop-shell__header")).toHaveCount(0);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectNoHorizontalOverflow(page);
+    if (width > 768) {
+      const sidebar = workspaceNav.locator(".workspace-sidebar__links");
+      await expect(sidebar.getByRole("button", { name: /^Operations/u })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      await expect(sidebar.getByRole("link", { name: "Kitchen", exact: true })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      await expect(sidebar.getByRole("button", { name: /^Commerce/u })).toBeVisible();
+    } else
+      await expect(workspaceNav.locator(".workspace-sidebar__compact > summary")).toHaveText(
+        "Menu",
+      );
+    await page.screenshot({ path: `test-results/kitchen-view-only-${width}.png`, fullPage: true });
+  }
+  await page.getByRole("button", { name: "Start kitchen display here", exact: true }).click();
+  await expect(page).toHaveURL(/\/internal-test\/staff$/u);
+  expect(loggedOut).toBe(1);
+});

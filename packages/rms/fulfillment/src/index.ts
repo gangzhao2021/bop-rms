@@ -1,3 +1,4 @@
+export type { PickupQueueReadItem, PickupQueueReadPage } from "./contracts/pickup-queue.js";
 export { moduleManifest } from "./module.manifest.js";
 export * from "./contracts/pickup-fulfillment.js";
 export * from "./domain/pickup-fulfillment.js";
@@ -28,3 +29,62 @@ export * from "./application/ports/customer-delivery-tracking-ports.js";
 export * from "./domain/delivery-exception.js";
 export * from "./contracts/delivery-exception.js";
 export * from "./application/ports/delivery-exception-ports.js";
+export * from "./domain/scheduled-capacity.js";
+export * from "./infrastructure/persistence/capacity-query-store.js";
+export * from "./infrastructure/persistence/capacity-hold-store.js";
+export * from "./infrastructure/persistence/capacity-hold-transition-store.js";
+export * from "./infrastructure/persistence/capacity-allocation-terminal-store.js";
+
+export * from "./domain/asap-capacity.js";
+
+export * from "./infrastructure/persistence/asap-capacity-store.js";
+
+export * from "./application/asap-capacity-service.js";
+
+export * from "./infrastructure/persistence/current-pickup-capacity-store.js";
+
+export * from "./application/pickup-capacity-units.js";
+
+export {
+  createAsapCapacityClockService,
+  type AsapCapacityClockOptions,
+} from "./application/asap-capacity-clock-service.js";
+
+export { createPostgresPickupFulfillmentStore } from "./infrastructure/persistence/pickup-fulfillment-store.js";
+
+export {
+  createPostgresFulfillmentItemCancellation,
+  createPostgresFulfillmentReadinessStore,
+} from "./infrastructure/persistence/fulfillment-readiness-store.js";
+
+export * from "./domain/fulfillment-item-cancellation.js";
+
+export { createPostgresPickupProofStore } from "./infrastructure/persistence/pickup-proof-store.js";
+
+export { createPostgresPickupHandoffStore } from "./infrastructure/persistence/pickup-handoff-store.js";
+// WP-2423 / DEC-PILOT-BATCH-PHASE-01: a pickup closed as not collected, published for Ordering.
+export * from "./application/pickup-not-collected-event.js";
+export { createPostgresPickupNotCollectedPublisher } from "./infrastructure/persistence/pickup-not-collected-publication-store.js";
+
+export { createPickupCredentialProvider } from "./infrastructure/crypto/pickup-credential-provider.js";
+
+export { createPostgresPickupProofIssuer } from "./infrastructure/persistence/pickup-proof-issuer.js";
+
+export {
+  planPickupNotCollected,
+  pickupHoldMilliseconds,
+  type PickupNotCollectedRecord,
+} from "./domain/pickup-not-collected.js";
+export {
+  listStoreUncollectedPickupOrders,
+  loadPickupNotCollected,
+} from "./infrastructure/persistence/pickup-handoff-history.js";
+
+// WP-2423 DEC-PICKUP-CAPACITY-SCHEDULE: rolling pickup slots from the Store's published hours.
+export * from "./domain/pickup-capacity-schedule.js";
+export {
+  createPostgresPickupCapacityScheduleStore,
+  type PickupCapacityScheduleRun,
+  type PickupCapacityScheduleResult,
+  type PickupCapacityScheduleTransactionRunner,
+} from "./infrastructure/persistence/pickup-capacity-schedule-store.js";

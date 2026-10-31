@@ -1,3 +1,7 @@
+import type {
+  ProductLifecycleReviewRequest,
+  ProductLifecycleReviewEvidence,
+} from "../../contracts/product-lifecycle-review.js";
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { PermissionDecision } from "@bop/permission";
 import type { TenantContext } from "@bop/tenant";
@@ -54,6 +58,13 @@ export interface CatalogProductRepositoryPort {
   }): Promise<CatalogOperationRecord>;
 }
 export interface CatalogProductPorts {
+  readonly lifecycleReview?: {
+    /** Runs mutation once with current held sources/policy, through its transaction completion. */
+    withCurrentReview<T>(
+      request: ProductLifecycleReviewRequest,
+      mutation: (evidence: ProductLifecycleReviewEvidence) => Promise<T>,
+    ): Promise<T>;
+  };
   readonly authorization: CatalogAuthorizationPort;
   readonly references: CatalogReferencePort;
   readonly repository: CatalogProductRepositoryPort;

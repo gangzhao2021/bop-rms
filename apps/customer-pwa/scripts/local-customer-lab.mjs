@@ -8,11 +8,18 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { URL, fileURLToPath } from "node:url";
 import { createServer, resolveConfig } from "vite";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-export async function startCustomerLab({ apiOrigin, token, stop }) {
+export async function startCustomerLab({
+  apiOrigin,
+  token,
+  stop,
+  diningAdmissionEnabled = false,
+  cartEnabled = false,
+  quoteEnabled = false,
+}) {
   assert.equal(process.env.BOP_LOCAL_CUSTOMER_LAB, "1");
   assert(["development", "test"].includes(process.env.NODE_ENV));
   assert.match(apiOrigin, /^http:\/\/127\.0\.0\.1:\d+$/u);
@@ -81,7 +88,12 @@ export async function startCustomerLab({ apiOrigin, token, stop }) {
                 allowed
                   ? stopping
                     ? { status: "stopping" }
-                    : { qrToken: token() }
+                    : {
+                        qrToken: token(),
+                        diningAdmissionEnabled: diningAdmissionEnabled === true,
+                        cartEnabled: cartEnabled === true,
+                        quoteEnabled: quoteEnabled === true,
+                      }
                   : { error: "unavailable" },
               ),
             );
@@ -104,7 +116,7 @@ export async function startCustomerLab({ apiOrigin, token, stop }) {
   }
 }
 
-export async function verifyCustomerLab(origin, sessionCount, stopAfter = false) {
+export async function verifyCustomerLab(origin, sessionCount, stopAfter = false, dining, cart) {
   const production = await resolveConfig({ root, logLevel: "silent" }, "build", "production");
   const entryPlugin = production.plugins.find(
     (plugin) => plugin.name === "bop-local-customer-demo-entry",
@@ -114,12 +126,19 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false)
     '<script src="/src/main.tsx"></script>',
   );
   const browser = await chromium.launch();
+  let cartJourneys = 0;
   try {
     for (const viewport of [
       { width: 1440, height: 900 },
       { width: 390, height: 844 },
     ]) {
-      const context = await browser.newContext({ viewport, ignoreHTTPSErrors: true });
+      let joinProof = dining ? await dining.prepare() : null;
+      const context = await browser.newContext({
+        viewport,
+        ignoreHTTPSErrors: true,
+        isMobile: viewport.width === 390,
+        hasTouch: viewport.width === 390,
+      });
       try {
         const denied = await context.request.post(`${origin}/__local/customer-entry`);
         assert.equal(denied.status(), 404);
@@ -157,13 +176,68 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false)
         const cookie = (await context.cookies()).find((value) => value.name === "__Host-bop-guest");
         assert(cookie?.secure && cookie.httpOnly && cookie.sameSite === "Lax");
         assert.equal(new URL(page.url()).hash, "");
+        if (dining) {
+          try {
+            // WP-2423 item 8 ⑤: a guest with the table's code asks for the code field first
+            // (scanning the table's own QR joins without one).
+            await page.getByRole("button", { name: "I have a table code", exact: true }).click();
+            await page.getByLabel("Join code or invitation", { exact: true }).fill(joinProof);
+          } catch {
+            throw new Error("protected dining input unavailable");
+          } finally {
+            joinProof = null;
+          }
+          await page.getByRole("button", { name: "Join with this code", exact: true }).click();
+          await page
+            .getByRole("heading", { name: "You’ve joined this table", exact: true })
+            .waitFor();
+          assert.equal(
+            await page.getByLabel("Join code or invitation", { exact: true }).count(),
+            0,
+          );
+          const bound = (await context.cookies()).find(
+            (value) => value.name === "__Host-bop-guest",
+          );
+          assert(bound?.secure && bound.httpOnly && bound.sameSite === "Lax");
+          assert(bound.value !== cookie.value);
+          assert.deepEqual(
+            (await context.cookies()).map((value) => value.name),
+            ["__Host-bop-guest"],
+          );
+          assert.equal(await sessionCount(), before + 2);
+          await dining.verify();
+        }
         await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
         await page.getByText("Latte", { exact: true }).first().waitFor();
-        await page
-          .getByText("Price confirmed in your final quote", { exact: true })
-          .first()
-          .waitFor();
+        // No Store price is published in this lab: the menu says it is priced at checkout.
+        await page.getByText("Priced at checkout", { exact: true }).first().waitFor();
         assert.equal(new URL(page.url()).pathname, "/menu");
+        if (cart) {
+          await page.getByRole("link", { name: "View Latte", exact: true }).click();
+          await page.getByLabel("Quantity", { exact: true }).fill("2");
+          await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+          await viewAddedCart(page).catch(async () => {
+            throw new Error(
+              JSON.stringify({
+                stage: "dining-add",
+                persisted: await cart.inspect(),
+                alerts: await page.getByRole("alert").allTextContents(),
+              }),
+            );
+          });
+          await page.getByLabel("Latte quantity", { exact: true }).waitFor();
+          assert.equal(await page.getByLabel("Latte quantity", { exact: true }).textContent(), "2");
+          await page.getByRole("button", { name: "Increase Latte quantity", exact: true }).click();
+          await page.waitForFunction(
+            () =>
+              globalThis.document.querySelector('[aria-label="Latte quantity"]')?.textContent ===
+              "3",
+          );
+          await page.getByRole("button", { name: "Remove", exact: true }).click();
+          await page.getByRole("heading", { name: "Your cart is empty", exact: true }).waitFor();
+          assert.equal(new URL(page.url()).pathname, "/cart");
+          await cart.verify(++cartJourneys);
+        }
         assert.equal((await page.request.get(`${origin}/ready`)).status(), 503);
         assert.equal(
           await page.evaluate(
@@ -178,6 +252,8 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false)
           ),
           0,
         );
+        if (dining && cart && viewport.width === 390)
+          await verifySharedTable(browser, origin, dining, cart);
         if (stopAfter && viewport.width === 390) {
           await page.getByRole("button", { name: "Stop local lab", exact: true }).click();
           await page.getByRole("button", { name: "Lab stopped", exact: true }).waitFor();
@@ -188,5 +264,100 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false)
     }
   } finally {
     await browser.close();
+  }
+}
+
+/** The configure page confirms the add in place; its own "View cart" link opens the cart. */
+function viewAddedCart(page) {
+  return page.getByRole("status").getByRole("link", { name: "View cart", exact: true }).click();
+}
+
+async function verifySharedTable(browser, origin, dining, cart) {
+  const contexts = [];
+  const pages = [];
+  const errors = [];
+  const notes = ["Synthetic first guest note", "Synthetic second guest note"];
+  const owner = (page) =>
+    page.locator("article.cart-item").filter({ hasNotText: "Added by another guest." });
+  const foreignItem = (page) =>
+    page.locator("article.cart-item").filter({ hasText: "Added by another guest." });
+  async function refresh(page) {
+    await page.getByRole("link", { name: "Continue shopping", exact: true }).click();
+    await page.getByRole("link", { name: "Cart", exact: true }).click();
+  }
+  try {
+    for (let index = 0; index < 2; index++) {
+      let proof = await dining.prepare(index === 1);
+      const context = await browser.newContext({
+        viewport: { width: index === 0 ? 1440 : 390, height: 900 },
+        ignoreHTTPSErrors: true,
+      });
+      contexts.push(context);
+      const page = await context.newPage();
+      pages.push(page);
+      page.on("pageerror", () => errors.push("page_error"));
+      await page.goto(origin);
+      await page.getByRole("heading", { name: "Synthetic Store", exact: true }).waitFor();
+      try {
+        await page.getByRole("button", { name: "I have a table code", exact: true }).click();
+        await page.getByLabel("Join code or invitation", { exact: true }).fill(proof);
+      } catch {
+        throw new Error("protected shared Dining input unavailable");
+      } finally {
+        proof = null;
+      }
+      await page.getByRole("button", { name: "Join with this code", exact: true }).click();
+      await page.getByRole("heading", { name: "You’ve joined this table", exact: true }).waitFor();
+      await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
+      await page.getByRole("link", { name: "View Latte", exact: true }).click();
+      await page.getByLabel("Preparation note (optional)", { exact: true }).fill(notes[index]);
+      await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+      await viewAddedCart(page);
+      await owner(page).getByRole("button", { name: "Remove", exact: true }).waitFor();
+    }
+    await refresh(pages[0]);
+    for (const [index, page] of pages.entries()) {
+      await page.getByText("2 items", { exact: true }).waitFor();
+      const foreign = foreignItem(page);
+      assert.equal(await foreign.count(), 1);
+      for (const button of ["Increase Latte quantity", "Decrease Latte quantity", "Remove"])
+        assert.equal(
+          await foreign.getByRole("button", { name: button, exact: true }).isDisabled(),
+          true,
+        );
+      assert.equal(await page.getByText(`Note: ${notes[index]}`, { exact: true }).count(), 1);
+      assert.equal(await page.getByText(`Note: ${notes[1 - index]}`, { exact: true }).count(), 0);
+      assert.equal(
+        await page.evaluate(
+          () => globalThis.localStorage.length + globalThis.sessionStorage.length,
+        ),
+        0,
+      );
+      assert.equal(new URL(page.url()).hash, "");
+    }
+    // The cart shows guests their items and counts, not internal versions: each change is
+    // observed through what the other guest sees after refreshing.
+    const quantity = (page, own) =>
+      (own ? owner(page) : foreignItem(page)).getByLabel("Latte quantity", { exact: true });
+    await owner(pages[0])
+      .getByRole("button", { name: "Increase Latte quantity", exact: true })
+      .click();
+    await expect(quantity(pages[0], true)).toHaveText("2");
+    await pages[0].getByText("3 items", { exact: true }).waitFor();
+    await refresh(pages[1]);
+    await expect(quantity(pages[1], false)).toHaveText("2");
+    await pages[1].getByText("3 items", { exact: true }).waitFor();
+    await owner(pages[1]).getByRole("button", { name: "Remove", exact: true }).click();
+    await pages[1].getByText("2 items", { exact: true }).waitFor();
+    await refresh(pages[0]);
+    await expect(foreignItem(pages[0])).toHaveCount(0);
+    await pages[0].getByText("2 items", { exact: true }).waitFor();
+    await owner(pages[0]).getByRole("button", { name: "Remove", exact: true }).click();
+    await pages[0].getByRole("heading", { name: "Your cart is empty", exact: true }).waitFor();
+    await dining.verify();
+    await cart.verifyShared();
+    assert.deepEqual(errors, []);
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
   }
 }

@@ -13,6 +13,7 @@ import type {
   CustomerMenuClient,
   MenuJourneyContext,
   MenuLoadResult,
+  MenuPhoto,
   MenuView,
 } from "./menu/types.js";
 import type { OrderStatusController } from "./order-status/order-status-controller.js";
@@ -47,6 +48,91 @@ const menuContext: MenuJourneyContext = Object.freeze({
   storeDisplayName: entryContext.storeDisplayName,
 });
 
+/*
+ * Synthetic training photo (a generated brown radial gradient, not a real product photo). Kept in
+ * this development-only module as object URLs so no demo image is copied into the production build.
+ */
+const syntheticPhotoJpeg =
+  "/9j/2wBDAA4KCw0LCQ4NDA0QDw4RFiQXFhQUFiwgIRokNC43NjMuMjI6QVNGOj1OPjIySGJJTlZYXV5dOEVmbWVa" +
+  "bFNbXVn/2wBDAQ8QEBYTFioXFypZOzI7WVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZ" +
+  "WVlZWVlZWVn/wAARCADwAUADASIAAhEBAxEB/8QAGAABAQEBAQAAAAAAAAAAAAAAAgMBAAb/xAAYEAEBAQEBAAAA" +
+  "AAAAAAAAAAABABICEf/EABYBAQEBAAAAAAAAAAAAAAAAAAABAv/EABYRAQEBAAAAAAAAAAAAAAAAAAARAf/aAAwD" +
+  "AQACEQMRAD8A8ZdddZaddddB1110HXXWhBl3kgkFKsAJZkEjmlWBm3yebfJVgeW5n5bmlInm3NTN2aVYnm7NTN2Z" +
+  "SJ5uzUzdmUiebM1c3ZlIlmzyrmzytSJeWZq+WZrSJPMUrPMUlSJeXVEilakG61LKo6666DrrroOuuug6666Drrrv" +
+  "IOtC0JBSrBCQSCQUqwQkEgkFKsAJBIJBStQM2+TzbmlIHluZ+W5pVgZuzUzbmlWJ5uzUzdmUiebs1M3ZlIlm7NXN" +
+  "mZSJZs8q5s8rUiXlmaubM1qRJIpWSKVpEkilZIpWsxFIpWSKVqRJLKiRS1Ug3XeXRHXXXQdddaEGBMLgmFKsYEgt" +
+  "CQWa1GBIJBIKVqCEgkEgs1YISCQWhSrBC0JhI5pVgeW5n5b5SrE825qZuzSrE825qZuzKRPNmaubsykSzZmrm7Mp" +
+  "Es2eVfLPK1IiliVnmKVqRJIpVSxK1IikUrJFK1IikUrJFLVSIpFKqRStZiSQSskEtVkLrUsqjQkFwTCmq4JhYEws" +
+  "7rWOCQWhILNajgkFoSCzWowJBIJBZqwQkEgkFK1BCRzILQpVghb5M5tzSrAzbmebc0E825qZuzBPNmaubswSzZmr" +
+  "mzMEvLEq5sea0iTzFKqWJWpEUilZIpWpEUilZIpWsxFIpVSKWqkRSKVUilrNZiSQSqkEtZrOpJFKqQS1jJBMLAmF" +
+  "nWsaEwsCYWdaxwTC4JhZ1rHBILgmFndazHBILQkFmtRgSCQSCiiEgkczOaAHMjmZzI5gBzbmZzbmCebc1M25glmz" +
+  "NbNmYJZseaubHmCLzF5rvMXmCCRSu8weYIpFKyRSoikUqpFK1IikUqpBLWazEkglZIJaxnUkglVIJaxnUkglVIJa" +
+  "xnSCYRCoU1caEwsCYWdaxoTCwJhY1rGhILgmFnW8cEwuCYWVcEwuCYQcEgtCYQE5kczOZBEA5lmZzacwDN2ambcw" +
+  "SzdmrmzMEsxeazzY8wQeYvNdIvMEEilZIJFRSCVkgkEUglZIJBFIpVSCWsTUkglVIJaxjUkglVIJbxnUkglVptrG" +
+  "dImRJlNXCJhEmWNawgmWEyzreEEwiTCzrWEEws5J8lAgmFgTCDQmFwTCI4JnNoTCIJzI5kEzmAZuzUObcwSzdmrm" +
+  "x5gi8xea7zBIIvMErpBIqCQSskEgikEqpBIqKQSr0Q6IJJBKiQa4akwSqwbWM6kkGowbeMamwajBtYzrSZAmU1cM" +
+  "mQKhZ1rDJkCZY1rDJkSZZaPmpzDmoQMnyR5qcxCCpyQKnMCCoESpyRGhMLuSYQYc25mEjmIlmx5rPMUgikErJDoi" +
+  "opTSt0U2CXRTSr1TYqXRBq9U+oJdU+qrT6ipMGowYJsGbBtYzqbBqNNt4zoMGbBtYzriZAmTTFOZlMqFnWsMqFMm" +
+  "WNaxTmZAmWWlOahT5qEFOanNPmpzEUKhSKnMFSfNMqcsRTmoU+WYwV5qFEZHURRp9XPUVgLT6msOmKn1Bn002AdU" +
+  "2fVNih1T6qdU+oJtPqo0+oqbDqbBgDTZsG1jOgw6m023jOgwZsG1jOuJlMmV1MUJlMmWNbxUmUyZZ1rFCZTJjZaV" +
+  "5qc0uWfLQWJ8tIZjEWGpy0RmMFhqDRGYxFhmNAZnUFjq3VE6t1BXVj1T1Y9QNYLY9QWDVprasFgzpprasFij0wbV" +
+  "gsB6p9S6YdMUGDJYNQWDJg2sZ0GDJg2sZ0WDJg28Y1hMpDUJpihMaYzGzrWKDMpjMbOtYqMxpDMbGtYqMxpDMaKs" +
+  "MxojMYLDMaIzGIsMzqidSGCx1I6onVp1EX1dqjq3UFdXapas1BR6i9QerHqBPUFsWL1FcsFuWCwcsFuWCxWLBbVg" +
+  "sGLBbVgtcTRYLJYLbxnRWDJYLaxnRYMmmtrGdYMxpDMa6mKjMaQzGzrWKjMaQzGzrWKjIaQzGzrWKjMaQyGy0sMx" +
+  "ojIaC4yGgdTOoLHUjqidSOoLHUtUDq3URfV2qOrdQV1dqlqzUFdReqerHqBvUXqL1F6iksVi9QeoEsFsWKwcsFuW" +
+  "K1GLFblgtrGdcsFtWC2sZ1iwW1YLaxnWLBbVgtrGdEZjSGY2tZxUZjRGY2daxUZjSGQ2dxpYZDSGQ2Y1VhkNIZDZ" +
+  "jVVGQ0hkNItVGQ0htGyqx1I6onVuoLnVuqGrdQW1bqjq7UFtWapau1BXVj1S1ZqCj1F6hqx6gSxWK2LUasVsWK1i" +
+  "VqxWxYrWJXLFbFitqM1ywW5YrazGXLBblgtrGdcsFtWC2sZ0RkMLRtIqMxojMbMWqjIaQyGzuNVYZDSGQ2Y1VRkN" +
+  "IZDSLVRkNIbRsxqrDI6ojI6pFqo2+0vbfaRarq3VLV2qQqurdUtXakWq6s1T1dqQqmrNU9XakSn7YsPbPawpvUVi" +
+  "9RWsSksViti1iVqxWxYrajNasVsWK1iVyxWxYrajNasFuWC2sxmuWK3LZaR1110RwzGF3sVUZDSGQ2YtVGQ0hkNI" +
+  "tVGQ0hkNmNVUZDRGQ0i1UbRpat1SLVvbdUfbdUi1XVuqWrdSFU1bqlq7VItV1Zqnq7UhVNWahqzVYlU1Z7T1Z7IU" +
+  "1sWGrNViU1isVitYlJYrYsVrErVitixW1Ga1YrYsVrErVgt3t1pHXXXRH//Z";
+const syntheticPhotoWebp =
+  "UklGRi4DAABXRUJQVlA4ICIDAABQIgCdASpAAfAAPsFepVCnpKMioCyY8BgJaW7hHFCo9+W02r0eWpiFyyPf+tN3" +
+  "/P7/9wArrUhJRwaBl1btVyXsrHxu000Kstr7tmBuV5hmYRw9ZtcjPVc6vusHvkL6vzqU5UXu7ey420vOWS51Vmpp" +
+  "AHBim3ddMvS1feFyMP7uLeMv9dAQSHApZqGhTD8SWYA4Hy/e7/GHUtNTFOVKdQ4H0hxJUOjD1oIsxxv5cLFzZeoA" +
+  "aqtdrDzNKVg2Ua09qV2BQHdfIaHRaXjrSF3PMIZlVGkrbXBtQ0KWmzSNN/ap1CKWoaFLTSDWo4P5NIA3xjJolIAu" +
+  "91fDSuoUaUtxaKIlNYcDkI+HtdKhbSFg+8M1ndUuL1n93GyECQIAAP7b2scqRFAeZYujGQgg4SDbsNiErVvXwpFA" +
+  "rmqtC8vRFyoPadZVvIF7alFhRasYxJft7TaJp3qxTL1eN5U9luJxDFVeIfDZDUwPZQrlujtM5n07ACbmOESLfp2a" +
+  "ZDtGJCpuc3Eh7QLfBR6NnzdEMvqiX9AlR0qxjiw6qDywyfVHvbfODBJj+04olyO28ljI7qtbWJKT4R76ipkmwXIU" +
+  "5e/E++S3GoUfe0s5xXvDyJ9r0Ro7ZH5ZYavjUT8kaPw/bOaQypOGVUvzlNic8Jn4GykrnbGF5I8reZLARObw7e5R" +
+  "NUB0be3SsOSDqhgl/7xzhJmc3cazntlMR0sogbiEt2Yo6NlKmTBRbT98pJQAPDQrcU8WvrixPrxM9F7UlJ7d4sgO" +
+  "bdMcc3XkSauLyZNyu23XUiewEAAqg8df0LsVfsoonKaIw1N96fBfLEocjaACY6xy6T6lYlw3HVHw7kbypca924SU" +
+  "PJcsqlYHGGhQ7BLRi54CF2A9I0D+bHx4wqa7A/fUCqnpbLkIs2M+U55BcDahYfGcUhuUUTa297c11RAhnVAm9gP4" +
+  "gkdAlHk8fCGWqHTmJ2O5Prl/3s7qlwRJDMf6Cmc/Kv0AhyIHlGDtzjz/R1WG8IwCsTmp59/6KxKRS7SmTb/8bPCO" +
+  "HLHF3njaWOiGE7NwI87dExJ/2BlXSDJQ56sXDgAA";
+
+function syntheticObjectUrl(base64: string, type: string): string {
+  const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+  return URL.createObjectURL(new Blob([bytes], { type }));
+}
+
+function syntheticPhoto(altText: string): MenuPhoto {
+  const jpeg = syntheticObjectUrl(syntheticPhotoJpeg, "image/jpeg");
+  const webp = syntheticObjectUrl(syntheticPhotoWebp, "image/webp");
+  return Object.freeze({
+    altText,
+    width: 320,
+    height: 240,
+    renditions: Object.freeze(
+      ([320, 640, 1280] as const).flatMap((width) => [
+        Object.freeze({
+          url: jpeg,
+          contentType: "image/jpeg" as const,
+          width,
+          height: (width * 3) / 4,
+        }),
+        Object.freeze({
+          url: webp,
+          contentType: "image/webp" as const,
+          width,
+          height: (width * 3) / 4,
+        }),
+      ]),
+    ),
+  });
+}
+
 const menu: MenuView = Object.freeze({
   name: "Synthetic all-day menu",
   locale: "en-CA",
@@ -60,8 +146,15 @@ const menu: MenuView = Object.freeze({
         Object.freeze({
           sellableReference: customerDemoSellableReference,
           name: "Synthetic mushroom rice bowl",
+          description:
+            "Steamed rice with roasted mushrooms, pickled carrot and a soy-sesame glaze. A synthetic training item for staff practice.",
+          photo: syntheticPhoto(
+            "Synthetic training photo: a brown bowl shape on a dark background",
+          ),
           presentationRole: "Featured",
           pinned: true,
+          availability: "Available",
+          price: null,
           allergens: Object.freeze([
             Object.freeze({ name: "Soy", classification: "Contains" }),
             Object.freeze({ name: "Sesame", classification: "CrossContactPossible" }),
@@ -71,8 +164,12 @@ const menu: MenuView = Object.freeze({
         Object.freeze({
           sellableReference: id(4),
           name: "Synthetic iced tea",
+          description: null,
+          photo: null,
           presentationRole: "Standard",
           pinned: false,
+          availability: "Available",
+          price: null,
           allergens: Object.freeze([]),
           optionRules: Object.freeze([]),
         }),
@@ -320,13 +417,27 @@ export const enabledCustomerDemo: CustomerDemoDependencies = Object.freeze({
       input?: Readonly<{ searchTerm?: string; sectionReference?: string }>,
     ): Promise<MenuLoadResult> {
       const term = input?.searchTerm?.toLocaleLowerCase("en-CA");
-      if (!term) return { kind: "Found", menu };
       const sections = menu.sections
+        .filter(
+          (section) =>
+            input?.sectionReference === undefined ||
+            section.sectionReference === input.sectionReference,
+        )
         .map((section) => ({
           ...section,
-          sellables: section.sellables.filter((item) =>
-            item.name.toLocaleLowerCase("en-CA").includes(term),
-          ),
+          // Mirrors the published menu search: name matches first, then description matches.
+          sellables: term
+            ? [
+                ...section.sellables.filter((item) =>
+                  item.name.toLocaleLowerCase("en-CA").includes(term),
+                ),
+                ...section.sellables.filter(
+                  (item) =>
+                    !item.name.toLocaleLowerCase("en-CA").includes(term) &&
+                    (item.description?.toLocaleLowerCase("en-CA").includes(term) ?? false),
+                ),
+              ]
+            : section.sellables,
         }))
         .filter((section) => section.sellables.length > 0);
       return sections.length === 0

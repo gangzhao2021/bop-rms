@@ -1,6 +1,8 @@
 import {
   customerMenuFreshnessTargetMilliseconds,
   type CustomerMenuFound,
+  type CustomerMenuOptionRuleDto,
+  type CustomerMenuPhotoDto,
   type CustomerMenuQueryInput,
   type CustomerMenuSellableDto,
 } from "../contracts/customer-menu-query.js";
@@ -15,9 +17,14 @@ import {
 } from "../domain/product.js";
 import {
   parsePublishedMenuProjection,
+  publishedDefaultOptionSelections,
   type PublishedMenuProjection,
+  type PublishedSellablePresentation,
 } from "../domain/published-menu-projection.js";
-import type { CustomerMenuQueryPorts } from "./ports/customer-menu-query-ports.js";
+import type {
+  CustomerMenuQueryPorts,
+  CustomerMenuStoreFact,
+} from "./ports/customer-menu-query-ports.js";
 
 function invalid(): never {
   throw new CatalogError("CATALOG_INPUT_INVALID");
@@ -115,10 +122,70 @@ function localized(
   return selected;
 }
 
+/** Requested locale, else the menu default, else the first available (sorted) language; null when none. */
+function localizedOptional(
+  texts: Readonly<Record<string, string>>,
+  requestedLocale: string,
+  defaultLocale: string,
+): string | null {
+  const first = Object.keys(texts).sort()[0];
+  return (
+    texts[requestedLocale] ??
+    texts[defaultLocale] ??
+    (first === undefined ? null : texts[first]) ??
+    null
+  );
+}
+
+function publicPhoto(
+  presentation: PublishedSellablePresentation | undefined,
+  locale: string,
+  defaultLocale: string,
+): CustomerMenuPhotoDto | null {
+  const photo = presentation?.photo ?? null;
+  if (photo === null) return null;
+  const altText = localizedOptional(photo.localizedAltText, locale, defaultLocale);
+  if (altText === null) return dependencyFailure();
+  return Object.freeze({
+    altText,
+    width: photo.width,
+    height: photo.height,
+    renditions: Object.freeze(
+      photo.renditions.map((rendition) =>
+        Object.freeze({
+          url: rendition.path,
+          contentType: rendition.contentType,
+          width: rendition.width,
+          height: rendition.height,
+        }),
+      ),
+    ),
+  });
+}
+
+/** One option's current price at the Store, when the Store's facts were read. */
+function optionPrice(
+  fact: CustomerMenuStoreFact | null,
+  bindingReference: CatalogReference,
+  optionReference: CatalogReference,
+): CustomerMenuOptionRuleDto["options"][number]["incrementalPrice"] {
+  const price = fact?.optionPrices?.get(bindingReference + ":" + optionReference);
+  if (price !== undefined)
+    return { status: "Available", amount: price.amount, currency: price.currency, reason: null };
+  return {
+    status: "Unavailable",
+    amount: null,
+    currency: null,
+    reason:
+      fact === null || fact.optionPrices === undefined ? "PRICING_NOT_INTEGRATED" : "PRICE_NOT_SET",
+  };
+}
 function publicSellable(
   item: PublishedMenuProjection["snapshot"]["sections"][number]["sellables"][number],
   locale: string,
   defaultLocale: string,
+  channelCode: string,
+  fact: CustomerMenuStoreFact | null,
 ): CustomerMenuSellableDto {
   return Object.freeze({
     sellableReference: item.sellableReference,
@@ -126,31 +193,51 @@ function publicSellable(
     name: localized(item.localizedNames, locale, defaultLocale),
     presentationRole: item.presentationRole as CustomerMenuSellableDto["presentationRole"],
     pinned: item.pinned,
-    availability: "Available",
+    availability: fact?.availability === "SoldOut" ? "SoldOut" : "Available",
     optionRules: Object.freeze(
-      item.optionRules.map((rule) =>
-        Object.freeze({
-          ...rule,
-          options: Object.freeze(
-            rule.options.map((option) =>
-              Object.freeze({
-                optionReference: option.optionReference,
-                name: localized(option.localizedNames, locale, defaultLocale),
-                maximumQuantity: option.maximumQuantity,
-                conflictOptionReferences: option.conflictOptionReferences,
-                selectedByDefault: option.selectedByDefault,
-                incrementalPrice: Object.freeze({
-                  status: "Unavailable" as const,
-                  amount: null,
-                  currency: null,
-                  reason: "PRICING_NOT_INTEGRATED" as const,
+      item.optionRules
+        .filter(
+          (rule) =>
+            rule.semanticsVersion !== 2 ||
+            rule.channelCodes?.some((channel) => channel === channelCode),
+        )
+        .map((rule) =>
+          Object.freeze({
+            ...rule,
+            name:
+              rule.localizedNames === undefined
+                ? null
+                : (rule.localizedNames[locale] ?? rule.localizedNames[defaultLocale] ?? null),
+            ...(fact?.comboChoices !== undefined &&
+            rule.options.length > 0 &&
+            rule.options.every((option) => fact.comboChoices?.has(option.optionReference))
+              ? { comboPart: true as const }
+              : {}),
+            options: Object.freeze(
+              rule.options.map((option) =>
+                Object.freeze({
+                  optionReference: option.optionReference,
+                  name: localized(option.localizedNames, locale, defaultLocale),
+                  maximumQuantity: option.maximumQuantity,
+                  conflictOptionReferences: option.conflictOptionReferences,
+                  selectedByDefault: option.selectedByDefault,
+                  ...(rule.semanticsVersion === 2
+                    ? { defaultQuantity: Number(option.defaultQuantity) }
+                    : {}),
+                  incrementalPrice: Object.freeze(
+                    optionPrice(fact, rule.bindingReference, option.optionReference),
+                  ),
                 }),
-              }),
+              ),
             ),
-          ),
-        }),
-      ),
+          }),
+        ),
     ),
+    description:
+      item.presentation === undefined
+        ? null
+        : localizedOptional(item.presentation.localizedDescriptions, locale, defaultLocale),
+    photo: publicPhoto(item.presentation, locale, defaultLocale),
     allergenDisclosure: Object.freeze({
       registryVersionReference: item.allergenDisclosure.registryVersionReference,
       items: Object.freeze(
@@ -165,13 +252,32 @@ function publicSellable(
       ),
       allergenFreeClaim: false,
       assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
+      ...(item.allergenDisclosure.byChoice === undefined
+        ? {}
+        : { byChoice: item.allergenDisclosure.byChoice }),
     }),
-    displayPrice: Object.freeze({
-      status: "Unavailable",
-      amount: null,
-      currency: null,
-      reason: "PRICING_NOT_INTEGRATED",
-    }),
+    displayPrice: Object.freeze(
+      fact === null
+        ? {
+            status: "Unavailable" as const,
+            amount: null,
+            currency: null,
+            reason: "PRICING_NOT_INTEGRATED" as const,
+          }
+        : fact.price === null
+          ? {
+              status: "Unavailable" as const,
+              amount: null,
+              currency: null,
+              reason: "PRICE_NOT_SET" as const,
+            }
+          : {
+              status: "Available" as const,
+              amount: fact.price.amount,
+              currency: fact.price.currency,
+              reason: null,
+            },
+    ),
     taxDisplayContext: Object.freeze({
       status: "Unavailable",
       taxInclusive: null,
@@ -180,9 +286,33 @@ function publicSellable(
   });
 }
 
+type PublishedMenuSellable =
+  PublishedMenuProjection["snapshot"]["sections"][number]["sellables"][number];
+
+/**
+ * Search rank against the text the customer is shown: 0 for a name match, 1 for a match in the
+ * published customer description only, null for no match. Without a search everything ranks 0.
+ */
+function searchRank(
+  item: PublishedMenuSellable,
+  search: string | null,
+  locale: string,
+  snapshot: PublishedMenuProjection["snapshot"],
+): 0 | 1 | null {
+  if (search === null) return 0;
+  const name = localized(item.localizedNames, locale, snapshot.defaultLocale);
+  if (name.toLocaleLowerCase(locale).includes(search)) return 0;
+  const description =
+    item.presentation === undefined
+      ? null
+      : localizedOptional(item.presentation.localizedDescriptions, locale, snapshot.defaultLocale);
+  return description !== null && description.toLocaleLowerCase(locale).includes(search) ? 1 : null;
+}
+
 function found(
   projection: PublishedMenuProjection,
   input: CustomerMenuQueryInput,
+  facts: ReadonlyMap<string, CustomerMenuStoreFact> | null,
 ): CustomerMenuFound {
   const snapshot = projection.snapshot;
   const search = input.searchTerm?.toLocaleLowerCase(input.locale) ?? null;
@@ -196,16 +326,28 @@ function found(
       const sellables = section.sellables
         .filter(
           (item) =>
-            item.configuredAvailability === "Available" && item.presentationRole !== "Hidden",
+            item.configuredAvailability === "Available" &&
+            item.presentationRole !== "Hidden" &&
+            // Items the Store does not offer are not on its menu.
+            (facts === null ||
+              (facts.get(item.sellableReference)?.availability ?? "NotOffered") !== "NotOffered"),
         )
-        .filter((item) => {
-          if (search === null) return true;
-          return localized(item.localizedNames, input.locale, snapshot.defaultLocale)
-            .toLocaleLowerCase(input.locale)
-            .includes(search);
-        })
-        .sort((left, right) => left.sortOrder - right.sortOrder)
-        .map((item) => publicSellable(item, input.locale, snapshot.defaultLocale));
+        .map((item) => ({ item, rank: searchRank(item, search, input.locale, snapshot) }))
+        .filter((entry) => entry.rank !== null)
+        // Name matches first, then description matches; menu order within each.
+        .sort(
+          (left, right) =>
+            (left.rank ?? 0) - (right.rank ?? 0) || left.item.sortOrder - right.item.sortOrder,
+        )
+        .map(({ item }) =>
+          publicSellable(
+            item,
+            input.locale,
+            snapshot.defaultLocale,
+            input.channelCode,
+            facts?.get(item.sellableReference) ?? null,
+          ),
+        );
       return Object.freeze({
         sectionReference: section.sectionReference,
         name: localized(section.localizedNames, input.locale, snapshot.defaultLocale),
@@ -262,6 +404,9 @@ export function createCustomerMenuQueryService(ports: CustomerMenuQueryPorts) {
             await ports.projections.loadCandidates({
               brandReference: store.brandReference,
               storeReference: store.storeReference,
+              channelCode: input.channelCode,
+              orderTypeCode: input.orderTypeCode,
+              requestedAt: input.requestedAt,
             })
           ).map(parsePublishedMenuProjection),
         );
@@ -277,7 +422,66 @@ export function createCustomerMenuQueryService(ports: CustomerMenuQueryPorts) {
       if (projection === undefined) return Object.freeze({ status: "Unavailable" as const });
       if (projection.freshnessStatus !== "Fresh")
         return Object.freeze({ status: "ProjectionStale" as const });
-      return found(projection, input);
+      let facts: ReadonlyMap<string, CustomerMenuStoreFact> | null = null;
+      if (ports.storeFacts !== undefined)
+        try {
+          facts = await ports.storeFacts.load({
+            brandReference: store.brandReference,
+            storeReference: store.storeReference,
+            channelCode: input.channelCode,
+            orderTypeCode: input.orderTypeCode,
+            requestedAt: input.requestedAt,
+            sellableReferences: Object.freeze(
+              projection.snapshot.sections.flatMap((section) =>
+                section.sellables.map((item) => item.sellableReference),
+              ),
+            ),
+            // The published options offered on this channel, to show what each adds.
+            options: Object.freeze(
+              projection.snapshot.sections.flatMap((section) =>
+                section.sellables.flatMap((item) =>
+                  item.optionRules
+                    .filter(
+                      (rule) =>
+                        rule.semanticsVersion !== 2 ||
+                        rule.channelCodes?.some((channel) => channel === input.channelCode),
+                    )
+                    .flatMap((rule) =>
+                      rule.options.map((option) => ({
+                        sellableReference: item.sellableReference,
+                        bindingReference: rule.bindingReference,
+                        optionReference: option.optionReference,
+                      })),
+                    ),
+                ),
+              ),
+            ),
+            // Each shown item as normally ordered, so the Store's stock can be observed for it.
+            items: Object.freeze(
+              projection.snapshot.sections.flatMap((section) =>
+                section.sellables
+                  .filter(
+                    (item) =>
+                      item.configuredAvailability === "Available" &&
+                      item.presentationRole !== "Hidden",
+                  )
+                  .map((item) =>
+                    Object.freeze({
+                      sellableReference: item.sellableReference,
+                      productVersionReference: item.productVersionReference,
+                      defaultOptionSelections: publishedDefaultOptionSelections(
+                        item.optionRules,
+                        input.channelCode,
+                      ),
+                    }),
+                  ),
+              ),
+            ),
+          });
+        } catch {
+          return Object.freeze({ status: "Unavailable" as const });
+        }
+      return found(projection, input, facts);
     },
   });
 }

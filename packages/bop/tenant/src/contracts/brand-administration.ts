@@ -98,6 +98,80 @@ export interface BrandConfigurationVersion {
   readonly updatedAt: CanonicalInstant;
   readonly dataClassification: "ConfigurationMetadata";
 }
+export type BrandConfigurationEditableContent = Pick<
+  BrandConfigurationVersion,
+  | "defaultLocale"
+  | "supportedLocales"
+  | "mediaThemeReference"
+  | "catalogSourceReference"
+  | "platformTemplateReference"
+  | "overrideAllowedFieldCodes"
+  | "hardRequirementFieldCodes"
+  | "effectiveFrom"
+  | "effectiveUntil"
+  | "reasonCode"
+>;
+export const brandConfigurationEditableFields = Object.freeze([
+  "defaultLocale",
+  "supportedLocales",
+  "mediaThemeReference",
+  "catalogSourceReference",
+  "platformTemplateReference",
+  "overrideAllowedFieldCodes",
+  "hardRequirementFieldCodes",
+  "effectiveFrom",
+  "effectiveUntil",
+  "reasonCode",
+] as const);
+export function parseBrandConfigurationEditableContent(
+  value: unknown,
+): BrandConfigurationEditableContent {
+  const input = exact(value, brandConfigurationEditableFields),
+    r: Record<string, unknown> = {};
+  for (const key of brandConfigurationEditableFields) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key);
+    if (!descriptor?.enumerable || !("value" in descriptor)) return fail();
+    r[key] = descriptor.value;
+  }
+  const array = (value: unknown, maximum: number): readonly unknown[] => {
+    if (
+      !Array.isArray(value) ||
+      value.length > maximum ||
+      Object.getPrototypeOf(value) !== Array.prototype ||
+      Reflect.ownKeys(value).length !== value.length + 1
+    )
+      return fail();
+    return Array.from({ length: value.length }, (_, index) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor?.enumerable || !("value" in descriptor)) return fail();
+      return descriptor.value;
+    });
+  };
+  const defaultLocale = locale(r.defaultLocale),
+    supportedLocales = uniqueLocales(array(r.supportedLocales, 20)),
+    allowed = uniqueCodes(array(r.overrideAllowedFieldCodes, 100)),
+    hard = uniqueCodes(array(r.hardRequirementFieldCodes, 100)),
+    effectiveFrom = instant(r.effectiveFrom),
+    effectiveUntil = nullableInstant(r.effectiveUntil);
+  if (
+    !supportedLocales.includes(defaultLocale) ||
+    hard.some((field) => allowed.includes(field)) ||
+    (effectiveUntil !== null && Date.parse(effectiveUntil) <= Date.parse(effectiveFrom))
+  )
+    return fail("BRAND_ADMIN_STATE_INVALID");
+  return Object.freeze({
+    defaultLocale,
+    supportedLocales,
+    mediaThemeReference: nullableRef(r.mediaThemeReference),
+    catalogSourceReference: parseBrandAdministrationReference(r.catalogSourceReference),
+    platformTemplateReference: parseBrandAdministrationReference(r.platformTemplateReference),
+    overrideAllowedFieldCodes: allowed,
+    hardRequirementFieldCodes: hard,
+    effectiveFrom,
+    effectiveUntil,
+    reasonCode: code(r.reasonCode),
+  });
+}
 export function createBrandConfigurationVersion(value: unknown): BrandConfigurationVersion {
   const r = exact(value, [
     "configurationVersionReference",
@@ -125,12 +199,17 @@ export function createBrandConfigurationVersion(value: unknown): BrandConfigurat
   ]);
   const lifecycle = oneOf(r.lifecycle, brandConfigurationLifecycles),
     version = parseOrganizationVersion(r.configurationVersion),
-    defaultLocale = locale(r.defaultLocale),
-    supportedLocales = uniqueLocales(r.supportedLocales),
-    allowed = uniqueCodes(r.overrideAllowedFieldCodes),
-    hard = uniqueCodes(r.hardRequirementFieldCodes),
-    effectiveFrom = instant(r.effectiveFrom),
-    effectiveUntil = nullableInstant(r.effectiveUntil),
+    editable = parseBrandConfigurationEditableContent(
+      Object.fromEntries(brandConfigurationEditableFields.map((key) => [key, r[key]])),
+    ),
+    {
+      defaultLocale,
+      supportedLocales,
+      overrideAllowedFieldCodes: allowed,
+      hardRequirementFieldCodes: hard,
+      effectiveFrom,
+      effectiveUntil,
+    } = editable,
     createdAt = instant(r.createdAt),
     updatedAt = instant(r.updatedAt),
     authored = parseBrandAdministrationReference(r.authoredByReference),
@@ -173,7 +252,7 @@ export function createBrandConfigurationVersion(value: unknown): BrandConfigurat
     effectiveFrom,
     effectiveUntil,
     supersedesVersionReference: supersedes,
-    reasonCode: code(r.reasonCode),
+    reasonCode: editable.reasonCode,
     authoredByReference: authored,
     approvedByReference: approved,
     approvalEvidenceReference: approval,

@@ -1,4 +1,8 @@
-import type { GuestRawCredential, GuestSessionCookieDescriptor } from "@bop/identity";
+import {
+  serializeGuestSessionCookie,
+  type GuestRawCredential,
+  type GuestSessionCookieDescriptor,
+} from "@bop/identity";
 import type { RequestHandler, Response } from "express";
 
 const compactSegmentPattern = /^[A-Za-z0-9_-]+$/u;
@@ -34,13 +38,69 @@ export interface CustomerEntryEstablished {
   readonly availableServiceModes: readonly ("DineIn" | "Pickup" | "Delivery")[];
   readonly locale: string;
   readonly contextExpiresAt: string;
+  /**
+   * Coordinator 2026-10-30: at a table, whether a party is seated there now (staff seat guests
+   * before they can join and order); absent for pickup or when it can't be read.
+   */
+  readonly tableOpen?: boolean;
   readonly sessionCredential: GuestRawCredential;
   readonly csrfCredential: GuestRawCredential;
   readonly cookie: GuestSessionCookieDescriptor;
 }
 
+/** WP-2423 Q4: the Store is closed or not taking this service now; no Session is issued. */
+export interface CustomerEntryNotAccepting {
+  readonly status: "NotAccepting";
+  readonly storeDisplayName: string;
+  readonly operatingState: "Closed" | "TemporarilyClosed" | "Open";
+  readonly todayHours: readonly {
+    readonly startLocalTime: string;
+    readonly endLocalTime: string;
+    readonly endsNextDay: boolean;
+  }[];
+  /** WP-2423 item 8 ③ (decision 16): today's holiday, special hours or closure, when it is one. */
+  readonly todayKind: "Holiday" | "TemporaryClosure" | "Override" | null;
+  /** The Store's next opening within 7 days (its local date and time), when one is published. */
+  readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
+  /** The Store's local date now, so "tomorrow" can be said. */
+  readonly localDate: string | null;
+}
+
+/**
+ * WP-2423 item 8 ⑦ 1b: a pickup code at a Store that turned pickup off (it takes dine-in orders
+ * only); no Session is issued.
+ */
+export interface CustomerEntryServiceNotOffered {
+  readonly status: "ServiceNotOffered";
+  readonly storeDisplayName: string;
+}
+
+/**
+ * Coordinator 2026-10-30: no party is seated at the scanned table (free, or waiting for cleaning).
+ * Nobody can join or order there until staff seat a party, so no Session is issued (a browser's
+ * earlier visit, e.g. a guest whose table was just settled, keeps its receipt); the public context
+ * lets the guest look at the menu.
+ */
+export interface CustomerEntryTableNotOpen {
+  readonly status: "TableNotOpen";
+  readonly brandDisplayName: string;
+  readonly storeDisplayName: string;
+  readonly publicStoreReference: string;
+  readonly locale: string;
+}
+
+/** WP-2423 Q11: a genuine table code that staff replaced or turned off; no Session is issued. */
+export interface CustomerEntryQrRetired {
+  readonly status: "QrRetired";
+  readonly reason: "Replaced" | "TurnedOff";
+}
+
 export type CustomerEntryPortResult =
   | CustomerEntryEstablished
+  | CustomerEntryNotAccepting
+  | CustomerEntryServiceNotOffered
+  | CustomerEntryTableNotOpen
+  | CustomerEntryQrRetired
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
 
@@ -48,16 +108,36 @@ export interface CustomerEntryPort {
   establish(input: Readonly<CustomerEntryPortInput>): Promise<CustomerEntryPortResult>;
 }
 
+export interface CustomerEntryRequestAdmission {
+  consume(
+    input: Readonly<{ remoteAddress: string | null; requestedAt: string }>,
+  ): Promise<
+    | { readonly status: "Allowed" }
+    | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
+    | { readonly status: "Unavailable" }
+  >;
+}
+
 export interface CustomerEntryHandlerOptions {
+  readonly requestAdmission?: CustomerEntryRequestAdmission;
   readonly allowedOrigin: string;
   readonly now?: () => string;
   readonly port: CustomerEntryPort;
   readonly uuidV7Factory: () => string;
 }
 
-type ErrorCode = "entry_request_invalid" | "entry_unavailable" | "entry_service_unavailable";
+type ErrorCode =
+  | "entry_request_invalid"
+  | "entry_unavailable"
+  | "entry_service_unavailable"
+  | "entry_rate_limited";
 
 const errorContracts = Object.freeze({
+  entry_rate_limited: Object.freeze({
+    messageKey: "customer.entry.rate_limited",
+    recovery: Object.freeze({ action: "RetryOrAskStaff", storeSelection: "Hidden" }),
+    status: 429,
+  }),
   entry_request_invalid: Object.freeze({
     messageKey: "customer.entry.request_invalid",
     recovery: Object.freeze({ action: "Rescan", storeSelection: "Hidden" }),
@@ -213,10 +293,16 @@ function parseEstablished(
     "availableServiceModes",
     "locale",
     "contextExpiresAt",
+    ...(Object.hasOwn(value as object, "tableOpen") ? ["tableOpen"] : []),
     "sessionCredential",
     "csrfCredential",
     "cookie",
   ]);
+  if (
+    result.tableOpen !== undefined &&
+    (typeof result.tableOpen !== "boolean" || result.channel !== "DineIn")
+  )
+    throw new TypeError("table state only at a table");
   if (
     result.status !== "Established" ||
     (result.channel !== "DineIn" && result.channel !== "Pickup") ||
@@ -279,6 +365,7 @@ function parseEstablished(
     availableServiceModes,
     locale: result.locale,
     contextExpiresAt,
+    ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen as boolean }),
     sessionCredential: parseGuestRawCredential(result.sessionCredential),
     csrfCredential: parseGuestRawCredential(result.csrfCredential),
     cookie: parseCookie(result.cookie),
@@ -291,6 +378,10 @@ function parsePortResult(
 ):
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" }
+  | CustomerEntryQrRetired
+  | CustomerEntryNotAccepting
+  | CustomerEntryServiceNotOffered
+  | CustomerEntryTableNotOpen
   | CustomerEntryEstablished {
   const statusRecord =
     typeof value === "object" && value !== null
@@ -307,11 +398,120 @@ function parsePortResult(
   if (status === "Established") {
     return Object.freeze({ status, ...parseEstablished(value, requestedAt) });
   }
+  if (status === "QrRetired") {
+    const raw = closedRecord(value, ["status", "reason"]);
+    if (raw.reason !== "Replaced" && raw.reason !== "TurnedOff")
+      throw new TypeError("invalid retired result");
+    return Object.freeze({ status: "QrRetired", reason: raw.reason });
+  }
+  if (status === "TableNotOpen") {
+    const raw = closedRecord(value, [
+      "status",
+      "brandDisplayName",
+      "storeDisplayName",
+      "publicStoreReference",
+      "locale",
+    ]);
+    const label = (text: unknown) =>
+      typeof text === "string" &&
+      /^[^\p{Cc}\p{Cf}<>{}[\]`*_#]{1,120}$/u.test(text) &&
+      text === text.trim()
+        ? text
+        : (() => {
+            throw new TypeError("invalid table-not-open result");
+          })();
+    if (typeof raw.locale !== "string" || !localePattern.test(raw.locale))
+      throw new TypeError("invalid table-not-open result");
+    return Object.freeze({
+      status: "TableNotOpen",
+      brandDisplayName: label(raw.brandDisplayName),
+      storeDisplayName: label(raw.storeDisplayName),
+      publicStoreReference: parseUuidV7(raw.publicStoreReference),
+      locale: raw.locale,
+    });
+  }
+  if (status === "ServiceNotOffered") {
+    const raw = closedRecord(value, ["status", "storeDisplayName"]);
+    if (
+      typeof raw.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(raw.storeDisplayName)
+    )
+      throw new TypeError("invalid service-not-offered result");
+    return Object.freeze({ status: "ServiceNotOffered", storeDisplayName: raw.storeDisplayName });
+  }
+  if (status === "NotAccepting") {
+    const raw = closedRecord(value, [
+      "status",
+      "storeDisplayName",
+      "operatingState",
+      "todayHours",
+      "todayKind",
+      "nextOpening",
+      "localDate",
+    ]);
+    const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
+    if (
+      typeof raw.storeDisplayName !== "string" ||
+      !/^[^\p{Cc}\p{Cf}<>]{1,120}$/u.test(raw.storeDisplayName) ||
+      !["Closed", "TemporarilyClosed", "Open"].includes(String(raw.operatingState)) ||
+      !Array.isArray(raw.todayHours) ||
+      raw.todayHours.length > 12
+    )
+      throw new TypeError("invalid not-accepting result");
+    const todayHours = raw.todayHours.map((value: unknown) => {
+      const interval = closedRecord(value, ["startLocalTime", "endLocalTime", "endsNextDay"]);
+      if (
+        typeof interval.startLocalTime !== "string" ||
+        !time.test(interval.startLocalTime) ||
+        typeof interval.endLocalTime !== "string" ||
+        !time.test(interval.endLocalTime) ||
+        typeof interval.endsNextDay !== "boolean"
+      )
+        throw new TypeError("invalid hours");
+      return Object.freeze({
+        startLocalTime: interval.startLocalTime,
+        endLocalTime: interval.endLocalTime,
+        endsNextDay: interval.endsNextDay,
+      });
+    });
+    const date = /^\d{4}-\d{2}-\d{2}$/u;
+    if (
+      (raw.todayKind !== null &&
+        !["Holiday", "TemporaryClosure", "Override"].includes(String(raw.todayKind))) ||
+      (raw.localDate !== null && (typeof raw.localDate !== "string" || !date.test(raw.localDate)))
+    )
+      throw new TypeError("invalid not-accepting result");
+    let nextOpening: CustomerEntryNotAccepting["nextOpening"] = null;
+    if (raw.nextOpening !== null) {
+      const next = closedRecord(raw.nextOpening, ["localDate", "startLocalTime"]);
+      if (
+        typeof next.localDate !== "string" ||
+        !date.test(next.localDate) ||
+        typeof next.startLocalTime !== "string" ||
+        !time.test(next.startLocalTime)
+      )
+        throw new TypeError("invalid next opening");
+      nextOpening = Object.freeze({
+        localDate: next.localDate,
+        startLocalTime: next.startLocalTime,
+      });
+    }
+    return Object.freeze({
+      status: "NotAccepting",
+      storeDisplayName: raw.storeDisplayName,
+      operatingState: raw.operatingState as CustomerEntryNotAccepting["operatingState"],
+      todayHours: Object.freeze(todayHours),
+      todayKind: raw.todayKind as CustomerEntryNotAccepting["todayKind"],
+      nextOpening,
+      localDate: raw.localDate as string | null,
+    });
+  }
   throw new TypeError("unknown Customer-entry result");
 }
 
+/** WP-2423 Q10: persistent for the Session's absolute lifetime so a browser restart keeps the order. */
 function serializeCookie(credential: GuestRawCredential): string {
-  return `${expectedGuestSessionCookie.name}=${credential}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+  return serializeGuestSessionCookie(credential);
 }
 
 export const unavailableCustomerEntryHandler: RequestHandler = (_request, response) => {
@@ -329,17 +529,20 @@ export class CustomerEntryHandler {
   readonly #now: () => string;
   readonly #port: CustomerEntryPort;
   readonly #uuidV7Factory: () => string;
+  readonly #requestAdmission: CustomerEntryRequestAdmission | undefined;
 
   constructor({
     allowedOrigin,
     now = () => new Date().toISOString(),
     port,
     uuidV7Factory,
+    requestAdmission,
   }: CustomerEntryHandlerOptions) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
     this.#uuidV7Factory = uuidV7Factory;
+    this.#requestAdmission = requestAdmission;
   }
 
   handler(): RequestHandler {
@@ -366,6 +569,29 @@ export class CustomerEntryHandler {
 
       try {
         const requestedAt = parseCanonicalInstant(this.#now());
+        const admission = await this.#requestAdmission?.consume(
+          Object.freeze({
+            remoteAddress: request.socket.remoteAddress ?? null,
+            requestedAt,
+          }),
+        );
+        if (admission?.status === "RateLimited") {
+          const decision = closedRecord(admission, ["status", "retryAfterSeconds"]);
+          if (
+            !Number.isSafeInteger(decision.retryAfterSeconds) ||
+            Number(decision.retryAfterSeconds) < 1 ||
+            Number(decision.retryAfterSeconds) > 86400
+          )
+            throw new TypeError("admission unavailable");
+          response.setHeader("Retry-After", String(decision.retryAfterSeconds));
+          sendError(response, "entry_rate_limited");
+          return;
+        }
+        if (admission?.status !== "Allowed") {
+          sendError(response, "entry_service_unavailable");
+          return;
+        }
+        closedRecord(admission, ["status"]);
         const entryRequestReference = parseUuidV7(this.#uuidV7Factory());
         const operationReference = parseUuidV7(this.#uuidV7Factory());
         if (entryRequestReference === operationReference) {
@@ -390,6 +616,64 @@ export class CustomerEntryHandler {
           sendError(response, "entry_unavailable");
           return;
         }
+        // WP-2423 Q11: a replaced or turned-off table code; the customer asks staff for help.
+        if (result.status === "QrRetired") {
+          response.status(410).json({
+            schemaVersion: 1,
+            code: "entry_qr_retired",
+            messageKey:
+              result.reason === "Replaced"
+                ? "customer.entry.qr_replaced"
+                : "customer.entry.qr_turned_off",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+          });
+          return;
+        }
+        // Coordinator 2026-10-30: no party is seated at this table; no visit is started.
+        if (result.status === "TableNotOpen") {
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_table_not_open",
+            messageKey: "customer.entry.table_not_open",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+            store: {
+              brandDisplayName: result.brandDisplayName,
+              storeDisplayName: result.storeDisplayName,
+              publicStoreReference: result.publicStoreReference,
+              locale: result.locale,
+            },
+          });
+          return;
+        }
+        // WP-2423 item 8 ⑦ 1b: this Store takes no pickup orders (dine-in only).
+        if (result.status === "ServiceNotOffered") {
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_service_not_offered",
+            messageKey: "customer.entry.pickup_not_offered",
+            recovery: { action: "AskStaff", storeSelection: "Hidden" },
+            store: { storeDisplayName: result.storeDisplayName },
+          });
+          return;
+        }
+        // WP-2423 Q4: tell the customer the Store is not taking orders, and today's hours.
+        if (result.status === "NotAccepting") {
+          response.status(409).json({
+            schemaVersion: 1,
+            code: "entry_not_accepting",
+            messageKey: "customer.entry.not_accepting",
+            recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+            store: {
+              storeDisplayName: result.storeDisplayName,
+              operatingState: result.operatingState,
+              todayHours: result.todayHours,
+              todayKind: result.todayKind,
+              nextOpening: result.nextOpening,
+              localDate: result.localDate,
+            },
+          });
+          return;
+        }
         response.setHeader("Set-Cookie", serializeCookie(result.sessionCredential));
         response.status(201).json({
           schemaVersion: 2,
@@ -403,6 +687,7 @@ export class CustomerEntryHandler {
           availableServiceModes: result.availableServiceModes,
           locale: result.locale,
           contextExpiresAt: result.contextExpiresAt,
+          ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen }),
           csrfToken: result.csrfCredential,
         });
       } catch {

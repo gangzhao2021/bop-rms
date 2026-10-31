@@ -1,7 +1,10 @@
 import type { CustomerCartClient } from "../cart/cart-client.js";
-import { boundedFetch } from "../network/bounded-fetch.js";
+import { browserRequestTimeoutMs } from "../network/bounded-fetch.js";
 import { CartClientError, type CartMoney, type CartView } from "../cart/types.js";
-import { getCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import {
+  captureCustomerCsrfContext,
+  getCustomerCsrfCredential,
+} from "../session/customer-transaction-context.js";
 import type { CheckoutQuote, CheckoutState } from "./types.js";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -44,8 +47,21 @@ function codes(value: unknown): readonly string[] {
     throw new Error("invalid");
   return Object.freeze([...value]);
 }
-function parseQuote(value: unknown, cart: CartView): CheckoutQuote {
-  const root = exact(value, ["schemaVersion", "quote"]);
+/** WP-2423: the server's bounded wait in seconds (1..3600), when it sent one. */
+export function retryAfterSeconds(response: Response): number | null {
+  const header = response.headers.get("retry-after");
+  if (header === null || !/^[1-9][0-9]{0,3}$/u.test(header)) return null;
+  const seconds = Number(header);
+  return seconds <= 3600 ? seconds : null;
+}
+function parseQuote(value: unknown, expectedCartVersion: number): CheckoutQuote {
+  const root = exact(
+    value,
+    Object.hasOwn(record(value), "tips")
+      ? ["schemaVersion", "quote", "tips"]
+      : ["schemaVersion", "quote"],
+  );
+  const tips = root.tips === undefined ? undefined : parseTips(root.tips);
   const raw = exact(root.quote, [
     "quoteReference",
     "quoteVersion",
@@ -62,7 +78,8 @@ function parseQuote(value: unknown, cart: CartView): CheckoutQuote {
     "priceChange",
   ]);
   const quoteCurrency = text(raw.currency, currency);
-  if (root.schemaVersion !== 1 || raw.cartVersion !== cart.cart.version) throw new Error("invalid");
+  if (root.schemaVersion !== 1 || raw.cartVersion !== expectedCartVersion)
+    throw new Error("invalid");
   const price =
     raw.priceChange === null
       ? null
@@ -125,6 +142,24 @@ function parseQuote(value: unknown, cart: CartView): CheckoutQuote {
             requiresReconfirmation: price.requiresReconfirmation as boolean,
             evaluatedAt: evaluatedAt as string,
           }),
+    ...(tips === undefined ? {} : { tips }),
+  });
+}
+/** WP-2423 item 8 ⑦: tips on or off, and three ascending whole percentages (1–50). */
+function parseTips(value: unknown) {
+  const raw = exact(value, ["enabled", "tierPercents"]);
+  const tiers = raw.tierPercents;
+  if (
+    typeof raw.enabled !== "boolean" ||
+    !Array.isArray(tiers) ||
+    tiers.length !== 3 ||
+    tiers.some((n) => !Number.isSafeInteger(n) || Number(n) < 1 || Number(n) > 50) ||
+    !(Number(tiers[0]) < Number(tiers[1]) && Number(tiers[1]) < Number(tiers[2]))
+  )
+    throw new Error("invalid");
+  return Object.freeze({
+    enabled: raw.enabled,
+    tierPercents: Object.freeze(tiers.map(Number)),
   });
 }
 
@@ -133,59 +168,166 @@ export interface CheckoutClient {
   quote(cart: CartView, operationReference: string): Promise<CheckoutQuote>;
 }
 
+/** Checkout writes remain uncertain when the complete response cannot be confirmed. */
+export async function requestCheckoutMutation(
+  url: string,
+  init: RequestInit,
+  contextCurrent: () => boolean,
+) {
+  const controller = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let rejectCancellation: (error: CartClientError) => void = () => undefined;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    rejectCancellation = reject;
+  });
+  const timer = setTimeout(() => {
+    controller.abort();
+    rejectCancellation(new CartClientError("network_unknown"));
+  }, browserRequestTimeoutMs);
+  const check = () => {
+    if (controller.signal.aborted || !contextCurrent())
+      throw new CartClientError("network_unknown");
+  };
+  const operation = async () => {
+    check();
+    const response = await globalThis.fetch(url, {
+      ...init,
+      signal: controller.signal,
+      mode: "cors",
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      referrerPolicy: "no-referrer",
+    });
+    if (
+      controller.signal.aborted ||
+      !contextCurrent() ||
+      response.redirected ||
+      response.body === null
+    ) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new CartClientError("network_unknown");
+    }
+    reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      check();
+      const part = await reader.read();
+      check();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > 16 * 1024 * 1024) throw new CartClientError("network_unknown");
+      chunks.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const payload: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    check();
+    return { response, payload };
+  };
+  try {
+    const result = await Promise.race([operation(), cancellation]);
+    check();
+    return result;
+  } catch {
+    throw new CartClientError("network_unknown");
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+    if (reader !== undefined) {
+      void reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+  }
+}
+
 export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutClient {
   return Object.freeze({
     loadCart: () => cartClient.loadCurrent(),
     async quote(cart: CartView, operationReference: string) {
+      const contextCurrent = captureCustomerCsrfContext();
       const csrf = getCustomerCsrfCredential();
       if (csrf === null) throw new CartClientError("cart_session_expired");
       if (!credential.test(csrf) || !uuidV7.test(operationReference))
         throw new CartClientError("cart_request_invalid");
-      let response: Response;
+      let cartReference: string;
+      let cartVersion: number;
       try {
-        response = await boundedFetch(
-          globalThis.fetch,
-          `/api/v1/carts/${cart.cart.cartReference}/quote`,
-          {
-            method: "POST",
-            credentials: "same-origin",
-            cache: "no-store",
-            headers: {
-              "content-type": "application/json",
-              "idempotency-key": operationReference,
-              "x-csrf-token": csrf,
-            },
-            body: JSON.stringify({ cartVersion: cart.cart.version }),
+        cartReference = text(cart.cart.cartReference, uuidV7);
+        cartVersion = integer(cart.cart.version);
+      } catch {
+        throw new CartClientError("cart_request_invalid");
+      }
+      const { response, payload } = await requestCheckoutMutation(
+        "/api/v1/carts/" + cartReference + "/quote",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": operationReference,
+            "x-csrf-token": csrf,
           },
-        );
-      } catch {
-        throw new CartClientError("network_unknown");
-      }
-      let body: unknown;
+          body: JSON.stringify({ cartVersion }),
+        },
+        contextCurrent,
+      );
       try {
-        body = await response.json();
-      } catch {
-        throw new CartClientError("cart_service_unavailable");
-      }
-      try {
-        if (response.ok) return parseQuote(body, cart);
-        const errorRoot = exact(body, ["schemaVersion", "error"]);
-        if (errorRoot.schemaVersion !== 1) throw new CartClientError("cart_service_unavailable");
+        if (!contextCurrent()) throw new CartClientError("network_unknown");
+        if (response.status === 200 || response.status === 201)
+          return parseQuote(payload, cartVersion);
+        if (response.status === 410) {
+          const root = exact(payload, ["schemaVersion", "error", "resolution"]);
+          const error = exact(root.error, ["code", "messageKey"]);
+          const resolution = exact(root.resolution, [
+            "operationReference",
+            "cartReference",
+            "cartVersion",
+          ]);
+          if (
+            root.schemaVersion !== 1 ||
+            error.code !== "quote_operation_expired" ||
+            error.messageKey !== "customer.quote.operation_expired" ||
+            resolution.operationReference !== operationReference ||
+            resolution.cartReference !== cartReference ||
+            resolution.cartVersion !== cartVersion
+          )
+            throw new Error("invalid");
+          throw new CartClientError("quote_operation_expired");
+        }
+        const errorRoot = exact(payload, ["schemaVersion", "error"]);
+        if (errorRoot.schemaVersion !== 1) throw new Error("invalid");
         const error = exact(errorRoot.error, ["code", "messageKey"]);
         text(error.messageKey, /^[a-z][a-z0-9_.-]{0,127}$/u);
-        const code = String(error.code);
+        const known = {
+          quote_version_conflict: [409, "cart_version_conflict"],
+          quote_idempotency_conflict: [409, "cart_idempotency_conflict"],
+          quote_configuration_invalid: [422, "cart_selection_invalid"],
+          quote_request_invalid: [400, "cart_request_invalid"],
+          cart_order_processing: [409, "cart_order_processing"],
+          cart_checkout_in_progress: [409, "cart_checkout_in_progress"],
+        } as const;
+        const contract = Object.hasOwn(known, String(error.code))
+          ? known[error.code as keyof typeof known]
+          : undefined;
+        if (contract === undefined || response.status !== contract[0])
+          throw new CartClientError("network_unknown");
+        const seconds = retryAfterSeconds(response);
         throw new CartClientError(
-          code === "quote_version_conflict"
-            ? "cart_version_conflict"
-            : code === "quote_configuration_invalid"
-              ? "cart_selection_invalid"
-              : code === "quote_request_invalid"
-                ? "cart_request_invalid"
-                : "cart_service_unavailable",
+          contract[1],
+          seconds === null ||
+            (contract[1] !== "cart_order_processing" && contract[1] !== "cart_checkout_in_progress")
+            ? {}
+            : { retryAfterSeconds: seconds },
         );
       } catch (error) {
+        if (!contextCurrent()) throw new CartClientError("network_unknown");
         if (error instanceof CartClientError) throw error;
-        throw new CartClientError("cart_service_unavailable");
+        throw new CartClientError("network_unknown");
       }
     },
   });
@@ -201,10 +343,36 @@ export interface CheckoutController {
 }
 function key(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let timestamp = Date.now();
+  for (let index = 5; index >= 0; index -= 1) {
+    bytes[index] = timestamp & 255;
+    timestamp = Math.floor(timestamp / 256);
+  }
   bytes[6] = ((bytes[6] ?? 0) & 15) | 112;
   bytes[8] = ((bytes[8] ?? 0) & 63) | 128;
   const hex = [...bytes].map((v) => v.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+interface QuotePlan {
+  readonly cart: CartView;
+  readonly operationReference: string;
+  readonly contextCurrent: () => boolean;
+  outcomeUnknown: boolean;
+}
+function snapshotCart(current: CartView): CartView {
+  const copy = structuredClone(current);
+  const pending: object[] = [copy];
+  const seen = new WeakSet<object>();
+  while (pending.length) {
+    const value = pending.pop();
+    if (value === undefined || seen.has(value)) continue;
+    seen.add(value);
+    for (const field of Object.values(value))
+      if (field !== null && typeof field === "object") pending.push(field);
+    Object.freeze(value);
+  }
+  return copy;
 }
 export function createCheckoutController(
   client: CheckoutClient,
@@ -212,102 +380,268 @@ export function createCheckoutController(
 ): CheckoutController {
   let state: CheckoutState = { status: "loading" };
   let online = typeof navigator === "undefined" || navigator.onLine !== false;
-  let pendingKey: string | null = null;
+  let plan: QuotePlan | null = null;
   let quoteFlight: Promise<void> | null = null;
+  let revision = 0;
+  let querySequence = 0;
+  let offlineWasEmpty = false;
   const listeners = new Set<() => void>();
   const publish = (next: CheckoutState) => {
     state = next;
     listeners.forEach((listener) => listener());
   };
   const cart = () => ("cart" in state ? state.cart : null);
+  const unresolved = () => {
+    const available = plan?.contextCurrent() === true;
+    publish({
+      status: online ? "outcome-unknown" : "offline",
+      cart: available ? (plan?.cart ?? null) : null,
+      canRetry: available,
+    });
+  };
   const fail = (error: unknown, current: CartView | null) => {
     const parsed = error instanceof CartClientError ? error.code : "cart_service_unavailable";
-    if (parsed !== "network_unknown") pendingKey = null;
+    if (
+      online &&
+      current !== null &&
+      (parsed === "cart_order_processing" || parsed === "cart_checkout_in_progress")
+    ) {
+      publish({
+        status: parsed === "cart_order_processing" ? "order-processing" : "checkout-in-progress",
+        cart: current,
+        retryAfterSeconds: (error as CartClientError).retryAfterSeconds,
+        canRetry: true,
+      });
+      return;
+    }
     publish({
-      status:
-        parsed === "cart_session_expired"
+      status: !online
+        ? "offline"
+        : parsed === "cart_session_expired"
           ? "session-expired"
-          : parsed === "cart_version_conflict"
+          : parsed === "cart_version_conflict" || parsed === "cart_idempotency_conflict"
             ? "conflict"
             : parsed === "cart_selection_invalid" || parsed === "cart_request_invalid"
               ? "validation"
-              : parsed === "network_unknown"
-                ? "outcome-unknown"
-                : "unavailable",
-      cart: current,
-      canRetry: parsed === "network_unknown",
+              : "unavailable",
+      cart: parsed === "cart_session_expired" ? null : current,
+      canRetry: false,
     });
   };
   const executeQuote = async () => {
-    const current = cart();
+    const current = plan?.cart ?? cart();
     if (!online) {
-      publish({ status: "offline", cart: current, canRetry: pendingKey !== null });
+      publish({
+        status: "offline",
+        cart: plan !== null && !plan.contextCurrent() ? null : current,
+        canRetry: plan !== null && plan.contextCurrent(),
+      });
       return;
     }
-    if (current === null) return;
-    pendingKey ??= keyFactory();
-    publish({ status: "pending", cart: current });
+    if (current === null || current.cart.items.length === 0) return;
+    revision += 1;
+    if (plan === null) {
+      const contextCurrent = captureCustomerCsrfContext();
+      try {
+        plan = {
+          cart: snapshotCart(current),
+          operationReference: keyFactory(),
+          contextCurrent,
+          outcomeUnknown: false,
+        };
+      } catch (error) {
+        fail(error, current);
+        return;
+      }
+    }
+    const active = plan;
+    if (!active.contextCurrent()) {
+      active.outcomeUnknown = true;
+      unresolved();
+      return;
+    }
+    publish({ status: "pending", cart: active.cart });
     try {
-      const result = await client.quote(current, pendingKey);
-      pendingKey = null;
-      publish({ status: "ready", cart: current, quote: result });
+      const result = await client.quote(active.cart, active.operationReference);
+      if (!active.contextCurrent() || result.cartVersion !== active.cart.cart.version)
+        throw new CartClientError("network_unknown");
+      plan = null;
+      publish(
+        online
+          ? { status: "ready", cart: active.cart, quote: result }
+          : { status: "offline", cart: active.cart, canRetry: false },
+      );
     } catch (error) {
-      if (error instanceof CartClientError && error.code === "cart_version_conflict") {
-        pendingKey = null;
+      if (
+        active.contextCurrent() &&
+        error instanceof CartClientError &&
+        error.code === "quote_operation_expired"
+      ) {
+        plan = null;
         try {
           const refreshed = await client.loadCart();
-          publish({ status: "conflict", cart: refreshed, canRetry: false });
-          return;
-        } catch {
-          publish({ status: "unavailable", cart: current, canRetry: false });
-          return;
+          if (!active.contextCurrent()) {
+            fail(new CartClientError("cart_session_expired"), null);
+            return;
+          }
+          publish(
+            !online
+              ? { status: "offline", cart: refreshed, canRetry: false }
+              : refreshed === null || refreshed.cart.items.length === 0
+                ? { status: "empty" }
+                : { status: "quote-expired", cart: refreshed, canRetry: false },
+          );
+        } catch (refreshError) {
+          fail(refreshError, null);
         }
+        return;
       }
-      fail(error, current);
+      if (
+        active.outcomeUnknown ||
+        !active.contextCurrent() ||
+        (error instanceof CartClientError && error.code === "network_unknown")
+      ) {
+        active.outcomeUnknown = true;
+        unresolved();
+        return;
+      }
+      plan = null;
+      if (error instanceof CartClientError && error.code === "cart_version_conflict" && online) {
+        try {
+          const refreshed = await client.loadCart();
+          if (!active.contextCurrent()) {
+            fail(new CartClientError("cart_session_expired"), null);
+            return;
+          }
+          publish({ status: online ? "conflict" : "offline", cart: refreshed, canRetry: false });
+        } catch (refreshError) {
+          fail(refreshError, active.cart);
+        }
+        return;
+      }
+      fail(error, active.cart);
     }
   };
   const quote = (): Promise<void> => {
     if (quoteFlight !== null) return quoteFlight;
-    const current = executeQuote();
-    quoteFlight = current;
-    void current.then(
-      () => {
-        if (quoteFlight === current) quoteFlight = null;
-      },
-      () => {
-        if (quoteFlight === current) quoteFlight = null;
-      },
-    );
-    return current;
+    // Install the flight before publishing or calling injected providers/listeners.
+    let complete: () => void = () => undefined;
+    const flight = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    quoteFlight = flight;
+    const settle = () => {
+      if (quoteFlight === flight) quoteFlight = null;
+      complete();
+    };
+    void executeQuote().then(settle, (error) => {
+      if (plan?.outcomeUnknown) unresolved();
+      else fail(error, cart());
+      settle();
+    });
+    return flight;
   };
   return Object.freeze({
     getState: () => state,
     async load() {
+      if (quoteFlight !== null) return;
       if (!online) {
-        publish({ status: "offline", cart: cart(), canRetry: false });
+        if (plan !== null) unresolved();
+        else publish({ status: "offline", cart: cart(), canRetry: false });
         return;
       }
+      const observedRevision = revision;
+      const query = ++querySequence;
+      const contextCurrent = captureCustomerCsrfContext();
       try {
         const current = await client.loadCart();
-        pendingKey = null;
+        if (
+          observedRevision !== revision ||
+          query !== querySequence ||
+          quoteFlight !== null ||
+          !online
+        )
+          return;
+        if (plan !== null) {
+          unresolved();
+          return;
+        }
+        if (!contextCurrent()) {
+          fail(new CartClientError("cart_service_unavailable"), null);
+          return;
+        }
         publish(
           current === null || current.cart.items.length === 0
             ? { status: "empty" }
             : { status: "ready", cart: current, quote: null },
         );
       } catch (error) {
-        fail(error, null);
+        if (
+          observedRevision !== revision ||
+          query !== querySequence ||
+          quoteFlight !== null ||
+          !online
+        )
+          return;
+        if (plan !== null) unresolved();
+        else fail(error, null);
       }
     },
     quote,
-    retry: quote,
+    // WP-2423: a refused price (order processing, another guest checking out) changed nothing,
+    // so retrying prices the same cart again with a new operation.
+    retry: () =>
+      plan !== null ||
+      state.status === "order-processing" ||
+      state.status === "checkout-in-progress"
+        ? quote()
+        : Promise.resolve(),
     setOnline(value: boolean) {
+      if (online === value) return;
       online = value;
-      if (!value) publish({ status: "offline", cart: cart(), canRetry: pendingKey !== null });
+      revision += 1;
+      if (!value) {
+        offlineWasEmpty = state.status === "empty";
+        publish({
+          status: "offline",
+          cart: plan !== null && !plan.contextCurrent() ? null : cart(),
+          canRetry: plan !== null && plan.contextCurrent(),
+        });
+        return;
+      }
+      if (quoteFlight !== null) {
+        if (plan !== null && !plan.contextCurrent()) {
+          unresolved();
+          return;
+        }
+        const current = plan?.cart ?? cart();
+        publish(
+          current === null
+            ? { status: "unavailable", cart: null, canRetry: false }
+            : { status: "pending", cart: current },
+        );
+        return;
+      }
+      if (plan !== null) {
+        unresolved();
+        return;
+      }
+      const current = cart();
+      publish(
+        current === null
+          ? offlineWasEmpty
+            ? { status: "empty" }
+            : { status: "unavailable", cart: null, canRetry: false }
+          : current.cart.items.length === 0
+            ? { status: "empty" }
+            : { status: "ready", cart: current, quote: null },
+      );
     },
     subscribe(listener: () => void) {
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   });
 }

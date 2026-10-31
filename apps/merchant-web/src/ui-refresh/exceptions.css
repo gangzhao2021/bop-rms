@@ -1,0 +1,240 @@
+/* WP-2423 merchant UI refresh (2026-10-21): exceptions. Loaded after styles.css so it refines the shared baseline. */
+/* Benchmark: a back-office work queue. Same list language as Orders: one entry per case, what is
+   wrong first, then which order, how long it has been open or overdue, then the action. Overdue
+   cases carry a danger edge and say so in words; resolved cases are muted history. */
+
+/* Filters: a compact toolbar on the page canvas. */
+.order-exception-page .list-filters.order-exception-filters {
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+  gap: var(--bop-space-2) var(--bop-space-3);
+  margin: 0 0 var(--bop-space-4);
+  padding: var(--bop-space-3) 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  border-radius: 0;
+  background: var(--bop-color-surface-default);
+}
+.order-exception-page .list-filters.order-exception-filters label {
+  gap: 2px;
+  color: var(--bop-color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.order-exception-page .list-filters.order-exception-filters select {
+  color: var(--bop-color-text-default);
+  border-color: var(--bop-color-border-default);
+}
+.order-exception-page .list-filters.order-exception-filters label.order-exception-overdue-filter {
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 500;
+}
+.order-exception-page .list-filters.order-exception-filters input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--bop-color-brand-primary);
+}
+.order-exception-page .list-filters.order-exception-filters > button {
+  justify-self: start;
+  min-height: 44px;
+  padding: 0 var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.order-exception-page .list-filters.order-exception-filters > button:disabled {
+  border-color: var(--bop-color-border-default);
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+
+/* The list: full-width entries separated by thin rules, not floating cards. */
+.order-exception-page .store-card-grid {
+  container: exception-list / inline-size;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--bop-color-border-strong);
+}
+.order-exception-page .store-card.order-exception__card {
+  display: grid;
+  gap: var(--bop-space-3);
+  min-width: 0;
+  padding: var(--bop-space-4) var(--bop-space-4) var(--bop-space-5);
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  border-inline-start: 3px solid transparent;
+  border-radius: 0;
+  background: var(--bop-color-surface-default);
+}
+.order-exception-page .store-card.order-exception__card[hidden] {
+  display: none;
+}
+.order-exception-page .store-card.order-exception__card[data-overdue="true"] {
+  border-inline-start-color: var(--bop-color-danger-mark);
+}
+.order-exception-page .store-card.order-exception__card[data-status="Resolved"] {
+  background: var(--bop-color-surface-default);
+}
+.order-exception-page .store-card.order-exception__card[data-status="Resolved"] h3 {
+  color: var(--bop-color-text-muted);
+}
+.order-exception-page .store-card.order-exception__card > * {
+  margin: 0;
+}
+
+/* Heading line: due/overdue and the case on the left; its state and age on the right. */
+.order-exception-page .store-card.order-exception__card header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--bop-space-2) var(--bop-space-4);
+  padding: 0;
+  border: 0;
+}
+.order-exception-page .order-exception__card header > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 20rem;
+}
+.order-exception-page .order-exception__card header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.order-exception-page .order-exception__severity {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.order-exception-page .order-exception__severity[data-severity="High"] {
+  color: var(--bop-color-warning);
+}
+.order-exception-page .order-exception__severity[data-severity="Critical"],
+.order-exception-page .order-exception__card[data-overdue="true"] .order-exception__severity {
+  color: var(--bop-color-danger);
+}
+.order-exception-page .order-exception__card[data-status="Resolved"] .order-exception__severity {
+  color: var(--bop-color-text-muted);
+}
+.order-exception-page .order-exception__state {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  text-align: end;
+}
+.order-exception-page .order-exception__open-for {
+  color: var(--bop-color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.order-exception-page .order-exception__card[data-overdue="true"] .order-exception__open-for {
+  color: var(--bop-color-danger);
+}
+
+/* Facts: one aligned line of label/value pairs on wide screens, two columns on a phone. */
+.order-exception-page .store-card.order-exception__card dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr));
+  gap: var(--bop-space-2) var(--bop-space-4);
+  margin: 0;
+  padding: var(--bop-space-3) 0;
+  border-top: 1px solid var(--bop-color-border-default);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.order-exception-page .store-card.order-exception__card dl div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+.order-exception-page .store-card.order-exception__card dt {
+  color: var(--bop-color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.order-exception-page .store-card.order-exception__card dd {
+  margin: 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.order-exception-page .order-exception__card > p,
+.order-exception-page .order-exception__card > ul {
+  max-width: 60rem;
+  font-size: 14px;
+}
+.order-exception-page .order-exception__card > p[role="note"] {
+  padding: var(--bop-space-2) var(--bop-space-3);
+  border-inline-start: 3px solid var(--bop-color-border-strong);
+  background: var(--bop-color-surface-raised);
+}
+.order-exception-page .order-exception__differences {
+  margin: 0;
+  padding-inline-start: 1.25em;
+  font-weight: 600;
+}
+.order-exception-page .order-exception__card a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--bop-color-text-default);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.order-exception-page .order-exception__card > :is(div, section, form, fieldset) {
+  min-width: 0;
+  max-width: 60rem;
+}
+
+@container exception-list (max-width: 35.99rem) {
+  .order-exception-page .store-card.order-exception__card {
+    padding-inline: var(--bop-space-3);
+  }
+  .order-exception-page .store-card.order-exception__card dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* The state drops under the title: status and age on one line, from the left edge. */
+  .order-exception-page .order-exception__state {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--bop-space-2) var(--bop-space-3);
+    text-align: start;
+  }
+}
+
+.order-exception-page .order-exception__older {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+  margin-top: var(--bop-space-4);
+}
+.order-exception-page .order-exception__older button {
+  min-height: 44px;
+  padding: 0 var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}

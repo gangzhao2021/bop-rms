@@ -1,0 +1,590 @@
+/* WP-2423 merchant UI refresh (2026-10-21): kitchen. Loaded after styles.css so it refines the shared baseline. */
+/* Benchmark: Toast / Square / Fresh KDS. One order is one ticket: a strong header bar (order and
+   table, waiting time), its dishes listed large below, one big step per dish at the bottom of its
+   row. Tickets flow left to right, oldest first, in a responsive grid (3 across a 1024 tablet, 4
+   on a 1440 wall screen, 1 on a phone). Urgency is written ("Running long", "Overdue") and carried
+   by a heavier header and frame, never by colour alone. */
+
+/* ---------------------------------------------------------------- Display chrome */
+.kitchen-shell .bop-shell__header {
+  gap: 4px 12px;
+  padding: 8px clamp(16px, 2.5vw, 32px);
+}
+.kitchen-shell .bop-shell__nav {
+  padding: 0 clamp(16px, 2.5vw, 32px);
+}
+.kitchen-shell .bop-shell__main {
+  padding: 16px clamp(16px, 2.5vw, 32px) 48px;
+}
+.kitchen-board-workspace {
+  gap: 12px;
+}
+/* The browser cannot hold the screen on: kept in view, said plainly, without shouting. */
+.kitchen-screen-awake {
+  max-width: 34rem;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.kitchen-screen-awake[data-state="Unsupported"] {
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--bop-color-warning);
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+
+/* ---------------------------------------------------------------- Board heading */
+.kitchen-board-heading {
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.kitchen-board-heading > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
+  min-width: 0;
+}
+.kitchen-board-heading h2 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.kitchen-board-freshness {
+  align-items: baseline;
+  gap: 2px 14px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.kitchen-work-item-screen .kitchen-board-heading > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+.kitchen-board-eyebrow {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- Queue bar */
+.kitchen-queue-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.kitchen-queue-heading {
+  margin: 0;
+}
+.kitchen-queue-heading h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bop-color-text-muted);
+}
+.kitchen-filter-toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.kitchen-reference-search input {
+  /* Wide enough for the whole "Order number or table" hint. */
+  width: 15rem;
+  max-width: 100%;
+}
+/* The frame's "Kitchen display" label reads as words, not code. */
+.kitchen-shell .bop-shell__header p {
+  font-family: inherit;
+}
+.kitchen-queue-count {
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- Read-only and stale states */
+/* IDR-0039: a board showing its last read is unmistakable: thick edge, larger heading. */
+.kitchen-board-stale .bop-state-card {
+  padding: 14px 18px;
+  border: 2px solid var(--bop-color-warning);
+  border-left-width: 8px;
+  background: var(--bop-color-surface-raised);
+}
+.kitchen-board-stale .bop-state-card h2 {
+  font-size: 20px;
+  font-weight: 700;
+}
+.kitchen-board-stale .bop-state-card p {
+  margin: 2px 0 0;
+  font-size: 15px;
+}
+.kitchen-board-lock .bop-state-card {
+  border-left-width: 6px;
+}
+.kitchen-board-lock .bop-state-card h2 {
+  font-size: 17px;
+}
+
+/* ---------------------------------------------------------------- Empty board */
+.kitchen-board-empty .bop-state-card {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: clamp(40px, 10vh, 96px) 24px;
+  border: 1px dashed var(--bop-color-border-default);
+  border-left-width: 1px;
+  text-align: center;
+}
+.kitchen-board-empty .bop-state-card h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.kitchen-board-empty .bop-state-card p {
+  max-width: 36rem;
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 17px;
+}
+
+/* ---------------------------------------------------------------- Lanes and the ticket grid */
+.kitchen-board-lanes {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+.kitchen-station-lane {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.kitchen-station-lane__heading {
+  justify-content: flex-start;
+  padding: 0 0 8px;
+  border-bottom: 0;
+}
+.kitchen-station-lane__heading h3 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.kitchen-station-lane__heading > span {
+  min-width: 24px;
+  height: 24px;
+  border-radius: var(--bop-radius-control);
+  font-size: 12px;
+}
+.kitchen-station-lane__items {
+  grid-template-columns: repeat(auto-fill, minmax(min(18.5rem, 100%), 1fr));
+  align-items: start;
+  gap: 16px;
+  padding: 0;
+}
+/* Several stations: one column per station side by side (a station's cook reads down their own
+   column), tickets stacked inside it; one "All work" lane keeps the ticket grid above. */
+@media (min-width: 64rem) {
+  .kitchen-board-lanes:has(> .kitchen-station-lane + .kitchen-station-lane) {
+    grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+    align-items: start;
+  }
+  .kitchen-board-lanes:has(> .kitchen-station-lane + .kitchen-station-lane)
+    .kitchen-station-lane__items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------------------------------------------------------------- Ticket */
+.kitchen-order-group.kitchen-ticket {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--bop-color-border-strong);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.kitchen-order-group + .kitchen-order-group {
+  margin-top: 0;
+}
+.kitchen-ticket__header {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px 12px;
+  min-height: 56px;
+  padding: 10px 12px;
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.kitchen-ticket__header .kitchen-order-group__label {
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.kitchen-ticket__wait {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
+  margin: 0 0 0 auto;
+  line-height: 1.1;
+  text-align: end;
+  white-space: nowrap;
+}
+.kitchen-ticket__timer {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.kitchen-ticket__tier {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+/* Running long: a heavier frame and the header in the warning colour, with the words. */
+.kitchen-ticket[data-age="warning"] {
+  border: 3px solid var(--bop-color-warning);
+}
+.kitchen-ticket[data-age="warning"] .kitchen-ticket__header {
+  background: var(--bop-color-warning);
+}
+/* Overdue: heaviest frame, danger header, the words. */
+.kitchen-ticket[data-age="late"] {
+  border: 4px solid var(--bop-color-danger-mark);
+}
+.kitchen-ticket[data-age="late"] .kitchen-ticket__header {
+  background: var(--bop-color-danger);
+}
+/* Everything on it finished (only under a "All states"-style filter): quiet. */
+.kitchen-ticket[data-age="done"] {
+  border-color: var(--bop-color-border-default);
+}
+.kitchen-ticket[data-age="done"] .kitchen-ticket__header {
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+}
+
+/* ---------------------------------------------------------------- Dish row inside a ticket */
+.kitchen-work-item {
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-radius: var(--bop-radius-card);
+}
+.kitchen-ticket > .kitchen-work-item,
+.kitchen-earlier-ticket > .kitchen-work-item {
+  border: 0;
+  border-left: 4px solid var(--bop-color-border-strong);
+  border-radius: 0;
+}
+.kitchen-ticket > .kitchen-work-item + .kitchen-work-item {
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.kitchen-ticket > .kitchen-work-item[data-age="warning"],
+.kitchen-earlier-ticket > .kitchen-work-item[data-age="warning"] {
+  border-left-color: var(--bop-color-warning);
+}
+.kitchen-ticket > .kitchen-work-item[data-age="late"],
+.kitchen-earlier-ticket > .kitchen-work-item[data-age="late"] {
+  border-left-color: var(--bop-color-danger-mark);
+}
+.kitchen-ticket > .kitchen-work-item[data-status="Completed"],
+.kitchen-ticket > .kitchen-work-item[data-status="Cancelled"],
+.kitchen-earlier-ticket > .kitchen-work-item[data-status="Completed"],
+.kitchen-earlier-ticket > .kitchen-work-item[data-status="Cancelled"] {
+  border-left-color: var(--bop-color-border-default);
+  background: var(--bop-color-surface-raised);
+}
+.kitchen-work-item__summary h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.kitchen-work-item__count {
+  flex: none;
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.kitchen-work-item__detail-link {
+  min-height: 44px;
+  min-width: 0;
+}
+.kitchen-work-item__state strong {
+  min-height: 26px;
+  font-size: 12px;
+}
+.kitchen-work-item__state span {
+  font-size: 15px;
+  font-weight: 600;
+}
+.kitchen-work-item__facts {
+  gap: 6px 14px;
+}
+.kitchen-work-item__quantity {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+/* Modifiers indented under the dish, one per line, readable at arm's length. */
+.kitchen-work-item__options {
+  display: grid;
+  gap: 2px;
+  padding-inline-start: 14px;
+  border-inline-start: 2px solid var(--bop-color-border-default);
+  font-size: 17px;
+  font-weight: 600;
+}
+/* The guest's note and the allergens stand apart from the dish text. */
+.kitchen-work-item__note {
+  padding: 8px 10px;
+  border: 1px solid var(--bop-color-warning);
+  border-inline-start-width: 4px;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-work-item__note span {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 13px;
+}
+.kitchen-work-item__allergens {
+  font-size: 15px;
+}
+.kitchen-work-item__allergens[data-kind="declared"] {
+  padding: 6px 10px;
+  border-inline-start: 4px solid var(--bop-color-danger-mark);
+  background: var(--bop-color-surface-raised);
+}
+.kitchen-work-item__allergens[data-kind="declared"] strong {
+  font-weight: 800;
+}
+.kitchen-work-item__allergens-modifiers {
+  flex-basis: 100%;
+}
+.kitchen-work-item__staff {
+  font-size: 13px;
+  color: var(--bop-color-text-muted);
+}
+/* The step: big, black, at the bottom of the dish. */
+.kitchen-work-item__actions {
+  margin-top: 4px;
+}
+.kitchen-work-item__actions button {
+  min-height: 56px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.kitchen-work-item__actions button.kitchen-remake-button,
+.kitchen-work-item__actions button.kitchen-remake-cancel {
+  flex: 1 1 8rem;
+  min-height: 56px;
+  font-size: 15px;
+}
+.kitchen-work-item__no-actions {
+  padding: 6px 0;
+}
+
+/* ---------------------------------------------------------------- Remakes lane */
+.kitchen-board-remakes {
+  margin-bottom: 0;
+}
+.kitchen-remake-lane {
+  padding: 12px;
+  border: 2px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-raised);
+}
+.kitchen-work-item.kitchen-work-item--remake {
+  gap: 10px;
+  padding: 0 0 14px;
+  overflow: hidden;
+  border: 3px solid var(--bop-color-warning);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.kitchen-work-item--remake > :not(.kitchen-ticket__header) {
+  margin-inline: 14px;
+}
+.kitchen-work-item--remake .kitchen-work-item__actions button {
+  flex: 1 1 100%;
+}
+.kitchen-work-item--remake .kitchen-ticket__header {
+  flex-wrap: wrap;
+  background: var(--bop-color-warning);
+}
+.kitchen-work-item--remake .kitchen-remake-badge {
+  margin: 0 0 0 auto;
+  border-color: var(--bop-color-on-primary);
+  color: var(--bop-color-on-primary);
+}
+
+/* ---------------------------------------------------------------- Earlier days */
+.kitchen-earlier-days summary {
+  min-height: 52px;
+}
+.kitchen-earlier-ticket {
+  padding: 0 0 4px;
+  overflow: hidden;
+  border-color: var(--bop-color-border-strong);
+}
+.kitchen-earlier-ticket__heading {
+  padding: 10px 12px;
+  background: var(--bop-color-surface-raised);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.kitchen-earlier-ticket__day {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- Recently finished */
+.kitchen-recent-finished {
+  margin-top: 4px;
+  background: var(--bop-color-surface-default);
+}
+.kitchen-recent-finished summary {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  padding: 0 16px;
+  list-style: none;
+  font-size: 15px;
+}
+.kitchen-recent-finished summary::-webkit-details-marker {
+  display: none;
+}
+.kitchen-recent-finished summary::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 12px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--bop-motion-fast);
+}
+.kitchen-recent-finished[open] summary::before {
+  transform: rotate(45deg);
+}
+.kitchen-recent-finished ul {
+  gap: 0;
+  padding: 0;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.kitchen-recent-finished li {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 0;
+}
+.kitchen-recent-finished li + li {
+  border-top: 1px solid var(--bop-color-border-default);
+}
+
+/* ---------------------------------------------------------------- Work item detail */
+.kitchen-work-item-screen__content {
+  max-width: 44rem;
+}
+.kitchen-work-item.kitchen-work-item--detail {
+  padding: 16px 18px;
+  border: 1px solid var(--bop-color-border-strong);
+  border-left-width: 6px;
+}
+.kitchen-work-item--detail[data-age="warning"] {
+  border-left-color: var(--bop-color-warning);
+}
+.kitchen-work-item--detail[data-age="late"] {
+  border-left-color: var(--bop-color-danger-mark);
+}
+.kitchen-work-item--detail .kitchen-work-item__state span {
+  font-size: 24px;
+  font-weight: 700;
+}
+.kitchen-work-item-screen__details {
+  max-width: 44rem;
+}
+
+/* ---------------------------------------------------------------- Phone */
+@media (max-width: 767px) {
+  .kitchen-queue-bar {
+    display: none;
+  }
+  .kitchen-board-heading > div:first-child {
+    display: grid;
+  }
+  .kitchen-station-lane__items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kitchen-ticket__timer {
+    font-size: 22px;
+  }
+  .kitchen-screen-awake {
+    flex-basis: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------- Inside the workspace frame */
+/* A counter or office sign-in reads the Kitchen beside the shared workspace navigation: the
+   board's title is the page heading, styled like the kitchen display's. */
+.kitchen-shell--workspace .kitchen-board-heading h1,
+.kitchen-shell--workspace .kitchen-workspace-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.kitchen-shell--workspace .kitchen-workspace-title {
+  margin-bottom: 12px;
+}
+.kitchen-workspace-status {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/*
+ * Figma v1 (2026-10-25) kitchen display: a black ticket header with the order and its minutes; a
+ * ticket running long or late keeps a white header with the minutes and words in the state colour
+ * and an outline in that colour; declared allergens read in the danger colour on their bar.
+ */
+.kitchen-ticket__header .kitchen-order-group__label {
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-ticket__timer {
+  font-size: 20px;
+}
+.kitchen-ticket[data-age="warning"] {
+  border: 2px solid var(--bop-color-warning);
+}
+.kitchen-ticket[data-age="warning"] .kitchen-ticket__header {
+  border-bottom: 1px solid var(--bop-color-warning);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-warning);
+}
+.kitchen-ticket[data-age="late"] {
+  border: 2px solid var(--bop-color-danger-mark);
+}
+.kitchen-ticket[data-age="late"] .kitchen-ticket__header {
+  border-bottom: 1px solid var(--bop-color-danger-mark);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-danger);
+}
+.kitchen-work-item__allergens[data-kind="declared"] {
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}

@@ -1,0 +1,616 @@
+/*
+ * Kitchen v3 (Owner 2026-10-26 "好，按这个思路往下推"; Figma "Counter order + Kitchen · v3" 42:2 /
+ * 42:111 / 42:267). The v3 system on the kitchen display: white, one accent, one main step per
+ * ticket, three status meanings. Read from 1-2 m away, so the ticket number and dishes use the
+ * kitchen type tokens; every control is at least 48px. Lateness is the timer in red and a red top
+ * edge, nothing else; a new ticket has an accent top edge; allergens sit in an outlined label.
+ */
+
+/* ------------------------------------------------------------ One bar of display chrome */
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
+  align-items: center;
+  min-height: 56px;
+  padding: 4px 24px;
+  border-bottom: 0;
+}
+.kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header > strong {
+  display: none;
+}
+.kitchen-shell .bop-shell__header h1 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-shell .bop-shell__header p {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-shell .kitchen-screen-awake {
+  max-width: 22rem;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-shell .kitchen-screen-awake[data-state="Unsupported"] {
+  padding: 0;
+  border: 0;
+}
+.kitchen-shell .kitchen-handover-button,
+.kitchen-shell .bop-shell__header .language-switch {
+  min-height: var(--bop-kitchen-target);
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-shell .bop-shell__header .language-switch {
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+@media (min-width: 768px) {
+  .kitchen-shell:not(.kitchen-shell--workspace) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "header nav"
+      "main main";
+    align-content: start;
+    border-bottom: 0;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__header {
+    grid-area: header;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__nav {
+    grid-area: nav;
+    align-items: center;
+    padding: 0 24px 0 0;
+  }
+  .kitchen-shell:not(.kitchen-shell--workspace) .bop-shell__main {
+    grid-area: main;
+  }
+}
+.kitchen-shell .bop-shell__nav a.kitchen-display-nav-link {
+  min-height: var(--bop-kitchen-target);
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.kitchen-shell .bop-shell__nav a.kitchen-display-nav-link[aria-current="page"] {
+  color: var(--bop-color-text-default);
+}
+
+/* ------------------------------------------------------------ The board's bar */
+.kitchen-shell .bop-shell__main {
+  padding: 0 24px 48px;
+}
+.kitchen-board-workspace {
+  gap: 16px;
+}
+.kitchen-board-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 24px;
+  min-height: 64px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.kitchen-board-heading h1,
+.kitchen-board-heading h2 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.kitchen-board-freshness,
+.kitchen-board-freshness > * {
+  color: var(--bop-color-text-muted);
+  font-size: 16px;
+  font-weight: 400;
+}
+.kitchen-board-freshness .kitchen-queue-count {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 16px;
+}
+.kitchen-board-heading__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 24px;
+  margin-inline-start: auto;
+}
+.kitchen-board-heading__actions > button,
+.kitchen-board-heading__actions > a,
+.kitchen-board-heading__actions .kitchen-recent-finished > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--bop-kitchen-target);
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.kitchen-board-heading__actions > button:disabled {
+  color: var(--bop-color-text-muted);
+}
+.kitchen-board-heading__actions .kitchen-sound-toggle[aria-pressed="false"] {
+  color: var(--bop-color-danger);
+}
+.kitchen-sound-reminder {
+  margin: 0;
+  color: var(--bop-color-danger);
+  font-size: 16px;
+}
+/* On the kitchen display, search and filters open from the bar ("Find an order") instead of a
+   queue row; a phone keeps its own Filters button under the bar. A counter or office sign-in
+   reading the Kitchen in the workspace keeps its search row. */
+.kitchen-shell:not(.kitchen-shell--workspace) .kitchen-queue-bar {
+  display: none;
+}
+@media (min-width: 768px) {
+  .kitchen-filter-toggle {
+    display: none;
+  }
+}
+@media (max-width: 767px) {
+  .kitchen-board-heading__actions .kitchen-find-button {
+    display: none;
+  }
+}
+/* Recently finished: in the bar; its list opens under it, above the tickets. */
+.kitchen-board-heading__actions .kitchen-recent-finished {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.kitchen-board-heading__actions .kitchen-recent-finished > summary::before {
+  display: none;
+}
+.kitchen-board-heading__actions .kitchen-recent-finished[open] > ul {
+  position: absolute;
+  inset: calc(100% + 4px) 0 auto auto;
+  z-index: 5;
+  width: min(28rem, calc(100vw - 48px));
+  max-height: 60vh;
+  margin: 0;
+  padding: 8px 16px;
+  overflow: auto;
+  border: 1px solid var(--bop-color-row-divider, #e5e5e5);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+.kitchen-recent-finished li button {
+  min-height: var(--bop-kitchen-target);
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ New orders */
+.kitchen-arrivals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  min-height: 64px;
+  padding: 0 0 0 20px;
+  border: 0;
+  border-left: 6px solid var(--bop-color-accent);
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+}
+.kitchen-arrivals > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  margin-inline-end: auto;
+}
+.kitchen-arrivals h3 {
+  margin: 0;
+  color: var(--bop-color-accent);
+  font-size: 20px;
+  font-weight: 600;
+}
+.kitchen-arrivals p {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 16px;
+}
+.kitchen-arrivals button {
+  min-height: var(--bop-kitchen-target);
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ Lanes */
+.kitchen-station-lane__heading h3 {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.kitchen-station-lane__heading > span {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+@media (min-width: 768px) {
+  .kitchen-station-lane__items {
+    grid-template-columns: repeat(auto-fill, minmax(min(17.5rem, 100%), 1fr));
+    gap: 24px;
+  }
+}
+/* One lane (no named stations): the lane heading says nothing the bar does not. */
+.kitchen-board-lanes:not(:has(> .kitchen-station-lane + .kitchen-station-lane))
+  .kitchen-station-lane__heading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* ------------------------------------------------------------ Ticket */
+.kitchen-order-group.kitchen-ticket,
+.kitchen-ticket[data-age="warning"],
+.kitchen-ticket[data-age="late"],
+.kitchen-ticket[data-age="done"] {
+  display: grid;
+  gap: 12px;
+  padding: 16px 0 20px;
+  overflow: visible;
+  border: 0;
+  border-top: 1px solid var(--bop-color-row-divider, #e5e5e5);
+  border-radius: 0;
+  background: none;
+}
+.kitchen-ticket[data-fresh="true"] {
+  border-top: 4px solid var(--bop-color-accent);
+}
+.kitchen-ticket[data-age="late"] {
+  border-top: 4px solid var(--bop-color-danger);
+}
+.kitchen-order-group.kitchen-ticket > .kitchen-ticket__header {
+  align-items: baseline;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+}
+.kitchen-order-group.kitchen-ticket .kitchen-ticket__header .kitchen-order-group__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 400;
+}
+.kitchen-ticket__number {
+  font-size: var(--bop-kitchen-ticket-number);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.kitchen-ticket__kind {
+  color: var(--bop-color-text-muted);
+  font-size: 16px;
+}
+.kitchen-order-group.kitchen-ticket .kitchen-ticket__wait {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+.kitchen-order-group.kitchen-ticket .kitchen-ticket__timer {
+  color: var(--bop-color-text-muted);
+  font-size: 16px;
+  font-weight: 400;
+}
+.kitchen-order-group.kitchen-ticket .kitchen-ticket__tier {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.kitchen-order-group.kitchen-ticket[data-age="late"]
+  :is(.kitchen-ticket__timer, .kitchen-ticket__tier) {
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}
+.kitchen-order-group.kitchen-ticket .kitchen-ticket__tier::before {
+  content: "· ";
+}
+.kitchen-ticket__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-ticket__state::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bop-color-accent);
+}
+.kitchen-ticket__state[data-state="ToAccept"]::before {
+  background: var(--bop-color-danger-mark);
+}
+.kitchen-ticket__state[data-state="Done"]::before {
+  background: var(--bop-color-success-mark);
+}
+.kitchen-ticket__next {
+  min-height: 56px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.kitchen-ticket__next:disabled {
+  background: var(--bop-color-surface-raised, #f2f2f2);
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+
+/* ------------------------------------------------------------ Dishes on a ticket */
+.kitchen-ticket > .kitchen-work-item,
+.kitchen-ticket > .kitchen-work-item + .kitchen-work-item,
+.kitchen-ticket > .kitchen-work-item[data-age] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.kitchen-work-item[data-in-ticket] > * {
+  grid-column: 1;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__summary h3 {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--bop-kitchen-item);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__count {
+  font-size: var(--bop-kitchen-item);
+  font-weight: 700;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__detail-link {
+  color: inherit;
+  text-decoration: none;
+}
+.kitchen-work-item[data-in-ticket][data-finished="true"] .kitchen-work-item__summary h3 {
+  color: var(--bop-color-text-muted);
+  text-decoration: line-through;
+}
+/* The ticket says where it is; each dish says only what to make. */
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__state,
+.kitchen-work-item[data-in-ticket]:not([data-partial]) .kitchen-work-item__quantity,
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__cue[data-value="None"],
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__cue[data-value="Acknowledged"] {
+  display: none;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__facts {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__options {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--bop-kitchen-modifier);
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__note {
+  margin: 0;
+  font-size: var(--bop-kitchen-modifier);
+  font-weight: 600;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__allergens,
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__allergens[data-kind="declared"] {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1.5px solid var(--bop-color-text-default);
+  border-radius: 4px;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 400;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__allergens strong {
+  color: var(--bop-color-text-default);
+  font-weight: 600;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__allergens[data-kind="none"] {
+  display: none;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__cue {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-danger);
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__actions {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  gap: 12px;
+  margin: 0;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__actions:empty {
+  display: none;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__actions button {
+  min-width: 0;
+  min-height: var(--bop-kitchen-target);
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ Phones */
+@media (max-width: 767px) {
+  .kitchen-shell .bop-shell__main {
+    padding: 0 16px 48px;
+  }
+  .kitchen-board-heading__actions {
+    gap: 0 16px;
+    margin-inline-start: 0;
+  }
+}
+
+/* The bar keeps to one line on a 1024 tablet: the display's own name is already in the frame
+   header, and the refresh rhythm is only said when it is not the usual one. */
+.kitchen-board-freshness [data-operator="Named"],
+.kitchen-board-freshness:has([data-operator="Named"]) .kitchen-board-autorefresh {
+  display: none;
+}
+.kitchen-sound-reminder {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-arrivals {
+  outline: 0;
+  box-shadow: none;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+/* New orders still draw the eye when the sound is off: the accent bar pulses, nothing else. */
+@media (prefers-reduced-motion: no-preference) {
+  .kitchen-arrivals {
+    animation: kitchen-v3-arrivals-pulse 1.2s ease-in-out infinite alternate;
+  }
+}
+@keyframes kitchen-v3-arrivals-pulse {
+  from {
+    border-left-color: var(--bop-color-accent);
+  }
+  to {
+    border-left-color: transparent;
+  }
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__actions:has(.kitchen-work-item__no-actions) {
+  grid-column: 1 / -1;
+  grid-row: auto;
+}
+.kitchen-work-item[data-in-ticket] .kitchen-work-item__no-actions {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* WP-2423 item 8 ③ (decision 8): a dish's Chinese name leads; its English name sits under it,
+   smaller and grey, for staff who read English. */
+.kitchen-work-item__other-name {
+  margin: 2px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+/* WP-2423 item 8 ⑥ part 4: a combo's dishes, each its own line under the combo, done on its own. */
+.kitchen-work-item__combo {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kitchen-work-item__combo li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 4px 0;
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.kitchen-work-item__combo-name {
+  font-size: var(--bop-kitchen-modifier);
+  font-weight: 600;
+}
+.kitchen-work-item__combo li[data-done] .kitchen-work-item__combo-name {
+  color: var(--bop-color-text-muted);
+  text-decoration: line-through;
+}
+.kitchen-work-item__combo-done {
+  color: var(--bop-color-text-muted);
+}
+/* Each dish's own step: an outlined button read from 1–2 m (the done state is plain text). */
+.kitchen-work-item__combo-step {
+  margin-left: auto;
+  min-width: 96px;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 2px solid var(--bop-color-text-default);
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 17px;
+  font-weight: 700;
+}
+.kitchen-work-item__combo-done {
+  margin-left: auto;
+}
+
+/* WP-2423 item 8 ⑦ DEC-STORE-FEATURES: a ticket with a dish a server chased (still being made). */
+.kitchen-ticket[data-chased="true"] {
+  border-color: var(--bop-color-danger);
+  box-shadow: inset 4px 0 0 var(--bop-color-danger);
+}
+.kitchen-work-item[data-chased="true"] .kitchen-work-item__chased {
+  margin: 4px 0 0;
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}

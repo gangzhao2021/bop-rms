@@ -1,5 +1,7 @@
+import { parseDiningReference, parseDiningInstant } from "../domain/dining-session.js";
 import {
   parseQrCompact,
+  QrContractError,
   parseQrSignedPayload,
   parseQrTableContextEvidence,
   parseQrVerificationKeySetEvidence,
@@ -129,4 +131,60 @@ export function createQrTableContextService(ports: QrTableContextPorts) {
       }
     },
   });
+}
+
+/** Current context for an already authenticated Guest; never verifies or reconstructs a signed QR. */
+export function assertCurrentDiningGuestTableContext(input: unknown, value: unknown) {
+  try {
+    const fields = [
+      "brandReference",
+      "storeReference",
+      "publicStoreReference",
+      "publicTableReference",
+      "channel",
+      "qrRevocationVersion",
+      "observedAt",
+    ];
+    if (
+      input === null ||
+      typeof input !== "object" ||
+      Object.getPrototypeOf(input) !== Object.prototype ||
+      Reflect.ownKeys(input).length !== fields.length
+    )
+      throw new QrContractError();
+    const entries = fields.map((field) => {
+      const descriptor = Object.getOwnPropertyDescriptor(input, field);
+      if (!descriptor?.enumerable || !("value" in descriptor)) throw new QrContractError();
+      return [field, descriptor.value] as const;
+    });
+    const raw = Object.fromEntries(entries);
+    const brand = String(parseDiningReference(raw.brandReference));
+    const store = String(parseDiningReference(raw.storeReference));
+    const publicStore = String(parseDiningReference(raw.publicStoreReference));
+    const publicTable = String(parseDiningReference(raw.publicTableReference));
+    const at = parseDiningInstant(raw.observedAt);
+    const context = parseQrTableContextEvidence(value);
+    if (
+      raw.channel !== "DineIn" ||
+      !Number.isSafeInteger(raw.qrRevocationVersion) ||
+      raw.qrRevocationVersion < 1 ||
+      context.brandReference !== brand ||
+      context.storeReference !== store ||
+      context.publicStoreReference !== publicStore ||
+      context.publicTableReference !== publicTable ||
+      context.channel !== "DineIn" ||
+      context.tableReference === null ||
+      context.revocationVersion !== raw.qrRevocationVersion ||
+      context.brandLifecycle !== "Active" ||
+      context.storeLifecycle !== "Active" ||
+      context.tableLifecycle !== "Active" ||
+      context.assignmentState !== "Active" ||
+      context.qrState !== "Enabled" ||
+      String(context.validUntil) <= String(at)
+    )
+      throw new QrContractError();
+    return context;
+  } catch {
+    throw new QrContractError();
+  }
 }

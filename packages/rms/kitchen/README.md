@@ -105,7 +105,7 @@ timestamps and digests only.
 - Allowed asynchronous dependencies: consumes `rms.ordering.order-confirmed.v1` plus
   `rms.kitchen.kitchen-work-created.v1`, `rms.kitchen.kitchen-work-accepted.v1`,
   `rms.kitchen.kitchen-work-started.v1`, `rms.kitchen.kitchen-item-progress-recorded.v1` and
-  `rms.kitchen.kitchen-item-completed.v1`; publishes the same five Kitchen Events plus the five
+  `rms.kitchen.kitchen-item-completed.v1`; publishes those Kitchen Events and the existing item/order-ready Events declared in its manifest, plus the five
   Store-scoped `ProductionBatch*` lifecycle Events registered by WP-2111.
 - Forbidden dependencies: Ordering private paths/repository/tables, current Catalog/Recipe lookup,
   HTTP/ORM/Provider SDK, cross-domain transaction and inferred routing.

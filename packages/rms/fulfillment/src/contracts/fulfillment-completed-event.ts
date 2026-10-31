@@ -5,7 +5,8 @@ export interface FulfillmentCompletedPayload extends JsonObject {
   readonly orderReference: string;
   readonly handoffRecordReference: string;
   readonly storeReference: string;
-  readonly verificationMethod: "Opaque" | "HumanCode";
+  /** WP-2423: InPerson when staff verified a customer whose pickup proof expired or was never issued. */
+  readonly verificationMethod: "Opaque" | "HumanCode" | "InPerson";
   readonly completedAt: string;
 }
 

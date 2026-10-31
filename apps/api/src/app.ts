@@ -1,4 +1,111 @@
+import {
+  createCustomerOrderMessagingOptionsHandler,
+  createCustomerOrderRecoveryHandler,
+  createNotificationFeedbackHandlers,
+  customerOrderMessagingOptionsRoute,
+  customerOrderRecoveryRoute,
+  notificationFeedbackRoute,
+} from "./customer-order-messaging-http.js";
+import {
+  createCustomerContactRemovalHandler,
+  customerContactRemovalRoute,
+} from "./customer-contact-removal.js";
+import {
+  createCustomerSessionBootstrapHandler,
+  customerSessionBootstrapRoute,
+} from "./customer-session-bootstrap.js";
+import {
+  createCustomerStoreProfileHandler,
+  customerStoreProfileRoute,
+} from "./customer-store-profile.js";
+import {
+  customerPickupCodeRoute,
+  type CustomerPickupCodeHandler,
+  unavailableCustomerPickupCodeHandler,
+} from "./customer-pickup-code.js";
+import {
+  customerReceiptRoute,
+  CustomerReceiptHandler,
+  unavailableCustomerReceiptHandler,
+} from "./customer-receipt.js";
+import {
+  customerOrderStatusRoute,
+  type CustomerOrderStatusHandler,
+  unavailableCustomerOrderStatusHandler,
+} from "./customer-order-status.js";
+import {
+  customerDiningSessionRoute,
+  type CustomerDiningSessionHandler,
+  unavailableCustomerDiningSessionHandler,
+} from "./customer-dining-session.js";
+import {
+  customerDiningInvitationRoute,
+  type CustomerDiningInvitationHandler,
+  unavailableCustomerDiningInvitationHandler,
+} from "./customer-dining-invitation.js";
+import {
+  customerDiningStaffCallRoute,
+  customerDiningStaffCallWithdrawRoute,
+  type CustomerDiningStaffCallHandler,
+  unavailableCustomerDiningStaffCallHandler,
+} from "./customer-dining-staff-call.js";
+import {
+  CustomerPaymentResultHandler,
+  customerPaymentResultRoute,
+  unavailableCustomerPaymentResultHandler,
+} from "./customer-payment-result.js";
+import {
+  CustomerPaymentHandoffHandler,
+  customerPaymentHandoffRoute,
+  unavailableCustomerPaymentHandoffHandler,
+} from "./customer-payment-handoff.js";
+import {
+  CustomerPaymentIntentHandler,
+  customerPaymentIntentRoute,
+  unavailableCustomerPaymentIntentHandler,
+} from "./customer-payment-intent.js";
+import {
+  CustomerCheckoutSessionHandler,
+  CustomerCheckoutSessionReadHandler,
+  customerCheckoutSessionReadRoute,
+  customerCheckoutSessionRoute,
+  unavailableCustomerCheckoutSessionHandler,
+} from "./customer-checkout-session.js";
+import {
+  customerCheckoutDetailsRoute,
+  customerCheckoutDetailsCurrentRoute,
+  customerCheckoutPolicyRoute,
+  type CustomerCheckoutDetailsHandler,
+  unavailableCustomerCheckoutDetailsHandler,
+} from "./customer-checkout-details.js";
+import {
+  customerOrderSubmissionRoute,
+  type CustomerOrderSubmissionHandler,
+  unavailableCustomerOrderSubmissionHandler,
+} from "./customer-order-submission.js";
+import {
+  CustomerDiningJoinHandler,
+  customerDiningJoinRoute,
+  customerDiningQrJoinRoute,
+  unavailableCustomerDiningJoinHandler,
+} from "./customer-dining-join.js";
+import {
+  CustomerDiningBindingHandler,
+  customerDiningBindingRoutes,
+  unavailableCustomerDiningBindingHandler,
+} from "./customer-dining-binding.js";
+import {
+  CustomerCartBindingHandler,
+  customerCartBindingRoutes,
+  unavailableCustomerCartBindingHandler,
+} from "./customer-cart-binding.js";
+import { staffContentLocaleMiddleware } from "./staff-content-locale.js";
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
+import {
+  type PaymentProviderWebhookHandler,
+  paymentProviderWebhookRoute,
+  unavailablePaymentProviderWebhookHandler,
+} from "./payment-provider-webhook.js";
 import type { CoreTelemetry } from "@bop-rms/observability";
 import {
   sendInvalidCustomerEntryRequest,
@@ -12,6 +119,8 @@ import {
 } from "./customer-cart.js";
 import { type CustomerMenuHandler, unavailableCustomerMenuHandler } from "./customer-menu.js";
 import { type CustomerQuoteHandler, unavailableCustomerQuoteHandler } from "./customer-quote.js";
+import { apiRouteTemplates } from "./http-route-templates.js";
+import { merchantBrandApplicationRoutes } from "./merchant-brand-application.js";
 import { HealthReadinessController } from "./health-readiness.js";
 import {
   createHttpRequestLimitMiddleware,
@@ -22,9 +131,20 @@ import {
   createUnavailableMerchantCatalogRouter,
   type MerchantCatalogRouterOptions,
   createMerchantCatalogRouter,
-  merchantCatalogRoutes,
 } from "./merchant-catalog.js";
 import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
+import {
+  createMerchantBrandAdministrationRouter,
+  type MerchantBrandAdministrationHttpOptions,
+} from "./merchant-brand-administration-http.js";
+import {
+  createPlatformAuthenticationRouter,
+  type PlatformAuthenticationHttpOptions,
+} from "./platform-authentication-http.js";
+import {
+  createPlatformTemplateAdministrationRouter,
+  type PlatformTemplateAdministrationHttpOptions,
+} from "./platform-template-administration-http.js";
 import { type RealtimeTransport, unavailableRealtimeHandler } from "./realtime.js";
 import {
   createRequestCorrelationMiddleware,
@@ -32,28 +152,6 @@ import {
   markRequestError,
   type RequestCompletionLogger,
 } from "./request-correlation.js";
-
-const routeTemplates = [
-  "/__acceptance/request-command-event",
-  "/bff/customer/entry",
-  customerCartRoutes.current,
-  "/bff/realtime",
-  "/api/v1/public/stores/:store_public_id/menu",
-  customerCartRoutes.create,
-  customerCartRoutes.read,
-  customerCartRoutes.addItem,
-  customerCartRoutes.updateItem,
-  "/api/v1/carts/:cart_id/quote",
-  ...Object.values(merchantCatalogRoutes),
-  "/merchant/login",
-  "/merchant/callback",
-  "/merchant/session",
-  "/merchant/store-context",
-  "/merchant/logout",
-  "/health",
-  "/ready",
-  "unmatched",
-] as const;
 
 export interface RequestErrorLogger {
   error(input: {
@@ -67,14 +165,50 @@ export interface RequestErrorLogger {
 export interface AppOptions {
   correlationAcceptanceHandler?: RequestHandler;
   customerCart?: CustomerCartHandler;
+  customerCartBinding?: CustomerCartBindingHandler;
+  customerDiningJoin?: CustomerDiningJoinHandler;
+  customerDiningBinding?: CustomerDiningBindingHandler;
   customerEntry?: CustomerEntryHandler;
   customerMenu?: CustomerMenuHandler;
+  customerPaymentIntent?: CustomerPaymentIntentHandler;
+  customerPaymentHandoff?: CustomerPaymentHandoffHandler;
+  customerPaymentResult?: CustomerPaymentResultHandler;
   customerQuote?: CustomerQuoteHandler;
+  customerCheckoutSessionRead?: CustomerCheckoutSessionReadHandler;
+  customerCheckoutSession?: CustomerCheckoutSessionHandler;
+  customerOrderSubmission?: CustomerOrderSubmissionHandler;
+  customerOrderStatus?: CustomerOrderStatusHandler;
+  /** WP-2423 Q8: the dine-in guest's own table view (CUST-DINE-IN-SESSION). */
+  customerDiningSession?: CustomerDiningSessionHandler;
+  /** WP-2423 DEC-DINING-GUEST-INVITATION: the table's Host invites the next guest. */
+  customerDiningInvitation?: CustomerDiningInvitationHandler;
+  /** WP-2423 Q28 DEC-DINING-STAFF-CALL: a seated guest asks staff to come to the table. */
+  customerDiningStaffCall?: CustomerDiningStaffCallHandler;
+  customerSessionBootstrap?: ReturnType<typeof createCustomerSessionBootstrapHandler>;
+  /** WP-2423: the guest's Store — published address, phone, open now and today's hours. */
+  customerStoreProfile?: ReturnType<typeof createCustomerStoreProfileHandler>;
+  customerPickupCode?: CustomerPickupCodeHandler;
+  customerReceipt?: CustomerReceiptHandler;
+  /** WP-2423 Q16: the customer removes their own pickup contact from the order page. */
+  customerContactRemoval?: RequestHandler;
+  customerCheckoutDetails?: CustomerCheckoutDetailsHandler;
+  /** DEC-PILOT-NOTIFICATIONS: which order-message channels can send (default: none). */
+  customerOrderMessagingOptions?: RequestHandler;
+  /** DEC-PILOT-NOTIFICATIONS R1: IDR-0031 one-time order link consume. */
+  customerOrderRecovery?: RequestHandler;
+  /** DEC-PILOT-NOTIFICATIONS: SNS HTTPS subscription for SES feedback (absent: 404). */
+  notificationFeedback?: RequestHandler[];
+  /** WP-2423 DEC-STRIPE-PILOT-WIRING: Stripe webhook (raw body, before JSON parsing). */
+  paymentProviderWebhook?: PaymentProviderWebhookHandler;
   deploymentEnvironment?: DeploymentEnvironment;
   errorLogger?: RequestErrorLogger;
   healthReadiness?: HealthReadinessController;
   merchantCatalog?: MerchantCatalogRouterOptions;
   merchantBff?: MerchantBffRouterOptions;
+  brandAdministration?: MerchantBrandAdministrationHttpOptions;
+  brandApplication?: RequestHandler;
+  platformAuthentication?: PlatformAuthenticationHttpOptions;
+  platformTemplateAdministration?: PlatformTemplateAdministrationHttpOptions;
   now?: () => string;
   nowMilliseconds?: () => number;
   realtime?: RealtimeTransport;
@@ -121,16 +255,43 @@ function createErrorHandler(errorLogger: RequestErrorLogger | undefined): ErrorR
 }
 
 export function createApp({
+  customerOrderMessagingOptions,
+  customerOrderRecovery,
+  notificationFeedback,
   correlationAcceptanceHandler,
   customerCart,
+  customerCartBinding,
+  customerDiningJoin,
+  customerDiningBinding,
   customerEntry,
   customerMenu,
+  customerPaymentIntent,
+  customerPaymentHandoff,
+  customerPaymentResult,
   customerQuote,
+  customerCheckoutSessionRead,
+  customerCheckoutSession,
+  customerOrderSubmission,
+  customerOrderStatus,
+  customerDiningSession,
+  customerDiningInvitation,
+  customerDiningStaffCall,
+  customerSessionBootstrap,
+  customerStoreProfile,
+  customerPickupCode,
+  customerReceipt,
+  customerContactRemoval,
+  customerCheckoutDetails,
+  paymentProviderWebhook,
   deploymentEnvironment = "development",
   errorLogger,
   healthReadiness,
   merchantCatalog,
   merchantBff,
+  brandAdministration,
+  brandApplication,
+  platformAuthentication,
+  platformTemplateAdministration,
   now = () => new Date().toISOString(),
   nowMilliseconds,
   realtime,
@@ -145,14 +306,37 @@ export function createApp({
     createRequestCorrelationMiddleware({
       ...(nowMilliseconds === undefined ? {} : { nowMilliseconds }),
       ...(requestLogger === undefined ? {} : { logger: requestLogger }),
-      routeTemplates,
+      routeTemplates: apiRouteTemplates,
       ...(telemetry === undefined ? {} : { telemetry }),
       ...(uuidV7Factory === undefined ? {} : { uuidV7Factory }),
     }),
   );
   app.use(...createHttpSecurityHeadersMiddleware(deploymentEnvironment));
   app.use(createHttpRequestLimitMiddleware());
+  if (platformAuthentication !== undefined)
+    app.use("/platform/auth", createPlatformAuthenticationRouter(platformAuthentication));
+  if (platformTemplateAdministration !== undefined)
+    app.use(
+      "/platform/templates",
+      createPlatformTemplateAdministrationRouter(platformTemplateAdministration),
+    );
+  if (brandAdministration !== undefined)
+    app.use(
+      "/merchant/organization/brands",
+      createMerchantBrandAdministrationRouter(brandAdministration),
+    );
+  // Owner 2026-10-24: the staff member's chosen language for Store content names on /merchant reads.
+  app.use("/merchant", staffContentLocaleMiddleware());
   if (merchantBff !== undefined) app.use("/merchant", createMerchantBffRouter(merchantBff));
+  // SNS posts JSON as text/plain: parsed by its own route-level text parser, before JSON parsing.
+  app.post(
+    notificationFeedbackRoute,
+    ...(notificationFeedback ?? createNotificationFeedbackHandlers({})),
+  );
+  // Stripe signs the exact bytes: this route reads its body raw, before the JSON parser.
+  if (paymentProviderWebhook !== undefined)
+    app.post(paymentProviderWebhookRoute, ...paymentProviderWebhook.handlers());
+  else app.post(paymentProviderWebhookRoute, unavailablePaymentProviderWebhookHandler);
   app.use(express.json({ limit: "64kb", strict: true }));
   app.use((_request, response, next) => {
     response.setHeader("Cache-Control", "no-store");
@@ -165,12 +349,49 @@ export function createApp({
   });
   app.get("/bff/realtime", realtime?.handler() ?? unavailableRealtimeHandler);
   app.post("/bff/customer/entry", customerEntry?.handler() ?? unavailableCustomerEntryHandler);
+  app.post(
+    customerCartBindingRoutes.prepare,
+    customerCartBinding?.prepare() ?? unavailableCustomerCartBindingHandler,
+  );
+  app.post(
+    customerCartBindingRoutes.activate,
+    customerCartBinding?.activate() ?? unavailableCustomerCartBindingHandler,
+  );
+  app.post(
+    customerCartBindingRoutes.complete,
+    customerCartBinding?.complete() ?? unavailableCustomerCartBindingHandler,
+  );
+
+  app.post(
+    customerDiningJoinRoute,
+    customerDiningJoin?.join() ?? unavailableCustomerDiningJoinHandler,
+  );
+  app.post(
+    customerDiningQrJoinRoute,
+    customerDiningJoin?.qrJoin() ?? unavailableCustomerDiningJoinHandler,
+  );
+  app.post(
+    customerDiningBindingRoutes.prepare,
+    customerDiningBinding?.prepare() ?? unavailableCustomerDiningBindingHandler,
+  );
+  app.post(
+    customerDiningBindingRoutes.activate,
+    customerDiningBinding?.activate() ?? unavailableCustomerDiningBindingHandler,
+  );
+  app.post(
+    customerDiningBindingRoutes.complete,
+    customerDiningBinding?.complete() ?? unavailableCustomerDiningBindingHandler,
+  );
   app.get(customerCartRoutes.current, customerCart?.current() ?? unavailableCustomerCartHandler);
   app.get(
     "/api/v1/public/stores/:store_public_id/menu",
     customerMenu?.handler() ?? unavailableCustomerMenuHandler,
   );
   app.post(customerCartRoutes.create, customerCart?.create() ?? unavailableCustomerCartHandler);
+  app.post(
+    customerCartRoutes.replacement,
+    customerCart?.replace() ?? unavailableCustomerCartHandler,
+  );
   app.get(customerCartRoutes.read, customerCart?.read() ?? unavailableCustomerCartHandler);
   app.post(customerCartRoutes.addItem, customerCart?.addItem() ?? unavailableCustomerCartHandler);
   app.patch(
@@ -180,6 +401,97 @@ export function createApp({
   app.delete(
     customerCartRoutes.removeItem,
     customerCart?.removeItem() ?? unavailableCustomerCartHandler,
+  );
+  app.post(
+    customerCheckoutPolicyRoute,
+    customerCheckoutDetails?.policy() ?? unavailableCustomerCheckoutDetailsHandler,
+  );
+  app.post(
+    customerCheckoutDetailsCurrentRoute,
+    customerCheckoutDetails?.current() ?? unavailableCustomerCheckoutDetailsHandler,
+  );
+  app.post(
+    customerCheckoutDetailsRoute,
+    customerCheckoutDetails?.handler() ?? unavailableCustomerCheckoutDetailsHandler,
+  );
+  app.get(
+    customerPaymentResultRoute,
+    customerPaymentResult?.handler() ?? unavailableCustomerPaymentResultHandler,
+  );
+  app.post(
+    customerPaymentHandoffRoute,
+    customerPaymentHandoff?.handler() ?? unavailableCustomerPaymentHandoffHandler,
+  );
+  app.post(
+    customerPaymentIntentRoute,
+    customerPaymentIntent?.handler() ?? unavailableCustomerPaymentIntentHandler,
+  );
+  app.get(
+    customerCheckoutSessionReadRoute,
+    customerCheckoutSessionRead?.handler() ?? unavailableCustomerCheckoutSessionHandler,
+  );
+  app.post(
+    customerCheckoutSessionRoute,
+    customerCheckoutSession?.handler() ?? unavailableCustomerCheckoutSessionHandler,
+  );
+  app.get(
+    customerSessionBootstrapRoute,
+    customerSessionBootstrap ?? createCustomerSessionBootstrapHandler(),
+  );
+  app.get(customerStoreProfileRoute, customerStoreProfile ?? createCustomerStoreProfileHandler());
+  app.get(
+    customerPickupCodeRoute,
+    customerPickupCode?.handler() ?? unavailableCustomerPickupCodeHandler,
+  );
+  app.get(customerReceiptRoute, customerReceipt?.handler() ?? unavailableCustomerReceiptHandler);
+  app.post(
+    customerContactRemovalRoute,
+    customerContactRemoval ??
+      createCustomerContactRemovalHandler({ allowedOrigin: "https://127.0.0.1" }),
+  );
+  app.get(
+    customerOrderMessagingOptionsRoute,
+    customerOrderMessagingOptions ??
+      createCustomerOrderMessagingOptionsHandler({
+        availability: () => ({ sms: false, email: false }),
+      }),
+  );
+  app.post(
+    customerOrderRecoveryRoute,
+    customerOrderRecovery ??
+      createCustomerOrderRecoveryHandler({ allowedOrigin: "https://127.0.0.1" }),
+  );
+  app.get(
+    customerOrderStatusRoute,
+    customerOrderStatus?.handler() ?? unavailableCustomerOrderStatusHandler,
+  );
+  app.get(
+    customerDiningSessionRoute,
+    customerDiningSession?.handler() ?? unavailableCustomerDiningSessionHandler,
+  );
+  app.get(
+    customerDiningInvitationRoute,
+    customerDiningInvitation?.read() ?? unavailableCustomerDiningInvitationHandler,
+  );
+  app.post(
+    customerDiningInvitationRoute,
+    customerDiningInvitation?.issue() ?? unavailableCustomerDiningInvitationHandler,
+  );
+  app.get(
+    customerDiningStaffCallRoute,
+    customerDiningStaffCall?.read() ?? unavailableCustomerDiningStaffCallHandler,
+  );
+  app.post(
+    customerDiningStaffCallRoute,
+    customerDiningStaffCall?.call() ?? unavailableCustomerDiningStaffCallHandler,
+  );
+  app.post(
+    customerDiningStaffCallWithdrawRoute,
+    customerDiningStaffCall?.withdraw() ?? unavailableCustomerDiningStaffCallHandler,
+  );
+  app.post(
+    customerOrderSubmissionRoute,
+    customerOrderSubmission?.handler() ?? unavailableCustomerOrderSubmissionHandler,
   );
   app.post(
     "/api/v1/carts/:cart_id/quote",
@@ -192,6 +504,10 @@ export function createApp({
   );
   if (correlationAcceptanceHandler !== undefined)
     app.post("/__acceptance/request-command-event", correlationAcceptanceHandler);
+  if (brandApplication !== undefined) {
+    for (const route of merchantBrandApplicationRoutes) app.all(route, brandApplication);
+    app.use(brandApplication);
+  }
   app.use((_request, response) =>
     response
       .status(404)

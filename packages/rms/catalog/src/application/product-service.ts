@@ -1,4 +1,10 @@
-import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
+import {
+  createProductLifecycleReviewRequest,
+  requiresProductLifecycleReview,
+  validateProductLifecycleReviewEvidence,
+  type ProductLifecycleReviewEvidence,
+} from "../contracts/product-lifecycle-review.js";
+import { canonicalizeRfc8785, validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import { revalidateTenantContext } from "@bop/permission";
 
 import {
@@ -8,11 +14,14 @@ import {
   parseCatalogHash,
   parseCatalogInstant,
   parseCatalogLocale,
+  parseCatalogLifecycleReasonCode,
   parseCatalogReference,
   parseLocalizedNames,
   parseProductAggregate,
   parseProductLifecycle,
   parseProductVersion,
+  parseProductCategoryClassification,
+  parseProductCustomerPresentation,
   parseVariantSelections,
   transitionCatalogLifecycle,
   type CatalogInstant,
@@ -25,20 +34,38 @@ import type {
   CatalogProductPorts,
 } from "./ports/product-ports.js";
 import { parseOptionSetAggregate, validateProductOptionBinding } from "../domain/option-set.js";
+import { parseProductEditorContentDetails } from "../domain/product-editor-content.js";
 
-function exact(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {
+/** Map one value at a time: owner ports may share one caller transaction (no concurrent use). */
+async function mapInSequence<T, R>(
+  values: readonly T[],
+  map: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  for (const value of values) results.push(await map(value));
+  return results;
+}
+
+function exact(
+  value: unknown,
+  keys: readonly string[],
+  optional: readonly string[] = [],
+): Readonly<Record<string, unknown>> {
   if (
     value === null ||
     typeof value !== "object" ||
     Array.isArray(value) ||
     Object.getPrototypeOf(value) !== Object.prototype ||
-    Reflect.ownKeys(value).length !== keys.length ||
-    Reflect.ownKeys(value).some((key) => typeof key !== "string" || !keys.includes(key))
+    Reflect.ownKeys(value).length < keys.length ||
+    Reflect.ownKeys(value).length > keys.length + optional.length ||
+    Reflect.ownKeys(value).some(
+      (key) => typeof key !== "string" || ![...keys, ...optional].includes(key),
+    )
   )
     throw new CatalogError("CATALOG_INPUT_INVALID");
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const result: Record<string, unknown> = {};
-  for (const key of keys) {
+  for (const key of [...keys, ...optional.filter((key) => Object.hasOwn(value, key))]) {
     const descriptor = descriptors[key];
     if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable)
       throw new CatalogError("CATALOG_INPUT_INVALID");
@@ -54,9 +81,12 @@ function positive(value: unknown): number {
 function failure(error: unknown): never {
   if (
     error instanceof CatalogError &&
-    (error.code === "CATALOG_VERSION_CONFLICT" ||
+    (error.code === "CATALOG_PERMISSION_DENIED" ||
+      error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" ||
+      error.code === "CATALOG_VERSION_CONFLICT" ||
       error.code === "CATALOG_IDEMPOTENCY_CONFLICT" ||
-      error.code === "CATALOG_CODE_CONFLICT")
+      error.code === "CATALOG_CODE_CONFLICT" ||
+      error.code === "CATALOG_LIFECYCLE_CONFLICT")
   )
     throw error;
   throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
@@ -187,51 +217,64 @@ function verifiedRecord(
   });
 }
 async function validateOptionBindings(ports: CatalogProductPorts, aggregate: ProductAggregate) {
-  await Promise.all(
-    aggregate.draft.optionBindings.map(async (binding) => {
-      const candidate = await ports.optionSets
-        .resolveVersion({
-          brandReference: aggregate.brandReference,
-          optionSetReference: binding.optionSetReference,
-          optionSetVersionReference: binding.optionSetVersionReference,
-        })
-        .catch(failure);
-      if (candidate === null) throw new CatalogError("CATALOG_UNAVAILABLE");
-      let optionSet;
-      try {
-        optionSet = parseOptionSetAggregate(candidate);
-      } catch {
-        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-      }
-      if (optionSet.brandReference !== aggregate.brandReference)
-        throw new CatalogError("CATALOG_UNAVAILABLE");
-      validateProductOptionBinding(binding, optionSet);
-    }),
-  );
+  await mapInSequence(aggregate.draft.optionBindings, async (binding) => {
+    const candidate = await ports.optionSets
+      .resolveVersion({
+        brandReference: aggregate.brandReference,
+        optionSetReference: binding.optionSetReference,
+        optionSetVersionReference: binding.optionSetVersionReference,
+      })
+      .catch(failure);
+    if (candidate === null) throw new CatalogError("CATALOG_UNAVAILABLE");
+    let optionSet;
+    try {
+      optionSet = parseOptionSetAggregate(candidate);
+    } catch {
+      throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+    }
+    if (optionSet.brandReference !== aggregate.brandReference)
+      throw new CatalogError("CATALOG_UNAVAILABLE");
+    validateProductOptionBinding(binding, optionSet);
+  });
 }
 
 export function createCatalogProductService(ports: CatalogProductPorts) {
   return Object.freeze({
     async create(value: unknown) {
-      const raw = exact(value, [
-        "internalCode",
-        "productType",
-        "defaultLocale",
-        "localizedNames",
-        "taxClassificationReference",
-        "skus",
-        "operationReference",
-        "requestedAt",
-      ]);
+      const raw = exact(
+        value,
+        [
+          "internalCode",
+          "productType",
+          "defaultLocale",
+          "localizedNames",
+          "taxClassificationReference",
+          "skus",
+          "operationReference",
+          "requestedAt",
+        ],
+        ["categoryClassification", "editorContent", "customerPresentation"],
+      );
       const op = operationInput({
         operationReference: raw.operationReference,
         requestedAt: raw.requestedAt,
       });
+      const classification = Object.hasOwn(raw, "categoryClassification")
+        ? { categoryClassification: parseProductCategoryClassification(raw.categoryClassification) }
+        : {};
       const code = parseCatalogCode(raw.internalCode);
       if (raw.productType !== "PreparedFood" && raw.productType !== "NonAlcoholicBeverage")
         throw new CatalogError("CATALOG_INPUT_INVALID");
       const defaultLocale = parseCatalogLocale(raw.defaultLocale);
       const localizedNames = parseLocalizedNames(raw.localizedNames, defaultLocale);
+      const presentation = Object.hasOwn(raw, "customerPresentation")
+        ? {
+            customerPresentation: parseProductCustomerPresentation(
+              raw.customerPresentation,
+              defaultLocale,
+            ),
+          }
+        : {};
       const taxClassificationReference =
         raw.taxClassificationReference === null
           ? null
@@ -253,6 +296,26 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
           unitQuantity: parseCatalogDecimal(input.unitQuantity),
         });
       });
+      const completeContent = Object.hasOwn(raw, "editorContent")
+        ? (() => {
+            // A single explicit base SKU needs no Variant mapping. Its identity
+            // is allocated by the owner below; initial content contains no SKU IDs.
+            if (skuInputs.length > 1 || skuInputs.some((sku) => sku.variantSelections.length !== 0))
+              throw new CatalogError("CATALOG_INPUT_INVALID");
+            const editorContent = parseProductEditorContentDetails(raw.editorContent, {
+              defaultLocale,
+              skus: [],
+              optionBindings: [],
+            });
+            if (
+              skuInputs.length !== 0 &&
+              (editorContent.variantDimensions.length !== 0 ||
+                editorContent.variantCombinations.length !== 0)
+            )
+              throw new CatalogError("CATALOG_INPUT_INVALID");
+            return { editorContent };
+          })()
+        : {};
       const intent = parseCatalogHash(
         ports.references.hashIntent(
           `Create:${JSON.stringify({
@@ -262,6 +325,9 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
             localizedNames,
             taxClassificationReference,
             skus: skuInputs,
+            ...classification,
+            ...completeContent,
+            ...presentation,
             requestedAt: op.requestedAt,
           })}`,
         ),
@@ -307,6 +373,9 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
           localizedNames,
           taxClassificationReference,
           skus,
+          ...classification,
+          ...completeContent,
+          ...presentation,
           optionBindings: [],
           createdAt: op.requestedAt,
           updatedAt: op.requestedAt,
@@ -383,6 +452,12 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         )
       )
         throw new CatalogError("CATALOG_INPUT_INVALID");
+      if (
+        (current.draft.categoryClassification !== undefined &&
+          draft.categoryClassification === undefined) ||
+        (current.draft.editorContent !== undefined && draft.editorContent === undefined)
+      )
+        throw new CatalogError("CATALOG_INPUT_INVALID");
       for (const sku of draft.skus) {
         const existing = current.draft.skus.find(
           (candidate) => candidate.skuReference === sku.skuReference,
@@ -390,9 +465,14 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         if (
           existing !== undefined &&
           (existing.skuCode !== sku.skuCode ||
+            existing.unitOfSale !== sku.unitOfSale ||
+            existing.unitQuantity !== sku.unitQuantity ||
+            existing.lifecycle !== sku.lifecycle ||
             existing.createdAt !== sku.createdAt ||
             existing.createdByActorReference !== sku.createdByActorReference)
         )
+          throw new CatalogError("CATALOG_INPUT_INVALID");
+        if (existing === undefined && sku.lifecycle !== "Draft")
           throw new CatalogError("CATALOG_INPUT_INVALID");
         if (
           existing === undefined &&
@@ -412,9 +492,15 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         })
         .catch(failure);
       if (!available) throw new CatalogError("CATALOG_CODE_CONFLICT");
+      // WP-2423: a draft written without the customer description/photo (an editor that does not
+      // show them) keeps the current ones; an explicit empty value clears them.
+      const nextDraft =
+        draft.customerPresentation === undefined && current.draft.customerPresentation !== undefined
+          ? { ...draft, customerPresentation: current.draft.customerPresentation }
+          : draft;
       const next = parseProductAggregate({
         ...current,
-        draft,
+        draft: nextDraft,
         aggregateVersion: current.aggregateVersion + 1,
         updatedAt: op.requestedAt,
       });
@@ -434,14 +520,18 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
     },
 
     async changeLifecycle(value: unknown) {
-      const raw = exact(value, [
-        "productReference",
-        "skuReference",
-        "targetLifecycle",
-        "expectedAggregateVersion",
-        "operationReference",
-        "requestedAt",
-      ]);
+      const raw = exact(
+        value,
+        [
+          "productReference",
+          "skuReference",
+          "targetLifecycle",
+          "expectedAggregateVersion",
+          "operationReference",
+          "requestedAt",
+        ],
+        ["reasonCode"],
+      );
       const productReference = parseCatalogReference(raw.productReference);
       const skuReference =
         raw.skuReference === null ? null : parseCatalogReference(raw.skuReference);
@@ -451,13 +541,22 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         requestedAt: raw.requestedAt,
       });
       const target = parseProductLifecycle(raw.targetLifecycle);
+      const reasonCode = Object.hasOwn(raw, "reasonCode")
+        ? parseCatalogLifecycleReasonCode(raw.reasonCode)
+        : undefined;
       const intent = parseCatalogHash(
         ports.references.hashIntent(
-          `Lifecycle:${productReference}:${skuReference ?? "Product"}:${target}:${expected}`,
+          `Lifecycle:${productReference}:${skuReference ?? "Product"}:${target}:${expected}` +
+            (reasonCode === undefined ? "" : `:Reason:${reasonCode}`),
         ),
       );
       const prior = await replay(ports, op.operationReference, intent);
       if (prior !== null) return prior;
+      if (
+        reasonCode === undefined &&
+        ["Suspended", "Discontinued", "Archived", "Draft"].includes(target)
+      )
+        throw new CatalogError("CATALOG_INPUT_INVALID");
       const currentValue = await ports.repository.load(productReference).catch(failure);
       if (currentValue === null) throw new CatalogError("CATALOG_UNAVAILABLE");
       const current = parseProductAggregate(currentValue);
@@ -469,7 +568,10 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
         productReference,
         op.requestedAt,
       );
-      if (auth.brand !== current.brandReference)
+      if (
+        auth.brand !== current.brandReference ||
+        (reasonCode !== undefined && auth.audit.reasonCode !== reasonCode)
+      )
         throw new CatalogError("CATALOG_PERMISSION_DENIED");
       const next =
         skuReference === null
@@ -499,13 +601,65 @@ export function createCatalogProductService(ports: CatalogProductPorts) {
       )
         throw new CatalogError("CATALOG_UNAVAILABLE");
       const expectedRecord = record("ChangeLifecycle", op.operationReference, intent, next);
-      const saved = await ports.repository
-        .commit({
-          record: expectedRecord,
-          expectedAggregateVersion: expected,
-          audit: auth.audit,
-        })
-        .catch(failure);
+      const reviewRequest = requiresProductLifecycleReview(target)
+        ? createProductLifecycleReviewRequest({
+            aggregate: current,
+            actorReference: auth.actor,
+            skuReference,
+            operationReference: op.operationReference,
+            targetLifecycle: target,
+            reasonCode: reasonCode ?? "",
+          })
+        : null;
+      let mutationCalls = 0;
+      let committed: CatalogOperationRecord | null = null;
+      const mutate = async (review: ProductLifecycleReviewEvidence | null) => {
+        if (++mutationCalls !== 1) throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        const evidence =
+          reviewRequest === null
+            ? null
+            : validateProductLifecycleReviewEvidence(review, reviewRequest, op.requestedAt);
+        const audit =
+          evidence === null
+            ? auth.audit
+            : validateAuditRecord(
+                {
+                  ...auth.audit,
+                  afterSummary: {
+                    ...auth.audit.afterSummary,
+                    lifecycleReviewReference: evidence.reviewReference,
+                    lifecycleReviewPolicyReference: evidence.policyReference,
+                    lifecycleReviewPolicyVersion: evidence.policyVersion,
+                    lifecycleReviewRequestDigest: ports.references.hashIntent(
+                      canonicalizeRfc8785(evidence.request),
+                    ),
+                  },
+                },
+                Date.parse(op.requestedAt),
+              );
+        committed = await ports.repository
+          .commit({ record: expectedRecord, expectedAggregateVersion: expected, audit })
+          .catch(failure);
+        return committed;
+      };
+      let saved: CatalogOperationRecord;
+      if (reviewRequest === null) saved = await mutate(null);
+      else {
+        const provider = ports.lifecycleReview;
+        if (!provider || typeof provider.withCurrentReview !== "function")
+          throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        saved = await provider.withCurrentReview(reviewRequest, mutate).catch((error: unknown) => {
+          if (error instanceof CatalogError && error.code === "CATALOG_LIFECYCLE_CONFLICT")
+            throw error;
+          return failure(error);
+        });
+        if (
+          mutationCalls !== 1 ||
+          committed === null ||
+          canonicalizeRfc8785(saved) !== canonicalizeRfc8785(committed)
+        )
+          throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+      }
       return Object.freeze({
         status: "Applied" as const,
         aggregate: verifiedRecord(saved, expectedRecord, ports).aggregate,

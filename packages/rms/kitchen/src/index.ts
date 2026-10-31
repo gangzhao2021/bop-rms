@@ -97,6 +97,7 @@ export {
   createKitchenWorkPlanDigestBinding,
   parseKitchenCustomerNote,
   parseKitchenPlanningSource,
+  parseKitchenPreparationRequest,
   parseKitchenTicket,
   parseKitchenTicketCreationAction,
   parseKitchenTicketCreationResult,
@@ -115,6 +116,7 @@ export {
   parseKitchenWorkCreatedEnvelope,
 } from "./application/kitchen-work-created-event.js";
 export { createKitchenTicketIntakeAdapter } from "./application/kitchen-ticket-intake-adapter.js";
+export { createKitchenNotPreparedIntakeAdapter } from "./application/kitchen-not-prepared-intake.js";
 export type {
   KitchenStableReferencePurpose,
   KitchenTicketCommitResult,
@@ -289,6 +291,30 @@ export {
   createKitchenWorkLifecycleAuditSemanticBinding,
   createKitchenWorkLifecycleService,
 } from "./application/kitchen-work-lifecycle-service.js";
+export {
+  KitchenBatchCancellationError,
+  kitchenBatchCancellationErrorCodes,
+  kitchenWorkCancellationActionCode,
+  kitchenWorkCancellationReasonCode,
+  kitchenWorkCancelledEventConsumer,
+  kitchenWorkCancelledEventType,
+  type KitchenBatchCancellationErrorCode,
+  type KitchenBatchCancellationResult,
+  type KitchenOrderItemCancellationState,
+  type KitchenWorkCancellationRecord,
+  type KitchenWorkCancelledEnvelope,
+  type KitchenWorkCancelledItem,
+  type KitchenWorkCancelledPayload,
+} from "./contracts/kitchen-work-cancellation.js";
+export {
+  createKitchenWorkCancelledEnvelope,
+  parseKitchenWorkCancelledEnvelope,
+} from "./application/kitchen-work-cancelled-event.js";
+export {
+  createPostgresKitchenBatchCancellation,
+  listStoreKitchenOrderItemStates,
+  listStoreStartedKitchenBatches,
+} from "./infrastructure/persistence/kitchen-work-cancellation-store.js";
 export type {
   KitchenOrderItemReadyResult,
   KitchenWorkLifecycleActionCode,
@@ -342,3 +368,119 @@ export {
 export * from "./domain/production-batch.js";
 export * from "./application/production-batch-service.js";
 export * from "./application/ports/production-batch-ports.js";
+
+export { createPostgresKitchenTicketStore } from "./infrastructure/persistence/kitchen-ticket-store.js";
+
+export {
+  createPostgresKitchenRoutingConfigurationStore,
+  listKitchenStationCapabilities,
+} from "./infrastructure/persistence/kitchen-routing-configuration-store.js";
+export {
+  parseKitchenRoutingConfigurationRecord,
+  rebindKitchenRoutingEvidence,
+  type KitchenRoutingConfigurationRecord,
+} from "./domain/station-routing-configuration.js";
+
+export { createPostgresKitchenWorkLifecycleStore } from "./infrastructure/persistence/kitchen-work-lifecycle-store.js";
+
+export {
+  createPostgresKitchenCustomerStatusReader,
+  type KitchenCustomerBatchStatus,
+} from "./infrastructure/persistence/kitchen-customer-status-reader.js";
+
+export {
+  createPostgresKitchenQueueQueries,
+  listKitchenWorkItemPreparationFacts,
+  lockPostgresKitchenQueueRead,
+} from "./infrastructure/persistence/kitchen-queue-queries.js";
+
+export { createPostgresKitchenQueueProjectionStore } from "./infrastructure/persistence/kitchen-queue-projection-store.js";
+
+export { createKitchenQueueLifecycleProofBundle } from "./application/kitchen-queue-lifecycle-proof.js";
+
+export { createPostgresKitchenQueueSourceReader } from "./infrastructure/persistence/kitchen-queue-source-reader.js";
+
+export { createKitchenQueueRebuildSource } from "./application/kitchen-queue-rebuild-source.js";
+
+export { createPostgresKitchenQueueReadModel } from "./infrastructure/kitchen-queue-read-model.js";
+export { createPostgresKdsOperatorShiftStore } from "./infrastructure/persistence/kds-operator-shift-store.js";
+// WP-2423 Q26 (Handoff Section 26.6): Rework work items for dishes that are made again.
+export {
+  KitchenReworkError,
+  kitchenReworkCancelledEventConsumer,
+  kitchenReworkCancelReasons,
+  kitchenReworkCreatedEventConsumer,
+  kitchenReworkErrorCodes,
+  kitchenReworkMaximumPerOriginal,
+  kitchenReworkNoteMaximumLength,
+  kitchenReworkNotReadyWindowMs,
+  kitchenReworkOpenStatuses,
+  kitchenReworkOriginalWindowMs,
+  kitchenReworkPermission,
+  kitchenReworkReasons,
+  kitchenReworkRecentWindowMs,
+  kitchenReworkWasteApplies,
+  parseKitchenReworkCommand,
+  type CreateKitchenReworkCommand,
+  type AdvanceKitchenReworkCommand,
+  type CancelKitchenReworkCommand,
+  type KitchenReworkAction,
+  type KitchenReworkCancelledEnvelope,
+  type KitchenReworkCancelledPayload,
+  type KitchenReworkCancelReason,
+  type KitchenReworkCommand,
+  type KitchenReworkCreatedEnvelope,
+  type KitchenReworkCreatedPayload,
+  type KitchenReworkErrorCode,
+  type KitchenReworkItem,
+  type KitchenReworkReason,
+  type KitchenReworkResult,
+  type KitchenReworkStatus,
+} from "./contracts/kitchen-rework.js";
+export {
+  createKitchenReworkCreatedEnvelope,
+  parseKitchenReworkCreatedEnvelope,
+} from "./application/kitchen-rework-created-event.js";
+export {
+  createKitchenReworkCancelledEnvelope,
+  parseKitchenReworkCancelledEnvelope,
+} from "./application/kitchen-rework-cancelled-event.js";
+export {
+  createPostgresKitchenReworkStore,
+  listOpenKitchenReworkByOrder,
+  listOpenKitchenReworkItems,
+  readKitchenReworkCancellation,
+} from "./infrastructure/persistence/kitchen-rework-store.js";
+// WP-2423 DEC-KITCHEN-STALE-TICKETS: a manager closes a ticket left from an earlier business day.
+export {
+  KitchenStaleTicketError,
+  kitchenStaleTicketClosePermission,
+  kitchenStaleTicketCloseReasons,
+  kitchenStaleTicketClosedActionCode,
+  kitchenStaleTicketErrorCodes,
+  kitchenStaleTicketFoodMade,
+  kitchenTicketClosedInventoryConsumer,
+  kitchenTicketClosedQueueConsumer,
+  parseCloseStaleKitchenTicketCommand,
+  parseKitchenBusinessDate,
+  type CloseStaleKitchenTicketCommand,
+  type KitchenStaleTicketCloseReason,
+  type KitchenStaleTicketCloseResult,
+  type KitchenStaleTicketClosure,
+  type KitchenStaleTicketErrorCode,
+  type KitchenStaleTicketOpenWorkItem,
+  type KitchenTicketClosedEnvelope,
+  type KitchenTicketClosedPayload,
+  type KitchenTicketClosedWorkItem,
+} from "./contracts/kitchen-stale-ticket.js";
+export {
+  createKitchenTicketClosedEnvelope,
+  parseKitchenTicketClosedEnvelope,
+} from "./application/kitchen-ticket-closed-event.js";
+export {
+  createPostgresKitchenStaleTicketStore,
+  listClosedKitchenTickets,
+} from "./infrastructure/persistence/kitchen-stale-ticket-store.js";
+export * from "./infrastructure/persistence/kitchen-combo-part-store.js";
+export * from "./infrastructure/persistence/kitchen-not-prepared-store.js";
+export * from "./infrastructure/persistence/kitchen-section-store.js";

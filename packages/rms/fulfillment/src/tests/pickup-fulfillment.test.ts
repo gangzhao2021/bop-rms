@@ -1,3 +1,7 @@
+import {
+  encodePickupFulfillmentRecord,
+  decodePickupFulfillmentRecord,
+} from "../application/pickup-fulfillment-record.js";
 import { createHash } from "node:crypto";
 
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -250,5 +254,53 @@ describe("WP-1600 Pickup Fulfillment Aggregate", () => {
     });
     expect(f.audits).toBe(1);
     expect(PickupFulfillmentError).toBeTypeOf("function");
+  });
+});
+
+describe("Pickup fulfillment original record", () => {
+  it("round-trips a service-generated effect without changing original types", async () => {
+    const f = fixture();
+    await f.service.consume(f.transaction, event());
+    const record = encodePickupFulfillmentRecord(f.stored, sha);
+    expect(decodePickupFulfillmentRecord(record, sha)).toEqual(f.stored);
+    expect(JSON.parse(record).effect.aggregate.sourceAggregateVersion).toBe("2");
+    expect(JSON.parse(record).effect.aggregate.aggregateVersion).toBe(1);
+  });
+  it.each(["0", "01", "-1", "1e0", "9223372036854775808", 2, null])(
+    "rejects invalid stored version %s",
+    async (version) => {
+      const f = fixture();
+      await f.service.consume(f.transaction, event());
+      const record = JSON.parse(encodePickupFulfillmentRecord(f.stored, sha));
+      record.effect.aggregate.sourceAggregateVersion = version;
+      expect(() => decodePickupFulfillmentRecord(JSON.stringify(record), sha)).toThrow(
+        PickupFulfillmentError,
+      );
+    },
+  );
+  it("rejects altered quantity, digest, record version and unknown fields", async () => {
+    const f = fixture();
+    await f.service.consume(f.transaction, event());
+    const original = encodePickupFulfillmentRecord(f.stored, sha);
+    for (const mutate of [
+      (r: ReturnType<typeof JSON.parse>) => {
+        r.effect.aggregate.items[0].orderedQuantity = 3;
+      },
+      (r: ReturnType<typeof JSON.parse>) => {
+        r.effect.effectDigest = sha("changed");
+      },
+      (r: ReturnType<typeof JSON.parse>) => {
+        r.recordVersion = 2;
+      },
+      (r: ReturnType<typeof JSON.parse>) => {
+        r.extra = true;
+      },
+    ]) {
+      const record = JSON.parse(original);
+      mutate(record);
+      expect(() => decodePickupFulfillmentRecord(JSON.stringify(record), sha)).toThrow(
+        PickupFulfillmentError,
+      );
+    }
   });
 });

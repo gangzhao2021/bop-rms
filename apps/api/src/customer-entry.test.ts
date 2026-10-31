@@ -8,6 +8,7 @@ import {
   type CustomerEntryPort,
   type CustomerEntryPortInput,
   type CustomerEntryPortResult,
+  type CustomerEntryRequestAdmission,
 } from "./customer-entry.js";
 
 const ORIGIN = "https://customer.example.test";
@@ -97,8 +98,12 @@ function referenceFactory(): () => string {
 function customerEntry(
   port: MutablePort,
   uuidV7Factory = referenceFactory(),
+  requestAdmission: CustomerEntryRequestAdmission | null = {
+    consume: async () => ({ status: "Allowed" }),
+  },
 ): CustomerEntryHandler {
   return new CustomerEntryHandler({
+    ...(requestAdmission === null ? {} : { requestAdmission }),
     allowedOrigin: ORIGIN,
     now: () => "2026-07-30T05:00:00.000Z",
     port,
@@ -184,7 +189,7 @@ describe("WP-1004 Customer-entry contract", () => {
 
     expect(response.status).toBe(201);
     expect(response.headers.get("set-cookie")).toBe(
-      `__Host-bop-guest=${SESSION_CREDENTIAL}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      `__Host-bop-guest=${SESSION_CREDENTIAL}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax`,
     );
     expect(await response.json()).toEqual({
       schemaVersion: 2,
@@ -208,6 +213,28 @@ describe("WP-1004 Customer-entry contract", () => {
         requestedAt: "2026-07-30T05:00:00.000Z",
       },
     ]);
+  });
+
+  it("says whether a party is seated at the scanned table, and only at a table", async () => {
+    const port = new MutablePort();
+    const serverPort = await listen(customerEntry(port));
+    port.result = established({ tableOpen: false });
+    const response = await post(serverPort);
+    expect(response.status).toBe(201);
+    expect(((await response.json()) as { tableOpen?: unknown }).tableOpen).toBe(false);
+    port.result = established({ tableOpen: true });
+    expect(((await (await post(serverPort)).json()) as { tableOpen?: unknown }).tableOpen).toBe(
+      true,
+    );
+    // A pickup code carries no table state; a malformed one is refused, not passed on.
+    port.result = established({
+      channel: "Pickup",
+      publicTableReference: null,
+      tableOpen: false,
+    });
+    expect((await post(serverPort)).status).toBe(503);
+    port.result = established({ tableOpen: "no" as never });
+    expect((await post(serverPort)).status).toBe(503);
   });
 
   it("sets no-store, non-index and referrer controls without CORS or retry invention", async () => {
@@ -367,6 +394,105 @@ describe("WP-1004 Customer-entry contract", () => {
     }
   });
 
+  it("WP-2423 Q4: says a closed Store is not taking orders, with today's hours, and sets no cookie", async () => {
+    const port = new MutablePort();
+    port.result = {
+      status: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      operatingState: "Closed",
+      todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+      // Decision 16: a holiday today, and when the Store opens next.
+      todayKind: "Holiday",
+      nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+      localDate: "2026-12-25",
+    };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_not_accepting",
+      messageKey: "customer.entry.not_accepting",
+      recovery: { action: "TryLaterOrAskStaff", storeSelection: "Hidden" },
+      store: {
+        storeDisplayName: "Synthetic Store",
+        operatingState: "Closed",
+        todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "21:30:00", endsNextDay: false }],
+        todayKind: "Holiday",
+        nextOpening: { localDate: "2026-12-26", startLocalTime: "11:00:00" },
+        localDate: "2026-12-25",
+      },
+    });
+    port.result = { ...(port.result as object), storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
+  it("WP-2423 item 8 ⑦ 1b: says the Store takes dine-in orders only, and sets no cookie", async () => {
+    const port = new MutablePort();
+    port.result = { status: "ServiceNotOffered", storeDisplayName: "Synthetic Store" };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_service_not_offered",
+      messageKey: "customer.entry.pickup_not_offered",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: { storeDisplayName: "Synthetic Store" },
+    });
+    port.result = { status: "ServiceNotOffered", storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
+  it("a table no party is seated at starts no visit (no cookie) and gives the menu's public context", async () => {
+    const port = new MutablePort();
+    port.result = {
+      status: "TableNotOpen",
+      brandDisplayName: "BOP Kitchen",
+      storeDisplayName: "Synthetic Market Store",
+      publicStoreReference: STORE_REFERENCE,
+      locale: "en-CA",
+    };
+    const response = await post(await listen(customerEntry(port)));
+    expect(response.status).toBe(409);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_table_not_open",
+      messageKey: "customer.entry.table_not_open",
+      recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      store: {
+        brandDisplayName: "BOP Kitchen",
+        storeDisplayName: "Synthetic Market Store",
+        publicStoreReference: STORE_REFERENCE,
+        locale: "en-CA",
+      },
+    });
+    port.result = { ...(port.result as object), storeDisplayName: "<script>" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
+  it("WP-2423 Q11: tells a guest with a replaced or turned-off table code to ask staff, with no cookie", async () => {
+    const port = new MutablePort();
+    for (const [reason, messageKey] of [
+      ["Replaced", "customer.entry.qr_replaced"],
+      ["TurnedOff", "customer.entry.qr_turned_off"],
+    ] as const) {
+      port.result = { status: "QrRetired", reason };
+      const response = await post(await listen(customerEntry(port)));
+      expect(response.status).toBe(410);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(await response.json()).toEqual({
+        schemaVersion: 1,
+        code: "entry_qr_retired",
+        messageKey,
+        recovery: { action: "AskStaff", storeSelection: "Hidden" },
+      });
+    }
+    port.result = { status: "QrRetired", reason: "Stolen" };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
+  });
+
   it("maps a strict port InvalidRequest without reflecting the QR", async () => {
     const port = new MutablePort();
     port.result = { status: "InvalidRequest" };
@@ -496,5 +622,75 @@ describe("WP-1004 Customer-entry contract", () => {
       channel: "Pickup",
       publicTableReference: null,
     });
+  });
+});
+
+describe("Customer entry request admission", () => {
+  it("returns generic429 before creating Guest and never issues a cookie", async () => {
+    const port = new MutablePort();
+    const response = await post(
+      await listen(
+        customerEntry(port, referenceFactory(), {
+          consume: async () => ({ status: "RateLimited", retryAfterSeconds: 37 }),
+        }),
+      ),
+    );
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("37");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      code: "entry_rate_limited",
+      messageKey: "customer.entry.rate_limited",
+      recovery: { action: "RetryOrAskStaff", storeSelection: "Hidden" },
+    });
+    expect(port.calls).toHaveLength(0);
+  });
+  it("fails closed for absent, unavailable, failing or malformed admission", async () => {
+    const admissions: (CustomerEntryRequestAdmission | null)[] = [
+      null,
+      { consume: async () => ({ status: "Unavailable" }) },
+      {
+        consume: async () => {
+          throw new Error("private limiter detail");
+        },
+      },
+      { consume: async () => ({ status: "RateLimited", retryAfterSeconds: 0 }) },
+      { consume: async () => ({ status: "RateLimited", retryAfterSeconds: 86401 }) },
+    ];
+    for (const admission of admissions) {
+      const port = new MutablePort();
+      const response = await post(await listen(customerEntry(port, referenceFactory(), admission)));
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBeNull();
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(await response.json()).toMatchObject({ code: "entry_service_unavailable" });
+      expect(port.calls).toHaveLength(0);
+    }
+  });
+  it("passes only direct peer address and server time, ignoring forged forwarding headers", async () => {
+    const inputs: unknown[] = [];
+    const port = new MutablePort();
+    const response = await post(
+      await listen(
+        customerEntry(port, referenceFactory(), {
+          consume: async (input) => {
+            inputs.push(input);
+            return { status: "Allowed" };
+          },
+        }),
+      ),
+      { qrToken: TOKEN },
+      requestHeaders({
+        "x-forwarded-for": "203.0.113.99",
+        forwarded: "for=203.0.113.99",
+      }),
+    );
+    expect(response.status).toBe(201);
+    expect(inputs).toEqual([
+      { remoteAddress: "127.0.0.1", requestedAt: "2026-07-30T05:00:00.000Z" },
+    ]);
+    expect(port.calls).toHaveLength(1);
   });
 });

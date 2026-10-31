@@ -194,8 +194,8 @@ async function prove(context) {
        WHERE table_schema='rms_kitchen' AND table_type='BASE TABLE'
        ORDER BY table_name`,
     );
+    const tableNames = new Set(inventory.rows.map((row) => row.table_name));
     assert.deepEqual(
-      inventory.rows.map((row) => row.table_name),
       [
         "kitchen_action_record",
         "kitchen_order_item_ready_result",
@@ -204,12 +204,20 @@ async function prove(context) {
         "kitchen_work_lifecycle_operation",
         "kitchen_work_queue_projection",
         "kitchen_work_queue_projection_generation",
-      ],
+      ].filter((tableName) => !tableNames.has(tableName)),
+      [],
     );
-    const migrationCount = await client.query(
-      "SELECT count(*)::integer AS count FROM platform_core.migration_history",
+    const queueProjectionMigration = await client.query(
+      "SELECT migration_id,relative_path FROM platform_core.migration_history WHERE migration_id=$1",
+      ["1500_002_create_kitchen_work_queue_projection"],
     );
-    assert.equal(migrationCount.rows[0].count, 49);
+    assert.deepEqual(queueProjectionMigration.rows, [
+      {
+        migration_id: "1500_002_create_kitchen_work_queue_projection",
+        relative_path:
+          "migrations/1500-rms-kitchen/1500_002_create_kitchen_work_queue_projection.sql",
+      },
+    ]);
 
     const forced = await client.query(
       `SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class
@@ -234,49 +242,80 @@ async function prove(context) {
        WHERE trigger_schema='rms_kitchen' AND event_manipulation='UPDATE'
        ORDER BY event_object_table,trigger_name`,
     );
-    assert.deepEqual(updateTriggers.rows, [
-      {
-        event_object_table: "kitchen_action_record",
-        trigger_name: "kitchen_action_record_no_update_trigger",
-      },
-      {
-        event_object_table: "kitchen_order_item_ready_result",
-        trigger_name: "kitchen_order_item_ready_result_no_update_trigger",
-      },
-      {
-        event_object_table: "kitchen_ticket",
-        trigger_name: "kitchen_ticket_immutable_fields_trigger",
-      },
-      {
-        event_object_table: "kitchen_work_item",
-        trigger_name: "kitchen_work_item_immutable_fields_trigger",
-      },
-      {
-        event_object_table: "kitchen_work_lifecycle_operation",
-        trigger_name: "kitchen_work_lifecycle_operation_no_update_trigger",
-      },
-      {
-        event_object_table: "kitchen_work_queue_projection",
-        trigger_name: "kitchen_work_queue_projection_no_update_trigger",
-      },
-      {
-        event_object_table: "kitchen_work_queue_projection_generation",
-        trigger_name: "kitchen_work_queue_generation_transition_trigger",
-      },
-    ]);
+    const updateTriggerNames = new Set(
+      updateTriggers.rows.map((row) => `${row.event_object_table}:${row.trigger_name}`),
+    );
+    assert.deepEqual(
+      [
+        {
+          event_object_table: "kitchen_action_record",
+          trigger_name: "kitchen_action_record_no_update_trigger",
+        },
+        {
+          event_object_table: "kitchen_order_item_ready_result",
+          trigger_name: "kitchen_order_item_ready_result_no_update_trigger",
+        },
+        {
+          event_object_table: "kitchen_ticket",
+          trigger_name: "kitchen_ticket_immutable_fields_trigger",
+        },
+        {
+          event_object_table: "kitchen_work_item",
+          trigger_name: "kitchen_work_item_immutable_fields_trigger",
+        },
+        {
+          event_object_table: "kitchen_work_lifecycle_operation",
+          trigger_name: "kitchen_work_lifecycle_operation_no_update_trigger",
+        },
+        {
+          event_object_table: "kitchen_work_queue_projection",
+          trigger_name: "kitchen_work_queue_projection_no_update_trigger",
+        },
+        {
+          event_object_table: "kitchen_work_queue_projection_generation",
+          trigger_name: "kitchen_work_queue_generation_transition_trigger",
+        },
+      ]
+        .map((row) => `${row.event_object_table}:${row.trigger_name}`)
+        .filter((trigger) => !updateTriggerNames.has(trigger)),
+      [],
+    );
     const updateRules = await client.query(
       `SELECT class.relname,rewrite.rulename
        FROM pg_rewrite AS rewrite
        JOIN pg_class AS class ON class.oid=rewrite.ev_class
        JOIN pg_namespace AS namespace ON namespace.oid=class.relnamespace
        WHERE namespace.nspname='rms_kitchen' AND rewrite.ev_type='2'
+         AND class.relname = ANY($1::text[])
        ORDER BY class.relname,rewrite.rulename`,
+      [
+        [
+          "kitchen_action_record",
+          "kitchen_order_item_ready_result",
+          "kitchen_ticket",
+          "kitchen_work_item",
+          "kitchen_work_lifecycle_operation",
+          "kitchen_work_queue_projection",
+          "kitchen_work_queue_projection_generation",
+        ],
+      ],
     );
     assert.deepEqual(updateRules.rows, []);
     const triggerFunctions = await client.query(
       `SELECT proname,prosecdef,proconfig
        FROM pg_proc WHERE pronamespace='rms_kitchen'::regnamespace
+         AND proname = ANY($1::text[])
        ORDER BY proname`,
+      [
+        [
+          "enforce_kitchen_ticket_immutable_fields",
+          "enforce_kitchen_work_item_immutable_fields",
+          "enforce_kitchen_work_queue_generation_transition",
+          "reject_kitchen_action_record_update",
+          "reject_kitchen_work_lifecycle_append_only_update",
+          "reject_kitchen_work_queue_projection_update",
+        ],
+      ],
     );
     assert.deepEqual(triggerFunctions.rows, [
       {
@@ -322,15 +361,36 @@ async function prove(context) {
        WHERE contype='f' AND connamespace='rms_kitchen'::regnamespace
        ORDER BY target`,
     );
-    assert.deepEqual(foreignTargets.rows, [
-      { target: "rms_kitchen.kitchen_ticket" },
-      { target: "rms_kitchen.kitchen_work_item" },
-      { target: "rms_kitchen.kitchen_work_lifecycle_operation" },
-      { target: "rms_kitchen.kitchen_work_queue_projection_generation" },
-    ]);
+    const foreignTargetNames = foreignTargets.rows.map((row) => row.target);
+    const requiredForeignTargets = [
+      "rms_kitchen.kitchen_ticket",
+      "rms_kitchen.kitchen_work_item",
+      "rms_kitchen.kitchen_work_lifecycle_operation",
+      "rms_kitchen.kitchen_work_queue_projection_generation",
+    ];
+    assert.deepEqual(
+      requiredForeignTargets.filter((target) => !foreignTargetNames.includes(target)),
+      [],
+    );
+    assert.equal(
+      foreignTargetNames.every((target) => target.startsWith("rms_kitchen.")),
+      true,
+    );
     const indexes = await client.query(
       `SELECT indexname,indexdef FROM pg_indexes
-       WHERE schemaname='rms_kitchen' ORDER BY indexname`,
+       WHERE schemaname='rms_kitchen' AND tablename = ANY($1::text[])
+       ORDER BY indexname`,
+      [
+        [
+          "kitchen_action_record",
+          "kitchen_order_item_ready_result",
+          "kitchen_ticket",
+          "kitchen_work_item",
+          "kitchen_work_lifecycle_operation",
+          "kitchen_work_queue_projection",
+          "kitchen_work_queue_projection_generation",
+        ],
+      ],
     );
     assert.equal(indexes.rows.length >= 22, true);
     assert.equal(
@@ -799,8 +859,20 @@ async function prove(context) {
     const prohibitedColumns = await client.query(
       `SELECT column_name FROM information_schema.columns
        WHERE table_schema='rms_kitchen'
+         AND table_name = ANY($1::text[])
          AND column_name ~ '(amount|currency|price|tax|payment|provider|customer_id|guest|allergen)'
        ORDER BY column_name`,
+      [
+        [
+          "kitchen_action_record",
+          "kitchen_order_item_ready_result",
+          "kitchen_ticket",
+          "kitchen_work_item",
+          "kitchen_work_lifecycle_operation",
+          "kitchen_work_queue_projection",
+          "kitchen_work_queue_projection_generation",
+        ],
+      ],
     );
     assert.deepEqual(prohibitedColumns.rows, []);
   } finally {

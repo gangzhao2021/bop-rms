@@ -114,7 +114,7 @@ function sameScope(left: MovementStockScope, right: MovementStockScope): boolean
   return left.scopeType === right.scopeType && left.scopeReference === right.scopeReference;
 }
 
-function command(value: unknown): LotHoldCommand {
+export function parseLotHoldCommand(value: unknown): LotHoldCommand {
   const raw = exact(value, [
     "tenantReference",
     "brandReference",
@@ -489,6 +489,7 @@ function validateRecord(
   hold: LotHoldAggregate,
   audit: LotHoldCommandRecord["audit"],
 ): LotHoldCommandRecord {
+  if (record.outcome === "AlreadyApplied") return validateReplay(record, command, intentHash);
   if (
     record.operationReference !== command.operationReference ||
     record.intentHash !== intentHash ||
@@ -505,7 +506,7 @@ function validateRecord(
 }
 
 export async function executeLotHold(value: unknown, ports: LotExpiryPorts) {
-  const input = command(value);
+  const input = parseLotHoldCommand(value);
   const payload = input.payload as {
     readonly stockScope: MovementStockScope;
     readonly locationReference: InventoryReference;
@@ -560,10 +561,9 @@ export async function executeLotHold(value: unknown, ports: LotExpiryPorts) {
     )
       return fail("LOT_HOLD_NOT_FOUND");
     if (before === null && payload.expectedVersion !== 0) return fail("LOT_HOLD_CONFLICT");
-    const [snapshotRaw, complianceRaw] = await Promise.all([
-      ports.snapshot.inspect(input),
-      ports.compliance.resolveDecision(input),
-    ]);
+    // Sequential: owner ports may share one caller transaction (no concurrent use of a client).
+    const snapshotRaw = await ports.snapshot.inspect(input);
+    const complianceRaw = await ports.compliance.resolveDecision(input);
     const snapshot = validateSnapshot(snapshotRaw, input, before);
     validateCompliance(complianceRaw, input);
     let after: LotHoldAggregate;

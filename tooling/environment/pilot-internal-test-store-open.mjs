@@ -1,0 +1,573 @@
+#!/usr/bin/env node
+import console from "node:console";
+import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
+import {
+  issueInternalTestStoreDirectory,
+  provisionStoreSimulator,
+} from "./pilot-internal-test-store-directory.mjs";
+
+/**
+ * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segments 3b/3d — InternalTest only, a
+ * test-environment-only shortcut (coordinator 2026-10-30). After the Owner opened a TEST Store on
+ * the Stores page ("… – not production"):
+ *
+ *   setup     — its first published configuration and synthetic launch gate (database, one
+ *               audited transaction; `--dry-run` rolls it back);
+ *   tax       — after `directory`, and once its address is set in Store setup: its own synthetic
+ *               tax configuration, a copy of the installation Store's (same province only;
+ *               database, audited under the approver; the Store's profile then names it). A
+ *               Store that has it gets it back, nothing written. Staff then publish Store setup
+ *               (Review), which carries the Store's tax settings;
+ *   stock-site — its default stock site and storage location (database, audited under the
+ *               approver; a Store that has its default site gets it back, nothing written);
+ *   directory — its runtime directory `stores/<name>/`, listed in `stores.json`, so the next
+ *               planned restart serves it: only the files its services read, its own identities
+ *               (the same on every run for the same Store) and its own default stock site, read
+ *               from the database (`--stock-site` must name it if given; never another Store's);
+ *   provider  — the Store's TEST payment simulator through its own initialiser (created when
+ *               absent, missing tables added, no record removed); the directory given is the
+ *               Store's (`…/stores/<name>`). `directory` runs it; this repairs a directory
+ *               written before it did;
+ *   settlement — once the Store's first business day has closed, its day-end settlement
+ *               coverage (that day), read as the services do; its settlement worker starts at the
+ *               next restart. The directory given is the Store's (`…/stores/<name>`);
+ *   renew     — after the installation's own renewal: the Store's synthetic launch gate and its
+ *               own tax evidence (`tax`; database) and its files' common expiry move to the same
+ *               `--until` (the Store's directory).
+ *
+ * Refuses outside development mode or an InternalTest installation. Prints fixed codes only.
+ */
+const unavailable = (reason) => {
+  const error = new Error("PILOT_INTERNAL_TEST_STORE_OPEN_UNAVAILABLE");
+  error.reason = reason;
+  throw error;
+};
+function uuidV7(now = Date.now()) {
+  const time = now.toString(16).padStart(12, "0"),
+    hex = randomBytes(10).toString("hex");
+  const variant = ((parseInt(hex.slice(3, 4), 16) & 0x3) | 0x8).toString(16);
+  return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${hex.slice(0, 3)}-${variant}${hex.slice(4, 7)}-${hex.slice(7, 19)}`;
+}
+const flags = {
+  setup: {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--store": "storeReference",
+    "--approver": "approverActorReference",
+    "--reason": "reason",
+    "--approved-by": "approvedBy",
+    "--approval": "approval",
+  },
+  "stock-site": {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--store": "storeReference",
+    "--approver": "approverActorReference",
+    "--reason": "reason",
+    "--approved-by": "approvedBy",
+    "--approval": "approval",
+  },
+  tax: {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--store": "storeReference",
+    "--approver": "approverActorReference",
+    "--reason": "reason",
+    "--approved-by": "approvedBy",
+    "--approval": "approval",
+  },
+  directory: {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--store": "storeReference",
+    "--name": "name",
+    "--stock-site": "stockSiteReference",
+  },
+  settlement: { "--database": "expectedDatabaseName", "--migration-env": "envFile" },
+  provider: {},
+  renew: {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--until": "until",
+    "--reason": "reason",
+    "--approved-by": "approvedBy",
+    "--approval": "approval",
+  },
+};
+/** Flags a command may leave out: `directory` reads the Store's own default stock site. */
+const optionalFlags = new Set(["directory:stockSiteReference"]);
+export function parseStoreOpenArguments(args) {
+  const [command, directory, ...rest] = args;
+  const known = flags[command];
+  if (!known || typeof directory !== "string" || directory.startsWith("--"))
+    return unavailable("arguments-invalid");
+  const options = { command, directory, dryRun: false };
+  for (let index = 0; index < rest.length; index++) {
+    const flag = rest[index];
+    if (
+      flag === "--dry-run" &&
+      (command === "setup" || command === "renew") &&
+      !options.dryRunSeen
+    ) {
+      options.dryRun = options.dryRunSeen = true;
+      continue;
+    }
+    const name = known[flag],
+      value = rest[index + 1];
+    if (
+      !name ||
+      Object.hasOwn(options, name) ||
+      typeof value !== "string" ||
+      value.startsWith("--")
+    )
+      return unavailable("arguments-invalid");
+    options[name] = value;
+    index += 1;
+  }
+  if (
+    Object.values(known).some(
+      (name) => !Object.hasOwn(options, name) && !optionalFlags.has(command + ":" + name),
+    )
+  )
+    return unavailable("arguments-invalid");
+  delete options.dryRunSeen;
+  return Object.freeze(options);
+}
+
+async function setup(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const store = await import("./pilot-internal-test-store-setup.mjs");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  try {
+    const setupRole = store.storeSetupRoleName(options.expectedDatabaseName);
+    for (const sql of store.renderStoreSetupRoleSql(setupRole)) await client.query(sql);
+    return await store.setUpInternalTestStore(client, {
+      environment: profile.environment,
+      database: options.expectedDatabaseName,
+      setupRole,
+      readRole: installation.roles.api,
+      binding: profile.binding,
+      sourceStoreReference: profile.binding.storeReference,
+      targetStoreReference: options.storeReference,
+      approverActorReference: options.approverActorReference,
+      now: () => new Date().toISOString(),
+      evidence: {
+        setupReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+        operatorAccount: "uid:" + process.getuid?.(),
+      },
+      dryRun: options.dryRun,
+      nextReference: () => uuidV7(),
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+async function stockSite(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const site = await import("./pilot-internal-test-stock-site.mjs");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  try {
+    const role = site.stockSiteRoleName(options.expectedDatabaseName);
+    for (const sql of site.renderStockSiteRoleSql(role)) await client.query(sql);
+    return await site.createInternalTestStockSite(client, {
+      environment: profile.environment,
+      database: options.expectedDatabaseName,
+      role,
+      binding: profile.binding,
+      storeReference: options.storeReference,
+      approverActorReference: options.approverActorReference,
+      now: () => new Date().toISOString(),
+      evidence: {
+        operationReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+      },
+      nextReference: () => uuidV7(),
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+/** The served Store's directory (`stores/<name>`) from `stores.json`: the one serving `store`. */
+export async function servedStoreDirectory(directory, storeReference) {
+  let list;
+  try {
+    list = JSON.parse(await readFile(join(directory, "stores.json"), "utf8"));
+  } catch {
+    return unavailable("store-not-served-run-directory-first");
+  }
+  if (list?.schemaVersion !== 1 || !Array.isArray(list.stores))
+    return unavailable("stores-list-invalid");
+  for (const relative of list.stores) {
+    if (typeof relative !== "string" || !/^stores\/[a-z0-9][a-z0-9-]{0,62}$/u.test(relative))
+      return unavailable("stores-list-invalid");
+    const profile = JSON.parse(
+      await readFile(join(directory, relative, "internal-test-profile.json"), "utf8"),
+    );
+    if (profile?.binding?.storeReference === storeReference) return join(directory, relative);
+  }
+  return unavailable("store-not-served-run-directory-first");
+}
+
+async function storeTax(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const tax = await import("./pilot-internal-test-store-tax.mjs");
+  const { rename, writeFile } = await import("node:fs/promises");
+  const read = async (base, name) => JSON.parse(await readFile(join(base, name), "utf8"));
+  const installation = await read(options.directory, "installation.json"),
+    profile = await read(options.directory, "internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const own = await servedStoreDirectory(options.directory, options.storeReference);
+  const storeProfile = await read(own, "internal-test-profile.json");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  let result;
+  try {
+    const role = tax.storeTaxRoleName(options.expectedDatabaseName);
+    for (const sql of tax.renderStoreTaxRoleSql(role)) await client.query(sql);
+    result = await tax.createInternalTestStoreTax(client, {
+      environment: profile.environment,
+      database: options.expectedDatabaseName,
+      role,
+      readRole: installation.roles.api,
+      installationProfile: profile,
+      installationMenu: await read(options.directory, "internal-test-menu.json"),
+      storeProfile,
+      menu: await read(own, "internal-test-menu.json"),
+      approverActorReference: options.approverActorReference,
+      now: () => new Date().toISOString(),
+      evidence: {
+        operationReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+      },
+      nextReference: () => uuidV7(),
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+  // The Store's services read their tax configuration from its profile.
+  if (result.profile !== storeProfile) {
+    const file = join(own, "internal-test-profile.json");
+    await writeFile(file + ".next", JSON.stringify(result.profile, null, 2) + "\n", {
+      mode: 0o600,
+    });
+    await rename(file + ".next", file);
+  }
+  return Object.freeze({
+    status: result.status,
+    storeReference: options.storeReference,
+    taxConfigurationReference: result.configurationReference,
+    versionNumber: result.versionNumber,
+  });
+}
+
+/** The Store's runtime directory, with its own default stock site read as the services read it. */
+async function directory(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const site = await import("./pilot-internal-test-stock-site.mjs");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  let own;
+  try {
+    own = await site.readStoreDefaultStockSite(client, {
+      role: installation.roles.api,
+      binding: profile.binding,
+      storeReference: options.storeReference,
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+  return issueStoreDirectoryWithOwnSite(options, own);
+}
+
+/**
+ * Pure step of `directory` after the read: never another Store's site; with none yet, refuses and
+ * says to run `stock-site` first.
+ */
+export function issueStoreDirectoryWithOwnSite(
+  options,
+  own,
+  issue = issueInternalTestStoreDirectory,
+) {
+  if (own === null) unavailable("stock-site-missing-run-stock-site-first");
+  if (options.stockSiteReference !== undefined && options.stockSiteReference !== own)
+    unavailable("stock-site-not-this-store");
+  return issue({
+    directory: options.directory,
+    name: options.name,
+    storeReference: options.storeReference,
+    // The Store's own identities derive from the Store: a rerun gives the same ones.
+    operationReference: options.storeReference,
+    stockSiteReference: own,
+  });
+}
+
+async function settlement(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const { createInternalSettlementDays } = await import("./pilot-settlement-window.mjs");
+  const { resolveOperatingConfiguration, createBindingAuthorization } =
+    await import("./pilot-operating-source.mjs");
+  const codes = await import("./pilot-store-publication-codes.mjs");
+  const { writeFile } = await import("node:fs/promises");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json"),
+    customer = await read("customer-runtime.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  try {
+    const scope = {
+      tenantReference: profile.binding.tenantReference,
+      brandReference: profile.binding.brandReference,
+      storeReference: profile.binding.storeReference,
+    };
+    const [store] = (
+      await client.query(
+        "SELECT time_zone FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2",
+        [scope.brandReference, scope.storeReference],
+      )
+    ).rows;
+    if (store === undefined) unavailable("store-unavailable");
+    const operating = {
+      ...scope,
+      configurationType: "STORE_CONFIGURATION",
+      purposeCode: "STORE_CONFIGURATION",
+      requiredLiveGateRequirementCodes:
+        resolveOperatingConfiguration(profile).liveGateRequirementCodes,
+      requiredValidationCheckCodes: codes.storeConfigurationValidationCheckCodes,
+      setupSnapshotReferences: codes.storeConfigurationSetupSnapshotReferences,
+      authorize: createBindingAuthorization(profile.binding),
+      hashContent: codes.storeConfigurationContentHash,
+      timeZone: store.time_zone,
+    };
+    // As the services' api role, in the Store's scope.
+    const transactions = {
+      async run(work) {
+        await client.query("BEGIN");
+        try {
+          await client.query(`SET LOCAL ROLE "${installation.roles.api}"`);
+          await client.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [scope.brandReference, scope.storeReference],
+          );
+          const value = await work({
+            query: (sql, values) => client.query(sql, [...(values ?? [])]),
+          });
+          await client.query("COMMIT");
+          return value;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      },
+    };
+    let window;
+    try {
+      window = await createInternalSettlementDays({
+        resources: { scope, operating, transactions, now: () => new Date().toISOString() },
+        active: async () => true,
+      }).window();
+    } catch {
+      unavailable("no-closed-business-day");
+    }
+    const coverage = {
+      schemaVersion: 1,
+      environment: "InternalTest",
+      database: installation.database,
+      scope: customer.scope,
+      firstWindow: {
+        businessDate: window.businessDate,
+        startsAt: window.startsAt,
+        endsAt: window.endsAt,
+        configurationReference: String(window.configurationReference),
+        configurationVersion: window.configurationVersion,
+        contentDigest: window.contentDigest,
+      },
+    };
+    await writeFile(
+      join(options.directory, "daily-settlement-coverage.json"),
+      JSON.stringify(coverage, null, 2) + "\n",
+      { mode: 0o600, flag: "wx" },
+    ).catch(() => unavailable("coverage-already-recorded"));
+    return Object.freeze({ status: "Recorded", firstBusinessDate: window.businessDate });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+async function renew(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const store = await import("./pilot-internal-test-store-setup.mjs");
+  const { rename, writeFile } = await import("node:fs/promises");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json"),
+    queue = await read("internal-test-task-queue.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const from = profile.binding.validUntil;
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  let result, taxRenewal;
+  try {
+    const setupRole = store.storeSetupRoleName(options.expectedDatabaseName);
+    for (const sql of store.renderStoreSetupRoleSql(setupRole)) await client.query(sql);
+    result = await store.renewInternalTestStore(client, {
+      environment: profile.environment,
+      database: options.expectedDatabaseName,
+      setupRole,
+      readRole: installation.roles.api,
+      binding: profile.binding,
+      from,
+      to: options.until,
+      now: () => new Date().toISOString(),
+      evidence: {
+        renewalReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+        operatorAccount: "uid:" + process.getuid?.(),
+      },
+      dryRun: options.dryRun,
+      nextReference: () => uuidV7(),
+    });
+    // Its own tax evidence (`tax`), when it has its own configuration.
+    const tax = await import("./pilot-internal-test-store-tax.mjs");
+    const taxRole = tax.storeTaxRoleName(options.expectedDatabaseName);
+    if (profile.storeTaxConfiguration !== undefined)
+      for (const sql of tax.renderStoreTaxRoleSql(taxRole)) await client.query(sql);
+    taxRenewal = await tax.renewInternalTestStoreTax(client, {
+      database: options.expectedDatabaseName,
+      role: taxRole,
+      readRole: installation.roles.api,
+      profile,
+      menu: await read("internal-test-menu.json"),
+      from,
+      to: options.until,
+      now: () => new Date().toISOString(),
+      evidence: {
+        renewalReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+        operatorAccount: "uid:" + process.getuid?.(),
+      },
+      dryRun: options.dryRun,
+      nextReference: () => uuidV7(),
+    });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+  result = { ...result, tax: taxRenewal.status };
+  if (options.dryRun) return result;
+  // Files, the profile last: only the common expiry moves.
+  const move = (value) => (value === from ? options.until : value);
+  const nextQueue = {
+    ...queue,
+    effectiveUntil: move(queue.effectiveUntil),
+    ...(queue.exceptionTaskPolicy
+      ? {
+          exceptionTaskPolicy: {
+            ...queue.exceptionTaskPolicy,
+            effectiveUntil: move(queue.exceptionTaskPolicy.effectiveUntil),
+          },
+        }
+      : {}),
+  };
+  const nextProfile = {
+    ...profile,
+    binding: { ...profile.binding, validUntil: options.until },
+    ...(taxRenewal.status === "Renewed"
+      ? { taxConfigurationVersion: taxRenewal.taxConfigurationVersion }
+      : {}),
+  };
+  for (const [name, value] of [
+    ["internal-test-task-queue.json", nextQueue],
+    ["internal-test-profile.json", nextProfile],
+  ]) {
+    const file = join(options.directory, name);
+    await writeFile(file + ".next", JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+    await rename(file + ".next", file);
+  }
+  return Object.freeze({ ...result, from, to: options.until });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    const options = parseStoreOpenArguments(process.argv.slice(2));
+    if (process.env.NODE_ENV !== "development") unavailable("not-development-mode");
+    const result =
+      options.command === "setup"
+        ? await setup(options)
+        : options.command === "settlement"
+          ? await settlement(options)
+          : options.command === "renew"
+            ? await renew(options)
+            : options.command === "stock-site"
+              ? await stockSite(options)
+              : options.command === "tax"
+                ? await storeTax(options)
+                : options.command === "provider"
+                  ? await provisionStoreSimulator(options.directory)
+                  : await directory(options);
+    console.log(JSON.stringify(result));
+  } catch (error) {
+    const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";
+    console.error(
+      "PILOT_INTERNAL_TEST_STORE_OPEN_UNAVAILABLE (" +
+        reason +
+        "): InternalTest only; the Store must be opened on the Stores page, named '… – not production', and not set up yet. Nothing was changed.",
+    );
+    process.exitCode = 1;
+  }
+}

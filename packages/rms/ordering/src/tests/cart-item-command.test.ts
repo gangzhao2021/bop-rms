@@ -1,6 +1,7 @@
 import type { AppendAuditRecordInput } from "@bop/audit";
 import type { GuestSession } from "@bop/identity";
-import { describe, expect, it } from "vitest";
+import { createCatalogSelectionValidationService } from "@rms/catalog";
+import { describe, expect, it, vi } from "vitest";
 import { createCartItemCommandService } from "../application/cart-item-command-service.js";
 import type {
   CartItemCommandPorts,
@@ -195,10 +196,12 @@ function fixture(
     },
   };
   return {
+    ports,
     service: createCartItemCommandService(ports),
     current: () => aggregate,
     generated: () => generated,
     operations: () => operations.size,
+    operation: (reference: string) => operations.get(reference),
     validations: () => validations,
   };
 }
@@ -438,6 +441,59 @@ describe("Cart Item Add / Update / Remove commands", () => {
   });
 });
 
+describe("WP-2225 stable Cart retry", () => {
+  it.each(["add", "update", "remove"] as const)(
+    "%s replays its persisted result at a later observation time without extending history",
+    async (action) => {
+      const state = fixture();
+      if (action !== "add") await state.service.add(addInput());
+      const command =
+        action === "add"
+          ? addInput()
+          : {
+              cartReference: ids.cart,
+              cartItemReference: ids.item,
+              expectedAggregateVersion: 2,
+              ...(action === "update"
+                ? { quantity: 3, optionSelections: [], customerNote: null }
+                : {}),
+              operationReference: ids.secondOperation,
+              requestedAt: "2026-08-02T14:02:00.000Z",
+            };
+      const execute = state.service[action];
+      const first = await execute(command);
+      const record = state.operation(command.operationReference as string);
+      const originalRecord = structuredClone(record);
+      const validations = state.validations();
+      const operations = state.operations();
+      // Pin the pre-fix timestamp-bearing encoding for compatibility with existing records.
+      const actionName = { add: "Add", update: "Update", remove: "Remove" }[action];
+      expect(record?.operationIntentHash).toBe(digest(`${actionName}:${JSON.stringify(command)}`));
+      const retry = await execute({ ...command, requestedAt: "2026-08-02T14:10:00.000Z" });
+      expect(retry).toEqual({ ...first, status: "AlreadyApplied" });
+      expect(state.current()).toEqual(first.aggregate);
+      expect(state.operation(command.operationReference as string)).toEqual(originalRecord);
+      expect(state.validations()).toBe(validations);
+      expect(state.operations()).toBe(operations);
+      const changed = action === "remove" ? { cartItemReference: id(90) } : { quantity: 4 };
+      await expect(
+        execute({ ...command, ...changed, requestedAt: "2026-08-02T14:11:00.000Z" }),
+      ).rejects.toMatchObject({ code: "CART_IDEMPOTENCY_CONFLICT" });
+      await expect(
+        execute({
+          ...command,
+          expectedAggregateVersion: 99,
+          requestedAt: "2026-08-02T14:11:00.000Z",
+        }),
+      ).rejects.toMatchObject({ code: "CART_IDEMPOTENCY_CONFLICT" });
+      await expect(
+        execute({ ...command, requestedAt: "2026-08-02T18:00:00.000Z" }),
+      ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+      expect(state.operation(command.operationReference as string)).toEqual(originalRecord);
+    },
+  );
+});
+
 describe("WP-2026 concurrent Cart update scenario", () => {
   it("commits one winner, rejects the stale contender and replays only the winner", async () => {
     const state = fixture();
@@ -484,5 +540,286 @@ describe("WP-2026 concurrent Cart update scenario", () => {
     );
     expect(state.operations()).toBe(1);
     expect(state.validations()).toBe(2);
+  });
+});
+
+describe("Cart authority before persistence", () => {
+  const commands = ["add", "update", "remove"] as const;
+  function input(command: (typeof commands)[number]) {
+    if (command === "add") return addInput();
+    const common = {
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 1,
+      operationReference: ids.operation,
+      requestedAt,
+    };
+    return command === "remove"
+      ? common
+      : {
+          ...common,
+          quantity: 2,
+          optionSelections: [],
+          customerNote: null,
+        };
+  }
+  it.each(commands)("%s denies before any persistence read", async (command) => {
+    const state = fixture({ denied: true });
+    const load = vi.spyOn(state.ports.repository, "load");
+    const resolve = vi.spyOn(state.ports.repository, "resolveOperation");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(state.validations()).toBe(0);
+  });
+  it.each(commands)("%s rejects expired Session before reading Cart", async (command) => {
+    const state = fixture({ session: guest({ idleExpiresAt: requestedAt as never }) });
+    const load = vi.spyOn(state.ports.repository, "load");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(load).not.toHaveBeenCalled();
+  });
+  it.each(commands)("%s rejects malformed Session before reading Cart", async (command) => {
+    const state = fixture({ session: guest({ version: 0 }) });
+    const load = vi.spyOn(state.ports.repository, "load");
+    const resolve = vi.spyOn(state.ports.repository, "resolveOperation");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+  it.each(commands)("%s bounds authorization failure without reading Cart", async (command) => {
+    const state = fixture();
+    vi.spyOn(state.ports.authorization, "authorize").mockRejectedValue(
+      new Error("synthetic dependency detail"),
+    );
+    const load = vi.spyOn(state.ports.repository, "load");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(load).not.toHaveBeenCalled();
+  });
+  it.each(commands)("%s rejects a substituted Cart identity", async (command) => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "load").mockResolvedValue(
+      cart({ cartReference: id(99) as never }),
+    );
+    const commit = vi.spyOn(state.ports.repository, "commit");
+    await expect(state.service[command](input(command))).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(commit).not.toHaveBeenCalled();
+    expect(state.validations()).toBe(0);
+  });
+  it("authorizes a valid Add before loading its exact Cart", async () => {
+    const state = fixture();
+    const authorize = vi.spyOn(state.ports.authorization, "authorize");
+    const load = vi.spyOn(state.ports.repository, "load");
+    await state.service.add(addInput());
+    const authorizedAt = authorize.mock.invocationCallOrder[0];
+    const loadedAt = load.mock.invocationCallOrder[0];
+    if (authorizedAt === undefined || loadedAt === undefined)
+      throw new Error("expected both calls");
+    expect(authorizedAt).toBeLessThan(loadedAt);
+    expect(state.current().items).toHaveLength(1);
+  });
+});
+
+describe("canonical concurrent Cart commit result", () => {
+  it("returns the winning generated Item identity", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "commit").mockImplementation(async ({ record }) => ({
+      ...record,
+      cartItemReference: id(90) as never,
+      result: parseCartAggregate({
+        ...record.result,
+        items: record.result.items.map((item) => ({ ...item, cartItemReference: id(90) })),
+      }),
+    }));
+    const result = await state.service.add(addInput());
+    expect(result.cartItemReference).toBe(id(90));
+    expect(result.aggregate.items[0]?.cartItemReference).toBe(id(90));
+  });
+  it("bounds malformed canonical commit time", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "commit").mockImplementation(async ({ record }) => ({
+      ...record,
+      occurredAt: "invalid" as never,
+    }));
+    await expect(state.service.add(addInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+  it("still rejects a foreign committed snapshot", async () => {
+    const state = fixture();
+    vi.spyOn(state.ports.repository, "commit").mockImplementation(async ({ record }) => ({
+      ...record,
+      result: parseCartAggregate({ ...record.result, storeReference: id(90) }),
+    }));
+    await expect(state.service.add(addInput())).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+});
+
+describe("WP-2270 Cart commands across revision999", () => {
+  it("adds, updates and removes with exact original replay and stable attribution", async () => {
+    const state = fixture({ aggregate: cart({ aggregateVersion: 999 }) });
+    const input = addInput({ expectedAggregateVersion: 999 });
+    const added = await state.service.add(input);
+    expect(added.aggregate.aggregateVersion).toBe(1000);
+    const updated = await state.service.update({
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 1000,
+      quantity: 3,
+      optionSelections: [],
+      customerNote: null,
+      operationReference: ids.secondOperation,
+      requestedAt,
+    });
+    expect(updated.aggregate.aggregateVersion).toBe(1001);
+    expect(updated.aggregate.items[0]).toMatchObject({
+      addedAt: requestedAt,
+      addedByActorReference: ids.session,
+    });
+    const removed = await state.service.remove({
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 1001,
+      operationReference: ids.thirdOperation,
+      requestedAt,
+    });
+    expect(removed.aggregate).toMatchObject({ aggregateVersion: 1002, items: [] });
+    const retry = await state.service.add(input);
+    expect(retry).toMatchObject({ status: "AlreadyApplied", aggregate: added.aggregate });
+    expect(state.current()).toEqual(removed.aggregate);
+    expect(state.operations()).toBe(3);
+    await expect(
+      state.service.add(addInput({ expectedAggregateVersion: 999, operationReference: id(91) })),
+    ).rejects.toMatchObject({ code: "CART_VERSION_CONFLICT" });
+    expect(state.operations()).toBe(3);
+  });
+  it("fails before persistence when the next revision exceeds storage", async () => {
+    const state = fixture({ aggregate: cart({ aggregateVersion: 2_147_483_647 }) });
+    const commit = vi.spyOn(state.ports.repository, "commit");
+    await expect(
+      state.service.add(addInput({ expectedAggregateVersion: 2_147_483_647 })),
+    ).rejects.toBeInstanceOf(CartError);
+    expect(commit).not.toHaveBeenCalled();
+    expect(state.current().aggregateVersion).toBe(2_147_483_647);
+    expect(state.operations()).toBe(0);
+  });
+});
+
+describe("actual Catalog validator and Ordering composition", () => {
+  it("persists exact accepted evidence, denies new invalid selections and preserves original recovery", async () => {
+    const state = fixture();
+    const hook = vi.fn(() => []);
+    let hostile = false;
+    const resolveCurrent = vi.fn(
+      async (scope: {
+        brandReference: string;
+        storeReference: string;
+        sellableReference: string;
+        sourceChannel: string;
+        orderType: string;
+        observedAt: string;
+      }) => {
+        const conflicts: string[] = [];
+        if (hostile) Object.defineProperty(conflicts, "map", { value: hook });
+        return {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          sourceChannel: scope.sourceChannel,
+          orderType: scope.orderType,
+          sellableReference: scope.sellableReference,
+          availability: "Available",
+          freshnessStatus: "Fresh",
+          menuVersionReference: ids.menuVersion,
+          productVersionReference: ids.productVersion,
+          catalogChannelCode: "PILOT_CHANNEL",
+          catalogOrderTypeCode: "PILOT_ORDER_TYPE",
+          effectiveFrom: createdAt,
+          effectiveUntil: null,
+          resolvedAt: scope.observedAt,
+          rules: [
+            {
+              bindingReference: ids.binding,
+              optionSetVersionReference: ids.optionSetVersion,
+              minimumQuantity: 1,
+              maximumQuantity: 1,
+              activationOptionReferences: [],
+              options: [
+                {
+                  optionReference: ids.option,
+                  maximumQuantity: 1,
+                  conflictOptionReferences: conflicts,
+                },
+              ],
+            },
+          ],
+        } as never;
+      },
+    );
+    const validator = createCatalogSelectionValidationService({ snapshots: { resolveCurrent } });
+    const composed = createCartItemCommandService({ ...state.ports, catalog: validator });
+    const original = addInput({ customerNote: null });
+    const contexts: unknown[] = [];
+    const contextual = createCartItemCommandService({
+      ...state.ports,
+      catalog: {
+        validateSelection: (input, selectionContext) => {
+          contexts.push(selectionContext);
+          return validator.validateSelection(input);
+        },
+      },
+    });
+    const first = await contextual.add(original);
+    expect(contexts).toEqual([
+      {
+        diningSessionReference: null,
+        cartReference: original.cartReference,
+        cartVersion: original.expectedAggregateVersion,
+        quantity: original.quantity,
+        guestSessionReference: first.aggregate.createdByActorReference,
+      },
+    ]);
+    expect(Object.isFrozen(contexts[0])).toBe(true);
+    expect(first.aggregate.items[0]?.catalogSelectionEvidence).toMatchObject({
+      menuVersionReference: ids.menuVersion,
+      productVersionReference: ids.productVersion,
+      ruleEvidence: [
+        { bindingReference: ids.binding, optionSetVersionReference: ids.optionSetVersion },
+      ],
+    });
+    const update = {
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 2,
+      quantity: 1,
+      optionSelections: [],
+      customerNote: null,
+      operationReference: ids.secondOperation,
+      requestedAt,
+    };
+    await expect(composed.update(update)).rejects.toMatchObject({ code: "CART_SELECTION_INVALID" });
+    expect(state.operations()).toBe(1);
+    hostile = true;
+    await expect(
+      composed.update({ ...update, optionSelections: original.optionSelections }),
+    ).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(hook).not.toHaveBeenCalled();
+    expect(state.operations()).toBe(1);
+    expect(await composed.add(original)).toEqual({ ...first, status: "AlreadyApplied" });
+    expect(resolveCurrent).toHaveBeenCalledTimes(3);
+    expect(state.generated()).toBe(1);
+    expect(state.current().aggregateVersion).toBe(2);
   });
 });

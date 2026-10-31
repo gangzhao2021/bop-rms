@@ -76,9 +76,19 @@ export interface AwaitingOrderPaymentOutcomeDisposition extends OrderPaymentOutc
   readonly reason: "OrderAcceptancePending";
 }
 
+export const paidWithoutFulfillableOrderReasons = [
+  "CapacityExpired",
+  "SubmissionCancelled",
+  "OrderNoLongerFulfillable",
+  "CancelledByStaff",
+] as const;
+export type PaidWithoutFulfillableOrderReason = (typeof paidWithoutFulfillableOrderReasons)[number];
+
 export interface PaidWithoutFulfillableOrderDisposition extends OrderPaymentOutcomeDispositionBase {
   readonly disposition: "PaidWithoutFulfillableOrder";
-  readonly reason: "CapacityExpired" | "SubmissionCancelled" | "OrderNoLongerFulfillable";
+  /** CancelledByStaff (WP-2423 Q6) is never stored as a disposition row; it is the compensation
+   * view of an Ordering staff cancellation record. */
+  readonly reason: PaidWithoutFulfillableOrderReason;
   readonly kitchenReleaseDisposition: "Blocked";
 }
 

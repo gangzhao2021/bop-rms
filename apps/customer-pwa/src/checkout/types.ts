@@ -18,6 +18,11 @@ export interface CheckoutQuote {
     readonly requiresReconfirmation: boolean;
     readonly evaluatedAt: string;
   };
+  /**
+   * WP-2423 item 8 ⑦ (Owner decision 11): the tips the Store offers, as percentages of the
+   * subtotal before tax, or tips off. Absent from an older server: 10 / 15 / 18 %.
+   */
+  readonly tips?: { readonly enabled: boolean; readonly tierPercents: readonly number[] };
 }
 
 export type CheckoutState =
@@ -32,7 +37,18 @@ export type CheckoutState =
         | "conflict"
         | "validation"
         | "unavailable"
+        | "quote-expired"
         | "outcome-unknown";
       cart: CartView | null;
+      canRetry: boolean;
+    }>
+  | Readonly<{
+      /**
+       * WP-2423: pricing was refused and nothing changed — the table's last order is still being
+       * processed, or another guest at the table is checking out this cart. Retry after the wait.
+       */
+      status: "order-processing" | "checkout-in-progress";
+      cart: CartView;
+      retryAfterSeconds: number | null;
       canRetry: boolean;
     }>;

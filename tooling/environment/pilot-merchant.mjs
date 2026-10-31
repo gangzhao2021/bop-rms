@@ -1,0 +1,1702 @@
+import { createMerchantStoreOpening } from "../../apps/api/dist/merchant-store-opening.js";
+import { servedStoresOf } from "./pilot-served-stores.mjs";
+import console from "node:console";
+import { URL } from "node:url";
+import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
+import { createMerchantTaxConfigAuthoring } from "../../apps/api/dist/merchant-tax-config-authoring.js";
+import { createMerchantReconciliationEvidenceQuery } from "../../apps/api/dist/merchant-reconciliation-evidence-query.js";
+import { createMerchantReconciliationFollowUpCommand } from "../../apps/api/dist/merchant-reconciliation-follow-up-command.js";
+import { createMerchantReconciliationFollowUpQuery } from "../../apps/api/dist/merchant-reconciliation-follow-up-query.js";
+import { resolveInternalDiningTaskPolicy } from "./pilot-dining-task-policy.mjs";
+import { createInternalExceptionSnapshotTransactions } from "./pilot-exception-snapshot.mjs";
+import { readInternalExceptionCoverage } from "./pilot-exception-coverage.mjs";
+import { createPersistentMerchantOrderExceptions } from "../../apps/api/dist/persistent-merchant-order-exceptions.js";
+import { createPersistentMerchantSettlement } from "../../apps/api/dist/persistent-merchant-settlement.js";
+import { createPersistentMerchantOperationsAlerts } from "../../apps/api/dist/merchant-operations-alerts.js";
+import { createPersistentMerchantStoreReports } from "../../apps/api/dist/persistent-merchant-store-reports.js";
+import {
+  dailySettlementRunReference,
+  dailySettlementRecheckRunReference,
+  dailySettlementRecheckLimit,
+  dailySettlementDayEnd,
+} from "./pilot-daily-settlement-reference.mjs";
+import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
+import { createMerchantCompensationReconciliationQuery } from "../../apps/api/dist/merchant-compensation-reconciliation-query.js";
+import { createMerchantCompensationReconciliationCommand } from "../../apps/api/dist/merchant-compensation-reconciliation-command.js";
+import { createMerchantDiningHostSelection } from "../../apps/api/dist/merchant-dining-host-selection.js";
+import { createMerchantDiningHostTransfer } from "../../apps/api/dist/merchant-dining-host-transfer.js";
+import { createMerchantOrdinaryRefundStatus } from "../../apps/api/dist/merchant-ordinary-refund-status.js";
+import { createMerchantRefundPaymentContext } from "../../apps/api/dist/merchant-refund-payment-context.js";
+import { createMerchantOrdinaryRefundItems } from "../../apps/api/dist/merchant-ordinary-refund-items.js";
+import { createMerchantOrdinaryRefundRequest } from "../../apps/api/dist/merchant-ordinary-refund-request.js";
+import { createMerchantDiningJoinState } from "../../apps/api/dist/merchant-dining-join-state.js";
+import { createMerchantDiningQrJoin } from "../../apps/api/dist/merchant-dining-qr-join.js";
+import {
+  createMerchantDiningHeldRound,
+  createMerchantDiningRoundHoldSetting,
+} from "../../apps/api/dist/merchant-dining-held-round.js";
+import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant-dining-join-regenerate.js";
+import { createMerchantDiningChase } from "../../apps/api/dist/merchant-dining-chase.js";
+import { createMerchantDiningPartySize } from "../../apps/api/dist/merchant-dining-party-size.js";
+import { createMerchantKitchenNotPrepared } from "../../apps/api/dist/merchant-kitchen-not-prepared.js";
+import { createMerchantKitchenSections } from "../../apps/api/dist/merchant-kitchen-sections.js";
+import { createMerchantDiningTeaCharge } from "../../apps/api/dist/merchant-dining-tea-charge.js";
+import {
+  createMerchantStoreFeatures,
+  navigationForStoreFeatures,
+  readStoreFeatures,
+} from "../../apps/api/dist/merchant-store-features.js";
+import { createMerchantDiningSessionStart } from "../../apps/api/dist/merchant-dining-session-start.js";
+import { createMerchantDiningTableCommand } from "../../apps/api/dist/merchant-dining-table-command.js";
+import { createMerchantDiningTableMove } from "../../apps/api/dist/merchant-dining-table-move.js";
+import { createMerchantDiningTableMerge } from "../../apps/api/dist/merchant-dining-table-merge.js";
+import { createMerchantDiningTables } from "../../apps/api/dist/merchant-dining-tables.js";
+import {
+  createMerchantDiningStaffCallAnswer,
+  createMerchantDiningStaffCallCount,
+} from "../../apps/api/dist/merchant-dining-staff-calls.js";
+import { createMerchantDiningClosingCommand } from "../../apps/api/dist/merchant-dining-closing-command.js";
+import {
+  createMerchantDiningPaymentTimingChange,
+  createMerchantDiningPaymentTimingRead,
+} from "../../apps/api/dist/merchant-dining-payment-timing.js";
+import {
+  createMerchantDiningTableBillRead,
+  createMerchantDiningTableSettle,
+  createMerchantDiningTableSplit,
+} from "../../apps/api/dist/merchant-dining-table-checkout.js";
+import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant-dining-table-close-plan.js";
+import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
+import { createMerchantDiningUnpaidDeparture } from "../../apps/api/dist/merchant-dining-unpaid-departure.js";
+import { createMerchantDiningUnpaidItemRemoval } from "../../apps/api/dist/merchant-dining-unpaid-item-removal.js";
+import { createMerchantDiningItemComp } from "../../apps/api/dist/merchant-dining-item-comp.js";
+import { createMerchantDiningTableOnlinePaymentStop } from "../../apps/api/dist/merchant-dining-table-online-payment.js";
+import { createInternalDiningTablePayments } from "./pilot-dining-table-payment.mjs";
+import {
+  createMerchantDiningTableCashRefund,
+  createMerchantDiningTablePaymentRead,
+} from "../../apps/api/dist/merchant-dining-table-payment.js";
+import { createDiningOrderCloseConfiguration } from "../../apps/api/dist/dining-order-close-configuration.js";
+import { createPersistentMerchantTaskInbox } from "../../apps/api/dist/persistent-merchant-task-inbox.js";
+import { createMerchantDiningTaskSource } from "../../apps/api/dist/merchant-dining-task-source.js";
+import { createMerchantDiningServeCommand } from "../../apps/api/dist/merchant-dining-serve-command.js";
+import { createMerchantDiningServeReadyCommand } from "../../apps/api/dist/merchant-dining-serve-ready-command.js";
+import { createMerchantDiningOrderProgress } from "../../apps/api/dist/merchant-dining-order-progress.js";
+import { createHash } from "node:crypto";
+import { createMerchantKitchenQuery } from "../../apps/api/dist/merchant-kitchen-query.js";
+import { createMerchantKitchenRelease } from "../../apps/api/dist/merchant-kitchen-release.js";
+import { createMerchantRoleAdministration } from "../../apps/api/dist/merchant-role-administration.js";
+import { createMerchantStaffAdministration } from "../../apps/api/dist/merchant-staff-administration.js";
+import { createMerchantInventoryItems } from "../../apps/api/dist/merchant-inventory-items.js";
+import { createMerchantStockPlaces } from "../../apps/api/dist/merchant-stock-places.js";
+import { createMerchantOpeningCount } from "../../apps/api/dist/merchant-opening-count.js";
+import { createMerchantStoreReceipts } from "../../apps/api/dist/merchant-store-receipts.js";
+import { createMerchantRecipes } from "../../apps/api/dist/merchant-recipes.js";
+import { createMerchantDishAllergens } from "../../apps/api/dist/merchant-dish-allergens.js";
+import { createMerchantOneStoreDishes } from "../../apps/api/dist/merchant-one-store-dishes.js";
+import { createMerchantProducts } from "../../apps/api/dist/merchant-products.js";
+import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
+import { createMerchantPrices } from "../../apps/api/dist/merchant-prices.js";
+import { createMerchantStorePrices } from "../../apps/api/dist/merchant-store-prices.js";
+import { createPilotWorkspaceListing } from "./pilot-merchant-workspace.mjs";
+import { createMerchantAllergens } from "../../apps/api/dist/merchant-allergens.js";
+import { createMerchantMenus } from "../../apps/api/dist/merchant-menus.js";
+import { createMerchantAvailability } from "../../apps/api/dist/merchant-availability.js";
+import { createMerchantKitchenRework } from "../../apps/api/dist/merchant-kitchen-rework.js";
+import { createMerchantKitchenStaleClose } from "../../apps/api/dist/merchant-kitchen-stale-close.js";
+import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-sets.js";
+import { createMerchantCombos } from "../../apps/api/dist/merchant-combos.js";
+import { createMerchantComboPartCommands } from "../../apps/api/dist/merchant-combo-part-commands.js";
+import { logUnexpected, reportUnexpected } from "./pilot-merchant-pickup.mjs";
+import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
+import { createMerchantOptionRecipes } from "../../apps/api/dist/merchant-option-recipes.js";
+import { createMerchantStoreTax } from "../../apps/api/dist/merchant-store-tax.js";
+import { createMerchantTaxClassifications } from "../../apps/api/dist/merchant-tax-classifications.js";
+import { createMerchantStockCounts } from "../../apps/api/dist/merchant-stock-counts.js";
+import { createMerchantStoreWaste } from "../../apps/api/dist/merchant-store-waste.js";
+import { createPersistentMerchantBffService } from "../../apps/api/dist/persistent-merchant-bff.js";
+import { createMerchantServiceControl } from "../../apps/api/dist/merchant-service-control.js";
+import { createMerchantUnmatchedCaptureRefund } from "../../apps/api/dist/merchant-unmatched-capture-refund.js";
+import {
+  createMerchantOrderStaffCancellation,
+  createMerchantOrderStaffCancellationPreview,
+} from "../../apps/api/dist/merchant-order-staff-cancellation.js";
+import { createMerchantUnpaidRoundCancellation } from "../../apps/api/dist/merchant-unpaid-round-cancellation.js";
+import { createMerchantEndedOrderStockRelease } from "../../apps/api/dist/merchant-stock-holding-orders.js";
+import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-business-day-window.js";
+import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/merchant-order-item-staff-cancellation.js";
+import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/merchant-ordinary-refund-business-date.js";
+import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
+import { createMerchantStorePresence } from "../../apps/api/dist/merchant-store-presence.js";
+import { createMerchantOrderAcceptanceHoldRefund } from "../../apps/api/dist/merchant-order-acceptance-hold-refund.js";
+import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
+import { createInternalStoreSetupBff } from "./pilot-store-setup.mjs";
+import { createMerchantMfaStepUp } from "../../apps/api/dist/merchant-mfa-step-up.js";
+import { createMerchantStaffPin } from "../../apps/api/dist/merchant-staff-pin.js";
+import { createStoreAwaitingPickupDeadlines } from "../../apps/api/dist/pickup-acceptance-deadline.js";
+import {
+  createPostgresMerchantOrganizationSource,
+  parseStoreReference,
+} from "../../packages/bop/tenant/src/index.ts";
+import { createMerchantRefundSoleOperatorResolver } from "../../apps/api/dist/merchant-sole-operator.js";
+import { createMerchantSoleOperator } from "../../apps/api/dist/merchant-sole-operator-setting.js";
+import { createMerchantStoreReceiptProfile } from "../../apps/api/dist/merchant-store-receipt-profile.js";
+import { createMerchantStorePublicProfile } from "../../apps/api/dist/merchant-store-public-profile.js";
+import { createMerchantOrdinaryRefundApproval } from "../../apps/api/dist/merchant-ordinary-refund-approval.js";
+import { createMerchantOrdinaryRefundApprovals } from "../../apps/api/dist/merchant-ordinary-refund-approvals.js";
+import { createMerchantOrdinaryRefundDecline } from "../../apps/api/dist/merchant-ordinary-refund-decline.js";
+import { createMerchantOrdinaryRefundProgress } from "../../apps/api/dist/merchant-ordinary-refund-progress.js";
+import { createMerchantCardMachineOrdinaryRefund } from "../../apps/api/dist/merchant-card-machine-ordinary-refund.js";
+import { withPaidBatchAcceptance } from "../../apps/api/dist/merchant-card-machine-payment.js";
+import {
+  createRefundReceiptIssuance,
+  hasDigitalReceipt,
+} from "../../apps/api/dist/refund-receipt-issuance.js";
+import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
+import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
+import { matchesPilotEnvironment, pilotProviderEnvironment } from "./pilot-environment.mjs";
+export async function createInternalMerchant(
+  resources,
+  {
+    createInternalRefundReconciliation,
+    createInternalRefundSend,
+    createInternalRefundPreparation,
+    createInternalDiningCredentials,
+    createInternalMerchantDining,
+    createInternalMerchantPickup,
+    createInternalKitchenCommand,
+    createInternalMerchantAcceptance,
+    createInternalMerchantSession,
+    createInternalMerchantProduct,
+    loadTaskQueue,
+    expectedDatabaseName,
+    providerAccountReference,
+    exceptionPaymentMode,
+    roleMapping,
+    taxConfigCurrencyMetadata,
+    loadPricingCurrencyMetadata,
+    refundUnmatchedCapture,
+    cancellationRefundProvider,
+    tableOnlinePaymentProvider,
+    staffTotpVerifier,
+    createInternalCounterOrder,
+    createInternalStaffStockShortage,
+    createInternalTableQr,
+    createInternalStaffPinCredentials,
+    readOperationsAlertBoard,
+    loadDailySettlementCoverage,
+    refreshOrderReceiptObservations,
+    createInternalUnpaidRoundCancellation,
+    productImageDirectory,
+    // DEC-PILOT-MAINTENANCE-PAGE / Tls: the Store's customer origin from hosting.json.
+    publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
+  },
+) {
+  const session = await createInternalMerchantSession(resources);
+  const selected = {
+    tenantReference: resources.publicProfile.binding.tenantReference,
+    ...resources.scope,
+  };
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a staff member may select any Store this installation
+  // serves where they are associated; this composition's own Store comes first.
+  const served = servedStoresOf(resources);
+  const targetScope = async (_tx, authenticated, reference) => {
+    const candidates =
+      reference === undefined
+        ? served
+        : served.filter((store) => store.storeReference === reference);
+    for (const store of candidates)
+      if (await session.validateAssociation(_tx, authenticated, store, resources.now()))
+        return store;
+    throw new Error("INTERNAL_MERCHANT_SCOPE_DENIED");
+  };
+  // Set once the pickup composition exists (the workspace is read per request).
+  let waitingPickups = null;
+  const workspace = createPilotWorkspaceListing({
+    served,
+    // Read when listed: `product` is composed below.
+    optionSets: () => typeof product.optionSetList === "function",
+    tableQr: createInternalTableQr !== undefined,
+  });
+  const persistence = {
+    ...session.persistence,
+    ...(createInternalMerchantProduct === undefined
+      ? {}
+      : { catalogProductNavigation: { currentRuntime: true } }),
+    publication: {
+      configurationType: "STORE_CONFIGURATION",
+      purposeCode: "STORE_CONFIGURATION",
+      // WP-2423 StoreOperatingSource: the same gate codes the resources were verified against.
+      requiredLiveGateRequirementCodes: resources.operating.requiredLiveGateRequirementCodes,
+      // WP-2423 DEC-STORE-SETUP-PUBLICATION: the check inventory of a configuration published from
+      // Store setup.
+      requiredValidationCheckCodes: resources.operating.requiredValidationCheckCodes,
+    },
+    // WP-2423 DEC-COGNITO-STORE-STAFF: a full Cognito sign-in also starts a kitchen display shift
+    // and records its authenticator check, in the session's creation transaction.
+    initialScope:
+      typeof session.onFullSignIn === "function"
+        ? async (tx, authenticated) => {
+            const scope = await targetScope(tx, authenticated);
+            await session.onFullSignIn(tx, authenticated, scope);
+            return scope;
+          }
+        : targetScope,
+    targetScope,
+    // v15 2026-10-31: a refused Store switch names its step and error code in the log.
+    onStoreSwitchDenied: (step, error) =>
+      reportUnexpected("MERCHANT_STORE_SWITCH_DENIED", error, { step }),
+    // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: screens of modules the Store turned off are not listed.
+    workspace: async (tx, input) => {
+      const listed = workspace(input);
+      // The session's Store (after a switch, the Store switched to), never this composition's.
+      const here = { ...selected, storeReference: String(input.context.store.storeReference) };
+      const features = await readStoreFeatures(tx, here, "AllModules");
+      // With pickup and counter ordering off, Pickup stays while orders are still to hand over
+      // (counted by this composition for its own Store; another Store's own next read counts it).
+      const pickupWaiting =
+        features.pickup ||
+        features.counterOrder ||
+        waitingPickups === null ||
+        here.storeReference !== selected.storeReference
+          ? 0
+          : await waitingPickups(tx);
+      return {
+        ...listed,
+        navigation: navigationForStoreFeatures(listed.navigation, features, pickupWaiting),
+      };
+    },
+  };
+  const queue = await loadTaskQueue();
+  if (
+    !matchesPilotEnvironment(queue.environment) ||
+    queue.database !== expectedDatabaseName ||
+    queue.tenantReference !== selected.tenantReference ||
+    queue.brandReference !== selected.brandReference ||
+    queue.storeReference !== selected.storeReference
+  )
+    throw new Error("INTERNAL_TASK_QUEUE_UNAVAILABLE");
+  const taskInbox = createPersistentMerchantTaskInbox({
+    persistence,
+    queues: [queue],
+    authorizeSource: createMerchantDiningTaskSource(persistence),
+  });
+  const service = createPersistentMerchantBffService(persistence);
+  const product =
+    createInternalMerchantProduct === undefined
+      ? {}
+      : await createInternalMerchantProduct(resources, persistence, service);
+  const orderExceptions = createPersistentMerchantOrderExceptions({
+    persistence: {
+      ...persistence,
+      transactions: createInternalExceptionSnapshotTransactions(resources),
+    },
+    // WP-2423 D3: an unreadable reconciliation detail is logged (code and frames only).
+    onUnexpected: (error) =>
+      reportUnexpected("INTERNAL_ORDER_EXCEPTION_RECONCILIATION_DETAIL_UNAVAILABLE", error),
+    // WP-2423: a business day's totals difference names its day by the scheduler's own runs.
+    settlementDays: {
+      dayEndOf: dailySettlementDayEnd,
+      runReferences: async (scope, window) => {
+        for (const key of ["brandReference", "storeReference"])
+          if (scope[key] !== selected[key]) throw new Error("INTERNAL_EXCEPTION_SCOPE_DENIED");
+        const day = {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          businessDate: window.businessDate,
+          startsAt: window.startsAt,
+          endsAt: window.endsAt,
+        };
+        return {
+          original: dailySettlementRunReference(day).runReference,
+          rechecks: Array.from({ length: dailySettlementRecheckLimit }, (_, n) =>
+            dailySettlementRecheckRunReference(day, n + 1),
+          ),
+        };
+      },
+    },
+    metadata: async (tx, { scope, storeLabel, sources }) => {
+      if (
+        scope.tenantReference !== selected.tenantReference ||
+        scope.brandReference !== selected.brandReference ||
+        scope.storeReference !== selected.storeReference
+      )
+        throw new Error("INTERNAL_EXCEPTION_SCOPE_DENIED");
+      const at = resources.now();
+      const status = await createPostgresPublishedStoreOperatingStatusReader({
+        ...resources.operating,
+        authorize: async () => resources.now() < resources.publicProfile.binding.validUntil,
+      })(tx, at);
+      if (
+        status.businessDate.brandReference !== scope.brandReference ||
+        status.businessDate.storeReference !== scope.storeReference ||
+        status.evaluatedAt !== at
+      )
+        throw new Error("INTERNAL_EXCEPTION_SOURCE_UNAVAILABLE");
+      const freshnessStatus = await readInternalExceptionCoverage({
+        resources,
+        providerAccountReference,
+        paymentMode: exceptionPaymentMode,
+        tx,
+        sources,
+      });
+      return {
+        storeLabel,
+        businessDate: status.businessDate.businessDate,
+        checkpointReference: resources.credentials.reference(),
+        projectedAt: at,
+        freshnessStatus,
+        ...(freshnessStatus === "Fresh" ? { currentSourceCheck: "Complete" } : {}),
+      };
+    },
+  });
+  const reconciliationEvidenceQuery = createMerchantReconciliationEvidenceQuery({
+    persistence,
+    authentication: service,
+  });
+  const reconciliationFollowUpQuery = createMerchantReconciliationFollowUpQuery({
+    persistence,
+    authentication: service,
+  });
+  const reconciliationFollowUp = createMerchantReconciliationFollowUpCommand({
+    persistence,
+    authentication: service,
+    now: resources.now,
+    reference: () => resources.credentials.reference(),
+  });
+  const unmatchedCaptureRefund =
+    refundUnmatchedCapture === undefined
+      ? undefined
+      : createMerchantUnmatchedCaptureRefund({
+          persistence,
+          authentication: service,
+          nextReference: () => resources.credentials.reference(),
+          refundPayment: refundUnmatchedCapture,
+        });
+  // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts. The refund is made by
+  // the compensation workload (business worker), which discovers the staff cancellation record.
+  const orderStaffCancellationOptions = {
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    // DEC-TABLE-CLOSE-GUESTS-LEFT: what is left to refund of a never-accepted round paid online.
+    resolveRefundConfiguration: async (tx, scope) => {
+      const configuration = await refundConfiguration(tx, scope);
+      return {
+        providerAccountReference: configuration.providerAccountReference,
+        environment: configuration.environment,
+      };
+    },
+    installContext: async (tx, scope) => {
+      for (const key of ["tenantReference", "brandReference", "storeReference"])
+        if (scope[key] !== selected[key])
+          throw new Error("INTERNAL_ORDER_CANCELLATION_SCOPE_DENIED");
+      await tx.query(
+        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+        [scope.tenantReference, scope.brandReference, scope.storeReference],
+      );
+    },
+  };
+  const orderStaffCancellation = createMerchantOrderStaffCancellation(
+    orderStaffCancellationOptions,
+  );
+  // WP-2423 (v15 2026-10-18): the cancel dialog reads what the cancellation would refund.
+  const orderStaffCancellationPreview = createMerchantOrderStaffCancellationPreview(
+    orderStaffCancellationOptions,
+  );
+  // WP-2423 abandoned payment: a manager cancels an unpaid dine-in round before its deadline.
+  const unpaidRound =
+    createInternalUnpaidRoundCancellation === undefined
+      ? undefined
+      : await createInternalUnpaidRoundCancellation(resources);
+  const unpaidRoundCancellation =
+    unpaidRound === undefined
+      ? undefined
+      : createMerchantUnpaidRoundCancellation({
+          persistence,
+          authentication: service,
+          resolvePayment: (operation) => unpaidRound.payment.resolve(operation),
+          cancellation: unpaidRound.cancellation,
+          installContext: async (tx, scope) => {
+            for (const key of ["tenantReference", "brandReference", "storeReference"])
+              if (scope[key] !== selected[key])
+                throw new Error("INTERNAL_UNPAID_ROUND_SCOPE_DENIED");
+            await tx.query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+              [scope.tenantReference, scope.brandReference, scope.storeReference],
+            );
+          },
+        });
+  // WP-2423 (2026-10-16 v15 stock leak): a manager returns stock still set aside for an Order of
+  // an earlier day that already ended (handed over, not collected, closed or cancelled).
+  const installSelectedContext = async (tx, scope) => {
+    for (const key of ["tenantReference", "brandReference", "storeReference"])
+      if (scope[key] !== selected[key]) throw new Error("INTERNAL_STOCK_RELEASE_SCOPE_DENIED");
+    await tx.query(
+      "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+      [scope.tenantReference, scope.brandReference, scope.storeReference],
+    );
+  };
+  const endedOrderStockRelease = createMerchantEndedOrderStockRelease({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    installContext: installSelectedContext,
+    today: (tx) =>
+      createMerchantBusinessDayWindows({
+        persistence,
+        scope: selected,
+        timeZone: resources.operating.timeZone,
+        authorize: async () => true,
+      }).today(tx, resources.now()),
+  });
+  // WP-2423 Q9-G1 (DEC-OUTAGE-ACCEPTANCE-HOLD): signed-in staff using the Orders page, kitchen
+  // board or counter order mark the Store online (at most one write a minute); a manager may refund
+  // an order paid online while the Store was offline instead of accepting it.
+  const storePresence = createMerchantStorePresence({
+    transactions: persistence.transactions,
+    now: resources.now,
+    newReference: () => resources.credentials.reference(),
+  });
+  const presenceScope = {
+    brandReference: selected.brandReference,
+    storeReference: selected.storeReference,
+  };
+  const orderAcceptanceHoldRefund = createMerchantOrderAcceptanceHoldRefund({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    audit: { retentionPolicyCode: "FINANCIAL_COMPLIANCE", retentionPolicyVersion: 1 },
+  });
+  const compensationQuery = createMerchantCompensationReconciliationQuery({
+    persistence,
+    authentication: service,
+  });
+  const compensationReconciliation = createMerchantCompensationReconciliationCommand({
+    persistence,
+    authentication: service,
+    now: resources.now,
+  });
+  const refundConfiguration = async (_tx, scope) => {
+    for (const key of ["tenantReference", "brandReference", "storeReference"])
+      if (scope[key] !== selected[key]) throw new Error("INTERNAL_REFUND_SCOPE_DENIED");
+    return { providerAccountReference, environment: pilotProviderEnvironment(), roleMapping };
+  };
+  const settlement = logUnexpected(
+    "INTERNAL_SETTLEMENT_UNAVAILABLE",
+    createPersistentMerchantSettlement({
+      persistence,
+      resolveConfiguration: async (tx, scope) => {
+        const configuration = await refundConfiguration(tx, scope);
+        return {
+          providerAccountReference: configuration.providerAccountReference,
+          environment: configuration.environment,
+        };
+      },
+      // The run the pilot's daily settlement scheduler creates for that closed day.
+      settlementRunReference: async (scope, window) => {
+        for (const key of ["brandReference", "storeReference"])
+          if (scope[key] !== selected[key]) throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
+        return dailySettlementRunReference({
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          businessDate: window.businessDate,
+          startsAt: window.startsAt,
+          endsAt: window.endsAt,
+        }).runReference;
+      },
+      // WP-2423: the re-check runs the settlement worker derives for that day, in order.
+      settlementRecheckRunReferences: async (scope, window) => {
+        for (const key of ["brandReference", "storeReference"])
+          if (scope[key] !== selected[key]) throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
+        const day = {
+          brandReference: scope.brandReference,
+          storeReference: scope.storeReference,
+          businessDate: window.businessDate,
+          startsAt: window.startsAt,
+          endsAt: window.endsAt,
+        };
+        return Array.from({ length: dailySettlementRecheckLimit }, (_, n) =>
+          dailySettlementRecheckRunReference(day, n + 1),
+        );
+      },
+      // WP-2423: the first business day the installation's settlement coverage starts.
+      ...(loadDailySettlementCoverage === undefined
+        ? {}
+        : {
+            firstBusinessDate: async (scope) => {
+              for (const key of ["tenantReference", "brandReference", "storeReference"])
+                if (scope[key] !== selected[key])
+                  throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
+              const coverage = await loadDailySettlementCoverage();
+              for (const key of ["tenantReference", "brandReference", "storeReference"])
+                if (coverage.scope[key] !== selected[key])
+                  throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
+              return coverage.firstWindow.businessDate;
+            },
+          }),
+    }),
+  );
+  // WP-2423 Q13: the operations monitor's alert board for the installation's Store (Home).
+  const operationsAlerts =
+    readOperationsAlertBoard === undefined
+      ? undefined
+      : logUnexpected(
+          "INTERNAL_OPERATIONS_ALERTS_UNAVAILABLE",
+          createPersistentMerchantOperationsAlerts({
+            persistence,
+            storeReference: selected.storeReference,
+            readBoard: readOperationsAlertBoard,
+          }),
+        );
+  // WP-2423 Q14: the Store's sales reports, over the same payment sources as the settlement.
+  const reports = createPersistentMerchantStoreReports({
+    persistence,
+    resolveConfiguration: async (tx, scope) => {
+      const configuration = await refundConfiguration(tx, scope);
+      return {
+        providerAccountReference: configuration.providerAccountReference,
+        environment: configuration.environment,
+      };
+    },
+  });
+  const storeReports = {
+    read: logUnexpected("INTERNAL_STORE_REPORTS_UNAVAILABLE", reports.read),
+    export: logUnexpected("INTERNAL_STORE_REPORTS_EXPORT_UNAVAILABLE", reports.export),
+    // WP-2423 item 8 ②: the closing summary (Reports "Tonight" and the closing reminder on Home).
+    tonight: logUnexpected("INTERNAL_STORE_TONIGHT_UNAVAILABLE", reports.tonight),
+    // DEC-BRAND-MULTI-STORE segment 7: another Store's tonight (Reports → Stores), authorized at
+    // that Store by its own composition.
+    storeTonight: logUnexpected(
+      "INTERNAL_STORE_TONIGHT_BY_STORE_UNAVAILABLE",
+      reports.storeTonight,
+    ),
+  };
+  const refundPaymentContext = createMerchantRefundPaymentContext({
+    persistence,
+    authentication: service,
+    resolveConfiguration: refundConfiguration,
+    soleOperator: (...args) => refundSoleOperator(...args),
+  });
+  const ordinaryRefund = createInternalRefundPreparation({
+    resources,
+    persistence,
+    authentication: service,
+    resolveRefundConfiguration: refundConfiguration,
+  });
+  // WP-2423 Q5: the result check and receipt issuance log their real failure code (no payload).
+  const ordinaryRefundReconciliation = logUnexpected(
+    "INTERNAL_REFUND_RECONCILIATION_UNAVAILABLE",
+    createInternalRefundReconciliation({
+      resources,
+      persistence,
+      authentication: service,
+    }),
+  );
+  const ordinaryRefundSend = logUnexpected(
+    "INTERNAL_REFUND_SEND_UNAVAILABLE",
+    createInternalRefundSend({
+      resources,
+      persistence,
+      authentication: service,
+      resolveRefundConfiguration: refundConfiguration,
+    }),
+  );
+  // WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them. The Cancellation
+  // refund claim is dispatched after commit through the ordinary refund journal (simulated
+  // Provider, TEST-ONLY); the last remaining lines go through the whole cancellation above.
+  const orderItemStaffCancellation =
+    cancellationRefundProvider === undefined
+      ? undefined
+      : createMerchantOrderItemStaffCancellation({
+          persistence,
+          authentication: service,
+          nextReference: () => resources.credentials.reference(),
+          installContext: async (tx, scope) => {
+            for (const key of ["tenantReference", "brandReference", "storeReference"])
+              if (scope[key] !== selected[key])
+                throw new Error("INTERNAL_ORDER_CANCELLATION_SCOPE_DENIED");
+            await tx.query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+              [scope.tenantReference, scope.brandReference, scope.storeReference],
+            );
+          },
+          wholeCancellation: orderStaffCancellation,
+          resolveRefundConfiguration: async (tx, scope) => {
+            const configuration = await refundConfiguration(tx, scope);
+            return {
+              providerAccountReference: configuration.providerAccountReference,
+              environment: configuration.environment,
+            };
+          },
+          businessDate: createMerchantOrdinaryRefundBusinessDate({
+            ...selected,
+            ...persistence.publication,
+            timeZone: resources.operating.timeZone,
+            authorize: async (_tx, at) => at <= resources.now(),
+          }),
+          provider: cancellationRefundProvider,
+          // WP-2423 (v15 3cd0f8dd M4): a confirmed item-cancellation refund gives the order's
+          // digital receipt a refund version stating the cancelled items, as other refunds do.
+          issueRefundReceipt: (request) => issueOrderRefundReceipt(request),
+          onUnexpected: (error) =>
+            reportUnexpected("INTERNAL_ITEM_CANCELLATION_RECEIPT_UNAVAILABLE", error),
+        });
+  const ordinaryRefundStatus = createMerchantOrdinaryRefundStatus({
+    persistence,
+    authentication: service,
+    resolveConfiguration: refundConfiguration,
+  });
+  const ordinaryRefundItems = createMerchantOrdinaryRefundItems({
+    persistence,
+    authentication: service,
+    resolveConfiguration: refundConfiguration,
+    newReference: () => resources.credentials.reference(),
+    locale: "en-CA",
+    soleOperator: (...args) => refundSoleOperator(...args),
+  });
+  // WP-2423 Q5: the Store Business Date of the published configuration (RF-D01) for escalation.
+  const refundBusinessDate = createMerchantOrdinaryRefundBusinessDate({
+    ...selected,
+    ...persistence.publication,
+    timeZone: resources.operating.timeZone,
+    authorize: async (_tx, at) => at <= resources.now(),
+  });
+  const ordinaryRefundRequest = createMerchantOrdinaryRefundRequest({
+    persistence,
+    authentication: service,
+    resolveConfiguration: refundConfiguration,
+    newAuditReference: () => resources.credentials.reference(),
+    retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+    retentionPolicyVersion: 1,
+    businessDate: refundBusinessDate,
+    soleOperator: (...args) => refundSoleOperator(...args),
+  });
+  // WP-2423 item 4: staff record an item refund of a card-machine payment made on the machine.
+  // When the Order has a digital receipt (a dine-in table that also paid rounds online), the
+  // receipt gains a refund version afterwards, as after an online refund (System, TEST-ONLY audit
+  // reason as the online receipt path). WP-2423 (v15 3cd0f8dd M4): item cancellations use it too.
+  // The item cancellation above calls it only at run time, after this declaration has run.
+  const issueOrderRefundReceipt = async ({ orderReference }) => {
+    const active = async () => resources.now() < resources.publicProfile.binding.validUntil;
+    const receiptScope = {
+      ...selected,
+      providerAccountReference,
+      environment: pilotProviderEnvironment(),
+    };
+    const has = await persistence.transactions.run((tx) =>
+      hasDigitalReceipt(tx, { ...resources.scope, orderReference, authorize: active }),
+    );
+    if (!has) return "NoDigitalReceipt";
+    const freshAfter = resources.now();
+    if (refreshOrderReceiptObservations !== undefined)
+      await refreshOrderReceiptObservations(
+        { ...resources, transactions: persistence.transactions },
+        orderReference,
+        active,
+      );
+    const authorize = async (_t, q) =>
+      q.brandReference === receiptScope.brandReference &&
+      q.storeReference === receiptScope.storeReference &&
+      q.orderReference === orderReference &&
+      (await active());
+    const ref = () => resources.credentials.reference();
+    await persistence.transactions.run((tx) =>
+      createRefundReceiptIssuance({
+        scope: receiptScope,
+        authorize,
+        authorizeSources: authorize,
+        authorizeOrder: authorize,
+        identities: () => ({ recordReference: ref(), operationReference: ref() }),
+        audit: async (record, operationReference) => ({
+          auditId: ref(),
+          brandId: receiptScope.brandReference,
+          storeId: receiptScope.storeReference,
+          actor: { type: "System" },
+          actionCode: "DIGITAL_RECEIPT_APPEND",
+          targetType: "DigitalReceipt",
+          targetId: record.recordReference,
+          reasonCode: "INTERNAL_TEST_REFUND_RECEIPT",
+          correlationId: operationReference,
+          occurredAt: record.recordedAt,
+          sourceChannel: "SYSTEM",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+        }),
+      })(tx, { orderReference, observedAt: resources.now(), freshAfter }),
+    );
+    return "Issued";
+  };
+  const cardMachineOrdinaryRefund = createMerchantCardMachineOrdinaryRefund({
+    persistence,
+    authentication: service,
+    resolveConfiguration: refundConfiguration,
+    businessDate: refundBusinessDate,
+    nextReference: () => resources.credentials.reference(),
+    issueRefundReceipt: issueOrderRefundReceipt,
+    onUnexpected: (error) =>
+      reportUnexpected("INTERNAL_CARD_MACHINE_ORDINARY_REFUND_UNAVAILABLE", error),
+  });
+  // WP-2423 Q5: escalated refund approval. The requester's role, permission and MFA are read from
+  // their owners for that person (Identity roster, Membership, Permission, MFA step-ups).
+  const escalatedRefundConfiguration = async (tx, scope, authority) => {
+    const deny = () => {
+      throw new Error("INTERNAL_REFUND_APPROVAL_CONFIGURATION_DENIED");
+    };
+    for (const key of ["tenantReference", "brandReference", "storeReference"])
+      if (scope[key] !== selected[key]) deny();
+    const context = authority.context;
+    if (context.actor.actorReference !== scope.actorReference || !(await authority.authorize()))
+      deny();
+    const bound = await refundConfiguration(tx, scope);
+    const current = async (t, at) =>
+      t === tx &&
+      parseCanonicalInstant(at) <= parseCanonicalInstant(resources.now()) &&
+      (await authority.authorize());
+    return {
+      providerAccountReference: bound.providerAccountReference,
+      environment: bound.environment,
+      businessDate: refundBusinessDate,
+      workforce: {
+        resolveContext: createInternalRefundWorkforceContext({
+          expected: selected,
+          persistence,
+          sessionActorReference: scope.actorReference,
+          sessionContext: async () => context,
+          current,
+        }),
+        resolveRoleMapping: async (t, query) => {
+          for (const key of ["tenantReference", "brandReference", "storeReference"])
+            if (query[key] !== selected[key]) deny();
+          if (!(await current(t, query.observedAt))) deny();
+          return (await refundConfiguration(t, scope)).roleMapping;
+        },
+        stepUp: true,
+        // WP-2423 Q19: an Owner's own request and approval need sole operator in effect now.
+        soleOperator: true,
+      },
+    };
+  };
+  // WP-2423 Q19: lets an Owner request (and see the request form) while sole operator is in
+  // effect for them; resolved per command through the same owner reads as approval.
+  const refundSoleOperator = createMerchantRefundSoleOperatorResolver((tx, scope, authority) =>
+    escalatedRefundConfiguration(tx, scope, authority),
+  );
+  const ordinaryRefundApproval = logUnexpected(
+    "INTERNAL_REFUND_APPROVAL_UNAVAILABLE",
+    createMerchantOrdinaryRefundApproval({
+      persistence,
+      authentication: service,
+      resolveConfiguration: escalatedRefundConfiguration,
+      prepare: ordinaryRefund,
+      send: ordinaryRefundSend,
+      // WP-2423 Q5: answer once approved and prepared; send, confirm the result and issue the
+      // refund receipt in the background (the browser follows progress; retry is the same approval).
+      reconcile: ordinaryRefundReconciliation,
+      sendInBackground: true,
+      onBackgroundFailure: () =>
+        console.error(JSON.stringify({ event: "INTERNAL_REFUND_APPROVAL_SEND_INCOMPLETE" })),
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+    }),
+  );
+  // WP-2423 Q5: an Owner declines a refund nothing was prepared for (RF-D04 release).
+  const ordinaryRefundDecline = logUnexpected(
+    "INTERNAL_REFUND_DECLINE_UNAVAILABLE",
+    createMerchantOrdinaryRefundDecline({
+      persistence,
+      authentication: service,
+      resolveConfiguration: escalatedRefundConfiguration,
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+    }),
+  );
+  const ordinaryRefundApprovals = logUnexpected(
+    "INTERNAL_REFUND_APPROVALS_UNAVAILABLE",
+    createMerchantOrdinaryRefundApprovals({
+      persistence,
+      resolveConfiguration: escalatedRefundConfiguration,
+    }),
+  );
+  // WP-2423 Q5: TEST-ONLY authenticator step-up; with Cognito sign-in (DEC-COGNITO-STORE-STAFF)
+  // staff step up by signing in again instead, and the test verifier is never offered.
+  const providerStepUp =
+    typeof session.createProviderStepUp === "function"
+      ? session.createProviderStepUp(persistence, service)
+      : undefined;
+  const mfaStepUp =
+    staffTotpVerifier === undefined || session.mode === "cognito"
+      ? undefined
+      : createMerchantMfaStepUp({
+          persistence,
+          authentication: service,
+          method: "InternalTestTotp",
+          verify: staffTotpVerifier,
+          newReference: () => resources.credentials.reference(),
+          retentionPolicyCode: "SECURITY_AUDIT",
+          retentionPolicyVersion: 1,
+        });
+  // WP-2423 Q18 option A: staff switch on a registered shared tablet with a six-digit PIN.
+  const staffPin =
+    createInternalStaffPinCredentials === undefined && session.staffPinCredentials === undefined
+      ? undefined
+      : await (async () => {
+          // DEC-COGNITO-STORE-STAFF: with Cognito sign-in the PIN keys come from secret files.
+          const keys =
+            typeof session.staffPinCredentials === "function"
+              ? await session.staffPinCredentials()
+              : await createInternalStaffPinCredentials();
+          return createMerchantStaffPin({
+            persistence,
+            authentication: service,
+            deviceHasher: keys.deviceHasher,
+            kdf: keys.kdf,
+            choiceTokens: keys.choiceTokens,
+            newReference: () => resources.credentials.reference(),
+            describeStore: async (tx, scope) => {
+              if (
+                scope.brandReference !== selected.brandReference ||
+                scope.storeReference !== selected.storeReference
+              )
+                throw new Error("INTERNAL_STAFF_PIN_STORE_DENIED");
+              const store = await createPostgresMerchantOrganizationSource(tx, {
+                ...selected,
+                observedAt: scope.at,
+              }).getStore(parseStoreReference(selected.storeReference));
+              if (!store) throw new Error("INTERNAL_STAFF_PIN_STORE_UNAVAILABLE");
+              return { label: store.displayName, timeZone: store.timeZone };
+            },
+            // v15 cbff9d6f: a registered tablet re-checks the refund countdowns it shows.
+            awaitingPickupDeadlines: (() => {
+              const read = createStoreAwaitingPickupDeadlines({
+                persistence,
+                tenantReference: selected.tenantReference,
+              });
+              return async (tx, scope) => {
+                if (
+                  scope.brandReference !== selected.brandReference ||
+                  scope.storeReference !== selected.storeReference
+                )
+                  throw new Error("INTERNAL_STAFF_PIN_STORE_DENIED");
+                return read(tx, scope);
+              };
+            })(),
+            issueSession: (actorReference, finalize) =>
+              session.issueForPin(actorReference, finalize),
+            retentionPolicyCode: "SECURITY_AUDIT",
+            retentionPolicyVersion: 1,
+          });
+        })();
+  const diningClosing = createMerchantDiningClosingCommand({
+    exceptionTaskPolicy: resolveInternalDiningTaskPolicy({
+      queue,
+      scope: selected,
+      observedAt: resources.now(),
+    }),
+    persistence,
+    authentication: service,
+    providerAccountReference,
+    environment: pilotProviderEnvironment(),
+    newReference: () => resources.credentials.reference(),
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+  });
+  const orderClosure = createMerchantDiningOrderCloseCommand({
+    persistence,
+    authentication: service,
+    resolveConfiguration: createDiningOrderCloseConfiguration({
+      ...selected,
+      providerAccountReference,
+      environment: pilotProviderEnvironment(),
+    }),
+    newReference: () => resources.credentials.reference(),
+    audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+  });
+  // DEC-DINE-IN-PAY-LATER: a manager writes off a table that left without paying.
+  const orderUnpaidDeparture = createMerchantDiningUnpaidDeparture({
+    persistence,
+    authentication: service,
+    resolveConfiguration: createDiningOrderCloseConfiguration({
+      ...selected,
+      providerAccountReference,
+      environment: pilotProviderEnvironment(),
+    }),
+    newReference: () => resources.credentials.reference(),
+    audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+  });
+  const tablePayment = createMerchantDiningTablePaymentRead({
+    persistence,
+    authentication: service,
+  });
+  // DEC-DINE-IN-PAY-LATER: dishes taken off an unpaid pay-later bill (who and why).
+  const unpaidItemRemoval = createMerchantDiningUnpaidItemRemoval({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    installContext: async (tx, scope) => {
+      for (const key of ["tenantReference", "brandReference", "storeReference"])
+        if (scope[key] !== selected[key])
+          throw new Error("INTERNAL_ORDER_CANCELLATION_SCOPE_DENIED");
+      await tx.query(
+        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+        [scope.tenantReference, scope.brandReference, scope.storeReference],
+      );
+    },
+  });
+  // WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays.
+  const itemComp = createMerchantDiningItemComp({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+    installContext: async (tx, scope) => {
+      for (const key of ["tenantReference", "brandReference", "storeReference"])
+        if (scope[key] !== selected[key])
+          throw new Error("INTERNAL_ORDER_CANCELLATION_SCOPE_DENIED");
+      await tx.query(
+        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+        [scope.tenantReference, scope.brandReference, scope.storeReference],
+      );
+    },
+  });
+  const tableCashRefund = createMerchantDiningTableCashRefund({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+  });
+  const orderAcceptance = await createInternalMerchantAcceptance(resources, persistence, service);
+  const diningJoinState = createMerchantDiningJoinState({
+    persistence,
+    authentication: service,
+    credentials: await createInternalDiningCredentials(resources),
+  });
+  // WP-2423 item 8 ⑤ DEC-DINING-QR-JOIN: phones at a table, pause/resume QR joining, remove one.
+  const diningQrJoin = createMerchantDiningQrJoin({
+    persistence,
+    authentication: service,
+    credentials: await createInternalDiningCredentials(resources),
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+    nextReference: () => resources.credentials.reference(),
+    now: resources.now,
+  });
+  const diningJoinRegenerate = createMerchantDiningJoinRegenerate({
+    persistence,
+    authentication: service,
+    credentials: await createInternalDiningCredentials(resources),
+    pepperVersion: 1,
+    newReference: () => resources.credentials.reference(),
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+  });
+  const diningSessionStart = createMerchantDiningSessionStart({
+    persistence,
+    authentication: service,
+    credentials: await createInternalDiningCredentials(resources),
+    pepperVersion: 1,
+    newReference: () => resources.credentials.reference(),
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+  });
+  const diningHostSelection = createMerchantDiningHostSelection({
+    persistence,
+    authentication: service,
+  });
+  const diningHostTransfer = createMerchantDiningHostTransfer({
+    persistence,
+    authentication: service,
+    newReference: () => resources.credentials.reference(),
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+  });
+  const diningTableCommand = createMerchantDiningTableCommand({
+    persistence,
+    authentication: service,
+    newReference: () => resources.credentials.reference(),
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+  });
+  const diningTables = createMerchantDiningTables({
+    persistence,
+    authentication: service,
+    tableAvailabilityCommandEnabled: true,
+  });
+  // WP-2423 Q28 DEC-DINING-STAFF-CALL: guests waiting for staff, and answering a call.
+  const diningStaffCallCount = createMerchantDiningStaffCallCount({
+    persistence,
+    authentication: service,
+  });
+  const diningStaffCallAnswer = createMerchantDiningStaffCallAnswer({
+    persistence,
+    authentication: service,
+  });
+  // WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing (Owner, Store Manager).
+  const diningPaymentTimingRead = createMerchantDiningPaymentTimingRead({
+    persistence,
+    authentication: service,
+  });
+  const diningPaymentTimingChange = createMerchantDiningPaymentTimingChange({
+    persistence,
+    authentication: service,
+  });
+  // DEC-DINE-IN-PAY-LATER: a pay-later table's bill and its one payment (card machine or cash).
+  const diningTableBill = createMerchantDiningTableBillRead({
+    persistence,
+    authentication: service,
+  });
+  const diningTableSettle = createMerchantDiningTableSettle({
+    persistence,
+    authentication: service,
+    environment: pilotProviderEnvironment(),
+    nextReference: () => resources.credentials.reference(),
+  });
+  // WP-2423 item 8 ④: split the table's bill evenly or by rounds (or pay it whole again).
+  const diningTableSplit = createMerchantDiningTableSplit({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+  });
+  // DEC-DINE-IN-PAY-LATER S4: stop a phone payment a guest gave up on (the Provider is asked).
+  const diningTableOnlinePaymentStop =
+    tableOnlinePaymentProvider === undefined
+      ? undefined
+      : createMerchantDiningTableOnlinePaymentStop({
+          persistence,
+          authentication: service,
+          payments: () =>
+            createInternalDiningTablePayments(resources, tableOnlinePaymentProvider, {
+              providerAccountReference,
+            }),
+        });
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: the close dialog's per-round plan (Owner, Store Manager).
+  const diningTableClosePlan = createMerchantDiningTableClosePlan({
+    persistence,
+    authentication: service,
+    resolveRefundConfiguration: async (tx, scope) => {
+      const configuration = await refundConfiguration(tx, scope);
+      return {
+        providerAccountReference: configuration.providerAccountReference,
+        environment: configuration.environment,
+      };
+    },
+  });
+  const diningOrderProgress = createMerchantDiningOrderProgress({
+    locale: "en-CA",
+    persistence,
+    authentication: service,
+  });
+  const diningServe = createMerchantDiningServeCommand({
+    persistence,
+    authentication: service,
+    reference: () => resources.credentials.reference(),
+    audit: {
+      reasonCode: "DINING_ITEM_SERVED",
+      retentionPolicyCode: "AUDIT_DEFAULT",
+      retentionPolicyVersion: 1,
+    },
+  });
+  // WP-2423: "Serve all ready items" runs the serve command above once per line.
+  const diningServeReady = createMerchantDiningServeReadyCommand({
+    serve: diningServe,
+    progress: diningOrderProgress,
+  });
+  const diningItemService = createInternalMerchantDining(resources, persistence, service);
+  const kitchenCommand = createInternalKitchenCommand(resources, persistence, service);
+  const kitchenQuery = storePresence.wrap(
+    presenceScope,
+    createMerchantKitchenQuery({
+      persistence,
+      authentication: service,
+      sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+    }),
+  );
+  // WP-2423 Q26 (Handoff Section 26.6): remake a finished dish from the Kitchen board.
+  const kitchenRework = createMerchantKitchenRework({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+  });
+  // DEC-KITCHEN-STALE-TICKETS: a manager closes an earlier business day's kitchen ticket.
+  const kitchenStaleClose = createMerchantKitchenStaleClose({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+  });
+  const kitchenRelease = createMerchantKitchenRelease({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+  });
+  const roleAdministration = createMerchantRoleAdministration({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+  });
+  const staffAdministration = createMerchantStaffAdministration({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    // WP-2423 DEC-COGNITO-STORE-STAFF: in-app invitations when staff sign in with Cognito.
+    ...(session.invitations === undefined ? {} : { invitations: session.invitations }),
+  });
+  const inventoryItems = createMerchantInventoryItems({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
+  const stockPlaces = createMerchantStockPlaces({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
+  const openingCount = createMerchantOpeningCount({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
+  const storeReceipts = createMerchantStoreReceipts({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
+  const recipes = createMerchantRecipes({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
+  // WP-2423 item 8 ⑥: a dish's allergens declared by staff in the one-page menu (generated
+  // recipe; names in the menu's locale).
+  const dishAllergens = createMerchantDishAllergens({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en-CA",
+  });
+  // TEST-ONLY locale: the internal-test Brand writes its menu in Canadian English.
+  const products = createMerchantProducts({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en-CA",
+    // WP-2423 menu descriptions and photos (pilot storage adapter in the runtime directory).
+    ...(productImageDirectory === undefined
+      ? {}
+      : { images: createPilotProductImages(productImageDirectory).service }),
+  });
+  const prices =
+    loadPricingCurrencyMetadata === undefined
+      ? undefined
+      : createMerchantPrices({
+          persistence,
+          authentication: service,
+          references: { next: () => resources.credentials.reference() },
+          currencyMetadata: await loadPricingCurrencyMetadata(),
+          locale: "en-CA",
+        });
+  // DEC-BRAND-MULTI-STORE segment 9: this Store's own prices at a Brand with several Stores.
+  const storePrices =
+    loadPricingCurrencyMetadata === undefined
+      ? undefined
+      : createMerchantStorePrices({
+          persistence,
+          authentication: service,
+          currencyMetadata: await loadPricingCurrencyMetadata(),
+        });
+  const optionPrices =
+    loadPricingCurrencyMetadata === undefined
+      ? undefined
+      : createMerchantOptionPrices({
+          persistence,
+          authentication: service,
+          currencyMetadata: await loadPricingCurrencyMetadata(),
+          locale: "en-CA",
+        });
+  const menus =
+    loadPricingCurrencyMetadata === undefined
+      ? undefined
+      : createMerchantMenus({
+          persistence,
+          authentication: service,
+          references: { next: () => resources.credentials.reference() },
+          currencyMetadata: await loadPricingCurrencyMetadata(),
+          locale: "en-CA",
+        });
+  const availability = createMerchantAvailability({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en-CA",
+    // WP-2423 (2026-10-16): what guests see from stock, and why (short ingredients).
+    ...(createInternalStaffStockShortage === undefined
+      ? {}
+      : { stock: await createInternalStaffStockShortage(resources) }),
+  });
+  const storeTax = createMerchantStoreTax({
+    persistence,
+    authentication: service,
+    locale: "en-CA",
+  });
+  const optionRecipes = createMerchantOptionRecipes({
+    persistence,
+    authentication: service,
+    locale: "en-CA",
+  });
+  const optionSets = createMerchantOptionSets({
+    persistence,
+    authentication: service,
+    locale: "en-CA",
+  });
+  const taxClassifications = createMerchantTaxClassifications({
+    persistence,
+    authentication: service,
+  });
+  const allergens = createMerchantAllergens({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en-CA",
+  });
+  // WP-2423 item 8 ⑥ part 4: combos authored on the one-page menu (Bundles compiled into dishes).
+  const combos = createMerchantCombos({
+    persistence,
+    authentication: service,
+    locale: "en-CA",
+  });
+  // WP-2423 item 8 ⑥: one dish saved from the one-page menu, and "List it" for all of it.
+  const oneStoreDishes =
+    prices === undefined || optionPrices === undefined || menus === undefined
+      ? undefined
+      : createMerchantOneStoreDishes({
+          products,
+          prices,
+          optionPrices,
+          menus,
+          dishAllergens,
+          optionRecipes,
+          availability,
+          combos,
+          optionSets,
+          now: () => new Date().toISOString(),
+        });
+  const stockCounts = createMerchantStockCounts({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
+  const storeWaste = createMerchantStoreWaste({
+    persistence,
+    authentication: service,
+    references: { next: () => resources.credentials.reference() },
+    locale: "en",
+  });
+  const {
+    pickupQuery,
+    pickupProof,
+    pickupHandoff,
+    pickupNotCollected,
+    pickupIdentityCheck,
+    waitingPickups: readWaitingPickups,
+  } = await createInternalMerchantPickup(resources, { persistence, service });
+  waitingPickups = readWaitingPickups;
+  // WP-2423 Q4: store hours and holiday editing — a manager drafts, the owner approves and publishes.
+  const storeConfiguration = await createInternalStoreConfiguration(resources, {
+    persistence,
+    service,
+  });
+  const orderQueue = logUnexpected(
+    "INTERNAL_ORDER_QUEUE_UNAVAILABLE",
+    createPersistentMerchantOrderQueue({
+      persistence,
+      quoteVersion: 2,
+      acceptanceConfigured: true,
+      locale: "en-CA",
+      storePresence,
+      resolveRefundConfiguration: async (tx, scope) => {
+        const configuration = await refundConfiguration(tx, scope);
+        return {
+          providerAccountReference: configuration.providerAccountReference,
+          environment: configuration.environment,
+        };
+      },
+    }),
+  );
+  return {
+    ordinaryRefundReconciliation,
+    ordinaryRefundSend,
+    // WP-2423 Q18: a full sign-in on a registered tablet ends the PIN sessions left on it, in the
+    // transaction that creates the new session.
+    // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY sign-in page exists only in its own mode.
+    staffSignInMode: session.mode === "cognito" ? "cognito" : "internal-test",
+    ...(typeof session.issue !== "function"
+      ? {}
+      : {
+          issue: (selector, purpose, deviceCookie) =>
+            staffPin === undefined || deviceCookie === undefined
+              ? session.issue(selector, purpose)
+              : session.issue(selector, purpose, (tx, created) =>
+                  staffPin.endTabletPinSessions(tx, deviceCookie, created),
+                ),
+          staffChoices: session.staffChoices,
+        }),
+    persistence,
+    service,
+    orderQueue,
+    kitchenQuery,
+    kitchenCommand,
+    kitchenRelease,
+    pickupQuery,
+    pickupProof,
+    pickupHandoff,
+    pickupNotCollected,
+    pickupIdentityCheck,
+    orderAcceptance,
+    bff: {
+      // WP-2423 Q18: TEST-ONLY staff sign-in page of the InternalTest pilot, labelled as test
+      // sign-in for staff; with Cognito (DEC-COGNITO-STORE-STAFF) the staff sign-in page.
+      signInEntry: session.signInEntry ?? { path: "/internal-test/staff", testOnly: true },
+      ...(staffPin === undefined ? {} : { staffPin }),
+      // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens a Store.
+      // Unexpected failures of opening a Store are logged (v15 2026-10-31: a 503 was silent).
+      storeOpening: (() => {
+        const opening = createMerchantStoreOpening({ persistence, authentication: service });
+        return {
+          open: logUnexpected("INTERNAL_STORE_OPENING_UNAVAILABLE", opening.open),
+          mayOpen: logUnexpected("INTERNAL_STORE_OPENING_CHECK_UNAVAILABLE", opening.mayOpen),
+        };
+      })(),
+      // WP-2423 Q4: busy mode — a manager pauses and resumes taking new online orders.
+      ...(() => {
+        const control = createMerchantServiceControl({
+          persistence,
+          authentication: service,
+          audit: {
+            reasonCode: "STORE_SERVICE_CONTROL",
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          },
+        });
+        return {
+          serviceControl: control,
+          serviceControlState: control.read,
+          // WP-2423 Q21: the Store's current business day for every merchant "today".
+          businessDay: control.businessDay,
+        };
+      })(),
+      // WP-2423 Q4: refusals are answered to staff; unexpected failures are logged as codes only.
+      storeConfiguration: logUnexpected(
+        "INTERNAL_STORE_CONFIGURATION_UNAVAILABLE",
+        storeConfiguration,
+      ),
+      storeConfigurationState: logUnexpected(
+        "INTERNAL_STORE_CONFIGURATION_READ_UNAVAILABLE",
+        storeConfiguration.read,
+      ),
+      // WP-2423 Q4: an hours change once the configuration came from Store setup.
+      storeHoursDraft: logUnexpected(
+        "INTERNAL_STORE_HOURS_DRAFT_UNAVAILABLE",
+        storeConfiguration.hoursDraft,
+      ),
+      // WP-2423 (2026-10-16 v15): withdrawn hours leave Store setup too.
+      storeHoursRestore: logUnexpected(
+        "INTERNAL_STORE_HOURS_RESTORE_UNAVAILABLE",
+        storeConfiguration.hoursRestore,
+      ),
+      taxConfigAuthoring: createMerchantTaxConfigAuthoring({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+        ...(taxConfigCurrencyMetadata === undefined
+          ? {}
+          : { currencyMetadata: taxConfigCurrencyMetadata }),
+      }),
+      // WP-2423 Q15/Q16: Store setup reads and saves, including the step 5 fee classification read.
+      ...(await createInternalStoreSetupBff(resources, {
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
+      })),
+      ...product,
+      reconciliationEvidenceQuery,
+      reconciliationFollowUp,
+      reconciliationFollowUpQuery,
+      orderExceptions,
+      settlement,
+      ...(operationsAlerts === undefined ? {} : { operationsAlerts }),
+      storeReports,
+      compensationReconciliation,
+      compensationQuery,
+      ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
+      orderStaffCancellation,
+      orderStaffCancellationPreview,
+      ...(unpaidRoundCancellation === undefined ? {} : { unpaidRoundCancellation }),
+      endedOrderStockRelease,
+      ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),
+      // WP-2423 Q7: counter pickup orders and card-machine payments and refunds.
+      ...(createInternalCounterOrder === undefined
+        ? {}
+        : await (async () => {
+            const { diningPayLaterRound, ...counter } = await createInternalCounterOrder(
+              resources,
+              persistence,
+              service,
+              {
+                diningClosing,
+                // WP-2423 (v15 3cd0f8dd M4): a machine refund of a cancelled round is on the receipt.
+                issueRefundReceipt: issueOrderRefundReceipt,
+              },
+            );
+            return {
+              ...counter,
+              // WP-2423 item 8 ⑤: staff send a guest round that waited for them to the kitchen,
+              // or cancel it with the unpaid round cancellation.
+              ...(diningPayLaterRound === undefined || unpaidRound === undefined
+                ? {}
+                : {
+                    diningHeldRound: createMerchantDiningHeldRound({
+                      persistence,
+                      authentication: service,
+                      payLater: diningPayLaterRound,
+                      cancellation: unpaidRound.cancellation,
+                      now: resources.now,
+                    }),
+                  }),
+              ...(counter.counterMenu === undefined
+                ? {}
+                : { counterMenu: storePresence.wrap(presenceScope, counter.counterMenu) }),
+              ...(counter.counterOrder === undefined
+                ? {}
+                : { counterOrder: storePresence.wrap(presenceScope, counter.counterOrder) }),
+              // WP-2423 D1: the server accepts a card-machine-paid order or table round with its
+              // payment record (staff member's acceptance authority, the Order's current version).
+              ...(counter.cardMachinePayment === undefined
+                ? {}
+                : {
+                    cardMachinePayment: withPaidBatchAcceptance(counter.cardMachinePayment, {
+                      accept: orderAcceptance,
+                      nextReference: () => resources.credentials.reference(),
+                      onNotAccepted: (error) =>
+                        reportUnexpected("INTERNAL_CARD_MACHINE_ACCEPTANCE_NOT_MADE", error),
+                    }),
+                  }),
+              // WP-2423 Q7 slice 2: staff-entered dine-in rounds for a table.
+              ...(counter.staffDiningRound === undefined
+                ? {}
+                : {
+                    staffDiningRound: storePresence.wrap(presenceScope, counter.staffDiningRound),
+                    // WP-2423 item 8 ⑦ 4b-2: the per-head tea follows the party size (adds tea as a
+                    // staff round, takes it off as an unpaid removal).
+                    diningTeaCharge: createMerchantDiningTeaCharge({
+                      persistence,
+                      authentication: service,
+                      now: resources.now,
+                      placeRound: counter.staffDiningRound,
+                      removeItems: unpaidItemRemoval,
+                    }),
+                  }),
+            };
+          })()),
+      orderAcceptanceHoldRefund,
+      ordinaryRefundSend,
+      ordinaryRefundReconciliation,
+      ordinaryRefund,
+      diningHostSelection,
+      diningHostTransfer,
+      // WP-2423 Q5: refund reads log their real refusal code (no payload) for the operator.
+      ordinaryRefundStatus: logUnexpected(
+        "INTERNAL_REFUND_STATUS_UNAVAILABLE",
+        ordinaryRefundStatus,
+      ),
+      refundPaymentContext: logUnexpected(
+        "INTERNAL_REFUND_CONTEXT_UNAVAILABLE",
+        refundPaymentContext,
+      ),
+      ordinaryRefundPreview: ordinaryRefundRequest.preview,
+      ordinaryRefundItems: logUnexpected("INTERNAL_REFUND_ITEMS_UNAVAILABLE", ordinaryRefundItems),
+      ordinaryRefundProgress: logUnexpected(
+        "INTERNAL_REFUND_PROGRESS_UNAVAILABLE",
+        createMerchantOrdinaryRefundProgress({
+          persistence,
+          authentication: service,
+          resolveConfiguration: refundConfiguration,
+          newReference: () => resources.credentials.reference(),
+        }),
+      ),
+      ordinaryRefundRequest,
+      cardMachineOrdinaryRefund,
+      ordinaryRefundApproval,
+      ordinaryRefundApprovals,
+      ordinaryRefundDecline,
+      ...(mfaStepUp === undefined ? {} : { mfaStepUp }),
+      ...(providerStepUp === undefined ? {} : { providerStepUp }),
+      // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): the Brand Owner turns sole operator on/off.
+      soleOperator: (() => {
+        const soleOperator = createMerchantSoleOperator({
+          persistence,
+          authentication: service,
+          resolveConfiguration: escalatedRefundConfiguration,
+          retentionPolicyCode: "SECURITY_AUDIT",
+          retentionPolicyVersion: 1,
+        });
+        return Object.assign(logUnexpected("INTERNAL_SOLE_OPERATOR_UNAVAILABLE", soleOperator), {
+          read: logUnexpected("INTERNAL_SOLE_OPERATOR_READ_UNAVAILABLE", soleOperator.read),
+        });
+      })(),
+      // WP-2423 Q15/Q16: Store setup → receipt registrations and privacy notice link.
+      storeReceiptProfile: (() => {
+        const profile = createMerchantStoreReceiptProfile({ persistence, authentication: service });
+        return Object.assign(logUnexpected("INTERNAL_RECEIPT_PROFILE_UNAVAILABLE", profile), {
+          read: logUnexpected("INTERNAL_RECEIPT_PROFILE_READ_UNAVAILABLE", profile.read),
+        });
+      })(),
+      // WP-2423 DEC-STORE-CUSTOMER-NAME: Store setup → name, address and phone customers see.
+      storePublicProfile: (() => {
+        const profile = createMerchantStorePublicProfile({ persistence, authentication: service });
+        return Object.assign(logUnexpected("INTERNAL_PUBLIC_PROFILE_UNAVAILABLE", profile), {
+          read: logUnexpected("INTERNAL_PUBLIC_PROFILE_READ_UNAVAILABLE", profile.read),
+        });
+      })(),
+      diningJoinState,
+      diningQrJoin,
+      // WP-2423 item 8 ⑤ decision 5: "a new phone's first round waits for staff".
+      diningRoundHoldSetting: createMerchantDiningRoundHoldSetting({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store features page.
+      storeFeatures: createMerchantStoreFeatures({
+        persistence,
+        authentication: service,
+        now: resources.now,
+        // v15 2026-10-29: the tea choices are priced and offered at the Store, as a round sells them.
+        ...(loadPricingCurrencyMetadata === undefined
+          ? {}
+          : { currencyMetadata: await loadPricingCurrencyMetadata() }),
+      }),
+      // WP-2423 item 8 ⑦: a server chases a dish (when the Store turned chasing on).
+      diningChase: createMerchantDiningChase({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑦ (decision 2): how many guests sit at a table.
+      diningPartySize: createMerchantDiningPartySize({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑦: the menu's "not prepared by the kitchen" mark of dishes.
+      kitchenNotPrepared: createMerchantKitchenNotPrepared({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 item 8 ⑧ (decision 5): the kitchen sections (档口) and each dish's section.
+      kitchenSections: createMerchantKitchenSections({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      diningJoinRegenerate,
+      diningSessionStart,
+      diningTables,
+      diningTableCommand,
+      // WP-2423 item 8 ⑧ (Owner decision 3): move a table's party to another free table.
+      diningTableMove: createMerchantDiningTableMove({
+        persistence,
+        authentication: service,
+        newReference: () => resources.credentials.reference(),
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+        // v15 2026-10-30: the party's join code is reissued for the table it moved to.
+        credentials: await createInternalDiningCredentials(resources),
+        pepperVersion: 1,
+      }),
+      // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): merge a table's party into another's.
+      diningTableMerge: createMerchantDiningTableMerge({
+        persistence,
+        authentication: service,
+        newReference: () => resources.credentials.reference(),
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+      }),
+      ...(createInternalTableQr === undefined
+        ? {}
+        : { diningTableQr: createInternalTableQr(resources, persistence, service) }),
+      diningClosing,
+      orderClosure,
+      taskInbox,
+      diningServe,
+      diningServeReady,
+      diningStaffCallCount,
+      diningStaffCallAnswer,
+      diningPaymentTimingRead,
+      diningPaymentTimingChange,
+      diningTableBill,
+      diningTableSettle,
+      diningTableSplit,
+      ...(diningTableOnlinePaymentStop === undefined ? {} : { diningTableOnlinePaymentStop }),
+      orderUnpaidDeparture,
+      tablePayment,
+      tableCashRefund,
+      unpaidItemRemoval,
+      itemComp,
+      diningOrderProgress,
+      diningTableClosePlan,
+      diningItemService,
+      service,
+      orderQueue,
+      kitchenQuery,
+      kitchenCommand,
+      kitchenRelease,
+      kitchenRework,
+      kitchenStaleClose,
+      roleAdministration,
+      staffAdministration: {
+        ...staffAdministration,
+        command: logUnexpected("INTERNAL_STAFF_COMMAND_UNAVAILABLE", staffAdministration.command),
+      },
+      inventoryItems,
+      stockPlaces,
+      openingCount,
+      storeReceipts,
+      recipes,
+      dishAllergens,
+      products,
+      ...(prices === undefined ? {} : { prices }),
+      ...(storePrices === undefined ? {} : { storePrices }),
+      allergens,
+      ...(menus === undefined ? {} : { menus }),
+      availability,
+      optionSets,
+      optionPrices,
+      optionRecipes,
+      ...(oneStoreDishes === undefined ? {} : { oneStoreDishes }),
+      combos,
+      // WP-2423 item 8 ⑥ part 4: a combo's dish done in the kitchen or served at its table.
+      comboParts: createMerchantComboPartCommands({
+        persistence,
+        authentication: service,
+        locale: "en-CA",
+      }),
+      storeTax,
+      taxClassifications,
+      stockCounts,
+      storeWaste,
+      pickupQuery,
+      pickupProof,
+      pickupHandoff,
+      pickupNotCollected,
+      pickupIdentityCheck,
+      orderAcceptance,
+      exactOrigin: publicOrigin,
+      acceptedHost: new URL(publicOrigin).host,
+    },
+  };
+}

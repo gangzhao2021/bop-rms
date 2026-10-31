@@ -1,11 +1,185 @@
 const databaseAccessManifestInput = {
   version: 1,
-  module: { moduleName: "pricing", packageName: "@rms/pricing", layer: "RMS" },
+  module: {
+    moduleName: "pricing",
+    packageName: "@rms/pricing",
+    layer: "RMS",
+  },
   tables: [
+    {
+      // WP-2423 DEC-BRAND-MULTI-STORE segment 9: each Store's own prices (append-only).
+      table: "store_price_change",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "price_book_single_store_listing",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "option_price_single_store_listing",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 Q19: sole-operator approval mark (append-only).
+      table: "price_book_sole_operator_approval",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: option price sole-operator publication mark.
+      table: "option_price_sole_operator_approval",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_config_publication_candidate",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_config_candidate_rule",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_config_candidate_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_config_material",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier", "sensitive_personal"],
+    },
+    {
+      table: "tax_config_material_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "sensitive_personal"],
+    },
+    {
+      table: "tax_config_material_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier", "sensitive_personal"],
+    },
+    {
+      table: "tax_config_authoring_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "store_price_book_assignment",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "store_price_book_assignment_end",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "option_price_authoring_operation",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_reference_generation",
+      classification: "projection-read-model",
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.tax-reference.v1",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "tax_reference_scope",
+      classification: "projection-read-model",
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.tax-reference.v1",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "option_price_rule",
+      classification: "aggregate-root",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "option_price_rule_version",
+      classification: "configuration-version",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
     {
       table: "tax_configuration",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -13,7 +187,10 @@ const databaseAccessManifestInput = {
     {
       table: "tax_configuration_version",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -21,7 +198,10 @@ const databaseAccessManifestInput = {
     {
       table: "tax_configuration_rule",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -29,7 +209,10 @@ const databaseAccessManifestInput = {
     {
       table: "tax_configuration_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -37,7 +220,10 @@ const databaseAccessManifestInput = {
     {
       table: "tax_config_admin_projection_generation",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.tax-config-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.tax-config-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -45,7 +231,10 @@ const databaseAccessManifestInput = {
     {
       table: "tax_config_admin_projection",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.tax-config-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.tax-config-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -53,7 +242,10 @@ const databaseAccessManifestInput = {
     {
       table: "tax_config_rule_projection",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.tax-config-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.tax-config-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -61,7 +253,10 @@ const databaseAccessManifestInput = {
     {
       table: "tax_config_receipt_fixture_projection",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.tax-config-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.tax-config-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -69,7 +264,10 @@ const databaseAccessManifestInput = {
     {
       table: "tax_config_admin_projection_checkpoint",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.tax-config-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.tax-config-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -77,7 +275,10 @@ const databaseAccessManifestInput = {
     {
       table: "price_book",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -85,7 +286,10 @@ const databaseAccessManifestInput = {
     {
       table: "promotion",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -93,7 +297,10 @@ const databaseAccessManifestInput = {
     {
       table: "promotion_version",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -101,7 +308,10 @@ const databaseAccessManifestInput = {
     {
       table: "promotion_eligibility_reference",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -109,7 +319,10 @@ const databaseAccessManifestInput = {
     {
       table: "promotion_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -117,7 +330,10 @@ const databaseAccessManifestInput = {
     {
       table: "promotion_admin_projection_generation",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.promotion-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.promotion-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -125,7 +341,10 @@ const databaseAccessManifestInput = {
     {
       table: "promotion_admin_projection",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.promotion-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.promotion-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -133,7 +352,10 @@ const databaseAccessManifestInput = {
     {
       table: "promotion_admin_projection_checkpoint",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.promotion-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.promotion-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -141,7 +363,10 @@ const databaseAccessManifestInput = {
     {
       table: "price_book_version",
       classification: "configuration-version",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -149,7 +374,10 @@ const databaseAccessManifestInput = {
     {
       table: "price_entry",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -157,7 +385,10 @@ const databaseAccessManifestInput = {
     {
       table: "price_book_operation_record",
       classification: "append-only-record",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository"],
       retentionCategory: "audit-security",
       piiClassification: ["indirect_identifier"],
@@ -165,7 +396,10 @@ const databaseAccessManifestInput = {
     {
       table: "price_book_admin_projection_generation",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.price-book-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.price-book-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -173,7 +407,10 @@ const databaseAccessManifestInput = {
     {
       table: "price_book_admin_projection",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.price-book-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.price-book-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -181,7 +418,10 @@ const databaseAccessManifestInput = {
     {
       table: "price_book_entry_projection",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.price-book-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.price-book-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -189,15 +429,32 @@ const databaseAccessManifestInput = {
     {
       table: "price_book_admin_projection_checkpoint",
       classification: "projection-read-model",
-      writeOwner: { kind: "projection-builder", id: "@rms/pricing.price-book-admin.v1" },
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.price-book-admin.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
     },
     {
+      table: "price_quote_request",
+      classification: "append-only-record",
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "price_quote",
       classification: "aggregate-root",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -205,7 +462,10 @@ const databaseAccessManifestInput = {
     {
       table: "price_quote_line",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
@@ -213,13 +473,818 @@ const databaseAccessManifestInput = {
     {
       table: "price_quote_tax_line",
       classification: "aggregate-child-entity",
-      writeOwner: { kind: "module", id: "@rms/pricing" },
+      writeOwner: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "configuration_reference_generation",
+      classification: "projection-read-model",
+      writeOwner: {
+        kind: "projection-builder",
+        id: "@rms/pricing.configuration-reference.v1",
+      },
       allowedReadPatterns: ["owner-repository", "public-query-contract"],
       retentionCategory: "operational",
       piiClassification: ["indirect_identifier"],
     },
   ],
-  accesses: [],
+  accesses: [
+    {
+      id: "price-book-single-store-listing.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_single_store_listing" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "store-price-change.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_change" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/store-price-change-store.ts",
+    },
+    {
+      id: "store-price-change.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_change" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/store-price-change-store.ts",
+    },
+    {
+      id: "price-book-single-store-listing.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_single_store_listing" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-single-store-listing.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_single_store_listing" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-single-store-listing.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_single_store_listing" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "tax-config-candidate.read.tax_config_publication_candidate",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_publication_candidate" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-candidate-store.ts",
+    },
+    {
+      id: "tax-config-candidate.write.tax_config_publication_candidate",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_publication_candidate" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-candidate-store.ts",
+    },
+    {
+      id: "tax-config-candidate.read.tax_config_candidate_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_candidate_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-candidate-store.ts",
+    },
+    {
+      id: "tax-config-candidate.write.tax_config_candidate_rule",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_candidate_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-candidate-store.ts",
+    },
+    {
+      id: "tax-config-candidate.read.tax_config_candidate_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_candidate_operation" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-candidate-store.ts",
+    },
+    {
+      id: "tax-config-candidate.write.tax_config_candidate_operation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_candidate_operation" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-candidate-store.ts",
+    },
+    {
+      id: "tax-config-material.read.tax_config_material",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_material" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-material-store.ts",
+    },
+    {
+      id: "tax-config-material.write.tax_config_material",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_material" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-material-store.ts",
+    },
+    {
+      id: "tax-config-material.read.tax_config_material_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_material_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-material-store.ts",
+    },
+    {
+      id: "tax-config-material.write.tax_config_material_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_material_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-material-store.ts",
+    },
+    {
+      id: "tax-config-material.read.tax_config_material_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_material_operation" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-material-store.ts",
+    },
+    {
+      id: "tax-config-material.write.tax_config_material_operation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_material_operation" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-material-store.ts",
+    },
+    {
+      id: "tax-config-authoring.read.tax_configuration",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.write.tax_configuration",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.read.tax_configuration_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.write.tax_configuration_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.read.tax_configuration_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.write.tax_configuration_rule",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.read.tax_configuration_operation_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_operation_record" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.write.tax_configuration_operation_record",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_operation_record" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.read.tax_config_authoring_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_authoring_operation" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "tax-config-authoring.write.tax_config_authoring_operation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_config_authoring_operation" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/tax-config-authoring-store.ts",
+    },
+    {
+      id: "option-price-authoring.read.option_price_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/option-price-authoring-store.ts",
+    },
+    {
+      id: "option-price-authoring.write.option_price_rule",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/option-price-authoring-store.ts",
+    },
+    {
+      id: "option-price-authoring.read.option_price_rule_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_rule_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/option-price-authoring-store.ts",
+    },
+    {
+      id: "option-price-authoring.write.option_price_rule_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_rule_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/option-price-authoring-store.ts",
+    },
+    {
+      id: "option-price-authoring.read.option_price_authoring_operation",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_authoring_operation" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/option-price-authoring-store.ts",
+    },
+    {
+      id: "option-price-authoring.write.option_price_authoring_operation",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_authoring_operation" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source: "packages/rms/pricing/src/infrastructure/persistence/option-price-authoring-store.ts",
+    },
+    {
+      id: "brand-tax-reference-source.read.tax_reference_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "tax_reference_generation",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/brand-tax-reference-source-store.ts",
+    },
+    {
+      id: "brand-tax-reference-source.read.tax_reference_scope",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "tax_reference_scope",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/brand-tax-reference-source-store.ts",
+    },
+    {
+      id: "promotion-reference-source.read.promotion",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "promotion",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/promotion-reference-source-store.ts",
+    },
+    {
+      id: "promotion-reference-source.read.promotion_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "promotion_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/promotion-reference-source-store.ts",
+    },
+    {
+      id: "promotion-reference-source.read.promotion_eligibility_reference",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "promotion_eligibility_reference",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/promotion-reference-source-store.ts",
+    },
+    {
+      id: "option-price-reference-source.read.option_price_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "option_price_rule",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/option-price-reference-source-store.ts",
+    },
+    {
+      id: "option-price-reference-source.read.option_price_rule_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "option_price_rule_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/option-price-reference-source-store.ts",
+    },
+    {
+      id: "price-book-reference-source.read.price_book",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "price_book",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-reference-source-store.ts",
+    },
+    {
+      id: "price-book-reference-source.read.price_book_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "price_book_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-reference-source-store.ts",
+    },
+    {
+      id: "price-book-reference-source.read.price_entry",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "price_entry",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-reference-source-store.ts",
+    },
+    {
+      id: "tax-configuration-reference-source.read.tax_configuration",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "tax_configuration",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/tax-configuration-reference-source-store.ts",
+    },
+    {
+      id: "tax-configuration-reference-source.read.tax_configuration_version",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "tax_configuration_version",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/tax-configuration-reference-source-store.ts",
+    },
+    {
+      id: "tax-configuration-reference-source.read.tax_configuration_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "tax_configuration_rule",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "public-query-contract",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/tax-configuration-reference-source-store.ts",
+    },
+    {
+      id: "configuration-reference-source.read.configuration_reference_generation",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "configuration_reference_generation",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "configuration-reference-source.read.price_book",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "price_book",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "configuration-reference-source.read.option_price_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "option_price_rule",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "configuration-reference-source.read.promotion",
+      operation: "read",
+      mechanism: "repository",
+      target: {
+        schema: "rms_pricing",
+        table: "promotion",
+      },
+      principal: {
+        kind: "module",
+        id: "@rms/pricing",
+      },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/configuration-reference-source-store.ts",
+    },
+    {
+      id: "store-price-book-assignment.read.store_price_book_assignment",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_book_assignment" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
+    },
+    {
+      id: "store-price-book-assignment.write.store_price_book_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_book_assignment" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
+    },
+    {
+      id: "store-price-book-assignment.read.store_price_book_assignment_end",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_book_assignment_end" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
+    },
+    {
+      id: "store-price-book-assignment.write.store_price_book_assignment_end",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "store_price_book_assignment_end" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/store-price-book-assignment-store.ts",
+    },
+    {
+      id: "price-book-sole-operator-approval.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "price-book-sole-operator-approval.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-sole-operator-approval.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-sole-operator-approval.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-sole-operator-store.ts",
+    },
+    {
+      id: "option-price-sole-operator-approval.authoring-read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "option_price_sole_operator_approval" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source: "packages/rms/pricing/src/infrastructure/persistence/option-price-authoring-store.ts",
+    },
+    {
+      id: "internal-test-tax-evidence-renewal.read.tax_configuration",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-tax-evidence-renewal-store.ts",
+    },
+    {
+      id: "internal-test-tax-evidence-renewal.write.tax_configuration",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-tax-evidence-renewal-store.ts",
+    },
+    {
+      id: "internal-test-tax-evidence-renewal.read.tax_configuration_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-tax-evidence-renewal-store.ts",
+    },
+    {
+      id: "internal-test-tax-evidence-renewal.write.tax_configuration_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-tax-evidence-renewal-store.ts",
+    },
+    {
+      id: "internal-test-tax-evidence-renewal.read.tax_configuration_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-tax-evidence-renewal-store.ts",
+    },
+    {
+      id: "internal-test-tax-evidence-renewal.write.tax_configuration_rule",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-tax-evidence-renewal-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.read.tax_configuration",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.write.tax_configuration",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.read.tax_configuration_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.write.tax_configuration_version",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_version" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.read.tax_configuration_rule",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+    {
+      id: "internal-test-store-tax-configuration.write.tax_configuration_rule",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "tax_configuration_rule" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/internal-test-store-tax-configuration-store.ts",
+    },
+  ],
 } as const;
-
 export const databaseAccessManifest = databaseAccessManifestInput;

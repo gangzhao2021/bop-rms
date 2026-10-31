@@ -6,6 +6,19 @@ export type OrderingHash = string & { readonly __orderingHash: unique symbol };
 export type CartOrderType = "DineIn" | "Pickup";
 export type CartSourceChannel = "Api" | "Pos" | "Qr" | "Web";
 
+/**
+ * Channels whose carts a guest session operates. WP-2423 Q7: a counter (Pos) cart is a Pickup cart
+ * staff open at the counter for a walk-up guest, under that guest's own session; only Pickup takes
+ * it (staff dine-in ordering is a later slice).
+ */
+export function isGuestCartChannel(orderType: string | undefined, sourceChannel: string): boolean {
+  return (
+    sourceChannel === "Qr" ||
+    sourceChannel === "Web" ||
+    (sourceChannel === "Pos" && orderType === "Pickup")
+  );
+}
+
 export interface CartOptionSelection {
   readonly optionReference: OrderingReference;
   readonly quantity: number;
@@ -57,6 +70,13 @@ export const cartErrorCodes = [
   "CART_INPUT_INVALID",
   "CART_UNAVAILABLE",
   "CART_PERMISSION_DENIED",
+  "CART_REPLACEMENT_FORBIDDEN",
+  /** WP-2423: a checkout on the previous table Cart may still create an order or charge; retry later. */
+  "CART_REPLACEMENT_CHECKOUT_PENDING",
+  /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest's checkout holds this table Cart version. */
+  "CART_CHECKOUT_IN_PROGRESS",
+  /** DEC-DINE-IN-PAY-LATER: the guest's table is checking out; staff add dishes. */
+  "CART_TABLE_CHECKING_OUT",
   "CART_VERSION_CONFLICT",
   "CART_IDEMPOTENCY_CONFLICT",
   "CART_ITEM_NOT_FOUND",
@@ -88,6 +108,61 @@ export class CartError extends Error {
     this.name = "CartError";
     this.code = code;
   }
+}
+
+/**
+ * WP-2423: replacement of a timed-out table Cart waits for a checkout on it that may still create an
+ * order or a charge. pendingUntil is when the last time-bounded wait ends, or null when the wait
+ * has no known end (for example a payment without outcome).
+ */
+export class CartReplacementPendingError extends CartError {
+  readonly pendingUntil: string | null;
+  constructor(pendingUntil: string | null) {
+    super("CART_REPLACEMENT_CHECKOUT_PENDING");
+    this.pendingUntil = pendingUntil;
+  }
+}
+
+/**
+ * DEC-DINING-ANY-PARTICIPANT-SUBMIT: another participant at the table is checking out this exact
+ * Cart version until heldUntil. Nothing was changed; the guest may try again after it.
+ */
+export class CartCheckoutInProgressError extends CartError {
+  readonly heldUntil: string;
+  constructor(heldUntil: string) {
+    super("CART_CHECKOUT_IN_PROGRESS");
+    this.heldUntil = heldUntil;
+  }
+}
+
+/** Owner-supplied current read (Dining) of another participant's checkout hold on a Cart version. */
+export interface DiningCartCheckoutHoldPort {
+  read(input: {
+    readonly diningSessionReference: string;
+    readonly cartReference: string;
+    readonly cartVersion: number;
+    readonly participantReference: string;
+    readonly observedAt: string;
+  }): Promise<Readonly<{ heldUntil: string }> | null>;
+}
+
+/** Throws CartCheckoutInProgressError when another participant's checkout holds the version. */
+export async function assertDiningCartNotHeld(
+  hold: DiningCartCheckoutHoldPort | undefined,
+  input: Parameters<DiningCartCheckoutHoldPort["read"]>[0],
+): Promise<void> {
+  if (hold === undefined) return;
+  let held: Readonly<{ heldUntil: string }> | null;
+  try {
+    held = await hold.read(Object.freeze({ ...input }));
+  } catch {
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  }
+  if (held === null) return;
+  const heldUntil = held.heldUntil;
+  if (typeof heldUntil !== "string" || !instantPattern.test(heldUntil))
+    throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  throw new CartCheckoutInProgressError(heldUntil);
 }
 
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -145,6 +220,24 @@ export function parseOrderingInstant(value: unknown): OrderingInstant {
   if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value)
     return invalid();
   return value as OrderingInstant;
+}
+
+/**
+ * WP-2423: the application host and the database run on separate clocks. A Checkout authority is
+ * observed on the application clock and checked again inside the owning transaction on the
+ * database clock (`clock_timestamp()`); an ordering check between the two ("observed no later
+ * than now") allows this much skew in either direction. Expiry is never extended by it: a
+ * Session's deadlines are database facts compared with the database clock, and the in-transaction
+ * re-authorization is the authority, not the earlier observation.
+ */
+export const ORDERING_CLOCK_SKEW_ALLOWANCE_MS = 2000;
+
+/** `earlier` (one clock) is no later than `later` (the other clock), within the skew allowance. */
+export function orderingInstantNotAfterAcrossClocks(earlier: string, later: string): boolean {
+  return (
+    Date.parse(parseOrderingInstant(earlier)) <=
+    Date.parse(parseOrderingInstant(later)) + ORDERING_CLOCK_SKEW_ALLOWANCE_MS
+  );
 }
 
 export function parseOrderingHash(value: unknown): OrderingHash {
@@ -209,6 +302,13 @@ export function parseCatalogSelectionEvidence(value: unknown): CatalogSelectionE
     ruleEvidence: Object.freeze(ruleEvidence),
     validatedAt: parseOrderingInstant(raw.validatedAt),
   });
+}
+
+// Cart revisions follow the current PostgreSQL integer storage contract, not item quantities.
+function aggregateVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 2_147_483_647)
+    return invalid();
+  return value as number;
 }
 
 function quantity(value: unknown): number {
@@ -316,7 +416,7 @@ export function parseCartAggregate(value: unknown): CartAggregate {
     sourceChannel: raw.sourceChannel as CartSourceChannel,
     diningSessionReference,
     createdByActorReference: parseOrderingReference(raw.createdByActorReference),
-    aggregateVersion: quantity(raw.aggregateVersion),
+    aggregateVersion: aggregateVersion(raw.aggregateVersion),
     createdAt,
     updatedAt,
     lifecycle,

@@ -9,7 +9,7 @@ import {
 import {
   resolveActiveMembership,
   resolveActiveStoreAssignment,
-  type MembershipPort,
+  type CurrentMembershipReadPort,
 } from "@bop/membership";
 import {
   createBrand,
@@ -35,10 +35,10 @@ export interface StoreContextSessionPort {
 }
 
 export interface MerchantStoreSwitchServiceOptions {
-  readonly membershipPort: MembershipPort;
+  readonly membershipPort: CurrentMembershipReadPort;
   readonly now?: () => unknown;
   readonly sessionPort: StoreContextSessionPort;
-  readonly tenantOrganizationPort: TenantOrganizationPort;
+  readonly tenantOrganizationPort: Pick<TenantOrganizationPort, "getBrand" | "getStore">;
 }
 
 export interface MerchantStoreSwitchInput {
@@ -100,10 +100,10 @@ function validateRotation(
 }
 
 export class MerchantStoreSwitchService {
-  readonly #membershipPort: MembershipPort;
+  readonly #membershipPort: CurrentMembershipReadPort;
   readonly #now: () => unknown;
   readonly #sessionPort: StoreContextSessionPort;
-  readonly #tenantOrganizationPort: TenantOrganizationPort;
+  readonly #tenantOrganizationPort: Pick<TenantOrganizationPort, "getBrand" | "getStore">;
 
   constructor({
     membershipPort,
@@ -125,37 +125,47 @@ export class MerchantStoreSwitchService {
         csrf: input.csrf,
       });
       assertSessionUsable(current, observedAt);
-      const actorReference = workforceActor(current);
       const targetStoreReference = parseStoreReference(input.targetStoreReference);
+      const tenantPort = this.#tenantOrganizationPort;
+      const membershipPort = this.#membershipPort;
+      async function resolveTarget(
+        session: AuthenticationSession,
+        observedAt: ReturnType<typeof parseCanonicalInstant>,
+      ) {
+        const actorReference = workforceActor(session);
 
-      const storeInput = await this.#tenantOrganizationPort.getStore(targetStoreReference);
-      if (storeInput === null) throw new Error("STORE_SWITCH_DENIED");
-      const store = createStore(storeInput);
-      if (store.lifecycle !== "Active") throw new Error("STORE_SWITCH_DENIED");
-      const brandInput = await this.#tenantOrganizationPort.getBrand(store.brandReference);
-      if (brandInput === null) throw new Error("STORE_SWITCH_DENIED");
-      const brand = createBrand(brandInput);
-      if (brand.lifecycle !== "Active") throw new Error("STORE_SWITCH_DENIED");
+        const storeInput = await tenantPort.getStore(targetStoreReference);
+        if (storeInput === null) throw new Error("STORE_SWITCH_DENIED");
+        const store = createStore(storeInput);
+        if (store.lifecycle !== "Active") throw new Error("STORE_SWITCH_DENIED");
+        const brandInput = await tenantPort.getBrand(store.brandReference);
+        if (brandInput === null) throw new Error("STORE_SWITCH_DENIED");
+        const brand = createBrand(brandInput);
+        if (brand.lifecycle !== "Active") throw new Error("STORE_SWITCH_DENIED");
 
-      const membership = resolveActiveMembership(
-        await this.#membershipPort.findMemberships(actorReference, brand.brandReference),
-        actorReference,
-        brand.brandReference,
-        observedAt,
-      );
-      resolveActiveStoreAssignment(
-        membership,
-        await this.#membershipPort.findStoreAssignments(
-          membership.membershipReference,
+        const membership = resolveActiveMembership(
+          await membershipPort.findMemberships(actorReference, brand.brandReference),
+          actorReference,
+          brand.brandReference,
+          observedAt,
+        );
+        resolveActiveStoreAssignment(
+          membership,
+          await membershipPort.findStoreAssignments(
+            membership.membershipReference,
+            store.storeReference,
+          ),
           store.storeReference,
-        ),
-        store.storeReference,
-        observedAt,
-      );
-      const tenantContext = createTenantContext(current.actor, brand, store, observedAt);
+          observedAt,
+        );
+        return createTenantContext(session.actor, brand, store, observedAt);
+      }
+      await resolveTarget(current, observedAt);
 
       const rotated = await this.#sessionPort.rotate(input.sessionCookie, "StoreContextElevation");
-      const cookie = validateRotation(current, rotated, observedAt);
+      const refreshedAt = parseCanonicalInstant(this.#now());
+      const cookie = validateRotation(current, rotated, refreshedAt);
+      const tenantContext = await resolveTarget(rotated.session, refreshedAt);
       return Object.freeze({
         cookie,
         tenantContext,

@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type DiscrepancyClientErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -59,7 +60,6 @@ export interface DiscrepancyProjectionClient {
   load(): Promise<unknown>;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const decimalPattern = /^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/u;
 const safe = /^[^\p{Cc}\p{Cf}<>{}$]{1,200}$/u;
 const fail = (): never => {
@@ -85,16 +85,9 @@ const nullableText = (value: unknown) => (value === null ? null : text(value));
 const decimal = (value: unknown) =>
   typeof value === "string" && decimalPattern.test(value) ? value : fail();
 const nullableDecimal = (value: unknown) => (value === null ? null : decimal(value));
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  instantPattern.test(value) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
+const { instant, oneOf } = createContractParsers(fail);
 const integer = (value: unknown, min = 0) =>
   Number.isSafeInteger(value) && (value as number) >= min ? (value as number) : fail();
-const oneOf = <T extends string>(value: unknown, values: readonly T[]) =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
 export function parseDiscrepancyView(value: unknown): DiscrepancyView {
   const raw = object(value, [
     "screenId",

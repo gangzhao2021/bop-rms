@@ -21,7 +21,7 @@ export interface CartQuoteLineEvidence {
   readonly quantity: number;
 }
 
-export interface CartQuoteAttachment {
+export interface CartQuoteAttachment<V extends 1 | 2 = 1> {
   readonly operationReference: OrderingReference;
   readonly operationIntentHash: OrderingHash;
   readonly guestSessionReference: OrderingReference;
@@ -30,7 +30,7 @@ export interface CartQuoteAttachment {
   readonly storeReference: OrderingReference;
   readonly cartVersion: number;
   readonly quoteReference: OrderingReference;
-  readonly quoteVersion: 1;
+  readonly quoteVersion: V;
   readonly quoteInputDigest: OrderingHash;
   readonly currencyCode: string;
   readonly currencyMetadataVersion: number;
@@ -144,7 +144,10 @@ function warnings(value: unknown): readonly string[] {
   return Object.freeze(parsed);
 }
 
-export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
+function parseAttachment<V extends 1 | 2>(
+  value: unknown,
+  expectedVersion: V,
+): CartQuoteAttachment<V> {
   const raw = exact(value, [
     "operationReference",
     "operationIntentHash",
@@ -171,7 +174,7 @@ export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
     "attachedAt",
     "idempotencyExpiresAt",
   ]);
-  if (raw.quoteVersion !== 1 || !Array.isArray(raw.lines) || raw.lines.length > 100)
+  if (raw.quoteVersion !== expectedVersion || !Array.isArray(raw.lines) || raw.lines.length > 100)
     return invalid();
   const currencyCode = currency(raw.currencyCode);
   const parsedLines = raw.lines.map(line);
@@ -208,7 +211,7 @@ export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
     storeReference: parseOrderingReference(raw.storeReference),
     cartVersion: positive(raw.cartVersion),
     quoteReference: parseOrderingReference(raw.quoteReference),
-    quoteVersion: 1,
+    quoteVersion: expectedVersion,
     quoteInputDigest: parseOrderingHash(raw.quoteInputDigest),
     currencyCode,
     currencyMetadataVersion: positive(raw.currencyMetadataVersion),
@@ -225,4 +228,54 @@ export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
     attachedAt,
     idempotencyExpiresAt,
   });
+}
+
+export function parseCartQuoteAttachment(value: unknown): CartQuoteAttachment {
+  return parseAttachment(value, 1);
+}
+
+export function parseConfiguredCartQuoteAttachment(value: unknown): CartQuoteAttachment<2> {
+  return parseAttachment(value, 2);
+}
+
+export const CART_QUOTE_VERSIONS = [1, 2] as const;
+export type CartQuoteVersion = (typeof CART_QUOTE_VERSIONS)[number];
+
+export function isCartQuoteVersion(value: unknown): value is CartQuoteVersion {
+  return (CART_QUOTE_VERSIONS as readonly unknown[]).includes(value);
+}
+
+/**
+ * Parses an attachment that must be exactly the caller's configured Quote version (the pricing
+ * path the caller runs). Exhaustive: a new Quote version fails compilation here.
+ */
+export function parseCartQuoteAttachmentOfVersion<V extends CartQuoteVersion>(
+  value: unknown,
+  version: V,
+): CartQuoteAttachment<V> {
+  const selected: CartQuoteVersion = version;
+  switch (selected) {
+    case 1:
+      return parseCartQuoteAttachment(value) as CartQuoteAttachment<V>;
+    case 2:
+      return parseConfiguredCartQuoteAttachment(value) as CartQuoteAttachment<V>;
+    default: {
+      const unhandled: never = selected;
+      return unhandled;
+    }
+  }
+}
+
+/**
+ * WP-2423: parses a stored attachment whichever Quote version priced it (a cart's attachments can
+ * be v1 or configured v2). Use this wherever the reader does not itself fix the Quote version.
+ */
+export function parseAnyCartQuoteAttachment(value: unknown): CartQuoteAttachment<CartQuoteVersion> {
+  const version =
+    value !== null && typeof value === "object"
+      ? (value as { quoteVersion?: unknown }).quoteVersion
+      : undefined;
+  return isCartQuoteVersion(version)
+    ? parseCartQuoteAttachmentOfVersion(value, version)
+    : invalid();
 }

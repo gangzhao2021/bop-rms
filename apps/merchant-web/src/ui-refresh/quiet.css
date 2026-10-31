@@ -1,0 +1,575 @@
+/*
+ * Owner 2026-10-25 "fewer lines" (条条框框太生硬): areas are told apart by space and fill, not by
+ * boxes and rules. Loaded last. Two token moves do most of it, so every older rule follows:
+ * - the line tokens are transparent in the back office, so hairlines, outlines and box borders
+ *   drop out; the few borders that carry meaning are drawn below with their own colours;
+ * - a white control (button, field) takes the raised fill instead, so secondary buttons and
+ *   inputs read as filled grey shapes without an outline.
+ * Owner 2026-10-25 ("只要白底"): every surface is white — page, sidebar, cards, rows, notices;
+ * areas are told apart by space and type. Grey stays only on controls (buttons, fields, chips),
+ * which would otherwise disappear.
+ * Owner 2026-10-26 ("订单号这些还是灰底"): controls are white too. A field is a single 3:1 bottom
+ * line under its label; a secondary button keeps a 3:1 hairline outline; an unselected chip is
+ * plain words and a selected one the dark pill. Grey stays only on image placeholders.
+ */
+:root {
+  --bop-color-border-default: transparent;
+  --bop-color-border-strong: transparent;
+  /* Owner 2026-10-26 ("订单之间可以有适当的分割线"): list rows, and only list rows, are parted by
+     a light hairline — between rows, never above the first or below the last. Decorative: the
+     row text carries the meaning, so it needs no 3:1. Cards and page areas keep spacing only. */
+  --bop-color-row-divider: #e5e5e5;
+}
+.workspace-layout,
+.workspace-content,
+.workspace-content .bop-shell,
+.workspace-page.bop-shell__main {
+  background: var(--bop-color-surface-canvas);
+}
+.workspace-sidebar {
+  border-right: 0;
+  background: var(--bop-color-surface-canvas);
+}
+
+/* Cards, lists and panels: white on the grey page. */
+.workspace-content
+  :is(
+    .store-card,
+    .overview-card,
+    .list-filters,
+    .detail-section,
+    .refund-approval-card,
+    .dining-session-detail,
+    .dining-table-tile,
+    .pickup-queue__card,
+    .order-workbench-item,
+    .kitchen-ticket
+  ),
+.workspace-content
+  :is(.menu-builder-section, .product-editor-page form > fieldset, .product-customer-menu) {
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.workspace-page .list-filters {
+  padding: var(--bop-space-4);
+}
+/* "Right now" is a row of white tiles on the page, not a card around them. */
+.workspace-page.workspace-page .overview-card--today {
+  padding: 0;
+  background: none;
+}
+.workspace-page .overview-card--today .overview-counts li,
+.workspace-page .store-reports__totals li {
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+/* Order rows: a white row each, with space between instead of rules. */
+.orders-page .order-workbench-item {
+  margin-bottom: var(--bop-space-2);
+  overflow: hidden;
+}
+.orders-page .order-workbench-entry[open] > summary {
+  background: var(--bop-color-surface-default);
+}
+.orders-page .order-workbench-entry > summary:hover {
+  background: var(--bop-color-surface-default);
+}
+
+/* Buttons: any button drawn with a line gets the 3:1 control hairline back. */
+.workspace-layout :is(button, .availability-menu > summary) {
+  --bop-color-border-default: var(--bop-color-border-control);
+  --bop-color-border-strong: var(--bop-color-border-control);
+}
+.workspace-page__header button:not(:disabled, [type="submit"], [data-variant="destructive"]),
+.workspace-layout
+  > :not(.workspace-content)
+  button:not([aria-current], .workspace-nav__group-toggle, [type="submit"], dialog *),
+.workspace-content
+  :is(.kitchen-board-filters, .kitchen-reference-search)
+  button:not([type="submit"]),
+.workspace-page > button:not(:disabled, [type="submit"]),
+.workspace-page .overview-attention__action,
+.workspace-layout .availability-menu > summary {
+  border: 1px solid var(--bop-color-border-control);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+}
+.workspace-sidebar .workspace-nav__group-toggle {
+  border: 0;
+  background: transparent;
+}
+/* Filter chips: an unselected chip is plain words; the selected one keeps the dark pill. */
+.orders-page .order-status-filters button:not([aria-pressed="true"]) {
+  border-color: transparent;
+  background: transparent;
+}
+/* Fields: white, no box, one bottom line; 2px dark on focus; the red mark on an error. */
+.workspace-layout.workspace-layout
+  :is(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
+    select,
+    textarea
+  ) {
+  --bop-color-border-default: var(--bop-color-border-control);
+  --bop-color-border-strong: var(--bop-color-text-default);
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-border-control);
+  border-radius: 0;
+  padding-inline: 0;
+  background-color: var(--bop-color-surface-default);
+}
+.workspace-layout.workspace-layout
+  :is(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
+    select,
+    textarea
+  ):focus {
+  border-bottom-color: var(--bop-color-text-default);
+  box-shadow: 0 1px 0 var(--bop-color-text-default);
+}
+.workspace-layout.workspace-layout
+  :is(input, select, textarea):is([aria-invalid="true"], :user-invalid) {
+  border-bottom-color: var(--bop-color-danger-mark);
+}
+
+/* Status tags: words in the tone colour with a small dot; no box. */
+.orders-page .order-workbench-phase {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.overview-attention__state {
+  padding: 0;
+  border: 0;
+}
+.kitchen-work-item__state strong,
+.kitchen-work-item__state strong[data-status="In Progress"] {
+  padding: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+}
+.kitchen-work-item__state strong::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.kitchen-work-item__state strong[data-status="In Progress"]::before {
+  background: var(--bop-color-info);
+}
+
+/* Notices: no coloured side bar; a rounded fill, the tone carried by the words. */
+:is(
+  .command-error,
+  .stale-warning,
+  .recipe-source-notice,
+  .kitchen-work-item__note,
+  .store-setup-draft-page [role="alert"],
+  .staff-session__notice,
+  .refund-deadline-warning,
+  .pickup-queue__remake,
+  .pickup-queue__locked,
+  .pickup-queue__handed-over,
+  .kitchen-close-dialog__money,
+  .staff-switch__message,
+  .staff-pin__notice,
+  .staff-pin__verify,
+  .store-devices__verify,
+  .full-sign-in-prompt,
+  .counter-order__ticket [role="alert"],
+  .kitchen-screen-awake,
+  .kitchen-sound-reminder,
+  .orders-page .order-queue-awaiting,
+  .orders-page .order-queue-stale,
+  .orders-page .order-queue-released,
+  .workspace-page .settlement__difference-help,
+  .workspace-page .settlement__unmatched
+) {
+  border: 0;
+  border-radius: 0;
+  padding-inline: 0;
+  background: none;
+}
+.workspace-page
+  :is(.overview-card--alerts-critical, .overview-card--alerts-warning, .own-name-prompt--required) {
+  border: 0;
+}
+.workspace-page .overview-card--alerts-critical header h3 {
+  color: var(--bop-color-danger);
+}
+.workspace-page .overview-card--alerts-warning header h3,
+.kitchen-sound-reminder,
+.orders-page .order-queue-awaiting,
+.orders-page .order-queue-stale {
+  color: var(--bop-color-warning);
+}
+.orders-page .order-queue-released {
+  color: var(--bop-color-success);
+}
+
+/* The borders that carry meaning. */
+.workspace-page.dining-floor .dining-table-tile[data-selected="true"] {
+  outline: 2px solid var(--bop-color-text-default);
+  background: var(--bop-color-surface-default);
+}
+.workspace-page.dining-floor .dining-table-tile[data-session="linked"] {
+  box-shadow: none;
+}
+
+/* Owner 2026-10-25: pages built on the shared frame (Products, Prices, Item availability,
+   Receiving, ...) use the same column and left edge as every other workspace page. */
+.workspace-content .bop-shell__main:not(.workspace-page) {
+  width: 100%;
+  max-width: 90rem;
+  margin: 0;
+  padding: 24px clamp(16px, 3vw, 32px) 48px;
+}
+
+/* Owner 2026-10-25: a page's main action ("New product", "Receive goods") is a button, not an
+   underlined link. */
+.bop-shell__main a.primary-action-link {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--bop-space-5);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Owner 2026-10-25: one-line page intros with the detail on request. */
+.bop-shell__main .page-intro {
+  margin: var(--bop-space-1) 0 0;
+}
+.bop-shell__main .page-intro__summary {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+}
+.bop-shell__main .page-intro__aside {
+  font-size: 13px;
+}
+.bop-shell__main .page-intro__more summary {
+  min-height: 32px;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.bop-shell__main .page-intro__more p {
+  max-width: 44rem;
+  margin: var(--bop-space-1) 0 0;
+  color: var(--bop-color-text-muted);
+}
+/* A page's main list is a white panel on the grey page (its controls then read as grey fills). */
+.workspace-content .bop-shell__main > table,
+.workspace-content .bop-shell__main > section > table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+@media (max-width: 40rem) {
+  .workspace-content .bop-shell__main > table tr,
+  .workspace-content .bop-shell__main > section > table tr {
+    padding-inline: var(--bop-space-4);
+  }
+}
+
+/* Danger actions: red words with no fill (the lighter red is AA on white only, 4.53:1; on the
+   grey fill it is 4.15:1). Danger buttons sit on white cards and dialogs. */
+.workspace-content [data-variant="destructive"]:not(:disabled),
+.availability-menu--more .availability-menu__items button:not(:disabled),
+.order-cancel-dialog [data-variant="destructive"]:not(:disabled),
+.store-devices__confirm [data-variant="destructive"]:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--bop-color-danger);
+  font-weight: 600;
+}
+.workspace-content [data-variant="destructive"]:not(:disabled):hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/*
+ * Owner 2026-10-25 ("先这样吧"): red and green have two roles. Text in the tone colour stays only
+ * for count badges, danger buttons, a late ticket's minutes and field error messages. Every
+ * status word is dark text after a dot in the tone's mark colour.
+ */
+:is(
+  .orders-page .order-workbench-phase,
+  .overview-attention__state,
+  .system-alert__badge,
+  .pickup-queue__phase,
+  .order-exception__severity,
+  .staff-pin__result[data-tone="done"],
+  .order-queue-released
+) {
+  color: var(--bop-color-text-default);
+}
+/* The phase and attention tags already draw a dot; it takes the tone's mark colour. */
+.orders-page .order-workbench-phase::before,
+.overview-attention__state::before {
+  background: var(--tag-dot, var(--bop-color-text-muted));
+}
+.orders-page .order-workbench-phase:is([data-tone="danger"], [data-tone="cancelled"]),
+.overview-attention__state--danger {
+  --tag-dot: var(--bop-color-danger-mark);
+}
+.orders-page .order-workbench-phase:is([data-tone="ready"], [data-tone="done"]) {
+  --tag-dot: var(--bop-color-success-mark);
+}
+.orders-page .order-workbench-phase[data-tone="warning"],
+.overview-attention__state--warning {
+  --tag-dot: var(--bop-color-warning);
+}
+.orders-page .order-workbench-phase[data-tone="neutral"] {
+  --tag-dot: var(--bop-color-info);
+}
+/* Words that had no dot get one: urgent and late facts, failed checks, allergens, done results. */
+:is(
+  .system-alert--critical .system-alert__badge,
+  .workspace-page .overview-card--alerts-critical header h3,
+  .pickup-queue__phase[data-wait="late"],
+  .order-exception__severity[data-severity="Critical"],
+  .order-exception-page .order-exception__card[data-overdue="true"] .order-exception__open-for,
+  .orders-page .order-workbench-age[data-tone="danger"],
+  .order-accept-by:is([data-tier="urgent"], [data-tier="lapsed"]),
+  .workspace-page.dining-floor .dining-table-tile__notice.order-accept-by[data-tier="urgent"],
+  .workspace-page.dining-floor .dining-staff-calls li[data-tier="urgent"],
+  .workspace-page .settlement__reconciliation > p[data-reconciled="false"],
+  .kitchen-work-item__cue[data-kind="allergen"][data-value="ReviewRequired"],
+  .kitchen-work-item__allergens[data-kind="declared"]
+) {
+  color: var(--bop-color-text-default);
+}
+:is(
+  .system-alert--critical .system-alert__badge,
+  .workspace-page .overview-card--alerts-critical header h3,
+  .pickup-queue__phase[data-wait="late"],
+  .order-exception__severity[data-severity="Critical"],
+  .orders-page .order-workbench-age[data-tone="danger"],
+  .order-accept-by:is([data-tier="urgent"], [data-tier="lapsed"]),
+  .workspace-page.dining-floor .dining-table-tile__notice.order-accept-by[data-tier="urgent"],
+  .workspace-page .settlement__reconciliation > p[data-reconciled="false"],
+  .kitchen-work-item__cue[data-kind="allergen"][data-value="ReviewRequired"]
+)::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.15em;
+}
+.kitchen-work-item__allergens strong,
+.kitchen-work-item__allergens[data-kind="declared"] strong {
+  color: var(--bop-color-text-default);
+}
+.staff-pin__result[data-tone="done"]::before,
+.orders-page .order-queue-released::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--bop-color-success-mark);
+  vertical-align: 0.15em;
+}
+/* A late ticket: the outline in the mark colour, its minutes stay red (on white). */
+.kitchen-ticket[data-age="late"] .kitchen-ticket__header {
+  color: var(--bop-color-text-default);
+}
+.kitchen-ticket[data-age="late"] .kitchen-ticket__timer,
+.kitchen-ticket[data-age="late"] .kitchen-ticket__tier {
+  color: var(--bop-color-danger);
+}
+
+/* Owner 2026-10-25 ("只要白底"): space and type separate the areas now that every surface is
+   white; a notice is its title (or a tone dot) and its words, without a box. */
+.workspace-content .bop-state-card {
+  padding: 0;
+  background: none;
+}
+.workspace-page--overview .overview-grid,
+.workspace-page .overview-card--today .overview-counts {
+  gap: var(--bop-space-6);
+}
+.workspace-content
+  :is(.store-card, .overview-card, .detail-section, .refund-approval-card):not(
+    .counter-order__ticket
+  ) {
+  padding-inline: 0;
+}
+.workspace-page .overview-card--today .overview-counts li {
+  padding: 0;
+}
+.orders-page .order-workbench-item {
+  margin-bottom: 0;
+}
+/* A kitchen step that cannot be taken here reads as muted words, not as a grey button like the
+   ones that work. */
+.kitchen-work-item__actions button:disabled {
+  background: transparent;
+  color: var(--bop-color-text-muted);
+}
+/* Tag words stay dark in every tone (the per-tone colours in orders.css are more specific). */
+.orders-page .order-workbench-phase[data-tone],
+.orders-page .order-workbench-phase[data-phase] {
+  color: var(--bop-color-text-default);
+}
+
+/*
+ * Owner 2026-10-26 ("语言切换的位置就很反常理"): the language switch is plain words at the top
+ * right of every page, on the page's title row ("English" in Chinese, "中文" in English). The page
+ * header keeps that corner free. On a phone it sits in the top bar beside Menu (nav.css).
+ */
+.workspace-content {
+  position: relative;
+}
+/* Every page's header ends with it; the top bar is the fallback for a page without one. */
+.workspace-topbar {
+  position: absolute;
+  top: 18px;
+  right: clamp(8px, 3vw, 24px);
+  z-index: 6;
+}
+.workspace-content:has(.workspace-page__header, .bop-shell__header--in-workspace)
+  .workspace-topbar {
+  display: none;
+}
+.workspace-page__header .workspace-page__language {
+  order: 99;
+  margin-inline-start: auto;
+}
+.workspace-page__header .workspace-page__toolbar {
+  margin-inline-start: auto;
+}
+.workspace-page__header .workspace-page__toolbar + .workspace-page__language {
+  margin-inline-start: 0;
+}
+.bop-shell__header--in-workspace {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--bop-space-4);
+}
+.bop-shell__header--in-workspace .bop-shell__header-extra {
+  margin-inline-start: auto;
+}
+.workspace-layout .workspace-content button:is(.workspace-topbar__language, .language-switch),
+.workspace-layout .workspace-sidebar button.workspace-sidebar__language {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 15px;
+  font-weight: 500;
+}
+.workspace-layout .language-switch:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 48rem) {
+  .workspace-topbar,
+  .workspace-layout .workspace-content button.language-switch,
+  .workspace-content .bop-shell__header-extra {
+    display: none;
+  }
+  .workspace-layout .workspace-sidebar button.workspace-sidebar__language {
+    display: inline-flex;
+  }
+}
+@media (min-width: 48.0625rem) {
+  .workspace-layout .workspace-sidebar button.workspace-sidebar__language {
+    display: none;
+  }
+}
+/* Owner 2026-10-26: counts in the navigation are dark, not red — the page's own content leads. */
+.workspace-nav__badge {
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.workspace-sidebar a[aria-current="page"] .workspace-nav__badge,
+.workspace-drawer__panel a[aria-current="page"] .workspace-nav__badge {
+  background: var(--bop-color-on-primary);
+  color: var(--bop-color-text-default);
+}
+
+/*
+ * Owner 2026-10-26 (Orders v3, "Square style"), for every page with the sidebar: white sidebar
+ * parted from the page by one hairline; the current page in the accent with a 3px accent bar, no
+ * dark block; counts as grey numbers. On a phone the top bar keeps a hairline under it, the menu
+ * button reads "Menu", and it sits at least 24px from the language switch.
+ */
+@media (min-width: 48.0625rem) {
+  .workspace-layout .workspace-sidebar {
+    border-right: 1px solid var(--bop-color-row-divider);
+  }
+}
+.workspace-sidebar .workspace-nav__list a[aria-current="page"],
+.workspace-sidebar a[aria-current="page"],
+.workspace-drawer__panel .workspace-nav__list a[aria-current="page"] {
+  border-radius: 0;
+  background: none;
+  box-shadow: inset 3px 0 0 var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.workspace-sidebar a:hover,
+.workspace-drawer__panel a:hover {
+  color: var(--bop-color-accent);
+}
+.workspace-nav__badge,
+.workspace-sidebar a[aria-current="page"] .workspace-nav__badge,
+.workspace-drawer__panel a[aria-current="page"] .workspace-nav__badge {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.workspace-layout .workspace-content .workspace-page__header .language-switch,
+.workspace-layout .workspace-content .bop-shell__header-extra .language-switch {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+@media (max-width: 48rem) {
+  .workspace-layout .workspace-sidebar {
+    border-bottom: 1px solid var(--bop-color-row-divider);
+  }
+  .workspace-layout .workspace-sidebar button.workspace-sidebar__language {
+    min-width: 44px;
+    min-height: 44px;
+    margin-inline-end: 24px;
+    color: var(--bop-color-text-muted);
+    font-size: 14px;
+    font-weight: 400;
+  }
+  .workspace-layout .workspace-sidebar .workspace-sidebar__compact > summary {
+    min-height: 44px;
+    padding: 0 4px;
+    border: 0;
+    color: var(--bop-color-accent);
+    font-size: 14px;
+    font-weight: 600;
+  }
+}

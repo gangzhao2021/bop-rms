@@ -1,0 +1,150 @@
+import { describe, expect, it, vi } from "vitest";
+import { notReadyOffered } from "./KitchenRework.js";
+import {
+  createKitchenReworkClient,
+  kitchenReworkBadge,
+  KitchenReworkClientError,
+  kitchenReworkOpen,
+} from "./kitchen-rework-client.js";
+
+const id = (n: number) => "018f0f58-767a-7f3b-a1d0-" + n.toString(16).padStart(12, "0");
+const csrf = "a".repeat(43);
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+const view = {
+  reworkReference: id(1),
+  originalWorkItemReference: id(2),
+  orderReference: id(3),
+  orderItemReference: id(4),
+  reasonCode: "CUSTOMER_RETURNED",
+  note: null,
+  quantity: 1,
+  wasteApplies: true,
+  status: "Queued",
+  version: 1,
+  createdAt: "2026-10-14T12:00:00.000Z",
+  startedAt: null,
+  completedAt: null,
+  displayName: "Noodle bowl",
+  selectedOptions: [],
+  orderLabel: { orderNumber: "7", orderType: "Pickup", tableLabel: null },
+  customerNote: null,
+  allergens: { status: "Unavailable" },
+};
+
+describe("WP-2423 Q26 kitchen rework client", () => {
+  it("reads the Store's remakes and refuses another Store's answer", async () => {
+    const fetcher = vi.fn(async () =>
+      json({ storeReference: id(9), observedAt: view.createdAt, canRework: true, items: [view] }),
+    );
+    const client = createKitchenReworkClient({ csrf, storeReference: id(9), fetcher });
+    const board = await client.load();
+    expect(board.items[0]).toMatchObject({
+      reasonCode: "CUSTOMER_RETURNED",
+      displayName: "Noodle bowl",
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      "/merchant/kitchen/rework/query",
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
+    await expect(
+      createKitchenReworkClient({ csrf, storeReference: id(8), fetcher }).load(),
+    ).rejects.toMatchObject({ code: "PermissionDenied" });
+  });
+  it("hides remakes where the source does not offer them", async () => {
+    const client = createKitchenReworkClient({
+      csrf,
+      storeReference: id(9),
+      fetcher: vi.fn(async () => new Response("", { status: 404 })),
+    });
+    await expect(client.load()).rejects.toMatchObject({ code: "NotOffered" });
+  });
+  it("sends one body per intent and names a closed correction window", async () => {
+    const body = {
+      action: "CreateKitchenRework" as const,
+      idempotencyKey: id(20),
+      originalWorkItemReference: id(2),
+      reasonCode: "NOT_READY" as const,
+      note: null,
+      quantity: 1,
+      correlationReference: id(21),
+    };
+    const fetcher = vi.fn(async () => json({ error: "KITCHEN_REWORK_WINDOW_CLOSED" }, 422));
+    const client = createKitchenReworkClient({ csrf, storeReference: id(9), fetcher });
+    await expect(client.execute(body)).rejects.toMatchObject({ code: "WindowClosed" });
+    expect(
+      JSON.parse(String((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body)),
+    ).toEqual(body);
+    fetcher.mockImplementation(async () => {
+      throw new TypeError("network");
+    });
+    await expect(client.execute(body)).rejects.toBeInstanceOf(KitchenReworkClientError);
+    await expect(client.execute(body)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  });
+  it("words each reason for staff and offers 'not ready yet' only within two minutes", () => {
+    expect(kitchenReworkBadge("WRONG_ITEM")).toBe("Remake · Made wrong");
+    expect(kitchenReworkBadge("NOT_READY")).toBe("Back in progress · Marked done too early");
+    const item = {
+      execution: { readyAt: "2026-10-14T12:00:00.000Z" },
+    } as unknown as Parameters<typeof notReadyOffered>[0];
+    expect(notReadyOffered(item, "2026-10-14T12:01:59.000Z")).toBe(true);
+    expect(notReadyOffered(item, "2026-10-14T12:02:01.000Z")).toBe(false);
+  });
+});
+
+describe("WP-2423 Q26 remakes stay with today's dishes", () => {
+  it("offers a remake only for a finished dish of the last 12 hours", async () => {
+    const { remakeOffered } = await import("./KitchenRework.js");
+    const dish = (createdAt: string, status = "Completed") =>
+      ({ status, createdAt }) as unknown as Parameters<typeof remakeOffered>[0];
+    const now = "2026-10-14T18:00:00.000Z";
+    expect(remakeOffered(dish("2026-10-14T17:00:00.000Z"), now)).toBe(true);
+    expect(remakeOffered(dish("2026-10-09T17:00:00.000Z"), now)).toBe(false);
+    expect(remakeOffered(dish("2026-10-14T17:00:00.000Z", "In Progress"), now)).toBe(false);
+  });
+  it("WP-2423 (2026-10-18): cancels an open remake with a reason and reads the cancelled result", async () => {
+    const body = {
+      action: "CancelKitchenRework" as const,
+      idempotencyKey: id(30),
+      reworkReference: id(1),
+      expectedVersion: 1,
+      cancelReasonCode: "OPENED_BY_MISTAKE" as const,
+      correlationReference: id(31),
+    };
+    const fetcher = vi.fn(async () =>
+      json({
+        status: "Applied",
+        action: "CancelKitchenRework",
+        rework: {
+          ...view,
+          status: "Cancelled",
+          version: 2,
+          cancelledAt: "2026-10-14T12:01:00.000Z",
+          cancelReasonCode: "OPENED_BY_MISTAKE",
+        },
+      }),
+    );
+    const client = createKitchenReworkClient({ csrf, storeReference: id(9), fetcher });
+    await expect(client.execute(body)).resolves.toMatchObject({
+      status: "Cancelled",
+      cancelReasonCode: "OPENED_BY_MISTAKE",
+    });
+    expect(
+      JSON.parse(String((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body)),
+    ).toEqual(body);
+    // An older source without cancel facts still reads as not cancelled.
+    const board = await createKitchenReworkClient({
+      csrf,
+      storeReference: id(9),
+      fetcher: vi.fn(async () =>
+        json({ storeReference: id(9), observedAt: view.createdAt, canRework: true, items: [view] }),
+      ),
+    }).load();
+    expect(board.items[0]).toMatchObject({ cancelledAt: null, cancelReasonCode: null });
+    expect(kitchenReworkOpen({ status: "Cancelled" })).toBe(false);
+    expect(kitchenReworkOpen({ status: "In Progress" })).toBe(true);
+  });
+});

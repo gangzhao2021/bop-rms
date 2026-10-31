@@ -119,11 +119,39 @@ function hash(value: string) {
 }
 function fixture(options: { sameReviewers?: boolean; stale?: boolean } = {}) {
   let aggregate: RecipeSnapshot | null = snapshot(false);
+  let revoked = false;
+  let reads = 0;
   const operations = new Map<string, RecipeOperationRecord>();
   const ports: RecipePorts = {
     authorization: {
       async authorize(input) {
+        if (revoked) return null;
         return {
+          publicationEvidence: {
+            recipeReference: ids.recipe,
+            versionReference: ids.v2,
+            brandReference: ids.brand,
+            snapshotDigest: snapshot(true).snapshotDigest,
+            draftAuthorActorReference: ids.author,
+            reviews: [
+              {
+                reviewReference: id(70),
+                reviewKind: "Cost",
+                reviewerActorReference: ids.costReviewer,
+                evidenceDigest: parseRecipeDigest("sha256:" + "c".repeat(64)),
+                reviewedAt: at,
+                decision: "Approved",
+              },
+              {
+                reviewReference: id(71),
+                reviewKind: "FoodSafety",
+                reviewerActorReference: ids.foodReviewer,
+                evidenceDigest: parseRecipeDigest("sha256:" + "d".repeat(64)),
+                reviewedAt: at,
+                decision: "Approved",
+              },
+            ],
+          },
           tenantContext: tenant(),
           permission: {
             effect: "Allow",
@@ -194,6 +222,7 @@ function fixture(options: { sameReviewers?: boolean; stale?: boolean } = {}) {
     },
     repository: {
       async resolveOperation(reference) {
+        reads++;
         return operations.get(reference) ?? null;
       },
       async load(reference) {
@@ -215,7 +244,14 @@ function fixture(options: { sameReviewers?: boolean; stale?: boolean } = {}) {
       },
     },
   };
-  return { service: createRecipeService(ports), operation: () => operations.get(ids.operation) };
+  return {
+    service: createRecipeService(ports),
+    operation: () => operations.get(ids.operation),
+    revoke: () => {
+      revoked = true;
+    },
+    reads: () => reads,
+  };
 }
 describe("Recipe administration service", () => {
   it("publishes with dual review and replays the atomic Event result", async () => {
@@ -236,6 +272,23 @@ describe("Recipe administration service", () => {
       aggregateVersion: 2,
     });
     expect(await target.service.execute(input)).toMatchObject({ status: "AlreadyApplied" });
+  });
+  it("reauthorizes retries before reading original operation history", async () => {
+    const target = fixture();
+    const input = {
+      action: "Publish" as const,
+      operationReference: ids.operation,
+      expectedAggregateVersion: 1,
+      candidate: snapshot(true),
+      occurredAt: at,
+    };
+    await target.service.execute(input);
+    const before = target.reads();
+    target.revoke();
+    await expect(target.service.execute(input)).rejects.toMatchObject({
+      code: "RECIPE_PERMISSION_DENIED",
+    });
+    expect(target.reads()).toBe(before);
   });
   it("rejects non-independent reviewers and stale Expected Version", async () => {
     const input = {

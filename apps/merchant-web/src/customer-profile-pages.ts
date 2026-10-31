@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type CustomerProfileClientErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -106,12 +107,7 @@ const object = (value: unknown, fields: readonly string[]) => {
   return value as Record<string, unknown>;
 };
 const ref = (value: unknown) => (typeof value === "string" && uuid.test(value) ? value : fail());
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
+const { instant, oneOf } = createContractParsers(fail);
 const text = (value: unknown, max = 200) =>
   typeof value === "string" &&
   value.trim() === value &&
@@ -121,8 +117,6 @@ const text = (value: unknown, max = 200) =>
     : fail();
 const integer = (value: unknown, min = 0) =>
   Number.isSafeInteger(value) && (value as number) >= min ? (value as number) : fail();
-const oneOf = <T extends string>(value: unknown, values: readonly T[]) =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
 export function parseCustomerProfileView(value: unknown): CustomerProfileView {
   const raw = object(value, [
     "projectionName",

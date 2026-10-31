@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   CompliancePolicyPageError,
@@ -8,6 +9,7 @@ import {
   type CompliancePolicyPageErrorCode,
   type CompliancePolicyView,
 } from "./compliance-policy-page.js";
+import { timeZoneLabel } from "./time-zone-names.js";
 
 type PageState =
   | { readonly kind: "Loading" | CompliancePolicyPageErrorCode }
@@ -48,7 +50,8 @@ export function CompliancePolicies({ view }: { readonly view: CompliancePolicyVi
           <p className="bop-eyebrow">{view.screenId} · Compliance Configuration</p>
           <h1>Policies and Regulatory Requirements</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
         {view.permissions.mayCreateRevision ? <button>Create policy revision</button> : null}
@@ -104,7 +107,8 @@ export function CompliancePolicies({ view }: { readonly view: CompliancePolicyVi
                   {item.authorityReference ?? "Internal policy"}
                 </p>
                 <p>
-                  Effective {item.effectiveFrom} → {item.effectiveTo ?? "Open"} · {item.timeZone}
+                  Effective {item.effectiveFrom} → {item.effectiveTo ?? "Open"} ·{" "}
+                  {timeZoneLabel(item.timeZone)}
                 </p>
                 <p>
                   Monitoring every {item.monitoringFrequencyHours}h · retention {item.retentionDays}{" "}

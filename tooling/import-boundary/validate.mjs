@@ -114,6 +114,10 @@ async function json(file) {
     throw new ImportBoundaryError(`${file}: invalid JSON: ${error.message}`);
   }
 }
+function isBuildOutputTarget(target) {
+  return target.startsWith("./dist/");
+}
+
 function targets(value) {
   if (typeof value === "string") return [value];
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
@@ -207,6 +211,16 @@ export async function discoverModules(root, diagnostics) {
                 `${subpath} has no target`,
               ),
             );
+          // Build output under ./dist/ may be absent before `build`; the source target is required.
+          else if (exportTargets.every(isBuildOutputTarget))
+            diagnostics.push(
+              diagnostic(
+                "INVALID_EXPORT_TARGET",
+                relative(root, packageFile),
+                1,
+                `${subpath} has no source target`,
+              ),
+            );
           for (const target of exportTargets) {
             const absolute = resolve(moduleRoot, target);
             if (
@@ -221,7 +235,7 @@ export async function discoverModules(root, diagnostics) {
                   `${subpath} target ${target} escapes the Module`,
                 ),
               );
-            else
+            else if (!isBuildOutputTarget(target))
               try {
                 if (!(await stat(absolute)).isFile()) throw new Error();
               } catch {

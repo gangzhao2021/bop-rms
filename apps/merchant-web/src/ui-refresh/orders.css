@@ -1,0 +1,1518 @@
+/*
+ * Orders v2 (Owner 2026-10-26, Figma "Orders · v2 redesign"). Loaded after quiet.css.
+ * - Header: title, one summary line, then quiet "Updated · Refresh" and the sound toggle.
+ * - One row of status segments with counts; date, type, channel and the rarer statuses sit
+ *   behind "Filter"; the search is a single bottom line.
+ * - Rows: order number on the left (the only bold text), what and when in the middle, status
+ *   (dot and dark words) and amount on the right, then the one next step. A light hairline
+ *   between rows (Owner exception to "no dividers"), none above the first or below the last.
+ * - The opened order is a side panel: a column beside the list from 1280px, a sheet over the
+ *   list on tablets, and the whole page on a phone (the list comes back where staff left it).
+ */
+.orders-page {
+  --order-row-divider: var(--bop-color-row-divider, #e5e5e5);
+}
+
+/* Header: quiet actions, no boxes. */
+.orders-page .workspace-page__meta {
+  margin-top: 6px;
+  font-size: 15px;
+}
+.orders-page .workspace-page__header button.orders-page__quiet,
+.orders-page .workspace-page__header button.order-sound-toggle {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.orders-page .workspace-page__header button.orders-page__quiet {
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.orders-page .workspace-page__header button.order-sound-toggle[aria-pressed="true"] {
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.orders-page .orders-page__updated {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Notices: words and a tone dot, no box or side bar. */
+.orders-page .order-queue-stale,
+.orders-page .order-queue-released {
+  margin: 0 0 var(--bop-space-4);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 15px;
+  font-weight: 400;
+}
+.orders-page .order-queue-stale::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+.orders-page .order-attention {
+  margin: 0 0 var(--bop-space-6);
+}
+.orders-page .order-attention h2 {
+  margin: 0 0 var(--bop-space-2);
+  font-size: 15px;
+  font-weight: 600;
+}
+.orders-page .order-attention ul {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.orders-page .order-attention li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--bop-space-4);
+}
+.orders-page .order-attention li > div {
+  position: relative;
+  padding-inline-start: 20px;
+}
+.orders-page .order-attention li > div::before {
+  content: "";
+  position: absolute;
+  top: 0.55em;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+}
+.orders-page .order-attention p {
+  margin: 0;
+  max-width: 60rem;
+}
+.orders-page .order-attention .order-attention__hint {
+  margin-top: 2px;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.orders-page .order-attention li > button,
+.orders-page .order-hold-notice > button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.orders-page .order-hold-notice {
+  margin-top: var(--bop-space-3);
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.orders-page .order-hold-notice h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.orders-page .order-hold-notice p {
+  margin: 2px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+
+/* Toolbar: status segments, Filter and the search on one line. */
+.orders-page .order-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3) var(--bop-space-6);
+  margin: 0 0 var(--bop-space-4);
+}
+.orders-page .order-status-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-1);
+  margin: 0;
+}
+.orders-page .order-status-filters button,
+.orders-page .order-filter__chips button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 400;
+  cursor: pointer;
+}
+.orders-page .order-status-filters button:hover,
+.orders-page .order-filter__chips button:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.orders-page .order-status-filters button[aria-pressed="true"],
+.orders-page .order-filter__chips button[aria-pressed="true"] {
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+.orders-page .order-status-filters__count {
+  color: var(--bop-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.orders-page .order-status-filters button[aria-pressed="true"] .order-status-filters__count {
+  color: inherit;
+}
+.orders-page .order-toolbar__tools {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--bop-space-4);
+}
+.orders-page .order-toolbar__search {
+  width: 14rem;
+  min-height: 44px;
+  font-size: 15px;
+}
+.orders-page .order-filter {
+  position: relative;
+}
+.orders-page .order-filter__toggle,
+.orders-page .order-filter__actions button,
+.orders-page .order-paging button,
+.orders-page .order-workbench-main .bop-state-card button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 20px;
+  border: 1px solid var(--bop-color-border-control);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.orders-page .order-filter__applied {
+  display: inline-flex;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.orders-page .order-filter__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  width: min(28rem, calc(100vw - 32px));
+  gap: var(--bop-space-5);
+  padding: var(--bop-space-6);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 14%);
+}
+.orders-page .order-filter__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+}
+.orders-page .order-filter__head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.orders-page .order-filter__group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.orders-page .order-filter__group legend {
+  margin: 0 0 var(--bop-space-2);
+  padding: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.orders-page .order-filter__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-1);
+}
+.orders-page .order-filter__scope {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.orders-page .order-filter__actions {
+  display: flex;
+  gap: var(--bop-space-3);
+}
+.orders-page .order-filter__actions .order-filter__show {
+  flex: 1;
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.orders-page .order-filter__actions button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+
+/* The list and the panel. */
+.orders-page .order-workbench {
+  position: relative;
+  margin: 0;
+  border: 0;
+}
+.orders-page .order-workbench-main {
+  container: order-list / inline-size;
+  min-width: 0;
+}
+.orders-page .order-list {
+  margin: 0 0 var(--bop-space-5);
+  padding: 0;
+  list-style: none;
+}
+.orders-page .order-list__day {
+  padding: var(--bop-space-5) 12px var(--bop-space-1);
+}
+.orders-page .order-list__day:first-child {
+  padding-top: 0;
+}
+.orders-page .order-workbench-day {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.orders-page .order-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9.5rem;
+  align-items: center;
+}
+.orders-page .order-row[hidden] {
+  display: none;
+}
+.orders-page .order-row + .order-row {
+  border-top: 1px solid var(--order-row-divider);
+}
+.orders-page .order-row[data-open="true"] {
+  border-radius: var(--bop-radius-control);
+  outline: 1px solid var(--bop-color-text-default);
+  outline-offset: -1px;
+}
+.orders-page .order-row__summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) minmax(10rem, 16rem) 6.5rem;
+  grid-template-areas: "num what status amount";
+  align-items: center;
+  column-gap: var(--bop-space-6);
+  row-gap: var(--bop-space-1);
+  min-height: 72px;
+  padding: var(--bop-space-4) 12px;
+  border-radius: var(--bop-radius-control);
+}
+.orders-page .order-row__summary:has(.order-row__open:focus-visible) {
+  outline: 3px solid var(--bop-color-focus);
+  outline-offset: -3px;
+}
+.orders-page .order-row__number {
+  grid-area: num;
+  min-width: 0;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* The number is the button; its click area covers the whole row. */
+.orders-page .order-row__open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.orders-page .order-row__open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--bop-radius-control);
+}
+.orders-page .order-row__open:focus-visible {
+  outline: none;
+}
+.orders-page .order-row__summary:hover .order-row__open {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.orders-page .order-row__what {
+  grid-area: what;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.orders-page .order-workbench-type {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.orders-page .order-row__when,
+.orders-page .order-row__when .order-workbench-time {
+  justify-self: start;
+  text-align: start;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.orders-page .order-workbench-age {
+  font-weight: 400;
+}
+.orders-page .order-row__status {
+  grid-area: status;
+}
+.orders-page .order-row__status,
+.orders-page .order-panel__status {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+}
+.orders-page .order-workbench-amount {
+  grid-area: amount;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-size: 15px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+.orders-page .order-workbench-amount [aria-hidden="true"],
+.orders-page .order-row__paid {
+  color: var(--bop-color-text-muted);
+}
+.orders-page .order-row__paid {
+  font-size: 13px;
+}
+.orders-page .order-workbench-next {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 0 0;
+}
+/* Owner 2026-10-26: the open order's row keeps its own next step too. */
+.orders-page .order-workbench-next fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.orders-page .order-workbench-next .card-actions {
+  display: grid;
+  justify-items: end;
+  gap: var(--bop-space-1);
+  margin: 0;
+}
+.orders-page .order-workbench-next button {
+  min-height: 44px;
+  padding: 0 var(--bop-space-4);
+  border: 1px solid var(--bop-color-border-control);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.orders-page .order-workbench-next .card-actions button {
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.orders-page .order-workbench-next .card-actions p {
+  margin: 0;
+  font-size: 13px;
+  text-align: end;
+}
+
+/* Status: a dot in the tone's mark colour, then dark words. */
+.orders-page :is(.order-workbench-phase, .order-panel__phase) {
+  justify-self: start;
+  text-align: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 400;
+}
+.orders-page :is(.order-workbench-phase, .order-panel__phase)::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--tag-dot, var(--bop-color-text-default));
+}
+.orders-page :is(.order-workbench-phase, .order-panel__phase)[data-tone] {
+  color: var(--bop-color-text-default);
+}
+.orders-page :is(.order-workbench-phase, .order-panel__phase)[data-tone="neutral"] {
+  --tag-dot: var(--bop-color-text-default);
+}
+.orders-page
+  :is(.order-workbench-phase, .order-panel__phase):is(
+    [data-tone="danger"],
+    [data-tone="cancelled"]
+  ) {
+  --tag-dot: var(--bop-color-danger-mark);
+}
+.orders-page
+  :is(.order-workbench-phase, .order-panel__phase):is([data-tone="ready"], [data-tone="done"]) {
+  --tag-dot: var(--bop-color-success-mark);
+}
+.orders-page :is(.order-workbench-phase, .order-panel__phase)[data-tone="warning"] {
+  --tag-dot: var(--bop-color-warning);
+}
+/* The short lines under a status: muted, red only when it is late. */
+.orders-page
+  :is(.order-row__status, .order-panel__status)
+  :is(.order-accept-by, .order-held-stock-tag, .order-staff-cancelled, .order-counter-outage) {
+  display: block;
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.orders-page
+  :is(.order-row__status, .order-panel__status)
+  .order-accept-by:is([data-tier="urgent"], [data-tier="lapsed"]) {
+  color: var(--bop-color-danger);
+}
+.orders-page :is(.order-row__status, .order-panel__status) .order-accept-by::before {
+  content: none;
+}
+
+/* The opened order. */
+.orders-page .order-panel {
+  min-width: 0;
+  background: var(--bop-color-surface-default);
+  overflow-wrap: anywhere;
+}
+.orders-page .order-workbench-detail {
+  display: grid;
+  gap: var(--bop-space-6);
+  padding: 0;
+  border: 0;
+}
+.orders-page .order-workbench-detail > * {
+  margin: 0;
+}
+.orders-page .order-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--bop-space-4);
+}
+.orders-page .order-panel__head h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.orders-page .order-panel__head h2:focus {
+  outline: none;
+}
+.orders-page .order-panel__meta {
+  margin: 4px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 15px;
+}
+.orders-page .order-panel__close {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin: -6px -10px 0 0;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1;
+  cursor: pointer;
+}
+.orders-page .order-panel__close:hover {
+  background: var(--bop-color-surface-placeholder);
+}
+.orders-page
+  .order-workbench-detail
+  :is(.order-workbench-closed, .order-counter-note, .order-staff-round, .order-held-stock) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 15px;
+  font-weight: 400;
+}
+.orders-page .order-workbench-detail .order-staff-cancellation {
+  font-weight: 400;
+}
+.orders-page .order-round {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+.orders-page .order-round h3,
+.orders-page .order-lines h3 {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.orders-page .order-round p {
+  margin: 0;
+}
+.orders-page .order-round fieldset {
+  min-width: 0;
+  margin: var(--bop-space-2) 0 0;
+  padding: 0;
+  border: 0;
+}
+.orders-page .order-panel .order-round .card-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  gap: var(--bop-space-2);
+  margin: 0;
+}
+.orders-page .order-panel .order-round .card-actions > button {
+  width: 100%;
+  min-height: 48px;
+}
+/* The order's next step is the panel's one dark button. */
+.orders-page .order-panel .order-accept-action > button:not(:disabled) {
+  border-color: var(--bop-color-brand-primary);
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.orders-page .order-workbench-detail .order-lines li {
+  border-bottom: 0;
+}
+.orders-page .order-workbench-detail .order-lines li + li {
+  border-top: 1px solid var(--order-row-divider);
+}
+.orders-page .order-workbench-detail .order-lines-totals {
+  max-width: none;
+  margin: var(--bop-space-2) 0 0;
+}
+.orders-page .order-workbench-detail .order-lines-totals > div:last-child {
+  border-top: 0;
+  padding-top: 2px;
+}
+.orders-page .order-panel__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px var(--bop-space-4);
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+.orders-page .order-panel__facts div {
+  display: contents;
+}
+.orders-page .order-panel__facts dd {
+  margin: 0;
+}
+.orders-page .order-panel__page-link {
+  justify-self: start;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Paging. */
+.orders-page .order-paging {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bop-space-3) var(--bop-space-4);
+  padding: 0 12px;
+}
+.orders-page .order-paging .order-queue-filter-count {
+  flex: 1 1 16rem;
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
+
+/* Wide screens: the panel is a column beside the list, staying in view as the list scrolls. */
+@media (min-width: 80rem) {
+  .orders-page .order-workbench[data-panel] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 24rem;
+    align-items: start;
+    gap: var(--bop-space-8);
+  }
+  .orders-page .order-workbench[data-panel] .order-panel {
+    position: sticky;
+    top: calc(var(--bop-pinned-top, 0px) + 16px);
+    max-height: calc(100vh - var(--bop-pinned-top, 0px) - 32px);
+    overflow-y: auto;
+    padding: 0 4px var(--bop-space-6) 0;
+  }
+}
+/* Tablets: a sheet over the list from the right, below the page's title row. */
+@media (min-width: 48.0625rem) and (max-width: 79.99rem) {
+  .orders-page .order-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 20;
+    width: min(25rem, 100%);
+    min-height: 100%;
+    padding: var(--bop-space-6) var(--bop-space-8) var(--bop-space-8);
+    box-shadow: -8px 0 32px rgb(0 0 0 / 10%);
+  }
+}
+/* Phones: an order staff opened is the page; the list comes back on close. The one order shown
+   keeps the list, with its panel under it. The filter is a full sheet. */
+@media (max-width: 48rem) {
+  .orders-page .order-workbench[data-panel="open"] .order-workbench-main {
+    display: none;
+  }
+  .orders-page .order-workbench[data-panel="auto"] .order-panel {
+    margin-top: var(--bop-space-6);
+  }
+  .orders-page .order-toolbar {
+    display: grid;
+    justify-content: stretch;
+  }
+  .orders-page .order-toolbar__search {
+    width: auto;
+    flex: 1;
+  }
+  .orders-page .order-filter {
+    position: static;
+  }
+  .orders-page .order-filter__panel {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    width: auto;
+    align-content: start;
+    overflow-y: auto;
+    padding: var(--bop-space-4) var(--bop-space-4) 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .orders-page .order-filter__actions {
+    position: sticky;
+    bottom: 0;
+    padding: var(--bop-space-3) 0 var(--bop-space-6);
+    background: var(--bop-color-surface-default);
+  }
+  .orders-page .order-attention li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .orders-page .order-attention li > button {
+    justify-self: start;
+    margin-inline-start: 16px;
+  }
+}
+
+/* Narrow lists (a tablet, or a wide screen with the panel open): status under what. */
+@container order-list (max-width: 800px) {
+  .orders-page .order-row__summary {
+    grid-template-columns: 6.5rem minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num what amount"
+      "num status amount";
+    column-gap: var(--bop-space-4);
+    align-items: start;
+  }
+}
+/* Phones: one card per order — number and what, the amount; when; status and the next step. */
+@container order-list (max-width: 512px) {
+  .orders-page .order-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .orders-page .order-row__summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num amount"
+      "what what"
+      "status status";
+    padding: var(--bop-space-4) 4px var(--bop-space-2);
+  }
+  .orders-page .order-workbench-next {
+    justify-content: flex-start;
+    padding: 0 4px var(--bop-space-4);
+  }
+  .orders-page .order-workbench-next:empty {
+    display: none;
+  }
+  .orders-page .order-workbench-next .card-actions {
+    justify-items: start;
+  }
+  .orders-page .order-workbench-next .card-actions p {
+    text-align: start;
+  }
+}
+
+/*
+ * Orders v3 (Owner 2026-10-26, "Square style", Figma "Orders · v3 Square 风格" 37:2 / 38:30 /
+ * 39:64). One accent for what can be clicked; two button styles (accent fill for the one next step,
+ * accent words for the rest; cancelling in red words that confirm first); three status meanings
+ * (needs action / in progress / done); four type sizes (28/20/16/14) at 600 and 400.
+ */
+.orders-page .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.orders-page .workspace-page__meta {
+  font-size: 14px;
+}
+.orders-page .workspace-page__header {
+  align-items: center;
+}
+.orders-page .orders-page__updated,
+.orders-page .workspace-page__header button.orders-page__quiet,
+.orders-page .workspace-page__header button.order-sound-toggle,
+.orders-page .workspace-page__header .language-switch {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
+}
+.orders-page .workspace-page__header button.orders-page__quiet:hover,
+.orders-page .workspace-page__header button.order-sound-toggle:hover {
+  color: var(--bop-color-accent);
+}
+.orders-page .workspace-page__header button.order-sound-toggle[aria-pressed="true"] {
+  padding: 0 4px;
+  background: none;
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.orders-page .order-attention h2 {
+  font-size: 14px;
+}
+.orders-page .order-attention p {
+  font-size: 14px;
+}
+.orders-page .order-attention li > button,
+.orders-page .order-hold-notice > button {
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* Status tabs: words; the selected one in the accent over a 2px line; counts in grey. */
+.orders-page .order-toolbar {
+  align-items: flex-end;
+}
+.orders-page .order-status-filters {
+  gap: 0 28px;
+}
+.orders-page .order-status-filters button,
+.orders-page .order-status-filters button[aria-pressed="true"] {
+  min-height: 44px;
+  padding: 0 0 2px;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 400;
+  text-decoration: none;
+}
+.orders-page .order-status-filters button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.orders-page .order-status-filters button[aria-pressed="true"] .order-status-filters__count {
+  color: var(--bop-color-text-muted);
+}
+.orders-page .order-filter__toggle {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+.orders-page .order-filter__applied {
+  background: var(--bop-color-accent);
+}
+.orders-page .order-filter__chips button[aria-pressed="true"] {
+  border-radius: 0;
+  border-bottom: 2px solid var(--bop-color-accent);
+  background: none;
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.orders-page .order-filter__actions button,
+.orders-page .order-paging button,
+.orders-page .order-workbench-main .bop-state-card button {
+  border: 0;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+.orders-page .order-filter__actions .order-filter__show {
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+
+/* Rows: one height; number and items, then grey who and when; fixed right columns. */
+.orders-page .order-row {
+  grid-template-columns: minmax(0, 1fr) 7.5rem;
+}
+.orders-page .order-row__summary {
+  grid-template-columns: 5.5rem minmax(0, 1fr) 14.5rem 6rem;
+  column-gap: var(--bop-space-6);
+  align-items: center;
+  min-height: 64px;
+  padding: 10px 16px;
+  border-radius: 0;
+}
+.orders-page .order-row__number,
+.orders-page .order-workbench-type {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.orders-page .order-row__number {
+  align-self: start;
+  line-height: 1.45;
+}
+.orders-page .order-workbench-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orders-page .order-row__when,
+.orders-page .order-row__when .order-workbench-time {
+  font-size: 14px;
+}
+.orders-page .order-row[data-open="true"] {
+  outline: 0;
+  border-radius: 0;
+  box-shadow: inset 3px 0 0 var(--bop-color-accent);
+}
+.orders-page .order-row[data-open="true"] .order-row__open {
+  color: var(--bop-color-accent);
+}
+.orders-page .order-row__summary:hover .order-row__open {
+  text-decoration: none;
+  color: var(--bop-color-accent);
+}
+.orders-page .order-row__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+.orders-page .order-workbench-amount {
+  font-size: 16px;
+}
+.orders-page .order-row__paid {
+  font-size: 14px;
+}
+
+/* Status: a dot for its meaning, then dark words; the deadline in grey, red only once late. */
+.orders-page :is(.order-workbench-phase, .order-panel__phase) {
+  font-size: 14px;
+}
+.orders-page
+  :is(.order-workbench-phase, .order-panel__phase):is([data-tone="danger"], [data-tone="warning"]) {
+  --tag-dot: var(--bop-color-danger-mark);
+}
+.orders-page
+  :is(.order-workbench-phase, .order-panel__phase):is([data-tone="neutral"], [data-tone="ready"]) {
+  --tag-dot: var(--bop-color-accent);
+}
+.orders-page :is(.order-workbench-phase, .order-panel__phase)[data-tone="done"] {
+  --tag-dot: var(--bop-color-success-mark);
+}
+.orders-page :is(.order-workbench-phase, .order-panel__phase)[data-tone="cancelled"] {
+  --tag-dot: var(--bop-color-border-control);
+}
+.orders-page
+  :is(.order-row__status, .order-panel__status)
+  :is(.order-accept-by, .order-held-stock-tag, .order-staff-cancelled, .order-counter-outage) {
+  display: inline;
+  font-size: 14px;
+}
+.orders-page
+  :is(.order-row__status, .order-panel__status)
+  .order-accept-by:is([data-tier="urgent"], [data-tier="warning"]) {
+  color: var(--bop-color-text-muted);
+}
+.orders-page :is(.order-row__status, .order-panel__status) .order-accept-by[data-tier="lapsed"] {
+  color: var(--bop-color-danger);
+}
+
+/* Buttons: the accent fill for the one next step; accent words for the rest. */
+.orders-page :is(.order-workbench-next, .order-panel__next) .order-accept-action > button,
+.orders-page .order-next-fill,
+.orders-page .order-next-primary,
+.orders-page
+  .order-panel__next
+  :is(.staff-round-payment, .order-held-stock-action, .card-machine-refund-action)
+  > button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.orders-page .order-workbench-next button.order-next-fill {
+  border: 0;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+.orders-page .order-next-text {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* The opened order: 20px title; Items, Payment and Record parted by 24px; the next step held at
+   the bottom, cancelling under it in red words. */
+.orders-page .order-panel__head h2 {
+  font-size: 20px;
+}
+.orders-page .order-panel__meta {
+  font-size: 14px;
+}
+.orders-page .order-workbench-detail {
+  gap: var(--bop-space-6);
+}
+.orders-page .order-panel__hint {
+  margin: 0;
+  font-size: 14px;
+}
+.orders-page .order-panel__section h3,
+.orders-page .order-round h3,
+.orders-page .order-lines h3 {
+  margin: 0 0 var(--bop-space-2);
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 600;
+}
+.orders-page .order-panel__payment {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.orders-page .order-refund-howto summary {
+  min-height: 36px;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.orders-page .order-refund-howto p {
+  margin: 4px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.orders-page .order-panel__next {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: var(--bop-space-2);
+  padding: var(--bop-space-4) 0 var(--bop-space-2);
+  background: var(--bop-color-surface-default);
+}
+.orders-page
+  .order-panel__next
+  :is(
+    .order-accept-action,
+    .staff-round-payment,
+    .order-held-stock-action,
+    .card-machine-refund-action
+  )
+  > button,
+.orders-page .order-panel__next .order-next-primary {
+  width: 100%;
+  min-height: 44px;
+}
+.orders-page .order-panel__next fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.orders-page .order-panel__next .order-cancel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--bop-space-5);
+}
+.orders-page .order-panel .order-cancel-open,
+.orders-page .order-panel .order-cancel-items-link,
+.orders-page .order-panel .order-cancel-action > button {
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-danger);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+@media (min-width: 80rem) {
+  .orders-page .order-workbench[data-panel] .order-panel {
+    padding: 0 0 0 var(--bop-space-6);
+    border-left: 1px solid var(--bop-color-row-divider);
+  }
+}
+
+/* Phones: two lines per order — number and status, then items and amount; the next step on the
+   right at 36px. */
+@container order-list (max-width: 512px) {
+  .orders-page .order-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .orders-page .order-row__summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num status status"
+      "what what amount";
+    column-gap: 10px;
+    min-height: 0;
+    padding: 10px 0;
+  }
+  .orders-page .order-row__when {
+    display: none;
+  }
+  .orders-page .order-workbench-type {
+    color: var(--bop-color-text-muted);
+    font-size: 14px;
+    font-weight: 400;
+  }
+  .orders-page .order-workbench-amount {
+    font-size: 14px;
+  }
+  .orders-page .order-row__paid {
+    display: none;
+  }
+  .orders-page .order-workbench-next {
+    padding: 0;
+  }
+  .orders-page .order-workbench-next:empty {
+    display: none;
+  }
+  .orders-page .order-status-filters {
+    gap: 0 14px;
+  }
+  .orders-page .order-status-filters button,
+  .orders-page .order-status-filters button[aria-pressed="true"] {
+    font-size: 14px;
+  }
+}
+@media (max-width: 48rem) {
+  .orders-page .order-status-filters {
+    flex-wrap: nowrap;
+    gap: 0 14px;
+  }
+  .orders-page .order-status-filters button,
+  .orders-page .order-status-filters button[aria-pressed="true"] {
+    font-size: 14px;
+    white-space: nowrap;
+  }
+}
+
+.orders-page .order-workbench-next [data-state="Idle"] .order-accept-action__number {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* The panel starts under the page header; its height leaves that room so the next step at its
+   foot is always on screen. */
+@media (min-width: 80rem) {
+  .orders-page .order-workbench[data-panel] .order-panel {
+    max-height: calc(100vh - var(--bop-pinned-top, 0px) - 152px);
+  }
+}
+/* The list beside the panel keeps its columns, narrower; it stacks only on a phone. */
+@container order-list (min-width: 513px) and (max-width: 800px) {
+  .orders-page .order-row__summary {
+    grid-template-columns: 5.5rem minmax(0, 1fr) 9.5rem 5rem;
+    grid-template-areas: "num what status amount";
+    column-gap: var(--bop-space-4);
+    align-items: center;
+  }
+  .orders-page .order-row {
+    grid-template-columns: minmax(0, 1fr) 6rem;
+  }
+  .orders-page .order-row__status .order-accept-by,
+  .orders-page .order-row__status .order-held-stock-tag {
+    display: none;
+  }
+}
+.orders-page .order-panel .order-payment-links :is(button, a),
+.orders-page .order-panel__page-link {
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.orders-page .order-round:empty {
+  display: none;
+}
+@media (max-width: 48rem) {
+  .orders-page .order-toolbar__tools {
+    min-width: 0;
+  }
+  .orders-page .order-toolbar__search {
+    width: 100%;
+    min-width: 0;
+  }
+}
+.orders-page .order-panel__next:empty {
+  display: none;
+}
+@media (max-width: 48rem) {
+  /* One line of tabs; on the narrowest phones it scrolls within itself, never the page. */
+  .orders-page .order-status-filters {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+}
+/* The row's own action stays above the row's full-width click area. */
+.orders-page .order-workbench-next {
+  position: relative;
+  z-index: 1;
+}
+/* A table's round keeps its Accept in the round: the same accent button. */
+.orders-page .order-panel .order-round .order-accept-action > button:not(:disabled) {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-size: 14px;
+  font-weight: 600;
+}
+.orders-page .order-panel [data-state="Idle"] .order-accept-action__number {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.orders-page .order-payment-links p:empty,
+.orders-page .order-workbench-detail > p:empty {
+  display: none;
+}
+.orders-page .order-payment-links p {
+  margin: 0;
+}
+
+/* Live check 2026-10-26: the next-step column fits its longest label in English and Chinese
+   ("Hand over to guest"), with a fixed gap after the amount, so nothing overlaps. */
+.orders-page .order-row {
+  grid-template-columns: minmax(0, 1fr) 10.5rem;
+  column-gap: var(--bop-space-4);
+}
+.orders-page .order-row__summary {
+  grid-template-columns: 5.5rem minmax(0, 1fr) 13rem 6.5rem;
+}
+.orders-page .order-workbench-amount,
+.orders-page .order-row__paid {
+  white-space: nowrap;
+}
+@container order-list (min-width: 513px) and (max-width: 800px) {
+  .orders-page .order-row {
+    grid-template-columns: minmax(0, 1fr) 9.5rem;
+  }
+  .orders-page .order-row__summary {
+    grid-template-columns: 5rem minmax(0, 1fr) 7.5rem 4.5rem;
+  }
+  .orders-page .order-row__paid {
+    display: none;
+  }
+}
+
+/* Live check 2026-10-26, phones: every tab label is whole (the row wraps, no hidden scroll); the
+   updated time, Refresh and Sound sit on the title's line; the amount moves up beside the status
+   so the items can wrap to two lines. */
+@media (max-width: 48rem) {
+  .orders-page .order-status-filters {
+    flex-wrap: wrap;
+    overflow: visible;
+    row-gap: 0;
+  }
+  .orders-page .workspace-page__header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title tools"
+      "meta meta";
+    align-items: center;
+    gap: 2px var(--bop-space-3);
+  }
+  .orders-page .workspace-page__title {
+    display: contents;
+  }
+  .orders-page .workspace-page__title h1 {
+    grid-area: title;
+  }
+  .orders-page .workspace-page__meta {
+    grid-area: meta;
+    margin: 0;
+  }
+  .orders-page .workspace-page__toolbar {
+    grid-area: tools;
+    flex-wrap: nowrap;
+    gap: 0 var(--bop-space-3);
+  }
+  .orders-page .workspace-page__actions {
+    flex-wrap: nowrap;
+    gap: 0 var(--bop-space-2);
+  }
+}
+@container order-list (max-width: 512px) {
+  .orders-page .order-row__summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num status amount"
+      "what what what";
+  }
+  .orders-page .order-workbench-type {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}
+
+/* Live check 2026-10-26: the opened order reads as a few groups, 24px apart — who and what,
+   Payment with its links, Record with the full page — then the next step. */
+.orders-page .order-workbench-detail > * {
+  order: 4;
+}
+.orders-page .order-workbench-detail > .order-panel__head {
+  order: 0;
+}
+.orders-page .order-workbench-detail > .order-panel__status {
+  order: 1;
+}
+.orders-page .order-workbench-detail > :is(.order-panel__hint, .order-counter-note) {
+  order: 2;
+}
+.orders-page .order-workbench-detail > .order-round {
+  order: 3;
+}
+.orders-page .order-workbench-detail > .order-panel__section[aria-label="Payment"],
+.orders-page .order-workbench-detail > .order-panel__section:has(.order-panel__payment) {
+  order: 6;
+}
+.orders-page .order-workbench-detail > :is(.order-payment-links, .order-refund-howto) {
+  order: 7;
+  margin-top: calc(-1 * var(--bop-space-4));
+}
+.orders-page .order-workbench-detail > .order-panel__section:has(.order-panel__facts) {
+  order: 8;
+}
+.orders-page .order-workbench-detail > .order-panel__page-link {
+  order: 9;
+  margin-top: calc(-1 * var(--bop-space-4));
+}
+.orders-page .order-workbench-detail > .order-panel__next {
+  order: 10;
+}
+.orders-page .order-payment-links {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+@container order-list (max-width: 512px) {
+  .orders-page .order-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .orders-page .order-row__summary {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .orders-page .order-row__status {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .orders-page .order-row__status .order-workbench-phase {
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+}
+@media (max-width: 48rem) {
+  .orders-page .orders-page__updated {
+    display: none;
+  }
+}
+
+/* Live check 2026-10-26 (2): the opened order's groups sit exactly 24px apart and each heading 8px
+   above its content — the groups carry no padding of their own. */
+.orders-page .order-workbench-detail {
+  row-gap: 24px;
+}
+.orders-page .order-workbench-detail > :is(section, .order-payment-links) {
+  padding-block: 0;
+}
+.orders-page .order-workbench-detail :is(.order-panel__section, .order-round, .order-lines) h3 {
+  margin: 0 0 8px;
+}
+.orders-page
+  .order-workbench-detail
+  > :is(.order-payment-links, .order-refund-howto, .order-panel__page-link) {
+  margin-top: -16px;
+}
+
+/* Live check 2026-10-26 (2), phones: every amount ends on the same right edge. The row's next step
+   takes the second line's right end, under the amount, instead of a column of its own. */
+@container order-list (max-width: 512px) {
+  .orders-page .order-row {
+    position: relative;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "num status amount"
+      "what what next";
+    column-gap: 10px;
+    row-gap: 2px;
+    align-items: start;
+    padding: 10px 0;
+  }
+  .orders-page .order-row__summary {
+    display: contents;
+  }
+  .orders-page .order-row__number {
+    grid-area: num;
+  }
+  /* The whole row is the target, so the number keeps its text height and lines up with the status. */
+  .orders-page .order-row__number .order-row__open {
+    min-height: 0;
+  }
+  .orders-page .order-row__status {
+    grid-area: status;
+  }
+  .orders-page .order-workbench-amount {
+    grid-area: amount;
+    justify-self: end;
+    text-align: end;
+  }
+  .orders-page .order-row__what {
+    grid-area: what;
+  }
+  .orders-page .order-workbench-next {
+    grid-area: next;
+    align-self: end;
+    justify-self: end;
+  }
+  .orders-page .order-row:has(.order-row__open:focus-visible) {
+    outline: 3px solid var(--bop-color-focus);
+    outline-offset: -3px;
+  }
+}
+/* Without a Payment section the payment links start their own group. */
+.orders-page
+  .order-workbench-detail:not(:has(> .order-panel__section .order-panel__payment))
+  > :is(.order-payment-links, .order-refund-howto) {
+  margin-top: 0;
+}
+.orders-page .order-workbench-detail > .order-panel__next {
+  padding-top: 0;
+}
+/* Phones: the open row's accent bar sits beside its number, never over it. */
+@container order-list (max-width: 512px) {
+  .orders-page .order-row[data-open="true"] {
+    padding-left: 12px;
+  }
+}

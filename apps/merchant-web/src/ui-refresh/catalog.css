@@ -1,0 +1,710 @@
+/* Figma v1 (2026-10-25): the menu builder. Each section is a white card with its items as quiet
+   rows; on wide screens "Review and publication" stays in a column beside the menu. */
+.menu-builder-page .menu-builder-section {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin: 0 0 var(--bop-space-4);
+  padding: var(--bop-space-5);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.menu-builder-page .menu-builder-section > legend {
+  float: left;
+  display: flex;
+  align-items: center;
+  gap: var(--bop-space-2);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--bop-color-text-muted);
+}
+.menu-builder-page .menu-builder-section table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.menu-builder-page .menu-builder-section th {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: start;
+}
+.menu-builder-page .menu-builder-section td {
+  padding-block: var(--bop-space-2);
+  border-bottom: 1px solid var(--bop-color-border-default);
+  font-size: 15px;
+}
+.menu-builder-page .menu-builder-section td:first-child {
+  font-weight: 600;
+}
+.menu-builder-page .menu-builder-section td:nth-child(2) {
+  color: var(--bop-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.menu-builder-page .menu-builder-order {
+  text-align: end;
+}
+.menu-builder-page .menu-builder-order button {
+  min-width: 36px;
+  min-height: 36px;
+  margin-inline-start: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-default);
+}
+.menu-builder-page .menu-builder-order button:last-child {
+  background: none;
+  color: var(--bop-color-text-muted);
+}
+.menu-builder-page .drag-handle {
+  margin-inline-end: var(--bop-space-2);
+}
+.menu-builder-page .menu-builder-unsaved {
+  font-weight: 600;
+}
+@media (min-width: 1200px) {
+  .menu-builder-page .bop-shell__main:has(> .detail-section[aria-labelledby="publication"]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
+    column-gap: var(--bop-space-6);
+    row-gap: 0;
+    align-items: start;
+  }
+  .menu-builder-page .bop-shell__main > * {
+    grid-column: 1;
+  }
+  .menu-builder-page .bop-shell__main > .screen-heading {
+    grid-column: 1 / -1;
+  }
+  .menu-builder-page .bop-shell__main > .detail-section[aria-labelledby="publication"] {
+    position: sticky;
+    top: var(--bop-space-4);
+    grid-column: 2;
+    grid-row: 2 / span 12;
+    padding: var(--bop-space-5);
+    border: 1px solid var(--bop-color-border-default);
+    border-radius: var(--bop-radius-card);
+    background: var(--bop-color-surface-default);
+  }
+}
+
+/* Figma v1 (2026-10-25): the product page. Each part of the product (name and description, sizes
+   and prices, choices, the customer menu, this Store) is a white card with a plain heading. */
+.product-editor-page form > fieldset,
+.product-editor-page .detail-section,
+.product-editor-page .product-customer-menu {
+  margin: 0 0 var(--bop-space-4);
+  padding: var(--bop-space-5) var(--bop-space-6);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+}
+.product-editor-page form > fieldset > legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 var(--bop-space-3);
+  padding: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.product-editor-page .detail-section > h3,
+.product-editor-page .product-customer-menu > h3 {
+  margin: 0 0 var(--bop-space-3);
+  font-size: 18px;
+  font-weight: 600;
+}
+.product-editor-page form > fieldset th {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+.product-editor-page form > fieldset,
+.menu-builder-page .menu-builder-section {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+@media (max-width: 767px) {
+  .product-editor-page form > fieldset,
+  .product-editor-page .detail-section,
+  .product-editor-page .product-customer-menu,
+  .menu-builder-page .menu-builder-section {
+    padding: var(--bop-space-4);
+  }
+}
+/* A floated legend (the card's heading inside its border) needs a block fieldset; grid would put
+   the first field beside it. */
+.product-editor-page form > fieldset,
+.menu-builder-page .menu-builder-section {
+  display: block;
+}
+.product-editor-page form > fieldset > legend + *,
+.menu-builder-page .menu-builder-section > legend + * {
+  clear: both;
+}
+.product-editor-page form > fieldset > :not(legend) + :not(legend),
+.menu-builder-page .menu-builder-section > :not(legend) + :not(legend) {
+  margin-top: var(--bop-space-3);
+}
+.product-editor-page form > fieldset > label,
+.menu-builder-page .menu-builder-section > label {
+  display: grid;
+  gap: var(--bop-space-1);
+}
+
+/* Owner 2026-10-25: Item availability — a product heading over its sizes; per size one direct
+   action, a "Mark sold out" menu and a "More" menu. */
+.availability-product th {
+  padding-top: var(--bop-space-5);
+  color: var(--bop-color-text-default);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* DEC-BRAND-MULTI-STORE segment 9: this Store's price on Item availability. */
+.store-price {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+}
+.store-price__note,
+.store-price__problem {
+  max-width: 48ch;
+  margin: 0;
+  font-size: 13px;
+}
+.store-price__note {
+  color: var(--bop-color-text-muted);
+}
+.store-price__form,
+.store-price__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--bop-space-2);
+}
+.store-price__confirm {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+}
+.store-price__form label {
+  display: grid;
+  gap: var(--bop-space-1);
+}
+.store-price__confirm p {
+  max-width: 48ch;
+  margin: 0;
+}
+.availability-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: var(--bop-space-2);
+}
+.availability-menu > summary {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: var(--bop-space-1);
+  padding: 0 var(--bop-space-4);
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-raised);
+  font-size: 14px;
+  font-weight: 500;
+  list-style: none;
+  cursor: pointer;
+}
+.availability-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.availability-menu > summary::after {
+  content: "▾";
+  font-size: 11px;
+}
+.availability-menu[open] > summary {
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.availability-menu__items {
+  display: grid;
+  gap: var(--bop-space-1);
+  margin-top: var(--bop-space-1);
+}
+.availability-menu--more .availability-menu__items button {
+  color: var(--bop-color-danger);
+}
+
+/* WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU: a single store's menu on one page. White, row
+   hairlines, accent words for actions; the one primary action is "Save order" when dishes moved. */
+.one-menu .one-menu__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px 24px;
+  margin-bottom: 12px;
+}
+.one-menu .one-menu__search {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 260px;
+  font-size: 14px;
+  color: var(--bop-color-text-muted);
+}
+.one-menu .one-menu__search input {
+  min-height: 44px;
+  font-size: 16px;
+}
+.one-menu .one-menu__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.one-menu .one-menu__filters button,
+.one-menu .one-menu__actions button,
+.one-menu .one-menu__sizes button,
+.one-menu .one-menu__pending-actions button {
+  min-height: 44px;
+  margin: 0;
+  padding: 0 4px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.one-menu .one-menu__filters button {
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+.one-menu .one-menu__filters button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.one-menu button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+.one-menu .one-menu__pending-actions .one-menu__primary,
+.one-menu .dish-editor__actions .one-menu__primary {
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+.one-menu .one-menu__pending {
+  margin: 8px 0 16px;
+  padding: 8px 0 8px 12px;
+  border-left: 3px solid var(--bop-color-accent);
+}
+.one-menu .one-menu__pending p,
+.one-menu .one-menu__note,
+.one-menu .one-menu__message {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.one-menu .one-menu__note {
+  color: var(--bop-color-text-muted);
+}
+.one-menu .one-menu__pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.one-menu .one-menu__sections {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .one-menu__section {
+  margin: 24px 0 0;
+}
+.one-menu .one-menu__section h2 {
+  display: flex;
+  align-items: center;
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+.one-menu .one-menu__dishes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .one-menu__dish {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "handle names price state"
+    "handle sizes sizes sizes"
+    "handle allergens allergens allergens"
+    "handle actions actions actions"
+    "handle editor editor editor";
+  align-items: center;
+  gap: 2px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.one-menu .one-menu__dish > .drag-handle {
+  grid-area: handle;
+}
+.one-menu .one-menu__names {
+  grid-area: names;
+  display: grid;
+  min-width: 0;
+}
+.one-menu .one-menu__name {
+  font-size: 16px;
+}
+.one-menu .one-menu__name-zh {
+  color: var(--bop-color-text-muted);
+  font-size: 15px;
+}
+.one-menu .one-menu__price {
+  grid-area: price;
+  font-variant-numeric: tabular-nums;
+}
+.one-menu .one-menu__state {
+  grid-area: state;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.one-menu .one-menu__actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+.one-menu [data-drop-target="true"] {
+  box-shadow: inset 0 2px 0 var(--bop-color-accent);
+}
+.one-menu .one-menu__section h2 .one-menu__name-zh {
+  margin-left: 8px;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+/* WP-2423 item 8 ⑥: a dish's allergens declared by staff, edited in its row. */
+.one-menu .one-menu__allergens {
+  grid-area: allergens;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.one-menu .dish-editor {
+  grid-area: editor;
+  margin: 8px 0 4px;
+}
+.one-menu .dish-editor fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.one-menu .dish-editor legend {
+  padding: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.one-menu .dish-editor__note {
+  margin: 4px 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.one-menu .dish-editor__allergens {
+  margin: 8px 0;
+}
+.one-menu .dish-editor__allergens > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.one-menu .dish-editor__allergen {
+  flex: 1 1 160px;
+}
+.one-menu .dish-editor__options {
+  display: flex;
+  gap: 0 16px;
+}
+.one-menu .dish-editor__allergens label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.one-menu .dish-editor__problem {
+  color: var(--bop-color-danger, #b42318);
+}
+.one-menu .dish-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+/* WP-2423 item 8 ⑥: the dish editor on the one-page menu. */
+.one-menu .one-menu__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 8px 0;
+}
+.one-menu .one-menu__pending-price {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.one-menu .dish-editor fieldset + fieldset,
+.one-menu .dish-editor__grid + fieldset {
+  margin-top: 16px;
+}
+.one-menu .dish-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 24px;
+}
+.one-menu .dish-editor__field {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.one-menu .dish-editor__field input,
+.one-menu .dish-editor__field select {
+  min-height: 44px;
+  font-size: 16px;
+}
+.one-menu .dish-editor__group {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.one-menu .dish-editor__group > label,
+.one-menu .dish-editor__choices label,
+.one-menu .dish-editor__kind label,
+.one-menu .dish-editor__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+/* WP-2423 item 8 ⑦: a dish with allergens, or a charge with no stock ingredients. */
+.one-menu .dish-editor__kind {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--bop-space-4);
+}
+.one-menu .dish-editor__choices {
+  margin: 0 0 0 28px;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .dish-editor__choices li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+.one-menu .dish-editor__choice-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.one-menu .dish-editor__choice-price input {
+  width: 6em;
+  min-height: 44px;
+}
+
+/* v15 2026-10-28 finding b: a dish's sizes inside its row. */
+.one-menu .one-menu__sizes {
+  grid-area: sizes;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .one-menu__sizes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 16px;
+  min-height: 44px;
+}
+.one-menu .one-menu__size-name {
+  flex: 1 1 120px;
+}
+.one-menu .one-menu__size-price {
+  font-variant-numeric: tabular-nums;
+}
+.one-menu .one-menu__size-state {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store features page (white, row hairlines, no boxes). */
+.store-features {
+  max-width: 720px;
+}
+.store-features__intro,
+.store-features__detail,
+.store-features__changed {
+  color: var(--bop-color-text-muted);
+}
+.store-features__setup {
+  padding: var(--bop-space-4) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.store-features__setup h2 {
+  margin: 0 0 var(--bop-space-1);
+  font-size: 20px;
+}
+.store-features__setup button,
+.store-features__save {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+}
+.store-features__setup button:disabled,
+.store-features__save:disabled {
+  opacity: 0.5;
+}
+.store-features__modules {
+  margin: var(--bop-space-4) 0 0;
+  padding: 0;
+  border: 0;
+}
+.store-features__modules legend {
+  padding: 0;
+  font-weight: 600;
+}
+.store-features__row {
+  display: flex;
+  gap: var(--bop-space-3);
+  align-items: flex-start;
+  padding: var(--bop-space-3) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.store-features__row input {
+  width: 22px;
+  height: 22px;
+  margin: 2px 0 0;
+  flex: none;
+}
+/* A long item name (or the reason it can't be chosen) never widens the page: a fieldset
+   otherwise grows to its widest content. */
+fieldset.store-features__modules {
+  min-width: 0;
+}
+.store-features__row select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+}
+.store-features__row > span {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bop-space-1);
+}
+.store-features__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-3);
+  align-items: center;
+  margin-top: var(--bop-space-4);
+}
+.store-features__confirm {
+  margin: var(--bop-space-3) 0;
+  padding: var(--bop-space-2) 0 var(--bop-space-2) var(--bop-space-3);
+  border-left: 3px solid var(--bop-color-accent);
+}
+.store-features__confirm .store-features__actions {
+  margin-top: var(--bop-space-2);
+}
+.store-features__confirm button:not(.store-features__save) {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+}
+/* WP-2423 item 8 ⑧: the Store's kitchen sections, one row each. */
+.store-kitchen-sections {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin: var(--bop-space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+.store-kitchen-sections li,
+.store-kitchen-sections__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+  align-items: center;
+}
+.store-kitchen-sections input,
+.store-kitchen-sections__add input {
+  box-sizing: border-box;
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--bop-space-3);
+}
+.store-kitchen-sections button,
+.store-kitchen-sections__add button {
+  min-height: 44px;
+}
+/* DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores page (row hairlines, no boxes). */
+.stores-page {
+  max-width: 720px;
+}
+.stores-page__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stores-page__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  min-height: 44px;
+  padding: var(--bop-space-2) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.stores-page__current {
+  color: var(--bop-color-text-muted);
+}
+.stores-page__form {
+  display: grid;
+  gap: var(--bop-space-3);
+  max-width: 420px;
+}
+.stores-page__form label {
+  display: grid;
+  gap: var(--bop-space-1);
+}
+/* DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 7: tonight at each Store (rows, hairlines). */
+.brand-stores__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.brand-stores__table th,
+.brand-stores__table td {
+  padding: var(--bop-space-2) var(--bop-space-2) var(--bop-space-2) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  text-align: left;
+}
+.brand-stores__note {
+  display: block;
+  color: var(--bop-color-text-muted);
+}

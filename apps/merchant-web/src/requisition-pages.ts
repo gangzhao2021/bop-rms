@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type RequisitionClientErrorCode =
   | "Empty"
   | "PermissionDenied"
@@ -72,7 +73,6 @@ export interface RequisitionProjectionClient {
   load(input: { requisitionReference: string | null }): Promise<unknown>;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const decimalPattern = /^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/u;
 const safe = /^[^\p{Cc}\p{Cf}<>{}$]{1,160}$/u;
 const cursor = /^[A-Za-z0-9_-]{1,200}$/u;
@@ -95,16 +95,9 @@ const fail = (): never => {
 };
 const text = (value: unknown) =>
   typeof value === "string" && value.trim() === value && safe.test(value) ? value : fail();
-const oneOf = <T extends string>(value: unknown, values: readonly T[]) =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
+const { oneOf, instant } = createContractParsers(fail);
 const integer = (value: unknown, minimum = 0) =>
   Number.isSafeInteger(value) && (value as number) >= minimum ? (value as number) : fail();
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  instantPattern.test(value) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
 const decimal = (value: unknown) =>
   typeof value === "string" && decimalPattern.test(value) ? value : fail();
 function permissions(value: unknown) {

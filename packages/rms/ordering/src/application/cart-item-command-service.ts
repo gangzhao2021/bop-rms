@@ -14,6 +14,7 @@ import {
   type CatalogSelectionEvidence,
   type OrderingInstant,
   type OrderingReference,
+  isGuestCartChannel,
 } from "../domain/cart.js";
 import { advanceCartLifecycle, assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import type {
@@ -133,7 +134,7 @@ function authorizeSession(
       sessionBrandReference !== cart.brandReference ||
       sessionStoreReference !== cart.storeReference ||
       session.channel !== cart.orderType ||
-      !["Qr", "Web"].includes(cart.sourceChannel) ||
+      !isGuestCartChannel(cart.orderType, cart.sourceChannel) ||
       (cart.orderType === "Pickup" &&
         (sessionReference !== cart.createdByActorReference ||
           session.diningState !== "ContextOnly" ||
@@ -158,14 +159,21 @@ async function context(
   operationReference: OrderingReference,
   at: OrderingInstant,
 ) {
-  const cart = await ports.repository.load(cartReference).catch(failure);
-  if (cart === null) throw new CartError("CART_UNAVAILABLE");
-  const aggregate = parseCartAggregate(cart);
   const evidence = await ports.authorization
     .authorize({ action, cartReference, operationReference, observedAt: at })
     .catch(failure);
   if (evidence === null) throw new CartError("CART_PERMISSION_DENIED");
-  const session = authorizeSession(evidence.guestSession, aggregate, at);
+  let usableSession: GuestSession;
+  try {
+    usableSession = assertGuestSessionUsable(createGuestSession(evidence.guestSession), at);
+  } catch {
+    throw new CartError("CART_PERMISSION_DENIED");
+  }
+  const cart = await ports.repository.load(cartReference).catch(failure);
+  if (cart === null) throw new CartError("CART_UNAVAILABLE");
+  const aggregate = parseCartAggregate(cart);
+  if (aggregate.cartReference !== cartReference) throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+  const session = authorizeSession(usableSession, aggregate, at);
   return Object.freeze({ aggregate, session, audit: audit(evidence.audit, action, aggregate, at) });
 }
 
@@ -174,7 +182,7 @@ async function replay(
   input: {
     action: CartItemOperationAction;
     operationReference: OrderingReference;
-    intent: ReturnType<typeof parseOrderingHash>;
+    intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>;
     cartReference: OrderingReference;
     guestSessionReference: OrderingReference;
     requestedAt: OrderingInstant;
@@ -184,12 +192,16 @@ async function replay(
   if (prior === null) return null;
   try {
     const result = parseCartAggregate(prior.result);
+    // Preserve stored digest encoding; only the original observation belongs to that record.
     if (
       prior.action !== input.action ||
       prior.operationReference !== input.operationReference ||
       prior.cartReference !== input.cartReference ||
       prior.guestSessionReference !== input.guestSessionReference ||
-      !ports.references.equals(prior.operationIntentHash, input.intent) ||
+      !ports.references.equals(
+        prior.operationIntentHash,
+        input.intentAt(parseOrderingInstant(prior.occurredAt)),
+      ) ||
       Date.parse(input.requestedAt) >= Date.parse(parseOrderingInstant(prior.expiresAt))
     )
       throw new CartError("CART_IDEMPOTENCY_CONFLICT");
@@ -208,6 +220,7 @@ function verify(
   saved: CartItemOperationRecord,
   expected: CartItemOperationRecord,
   ports: CartItemCommandPorts,
+  intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>,
 ) {
   try {
     const result = parseCartAggregate(saved.result);
@@ -216,9 +229,17 @@ function verify(
       saved.operationReference !== expected.operationReference ||
       saved.guestSessionReference !== expected.guestSessionReference ||
       saved.cartReference !== expected.cartReference ||
-      saved.cartItemReference !== expected.cartItemReference ||
-      !ports.references.equals(saved.operationIntentHash, expected.operationIntentHash) ||
+      (expected.action !== "Add" && saved.cartItemReference !== expected.cartItemReference) ||
+      (expected.action === "Add" &&
+        result.items.find((item) => item.cartItemReference === saved.cartItemReference)
+          ?.addedByActorReference !== expected.guestSessionReference) ||
+      !ports.references.equals(
+        saved.operationIntentHash,
+        intentAt(parseOrderingInstant(saved.occurredAt)),
+      ) ||
       result.cartReference !== expected.result.cartReference ||
+      result.brandReference !== expected.result.brandReference ||
+      result.storeReference !== expected.result.storeReference ||
       result.aggregateVersion !== expected.result.aggregateVersion
     )
       throw new Error("bad result");
@@ -279,18 +300,29 @@ async function catalogEvidence(
   sellableReference: OrderingReference,
   optionSelections: readonly CartOptionSelection[],
   observedAt: OrderingInstant,
+  quantity: number,
+  guestSessionReference: OrderingReference,
 ): Promise<CatalogSelectionEvidence> {
   let result;
   try {
-    result = await ports.catalog.validateSelection({
-      brandReference: cart.brandReference as never,
-      storeReference: cart.storeReference as never,
-      sourceChannel: cart.sourceChannel,
-      orderType: cart.orderType,
-      sellableReference: sellableReference as never,
-      optionSelections: optionSelections as never,
-      observedAt: observedAt as never,
-    });
+    result = await ports.catalog.validateSelection(
+      {
+        brandReference: cart.brandReference as never,
+        storeReference: cart.storeReference as never,
+        sourceChannel: cart.sourceChannel,
+        orderType: cart.orderType,
+        sellableReference: sellableReference as never,
+        optionSelections: optionSelections as never,
+        observedAt: observedAt as never,
+      },
+      Object.freeze({
+        diningSessionReference: cart.diningSessionReference,
+        cartReference: cart.cartReference,
+        cartVersion: cart.aggregateVersion,
+        guestSessionReference,
+        quantity,
+      }),
+    );
   } catch {
     throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
   }
@@ -374,6 +406,7 @@ async function commit(
     action: CartItemOperationAction;
     operationReference: OrderingReference;
     intent: ReturnType<typeof parseOrderingHash>;
+    intentAt: (at: OrderingInstant) => ReturnType<typeof parseOrderingHash>;
     cartItemReference: OrderingReference;
     aggregate: CartAggregate;
     session: GuestSession;
@@ -396,10 +429,11 @@ async function commit(
   const saved = await ports.repository
     .commit({ record, expectedAggregateVersion: input.expectedVersion, audit: input.audit })
     .catch(failure);
+  const aggregate = verify(saved, record, ports, input.intentAt);
   return Object.freeze({
     status: "Applied" as const,
-    cartItemReference: input.cartItemReference,
-    aggregate: verify(saved, record, ports),
+    cartItemReference: saved.cartItemReference,
+    aggregate,
   });
 }
 
@@ -424,21 +458,23 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const quantity = itemQuantity(raw.quantity);
       const optionSelections = selections(raw.optionSelections);
       const customerNote = parseCustomerNote(raw.customerNote);
-      const intent = intentHash(ports, "Add", {
-        cartReference,
-        expectedAggregateVersion: expectedVersion,
-        sellableReference,
-        quantity,
-        optionSelections,
-        customerNote,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Add", {
+          cartReference,
+          expectedAggregateVersion: expectedVersion,
+          sellableReference,
+          quantity,
+          optionSelections,
+          customerNote,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(ports, "Add", cartReference, operationReference, requestedAt);
       const prior = await replay(ports, {
         action: "Add",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,
@@ -454,6 +490,8 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         sellableReference,
         optionSelections,
         requestedAt,
+        quantity,
+        parseOrderingReference(current.session.sessionReference),
       );
       const cartItemReference = parseOrderingReference(ports.references.generate("CartItem"));
       const item = parseCartItem({
@@ -482,6 +520,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Add",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,
@@ -510,16 +549,18 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const quantity = itemQuantity(raw.quantity);
       const optionSelections = selections(raw.optionSelections);
       const customerNote = parseCustomerNote(raw.customerNote);
-      const intent = intentHash(ports, "Update", {
-        cartReference,
-        cartItemReference,
-        expectedAggregateVersion: expectedVersion,
-        quantity,
-        optionSelections,
-        customerNote,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Update", {
+          cartReference,
+          cartItemReference,
+          expectedAggregateVersion: expectedVersion,
+          quantity,
+          optionSelections,
+          customerNote,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(
         ports,
         "Update",
@@ -530,7 +571,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const prior = await replay(ports, {
         action: "Update",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,
@@ -551,6 +592,8 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         item.sellableReference,
         optionSelections,
         requestedAt,
+        quantity,
+        parseOrderingReference(current.session.sessionReference),
       );
       const replacement = parseCartItem({
         ...item,
@@ -572,6 +615,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Update",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,
@@ -594,13 +638,15 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const operationReference = parseOrderingReference(raw.operationReference);
       const requestedAt = parseOrderingInstant(raw.requestedAt);
       const expectedVersion = version(raw.expectedAggregateVersion);
-      const intent = intentHash(ports, "Remove", {
-        cartReference,
-        cartItemReference,
-        expectedAggregateVersion: expectedVersion,
-        operationReference,
-        requestedAt,
-      });
+      const intentAt = (at: OrderingInstant) =>
+        intentHash(ports, "Remove", {
+          cartReference,
+          cartItemReference,
+          expectedAggregateVersion: expectedVersion,
+          operationReference,
+          requestedAt: at,
+        });
+      const intent = intentAt(requestedAt);
       const current = await context(
         ports,
         "Remove",
@@ -611,7 +657,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       const prior = await replay(ports, {
         action: "Remove",
         operationReference,
-        intent,
+        intentAt,
         cartReference,
         guestSessionReference: parseOrderingReference(current.session.sessionReference),
         requestedAt,
@@ -639,6 +685,7 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         action: "Remove",
         operationReference,
         intent,
+        intentAt,
         cartItemReference,
         aggregate,
         session: current.session,

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   LoyaltyProgramEditor,
   LoyaltyProgramList,
+  LoyaltyProgramListUnavailable,
   LoyaltyProgramState,
 } from "./LoyaltyProgramPages.js";
 import { LoyaltyProgramClientError, parseLoyaltyProgramView } from "./loyalty-program-pages.js";
@@ -148,5 +149,29 @@ describe("Loyalty Program pages", () => {
       "Unavailable",
     ] as const)
       expect(renderToStaticMarkup(<LoyaltyProgramState state={state} />)).toContain("status");
+  });
+  it("keeps the ordinary Phase 3 list route explicit when its source is unavailable", () => {
+    const html = renderToStaticMarkup(<LoyaltyProgramListUnavailable state="FeatureDisabled" />);
+    for (const value of [
+      "LOY-PROGRAM-LIST · PHASE 3",
+      "Phase 3 capability disabled",
+      "while the Phase 3 capability is disabled",
+      "Program name / code",
+      "Store scope",
+      "Scheduled",
+      "Program catalog",
+      "No program data available",
+      "Program actions unavailable",
+    ])
+      expect(html).toContain(value);
+    expect(html).not.toContain("Synthetic Rewards");
+    expect(html).toContain("disabled");
+    expect(html).toContain("while the Phase 3 capability is disabled");
+    expect(html).not.toContain("projection is not connected");
+    const unavailableHtml = renderToStaticMarkup(
+      <LoyaltyProgramListUnavailable state="Unavailable" />,
+    );
+    expect(unavailableHtml).toContain("Program projection unavailable");
+    expect(unavailableHtml).toContain("projection is not connected");
   });
 });

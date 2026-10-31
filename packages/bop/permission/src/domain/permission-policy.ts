@@ -183,12 +183,14 @@ function parseRole(value: unknown): PermissionRoleReference {
   return uuid(value);
 }
 
+/**
+ * DEC-PERM-CATALOG: the same action grammar as the database (0300_011 / 2000_001): dot-separated
+ * segments whose words join with single underscores or hyphens.
+ */
+export const permissionActionPattern =
+  /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:_[a-z0-9]+)*(?:-[a-z0-9]+)*){1,7}$/u;
 function parseAction(value: unknown): PolicyBusinessAction {
-  if (
-    typeof value !== "string" ||
-    value.length > 128 ||
-    !/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*){1,7}$/u.test(value)
-  )
+  if (typeof value !== "string" || value.length > 128 || !permissionActionPattern.test(value))
     throw new PermissionPolicyContractError("PERMISSION_POLICY_INPUT_INVALID");
   return value;
 }
@@ -333,6 +335,16 @@ export function createPermissionDefinition(value: unknown): PermissionDefinition
 }
 
 export function createPolicyState(value: unknown, brandInput: Brand): PolicyState {
+  return policyState(value, brandInput, false);
+}
+/** Reconstructs persisted administrative facts without granting an action. */
+export function createBrandAdministrationPolicyState(
+  value: unknown,
+  brandInput: Brand,
+): PolicyState {
+  return policyState(value, brandInput, true);
+}
+function policyState(value: unknown, brandInput: Brand, administrative: boolean): PolicyState {
   const record = closed(value, ["brandReference", "snapshotReference", "version", "updatedAt"]);
   let brand: Brand;
   try {
@@ -340,7 +352,10 @@ export function createPolicyState(value: unknown, brandInput: Brand): PolicyStat
   } catch {
     throw new PermissionPolicyContractError("PERMISSION_POLICY_DEPENDENCY_INVALID");
   }
-  if (brand.lifecycle !== "Active" || record.brandReference !== brand.brandReference)
+  if (
+    (!administrative && brand.lifecycle !== "Active") ||
+    record.brandReference !== brand.brandReference
+  )
     throw new PermissionPolicyContractError("PERMISSION_POLICY_SCOPE_INVALID");
   return Object.freeze({
     brandReference: brand.brandReference,
@@ -354,6 +369,21 @@ export function createPermissionRole(
   value: unknown,
   brandInput: Brand,
   storeInput: Store | null,
+): PermissionRole {
+  return permissionRole(value, brandInput, storeInput, false);
+}
+/** Brand-only reconstruction; Store-scoped roles remain operational facts. */
+export function createBrandAdministrationPermissionRole(
+  value: unknown,
+  brandInput: Brand,
+): PermissionRole {
+  return permissionRole(value, brandInput, null, true);
+}
+function permissionRole(
+  value: unknown,
+  brandInput: Brand,
+  storeInput: Store | null,
+  administrative: boolean,
 ): PermissionRole {
   const record = closed(value, [
     "roleReference",
@@ -376,7 +406,7 @@ export function createPermissionRole(
     throw new PermissionPolicyContractError("PERMISSION_POLICY_DEPENDENCY_INVALID");
   }
   if (
-    brand.lifecycle !== "Active" ||
+    (!administrative && brand.lifecycle !== "Active") ||
     record.brandReference !== brand.brandReference ||
     record.storeReference !== (store?.storeReference ?? null) ||
     (store !== null &&

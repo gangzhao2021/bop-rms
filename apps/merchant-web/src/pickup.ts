@@ -1,17 +1,54 @@
+import { t } from "./i18n/i18n.js";
 export interface PickupQueueItem {
   readonly fulfillmentReference: string;
   readonly orderReference: string;
-  readonly publicOrderNumber: string;
+  readonly publicOrderNumber: string | null;
   readonly phase: "Ready" | "InProgress" | "Completed";
   readonly readyAt: string;
-  readonly proofReadiness: "Ready" | "Unavailable";
+  /** Locked (WP-2423): five wrong pickup codes; staff check the customer in person. */
+  readonly proofReadiness: "Ready" | "Expired" | "NotIssued" | "Locked" | "Unavailable";
   readonly stagingLocation: string | null;
   readonly claimStatus: "Unclaimed" | "Claimed" | "Unavailable";
-  readonly exceptionStatus: "None" | "Reported";
-  readonly packageCount: number;
-  readonly allergenCue: "None" | "Present";
+  readonly exceptionStatus: "None" | "Reported" | "Unavailable";
+  readonly packageCount: number | null;
+  readonly allergenCue: "None" | "Present" | "Unavailable";
+  /** WP-2423 Q26: portions the kitchen is remaking for this order; wait before handing over. */
+  readonly remakeQuantity?: number;
+  /** WP-2423 Q26: the order's business day (order numbers restart every business day). */
+  readonly businessDate?: string;
+  /**
+   * WP-2423: staff took this order at the counter. No pickup code is sent and the order has no
+   * customer name, so staff call the order number and hand it over as soon as it is ready.
+   */
+  readonly takenAtCounter?: true;
+  readonly execution?: PickupExecution;
+}
+export interface PickupExecution {
+  readonly aggregateVersion: string;
+  readonly publicOrderReference: string | null;
+  readonly proof: {
+    readonly kind: "HumanCode" | "Opaque";
+    readonly generation: number;
+    readonly expiresAt: string;
+  } | null;
+  readonly items: readonly {
+    readonly fulfillmentItemReference: string;
+    readonly orderedQuantity: number;
+    readonly readyQuantity: number;
+    readonly handedOverQuantity: number;
+    /** WP-2423: the item's name as ordered (absent when it could not be read). */
+    readonly name?: string;
+    /** WP-2423: the options chosen with it, as ordered. */
+    readonly options?: readonly { readonly name: string; readonly quantity: number }[];
+  }[];
+}
+export interface PickupWorkstation {
+  readonly deviceReference: string;
+  readonly pickupLocationReference: string;
 }
 export interface PickupQueueView {
+  readonly workstation?: PickupWorkstation | null;
+
   readonly screenId: "FUL-PICKUP-QUEUE";
   readonly projectionName: "fulfillment_pickup_queue_v1";
   readonly projectionVersion: 1;
@@ -19,16 +56,22 @@ export interface PickupQueueView {
   readonly projectedAt: string;
   readonly freshnessStatus: "Fresh" | "Stale" | "Rebuilding" | "Failed";
   readonly items: readonly PickupQueueItem[];
+  readonly nextAfterFulfillmentReference?: string | null;
+  /** WP-2423 item 8 ⑦ (v15 finding v): guests' pickup ordering is turned off at this store. */
+  readonly guestPickupOff?: boolean;
 }
 export interface PickupClient {
-  loadQueue(): Promise<unknown>;
+  loadQueue(input?: {
+    afterFulfillmentReference: string | null;
+    includeCompleted: boolean;
+  }): Promise<unknown>;
 }
 export class PickupClientError extends Error {
   constructor(
     readonly code:
       "PermissionDenied" | "NotFound" | "Offline" | "Conflict" | "CommandFailed" | "Unavailable",
   ) {
-    super("Pickup is unavailable");
+    super(t("Pickup is unavailable"));
     this.name = "PickupClientError";
   }
 }
@@ -54,7 +97,7 @@ function closed(value: unknown, keys: readonly string[]): Readonly<Record<string
   }
   return result;
 }
-function reference(value: unknown): string {
+export function parsePickupReference(value: unknown): string {
   if (typeof value !== "string" || !UUID_V7.test(value)) throw new Error("PICKUP_VIEW_INVALID");
   return value;
 }
@@ -64,6 +107,10 @@ function instant(value: unknown): string {
   return value;
 }
 function item(value: unknown): PickupQueueItem {
+  const hasExecution = !!value && typeof value === "object" && Object.hasOwn(value, "execution");
+  const hasRemake = !!value && typeof value === "object" && Object.hasOwn(value, "remakeQuantity");
+  const hasDay = !!value && typeof value === "object" && Object.hasOwn(value, "businessDate");
+  const hasCounter = !!value && typeof value === "object" && Object.hasOwn(value, "takenAtCounter");
   const input = closed(value, [
     "fulfillmentReference",
     "orderReference",
@@ -76,24 +123,39 @@ function item(value: unknown): PickupQueueItem {
     "exceptionStatus",
     "packageCount",
     "allergenCue",
+    ...(hasRemake ? ["remakeQuantity"] : []),
+    ...(hasDay ? ["businessDate"] : []),
+    ...(hasCounter ? ["takenAtCounter"] : []),
+    ...(hasExecution ? ["execution"] : []),
   ]);
   if (
-    typeof input.publicOrderNumber !== "string" ||
-    !/^[A-Z0-9-]{1,40}$/u.test(input.publicOrderNumber) ||
+    (input.publicOrderNumber !== null &&
+      (typeof input.publicOrderNumber !== "string" ||
+        !/^[A-Z0-9-]{1,40}$/u.test(input.publicOrderNumber))) ||
     !["Ready", "InProgress", "Completed"].includes(String(input.phase)) ||
-    !["Ready", "Unavailable"].includes(String(input.proofReadiness)) ||
+    !["Ready", "Expired", "NotIssued", "Locked", "Unavailable"].includes(
+      String(input.proofReadiness),
+    ) ||
     (input.stagingLocation !== null &&
       (typeof input.stagingLocation !== "string" || !SAFE.test(input.stagingLocation))) ||
     !["Unclaimed", "Claimed", "Unavailable"].includes(String(input.claimStatus)) ||
-    !["None", "Reported"].includes(String(input.exceptionStatus)) ||
-    !Number.isSafeInteger(input.packageCount) ||
-    Number(input.packageCount) < 1 ||
-    !["None", "Present"].includes(String(input.allergenCue))
+    !["None", "Reported", "Unavailable"].includes(String(input.exceptionStatus)) ||
+    (input.packageCount !== null &&
+      (!Number.isSafeInteger(input.packageCount) || Number(input.packageCount) < 1)) ||
+    !["None", "Present", "Unavailable"].includes(String(input.allergenCue)) ||
+    (hasRemake &&
+      (!Number.isSafeInteger(input.remakeQuantity) ||
+        Number(input.remakeQuantity) < 1 ||
+        Number(input.remakeQuantity) > 999)) ||
+    (hasDay &&
+      (typeof input.businessDate !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(input.businessDate))) ||
+    (hasCounter && input.takenAtCounter !== true)
   )
     throw new Error("PICKUP_VIEW_INVALID");
   return Object.freeze({
-    fulfillmentReference: reference(input.fulfillmentReference),
-    orderReference: reference(input.orderReference),
+    fulfillmentReference: parsePickupReference(input.fulfillmentReference),
+    orderReference: parsePickupReference(input.orderReference),
     publicOrderNumber: input.publicOrderNumber,
     phase: input.phase as PickupQueueItem["phase"],
     readyAt: instant(input.readyAt),
@@ -101,11 +163,29 @@ function item(value: unknown): PickupQueueItem {
     stagingLocation: input.stagingLocation,
     claimStatus: input.claimStatus as PickupQueueItem["claimStatus"],
     exceptionStatus: input.exceptionStatus as PickupQueueItem["exceptionStatus"],
-    packageCount: Number(input.packageCount),
+    packageCount: input.packageCount === null ? null : Number(input.packageCount),
     allergenCue: input.allergenCue as PickupQueueItem["allergenCue"],
+    ...(hasRemake ? { remakeQuantity: Number(input.remakeQuantity) } : {}),
+    ...(hasDay ? { businessDate: input.businessDate as string } : {}),
+    ...(hasCounter ? { takenAtCounter: true as const } : {}),
+    ...(hasExecution ? { execution: parsePickupExecution(input.execution) } : {}),
+  });
+}
+export function parsePickupWorkstation(value: unknown): PickupWorkstation | null {
+  if (value === null) return null;
+  const raw = closed(value, ["deviceReference", "pickupLocationReference"]);
+  return Object.freeze({
+    deviceReference: parsePickupReference(raw.deviceReference),
+    pickupLocationReference: parsePickupReference(raw.pickupLocationReference),
   });
 }
 export function parsePickupQueueView(value: unknown): PickupQueueView {
+  const hasWorkstation =
+    !!value && typeof value === "object" && Object.hasOwn(value, "workstation");
+  const hasCursor =
+    !!value && typeof value === "object" && Object.hasOwn(value, "nextAfterFulfillmentReference");
+  const hasPickupOff =
+    !!value && typeof value === "object" && Object.hasOwn(value, "guestPickupOff");
   const input = closed(value, [
     "screenId",
     "projectionName",
@@ -114,7 +194,11 @@ export function parsePickupQueueView(value: unknown): PickupQueueView {
     "projectedAt",
     "freshnessStatus",
     "items",
+    ...(hasCursor ? ["nextAfterFulfillmentReference"] : []),
+    ...(hasWorkstation ? ["workstation"] : []),
+    ...(hasPickupOff ? ["guestPickupOff"] : []),
   ]);
+  if (hasPickupOff && input.guestPickupOff !== true) throw new Error("PICKUP_VIEW_INVALID");
   if (
     input.screenId !== "FUL-PICKUP-QUEUE" ||
     input.projectionName !== "fulfillment_pickup_queue_v1" ||
@@ -137,8 +221,117 @@ export function parsePickupQueueView(value: unknown): PickupQueueView {
     projectedAt: instant(input.projectedAt),
     freshnessStatus: input.freshnessStatus as PickupQueueView["freshnessStatus"],
     items,
+    ...(hasWorkstation ? { workstation: parsePickupWorkstation(input.workstation) } : {}),
+    ...(hasPickupOff ? { guestPickupOff: true } : {}),
+    ...(hasCursor
+      ? {
+          nextAfterFulfillmentReference:
+            input.nextAfterFulfillmentReference === null
+              ? null
+              : parsePickupReference(input.nextAfterFulfillmentReference),
+        }
+      : {}),
   });
 }
 export const unavailablePickupClient: PickupClient = Object.freeze({
   loadQueue: () => Promise.reject(new PickupClientError("Unavailable")),
 });
+
+const SAFE_NAME = /^[^\p{Cc}\p{Cf}]{1,240}$/u;
+function itemOptions(
+  value: unknown,
+): readonly { readonly name: string; readonly quantity: number }[] {
+  if (!Array.isArray(value) || value.length > 50) throw new Error("PICKUP_VIEW_INVALID");
+  return Object.freeze(
+    value.map((entry) => {
+      const option = closed(entry, ["name", "quantity"]);
+      if (
+        typeof option.name !== "string" ||
+        !SAFE_NAME.test(option.name) ||
+        !Number.isSafeInteger(option.quantity) ||
+        Number(option.quantity) < 1 ||
+        Number(option.quantity) > 999
+      )
+        throw new Error("PICKUP_VIEW_INVALID");
+      return Object.freeze({ name: option.name, quantity: Number(option.quantity) });
+    }),
+  );
+}
+/** WP-2423: how staff read an item to hand over: "Latte (Oat milk, 2 × Extra shot)". */
+export function pickupItemLabel(
+  item: Pick<PickupExecution["items"][number], "name" | "options">,
+  index: number,
+): string {
+  if (item.name === undefined) return t("Item {value}", { value: String(index + 1) });
+  const options = (item.options ?? []).map((option) =>
+    option.quantity > 1 ? `${String(option.quantity)} × ${option.name}` : option.name,
+  );
+  return options.length === 0 ? item.name : `${item.name} (${options.join(", ")})`;
+}
+export function parsePickupExecution(value: unknown): PickupExecution {
+  const raw = closed(value, ["aggregateVersion", "publicOrderReference", "proof", "items"]);
+  if (
+    typeof raw.aggregateVersion !== "string" ||
+    !/^[1-9][0-9]{0,18}$/.test(raw.aggregateVersion) ||
+    BigInt(raw.aggregateVersion) > 9223372036854775807n ||
+    (raw.publicOrderReference !== null &&
+      (typeof raw.publicOrderReference !== "string" ||
+        !/^[A-Za-z0-9_-]{22}$/.test(raw.publicOrderReference))) ||
+    !Array.isArray(raw.items) ||
+    raw.items.length < 1 ||
+    raw.items.length > 100
+  )
+    throw new Error("PICKUP_VIEW_INVALID");
+  let proof: PickupExecution["proof"] = null;
+  if (raw.proof !== null) {
+    const p = closed(raw.proof, ["kind", "generation", "expiresAt"]);
+    if (
+      (p.kind !== "HumanCode" && p.kind !== "Opaque") ||
+      !Number.isSafeInteger(p.generation) ||
+      Number(p.generation) < 1
+    )
+      throw new Error("PICKUP_VIEW_INVALID");
+    proof = Object.freeze({
+      kind: p.kind,
+      generation: Number(p.generation),
+      expiresAt: instant(p.expiresAt),
+    });
+  }
+  const items = raw.items.map((value) => {
+    const named = !!value && typeof value === "object" && Object.hasOwn(value, "name");
+    const item = closed(value, [
+      "fulfillmentItemReference",
+      "orderedQuantity",
+      "readyQuantity",
+      "handedOverQuantity",
+      ...(named ? ["name", "options"] : []),
+    ]);
+    const options = named ? itemOptions(item.options) : [];
+    if (named && (typeof item.name !== "string" || !SAFE_NAME.test(item.name)))
+      throw new Error("PICKUP_VIEW_INVALID");
+    if (
+      ![item.orderedQuantity, item.readyQuantity, item.handedOverQuantity].every(
+        (v) => Number.isSafeInteger(v) && Number(v) >= 0 && Number(v) <= 999,
+      ) ||
+      Number(item.orderedQuantity) < 1 ||
+      Number(item.readyQuantity) > Number(item.orderedQuantity) ||
+      Number(item.handedOverQuantity) > Number(item.readyQuantity)
+    )
+      throw new Error("PICKUP_VIEW_INVALID");
+    return Object.freeze({
+      fulfillmentItemReference: parsePickupReference(item.fulfillmentItemReference),
+      orderedQuantity: Number(item.orderedQuantity),
+      readyQuantity: Number(item.readyQuantity),
+      handedOverQuantity: Number(item.handedOverQuantity),
+      ...(named ? { name: item.name as string, options } : {}),
+    });
+  });
+  if (new Set(items.map((item) => item.fulfillmentItemReference)).size !== items.length)
+    throw new Error("PICKUP_VIEW_INVALID");
+  return Object.freeze({
+    aggregateVersion: raw.aggregateVersion,
+    publicOrderReference: raw.publicOrderReference,
+    proof,
+    items: Object.freeze(items),
+  });
+}

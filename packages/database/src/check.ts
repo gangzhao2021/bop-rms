@@ -14,7 +14,7 @@ try {
     process.exitCode = 1;
   } else {
     process.stdout.write(
-      `migration catalog valid: ${catalog.migrations.length} immutable migration, 14 Canonical namespaces\n`,
+      `migration catalog valid: ${catalog.migrations.length} immutable migrations; Canonical namespace registry validated\n`,
     );
   }
 } catch (error) {

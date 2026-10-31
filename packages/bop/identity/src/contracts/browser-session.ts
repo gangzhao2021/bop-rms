@@ -17,6 +17,10 @@ export const browserSessionErrorCodes = [
   "BROWSER_SESSION_INPUT_INVALID",
   "BROWSER_SESSION_DENIED",
   "BROWSER_SESSION_VERSION_CONFLICT",
+  // WP-2423 Q18: the Session has genuinely ended (revoked, expired or unknown).
+  "BROWSER_SESSION_ENDED",
+  // WP-2423 Q18: the Session could not be checked right now (retry later; not an ended Session).
+  "BROWSER_SESSION_UNAVAILABLE",
 ] as const;
 export type BrowserSessionErrorCode = (typeof browserSessionErrorCodes)[number];
 

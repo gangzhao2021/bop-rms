@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ComplianceMonitoringPageError,
@@ -52,7 +53,8 @@ export function TemperatureLog({ view }: { readonly view: TemperatureLogView }) 
           <p className="bop-eyebrow">CMP-TEMP-LOG · Operations Compliance</p>
           <h1>Temperature Log</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
         {view.permissions.mayRecordManual ? (
@@ -149,7 +151,8 @@ export function CleaningLog({ view }: { readonly view: CleaningLogView }) {
           <p className="bop-eyebrow">CMP-CLEANING · Operations Compliance</p>
           <h1>Cleaning and Sanitation</h1>
           <p>
-            Source as of {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source as of <SourceTime instant={view.sourceAsOf} /> · {view.completeness} ·{" "}
+            {view.freshness}
           </p>
         </div>
       </header>

@@ -9,7 +9,7 @@ description: Resolve the complete BOP-RMS Screen contract for Figma or code chan
 
 - Owning WP and applicable `AGENTS.md` chain.
 - `docs/spec/README.md`, current WP brief, and `docs/product/screen-registry.yaml`.
-- Section 88 authority and, for visual work, the Accepted Figma frame/node and source version.
+- Section 88 authority and source version. Visual implementation requires the Accepted Figma frame/node; authorized Draft/Review design work uses the explicit target and existing design references without requiring the target frame to be Accepted.
 
 ## Workflow
 
@@ -17,7 +17,7 @@ description: Resolve the complete BOP-RMS Screen contract for Figma or code chan
 2. Enumerate fields, views, search/filter/sort, actions, Commands, Permissions, Projections, navigation, and analytics/privacy classification.
 3. Enumerate default, loading, empty, unauthorized/forbidden/permission-denied, not-found, validation, conflict, rate-limit, offline, stale, Provider pending/unknown, disabled, and recovery states that apply.
 4. Resolve viewport, reflow, keyboard/focus, accessible-name, error-association, non-color state, touch-target, localization, zoom, and reduced-motion requirements.
-5. Compare Registry, Handoff, Accepted Figma, code, and tests. Revise the lower-authority artifact or stop for an approved decision change.
+5. Compare Registry, Handoff, applicable Figma references, code, and tests. Revise the lower-authority artifact or stop for an approved decision change.
 6. Map every applicable state and permission outcome to implementation plus behavior, accessibility, and visual evidence using synthetic data.
 
 ## Hard stops

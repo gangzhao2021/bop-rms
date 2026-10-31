@@ -8,6 +8,7 @@ import {
   type RealtimeAuthorization,
   type RealtimeAuthorizer,
   type RealtimeHint,
+  type RealtimeMetric,
   type RealtimeSession,
   RealtimeTransport,
   recoveryActionFor,
@@ -396,6 +397,152 @@ describe("WP-0036 same-origin realtime acceptance", () => {
     });
     expect(registry.activeCount()).toBe(0);
     expect((await requestJson(drainingPort)).status).toBe(503);
+  });
+
+  it("WP-2227 bounds a hung release, ends the response promptly and shares one failed drain", async () => {
+    const metrics: RealtimeMetric[] = [];
+    let releaseCalls = 0;
+    let rejectRelease: (error: Error) => void = () => undefined;
+    const release = new Promise<void>((_resolve, reject) => {
+      rejectRelease = reject;
+    });
+    const transport = transportFor(new MutableAuthorizer(), {
+      drainMs: 50,
+      metrics: (metric) => metrics.push(metric),
+      connectionRegistry: {
+        async acquire() {
+          return {
+            connectionId: "synthetic-hung-lease",
+            release: () => {
+              releaseCalls += 1;
+              return release;
+            },
+          };
+        },
+      },
+    });
+    const port = await listen(transport);
+    const stream = await openStream(port);
+    const ended = new Promise<void>((resolve) => stream.response.once("end", resolve));
+    const drain = transport.beginDrain();
+    expect(transport.beginDrain()).toBe(drain);
+    const failure = expect(drain).rejects.toThrow("realtime cleanup incomplete");
+    expect(transport.isReady()).toBe(false);
+    await ended;
+    expect(releaseCalls).toBe(1);
+    expect((await requestJson(port)).status).toBe(503);
+    await failure;
+    expect(transport.resourceSnapshot()).toEqual({
+      activeStreams: 0,
+      draining: true,
+      ownedTimers: 0,
+    });
+    expect(metrics).toContainEqual({
+      operation: "lifecycle",
+      result: "unavailable",
+      sessionKind: "merchant",
+    });
+    expect(metrics.some((metric) => metric.result === "drained")).toBe(false);
+    // Rejection after the deadline is observed; no second release or unhandled rejection.
+    rejectRelease(new Error("synthetic late release failure"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(releaseCalls).toBe(1);
+  });
+
+  it.each(["release", "unsubscribe"] as const)(
+    "WP-2227 closes on %s failure and reports incomplete cleanup",
+    async (failure) => {
+      const authorizer = new MutableAuthorizer();
+      if (failure === "unsubscribe")
+        authorizer.subscribeToScopeChanges = () => () => {
+          throw new Error("synthetic unsubscribe failure");
+        };
+      let releaseCalls = 0;
+      const transport = transportFor(authorizer, {
+        drainMs: 50,
+        connectionRegistry: {
+          async acquire() {
+            return {
+              connectionId: "synthetic-failing-lease",
+              release() {
+                releaseCalls += 1;
+                if (failure === "release") throw new Error("synthetic release failure");
+              },
+            };
+          },
+        },
+      });
+      const port = await listen(transport);
+      const stream = await openStream(port);
+      const ended = new Promise<void>((resolve) => stream.response.once("end", resolve));
+      await expect(transport.beginDrain()).rejects.toThrow("realtime cleanup incomplete");
+      await ended;
+      expect(releaseCalls).toBe(1);
+      expect(transport.resourceSnapshot()).toEqual({
+        activeStreams: 0,
+        draining: true,
+        ownedTimers: 0,
+      });
+    },
+  );
+
+  it("WP-2227 rejects an invalid lease promptly even when its release hangs", async () => {
+    let rejectRelease: (error: Error) => void = () => undefined;
+    const release = new Promise<void>((_resolve, reject) => {
+      rejectRelease = reject;
+    });
+    const transport = transportFor(new MutableAuthorizer(), {
+      drainMs: 5_000,
+      connectionRegistry: {
+        async acquire() {
+          return {
+            connectionId: "invalid lease identifier",
+            release: () => release,
+          };
+        },
+      },
+    });
+    const port = await listen(transport);
+    expect((await requestJson(port)).status).toBe(503);
+    const drain = expect(transport.beginDrain()).rejects.toThrow("realtime cleanup incomplete");
+    rejectRelease(new Error("synthetic invalid lease cleanup failure"));
+    await drain;
+    expect(transport.resourceSnapshot().ownedTimers).toBe(0);
+  });
+
+  it("WP-2227 ends the client stream before a delayed successful release completes", async () => {
+    let completeRelease: () => void = () => undefined;
+    const release = new Promise<void>((resolve) => {
+      completeRelease = resolve;
+    });
+    const transport = transportFor(new MutableAuthorizer(), {
+      drainMs: 5_000,
+      connectionRegistry: {
+        async acquire() {
+          return {
+            connectionId: "synthetic-delayed-release",
+            release: () => release,
+          };
+        },
+      },
+    });
+    const stream = await openStream(await listen(transport));
+    const ended = new Promise<void>((resolve) => stream.response.once("end", resolve));
+    const drain = transport.beginDrain();
+    await ended;
+    expect(transport.resourceSnapshot()).toEqual({
+      activeStreams: 0,
+      draining: true,
+      ownedTimers: 1,
+    });
+    completeRelease();
+    await drain;
+    expect(transport.resourceSnapshot().ownedTimers).toBe(0);
+  });
+
+  it("WP-2227 rejects drain bounds above the accepted 25 seconds", () => {
+    expect(() => transportFor(new MutableAuthorizer(), { drainMs: 25_001 })).toThrow();
+    expect(() => transportFor(new MutableAuthorizer(), { drainMs: 0 })).toThrow();
   });
 
   it("requires Query refresh for open, hint and reconnect and never replays a Command", () => {

@@ -11,6 +11,8 @@ const privatePrefixes = [
   "/payment",
   "/receipt",
   "/refund",
+  // DEC-PILOT-NOTIFICATIONS R1: the one-time order link page (IDR-0031) is never cached.
+  "/resume",
   "/support",
 ] as const;
 

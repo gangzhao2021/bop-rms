@@ -110,4 +110,112 @@ describe("Screen Registry validation", () => {
       }),
     ).toContain("broken navigation target");
   });
+  it.each([
+    "phase",
+    "feature_gate",
+    "action_summary",
+    "search_filter_sort_export",
+    "work_package_mode",
+    "permission_ref",
+    "projection_ref",
+  ] as const)("rejects standalone inherited %s even with a claimed parent", (field) => {
+    expect(
+      changed((copy) => {
+        const screen = find(copy, (item) => item.screen_id === "CUST-PROFILE");
+        screen[field] = "inherited";
+        screen.parent_screen_ids = ["CUST-LOYALTY"];
+      }),
+    ).toContain("unsupported standalone inheritance");
+  });
+  it("accepts explicit parent and family inheritance for shared utilities", () => {
+    expect(
+      changed((copy) => {
+        const screen = find(copy, (item) => item.screen_id === "HISTORY-TIMELINE");
+        screen.parent_screen_ids = ["CAT-PRODUCT-DETAIL"];
+        delete screen.allowed_family;
+      }),
+    ).toBe("");
+    expect(
+      changed((copy) => {
+        const screen = find(copy, (item) => item.screen_id === "HISTORY-TIMELINE");
+        screen.allowed_family = "master_detail";
+        delete screen.parent_screen_ids;
+      }),
+    ).toBe("");
+  });
+  it("rejects inherited utilities without a source or with an unknown source", () => {
+    expect(
+      changed((copy) => {
+        const screen = find(copy, (item) => item.screen_id === "HISTORY-TIMELINE");
+        delete screen.allowed_family;
+        delete screen.parent_screen_ids;
+      }),
+    ).toContain("unresolved inheritance source");
+    expect(
+      changed((copy) => {
+        const screen = find(copy, (item) => item.screen_id === "HISTORY-TIMELINE");
+        delete screen.allowed_family;
+        delete screen.parent_screen_ids;
+        screen.alias_of = "CAT-PRODUCT-DETAIL";
+      }),
+    ).toContain("unresolved inheritance source");
+    expect(
+      changed((copy) => {
+        const screen = find(copy, (item) => item.screen_id === "HISTORY-TIMELINE");
+        screen.parent_screen_ids = ["UNKNOWN-SCREEN"];
+      }),
+    ).toContain("invalid parent");
+  });
+  it("rejects direct and indirect parent cycles, including aliases", () => {
+    expect(
+      changed((copy) => {
+        const screen = find(copy, (item) => item.screen_id === "HISTORY-TIMELINE");
+        screen.parent_screen_ids = [screen.screen_id];
+      }),
+    ).toContain("inheritance cycle");
+    expect(
+      changed((copy) => {
+        const history = find(copy, (item) => item.screen_id === "HISTORY-TIMELINE");
+        const compare = find(copy, (item) => item.screen_id === "VERSION-COMPARE");
+        history.parent_screen_ids = [compare.screen_id];
+        compare.parent_screen_ids = [history.screen_id];
+      }),
+    ).toContain("inheritance cycle");
+    expect(
+      changed((copy) => {
+        const alias = find(copy, (item) => item.route_mode === "alias");
+        const target = find(copy, (item) => item.screen_id === alias.alias_of);
+        target.parent_screen_ids = [alias.screen_id];
+      }),
+    ).toContain("inheritance cycle");
+  });
+  it.each([
+    ["CUST-ACCOUNT-AUTH", ["WP-2140"]],
+    ["CUST-PROFILE", ["WP-2140", "WP-2144", "WP-2146"]],
+    ["CUST-RESERVATION-SEARCH", ["WP-2113"]],
+    ["CUST-RESERVATION-DETAIL", ["WP-2113"]],
+    ["CUST-WAITLIST", ["WP-2114"]],
+  ] as const)("retains the accepted future contract for %s", (id, packages) => {
+    const screen = find(registry, (item) => item.screen_id === id);
+    expect(screen.route_mode).toBe("standalone");
+    expect(screen.phase).toBe("phase_3");
+    expect(screen.feature_gate).toBe("phase_capability");
+    expect(screen.action_summary).not.toMatch(/inherit/i);
+    expect(screen.work_package_mode).toBe("resolved");
+    expect(screen.work_packages).toEqual(packages);
+  });
+  it("keeps abbreviated receipt ownership and later accepted refinements", () => {
+    const receipt = find(registry, (item) => item.screen_id === "CUST-RECEIPT-SUPPORT");
+    expect(receipt.work_packages).toEqual([
+      "WP-1709",
+      "WP-1720",
+      "WP-1721",
+      "WP-1722",
+      "WP-1723",
+      "WP-1724",
+      "WP-2028",
+    ]);
+    const publish = find(registry, (item) => item.screen_id === "CAT-MENU-PUBLISH");
+    expect(publish.work_packages).toEqual(["WP-1024", "WP-1027", "WP-1802"]);
+  });
 });

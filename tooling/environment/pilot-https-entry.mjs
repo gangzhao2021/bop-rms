@@ -1,0 +1,165 @@
+import console from "node:console";
+import process from "node:process";
+import path from "node:path";
+import { URL, fileURLToPath, pathToFileURL } from "node:url";
+import { loadPilotInstallation } from "./pilot-installation.mjs";
+import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
+import { composeCustomerDependencies } from "./pilot-customer-composition.mjs";
+import { composeConfiguredMerchant } from "./pilot-merchant-composition.mjs";
+import { createInternalQrLoaders } from "./pilot-qr.mjs";
+import { startInternalCustomerServer } from "./pilot-customer-server.mjs";
+import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
+import { loadPilotHosting } from "./pilot-hosting.mjs";
+import { isPilotRuntime } from "./pilot-environment.mjs";
+export { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
+export function parsePilotHttpsArguments(args) {
+  if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
+    throw Error("PILOT_HTTPS_ARGUMENT_INVALID");
+  return parsePilotRuntimeDirectory(args[0]);
+}
+export async function startConfiguredPilotHttps(
+  directory,
+  {
+    loadInstallation = loadPilotInstallation,
+    createResources = createConfiguredPilotResources,
+    composeCustomer = composeCustomerDependencies,
+    composeMerchant = composeConfiguredMerchant,
+    createQr = createInternalQrLoaders,
+    startServer = startInternalCustomerServer,
+    loadHosting = loadPilotHosting,
+  } = {},
+) {
+  const installation = await loadInstallation(directory),
+    customerConfig = await installation.loadCustomerRuntime(),
+    merchantConfig = await installation.loadMerchantRuntime();
+  if (
+    Object.entries(customerConfig.scope).some(([key, value]) => merchantConfig.scope[key] !== value)
+  )
+    throw Error("PILOT_HTTPS_SCOPE_CHANGED");
+  const customer = composeCustomer(
+    directory,
+    installation,
+    customerConfig,
+    await loadHosting(directory),
+  );
+  const merchant = composeMerchant(
+    directory,
+    installation,
+    merchantConfig,
+    customerConfig,
+    customer,
+  );
+  const qr = createQr({
+    file: path.join(directory, "internal-test-qr-key.pem"),
+    loadProfile: installation.loadProfile,
+    expectedDatabaseName: installation.database,
+  });
+  // WP-2423 Q11: the DEMO launcher opens each listed table's current issued code (DIN-TABLE-LIST).
+  const diningEntries = await Promise.all(
+    customerConfig.diningTableFiles.map(async (name, index) => {
+      const table = await installation.loadCustomerData(name);
+      return {
+        selector: "table-" + (index + 1),
+        label: table.label,
+        tableReference: table.tableReference,
+      };
+    }),
+  );
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the other Stores this installation serves, each a
+  // complete Store runtime directory of the same database, Tenant and Brand (absent: one Store).
+  // v15 2026-10-31: one Store that cannot be loaded never stops the others; it is logged (its
+  // code) and not served until it is fixed and the service restarts.
+  const additionalStores = [];
+  for (const [index, relative] of (await loadServedStoreDirectories(directory)).entries()) {
+    try {
+      const storeDirectory = path.join(directory, relative);
+      const storeInstallation = await loadInstallation(storeDirectory),
+        storeCustomerConfig = await storeInstallation.loadCustomerRuntime(),
+        storeMerchantConfig = await storeInstallation.loadMerchantRuntime();
+      if (
+        storeInstallation.database !== installation.database ||
+        storeCustomerConfig.scope.tenantReference !== customerConfig.scope.tenantReference ||
+        storeCustomerConfig.scope.brandReference !== customerConfig.scope.brandReference ||
+        storeCustomerConfig.scope.storeReference === customerConfig.scope.storeReference ||
+        Object.entries(storeCustomerConfig.scope).some(
+          ([key, value]) => storeMerchantConfig.scope[key] !== value,
+        )
+      )
+        throw Error("PILOT_HTTPS_SCOPE_CHANGED");
+      const storeCustomer = composeCustomer(
+        storeDirectory,
+        storeInstallation,
+        storeCustomerConfig,
+        await loadHosting(directory),
+      );
+      additionalStores.push({
+        storeReference: storeCustomerConfig.scope.storeReference,
+        // Its customer API's local port, by its place in stores.json (pilot-api-entry).
+        apiPort: 4301 + index,
+        createInternalMerchant: composeMerchant(
+          storeDirectory,
+          storeInstallation,
+          storeMerchantConfig,
+          storeCustomerConfig,
+          storeCustomer,
+        ),
+        createInternalTestResources: async () => {
+          const r = await createResources(storeDirectory);
+          if (
+            Object.entries(storeCustomerConfig.scope).some(
+              ([key, value]) => r.publicProfile.binding[key] !== value,
+            )
+          ) {
+            await r.close();
+            throw Error("PILOT_HTTPS_SCOPE_CHANGED");
+          }
+          return r;
+        },
+      });
+    } catch (error) {
+      reportUnexpected("PILOT_HTTPS_STORE_UNAVAILABLE", error, { store: relative });
+    }
+  }
+  return startServer({
+    ...customer,
+    additionalStores,
+    createInternalMerchant: merchant,
+    loadInternalPickupQr: qr.loadInternalPickupQr,
+    diningEntries,
+    loadProfile: installation.loadProfile,
+    // WP-2423 menu descriptions and photos: product photo sizes (pilot storage adapter).
+    productImageDirectory: path.join(directory, "media", "product-images"),
+    keyFile: path.join(directory, "customer-tls-key.pem"),
+    certificateFile: path.join(directory, "customer-tls-cert.pem"),
+    createInternalTestResources: async () => {
+      const r = await createResources(directory);
+      if (
+        Object.entries(customerConfig.scope).some(
+          ([key, value]) => r.publicProfile.binding[key] !== value,
+        )
+      ) {
+        await r.close();
+        throw Error("PILOT_HTTPS_SCOPE_CHANGED");
+      }
+      return r;
+    },
+  });
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    // DEC-PILOT-RUNTIME-ENVIRONMENT: InternalTest or a Pilot Store process; nothing else.
+    if (!isPilotRuntime()) throw Error("PILOT_HTTPS_ENVIRONMENT_INVALID");
+    const dir = path.join(
+      fileURLToPath(new URL("../../", import.meta.url)),
+      parsePilotHttpsArguments(process.argv.slice(2)),
+    );
+    await startConfiguredPilotHttps(dir);
+  } catch (error) {
+    // The real cause as a code (never message text, paths or secrets), then the fixed line.
+    reportUnexpected("PILOT_HTTPS_START_UNAVAILABLE", error);
+    console.error("PILOT_HTTPS_START_UNAVAILABLE");
+    process.exitCode = 1;
+  }
+}
