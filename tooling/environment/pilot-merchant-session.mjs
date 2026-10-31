@@ -1,3 +1,4 @@
+import { servedStoreFor } from "./pilot-served-stores.mjs";
 import process from "node:process";
 import { randomBytes } from "node:crypto";
 import {
@@ -194,9 +195,9 @@ export async function createInternalMerchantSession(
         entry !== undefined &&
         instant(at) < entry.validUntil &&
         instant(clock()) < entry.validUntil &&
-        selected.tenantReference === scope.tenantReference &&
-        selected.brandReference === scope.brandReference &&
-        selected.storeReference === scope.storeReference
+        // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: any Store this installation serves (the Store
+        // assignment itself is checked by the merchant BFF against the person's membership).
+        servedStoreFor(resources, selected) !== null
       );
     } catch {
       return false;

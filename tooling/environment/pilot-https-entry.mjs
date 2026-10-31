@@ -1,6 +1,7 @@
 import console from "node:console";
 import process from "node:process";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
@@ -11,6 +12,34 @@ import { startInternalCustomerServer } from "./pilot-customer-server.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { loadPilotHosting } from "./pilot-hosting.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
+/**
+ * `stores.json` in the installation directory: {"schemaVersion":1,"stores":["stores/<name>",…]},
+ * each a Store runtime directory below this one. Absent: this installation serves one Store.
+ */
+export async function loadServedStoreDirectories(directory) {
+  let text;
+  try {
+    text = await readFile(path.join(directory, "stores.json"), "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw Error("PILOT_HTTPS_STORES_INVALID", { cause: error });
+  }
+  const value = JSON.parse(text);
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Object.keys(value).sort().join() !== "schemaVersion,stores" ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.stores) ||
+    value.stores.length > 99 ||
+    new Set(value.stores).size !== value.stores.length ||
+    value.stores.some(
+      (entry) => typeof entry !== "string" || !/^stores\/[a-z0-9][a-z0-9-]{0,62}$/u.test(entry),
+    )
+  )
+    throw Error("PILOT_HTTPS_STORES_INVALID");
+  return Object.freeze([...value.stores]);
+}
 export function parsePilotHttpsArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
     throw Error("PILOT_HTTPS_ARGUMENT_INVALID");
@@ -64,8 +93,56 @@ export async function startConfiguredPilotHttps(
       };
     }),
   );
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the other Stores this installation serves, each a
+  // complete Store runtime directory of the same database, Tenant and Brand (absent: one Store).
+  const additionalStores = [];
+  for (const relative of await loadServedStoreDirectories(directory)) {
+    const storeDirectory = path.join(directory, relative);
+    const storeInstallation = await loadInstallation(storeDirectory),
+      storeCustomerConfig = await storeInstallation.loadCustomerRuntime(),
+      storeMerchantConfig = await storeInstallation.loadMerchantRuntime();
+    if (
+      storeInstallation.database !== installation.database ||
+      storeCustomerConfig.scope.tenantReference !== customerConfig.scope.tenantReference ||
+      storeCustomerConfig.scope.brandReference !== customerConfig.scope.brandReference ||
+      storeCustomerConfig.scope.storeReference === customerConfig.scope.storeReference ||
+      Object.entries(storeCustomerConfig.scope).some(
+        ([key, value]) => storeMerchantConfig.scope[key] !== value,
+      )
+    )
+      throw Error("PILOT_HTTPS_SCOPE_CHANGED");
+    const storeCustomer = composeCustomer(
+      storeDirectory,
+      storeInstallation,
+      storeCustomerConfig,
+      await loadHosting(directory),
+    );
+    additionalStores.push({
+      storeReference: storeCustomerConfig.scope.storeReference,
+      createInternalMerchant: composeMerchant(
+        storeDirectory,
+        storeInstallation,
+        storeMerchantConfig,
+        storeCustomerConfig,
+        storeCustomer,
+      ),
+      createInternalTestResources: async () => {
+        const r = await createResources(storeDirectory);
+        if (
+          Object.entries(storeCustomerConfig.scope).some(
+            ([key, value]) => r.publicProfile.binding[key] !== value,
+          )
+        ) {
+          await r.close();
+          throw Error("PILOT_HTTPS_SCOPE_CHANGED");
+        }
+        return r;
+      },
+    });
+  }
   return startServer({
     ...customer,
+    additionalStores,
     createInternalMerchant: merchant,
     loadInternalPickupQr: qr.loadInternalPickupQr,
     diningEntries,

@@ -23,6 +23,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { createPersistentMerchantBffService } from "../../../apps/api/src/persistent-merchant-bff.ts";
+import { createMerchantSessionStoreResolver } from "../../../apps/api/src/merchant-store-routing.ts";
 import { createPersistentMerchantOrderExceptions } from "../../../apps/api/src/persistent-merchant-order-exceptions.ts";
 import { createMerchantRuntime } from "../../../apps/api/src/merchant-runtime.ts";
 import { orderQueryFixture } from "../../rms/ordering/src/tests/order-creation-query.fixture.ts";
@@ -56,6 +57,15 @@ export async function verifyPersistentMerchantBff({
     start: "09:00:00",
     end: "17:00:00",
   };
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a Store switch writes its audit record (the pilot API
+  // role holds these grants).
+  await admin.query("GRANT USAGE ON SCHEMA platform_audit,platform_helpers TO " + role);
+  await admin.query(
+    "GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO " +
+      role,
+  );
+  await admin.query("GRANT SELECT,INSERT ON platform_audit.audit_record TO " + role);
+  await admin.query("GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO " + role);
   await admin.query("GRANT USAGE ON SCHEMA bop_task TO " + role);
   await admin.query("GRANT SELECT ON bop_task.task_version TO " + role);
   await admin.query("GRANT USAGE ON SCHEMA rms_store TO " + role);
@@ -942,6 +952,29 @@ export async function verifyPersistentMerchantBff({
   );
   const switched = await service().switchStore(switchInput);
   assert.equal(switched.workspace.selectedScope.storeReference, targetReference);
+  // Each switch (this one and the earlier one) is recorded in the Store left, naming the Store
+  // switched to, by the person.
+  await admin.query(
+    "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
+    [f.BRAND, f.STORE],
+  );
+  assert.deepEqual(
+    (
+      await admin.query(
+        "SELECT DISTINCT actor_reference::text AS actor,target_type,target_id::text AS target,reason_code FROM platform_audit.audit_record WHERE action_code='MERCHANT_STORE_SWITCHED'",
+      )
+    ).rows,
+    [
+      {
+        actor: f.ACTOR,
+        target_type: "Store",
+        target: targetReference,
+        reason_code: "STAFF_SELECTED_STORE",
+      },
+    ],
+  );
+  await admin.query("RESET bop.brand_id");
+  await admin.query("RESET bop.store_id");
   assert.equal(switched.workspace.businessDate, targetBusinessDate);
   assert.equal(switched.workspace.storeStatus, "Closed");
   assert.equal(switched.workspace.freshness, "Current");
@@ -950,6 +983,14 @@ export async function verifyPersistentMerchantBff({
     ["HOME-OVERVIEW", "OPS-ORDER-EXCEPTION"],
   );
   assert.equal(await nextRows(), 1);
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the server reads which Store a staff request belongs
+  // to from the Session (never from the request): the switched-to Store for the new Session, none
+  // for the rotated-away one or a cookie that is not a Session.
+  const sessionStore = createMerchantSessionStoreResolver(options);
+  assert.equal(await sessionStore(switched.cookie.value), targetReference);
+  assert.equal(await sessionStore(cookie.value), null);
+  assert.equal(await sessionStore(credentials.generate()), null);
+  assert.equal(await sessionStore(undefined), null);
   await assert.rejects(service().bootstrap(cookie.value));
   const refreshed = await service().bootstrap(switched.cookie.value);
   assert.notEqual(refreshed.csrf, initial.csrf);
@@ -959,6 +1000,8 @@ export async function verifyPersistentMerchantBff({
   );
   associationActive = false;
   await assert.rejects(service().bootstrap(switched.cookie.value));
+  // No current association: the Session is bound to no Store, so no Store's routes serve it.
+  assert.equal(await sessionStore(switched.cookie.value), null);
   associationActive = true;
   assert.equal((await service().logout(switched.cookie.value)).clear, true);
   await assert.rejects(service().bootstrap(switched.cookie.value));

@@ -477,6 +477,16 @@ end. Staff-facing names are the on-screen English labels.
 **Status**: procedure written 2026-10-14; **not rehearsed**. The rehearsal below is an external
 gate (it needs the Owner's staff, the store's devices and network, and the card machine).
 
+**Several Stores on one installation** (DEC-BRAND-MULTI-STORE-ONE-INSTALLATION): when the
+installation serves more than one Store of the brand, the pilot host is one failure point for all
+of them. If the host is down, **every Store runs this procedure on its own**: its own incident
+lead, its own paper slips and incident sheet (write the Store's name at the top of each), its own
+card machine, and its own back-entry after recovery, signed in to that Store (Home shows the Store
+name; switch Store before entering anything). Never enter one Store's slips or card-machine
+receipts while signed in to another Store. A failure confined to one Store (its network, its
+tablet, its card machine) is handled by that Store alone; the other Stores keep trading normally.
+An Area Manager covering several Stores is the incident lead only for the Store they are in.
+
 ### Roles during an outage
 
 - **Incident lead**: the Store Manager or Owner on shift. Only they can pause online ordering

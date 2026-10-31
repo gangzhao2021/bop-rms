@@ -1,3 +1,4 @@
+import { servedStoreFor } from "./pilot-served-stores.mjs";
 import console from "node:console";
 import process from "node:process";
 import { Buffer } from "node:buffer";
@@ -167,13 +168,13 @@ export async function createInternalMerchantCognitoSession(
   const validateAssociation = async (tx, session, selected, at = clock()) => {
     try {
       return (
-        selected.tenantReference === scope.tenantReference &&
-        selected.brandReference === scope.brandReference &&
-        selected.storeReference === scope.storeReference &&
+        // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: any Store this installation serves, where the
+        // person is a current member.
+        servedStoreFor(resources, selected) !== null &&
         session.actor.actorReference !== null &&
         (await isActiveStoreMember(tx, {
           brandReference: scope.brandReference,
-          storeReference: scope.storeReference,
+          storeReference: selected.storeReference,
           actorReference: session.actor.actorReference,
           at,
         }))

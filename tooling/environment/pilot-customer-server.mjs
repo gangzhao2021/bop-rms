@@ -1,9 +1,14 @@
 import { registerInternalDiningEntry } from "./pilot-dining-launcher.mjs";
 import { installInternalStaffLogin } from "./pilot-staff-login.mjs";
+import console from "node:console";
 import process from "node:process";
 import { URL } from "node:url";
 import { CustomerPaymentResultHandler } from "../../apps/api/dist/customer-payment-result.js";
 import { createMerchantBffRouter } from "../../apps/api/dist/merchant-bff.js";
+import {
+  createMerchantSessionStoreResolver,
+  createMerchantStoreRouting,
+} from "../../apps/api/dist/merchant-store-routing.js";
 import { staffContentLocaleMiddleware } from "../../apps/api/dist/staff-content-locale.js";
 import { createPilotProductImages } from "../../apps/api/dist/product-image-route.js";
 import { CustomerPaymentIntentHandler } from "../../apps/api/dist/customer-payment-intent.js";
@@ -29,6 +34,7 @@ const require = createRequire(new URL("../../apps/api/package.json", import.meta
 const express = require("express");
 export async function startInternalCustomerServer({
   createInternalMerchant,
+  additionalStores = [],
   loadInternalPickupQr,
   diningEntries = [],
   createInternalTestResources,
@@ -92,6 +98,7 @@ export async function startInternalCustomerServer({
   app.get("/bff/customer/pickup-entry", pickupEntry);
   if (internalTest) app.get("/bff/internal-test/pickup-entry", pickupEntry);
   let resources, simulator;
+  const additionalResources = [];
   try {
     resources = await createInternalTestResources();
     simulator = await createInternalSimulatedProvider();
@@ -133,12 +140,47 @@ export async function startInternalCustomerServer({
     const terminal = createInternalPaymentTerminal(resources, checkout, intents, simulator);
     // DEC-DINE-IN-PAY-LATER S4: a guest pays the whole table on their phone.
     registerInternalDiningTablePayment?.(app, { resources, checkout, simulator, origin });
-    const merchant = await createInternalMerchant(resources);
+    // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: each Store this installation serves has its own staff
+    // composition (its own Store facts); every one may select the others. One Store: as before.
+    const storeReferences =
+      additionalStores.length === 0
+        ? []
+        : [
+            resources.scope.storeReference,
+            ...additionalStores.map((store) => store.storeReference),
+          ];
+    const othersThan = (reference) => storeReferences.filter((value) => value !== reference);
+    const merchant = await createInternalMerchant(
+      additionalStores.length === 0
+        ? resources
+        : { ...resources, servedStoreReferences: othersThan(resources.scope.storeReference) },
+    );
+    const merchantRouter = createMerchantBffRouter(merchant.bff);
+    let staffRoutes = merchantRouter;
+    if (additionalStores.length > 0) {
+      const routers = new Map([[resources.scope.storeReference, merchantRouter]]);
+      for (const store of additionalStores) {
+        const storeResources = await store.createInternalTestResources();
+        additionalResources.push(storeResources);
+        const storeMerchant = await store.createInternalMerchant({
+          ...storeResources,
+          servedStoreReferences: othersThan(store.storeReference),
+        });
+        routers.set(store.storeReference, createMerchantBffRouter(storeMerchant.bff));
+      }
+      // A request goes to the composition of the Store its Session is bound to (server-side).
+      staffRoutes = createMerchantStoreRouting({
+        primaryStoreReference: resources.scope.storeReference,
+        routers,
+        resolve: createMerchantSessionStoreResolver(merchant.persistence),
+        onUnexpected: () => console.error("PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE"),
+      });
+    }
     // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY staff sign-in page is not served when staff
     // sign in with their own Cognito account.
     if (merchant.staffSignInMode !== "cognito") installInternalStaffLogin(app, merchant);
     // Owner 2026-10-24: item and option names on staff screens in the staff member's language.
-    app.use("/merchant", staffContentLocaleMiddleware(), createMerchantBffRouter(merchant.bff));
+    app.use("/merchant", staffContentLocaleMiddleware(), staffRoutes);
 
     app.post(
       "/api/v1/checkout-sessions/:checkout_session_id/payment-reconciliation",
@@ -315,6 +357,7 @@ export async function startInternalCustomerServer({
         server.close(async () => {
           try {
             simulator.close();
+            for (const storeResources of additionalResources) await storeResources.close();
             await resources.close();
           } finally {
             process.exit(0);
@@ -325,6 +368,7 @@ export async function startInternalCustomerServer({
   } catch (error) {
     try {
       simulator?.close();
+      for (const storeResources of additionalResources) await storeResources.close();
     } finally {
       await resources?.close();
     }

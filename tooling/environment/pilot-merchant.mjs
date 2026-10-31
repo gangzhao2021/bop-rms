@@ -1,3 +1,4 @@
+import { servedStoresOf } from "./pilot-served-stores.mjs";
 import console from "node:console";
 import { URL } from "node:url";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
@@ -193,13 +194,18 @@ export async function createInternalMerchant(
     tenantReference: resources.publicProfile.binding.tenantReference,
     ...resources.scope,
   };
-  const targetScope = async (_tx, authenticated, reference = selected.storeReference) => {
-    if (
-      reference !== selected.storeReference ||
-      !(await session.validateAssociation(_tx, authenticated, selected, resources.now()))
-    )
-      throw new Error("INTERNAL_MERCHANT_SCOPE_DENIED");
-    return selected;
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a staff member may select any Store this installation
+  // serves where they are associated; this composition's own Store comes first.
+  const served = servedStoresOf(resources);
+  const targetScope = async (_tx, authenticated, reference) => {
+    const candidates =
+      reference === undefined
+        ? served
+        : served.filter((store) => store.storeReference === reference);
+    for (const store of candidates)
+      if (await session.validateAssociation(_tx, authenticated, store, resources.now()))
+        return store;
+    throw new Error("INTERNAL_MERCHANT_SCOPE_DENIED");
   };
   // Set once the pickup composition exists (the workspace is read per request).
   let waitingPickups = null;
@@ -252,13 +258,12 @@ export async function createInternalMerchant(
         storeReference: selected.storeReference,
         timeZone: context.store.timeZone,
       },
-      authorizedStores: [
-        {
-          brandLabel: context.brand.displayName,
-          storeLabel: context.store.displayName,
-          storeReference: selected.storeReference,
-        },
-      ],
+      // Candidates only: the BFF lists those the person may use, with each Store's own name.
+      authorizedStores: served.map((store) => ({
+        brandLabel: context.brand.displayName,
+        storeLabel: context.store.displayName,
+        storeReference: store.storeReference,
+      })),
       // The Store-local calendar date (a UTC date is already tomorrow in Toronto after 20:00).
       businessDate: new Intl.DateTimeFormat("en-CA", {
         timeZone: context.store.timeZone,
