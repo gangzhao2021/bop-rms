@@ -15,7 +15,9 @@ import { issueInternalTestStoreDirectory } from "./pilot-internal-test-store-dir
  *   setup     — its first published configuration and synthetic launch gate (database, one
  *               audited transaction; `--dry-run` rolls it back);
  *   directory — its runtime directory `stores/<name>/`, listed in `stores.json`, so the next
- *               planned restart serves it;
+ *               planned restart serves it: only the files its services read, its own identities
+ *               (the same on every run for the same Store) and its own stock site (`--stock-site`,
+ *               created first under Supply → Locations at that Store);
  *   settlement — once the Store's first business day has closed, its day-end settlement
  *               coverage (that day), read as the services do; its settlement worker starts at the
  *               next restart. The directory given is the Store's (`…/stores/<name>`);
@@ -45,7 +47,11 @@ const flags = {
     "--approved-by": "approvedBy",
     "--approval": "approval",
   },
-  directory: { "--store": "storeReference", "--name": "name" },
+  directory: {
+    "--store": "storeReference",
+    "--name": "name",
+    "--stock-site": "stockSiteReference",
+  },
   settlement: { "--database": "expectedDatabaseName", "--migration-env": "envFile" },
   renew: {
     "--database": "expectedDatabaseName",
@@ -313,7 +319,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
                 directory: options.directory,
                 name: options.name,
                 storeReference: options.storeReference,
-                operationReference: uuidV7(),
+                // The Store's own identities derive from the Store: a rerun gives the same ones.
+                operationReference: options.storeReference,
+                stockSiteReference: options.stockSiteReference,
               });
     console.log(JSON.stringify(result));
   } catch (error) {

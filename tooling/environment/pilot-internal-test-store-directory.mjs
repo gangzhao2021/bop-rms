@@ -12,6 +12,10 @@ import { join } from "node:path";
  * Store, task queue and exception policy, payment admission control, pickup counter, receipt
  * template, provider account); no dining tables yet (staff add them in the product). Secrets are
  * copied byte for byte (owner-only); nothing is read from or sent anywhere else.
+ * v15 2026-10-31: only the files a Store's services read are written (`storeConfigurationFiles`,
+ * `storeSecretFiles`, an empty payment simulator) — never another Store's pids, locks, health,
+ * logs, evidence or provider state, which made the new Store's services refuse to start — and
+ * the Store's own stock site (created under Supply → Locations) replaces the installation's.
  */
 const SIMULATOR = "simulated-provider.sqlite";
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -48,6 +52,47 @@ export const storeOwnReferenceFields = Object.freeze({
   "business-worker.json": ["providerAccountReference"],
   "internal-test-receipt-template.json": ["familyReference", "versionReference"],
 });
+/**
+ * The Store's own configuration, rewritten for it. Required ones must exist in the installation;
+ * the others are copied when present.
+ */
+export const storeConfigurationFiles = Object.freeze({
+  required: Object.freeze([
+    "installation.json",
+    "internal-test-profile.json",
+    "internal-test-menu.json",
+    "internal-test-inventory.json",
+    "internal-test-task-queue.json",
+    "internal-test-receipt-template.json",
+    "customer-runtime.json",
+    "merchant-runtime.json",
+    "business-worker.json",
+    "kitchen-queue-worker.json",
+    "dining-exception-worker.json",
+  ]),
+  optional: Object.freeze([
+    "internal-test-merchant.json",
+    "internal-test-workflow-Pickup.json",
+    "internal-test-workflow-DineIn.json",
+    "internal-test-workflow-AdditionalRelease.json",
+    "cancellation-workflow-draft-result.json",
+    "notification.json",
+  ]),
+});
+/** The installation's keys and passwords the Store's services use, copied byte for byte. */
+export const storeSecretFiles = Object.freeze({
+  required: Object.freeze([
+    "api-password",
+    "worker-password",
+    "guest-abuse-pepper",
+    "internal-test-keys.json",
+  ]),
+  optional: Object.freeze([
+    "internal-test-dining-key",
+    "internal-test-qr-key.pem",
+    "internal-test-staff-totp.json",
+  ]),
+});
 /** Files that name one Store's dining tables; the new Store has none until staff add them. */
 const isTableFile = (name) => /^internal-test-dining-table.*\.json$/u.test(name);
 /** Historical copies and records the new Store never had. */
@@ -80,7 +125,10 @@ export function storeDirectoryReference(operationReference, label) {
 }
 
 /** Pure: the new Store's JSON files from the installation's (parsed). */
-export function deriveInternalTestStoreFiles(files, { storeReference, operationReference }) {
+export function deriveInternalTestStoreFiles(
+  files,
+  { storeReference, operationReference, stockSiteReference },
+) {
   const profile = files["internal-test-profile.json"];
   const installation = files["installation.json"];
   if (
@@ -92,6 +140,13 @@ export function deriveInternalTestStoreFiles(files, { storeReference, operationR
     storeReference === profile.binding.storeReference
   )
     return refuse("not-internal-test");
+  // Its own stock site (orders reserve stock there); never the installation Store's.
+  if (
+    typeof stockSiteReference !== "string" ||
+    !UUID_V7.test(stockSiteReference) ||
+    stockSiteReference === files["internal-test-inventory.json"]?.scope?.stockSiteReference
+  )
+    return refuse("stock-site-required");
   const primary = profile.binding.storeReference;
   const derived = new Map();
   const own = (field, value) => {
@@ -111,13 +166,22 @@ export function deriveInternalTestStoreFiles(files, { storeReference, operationR
     return value;
   };
   const result = {};
+  const configuration = [...storeConfigurationFiles.required, ...storeConfigurationFiles.optional];
   for (const [name, value] of Object.entries(files)) {
-    if (isTableFile(name) || isHistory(name) || isOwnSettlementCoverage(name)) continue;
+    if (
+      !configuration.includes(name) ||
+      isTableFile(name) ||
+      isHistory(name) ||
+      isOwnSettlementCoverage(name)
+    )
+      continue;
     const next = rewrite(value, "", storeOwnReferenceFields[name] ?? []);
     if (name === "customer-runtime.json" && Array.isArray(next.diningTableFiles))
       next.diningTableFiles = [];
     result[name] = next;
   }
+  const inventory = result["internal-test-inventory.json"];
+  if (inventory?.scope) inventory.scope.stockSiteReference = stockSiteReference;
   // The same queue named twice stays one queue.
   const queue = result["internal-test-task-queue.json"];
   if (queue?.exceptionTaskPolicy && queue.queueReference)
@@ -134,20 +198,32 @@ export async function issueInternalTestStoreDirectory({
   name,
   storeReference,
   operationReference,
+  stockSiteReference,
 }) {
   if (!NAME.test(name)) return refuse("name-invalid");
-  const entries = await readdir(directory, { withFileTypes: true });
+  const present = new Set(
+    (await readdir(directory, { withFileTypes: true }))
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name),
+  );
+  const pick = ({ required, optional }) => {
+    const missing = required.filter((file) => !present.has(file));
+    if (missing.length > 0) return refuse("installation-file-missing");
+    return [...required, ...optional.filter((file) => present.has(file))];
+  };
   const files = {},
-    copies = [];
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const path = join(directory, entry.name);
-    const stat = await lstat(path);
-    if (stat.isSymbolicLink()) return refuse("symbolic-link");
-    if (entry.name.endsWith(".json")) files[entry.name] = JSON.parse(await readFile(path, "utf8"));
-    else if (!isHistory(entry.name)) copies.push(entry.name);
+    copies = pick(storeSecretFiles);
+  for (const file of [...pick(storeConfigurationFiles), ...copies]) {
+    const stat = await lstat(join(directory, file));
+    if (stat.isSymbolicLink() || !stat.isFile()) return refuse("symbolic-link");
   }
-  const derived = deriveInternalTestStoreFiles(files, { storeReference, operationReference });
+  for (const file of pick(storeConfigurationFiles))
+    files[file] = JSON.parse(await readFile(join(directory, file), "utf8"));
+  const derived = deriveInternalTestStoreFiles(files, {
+    storeReference,
+    operationReference,
+    stockSiteReference,
+  });
   const listPath = join(directory, "stores.json");
   let list = { schemaVersion: 1, stores: [] };
   try {
@@ -177,12 +253,12 @@ export async function issueInternalTestStoreDirectory({
     return refuse("directory-exists");
   }
   for (const file of copies) {
-    // Segment 6: the Store's own TEST payment simulator starts empty (never another Store's
-    // payments); everything else (keys, passwords) is copied as it is.
-    const bytes = file === SIMULATOR ? Buffer.alloc(0) : await readFile(join(directory, file));
-    await writeFile(join(target, file), bytes, { mode: 0o600 });
+    await writeFile(join(target, file), await readFile(join(directory, file)), { mode: 0o600 });
     await chmod(join(target, file), 0o600);
   }
+  // Segment 6: the Store's own TEST payment simulator starts empty (never another Store's).
+  await writeFile(join(target, SIMULATOR), Buffer.alloc(0), { mode: 0o600 });
+  await chmod(join(target, SIMULATOR), 0o600);
   // The profile last: services refuse to start until it exists.
   const names = Object.keys(derived).sort((a, b) =>
     a === "internal-test-profile.json"
@@ -200,5 +276,5 @@ export async function issueInternalTestStoreDirectory({
   const next = { schemaVersion: 1, stores: [...list.stores, relative] };
   await writeFile(listPath + ".next", JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
   await rename(listPath + ".next", listPath);
-  return Object.freeze({ directory: relative, files: names.length + copies.length });
+  return Object.freeze({ directory: relative, files: names.length + copies.length + 1 });
 }

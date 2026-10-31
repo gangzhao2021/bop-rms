@@ -1,3 +1,4 @@
+import console from "node:console";
 import { expect, it, vi } from "vitest";
 import {
   loadServedStoreDirectories,
@@ -269,25 +270,90 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: serves each listed Store of the same
       });
     const options = await serve(loadFor(storeInstallation()));
     expect(options.additionalStores.map((store) => store.storeReference)).toEqual(["store-2"]);
+    expect(options.additionalStores[0].apiPort).toBe(4301);
     expect(
       (await options.additionalStores[0].createInternalTestResources()).publicProfile.binding,
     ).toEqual(second);
-    // Another database, Brand, or the installation's own Store is refused before serving.
-    for (const other of [
-      storeInstallation({ database: "other" }),
-      storeInstallation({
-        loadCustomerRuntime: async () => ({
-          scope: { ...second, brandReference: "other" },
-          diningTableFiles: [],
+    // Another database, Brand, or the installation's own Store is never served; v15 2026-10-31:
+    // the installation's own Store still is (the Store is logged and skipped, not the service).
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      for (const other of [
+        storeInstallation({ database: "other" }),
+        storeInstallation({
+          loadCustomerRuntime: async () => ({
+            scope: { ...second, brandReference: "other" },
+            diningTableFiles: [],
+          }),
         }),
-      }),
-      storeInstallation({
-        loadCustomerRuntime: async () => ({ scope, diningTableFiles: [] }),
-        loadMerchantRuntime: async () => merchantConfig,
-      }),
-    ])
-      await expect(serve(loadFor(other))).rejects.toThrow("PILOT_HTTPS_SCOPE_CHANGED");
+        storeInstallation({
+          loadCustomerRuntime: async () => ({ scope, diningTableFiles: [] }),
+          loadMerchantRuntime: async () => merchantConfig,
+        }),
+      ]) {
+        logged.mockClear();
+        const started = await serve(loadFor(other));
+        expect(started.additionalStores).toEqual([]);
+        expect(JSON.parse(String(logged.mock.calls[0]?.[0]))).toMatchObject({
+          event: "PILOT_HTTPS_STORE_UNAVAILABLE",
+          store: "stores/demo-2",
+        });
+      }
+    } finally {
+      logged.mockRestore();
+    }
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+it("v15 2026-10-31: a broken Store directory is logged and skipped; the other Stores keep serving", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "https-stores-"));
+  const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  try {
+    await writeFile(
+      join(directory, "stores.json"),
+      JSON.stringify({ schemaVersion: 1, stores: ["stores/demo-2", "stores/demo-3"] }),
+    );
+    const third = { ...scope, storeReference: "store-3" };
+    const options = await startConfiguredPilotHttps(directory, {
+      ...setup(),
+      loadInstallation: async (dir) => {
+        // demo-2 as v15 had it: its customer runtime does not load.
+        if (dir === join(directory, "stores/demo-2"))
+          return {
+            ...installation,
+            loadCustomerRuntime: async () => {
+              throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
+            },
+          };
+        if (dir === join(directory, "stores/demo-3"))
+          return {
+            ...installation,
+            loadCustomerRuntime: async () => ({ scope: third, diningTableFiles: [] }),
+            loadMerchantRuntime: async () => ({ ...merchantConfig, scope: third }),
+          };
+        return installation;
+      },
+      createResources: async () => ({ publicProfile: { binding: third } }),
+      loadHosting: async () => ({}),
+      startServer: async (started) => started,
+    });
+    // The installation's own Store and demo-3 are served; demo-3 keeps its own port.
+    expect(options.additionalStores.map((store) => [store.storeReference, store.apiPort])).toEqual([
+      ["store-3", 4302],
+    ]);
+    expect(logged.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([
+      expect.objectContaining({
+        event: "PILOT_HTTPS_STORE_UNAVAILABLE",
+        code: "PILOT_INSTALLATION_UNAVAILABLE",
+        store: "stores/demo-2",
+      }),
+    ]);
+  } finally {
+    logged.mockRestore();
     await rm(directory, { recursive: true, force: true });
   }
 });

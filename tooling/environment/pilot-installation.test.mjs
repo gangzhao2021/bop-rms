@@ -304,9 +304,11 @@ it("validates customer runtime scope, cart timeouts and bounded table file names
   const installation = await loadPilotInstallation(directory);
   await save("customer-runtime.json", config);
   expect(await installation.loadCustomerRuntime()).toEqual(config);
+  // v15 2026-10-31: a TEST Store opened in the product has no table launcher files yet.
+  await save("customer-runtime.json", { ...config, diningTableFiles: [] });
+  expect((await installation.loadCustomerRuntime()).diningTableFiles).toEqual([]);
   for (const change of [
     { diningTableFiles: ["../secret"] },
-    { diningTableFiles: [] },
     { diningTableFiles: ["internal-test-dining-table.json", "internal-test-dining-table.json"] },
     { cart: { ...config.cart, idleTimeoutSeconds: 0 } },
     { cart: { ...config.cart, absoluteTimeoutSeconds: 1 } },

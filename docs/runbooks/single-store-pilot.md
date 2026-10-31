@@ -1963,9 +1963,19 @@ owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager` (the 
    commits only if the services' api role reads the new Store's operating status. A refusal
    prints `PILOT_INTERNAL_TEST_STORE_OPEN_UNAVAILABLE (<reason>)` and changes nothing.
 
-4. **Its runtime directory:** the same command with `directory /app/.local/pilot-v15 --store
-<new Store reference> --name demo-2` writes `stores/demo-2/` (owner-only; secrets copied as
-   they are) and lists it in `stores.json`.
+4. **Its stock site, then its runtime directory.** Signed in at the new Store, its Owner
+   creates its stock site under Supply → Locations. Read its reference (read-only):
+   `SELECT stock_site_id FROM rms_inventory.stock_site WHERE store_id='<new Store reference>' AND is_default`.
+   Then the same command with `directory /app/.local/pilot-v15 --store <new Store reference>
+--name demo-2 --stock-site <its stock site reference>` writes `stores/demo-2/` (owner-only)
+   and lists it in `stores.json`. It holds only what the Store's services read: its own
+   configuration (its own identities, the same on every run), the keys and passwords those
+   services use (copied as they are) and an empty payment simulator — never the installation's
+   pids, locks, health files, logs, evidence or migration credentials. A Store directory that
+   cannot be loaded never stops the others: the services log `PILOT_HTTPS_STORE_UNAVAILABLE`,
+   `PILOT_CUSTOMER_STORE_UNAVAILABLE` or `PILOT_API_STORE_UNAVAILABLE` with its code and
+   `stores/<name>`, and serve the other Stores; the supervisor shows attention for that Store's
+   workers only. To redo it: set `stores.json` aside, delete `stores/<name>/`, rerun this step.
 5. **Restart** in a planned update window. Only the Owner (Store Owner or Brand Owner) adds
    someone from another Store to this one (Staff, "Your staff at other stores"): moving staff
    between Stores changes who can act there. A Store Manager or Area Manager who needs someone

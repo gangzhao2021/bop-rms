@@ -7,6 +7,7 @@ import { createConfiguredPilotApiRuntime } from "./pilot-customer-composition.mj
 import { startApiRuntime } from "../../apps/api/dist/server.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 
 /** Another Store's API in this process: it listens; the process signals stop the first one. */
 async function startStoreApiRuntime(runtime) {
@@ -29,12 +30,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     );
     startApiRuntime(await createConfiguredPilotApiRuntime(dir, { port: 4300 }));
     // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: each other Store this installation serves has its
-    // own customer API on the next local port, in this same process (stores.json order).
+    // own customer API on the next local port, in this same process (stores.json order). One
+    // that cannot start is logged (its code) and skipped; the others keep serving (v15 2026-10-31).
     for (const [index, relative] of (await loadServedStoreDirectories(dir)).entries())
-      await startStoreApiRuntime(
-        await createConfiguredPilotApiRuntime(path.join(dir, relative), { port: 4301 + index }),
-      );
-  } catch {
+      try {
+        await startStoreApiRuntime(
+          await createConfiguredPilotApiRuntime(path.join(dir, relative), { port: 4301 + index }),
+        );
+      } catch (error) {
+        reportUnexpected("PILOT_API_STORE_UNAVAILABLE", error, { store: relative });
+      }
+  } catch (error) {
+    reportUnexpected("PILOT_API_START_UNAVAILABLE", error);
     console.error("PILOT_API_START_UNAVAILABLE");
     process.exitCode = 1;
   }
