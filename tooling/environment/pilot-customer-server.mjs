@@ -1,10 +1,16 @@
 import { registerInternalDiningEntry } from "./pilot-dining-launcher.mjs";
 import { installInternalStaffLogin } from "./pilot-staff-login.mjs";
+import { Buffer } from "node:buffer";
 import console from "node:console";
 import process from "node:process";
 import { URL } from "node:url";
 import { CustomerPaymentResultHandler } from "../../apps/api/dist/customer-payment-result.js";
 import { createMerchantBffRouter } from "../../apps/api/dist/merchant-bff.js";
+import {
+  bodyRoutedLimit,
+  createCustomerStoreRouting,
+  isBodyRouted,
+} from "./pilot-customer-store-routing.mjs";
 import {
   createMerchantSessionStoreResolver,
   createMerchantStoreRouting,
@@ -99,6 +105,8 @@ export async function startInternalCustomerServer({
   if (internalTest) app.get("/bff/internal-test/pickup-entry", pickupEntry);
   let resources, simulator;
   const additionalResources = [];
+  // One Store: every guest request goes to the local customer API as before.
+  let customerStore = null;
   try {
     resources = await createInternalTestResources();
     simulator = await createInternalSimulatedProvider();
@@ -168,6 +176,19 @@ export async function startInternalCustomerServer({
         });
         routers.set(store.storeReference, createMerchantBffRouter(storeMerchant.bff));
       }
+      // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 4: guest requests go to their Store's
+      // customer API (the next local ports, in stores.json order).
+      customerStore = createCustomerStoreRouting({
+        stores: [resources, ...additionalResources].map((storeResources, index) => ({
+          storeReference: storeResources.scope.storeReference,
+          brandReference: storeResources.scope.brandReference,
+          publicStoreReference: storeResources.publicProfile.binding.publicStoreReference,
+          port: apiPort + index,
+          transactions: storeResources.transactions,
+          hashSession: (credential) =>
+            storeResources.credentials.sessions.hashCredential("Session", credential),
+        })),
+      });
       // A request goes to the composition of the Store its Session is bound to (server-side).
       staffRoutes = createMerchantStoreRouting({
         primaryStoreReference: resources.scope.storeReference,
@@ -286,12 +307,46 @@ export async function startInternalCustomerServer({
       if (!error) return next();
       res.status(400).set("Cache-Control", "no-store").json({ code: "SIMULATION_REQUEST_INVALID" });
     });
-    app.use((req, res, next) => {
+    app.use(async (req, res, next) => {
       if (!/^\/(?:api|bff)(?:\/|$)/u.test(req.url)) return next();
+      // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Store's own customer API.
+      let port = apiPort,
+        body;
+      if (customerStore !== null) {
+        if (isBodyRouted(req.method, req.url)) {
+          const chunks = [];
+          let size = 0;
+          for await (const chunk of req) {
+            size += chunk.length;
+            if (size > bodyRoutedLimit)
+              return res
+                .status(413)
+                .set("Cache-Control", "no-store")
+                .json({ code: "REQUEST_TOO_LARGE" });
+            chunks.push(chunk);
+          }
+          body = Buffer.concat(chunks);
+        }
+        try {
+          port = (
+            await customerStore({
+              method: req.method,
+              url: req.url,
+              cookie: req.headers.cookie,
+              body,
+            })
+          ).port;
+        } catch {
+          return res
+            .status(503)
+            .set("Cache-Control", "no-store")
+            .json({ code: "INTERNAL_API_UNAVAILABLE" });
+        }
+      }
       const upstream = request(
         {
           hostname: "127.0.0.1",
-          port: apiPort,
+          port,
           path: req.url,
           method: req.method,
           headers: { ...req.headers, host, connection: "close" },
@@ -325,7 +380,8 @@ export async function startInternalCustomerServer({
       res.on("close", () => {
         if (!res.writableFinished) upstream.destroy();
       });
-      req.pipe(upstream);
+      if (body === undefined) req.pipe(upstream);
+      else upstream.end(body);
     });
     // WP-2423 (v15 run): hashed build files are cached for a year and sent compressed; the app
     // pages and other unhashed files are revalidated so a deploy is picked up.

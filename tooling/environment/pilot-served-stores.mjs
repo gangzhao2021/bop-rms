@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 /**
  * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores this installation serves, as Tenant/Brand/Store
  * scopes, the installation's own Store first. Every Store is of the installation's Tenant and Brand.
@@ -36,4 +38,33 @@ export function servedStoreFor(resources, selected) {
         selected?.storeReference === store.storeReference,
     ) ?? null
   );
+}
+
+/**
+ * `stores.json` in the installation directory: {"schemaVersion":1,"stores":["stores/<name>",…]},
+ * each a Store runtime directory below this one. Absent: this installation serves one Store.
+ */
+export async function loadServedStoreDirectories(directory) {
+  let text;
+  try {
+    text = await readFile(path.join(directory, "stores.json"), "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw Error("PILOT_HTTPS_STORES_INVALID", { cause: error });
+  }
+  const value = JSON.parse(text);
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Object.keys(value).sort().join() !== "schemaVersion,stores" ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.stores) ||
+    value.stores.length > 99 ||
+    new Set(value.stores).size !== value.stores.length ||
+    value.stores.some(
+      (entry) => typeof entry !== "string" || !/^stores\/[a-z0-9][a-z0-9-]{0,62}$/u.test(entry),
+    )
+  )
+    throw Error("PILOT_HTTPS_STORES_INVALID");
+  return Object.freeze([...value.stores]);
 }
