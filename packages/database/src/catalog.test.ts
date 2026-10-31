@@ -781,6 +781,7 @@ describe("migration catalog", () => {
       "2000_137_alter_recipe_brand_owner_listing",
       "2000_138_create_brand_store_ids",
       "2000_139_create_store_price_change",
+      "2000_140_backfill_store_reference_projection",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

@@ -35,6 +35,7 @@ export const storeOpeningPermission = brandOwnerAuthority;
 export class MerchantStoreOpeningError extends Error {
   constructor(readonly code: "PermissionDenied" | "Invalid" | "CodeTaken" | "Conflict") {
     super("MERCHANT_STORE_OPENING_" + code.toUpperCase());
+    this.name = "MerchantStoreOpeningError";
   }
 }
 export interface MerchantStoreOpeningCommand {
@@ -82,7 +83,29 @@ export function createMerchantStoreOpening(options: {
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   const resolveBrandScope = createMerchantBrandScope(options.persistence);
-  return async (input: {
+  /**
+   * Coordinator 2026-10-31 decision 3: whether this person may open a Store (Brand Owner
+   * authority now), so the Stores page offers the form only to them. Anyone else: false.
+   */
+  const mayOpen = async (input: { readonly sessionCookie: unknown; readonly csrf: unknown }) => {
+    const session = await options.authentication
+      .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
+      .catch(() => fail("PermissionDenied"));
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run(async (tx) => {
+        const brand = await resolveBrandScope(
+          tx,
+          input.sessionCookie,
+          session.sessionReference,
+        ).catch(() => null);
+        return (
+          brand !== null &&
+          (await brand.authorizeAction(storeOpeningPermission))?.effect === "Allow"
+        );
+      }),
+    );
+  };
+  const open = async (input: {
     readonly sessionCookie: unknown;
     readonly csrf: unknown;
     readonly command: unknown;
@@ -137,6 +160,7 @@ export function createMerchantStoreOpening(options: {
       }),
     );
   };
+  return Object.freeze({ open, mayOpen });
 }
 
 /**

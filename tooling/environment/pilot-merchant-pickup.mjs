@@ -183,13 +183,15 @@ export async function createInternalMerchantPickup(
  */
 export function reportUnexpected(event, error) {
   // A plain Error whose message is an error code (UPPER_SNAKE) carries that code.
-  const code =
-    error?.code ??
-    (/^[A-Z][A-Z0-9_]{2,79}$/.test(error?.message ?? "") ? error.message : error?.name);
+  const codeMessage = /^[A-Z][A-Z0-9_]{2,79}$/.test(error?.message ?? "") ? error.message : null;
+  const code = error?.code ?? codeMessage ?? error?.name;
   console.error(
     JSON.stringify({
       event,
       code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE",
+      // A database error raised with a code as its message (e.g. SQLSTATE 55000 with
+      // STORE_REFERENCE_SOURCE_INVALID) names that code too; never other message text.
+      ...(codeMessage !== null && codeMessage !== code ? { reason: codeMessage } : {}),
       frames:
         String(error?.stack ?? "")
           .match(

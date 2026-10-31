@@ -782,9 +782,6 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     currentStoreReference={state.workspace.selectedScope.storeReference}
                     csrf={state.csrf}
                     switching={state.switching}
-                    mayOpen={state.workspace.navigation.some(
-                      (entry) => entry.screenId === "STORE-SETUP",
-                    )}
                     onSwitchStore={(reference) => void switchStore(reference)}
                   />
                 ) : (

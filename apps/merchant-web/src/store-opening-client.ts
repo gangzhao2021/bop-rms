@@ -31,6 +31,27 @@ export const storeOpeningTimeZones = [
 export const storeOpeningLocales = ["en-CA", "fr-CA"] as const;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
+/**
+ * Coordinator 2026-10-31 decision 3: whether the server says this person may open a Store (Brand
+ * Owner authority). Any failure is "no": the form is simply not offered.
+ */
+export async function mayOpenStore(csrf: string, fetcher: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const response = await fetcher("/merchant/organization/stores/may-open", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+      body: "{}",
+    });
+    if (!response.ok) return false;
+    const payload = (await response.json().catch(() => null)) as { mayOpen?: unknown } | null;
+    return payload?.mayOpen === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function openStore(
   csrf: string,
   input: {

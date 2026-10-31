@@ -30,6 +30,10 @@ it("selects all historical business data and sequences but never old history, sc
     "2; 0 2 TABLE DATA rms_store store owner\n4; 0 4 TABLE DATA rms_store empty owner\n5; 0 0 SEQUENCE SET rms_store store_seq owner\n",
   );
   expect(result.skippedTables).toEqual(["platform_core.migration_history", "platform_core.seed"]);
+  // v15 2026-10-31: registries kept by triggers are rebuilt after the trigger-less data load.
+  expect(result.postRestoreStatements).toEqual([
+    "SELECT bop_tenant.repair_store_reference_projection();",
+  ]);
   expect(result.expectedBusinessTables).toEqual({
     "rms_store.store": row("2"),
     "platform_core.seed": row("1"),

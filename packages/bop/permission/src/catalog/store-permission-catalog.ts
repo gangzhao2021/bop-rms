@@ -69,8 +69,12 @@
  * price), here only, at a Brand with several Stores. Store Manager, Area Manager and Owner hold it
  * in their Stores; the Brand Owner holds it in every Store through the `pricing.` prefix. Brand
  * prices stay with the price book permissions.
+ * v22 (2026-10-31, WP-2423 DEC-BRAND-MULTI-STORE, coordinator 2026-10-31 decision 2): the Brand
+ * Owner template also holds reporting.sales.read and reporting.sales.export, so the Brand Owner
+ * reads and downloads Reports (tonight, sales by period, items, hours, tips) at every Store of the
+ * Brand without a Store role there. No code is added; Store templates are unchanged.
  */
-export const storePermissionCatalogVersion = 21 as const;
+export const storePermissionCatalogVersion = 22 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -689,6 +693,9 @@ export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly
         "merchant.access",
         "organization.staff.",
         "organization.brand.manage",
+        // v22: Reports at every Store of the Brand (read and download only).
+        "reporting.sales.read",
+        "reporting.sales.export",
         "identity.role.",
         "catalog.",
         "pricing.",

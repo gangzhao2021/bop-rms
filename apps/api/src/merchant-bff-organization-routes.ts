@@ -447,6 +447,30 @@ export function installMerchantOrganizationRoutes(
       .catch((error: unknown) => staffFailure(response, error));
   });
 
+  // Coordinator 2026-10-31 decision 3: may this person open a Store (the Stores page offers the
+  // form only then). A read with no body; anything unexpected answers false.
+  router.post("/organization/stores/may-open", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    response.setHeader("Cache-Control", "no-store");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.storeOpening) {
+      response.json({ mayOpen: false });
+      return;
+    }
+    void options.storeOpening
+      .mayOpen({ sessionCookie, csrf })
+      .then((mayOpen) => response.json({ mayOpen }))
+      .catch(() => response.json({ mayOpen: false }));
+  });
   // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens a Store.
   router.post("/organization/stores", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
@@ -465,8 +489,8 @@ export function installMerchantOrganizationRoutes(
       response.status(503).json({ error: "store_opening_unavailable" });
       return;
     }
-    void options
-      .storeOpening({ sessionCookie, csrf, command: request.body })
+    void options.storeOpening
+      .open({ sessionCookie, csrf, command: request.body })
       .then((result) => response.status(result.status === "Opened" ? 201 : 200).json(result))
       .catch((error: unknown) => {
         if (!(error instanceof MerchantStoreOpeningError)) {
