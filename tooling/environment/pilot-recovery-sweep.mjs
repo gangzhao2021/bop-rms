@@ -1,5 +1,5 @@
 import { runPilotService, parsePilotRuntimeDirectory } from "./pilot-service.mjs";
-const services = Object.freeze([
+const allServices = Object.freeze([
   "api",
   "business-worker",
   "kitchen-queue-worker",
@@ -35,8 +35,18 @@ function attentionComponents(health) {
 /** Process recovery only. Start performs authoritative identity/terminal checks.
  * Health failures never authorize terminating or replacing a live process; with `workloadHealth`
  * (the supervisor), a running worker's alert-worthy workloads are reported as `attention`. */
+/** The workers another Store of the installation runs from its own directory. */
+export const storeWorkerServices = Object.freeze([
+  "business-worker",
+  "kitchen-queue-worker",
+  "reconciliation-worker",
+  "daily-settlement-worker",
+  "dining-exception-worker",
+]);
 export function createPilotRecoverySweep({
   runtimeDirectory,
+  // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a listed Store's directory runs its workers only.
+  services = allServices,
   service = runPilotService,
   now = Date.now,
   workloadHealth = null,

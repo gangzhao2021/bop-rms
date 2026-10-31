@@ -40,6 +40,7 @@ const files = () => ({
   },
   "internal-test-dining-table.json": { label: "DEMO-01", scope: { storeReference: store1 } },
   "internal-test-merchant.v1-backup.json": { scope: { storeReference: store1 } },
+  "daily-settlement-coverage.json": { scope: { storeReference: store1 }, firstWindow: {} },
 });
 
 it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION 3d: the TEST Store's files name it, with its own identities and no tables", () => {
@@ -64,6 +65,8 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION 3d: the TEST Store's files name it, w
   expect(derived["customer-runtime.json"].diningTableFiles).toEqual([]);
   expect(Object.keys(derived)).not.toContain("internal-test-dining-table.json");
   expect(Object.keys(derived)).not.toContain("internal-test-merchant.v1-backup.json");
+  // Its own first closed business day is recorded later, not the installation Store's.
+  expect(Object.keys(derived)).not.toContain("daily-settlement-coverage.json");
   // The same operation derives the same identities.
   expect(
     deriveInternalTestStoreFiles(files(), {

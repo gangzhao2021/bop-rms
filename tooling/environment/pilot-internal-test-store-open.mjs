@@ -15,7 +15,10 @@ import { issueInternalTestStoreDirectory } from "./pilot-internal-test-store-dir
  *   setup     — its first published configuration and synthetic launch gate (database, one
  *               audited transaction; `--dry-run` rolls it back);
  *   directory — its runtime directory `stores/<name>/`, listed in `stores.json`, so the next
- *               planned restart serves it.
+ *               planned restart serves it;
+ *   settlement — once the Store's first business day has closed, its day-end settlement
+ *               coverage (that day), read as the services do; its settlement worker starts at the
+ *               next restart. The directory given is the Store's (`…/stores/<name>`).
  *
  * Refuses outside development mode or an InternalTest installation. Prints fixed codes only.
  */
@@ -41,6 +44,7 @@ const flags = {
     "--approval": "approval",
   },
   directory: { "--store": "storeReference", "--name": "name" },
+  settlement: { "--database": "expectedDatabaseName", "--migration-env": "envFile" },
 };
 export function parseStoreOpenArguments(args) {
   const [command, directory, ...rest] = args;
@@ -113,6 +117,104 @@ async function setup(options) {
   }
 }
 
+async function settlement(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const { createInternalSettlementDays } = await import("./pilot-settlement-window.mjs");
+  const { resolveOperatingConfiguration, createBindingAuthorization } =
+    await import("./pilot-operating-source.mjs");
+  const codes = await import("./pilot-store-publication-codes.mjs");
+  const { writeFile } = await import("node:fs/promises");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json"),
+    customer = await read("customer-runtime.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  try {
+    const scope = {
+      tenantReference: profile.binding.tenantReference,
+      brandReference: profile.binding.brandReference,
+      storeReference: profile.binding.storeReference,
+    };
+    const [store] = (
+      await client.query(
+        "SELECT time_zone FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2",
+        [scope.brandReference, scope.storeReference],
+      )
+    ).rows;
+    if (store === undefined) unavailable("store-unavailable");
+    const operating = {
+      ...scope,
+      configurationType: "STORE_CONFIGURATION",
+      purposeCode: "STORE_CONFIGURATION",
+      requiredLiveGateRequirementCodes:
+        resolveOperatingConfiguration(profile).liveGateRequirementCodes,
+      requiredValidationCheckCodes: codes.storeConfigurationValidationCheckCodes,
+      setupSnapshotReferences: codes.storeConfigurationSetupSnapshotReferences,
+      authorize: createBindingAuthorization(profile.binding),
+      hashContent: codes.storeConfigurationContentHash,
+      timeZone: store.time_zone,
+    };
+    // As the services' api role, in the Store's scope.
+    const transactions = {
+      async run(work) {
+        await client.query("BEGIN");
+        try {
+          await client.query(`SET LOCAL ROLE "${installation.roles.api}"`);
+          await client.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [scope.brandReference, scope.storeReference],
+          );
+          const value = await work({
+            query: (sql, values) => client.query(sql, [...(values ?? [])]),
+          });
+          await client.query("COMMIT");
+          return value;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      },
+    };
+    let window;
+    try {
+      window = await createInternalSettlementDays({
+        resources: { scope, operating, transactions, now: () => new Date().toISOString() },
+        active: async () => true,
+      }).window();
+    } catch {
+      unavailable("no-closed-business-day");
+    }
+    const coverage = {
+      schemaVersion: 1,
+      environment: "InternalTest",
+      database: installation.database,
+      scope: customer.scope,
+      firstWindow: {
+        businessDate: window.businessDate,
+        startsAt: window.startsAt,
+        endsAt: window.endsAt,
+        configurationReference: String(window.configurationReference),
+        configurationVersion: window.configurationVersion,
+        contentDigest: window.contentDigest,
+      },
+    };
+    await writeFile(
+      join(options.directory, "daily-settlement-coverage.json"),
+      JSON.stringify(coverage, null, 2) + "\n",
+      { mode: 0o600, flag: "wx" },
+    ).catch(() => unavailable("coverage-already-recorded"));
+    return Object.freeze({ status: "Recorded", firstBusinessDate: window.businessDate });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const options = parseStoreOpenArguments(process.argv.slice(2));
@@ -120,12 +222,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const result =
       options.command === "setup"
         ? await setup(options)
-        : await issueInternalTestStoreDirectory({
-            directory: options.directory,
-            name: options.name,
-            storeReference: options.storeReference,
-            operationReference: uuidV7(),
-          });
+        : options.command === "settlement"
+          ? await settlement(options)
+          : await issueInternalTestStoreDirectory({
+              directory: options.directory,
+              name: options.name,
+              storeReference: options.storeReference,
+              operationReference: uuidV7(),
+            });
     console.log(JSON.stringify(result));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";

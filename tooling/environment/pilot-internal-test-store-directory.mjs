@@ -49,6 +49,12 @@ export const storeOwnReferenceFields = Object.freeze({
 /** Files that name one Store's dining tables; the new Store has none until staff add them. */
 const isTableFile = (name) => /^internal-test-dining-table.*\.json$/u.test(name);
 /** Historical copies and records the new Store never had. */
+/**
+ * The day-end settlement coverage names the installation Store's first closed business day; the
+ * new Store records its own once its first day has closed (`pilot-internal-test-store-open.mjs
+ * settlement`), and its settlement worker starts then.
+ */
+const isOwnSettlementCoverage = (name) => name === "daily-settlement-coverage.json";
 const isHistory = (name) =>
   /\.v\d+-backup\.json$/u.test(name) ||
   /^internal-test-renewal-log\.jsonl$/u.test(name) ||
@@ -104,7 +110,7 @@ export function deriveInternalTestStoreFiles(files, { storeReference, operationR
   };
   const result = {};
   for (const [name, value] of Object.entries(files)) {
-    if (isTableFile(name) || isHistory(name)) continue;
+    if (isTableFile(name) || isHistory(name) || isOwnSettlementCoverage(name)) continue;
     const next = rewrite(value, "", storeOwnReferenceFields[name] ?? []);
     if (name === "customer-runtime.json" && Array.isArray(next.diningTableFiles))
       next.diningTableFiles = [];
