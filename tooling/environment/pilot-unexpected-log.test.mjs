@@ -56,3 +56,17 @@ it("logs unexpected failures of a wrapped call and passes expected refusals thro
     }),
   ]);
 });
+
+it("names a refused Store switch's failing step, never ids or other text (v15 2026-10-31)", () => {
+  const lines = logged();
+  const refused = new Error("MERCHANT_BFF_STORE_SWITCH_DENIED");
+  reportUnexpected("MERCHANT_STORE_SWITCH_DENIED", refused, { step: "Workspace" });
+  reportUnexpected("MERCHANT_STORE_SWITCH_DENIED", refused, {
+    step: "01909a3c-0000-7000-8000-000000000003",
+  });
+  expect(lines().map(({ event, step }) => ({ event, step }))).toEqual([
+    { event: "MERCHANT_STORE_SWITCH_DENIED", step: "Workspace" },
+    { event: "MERCHANT_STORE_SWITCH_DENIED", step: undefined },
+  ]);
+  expect(JSON.stringify(lines())).not.toContain("01909a3c");
+});

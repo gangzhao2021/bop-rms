@@ -3790,6 +3790,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Store status": "门店状态",
   "Store stock site name": "门店库存点名称",
   "Store switch failed. Your previous Store is unchanged.": "切换门店失败。你之前的门店不变。",
+  "Couldn't switch to this store. Try again, or ask the brand owner to check your access there.":
+    "没能切换到这家店。请重试，或请品牌老板检查你在那里的权限。",
   "Store system": "门店系统",
   "Store unavailable": "门店暂不可用",
   "Store workspace": "门店工作台",

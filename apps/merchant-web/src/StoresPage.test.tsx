@@ -36,6 +36,21 @@ describe("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores page", () => {
     // No form until the server says this person may open a Store.
     expect(html).not.toContain("Open a store");
   });
+  it("says so when a switch is refused, never a silent no-op (v15 2026-10-31)", () => {
+    const refused = renderToStaticMarkup(
+      <StoresPage
+        stores={stores}
+        currentStoreReference={stores[0]?.storeReference ?? ""}
+        csrf="csrf"
+        switching={false}
+        switchFailed
+        onSwitchStore={() => undefined}
+      />,
+    );
+    expect(refused).toContain('role="alert"');
+    expect(refused).toContain("ask the brand owner to check your access there");
+    expect(render()).not.toContain('role="alert"');
+  });
   it("shows the Owner the opening form with time zones staff recognise, never codes", () => {
     const html = renderToStaticMarkup(<OpenStoreSection csrf="csrf" />);
     expect(html).toContain("Open a store");

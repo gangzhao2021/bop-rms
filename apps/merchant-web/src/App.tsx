@@ -782,6 +782,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     currentStoreReference={state.workspace.selectedScope.storeReference}
                     csrf={state.csrf}
                     switching={state.switching}
+                    switchFailed={state.switchFailed}
                     onSwitchStore={(reference) => void switchStore(reference)}
                   />
                 ) : (
