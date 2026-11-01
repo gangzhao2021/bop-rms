@@ -2037,7 +2037,12 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    opened on the Stores page or not named "… – not production", one without a saved address
    (`store-address-not-set-in-store-setup`) and one in another province than the installation
    Store's tax configuration (`store-province-differs`): rates are never guessed. Tax review then
-   shows its rates. No restart is needed.
+   shows its rates. No restart is needed: the next quote reads it (from 2026-11-01; earlier
+   builds answered 503 `INTERNAL_QUOTE_TAX_CONFIGURATION_MISMATCH` until restarted).
+
+   Run `tax` **before** "Use the live Store's settings" in Store setup: a configuration made first
+   copies no Store tax settings and stays on "Tax settings are not the ones in force" until the
+   draft is made again.
 
    **Store setup publication — required before guests can order there.** A guest quote uses the
    tax configuration the Store's published setup names; the Store's first setup (step 3) names
