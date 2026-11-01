@@ -2089,12 +2089,15 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    guest it is, with that Store's own TEST payment simulator (`stores/<name>/simulated-provider.sqlite`);
    a guest no Store knows is refused as before.
 
-   **Its kitchen and receipts — required before its paid orders reach the kitchen.** A TEST
-   Store opened with `setup` has no kitchen routing yet, so its paid orders cannot become kitchen
-   tickets (v15 2026-11-01: store 2's order and payment updates kept failing). Give it its own
-   kitchen routing, a copy of the installation Store's stations and rules under that Store's own
-   names (TEST-ONLY: a real Store needs a kitchen routing screen in the product, which does not
-   exist yet):
+   **Its kitchen and receipts — required before it takes orders.** A Store with no kitchen routing
+   takes no order and its menus can't be listed (WP-2423 item 11). The Owner or a Store Manager sets
+   it up in the product: Store setup → Kitchen → "Set up one kitchen line for all dishes", in effect
+   from that moment. If a recipe later needs something the kitchen lacks, the same section names the
+   dish and fixes it. During service, a paid order missing from the Kitchen screen is made from the
+   Orders page, or cancelled and refunded there.
+
+   TEST-ONLY alternative, a copy of the installation Store's stations, rules and sections under the
+   new Store's own names; keep it for internal live checks, never for a real Store:
 
    ```bash
    PILOT_UID=$(id -u) PILOT_GID=$(id -g) PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 \

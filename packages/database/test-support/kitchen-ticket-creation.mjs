@@ -1,6 +1,10 @@
 import { exercisePaidKitchenLifecycle } from "./kitchen-paid-lifecycle.mjs";
 import { bootstrapKitchenRecipe } from "./kitchen-recipe-bootstrap.mjs";
-import { exerciseKitchenRoutingConfiguration } from "./kitchen-routing-configuration.mjs";
+import {
+  exerciseKitchenRoutingConfiguration,
+  kitchenRoutingAlreadySetUp,
+  setUpKitchenThroughProduct,
+} from "./kitchen-routing-configuration.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -12,6 +16,8 @@ import {
 
 /** Actual Ordering source, Kitchen repository, Audit/Outbox/Inbox. Recipe publication/storage and routing are real; external review/Store/authority facts are synthetic. */
 export async function exerciseKitchenTicketCreation({
+  /** WP-2423 item 11: the routing comes from the product's own setup, as at a new Store. */
+  kitchenRoutingThroughProduct = false,
   merchantKitchen,
   kitchenNow,
   onItemReady,
@@ -59,15 +65,27 @@ export async function exerciseKitchenTicketCreation({
       role,
   );
   await admin.query("GRANT UPDATE,DELETE ON rms_kitchen.kitchen_creation_record TO " + role);
-  const routing = await exerciseKitchenRoutingConfiguration({
-    admin,
-    role,
-    runner,
-    scope,
-    at,
-    id,
-    hash,
-  });
+  // WP-2423 item 11: a Store that already takes orders (seeded so) already has its kitchen set up.
+  const alreadySetUp =
+    (
+      await admin.query(
+        "SELECT 1 FROM rms_kitchen.kitchen_routing_configuration WHERE brand_id=$1 AND store_id=$2 LIMIT 1",
+        [scope.brandReference, scope.storeReference],
+      )
+    ).rows.length === 1;
+  const routing = alreadySetUp
+    ? kitchenRoutingAlreadySetUp({ scope, hash })
+    : kitchenRoutingThroughProduct
+      ? await setUpKitchenThroughProduct({ admin, role, runner, scope, at, id, hash })
+      : await exerciseKitchenRoutingConfiguration({
+          admin,
+          role,
+          runner,
+          scope,
+          at,
+          id,
+          hash,
+        });
   const preparation = await bootstrapKitchenRecipe({
     admin,
     role,

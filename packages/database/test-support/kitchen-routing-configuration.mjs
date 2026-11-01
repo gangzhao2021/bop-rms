@@ -1,8 +1,89 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   createPostgresKitchenRoutingConfigurationStore,
   rebindKitchenRoutingEvidence,
+  recordStoreKitchenLine,
 } from "../../rms/kitchen/src/index.ts";
+import { brandKitchenCapabilityReference } from "../../../apps/api/src/merchant-kitchen-setup.ts";
+
+/**
+ * WP-2423 item 11: fixture for acceptance tests about something else: this Store's kitchen is set up
+ * (owner-written TEST facts), and `role` may read that, as the pilot's roles can.
+ */
+export async function seedStoreKitchenInEffect({ admin, role, scope, at, id }) {
+  await admin.query("GRANT USAGE ON SCHEMA rms_kitchen TO " + role);
+  await admin.query("GRANT SELECT ON rms_kitchen.kitchen_routing_configuration TO " + role);
+  const hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
+  let n = 0x9e700;
+  await admin.query("BEGIN");
+  try {
+    await recordStoreKitchenLine(admin, {
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      actorReference: id(0x9e600),
+      operationReference: id(0x9e601),
+      auditReference: id(0x9e602),
+      expectedVersion: 0,
+      recordedAt: at,
+      capabilityReferences: [brandKitchenCapabilityReference(scope.brandReference)],
+      onlyIfChanged: true,
+      sha256: hash,
+      nextReference: () => id(n++),
+      authorize: async () => true,
+    });
+    await admin.query("COMMIT");
+  } catch (error) {
+    await admin.query("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
+ * WP-2423 item 11: the Store's routing recorded by the product's one-step setup (no recipe yet, so
+ * the Brand's own capability), at the time the kitchen is first set up; the rest of the paid chain
+ * then reads it through the kitchen's ordinary routing store. The role holds the pilot's two
+ * privileges on the table.
+ */
+export async function setUpKitchenThroughProduct({ admin, role, runner, scope, at, id, hash }) {
+  await admin.query("GRANT SELECT,INSERT ON rms_kitchen.kitchen_routing_configuration TO " + role);
+  const capability = brandKitchenCapabilityReference(scope.brandReference);
+  let n = 0x9700;
+  const recorded = await runner().run((tx) =>
+    recordStoreKitchenLine(tx, {
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      actorReference: id(0x9600),
+      operationReference: id(0x9601),
+      auditReference: id(0x9602),
+      expectedVersion: 0,
+      recordedAt: at,
+      capabilityReferences: [capability],
+      onlyIfChanged: true,
+      sha256: hash,
+      nextReference: () => id(n++),
+      authorize: async () => true,
+    }),
+  );
+  assert.deepEqual(recorded, { status: "Recorded", version: 1 });
+  return kitchenRoutingAlreadySetUp({ scope, hash });
+}
+
+/** The kitchen's ordinary routing read for a Store whose kitchen the product already set up. */
+export function kitchenRoutingAlreadySetUp({ scope, hash }) {
+  return {
+    requiredCapabilityReference: brandKitchenCapabilityReference(scope.brandReference),
+    store: createPostgresKitchenRoutingConfigurationStore({
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      sha256: hash,
+      authorizeRead: async () => true,
+      authorizeWrite: async () => false,
+      validateConfiguration: async () => false,
+      audit: async () => assert.fail("no write"),
+    }),
+  };
+}
 
 /** Real Kitchen configuration write/read; explicit synthetic operator authority and Store facts. */
 export async function exerciseKitchenRoutingConfiguration({

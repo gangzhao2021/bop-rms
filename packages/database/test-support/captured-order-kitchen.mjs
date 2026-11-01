@@ -21,6 +21,7 @@ import { exerciseKitchenTicketCreation } from "./kitchen-ticket-creation.mjs";
 
 /** Actual captured Payment/resource context and published actions; external policy authority remains synthetic. */
 export async function exerciseCapturedOrderKitchen({
+  kitchenRoutingThroughProduct,
   /** WP-2423 Q7: inspect the order queue's view of this Order before it is accepted. */
   onQueueItem,
   kitchenNow,
@@ -475,6 +476,7 @@ export async function exerciseCapturedOrderKitchen({
     observedAt,
   };
   await exerciseKitchenTicketCreation({
+    kitchenRoutingThroughProduct,
     merchantKitchen: kitchenSession === undefined ? undefined : { session: kitchenSession, actor },
     kitchenNow,
     onItemReady: fulfillment?.consumeReady,

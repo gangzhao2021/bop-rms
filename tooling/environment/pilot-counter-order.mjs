@@ -54,7 +54,7 @@ import { createCustomerDiningCartWithCatalogInventoryComposition } from "../../a
 import { createCustomerAdditionalDiningPaymentAdmission } from "../../apps/api/dist/customer-additional-dining-payment-store.js";
 import { storeTakesOrder } from "../../apps/api/dist/customer-store-open-gate.js";
 import { createPostgresDiningTableStore } from "../../packages/rms/dining/src/index.ts";
-import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
+import { createKitchenGatedOperatingStatusReader } from "../../apps/api/dist/store-kitchen-open-gate.js";
 import { createInternalPaymentPreparation } from "./pilot-payment-preparation.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
@@ -165,7 +165,7 @@ export async function createInternalCounterOrder(
   const checkoutWrite = createCustomerCheckoutSessionComposition(checkout.checkoutSessions);
   const operatingNow = () =>
     transactions.run((tx) =>
-      createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
+      createKitchenGatedOperatingStatusReader(resources.operating)(tx, now()),
     );
   const pipeline = createCounterGuestPipeline({
     pickupQrToken: loadPickupQrToken,
@@ -469,7 +469,7 @@ async function createInternalStaffDiningRound(
   });
   const operatingNow = () =>
     transactions.run((tx) =>
-      createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
+      createKitchenGatedOperatingStatusReader(resources.operating)(tx, now()),
     );
   const loadJoinState = async (staff, diningSessionReference) => {
     try {
@@ -481,7 +481,8 @@ async function createInternalStaffDiningRound(
   const pipeline = createStaffTableGuestPipeline({
     takesOrder: async (input) =>
       // Staff open tables and send rounds after last orders too (recorded as their action).
-      input.recordedAfterOutage || storeTakesOrder(await operatingNow(), "SeatedDineIn", "Staff"),
+      (input.recordedAfterOutage && (await operatingNow()).kitchenNotSetUp !== true) ||
+      storeTakesOrder(await operatingNow(), "SeatedDineIn", "Staff"),
     // WP-2423 item 8 ⑦ (v15 finding t): after last orders a guest can't send the table's Cart.
     guestsCanSend: async () => storeTakesOrder(await operatingNow(), "SeatedDineIn", "Guest"),
     openTable: createStaffTableCode({

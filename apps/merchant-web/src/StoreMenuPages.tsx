@@ -18,6 +18,7 @@ import {
   photoChangeText,
   itemsNotOfferedHere,
   mayDiscardDraft,
+  menuReviewProblemFixHref,
   menuReviewProblemText,
   menuRevisionAction,
   menuStage,
@@ -65,6 +66,9 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   ),
   OptionRecipeMissing: t(
     "Some options on this menu's items have no published recipe change (what they do to stock, kitchen and allergens). Set, review and publish them under Option recipes, then submit again.",
+  ),
+  KitchenNotReady: t(
+    "A Store this menu serves can't send its orders to a kitchen yet. Set up its kitchen in Store setup, then list this menu again.",
   ),
   ApprovalRequired: t(
     "Approval needs someone other than the person who submitted the menu, holding menu approval.",
@@ -410,7 +414,11 @@ function MenuBuilder({
   const [pending, setPending] = useState<MenuCommand | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
-  const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    tone: "error" | "neutral";
+    text: string;
+    fixHref?: string | null;
+  } | null>(null);
   // WP-2423 Q31: unsaved changes kept on this device, offered back when the page is opened again.
   const [kept, setKept] = useState<StoredMenuDraft | "Outdated" | null>(null);
   useEffect(() => {
@@ -541,6 +549,7 @@ function MenuBuilder({
       setMessage({
         tone: "error",
         text: problem === null ? menuErrorText[code] : menuReviewProblemText(problem),
+        fixHref: menuReviewProblemFixHref(problem),
       });
     } finally {
       setBusy(false);
@@ -655,7 +664,15 @@ function MenuBuilder({
           tone={message.tone}
           status
         >
-          <p>{message.text}</p>
+          <p>
+            {message.text}
+            {message.fixHref ? (
+              <>
+                {" "}
+                <Link to={message.fixHref}>{t("Set up the kitchen")}</Link>
+              </>
+            ) : null}
+          </p>
         </StatePanel>
       ) : null}
       {kept !== null && editable ? (

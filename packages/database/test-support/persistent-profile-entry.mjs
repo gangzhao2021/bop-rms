@@ -46,6 +46,7 @@ import {
 } from "../../bop/identity/src/index.ts";
 import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import { prepareEntryOperatingPublication } from "./entry-operating-publication.mjs";
+import { seedStoreKitchenInEffect } from "./kitchen-routing-configuration.mjs";
 import { createPersistentEntryOperatingReader } from "../../../apps/api/src/persistent-entry-operating.ts";
 import { createConfiguredPickupQrContext } from "../../../apps/api/src/configured-pickup-qr-context.ts";
 import assert from "node:assert/strict";
@@ -73,6 +74,14 @@ export async function exercisePersistentProfileEntry({
 }) {
   const chineseName = chineseNames ? "拿铁" : "Latte";
   const f = fixture(at);
+  // WP-2423 item 11: a Store takes no order until its kitchen is set up.
+  await seedStoreKitchenInEffect({
+    admin,
+    role,
+    scope: publicOptions.binding,
+    at: new Date(Date.parse(at) - 86_400_000).toISOString(),
+    id: (n) => "0190ab10-0000-7000-8000-" + n.toString(16).padStart(12, "0"),
+  });
   if (pickupOnly) {
     // The legacy fixture port has no foreground-CSRF derivation. Use the same
     // production credential provider for Entry, Cart rotation and reload recovery.

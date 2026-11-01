@@ -1,4 +1,4 @@
-import { createPostgresPublishedStoreOperatingStatusReader } from "../../packages/rms/store/src/index.ts";
+import { createKitchenGatedOperatingStatusReader } from "../../apps/api/dist/store-kitchen-open-gate.js";
 import { CheckoutSessionServiceError } from "../../packages/rms/ordering/src/index.ts";
 import { storeTakesOrder } from "../../apps/api/dist/customer-store-open-gate.js";
 import { guestServiceModes } from "../../apps/api/dist/merchant-store-features.js";
@@ -76,7 +76,7 @@ export function createInternalDiningCheckout(resources, entry, pickup, { openGat
       guestServiceModes(
         tx,
         resources.operating,
-        await createPostgresPublishedStoreOperatingStatusReader(resources.operating)(tx, now()),
+        await createKitchenGatedOperatingStatusReader(resources.operating)(tx, now()),
       ),
     );
   /** Whether the Store takes this guest's order now; throws only when the guest is unknown. */

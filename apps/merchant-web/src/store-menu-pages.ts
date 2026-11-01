@@ -14,6 +14,7 @@ export type MenuErrorCode =
   | "OptionPriceMissing"
   | "TaxNotCovered"
   | "OptionRecipeMissing"
+  | "KitchenNotReady"
   | "ApprovalRequired"
   | "Lifecycle"
   | "Invalid"
@@ -70,7 +71,10 @@ export interface MenuReviewProblem {
     /** v15 2026-10-29: nothing was named missing; `reason` is the code of why it stopped. */
     | "Stopped"
     /** 2026-10-31: an item is not taxed at one of the menu's Stores. */
-    | "Tax";
+    | "Tax"
+    /** WP-2423 item 11: a Store's kitchen is not set up, or can't take this dish. */
+    | "Kitchen"
+    | "KitchenDish";
   readonly reason?: string;
   readonly productName: string | null;
   readonly sizeName: string | null;
@@ -79,10 +83,14 @@ export interface MenuReviewProblem {
   readonly ingredientName: string | null;
   /** The Store the gap is at (a menu served at several Stores), when named. */
   readonly storeName?: string | null;
+  /** WP-2423 item 11: the Store whose kitchen setup fixes it. */
+  readonly storeReference?: string | null;
 }
 const missingKinds = new Set<MenuReviewProblem["missing"]>([
   "Stopped",
   "Tax",
+  "Kitchen",
+  "KitchenDish",
   "Recipe",
   "SubRecipe",
   "OptionRecipe",
@@ -112,7 +120,17 @@ export function parseMenuReviewProblem(value: unknown): MenuReviewProblem | null
         : null,
     ingredientName: optionalText(raw.ingredientName),
     storeName: optionalText(raw.storeName),
+    storeReference:
+      typeof raw.storeReference === "string" && /^[0-9a-f-]{36}$/u.test(raw.storeReference)
+        ? raw.storeReference
+        : null,
   };
+}
+/** WP-2423 item 11: where staff fix a blocked listing, when there is one place. */
+export function menuReviewProblemFixHref(problem: MenuReviewProblem | null): string | null {
+  return problem?.storeReference
+    ? "/app/organization/stores/" + problem.storeReference + "/setup#kitchen-setup"
+    : null;
 }
 /** The blocked review in staff words: which item, size, option or ingredient, and where to fix it. */
 export function menuReviewProblemText(problem: MenuReviewProblem): string {
@@ -129,6 +147,16 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         ? `${problem.optionName} × ${problem.quantity}`
         : problem.optionName;
   switch (problem.missing) {
+    case "Kitchen":
+      return t(
+        "The kitchen at {store} is not set up, so its orders could not reach a kitchen and guests can't order there yet. Set it up in that Store's Store setup, then list this menu again.",
+        { store: problem.storeName ?? t("one of this menu's Stores") },
+      );
+    case "KitchenDish":
+      return t(
+        "{item} can't go to the kitchen at {store}: its recipe needs something that kitchen isn't set up for. Fix it under Kitchen in that Store's Store setup, then list this menu again.",
+        { item: item, store: problem.storeName ?? t("one of this menu's Stores") },
+      );
     case "Stopped":
       return t(
         "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.",
@@ -821,6 +849,7 @@ const codes = new Set<MenuErrorCode>([
   "OptionPriceMissing",
   "TaxNotCovered",
   "OptionRecipeMissing",
+  "KitchenNotReady",
   "ApprovalRequired",
   "Lifecycle",
   "Invalid",
@@ -867,7 +896,10 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
               response.status === 409 && typeof payload?.part === "string"
               ? "StoppedPartWay"
               : "Unavailable",
-        code === "ReviewBlocked" || code === "OptionRecipeMissing" || code === "TaxNotCovered"
+        code === "ReviewBlocked" ||
+          code === "OptionRecipeMissing" ||
+          code === "TaxNotCovered" ||
+          code === "KitchenNotReady"
           ? parseMenuReviewProblem((payload as { problem?: unknown } | null)?.problem)
           : null,
       );
