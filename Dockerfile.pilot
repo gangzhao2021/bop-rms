@@ -29,6 +29,9 @@ COPY . .
 # builds run PILOT_BUILD_CONCURRENCY at a time.
 ARG PILOT_BUILD_CONCURRENCY=2
 RUN pnpm install --frozen-lockfile && pnpm build --concurrency=${PILOT_BUILD_CONCURRENCY}
+# WP-2423 (2026-11-02, measured): each of the 17 processes transpiled about 1430 files at start.
+# Stored once here (about 6 s, 32 MB) they start in 1 s, not 5 s, at half the peak memory.
+RUN node tooling/environment/build-workspace-typescript-cache.mjs
 
 ENV NODE_ENV=development
 ARG PILOT_RUNTIME_DIRECTORY=.local/pilot-v14
