@@ -49,6 +49,8 @@ export function createPostgresPaymentTipSelectionStore(
   runner: PaymentTipTransactionRunner,
   scopeInput: { readonly brandReference: string; readonly storeReference: string },
   clock: { now(): string },
+  /** Whether the Store's published configuration has tips off (the Store's fact, asked of it). */
+  publishedTipsOff?: (tx: AuditTransaction) => Promise<boolean>,
 ) {
   const scope = exactPaymentObject(scopeInput, ["brandReference", "storeReference"]);
   const brand = parsePaymentReference(scope.brandReference),
@@ -149,8 +151,9 @@ export function createPostgresPaymentTipSelectionStore(
           // WP-2423 item 8 ⑦: a Store that turned tips off takes no tip (the database refuses too).
           if (
             record.tip.amountMinor > 0n &&
-            !(await loadStoreTipSetting(tx, { brandReference: brand, storeReference: store }))
-              .tipsEnabled
+            (!(await loadStoreTipSetting(tx, { brandReference: brand, storeReference: store }))
+              .tipsEnabled ||
+              (await publishedTipsOff?.(tx)) === true)
           )
             return fail("PAYMENT_TIP_TURNED_OFF");
           const result = await tx.query(

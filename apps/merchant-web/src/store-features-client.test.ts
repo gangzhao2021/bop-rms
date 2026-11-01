@@ -14,7 +14,13 @@ const view = {
     changedAt: "2026-10-29T15:06:00.000Z",
   },
   teaCharge: { version: 0, teaSellableReference: null, changedAt: null },
-  tips: { version: 0, enabled: true, tierPercents: [10, 15, 18], changedAt: null },
+  tips: {
+    version: 0,
+    enabled: true,
+    tierPercents: [10, 15, 18],
+    changedAt: null,
+    offInStoreSetup: false,
+  },
   canChange: true,
 };
 
@@ -93,7 +99,13 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
       sent.push(JSON.parse(String(init?.body)));
       return Response.json({
         ...view,
-        tips: { version: 1, enabled: false, tierPercents: [12, 15, 20], changedAt: view.changedAt },
+        tips: {
+          version: 1,
+          enabled: false,
+          tierPercents: [12, 15, 20],
+          changedAt: view.changedAt,
+          offInStoreSetup: false,
+        },
       });
     });
     const next = await client.changeTips({
@@ -114,6 +126,7 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
       enabled: false,
       tierPercents: [12, 15, 20],
       changedAt: view.changedAt,
+      offInStoreSetup: false,
     });
   });
 });

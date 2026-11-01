@@ -2046,7 +2046,13 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
     },
     teaCharge: { version: 0, teaSellableReference: null, changedAt: null },
     teaChoices: [],
-    tips: { version: 0, enabled: true, tierPercents: [10, 15, 18], changedAt: null },
+    tips: {
+      version: 0,
+      enabled: true,
+      tierPercents: [10, 15, 18],
+      changedAt: null,
+      offInStoreSetup: false,
+    },
     canChange: true,
   };
   const command = vi.fn<Command>().mockResolvedValue(view);

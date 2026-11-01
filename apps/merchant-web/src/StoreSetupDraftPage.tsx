@@ -2370,6 +2370,13 @@ export function StoreSetupFeeContextEditor({
               <option value="Enabled">{t("On")}</option>
             </select>
           </label>
+          {entry.chargeType === "Tip" ? (
+            <p>
+              {t(
+                "Off: once published, guests and staff are not asked for a tip at this Store. On: tips are offered; the percentages are under Store features.",
+              )}
+            </p>
+          ) : null}
           <label>
             {t("{chargeType} tax classification", { chargeType: feeLabel(entry.chargeType) })}
             <select

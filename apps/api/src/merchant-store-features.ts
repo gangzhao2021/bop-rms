@@ -28,6 +28,7 @@ import {
   StoreFeatureSettingConflictError,
   type StoreFeatureModules,
   type StoreFeatureSetting,
+  readPublishedStoreTipOff,
 } from "@rms/store";
 import type { CurrencyMetadataSnapshot } from "@rms/pricing";
 import { createCustomerMenuStoreFacts } from "./customer-menu-store-facts.js";
@@ -147,6 +148,8 @@ export interface StoreFeaturesView {
     readonly enabled: boolean;
     readonly tierPercents: readonly number[];
     readonly changedAt: string | null;
+    /** The Store's published configuration (Store setup) has Tip Off: no tips, whatever this says. */
+    readonly offInStoreSetup: boolean;
   };
   readonly canChange: boolean;
 }
@@ -401,7 +404,16 @@ export function createMerchantStoreFeatures(options: {
                 actorReference: String(current.actorReference),
                 observedAt: new Date(Date.parse(options.now())).toISOString(),
               });
-            return storeFeaturesView(setting, services, tips, teaCharge, teaChoices, true);
+            const offInStoreSetup = await readPublishedStoreTipOff(tx as never, scope);
+            return storeFeaturesView(
+              setting,
+              services,
+              tips,
+              offInStoreSetup,
+              teaCharge,
+              teaChoices,
+              true,
+            );
           },
         ),
       );
@@ -423,6 +435,7 @@ function storeFeaturesView(
   setting: StoreFeatureSetting,
   services: DiningServiceSetting,
   tips: StoreTipSetting,
+  offInStoreSetup: boolean,
   teaCharge: DiningTeaChargeSetting,
   teaChoices: StoreFeaturesView["teaChoices"],
   canChange: boolean,
@@ -454,6 +467,7 @@ function storeFeaturesView(
       enabled: tips.tipsEnabled,
       tierPercents: Object.freeze([...tips.tierPercents]),
       changedAt: tips.changedAt,
+      offInStoreSetup,
     }),
     canChange,
   });
@@ -682,9 +696,11 @@ export async function readStoreTipChoices(
       scope,
       asOf,
     );
+    // Off in the Store's published configuration (Store setup) is off here, whatever this says.
+    const publishedOff = await readPublishedStoreTipOff(tx, scope, asOf);
     await tx.query("RELEASE SAVEPOINT store_tip_setting_read", []);
     return Object.freeze({
-      enabled: setting.tipsEnabled,
+      enabled: setting.tipsEnabled && !publishedOff,
       tierPercents: Object.freeze([...setting.tierPercents]),
     });
   } catch (error) {

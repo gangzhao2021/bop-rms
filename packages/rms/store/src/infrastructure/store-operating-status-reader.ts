@@ -272,3 +272,31 @@ function readPublishedOperatingStatus(
     })(tx, now);
   };
 }
+
+/**
+ * v15 2026-11-01 (WP-2423 取舍 11, coordinator): whether the configuration published and in force
+ * at `at` (null: now) has Tip Off. The Store's own answer to "is this charge off here"; a
+ * configuration without fee intent (older ones) says nothing. Caller authorizes, in its transaction.
+ */
+export async function readPublishedStoreTipOff(
+  tx: { query(sql: string, values: readonly unknown[]): Promise<unknown> },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  at: string | null = null,
+): Promise<boolean> {
+  const result = (await tx.query(
+    `SELECT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(current_config.fee,'[]'::jsonb)) e
+       WHERE e->>'chargeType'='Tip' AND e->>'state'='Disabled') AS off
+     FROM (SELECT c.configuration_json->'setupBasis'->'feeContexts' AS fee
+       FROM rms_store.store_configuration_version v
+       JOIN rms_store.store_configuration_publication_content c
+         ON c.brand_id=v.brand_id AND c.store_id=v.store_id AND c.configuration_id=v.configuration_id
+       WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published'
+         AND v.effective_from<=COALESCE($3::timestamptz,clock_timestamp())
+         AND c.recorded_at<=COALESCE($3::timestamptz,clock_timestamp())
+         AND (c.configuration_json->>'effectiveUntil' IS NULL
+           OR (c.configuration_json->>'effectiveUntil')::timestamptz>COALESCE($3::timestamptz,clock_timestamp()))
+       ORDER BY v.configuration_version DESC LIMIT 1) current_config`,
+    [scope.brandReference, scope.storeReference, at],
+  )) as { readonly rows?: readonly { readonly off?: unknown }[] } | undefined;
+  return result?.rows?.[0]?.off === true;
+}

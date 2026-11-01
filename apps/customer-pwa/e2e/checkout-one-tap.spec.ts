@@ -15,6 +15,7 @@ async function stubCheckout(
   options: {
     readonly quoteReference: (call: number) => string;
     readonly details?: (call: number) => Promise<"abort" | "save"> | "abort" | "save";
+    readonly tips?: { readonly enabled: boolean; readonly tierPercents: readonly number[] };
   },
 ) {
   const expiresAt = new Date(Date.now() + 600_000).toISOString();
@@ -88,6 +89,7 @@ async function stubCheckout(
       status: 201,
       json: {
         schemaVersion: 1,
+        ...(options.tips === undefined ? {} : { tips: options.tips }),
         quote: {
           quoteReference: options.quoteReference(quoteCalls),
           quoteVersion: 1,
@@ -240,6 +242,29 @@ for (const screen of [
     });
     // v15 2026-10-17: reconnecting re-prices the cart under a new quote. The pickup name and
     // number the guest typed (and the tip) stay, and nothing is sent until they continue.
+    // v15 2026-11-01: a Store with tips off (published Tip Off) asks nothing and needs no tap.
+    test("with tips off there is no tip choice and payment needs no tip tap", async ({ page }) => {
+      await stubCheckout(page, {
+        quoteReference: () => id(5),
+        tips: { enabled: false, tierPercents: [10, 15, 18] },
+      });
+      await page.goto("/#qr=aaa.bbb.ccc");
+      await expect(
+        page.getByRole("heading", { name: "Synthetic One Tap Store", exact: true }),
+      ).toBeVisible();
+      await page.evaluate(() => {
+        history.pushState(null, "", "/checkout");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      await expect(page.getByRole("heading", { name: "Total", exact: true })).toBeVisible();
+      await page.getByLabel("Pickup name", { exact: true }).fill("Synthetic Guest");
+      await page.getByLabel("Mobile number", { exact: true }).fill("416 555 0123");
+      await expect(page.getByRole("button", { name: "No tip", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "15%", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /Continue to payment/u })).toBeEnabled();
+      await expect(page.locator("#checkout-tip-heading")).toHaveCount(0);
+    });
+
     test("typed details survive a reconnect and its new quote", async ({ page, context }) => {
       const failures: string[] = [];
       page.on("pageerror", () => failures.push("page error"));
