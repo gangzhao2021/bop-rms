@@ -153,6 +153,23 @@ it("shows a rate-limit wait without enabling retry or revealing context", () => 
 });
 
 describe("WP-2423 Q4 not accepting orders", () => {
+  it("WP-2423 item 11: a Store not ready yet says so in plain words, with no hours to mislead", () => {
+    const text = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+      todayKind: null,
+      nextOpening: { localDate: "2026-12-23", startLocalTime: "11:00:00" },
+      localDate: "2026-12-22",
+      notReady: true,
+    });
+    expect(text).toContain("Synthetic Store isn’t taking orders yet");
+    expect(text).toContain("This store is still getting ready.");
+    expect(text).not.toContain("Today’s hours");
+    expect(text).not.toContain("closed");
+    expect(text.toLowerCase()).not.toContain("kitchen");
+  });
   it("names the store, says why and gives today's hours instead of a dead link", () => {
     const closed = render({
       kind: "NotAccepting",

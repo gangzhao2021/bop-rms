@@ -54,6 +54,8 @@ export interface CustomerEntryOperatingReader {
         upcomingHours?: StoreUpcomingHours;
         /** WP-2423 item 8 ⑦ 1b: services the Store turned off (never offered, whatever the hour). */
         servicesTurnedOff?: readonly "Pickup"[];
+        /** WP-2423 item 11: this Store isn't ready to take orders yet (not a closing time). */
+        notReadyForOrders?: boolean;
       })
     | null
   >;
@@ -148,6 +150,7 @@ export function createCustomerEntryComposition(
         let upcoming: StoreUpcomingHours | null = null;
         let localDate: string | null = null;
         let turnedOff: readonly string[] = [];
+        let notReady = false;
         if ("operatingReader" in options) {
           const current = await options.operatingReader.readCurrent({
             ...scope,
@@ -161,6 +164,7 @@ export function createCustomerEntryComposition(
           upcoming = current.upcomingHours ?? null;
           localDate = current.localDate ?? null;
           turnedOff = current.servicesTurnedOff ?? [];
+          notReady = current.notReadyForOrders === true;
         } else {
           const operating = await createStoreOperatingStatusService({
             ...options.operating,
@@ -192,6 +196,7 @@ export function createCustomerEntryComposition(
             todayKind: upcoming?.todayKind ?? null,
             nextOpening: upcoming?.nextOpening ?? null,
             localDate,
+            ...(notReady ? { notReadyForOrders: true as const } : {}),
           });
 
         // Coordinator 2026-10-30: at a table, whether a party is seated there now (public state).

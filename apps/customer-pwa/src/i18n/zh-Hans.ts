@@ -1280,4 +1280,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "店员已把你们并到 {table} 桌，你们点过的菜都在那桌的账单上。请扫 {table} 桌的桌码继续点餐和一起付款。",
   "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.":
     "店员已把您这桌换到 {table} 桌，已点的菜和账单都一起转过去了。请扫 {table} 桌的桌码，继续一起点单和付款。",
+  "isn’t taking orders yet": "暂时还不能下单",
+  "This store is still getting ready. Please ask a staff member, or try again later.":
+    "这家店还在准备中。请询问店员，或稍后再试。",
 });

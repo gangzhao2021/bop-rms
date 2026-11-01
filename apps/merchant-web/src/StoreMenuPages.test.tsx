@@ -387,7 +387,8 @@ it("WP-2423 item 11: a listing refused for the kitchen names the Store and links
     storeReference: store,
   });
   expect(problem).not.toBeNull();
-  expect(menuReviewProblemText(problem!)).toContain("The kitchen at Second Street is not set up");
+  if (problem === null) throw new Error("parsed");
+  expect(menuReviewProblemText(problem)).toContain("The kitchen at Second Street is not set up");
   expect(menuReviewProblemFixHref(problem)).toBe(
     "/app/organization/stores/" + store + "/setup#kitchen-setup",
   );

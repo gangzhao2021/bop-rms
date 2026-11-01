@@ -6722,4 +6722,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{store} 的厨房还没设置，订单到不了厨房，顾客暂时不能在那里下单。请在该店的门店设置里设置好，再上架这份菜单。",
   "{item} can't go to the kitchen at {store}: its recipe needs something that kitchen isn't set up for. Fix it under Kitchen in that Store's Store setup, then list this menu again.":
     "{item} 进不了 {store} 的厨房：配方需要的条件那个厨房没有设置。请到该店门店设置的“厨房”里修好，再上架这份菜单。",
+  "Tips are off in this Store's published Store setup, so no one is asked for a tip, whatever is set here. To offer tips, turn Tip on in Store setup and publish it.":
+    "本店已发布的门店设置里小费是关闭的，所以不管这里怎么设，都不会要求任何人给小费。要收小费，请在门店设置里打开小费并发布。",
+  "Off: once published, guests and staff are not asked for a tip at this Store. On: tips are offered; the percentages are under Store features.":
+    "关闭：发布后，本店顾客和员工都不会被要求给小费。打开：提供小费，百分比在门店功能里设置。",
+  "The kitchen isn't set up": "厨房还没设置",
+  "Guests and staff can't place orders at this Store until it is.":
+    "设置好之前，本店顾客和员工都不能下单。",
 });

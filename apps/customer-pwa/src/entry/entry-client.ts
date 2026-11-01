@@ -161,6 +161,9 @@ function parseNotAccepting(value: unknown): CustomerEntryScreenState {
     "todayKind",
     "nextOpening",
     "localDate",
+    ...((raw.store as { notReadyForOrders?: unknown } | null)?.notReadyForOrders === true
+      ? ["notReadyForOrders"]
+      : []),
   ]);
   const date = /^\d{4}-\d{2}-\d{2}$/u;
   const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
@@ -219,6 +222,7 @@ function parseNotAccepting(value: unknown): CustomerEntryScreenState {
       todayKind: store.todayKind as "Holiday" | "TemporaryClosure" | "Override" | null,
       nextOpening,
       localDate: store.localDate as string | null,
+      ...(store.notReadyForOrders === true ? { notReady: true as const } : {}),
     });
   } catch {
     return Object.freeze({ kind: "ServiceUnavailable" });

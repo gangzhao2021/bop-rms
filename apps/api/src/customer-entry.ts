@@ -64,6 +64,8 @@ export interface CustomerEntryNotAccepting {
   readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
   /** The Store's local date now, so "tomorrow" can be said. */
   readonly localDate: string | null;
+  /** WP-2423 item 11: not a closing time; this Store isn't ready to take orders yet. */
+  readonly notReadyForOrders?: true;
 }
 
 /**
@@ -448,7 +450,10 @@ function parsePortResult(
       "todayKind",
       "nextOpening",
       "localDate",
+      ...(Object.hasOwn(value as object, "notReadyForOrders") ? ["notReadyForOrders"] : []),
     ]);
+    if (raw.notReadyForOrders !== undefined && raw.notReadyForOrders !== true)
+      throw new TypeError("invalid not-accepting result");
     const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
     if (
       typeof raw.storeDisplayName !== "string" ||
@@ -504,6 +509,7 @@ function parsePortResult(
       todayKind: raw.todayKind as CustomerEntryNotAccepting["todayKind"],
       nextOpening,
       localDate: raw.localDate as string | null,
+      ...(raw.notReadyForOrders === true ? { notReadyForOrders: true as const } : {}),
     });
   }
   throw new TypeError("unknown Customer-entry result");
@@ -670,6 +676,7 @@ export class CustomerEntryHandler {
               todayKind: result.todayKind,
               nextOpening: result.nextOpening,
               localDate: result.localDate,
+              ...(result.notReadyForOrders === true ? { notReadyForOrders: true } : {}),
             },
           });
           return;

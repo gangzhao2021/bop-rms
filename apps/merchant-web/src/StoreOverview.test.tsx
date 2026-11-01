@@ -730,6 +730,12 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     tables: ready({ tables: [table], canClose: true, more: false }),
     updatedAt: "2026-10-25T15:01:00.000Z",
   };
+  it("WP-2423 item 11: a kitchen not set up comes first, with the link to fix it", () => {
+    const href = "/app/organization/stores/s/setup#kitchen-setup";
+    const items = attentionItems(state, null, null, href);
+    expect(items[0]).toMatchObject({ key: "kitchen-setup", href, action: "Set up the kitchen" });
+    expect(attentionItems(state, null).some((item) => item.key === "kitchen-setup")).toBe(false);
+  });
   it("puts staff calls first, then orders to accept, overdue exceptions, approvals and checks", () => {
     const items = attentionItems(state, { awaiting: 2, approvedNotSent: 0 });
     expect(items.map((item) => [item.title, item.state, item.href])).toEqual([

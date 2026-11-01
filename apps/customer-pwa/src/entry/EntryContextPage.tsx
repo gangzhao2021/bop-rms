@@ -387,6 +387,20 @@ function EntryState({
       </div>
     );
 
+  // WP-2423 item 11: this Store isn't ready yet, so hours and a next opening would mislead.
+  if (state.kind === "NotAccepting" && state.notReady === true)
+    return (
+      <div className="entry-state entry-state--warning" role="alert">
+        <StateHeading headingRef={headingRef}>
+          {state.storeDisplayName} {t("isn’t taking orders yet")}
+        </StateHeading>
+        <p>
+          {t("This store is still getting ready. Please ask a staff member, or try again later.")}
+        </p>
+        <RetryAction onRetry={onRetry} />
+      </div>
+    );
+
   if (state.kind === "NotAccepting")
     return (
       <div className="entry-state entry-state--warning" role="alert">
