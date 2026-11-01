@@ -2108,9 +2108,16 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    ```
 
    It writes through Kitchen's own routing store as `<database>_internal_test_kitchen` (NOLOGIN
-   NOBYPASSRLS, only its grants), audits it under the approver with the approval wording, and
-   commits only if the services' api role then reads the routing. Run again it answers
-   `AlreadyPresent`. It refuses the installation's own Store and a Store not opened on the Stores
+   NOBYPASSRLS, only its grants), together with the installation Store's kitchen sections (under
+   the new Store's own section identities), each dish's section and the dishes the kitchen does not
+   prepare (parts the new Store already has are left alone), audits it under the approver with the
+   approval wording, and then checks that the services' api role reads the routing and the setup.
+   Run again it answers `AlreadyPresent`. Run it **before** the Store takes its first order: the
+   kitchen routes an order by the routing in effect when the order was confirmed, and a routing
+   never applies to earlier orders. An order confirmed before it never reaches the kitchen display
+   (the failure log names `KITCHEN_ROUTING_NOT_IN_EFFECT_AT_CONFIRMATION`): staff make and hand
+   over that order from the Orders page (or refund it), and the operator closes its dead letter
+   with `dead-letter-operations.mjs discard`; recovering it does not help. It refuses the installation's own Store and a Store not opened on the Stores
    page, not active or not named "… – not production". No restart is needed. Receipts: the Store's Owner opens Store setup → "Receipts and
    privacy", checks "Business name on receipts" (the legal or operating name of the business
    that sells to guests; the Brand's name is offered the first time) and saves — with the

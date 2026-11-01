@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { appendAuditRecordInTransaction } from "../../packages/bop/audit/src/index.ts";
 import {
+  changeKitchenNotPreparedProduct,
+  changeKitchenProductSection,
+  changeKitchenSections,
   createPostgresKitchenRoutingConfigurationStore,
+  loadKitchenNotPreparedProducts,
+  loadKitchenProductSections,
+  loadKitchenSections,
   rebindKitchenRoutingEvidence,
 } from "../../packages/rms/kitchen/src/index.ts";
 import {
@@ -21,6 +27,11 @@ import {
  * through the Kitchen owner's routing store (its own audit) and audited again under the approver
  * with the approval wording. Idempotent: a Store with a routing configuration gets it back and
  * nothing is written.
+ *
+ * v15 2026-11-01 (coordinator): with it, also the installation Store's kitchen setup the Brand's
+ * dishes use — its kitchen sections (under the Store's own section identities), each dish's
+ * section and the dishes the kitchen does not prepare — through the Kitchen owner's own versioned
+ * functions; each part the TEST Store already has is left as it is.
  */
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/u;
@@ -59,6 +70,9 @@ export const internalTestKitchenRoutingGrants = Object.freeze([
   ["table", "bop_tenant.store", "SELECT"],
   ["table", "bop_tenant.store_opening", "SELECT"],
   ["table", "rms_kitchen.kitchen_routing_configuration", "SELECT,INSERT"],
+  ["table", "rms_kitchen.kitchen_section_list", "SELECT,INSERT"],
+  ["table", "rms_kitchen.kitchen_product_section", "SELECT,INSERT"],
+  ["table", "rms_kitchen.kitchen_not_prepared_product", "SELECT,INSERT"],
   ["table", "platform_audit.audit_record", "SELECT,INSERT"],
   ["table", "platform_audit.audit_chain_head", "SELECT,INSERT"],
   ["column", "platform_audit.audit_chain_head", "UPDATE", ["next_sequence", "last_record_hash"]],
@@ -202,13 +216,43 @@ export async function createInternalTestKitchenRouting(
         [binding.brandReference, storeReference],
       )
     ).rows;
+    const own = (purpose, value) => storeKitchenReference(storeReference, purpose + ":" + value);
+    const setup = await copyKitchenSetup(tx, {
+      binding,
+      storeReference,
+      own,
+      actorReference: approverActorReference,
+      at,
+    });
     if (present !== undefined) {
-      await client.query("ROLLBACK");
+      if (setup.copied === 0) {
+        await client.query("ROLLBACK");
+        return Object.freeze({
+          status: "AlreadyPresent",
+          storeReference,
+          evidenceReference: present.version,
+          evidenceVersion: present.number,
+          setup,
+        });
+      }
+      await scope(storeReference);
+      await appendSetupAudit(tx, {
+        binding,
+        storeReference,
+        approverActorReference,
+        evidence,
+        nextReference,
+        at,
+        targetId: present.version,
+        afterSummary: { stations: null, ...setup.counts },
+      });
+      await client.query("COMMIT");
       return Object.freeze({
-        status: "AlreadyPresent",
+        status: "Created",
         storeReference,
         evidenceReference: present.version,
         evidenceVersion: present.number,
+        setup,
       });
     }
     // The installation Store's current routing: its stations and rules.
@@ -228,7 +272,6 @@ export async function createInternalTestKitchenRouting(
     });
     if (source === null || source.candidates.length < 1)
       unavailable("installation-store-has-no-kitchen-routing");
-    const own = (purpose, value) => storeKitchenReference(storeReference, purpose + ":" + value);
     const record = {
       operationReference: evidence.operationReference,
       actorReference: approverActorReference,
@@ -289,6 +332,7 @@ export async function createInternalTestKitchenRouting(
       targetId: record.configuration.evidenceReference,
       afterSummary: {
         stations: record.configuration.candidates.length,
+        ...setup.counts,
         copiedFromInstallationStore: true,
         environment: "InternalTest",
         approvedBy: evidence.approvedBy,
@@ -309,10 +353,153 @@ export async function createInternalTestKitchenRouting(
       storeReference,
       evidenceReference: record.configuration.evidenceReference,
       evidenceVersion: 1,
+      setup,
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof InternalTestStoreSetupError) throw error;
     return unavailable("database-check-failed", error);
+  }
+}
+
+/**
+ * The installation Store's kitchen sections, dish sections and not-prepared dishes, written for the
+ * TEST Store where it has none of its own (Kitchen's own functions; the Store's own section
+ * identities). Returns what was written.
+ */
+async function copyKitchenSetup(tx, { binding, storeReference, own, actorReference, at }) {
+  const from = { brandReference: binding.brandReference, storeReference: binding.storeReference },
+    to = {
+      tenantReference: binding.tenantReference,
+      brandReference: binding.brandReference,
+      storeReference,
+    };
+  const counts = { sections: 0, dishSections: 0, notPrepared: 0 };
+  const operation = (purpose, value) => own("operation:" + purpose, value);
+  // Sections: the whole list, once.
+  const source = await loadKitchenSections(tx, from);
+  const target = await loadKitchenSections(tx, to);
+  const sectionOf = (reference) => own("section", reference);
+  if (target.version === 0 && source.sections.length > 0) {
+    await changeKitchenSections(tx, to, {
+      operationReference: operation("sections", "1"),
+      expectedVersion: 0,
+      sections: source.sections.map((section) => ({
+        sectionReference: sectionOf(section.sectionReference),
+        name: section.name,
+      })),
+      actorReference,
+      observedAt: at,
+    });
+    counts.sections = source.sections.length;
+  }
+  const ownSections = new Set(
+    (await loadKitchenSections(tx, to)).sections.map((s) => s.sectionReference),
+  );
+  // Each dish's section, where the TEST Store never marked it.
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    from.brandReference,
+    from.storeReference,
+  ]);
+  const products = (
+    await tx.query(
+      "SELECT DISTINCT product_id::text AS product FROM rms_kitchen.kitchen_product_section WHERE brand_id=$1 AND store_id=$2 ORDER BY 1",
+      [from.brandReference, from.storeReference],
+    )
+  ).rows.map((row) => String(row.product));
+  const marks = await loadKitchenProductSections(tx, from, products);
+  const present = await loadKitchenProductSections(tx, to, products);
+  for (const product of products) {
+    const mark = marks.get(product);
+    if (present.has(product) || mark === undefined || mark.sectionReference === null) continue;
+    const section = sectionOf(mark.sectionReference);
+    if (!ownSections.has(section)) continue;
+    await changeKitchenProductSection(tx, to, {
+      productReference: product,
+      operationReference: operation("dish-section", product),
+      expectedVersion: 0,
+      sectionReference: section,
+      actorReference,
+      observedAt: at,
+    });
+    counts.dishSections++;
+  }
+  // The dishes the kitchen does not prepare, where the TEST Store never decided.
+  const notPrepared = await loadKitchenNotPreparedProducts(tx, from, null);
+  const decided = await loadKitchenNotPreparedProducts(tx, to, [...notPrepared.keys()]);
+  for (const [product, mark] of notPrepared) {
+    if (decided.has(product) || mark.notPrepared !== true) continue;
+    await changeKitchenNotPreparedProduct(tx, to, {
+      productReference: product,
+      operationReference: operation("not-prepared", product),
+      expectedVersion: 0,
+      notPrepared: true,
+      actorReference,
+      observedAt: at,
+    });
+    counts.notPrepared++;
+  }
+  return Object.freeze({
+    counts: Object.freeze(counts),
+    copied: counts.sections + counts.dishSections + counts.notPrepared,
+  });
+}
+
+async function appendSetupAudit(
+  tx,
+  {
+    binding,
+    storeReference,
+    approverActorReference,
+    evidence,
+    nextReference,
+    at,
+    targetId,
+    afterSummary,
+  },
+) {
+  await appendAuditRecordInTransaction(tx, {
+    auditId: nextReference(),
+    brandId: binding.brandReference,
+    storeId: storeReference,
+    actor: { type: "User", reference: approverActorReference },
+    actionCode: "INTERNAL_TEST_STORE_KITCHEN_ROUTING",
+    targetType: "KitchenRoutingConfiguration",
+    targetId,
+    afterSummary: {
+      ...afterSummary,
+      copiedFromInstallationStore: true,
+      environment: "InternalTest",
+      approvedBy: evidence.approvedBy,
+      approval: evidence.approval,
+      reason: evidence.reason ?? null,
+    },
+    reasonCode: "INTERNAL_TEST_STORE_KITCHEN",
+    correlationId: evidence.operationReference,
+    occurredAt: at,
+    sourceChannel: "DEPLOYMENT",
+    dataClassification: "Internal",
+    retentionPolicyCode: "AUDIT_DEFAULT",
+    retentionPolicyVersion: 1,
+  });
+}
+
+/** The TEST Store's kitchen setup as the given role reads it (counts only). */
+export async function readStoreKitchenSetup(client, { role, binding, storeReference }) {
+  if (!IDENTIFIER.test(role) || !UUID_V7.test(storeReference ?? ""))
+    return unavailable("input-invalid");
+  await client.query("BEGIN READ ONLY");
+  try {
+    await client.query(`SET LOCAL ROLE "${role}"`);
+    const tx = { query: (sql, values = []) => client.query(sql, [...values]) };
+    const scope = { brandReference: binding.brandReference, storeReference };
+    const sections = await loadKitchenSections(tx, scope);
+    const notPrepared = await loadKitchenNotPreparedProducts(tx, scope, null);
+    return Object.freeze({
+      sections: sections.sections.length,
+      notPrepared: [...notPrepared.values()].filter((mark) => mark.notPrepared).length,
+    });
+  } finally {
+    await client.query("ROLLBACK").catch(() => undefined);
   }
 }

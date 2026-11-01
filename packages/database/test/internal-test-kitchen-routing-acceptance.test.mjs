@@ -1,16 +1,24 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import pg from "pg";
 import { it } from "vitest";
 import { recordStoreOpening } from "../../../apps/api/src/merchant-store-opening.ts";
 import { brandRoleTemplateActions } from "../../bop/permission/src/index.ts";
 import {
+  changeKitchenNotPreparedProduct,
+  changeKitchenProductSection,
+  changeKitchenSections,
   createPostgresKitchenRoutingConfigurationStore,
+  loadKitchenNotPreparedProducts,
+  loadKitchenProductSections,
+  loadKitchenSections,
   rebindKitchenRoutingEvidence,
 } from "../../rms/kitchen/src/index.ts";
 import {
   createInternalTestKitchenRouting,
   readStoreKitchenRouting,
+  readStoreKitchenSetup,
   renderKitchenRoutingRoleSql,
 } from "../../../tooling/environment/pilot-internal-test-kitchen-routing.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -39,6 +47,14 @@ const sha256 = (value) => "sha256:" + createHash("sha256").update(value).digest(
  *    to store 2's own station; store 1's routing is unchanged;
  * 3. again: the same routing, nothing written;
  * 4. refused: the installation's own Store, a Store not opened in the product, one not TEST.
+ *
+ * v15 2026-11-01 (coordinator, second round): with the routing in place, store 2's paid order
+ * still failed: it was confirmed (01:54Z) before the routing took effect (02:28Z), and the kitchen
+ * routes an order by the routing in effect at its confirmation (a routing is never back-dated:
+ * effective_from >= recorded_at). So: an order confirmed before the command still finds no
+ * routing; one confirmed after finds store 2's. And the command also copies store 1's kitchen
+ * sections (store 2's own section identities), each dish's section and the dishes the kitchen does
+ * not prepare, read back as the services' role; store 1's setup is unchanged.
  */
 it("a TEST Store gets its own kitchen routing, read by the kitchen as the services' role", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_kitchen_route" }, async (context) => {
@@ -215,6 +231,49 @@ it("a TEST Store gets its own kitchen routing, read by the kitchen as the servic
           nextReference,
         });
       const storeOneBefore = await read(storeOne, storeOneAt);
+      // Store 1's kitchen setup (owner fixture, the Kitchen owner's functions): two sections, two
+      // dishes marked, one dish the kitchen does not prepare.
+      const dishes = [id(950), id(951), id(952)];
+      const ownerTx = { query: (sql, values) => admin.query(sql, values) };
+      const storeOneScope = { tenantReference, brandReference, storeReference: storeOne };
+      const setupAt = new Date().toISOString();
+      const sections = await changeKitchenSections(ownerTx, storeOneScope, {
+        operationReference: id(960),
+        expectedVersion: 0,
+        sections: [
+          { sectionReference: id(961), name: "Wok" },
+          { sectionReference: id(962), name: "Noodles" },
+        ],
+        actorReference: owner,
+        observedAt: setupAt,
+      });
+      for (const [n, section] of [id(961), id(962)].entries())
+        await changeKitchenProductSection(ownerTx, storeOneScope, {
+          productReference: dishes[n],
+          operationReference: id(963 + n),
+          expectedVersion: 0,
+          sectionReference: section,
+          actorReference: owner,
+          observedAt: setupAt,
+        });
+      await changeKitchenNotPreparedProduct(ownerTx, storeOneScope, {
+        productReference: dishes[2],
+        operationReference: id(966),
+        expectedVersion: 0,
+        notPrepared: true,
+        actorReference: owner,
+        observedAt: setupAt,
+      });
+      const storeOneSetup = async () => ({
+        sections: await loadKitchenSections(ownerTx, storeOneScope),
+        dishes: [...(await loadKitchenProductSections(ownerTx, storeOneScope, dishes))],
+        notPrepared: [...(await loadKitchenNotPreparedProducts(ownerTx, storeOneScope, null))],
+      });
+      const storeOneSetupBefore = await storeOneSetup();
+      assert.equal(sections.version, 1);
+      // An order at store 2 confirmed now, before the Store's kitchen is set up.
+      const confirmedBefore = new Date().toISOString();
+      await sleep(5);
 
       // 1. Before: no routing for store 2 — the kitchen could not route any item there.
       assert.equal(await read(storeTwo), null);
@@ -232,6 +291,43 @@ it("a TEST Store gets its own kitchen routing, read by the kitchen as the servic
       assert.notEqual(candidate.stationReference, id(903));
       assert.equal(candidate.targetStationReference, candidate.stationReference);
       assert.deepEqual(await read(storeOne, storeOneAt), storeOneBefore);
+      // The order confirmed before the routing existed never routes (the v15 order); one
+      // confirmed from now on does.
+      assert.equal(await read(storeTwo, confirmedBefore), null);
+      assert.equal((await read(storeTwo, new Date().toISOString()))?.storeReference, storeTwo);
+      // Store 1's kitchen setup, under store 2's own section identities, read as the services'.
+      assert.deepEqual(created.setup.counts, { sections: 2, dishSections: 2, notPrepared: 1 });
+      const storeTwoScope = { brandReference, storeReference: storeTwo };
+      await admin.query("BEGIN");
+      let copied;
+      try {
+        await admin.query("SET LOCAL ROLE " + apiRole);
+        const apiTx = { query: (sql, values) => admin.query(sql, values) };
+        copied = {
+          sections: await loadKitchenSections(apiTx, storeTwoScope),
+          dishes: await loadKitchenProductSections(apiTx, storeTwoScope, dishes),
+          notPrepared: await loadKitchenNotPreparedProducts(apiTx, storeTwoScope, null),
+        };
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+      assert.deepEqual(
+        copied.sections.sections.map((section) => section.name),
+        ["Wok", "Noodles"],
+      );
+      const ownSections = copied.sections.sections.map((section) => section.sectionReference);
+      assert.ok(ownSections.every((reference) => ![id(961), id(962)].includes(reference)));
+      assert.deepEqual(
+        dishes.slice(0, 2).map((dish) => copied.dishes.get(dish)?.sectionReference),
+        ownSections,
+      );
+      assert.equal(copied.dishes.has(dishes[2]), false);
+      assert.deepEqual([...copied.notPrepared], [[dishes[2], { notPrepared: true, version: 1 }]]);
+      assert.deepEqual(
+        await readStoreKitchenSetup(admin, { role: apiRole, binding, storeReference: storeTwo }),
+        { sections: 2, notPrepared: 1 },
+      );
+      assert.deepEqual(await storeOneSetup(), storeOneSetupBefore);
       const audits = (
         await admin.query(
           "SELECT action_code,actor_reference::text actor,after_summary_json->>'approval' approval FROM platform_audit.audit_record WHERE store_id=$1 ORDER BY chain_sequence",

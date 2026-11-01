@@ -268,7 +268,22 @@ async function kitchen(options) {
       at: new Date().toISOString(),
     });
     if (routed === null) unavailable("read-check-failed");
-    return Object.freeze({ status: result.status, storeReference: options.storeReference });
+    // Its sections and not-prepared dishes, as the services' role reads them.
+    const setup = await routing.readStoreKitchenSetup(client, {
+      role: installation.roles.api,
+      binding: profile.binding,
+      storeReference: options.storeReference,
+    });
+    if (
+      setup.sections < result.setup.counts.sections ||
+      setup.notPrepared < result.setup.counts.notPrepared
+    )
+      unavailable("read-check-failed");
+    return Object.freeze({
+      status: result.status,
+      storeReference: options.storeReference,
+      copied: result.setup.counts,
+    });
   } finally {
     await client.end().catch(() => undefined);
   }
