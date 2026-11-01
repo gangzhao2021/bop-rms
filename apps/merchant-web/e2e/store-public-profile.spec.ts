@@ -242,6 +242,10 @@ test("@production the Store Manager opens Store setup from the navigation and se
           privacyNoticeUrl: "https://example.com/privacy",
         },
         gaps: { taxRegistrationMissing: false, privacyNoticeMissing: false },
+        issuer: {
+          businessName: "Synthetic Kitchen Inc.",
+          suggestedBusinessName: "Synthetic Brand",
+        },
       },
     }),
   );

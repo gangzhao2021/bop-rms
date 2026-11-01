@@ -196,11 +196,15 @@ export function createPostgresStoreReceiptProfileStore(options: {
       const currentVersion = current?.version ?? 0;
       if (currentVersion !== input.expectedVersion)
         return fail("STORE_RECEIPT_PROFILE_VERSION_CONFLICT");
+      // v15 2026-11-01: the first save is recorded even with every field empty — a business not
+      // registered for these taxes, without a privacy link, has said so (and only then has
+      // receipt details at all).
       if (
-        (current?.gstHstNumber ?? null) === details.gstHstNumber &&
-        (current?.qstNumber ?? null) === details.qstNumber &&
-        (current?.pstNumber ?? null) === details.pstNumber &&
-        (current?.privacyNoticeUrl ?? null) === details.privacyNoticeUrl
+        current !== null &&
+        current.gstHstNumber === details.gstHstNumber &&
+        current.qstNumber === details.qstNumber &&
+        current.pstNumber === details.pstNumber &&
+        current.privacyNoticeUrl === details.privacyNoticeUrl
       )
         return fail("STORE_RECEIPT_PROFILE_NO_CHANGE");
       if (current !== null && recordedAt < current.recordedAt) return fail();

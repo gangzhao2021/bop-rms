@@ -122,6 +122,26 @@ const databaseAccessManifestInput = {
       source:
         "packages/bop/operating-entity/src/infrastructure/persistence/receipt-issuer-source.ts",
     },
+    {
+      id: "receipt-issuer-source.write.store_operating_entity_assignment",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_operating_entity", table: "store_operating_entity_assignment" },
+      principal: { kind: "module", id: "@bop/operating-entity" },
+      readPattern: null,
+      source:
+        "packages/bop/operating-entity/src/infrastructure/persistence/receipt-issuer-source.ts",
+    },
+    {
+      id: "receipt-issuer-source.write.operating_entity",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_operating_entity", table: "operating_entity" },
+      principal: { kind: "module", id: "@bop/operating-entity" },
+      readPattern: null,
+      source:
+        "packages/bop/operating-entity/src/infrastructure/persistence/receipt-issuer-source.ts",
+    },
   ],
 } as const;
 

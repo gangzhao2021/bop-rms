@@ -14,6 +14,11 @@ export interface StoreReceiptProfileGaps {
   readonly taxRegistrationMissing: boolean;
   readonly privacyNoticeMissing: boolean;
 }
+/** v15 2026-11-01: the business the Store's receipts name (none until this section is saved). */
+export interface StoreReceiptIssuerView {
+  readonly businessName: string | null;
+  readonly suggestedBusinessName: string;
+}
 export interface StoreReceiptProfileView {
   readonly observedAt: string;
   readonly canChange: boolean;
@@ -21,6 +26,7 @@ export interface StoreReceiptProfileView {
   readonly recordedAt: string | null;
   readonly details: StoreReceiptProfileDetails;
   readonly gaps: StoreReceiptProfileGaps;
+  readonly issuer: StoreReceiptIssuerView;
 }
 export interface StoreReceiptProfileSaveBody {
   readonly expectedVersion: number;
@@ -30,6 +36,7 @@ export interface StoreReceiptProfileSaveBody {
     readonly qstNumber: string | null;
     readonly pstNumber: string | null;
     readonly privacyNoticeUrl: string | null;
+    readonly businessName: string;
   };
 }
 
@@ -87,6 +94,17 @@ export function parseStoreReceiptProfileView(value: unknown): StoreReceiptProfil
       privacyNoticeUrl: nullableText(details.privacyNoticeUrl, 500),
     }),
     gaps: parseGaps(raw.gaps),
+    issuer: parseIssuer(raw.issuer),
+  });
+}
+function parseIssuer(value: unknown): StoreReceiptIssuerView {
+  const raw = value as Record<string, unknown> | null;
+  if (raw === null || typeof raw !== "object") return fail("Unavailable");
+  const suggested = nullableText(raw.suggestedBusinessName, 200);
+  if (suggested === null) return fail("Unavailable");
+  return Object.freeze({
+    businessName: nullableText(raw.businessName, 200),
+    suggestedBusinessName: suggested,
   });
 }
 
