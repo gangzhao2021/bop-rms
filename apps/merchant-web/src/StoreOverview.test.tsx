@@ -119,16 +119,17 @@ describe("WP-2423 P2 store overview", () => {
     expect(awaitingAcceptanceText({ orders: 2, rounds: 2, urgentRounds: 0 })).toBe(
       "2 awaiting acceptance",
     );
-    // A paid round said on a pickup, or on a round that cannot be accepted, is refused.
-    expect(() =>
-      parseCurrentOrderQueue(
-        {
-          ...fixture,
-          items: [{ ...table, orderType: "Pickup" as const }, ready],
-        },
-        null,
-      ),
-    ).toThrow();
+    // A paid round said on a pickup, or on a round that cannot be accepted, is not read: that
+    // Order is named and left out, the others stay.
+    const misread = parseCurrentOrderQueue(
+      {
+        ...fixture,
+        items: [{ ...table, orderType: "Pickup" as const }, ready],
+      },
+      null,
+    );
+    expect(misread.items.map((item) => item.orderReference)).toEqual([ready.orderReference]);
+    expect(misread.unreadable).toHaveLength(1);
   });
   it("counts only dine-in orders as ready to serve; pickups ready for collection come from Fulfillment", () => {
     const fixture = currentOrderQueueFixture();

@@ -1081,3 +1081,71 @@ it("v15 751dd768 ①: reads what an unsent counter order still has to be charged
   ])
     expect(() => read(bad)).toThrow(CurrentOrderQueueError);
 });
+
+// v15 a2458cff: one pickup the store refused took the whole Orders page down ("Orders unavailable").
+const refusedPickup = (n: number) => {
+  const base = row(n);
+  return {
+    ...base,
+    orderType: "Pickup",
+    currentPhase: "Rejected",
+    currentVersion: 2,
+    canRequestAcceptance: false,
+    batches: base.batches.map((batch) => ({
+      ...batch,
+      acceptanceStatus: "NotAccepted",
+      canRequestAcceptance: false,
+      canCancel: false,
+      staffCancellation: {
+        reasonCode: "SOLD_OUT",
+        cancelledAt: "2099-01-01T00:00:00.000Z",
+        refundStatus: "Pending",
+        refundMethod: "Online",
+        refundAmountMinor: null,
+      },
+    })),
+  };
+};
+it("v15 a2458cff: reads a pickup the store refused (Rejected, never accepted)", () => {
+  const queue = parseCurrentOrderQueue({
+    items: [row(3), refusedPickup(2), row(1)],
+    nextAfterOrderReference: null,
+  });
+  expect(queue.unreadable).toEqual([]);
+  expect(queue.items.map((item) => item.currentPhase)).toContain("Rejected");
+  // Rejected is only for a pickup never accepted; accepted and Rejected stays unreadable.
+  const accepted = refusedPickup(2);
+  const odd = {
+    ...accepted,
+    batches: accepted.batches.map((batch) => ({ ...batch, acceptanceStatus: "Accepted" })),
+  };
+  expect(
+    parseCurrentOrderQueue({ items: [row(3), odd], nextAfterOrderReference: null }).unreadable,
+  ).toHaveLength(1);
+});
+it("v15 a2458cff: one row it can't read is named and left out; the rest stay", () => {
+  const broken = { ...row(2), orderNumber: "42", currentPhase: 7 };
+  const queue = parseCurrentOrderQueue({
+    items: [row(3), broken, row(1)],
+    nextAfterOrderReference: null,
+  });
+  expect(queue.items.map((item) => item.orderReference)).toEqual([id(3), id(1)]);
+  expect(queue.unreadable).toEqual([{ orderNumber: "42", orderType: "Pickup", phase: null }]);
+  // Fail closed where nothing can be relied on: nothing readable, a row with no reference.
+  expect(() =>
+    parseCurrentOrderQueue({ items: [broken], nextAfterOrderReference: null }),
+  ).toThrow();
+  expect(() =>
+    parseCurrentOrderQueue({
+      items: [row(3), { ...broken, orderReference: "nope" }],
+      nextAfterOrderReference: null,
+    }),
+  ).toThrow();
+  // A full page with one unreadable row still continues to the next page.
+  const items = Array.from({ length: 50 }, (_, i) =>
+    i === 49 ? { ...row(11), currentPhase: 7 } : row(60 - i),
+  );
+  const paged = parseCurrentOrderQueue({ items, nextAfterOrderReference: id(11) });
+  expect(paged.items).toHaveLength(49);
+  expect(paged.nextAfterOrderReference).toBe(id(11));
+});

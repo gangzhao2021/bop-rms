@@ -49,6 +49,7 @@ test("@production the cancel dialog says what is refunded and the detail follows
   let refunded = "1424";
   let kitchenPhase: "Ready" | null = null;
   let waiting = false;
+  let refusedAlready = false;
   const order = (detail: boolean) => ({
     orderReference: id(21),
     orderNumber: "21",
@@ -61,16 +62,25 @@ test("@production the cancel dialog says what is refunded and the detail follows
       {
         orderBatchReference: id(91),
         sequence: 1,
-        acceptanceStatus: waiting ? "NotAccepted" : "Accepted",
+        acceptanceStatus: waiting || refusedAlready ? "NotAccepted" : "Accepted",
         canRequestAcceptance: waiting,
-        canCancel: kitchenPhase === null,
-        staffCancellation: null,
+        canCancel: !refusedAlready && kitchenPhase === null,
+        // The shape the server answers for a refused pickup (v15 a2458cff).
+        staffCancellation: refusedAlready
+          ? {
+              reasonCode: "SOLD_OUT",
+              cancelledAt: "2026-10-18T15:00:30.000Z",
+              refundStatus: "Pending",
+              refundMethod: "Online",
+              refundAmountMinor: null,
+            }
+          : null,
         canCancelItems: false,
       },
     ],
     canRequestAcceptance: waiting,
-    currentPhase: waiting ? "Submitted" : "Accepted",
-    currentVersion: waiting ? 1 : 3,
+    currentPhase: refusedAlready ? "Rejected" : waiting ? "Submitted" : "Accepted",
+    currentVersion: refusedAlready ? 2 : waiting ? 1 : 3,
     unfulfillable: null,
     pickupNotCollected: false,
     acceptBy: null,
@@ -78,7 +88,17 @@ test("@production the cancel dialog says what is refunded and the detail follows
     paidOnline: money("1424"),
     ...(detail ? { kitchenPhase } : {}),
   });
-  const listed = () => ({ items: [order(false)], nextAfterOrderReference: null });
+  // v15 a2458cff: a row this page can't read (a phase it has never heard of on another order).
+  let unreadableRow = false;
+  const listed = () => ({
+    items: [
+      order(false),
+      ...(unreadableRow
+        ? [{ ...order(false), orderReference: id(20), orderNumber: "20", currentPhase: 7 }]
+        : []),
+    ],
+    nextAfterOrderReference: null,
+  });
   await page.route("**/merchant/orders?*", (route) => route.fulfill({ headers, json: listed() }));
   await page.route("**/merchant/orders", (route) => route.fulfill({ headers, json: listed() }));
   await page.route("**/merchant/orders/detail?*", (route) =>
@@ -210,4 +230,32 @@ test("@production the cancel dialog says what is refunded and the detail follows
   await expect(refuse.getByRole("button", { name: "Refuse and refund" })).toBeVisible();
   await expectNoInternalText(page);
   await refuse.getByRole("button", { name: "Keep order" }).click();
+
+  // After refusing: the Orders list and the order's own page load, and say it was refused. One
+  // refused order must never cost staff the rest of their orders (v15 a2458cff).
+  waiting = false;
+  refusedAlready = true;
+  await page.reload();
+  await expect(page.getByText("Refused by store", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText("Orders unavailable")).toHaveCount(0);
+  await page.goto("/operations/orders");
+  const row = page.locator(".order-workbench-phase").first();
+  await expect(row).toHaveText("Rejected");
+  await expect(row).toHaveAttribute("data-phase", "Rejected");
+  await expect(page.getByText("Orders unavailable")).toHaveCount(0);
+  await expectNoInternalText(page);
+
+  // A row the page can't read is named and reported; the other orders stay.
+  const reports: unknown[] = [];
+  await page.route("**/merchant/orders/unreadable-report", (route) => {
+    reports.push(route.request().postDataJSON());
+    return route.fulfill({ status: 204 });
+  });
+  unreadableRow = true;
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("Order 20 can't be shown here right now");
+  await expect(page.locator(".order-workbench-phase").first()).toHaveText("Rejected");
+  await expect.poll(() => reports.length).toBe(1);
+  expect(reports).toEqual([{ count: 1, kinds: ["Pickup"] }]);
+  await expectNoInternalText(page);
 });

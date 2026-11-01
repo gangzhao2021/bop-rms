@@ -45,6 +45,13 @@ import { createRoundCancellationRefundSource } from "../../../apps/api/src/merch
 import { withoutCardMachinePayments } from "../../../tooling/environment/pilot-compensation-candidates.mjs";
 import { createInternalCompensationIdentity } from "../../../tooling/environment/pilot-compensation-identity.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
+import {
+  parseCurrentOrderDetail,
+  parseCurrentOrderQueue,
+} from "../../../apps/merchant-web/src/current-order-queue-client.ts";
+import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import { seedStaffItemCancellationQuote } from "../test-support/staff-item-cancellation-pricing.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { ensureSyntheticStockPlace } from "../test-support/stock-place.mjs";
 
@@ -68,6 +75,9 @@ vi.mock("../../../apps/api/src/merchant-store-scope.ts", () => ({
       context: { brand: { brandReference: merchant.brand }, resolvedAt: new Date().toISOString() },
       store: { storeReference: merchant.store },
       allowed: async () => merchant.allowed(),
+      // The Orders page's read: this manager may do everything it offers.
+      authorizeActions: async (actions) =>
+        new Map(actions.map((value) => [value, { effect: "Allow" }])),
     };
   },
 }));
@@ -465,6 +475,8 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           shift = 0,
           // Per Batch index: per-line reservation quantities on the one stock account.
           lineParts = {},
+          // Real Pricing quote and line snapshots, for the Orders page's read of this Order.
+          realSnapshots = false,
         },
       ) {
         const time = (offset) => baseTime(offset + shift);
@@ -480,7 +492,7 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             "(order_id,brand_id,store_id,business_date,sequence,order_number,allocated_at," +
             "business_date_configuration_id,business_date_configuration_version,business_date_content_digest," +
             "time_zone,business_day_start,business_date_boundary_at,boundary_disambiguation) " +
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto','00:00',$7,'Exact')",
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,'America/Toronto','00:00',$4::date::timestamp AT TIME ZONE 'America/Toronto','Exact')",
           [
             order.order,
             brand,
@@ -579,9 +591,53 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
               submittedAt,
             ],
           );
-          for (const [j, orderItem] of refs.items.entries())
+          const real = realSnapshots
+            ? await seedStaffItemCancellationQuote({
+                runner: {
+                  run: async (work) => {
+                    await admin.query("BEGIN");
+                    try {
+                      await admin.query(
+                        "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+                        [tenant, brand, store],
+                      );
+                      const value = await work({
+                        query: (sql, values) =>
+                          admin.query(sql, values === undefined ? [] : [...values]),
+                      });
+                      await admin.query("COMMIT");
+                      return value;
+                    } catch (error) {
+                      await admin.query("ROLLBACK");
+                      throw error;
+                    }
+                  },
+                },
+                scope: { brandReference: brand, storeReference: store },
+                orderBatchReference: refs.batch,
+                quoteReference: refs.quote,
+                cartReference: refs.cart,
+                cartVersion: 1,
+                inputDigest: hash(["quote-input", b]),
+                quotedAt: new Date(Date.parse(submittedAt) - minutes(2)).toISOString(),
+                capturedAt: submittedAt,
+                addedAt: new Date(Date.parse(submittedAt) - minutes(5)).toISOString(),
+                actorReference: order.guest,
+                nextReference: fresh,
+                lines: refs.items.map((orderItemReference, j) => ({
+                  cartLineReference: id(b + 40 + j),
+                  orderItemReference,
+                  sellableReference: id(b + 300 + j),
+                  priceEntryReference: id(b + 320 + j),
+                  unitAmountMinor: 500,
+                  quantity: Number(quantity),
+                })),
+              })
+            : null;
+          for (const [j, orderItem] of refs.items.entries()) {
+            const line = real === null ? null : JSON.parse(real.snapshots[j]);
             await admin.query(
-              "INSERT INTO rms_ordering.order_item (order_item_id,brand_id,store_id,order_id,order_batch_id,source_cart_line_id,quantity,catalog_snapshot_digest,quote_input_digest,transaction_snapshot_json,snapshot_captured_at) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10)",
+              "INSERT INTO rms_ordering.order_item (order_item_id,brand_id,store_id,order_id,order_batch_id,source_cart_line_id,quantity,catalog_snapshot_digest,quote_input_digest,transaction_snapshot_json,snapshot_captured_at,ordinal) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11)",
               [
                 orderItem,
                 brand,
@@ -589,12 +645,14 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
                 order.order,
                 refs.batch,
                 id(b + 40 + j),
-                hash(["catalog", b, j]),
-                hash(["quote", b, j]),
-                { catalog: { synthetic: true }, pricing: { synthetic: true } },
-                submittedAt,
+                line?.catalog.snapshotDigest ?? hash(["catalog", b, j]),
+                line?.pricing.quoteInputDigest ?? hash(["quote", b, j]),
+                line ?? { catalog: { synthetic: true }, pricing: { synthetic: true } },
+                line?.snapshotCapturedAt ?? submittedAt,
+                j + 1,
               ],
             );
+          }
           if (k === 0)
             await admin.query(
               "INSERT INTO rms_ordering.order_revision (revision_id,brand_id,store_id,order_id,kind,version,expected_version,previous_revision_id,initial_submission_id,occurred_at) VALUES ($1,$2,$3,$4,'Initial',1,0,NULL,$1,$5)",
@@ -1175,7 +1233,12 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           id(9904),
         ],
       );
-      const waitingPickup = await seedOrder(11000, { batches: [1], quantity: "1", awaiting: true });
+      const waitingPickup = await seedOrder(11000, {
+        batches: [1],
+        quantity: "1",
+        awaiting: true,
+        realSnapshots: true,
+      });
       // v15 DEMO-02 round 16: an accepted round paid on the card machine, refunded there in full.
       const acceptedCard = await seedOrder(13000, {
         type: "DineIn",
@@ -2377,6 +2440,65 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             candidate.paymentIntentReference === waitingPickup.batches[0].intent,
         ),
       );
+      // v15 2026-11-01 (a2458cff): after one refusal the whole Orders page read "Orders unavailable".
+      // The real queue read, as the restricted role, as the page's own parser reads it.
+      const reader = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions({ guc: false }),
+        scope: { tenantReference: tenant, brandReference: brand, storeReference: store },
+        actor: id(99001),
+        at: new Date().toISOString(),
+        extraPermissions: ["ordering.order.cancel"],
+        referencePrefix: "01a7e100",
+        sessionReferencePrefix: "01a7e101",
+      });
+      const queued = JSON.parse(
+        JSON.stringify(
+          await createPersistentMerchantOrderQueue({
+            persistence: {
+              ...reader.persistence,
+              transactions: transactions({ guc: false }),
+              now: () => new Date(Math.floor(Date.now())).toISOString(),
+            },
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({
+            sessionCookie: reader.sessionCookie,
+            afterOrderReference: null,
+            orderReference: waitingPickup.order,
+          }),
+        ),
+      );
+      // The list (this one Order; the others here are synthetic rows Ordering's reader won't read)
+      // and its details page, as the routes answer them.
+      // (The routes send a row without its internal `earlierDay` mark.)
+      const queuedRow = { ...queued.items[0] };
+      delete queuedRow.earlierDay;
+      const queue = parseCurrentOrderQueue({
+        items: [queuedRow],
+        nextAfterOrderReference: null,
+      });
+      const detail = parseCurrentOrderDetail(
+        {
+          screenId: "OPS-ORDER-DETAIL",
+          order: queuedRow,
+          lines: queued.lines,
+          pickupContact: queued.pickupContact,
+          ...(queued.paymentPosition === undefined
+            ? {}
+            : { paymentPosition: queued.paymentPosition }),
+        },
+        waitingPickup.order,
+      );
+      assert.equal(detail.view.items[0].currentPhase, "Rejected");
+      assert.deepEqual(queue.unreadable, []);
+      const refusedRow = queue.items.find((item) => item.orderReference === waitingPickup.order);
+      assert.ok(refusedRow, "the refused order is listed");
+      assert.equal(refusedRow.currentPhase, "Rejected");
+      assert.equal(refusedRow.batches[0].acceptanceStatus, "NotAccepted");
+      assert.equal(refusedRow.batches[0].canRequestAcceptance, false);
+      assert.equal(refusedRow.batches[0].canCancel, false);
+      assert.equal(refusedRow.batches[0].staffCancellation.reasonCode, "SOLD_OUT");
       // Its stock returned, its waiting payment is settled, it can't be refused twice.
       assert.notDeepEqual(await stock(), stockBeforeRefusal);
       await assert.rejects(cancel(waitingPickup, 0, { reasonCode: "SOLD_OUT" }));

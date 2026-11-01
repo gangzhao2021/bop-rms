@@ -1432,6 +1432,14 @@ export async function createInternalMerchant(
       reconciliationFollowUpQuery,
       orderExceptions,
       settlement,
+      // v15 2026-11-01: the Orders page couldn't read some Orders (kinds only, never which).
+      onOrderQueueRowsUnreadable: (count, kinds) => {
+        for (const step of kinds.length === 0 ? ["Unknown"] : kinds)
+          reportUnexpected("ORDER_QUEUE_ROW_UNREADABLE", new Error("ORDER_QUEUE_ROW_UNREADABLE"), {
+            step: step === "" ? "Unknown" : step,
+          });
+        void count;
+      },
       ...(operationsAlerts === undefined ? {} : { operationsAlerts }),
       storeReports,
       compensationReconciliation,

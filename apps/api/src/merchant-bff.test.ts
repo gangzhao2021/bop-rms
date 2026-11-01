@@ -2974,6 +2974,51 @@ it("WP-2423 Q6: protects staff cancellation transport and maps owner refusals to
   ).toBe(503);
 });
 
+it("v15 a2458cff: the Orders page reports rows it left out to the operator's log, signed-in only", async () => {
+  const reported = vi.fn();
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+      onOrderQueueRowsUnreadable: reported,
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address() as { port: number };
+  const root = "http://127.0.0.1:" + port;
+  const headers = {
+    ...safeHeaders,
+    Cookie: "__Host-bop-merchant=" + sessionCookie,
+    "X-BOP-CSRF": csrf,
+    "Content-Type": "application/json",
+  };
+  const send = (body: unknown, extra: Record<string, string> = {}) =>
+    request(root, "/merchant/orders/unreadable-report", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { ...headers, ...extra },
+    });
+  expect((await send({ count: 1, kinds: ["PickupRejected"] })).status).toBe(204);
+  expect(reported).toHaveBeenCalledExactlyOnceWith(1, ["PickupRejected"]);
+  // Only kinds and a count; no references; no sign-in, no log line.
+  for (const body of [
+    { count: 0, kinds: [] },
+    { count: 1, kinds: ["0190fa01-0000-7000-8000-000000000001"] },
+    { count: 1 },
+  ])
+    expect((await send(body)).status).toBe(403);
+  expect((await send({ count: 1, kinds: [] }, { Cookie: "" })).status).toBe(403);
+  expect((await send({ count: 1, kinds: [] }, { Origin: "https://foreign.invalid" })).status).toBe(
+    403,
+  );
+  expect(reported).toHaveBeenCalledTimes(1);
+});
+
 it("WP-2423 v15 2026-10-18: the cancel preview route returns only the refund it reads", async () => {
   const result = {
     orderReference: "0190fa01-0000-7000-8000-000000000001",

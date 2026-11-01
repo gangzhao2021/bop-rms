@@ -675,6 +675,8 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 Q21: the selected Store's current business day (date, start, end). */
   readonly businessDay?: ReturnType<typeof createMerchantServiceControl>["businessDay"];
   readonly orderExceptions?: ReturnType<typeof createMerchantOrderExceptionRead>;
+  /** v15 2026-11-01: the Orders page left out Orders it couldn't read (for the operator's log). */
+  readonly onOrderQueueRowsUnreadable?: (count: number, kinds: readonly string[]) => void;
   /** WP-2423 P1: the day-end settlement view for one business day. */
   readonly settlement?: ReturnType<typeof createMerchantSettlementRead>;
   /** WP-2423 Q13: the installation's operations alerts for the Home (Owner and Store Manager). */

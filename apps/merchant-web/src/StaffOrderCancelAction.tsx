@@ -118,7 +118,9 @@ export function staffCancellationSummary(order: Order, batch: Batch) {
   const machine = batch.staffCancellation.refundMethod === "CardMachine";
   return (
     (order.orderType === "Pickup"
-      ? t("Cancelled by store")
+      ? order.currentPhase === "Rejected"
+        ? t("Refused by store")
+        : t("Cancelled by store")
       : t("Round {sequence} cancelled", { sequence: batch.sequence })) +
     (batch.staffCancellation.refundStatus === "Refunded"
       ? machine

@@ -787,6 +787,39 @@ export function installMerchantOrderRoutes(
     )[error.code];
     response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
   };
+  // v15 2026-11-01: the Orders page left out Orders it couldn't read: a code in the operator's log
+  // (how many, and their type and phase; never which). Only a signed-in staff page can say so.
+  router.post("/orders/unreadable-report", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    const body = request.body as { count?: unknown; kinds?: unknown } | null;
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0 ||
+      body === null ||
+      typeof body !== "object" ||
+      !Number.isSafeInteger(body.count) ||
+      (body.count as number) < 1 ||
+      (body.count as number) > 100 ||
+      !Array.isArray(body.kinds) ||
+      body.kinds.length > 20 ||
+      body.kinds.some((kind) => typeof kind !== "string" || !/^[A-Za-z]{0,40}$/u.test(kind))
+    ) {
+      denied(response);
+      return;
+    }
+    void options.service
+      .authorize({ sessionCookie, csrf })
+      .then(() => {
+        options.onOrderQueueRowsUnreadable?.(body.count as number, body.kinds as readonly string[]);
+        response.status(204).set("Cache-Control", NO_STORE).end();
+      })
+      .catch(() => {
+        denied(response);
+      });
+  });
   // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it; refunded in full.
   router.post("/orders/cancel", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
