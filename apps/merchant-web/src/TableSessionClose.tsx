@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
@@ -458,7 +458,7 @@ export function TableSessionClose({
               ? t("Closing the table…")
               : outcome === "Unknown"
                 ? t("Try closing again")
-                : t("Close table {stableLabel}", { stableLabel: table.stableLabel })}
+                : t("Close table {stableLabel}", { stableLabel: saidTable(table.stableLabel) })}
           </button>
         </>
       )}

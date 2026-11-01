@@ -24,13 +24,26 @@ function fill(text: string, values: Readonly<Record<string, string | number>> | 
   );
 }
 
+// v15 2026-11-01: as on the staff screens, a table the owner named is said as they wrote it.
+const NAME_OPEN = "\uE000",
+  NAME_CLOSE = "\uE001";
+const namedTable = new RegExp(
+  `(?:[Tt]able |桌号 ?)?${NAME_OPEN}([^${NAME_CLOSE}]*)${NAME_CLOSE}(?: ?桌)?`,
+  "gu",
+);
+/** "Table 12", "table A1": the word only with a number or code; "Patio 3" as written. */
+export function saidTable(label: string): string {
+  return /^[A-Za-z0-9-]*[0-9][A-Za-z0-9-]*$/u.test(label) ? label : NAME_OPEN + label + NAME_CLOSE;
+}
+const said = (text: string) => (text.includes(NAME_OPEN) ? text.replace(namedTable, "$1") : text);
+
 /** The customer's wording of an English text, in the chosen language. */
 export function t(text: string, values?: Readonly<Record<string, string | number>>): string {
   if (current === "zh-Hans") {
     const translated = zhHans[text];
-    if (translated !== undefined) return fill(translated, values);
+    if (translated !== undefined) return said(fill(translated, values));
   }
-  return fill(text, values);
+  return said(fill(text, values));
 }
 
 export function currentLanguage(): CustomerLanguage {

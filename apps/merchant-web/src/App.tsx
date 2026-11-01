@@ -801,7 +801,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                       <p>
                         {state.kind === "SignedOut"
                           ? t(
-                              "Your sign-in has ended. Sign in again to see the stores you work in.",
+                              "This sign-in can't open your stores. Sign in again; if it keeps happening, ask the store's owner to check your access.",
                             )
                           : state.kind === "Offline"
                             ? t(

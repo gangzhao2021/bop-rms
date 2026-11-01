@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
@@ -207,7 +207,7 @@ export function TableSplitControls({
                     : t("phone {number}", { number: String(round.orderedBy) })}{" "}
                   {round.fromTableLabel === null
                     ? null
-                    : t("· from table {table}", { table: round.fromTableLabel }) + " "}
+                    : t("· from table {table}", { table: saidTable(round.fromTableLabel) }) + " "}
                   · {cad(round.totalMinor)}
                 </span>
                 <label>

@@ -103,7 +103,7 @@ export function tableNeed(
       step: null,
     };
   }
-  // WP-2423 item 8 ⑤ decision 3: a phone joined the table in the last 10 minutes.
+  // WP-2423 item 8 ⑤ decision 3: a phone joined the table in the last 3 minutes.
   const joined = [...(table.newPhones ?? [])].sort((a, b) =>
     b.joinedAt.localeCompare(a.joinedAt),
   )[0];

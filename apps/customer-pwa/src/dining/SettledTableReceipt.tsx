@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { t } from "../i18n/i18n.js";
+import { t, saidTable } from "../i18n/i18n.js";
 import { formatMoney } from "../journey/format.js";
 import { getSettledTableReceiptCsrf } from "../session/customer-transaction-context.js";
 
@@ -173,7 +173,7 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
             {t("Round {round}", { round: String(round.roundNumber) })}
             {round.fromTableLabel === null
               ? null
-              : ` · ${t("From table {table}", { table: round.fromTableLabel })}`}
+              : ` · ${t("From table {table}", { table: saidTable(round.fromTableLabel) })}`}
           </h3>
           <dl className="order-status__money">
             {round.items.map((item, index) => (

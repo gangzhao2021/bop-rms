@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -535,7 +535,9 @@ export function StaffOrderEntryPage({
         placeErrorText(
           failure,
           lines,
-          tableLabel === null ? null : t("Table {tableLabel}", { tableLabel: tableLabel }),
+          tableLabel === null
+            ? null
+            : t("Table {tableLabel}", { tableLabel: saidTable(tableLabel) }),
           tableQrHref !== undefined,
         ),
       );
@@ -618,7 +620,7 @@ export function StaffOrderEntryPage({
   const pageTitle = tableMode
     ? tableLabel === null
       ? t("Table order")
-      : t("Table {tableLabel} order", { tableLabel: tableLabel })
+      : t("Table {tableLabel} order", { tableLabel: saidTable(tableLabel) })
     : t("Counter order");
   if (menu.kind === "Loading")
     return (
@@ -1173,7 +1175,7 @@ export function StaffOrderEntryPage({
           >
             <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
               {t("Table {value} round sent to the kitchen", {
-                value: placed.tableLabel ?? tableLabel ?? "",
+                value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
               })}
             </h2>
             <dl>
@@ -1210,7 +1212,9 @@ export function StaffOrderEntryPage({
             <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
               {phase === "Paid" || phase === "Accepted"
                 ? tableMode
-                  ? t("Table {value} order paid", { value: placed.tableLabel ?? tableLabel ?? "" })
+                  ? t("Table {value} order paid", {
+                      value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
+                    })
                   : t("Order {orderNumber} paid", { orderNumber: placed.orderNumber })
                 : t("Charge {totalMinor} on the card machine", {
                     totalMinor: cad(placed.totalMinor),

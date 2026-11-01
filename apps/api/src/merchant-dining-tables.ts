@@ -42,7 +42,7 @@ const tablePageActions = Object.freeze([
 ]);
 
 /** WP-2423 item 8 ⑤ decision 3: a phone that joined in the last 10 minutes is pointed out. */
-const newPhoneMinutes = 10;
+const newPhoneMinutes = 3;
 
 export function createMerchantDiningTables(options: {
   persistence: PersistentMerchantBffOptions;

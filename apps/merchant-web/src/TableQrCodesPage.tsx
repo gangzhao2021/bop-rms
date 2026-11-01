@@ -1,4 +1,4 @@
-import { displayLocale, t } from "./i18n/i18n.js";
+import { displayLocale, t, saidTable } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -221,15 +221,15 @@ export function TableQrCodesPage({
           pending.action === "TurnOff"
             ? t(
                 "The code for table {stableLabel} is turned off. Guests who scan it are asked to see a staff member.",
-                { stableLabel: row.stableLabel },
+                { stableLabel: saidTable(row.stableLabel) },
               )
             : replaced
               ? t(
                   "Table {stableLabel} has a new code. The old code no longer works. Print the new one now.",
-                  { stableLabel: row.stableLabel },
+                  { stableLabel: saidTable(row.stableLabel) },
                 )
               : t("Table {stableLabel} has a code. Print it now.", {
-                  stableLabel: row.stableLabel,
+                  stableLabel: saidTable(row.stableLabel),
                 }),
       });
     } catch (error) {
@@ -474,14 +474,14 @@ export function TableQrCodesPage({
       <h2 id="table-qr-confirm-title">
         {pending.action === "TurnOff"
           ? t("Turn off the code for table {stableLabel}?", {
-              stableLabel: pending.table.stableLabel,
+              stableLabel: saidTable(pending.table.stableLabel),
             })
           : pending.table.codeState === "Active"
             ? t("Replace the code for table {stableLabel}?", {
-                stableLabel: pending.table.stableLabel,
+                stableLabel: saidTable(pending.table.stableLabel),
               })
             : t("Create a code for table {stableLabel}?", {
-                stableLabel: pending.table.stableLabel,
+                stableLabel: saidTable(pending.table.stableLabel),
               })}
       </h2>
       <p>

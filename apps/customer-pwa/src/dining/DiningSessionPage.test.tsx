@@ -300,7 +300,7 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
       "Round 1",
       "Milk tea",
       "Tea · On the house",
-      "Round 2 · From table T-M",
+      "Round 2 · From T-M",
       "Ramen · Discounted",
       "Subtotal before tax",
       "$16.50",

@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createTableClosePlanClient,
@@ -390,7 +390,9 @@ export function TableGuestsLeft({
                 disabled={run === "Running" || locked}
                 onChange={(event) => setConfirmed(event.target.checked)}
               />
-              {t("The guests at table {tableLabel} have left", { tableLabel: tableLabel })}
+              {t("The guests at table {tableLabel} have left", {
+                tableLabel: saidTable(tableLabel),
+              })}
             </label>
           )}
           <button
