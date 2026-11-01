@@ -651,6 +651,7 @@ export function installMerchantCommerceRoutes(
     OptionPriceMissing: 409,
     TaxNotCovered: 409,
     OptionRecipeMissing: 409,
+    KitchenNotReady: 409,
     ApprovalRequired: 403,
     Lifecycle: 409,
     Invalid: 400,

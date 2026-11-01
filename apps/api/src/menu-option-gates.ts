@@ -12,7 +12,13 @@ import {
   listStoreTaxClassifications,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
-import { optionRecipeCovered, skusWithRecipe, type RecipeAuthoringTransaction } from "@rms/recipe";
+import { readStoreKitchenLine } from "@rms/kitchen";
+import {
+  listRecipeKitchenCapabilities,
+  optionRecipeCovered,
+  skusWithRecipe,
+  type RecipeAuthoringTransaction,
+} from "@rms/recipe";
 
 /** The pricing channel customer Quotes use (customer-menu-store-facts, pilot Quote). */
 const quoteChannel = "CUSTOMER_WEB";
@@ -204,9 +210,13 @@ export async function menuItemsWithoutTax(
 /** A listing gap at one of the menu's Stores (references only; the merchant API names them). */
 export interface MenuListingGap {
   readonly storeReference: string;
-  readonly skuReference: string;
-  /** Tax: not taxed there; Recipe: no recipe there; OptionRecipe: an option's change is not published. */
-  readonly missing: "Tax" | "Recipe" | "OptionRecipe";
+  readonly skuReference: string | null;
+  /**
+   * Tax: not taxed there; Recipe: no recipe there; OptionRecipe: an option's change is not published;
+   * Kitchen (WP-2423 item 11): the Store's kitchen is not set up (skuReference is null); KitchenDish:
+   * the Store's kitchen line lacks what this dish's recipe needs, so its orders would not reach it.
+   */
+  readonly missing: "Tax" | "Recipe" | "OptionRecipe" | "Kitchen" | "KitchenDish";
   readonly optionReference: string | null;
 }
 /**
@@ -239,6 +249,27 @@ export async function menuListingGaps(
   const gaps: MenuListingGap[] = [];
   for (const storeReference of stores) {
     const owner = { brandReference: input.owner.brandReference, storeReference };
+    // WP-2423 item 11: no order can reach this Store's kitchen until its routing is in effect.
+    const kitchenTx = tx as unknown as Parameters<typeof readStoreKitchenLine>[0];
+    const line = await readStoreKitchenLine(kitchenTx, owner);
+    if (line.version === 0)
+      gaps.push({ storeReference, skuReference: null, missing: "Kitchen", optionReference: null });
+    else
+      for (const [skuReference, capabilities] of await listRecipeKitchenCapabilities(
+        tx as never,
+        owner,
+        input.observedAt,
+      ))
+        if (
+          placed.includes(skuReference) &&
+          capabilities.some((capability) => !line.capabilityReferences.includes(capability))
+        )
+          gaps.push({
+            storeReference,
+            skuReference,
+            missing: "KitchenDish",
+            optionReference: null,
+          });
     for (const skuReference of await menuItemsWithoutTax(tx, { ...input, owner }))
       gaps.push({ storeReference, skuReference, missing: "Tax", optionReference: null });
     const withRecipe = await skusWithRecipe(

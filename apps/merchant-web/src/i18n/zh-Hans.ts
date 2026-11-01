@@ -6685,4 +6685,41 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Change this Store's prices": "改本店价格",
   "No stock has been received at this store yet. Record its first delivery and guests can order it.":
     "本店还没有收过货。记下第一次到货后，顾客就能点这道菜。",
+  "Kitchen setup is unavailable": "厨房设置暂时不可用",
+  "Kitchen setup is unavailable. Nothing was changed.": "厨房设置暂时不可用，没有做任何更改。",
+  "Loading the kitchen…": "正在加载厨房…",
+  "Guests can't order at this Store until its kitchen is set up: an order here would be paid and never reach a kitchen.":
+    "本店厨房设置好之前，顾客无法下单：否则订单付了款，却到不了厨房。",
+  "One kitchen line takes every dish and shows them on this Store's Kitchen screen. You can divide dishes by kitchen section afterwards.":
+    "一条厨房线接收所有菜品，并显示在本店的后厨屏上。之后可以按档口分菜。",
+  "Set up one kitchen line for all dishes": "设置一条接收所有菜品的厨房线",
+  "The kitchen is set up. New orders go to it from now on.":
+    "厨房已设置好。从现在起新订单都会进厨房。",
+  "Ask the Owner or Store Manager to set this up.": "请店主或店长来设置。",
+  "Ask the Owner or Store Manager to fix this.": "请店主或店长来处理。",
+  "One kitchen line takes this Store's dishes, since": "一条厨房线接收本店菜品，开始于",
+  "Every dish with a recipe can reach the kitchen.": "所有有配方的菜品都能进厨房。",
+  "These dishes can't reach the kitchen: their recipes need something this kitchen isn't set up for. An order for one would be paid and not reach the kitchen.":
+    "这些菜进不了厨房：配方需要的条件这个厨房没有设置。点这些菜的订单付了款也到不了厨房。",
+  "Let the kitchen take these dishes": "让厨房接收这些菜",
+  "The kitchen now takes these dishes, for orders from now on.":
+    "厨房现在接收这些菜，从现在起的订单生效。",
+  "A change applies to orders confirmed from now on. Orders already confirmed keep what they got.":
+    "更改只对从现在起确认的订单生效。已确认的订单不受影响。",
+  "If a paid order doesn't appear on the Kitchen screen during service: make it from the Orders page, or cancel and refund it there. Then fix the dish here.":
+    "营业中如果已付款的订单没有出现在后厨屏上：照订单页制作，或在订单页取消并退款。然后回到这里修好这道菜。",
+  "Someone else changed this kitchen just now. Here is what it is now.":
+    "刚才有人改了这个厨房，下面是最新情况。",
+  "You can't change this kitchen. Ask the Owner or Store Manager.":
+    "你不能更改这个厨房，请找店主或店长。",
+  "We couldn't confirm that went through. Check your connection and try again.":
+    "无法确认是否成功。请检查网络后重试。",
+  "Set up the kitchen": "去设置厨房",
+  "one of this menu's Stores": "这份菜单的某家门店",
+  "A Store this menu serves can't send its orders to a kitchen yet. Set up its kitchen in Store setup, then list this menu again.":
+    "这份菜单覆盖的某家门店还不能把订单送进厨房。请在门店设置里设置好厨房，再上架这份菜单。",
+  "The kitchen at {store} is not set up, so its orders could not reach a kitchen and guests can't order there yet. Set it up in that Store's Store setup, then list this menu again.":
+    "{store} 的厨房还没设置，订单到不了厨房，顾客暂时不能在那里下单。请在该店的门店设置里设置好，再上架这份菜单。",
+  "{item} can't go to the kitchen at {store}: its recipe needs something that kitchen isn't set up for. Fix it under Kitchen in that Store's Store setup, then list this menu again.":
+    "{item} 进不了 {store} 的厨房：配方需要的条件那个厨房没有设置。请到该店门店设置的“厨房”里修好，再上架这份菜单。",
 });

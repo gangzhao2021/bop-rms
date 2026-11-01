@@ -1,7 +1,8 @@
 import {
-  createPostgresPublishedStoreOperatingStatusReader,
+  type createPostgresPublishedStoreOperatingStatusReader,
   parseGetPublicStoreRequest,
 } from "@rms/store";
+import { createKitchenGatedOperatingStatusReader } from "./store-kitchen-open-gate.js";
 import { createConfiguredPublicStoreResolution } from "./public-store-resolution.js";
 import type { CustomerEntryOperatingReader } from "./customer-entry-composition.js";
 import { guestServiceModes } from "./merchant-store-features.js";
@@ -26,7 +27,7 @@ export function createPersistentEntryOperatingReader(options: {
     ...options.publicStore,
     transaction: options.transaction,
   });
-  const read = createPostgresPublishedStoreOperatingStatusReader(options.operating);
+  const read = createKitchenGatedOperatingStatusReader(options.operating);
   return Object.freeze({
     async readCurrent(input: Parameters<CustomerEntryOperatingReader["readCurrent"]>[0]) {
       try {

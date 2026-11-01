@@ -150,6 +150,8 @@ export interface CounterStoreOperatingNow {
   readonly availableServiceModes: readonly string[];
   /** The service the published hours offer now, before any pause. */
   readonly scheduledServiceModes?: readonly string[];
+  /** WP-2423 item 11: no order, not even one recorded after an outage, can reach a kitchen. */
+  readonly kitchenNotSetUp?: boolean;
 }
 
 /**
@@ -161,6 +163,7 @@ export function counterTakesOrder(
   status: CounterStoreOperatingNow,
   input: { readonly recordedAfterOutage: boolean },
 ): boolean {
+  if (status.kitchenNotSetUp === true) return false;
   if (input.recordedAfterOutage) return true;
   if (status.scheduledServiceModes !== undefined)
     return status.scheduledServiceModes.includes("Pickup");

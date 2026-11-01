@@ -358,6 +358,8 @@ export async function exerciseCounterCardMachinePayment({
   );
   if (positive)
     await exerciseCapturedOrderKitchen({
+      // WP-2423 item 11: a paid counter order reaches the kitchen of a Store set up in the product.
+      kitchenRoutingThroughProduct: true,
       admin,
       runner,
       role,

@@ -82,6 +82,8 @@ export class MerchantMenuError extends Error {
       | "OptionPriceMissing"
       | "TaxNotCovered"
       | "OptionRecipeMissing"
+      /** WP-2423 item 11: a Store's kitchen would not receive this menu's orders. */
+      | "KitchenNotReady"
       | "ApprovalRequired"
       | "Lifecycle"
       | "Invalid"
@@ -102,7 +104,9 @@ export class MerchantMenuError extends Error {
 export interface MenuReviewProblem {
   /** "Stopped": nothing was named missing; `reason` says why it stopped (v15 2026-10-29).
    * "Tax": an item is not taxed at one of the menu's Stores (listing gates, 2026-10-31). */
-  readonly missing: MenuReviewGap["missing"] | "Stopped" | "Tax";
+  readonly missing: MenuReviewGap["missing"] | "Stopped" | "Tax" | "Kitchen" | "KitchenDish";
+  /** WP-2423 item 11: the Store whose kitchen setup fixes it. */
+  readonly storeReference?: string;
   readonly reason?: string;
   readonly productName: string | null;
   readonly sizeName: string | null;
@@ -765,7 +769,10 @@ export function createMerchantMenus(options: {
       observedAt: at,
       menu: aggregate.draft,
     });
-    const gap: MenuListingGap | undefined = gaps.find((item) => item.missing === "Tax") ?? gaps[0];
+    const gap: MenuListingGap | undefined =
+      gaps.find((item) => item.missing === "Kitchen") ??
+      gaps.find((item) => item.missing === "Tax") ??
+      gaps[0];
     if (gap === undefined) {
       await brandScope(tx, s.owner.brandReference);
       return;
@@ -791,15 +798,21 @@ export function createMerchantMenus(options: {
         () => null,
       );
     await brandScope(tx, s.owner.brandReference);
-    throw new MerchantMenuError(gap.missing === "Tax" ? "TaxNotCovered" : "OptionRecipeMissing", {
-      missing: gap.missing,
-      productName: sku ? name(sku.productLocalizedNames, sku.skuCode) : null,
-      sizeName: sku ? name(sku.localizedNames, sku.skuCode) : null,
-      optionName: option ? name(option.localizedNames, "") || null : null,
-      quantity: null,
-      ingredientName: null,
-      storeName,
-    });
+    const kitchen = gap.missing === "Kitchen" || gap.missing === "KitchenDish";
+    throw new MerchantMenuError(
+      kitchen ? "KitchenNotReady" : gap.missing === "Tax" ? "TaxNotCovered" : "OptionRecipeMissing",
+      {
+        missing: gap.missing,
+        productName: sku ? name(sku.productLocalizedNames, sku.skuCode) : null,
+        sizeName: sku ? name(sku.localizedNames, sku.skuCode) : null,
+        optionName: option ? name(option.localizedNames, "") || null : null,
+        quantity: null,
+        ingredientName: null,
+        storeName,
+        // WP-2423 item 11: where staff fix it (Store setup at that Store).
+        ...(kitchen ? { storeReference: gap.storeReference } : {}),
+      },
+    );
   };
   const unpricedOptions = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
     const missing = await unpricedMenuOptions(ptx(tx) as never, {

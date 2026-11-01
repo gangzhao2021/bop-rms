@@ -26,6 +26,7 @@ import { DigitalReceiptTemplateError } from "@rms/printing-device";
 import { bindMerchantReceiptTemplateArtifactCommand } from "./merchant-receipt-template-artifact-command.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { MerchantStoreReceiptProfileError } from "./merchant-store-receipt-profile.js";
+import { MerchantKitchenSetupError } from "./merchant-kitchen-setup.js";
 import { MerchantStorePublicProfileError } from "./merchant-store-public-profile.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { MerchantStoreFeaturesError } from "./merchant-store-features.js";
@@ -677,6 +678,71 @@ export function installMerchantStoreSetupRoutes(
         .catch((error) => receiptTemplateArtifactsFailure(response, error));
     },
   );
+
+  // WP-2423 item 11: the Store's kitchen setup, read by staff who open Store setup.
+  router.get("/store/kitchen-setup", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const port = options.kitchenSetup;
+    if (!port) {
+      response.status(503).json({ error: "kitchen_setup_unavailable" });
+      return;
+    }
+    void retryTransactionConflict(() => port.read({ sessionCookie }))
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => {
+        if (error instanceof MerchantKitchenSetupError && error.code === "Denied") {
+          denied(response);
+          return;
+        }
+        response
+          .status(503)
+          .set("Cache-Control", NO_STORE)
+          .set("Retry-After", "5")
+          .json({ error: "kitchen_setup_unavailable" });
+      });
+  });
+  router.post("/store/kitchen-setup", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    const command = options.kitchenSetup;
+    if (!command) {
+      response.status(503).json({ error: "kitchen_setup_unavailable" });
+      return;
+    }
+    void command({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        response.set("Cache-Control", NO_STORE);
+        if (!(error instanceof MerchantKitchenSetupError)) {
+          response.status(503).json({ error: "kitchen_setup_unavailable" });
+          return;
+        }
+        if (error.code === "Denied") response.status(403).json({ error: "kitchen_setup_denied" });
+        else if (error.code === "Changed")
+          response.status(409).json({ error: "kitchen_setup_changed" });
+        else if (error.code === "NoChange") response.status(409).json({ error: "no_change" });
+        else if (error.code === "Invalid") response.status(422).json({ error: "invalid_command" });
+        else response.status(503).json({ error: "kitchen_setup_unavailable" });
+      });
+  });
 
   // WP-2423 Q15/Q16 (DEC-RECEIPT-TAX-AND-PRIVACY): receipt registrations and privacy link.
   router.get("/store/receipt-profile", safeRead(options), (request, response) => {

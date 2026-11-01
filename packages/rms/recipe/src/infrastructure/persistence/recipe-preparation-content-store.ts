@@ -325,3 +325,44 @@ export function createPostgresRecipePreparationContentStore(options: {
     },
   });
 }
+
+/**
+ * v15 2026-11-01 (WP-2423 item 11): for each dish size with a recipe at this Store now, the kitchen
+ * capabilities its published kitchen steps need (its option changes' steps included). The Store's
+ * kitchen line must hold them, or the kitchen can't take an order for it.
+ */
+export async function listRecipeKitchenCapabilities(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  at: string,
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  const { rows } = await tx.query(
+    `SELECT b.sku_id::text sku,array_agg(DISTINCT capability.value #>> '{}') capabilities
+     FROM rms_recipe.recipe_scope_binding b
+     JOIN rms_recipe.recipe_preparation_content c
+       ON c.brand_id=b.brand_id AND c.recipe_id=b.recipe_id AND c.recipe_version_id=b.recipe_version_id
+     CROSS JOIN LATERAL jsonb_path_query(c.record_json,'$.**.capabilityReference') capability(value)
+     WHERE b.brand_id=$1 AND (b.store_id IS NULL OR b.store_id=$3)
+       AND b.effective_from<=$2::timestamptz AND (b.effective_until IS NULL OR b.effective_until>$2::timestamptz)
+       AND c.published_at<=$2::timestamptz
+       AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding_end e
+         WHERE e.recipe_scope_binding_id=b.recipe_scope_binding_id AND e.ended_at<=$2::timestamptz)
+     GROUP BY b.sku_id LIMIT 2000`,
+    [scope.brandReference, at, scope.storeReference],
+  );
+  return new Map(
+    rows.map((row) => [
+      String(row.sku),
+      Object.freeze((row.capabilities as string[]).slice().sort()),
+    ]),
+  );
+}

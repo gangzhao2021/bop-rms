@@ -1,5 +1,6 @@
 import { storeTakesOrder } from "../../../apps/api/src/customer-store-open-gate.ts";
 import { createPersistentEntryOperatingReader } from "../../../apps/api/src/persistent-entry-operating.ts";
+import { seedStoreKitchenInEffect } from "../test-support/kitchen-routing-configuration.mjs";
 import { createPostgresPublishedStoreOperatingStatusReader } from "../../rms/store/src/index.ts";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../../apps/api/src/merchant-ordinary-refund-business-date.ts";
 import { verifyStoreAuthoringRepository } from "../test-support/store-authoring-repository.mjs";
@@ -479,6 +480,13 @@ async function prove(context) {
     await admin.query("GRANT USAGE ON SCHEMA bop_tenant TO " + role);
     await admin.query("GRANT SELECT ON bop_tenant.brand,bop_tenant.store TO " + role);
     await admin.query("GRANT UPDATE(lifecycle) ON bop_tenant.brand,bop_tenant.store TO " + role);
+    await seedStoreKitchenInEffect({
+      admin,
+      role,
+      scope: { brandReference: id(2), storeReference: id(3) },
+      at: "2026-01-01T00:00:00.000Z",
+      id,
+    });
     await readAt("2026-08-16T08:00:00.000Z", async (tx, now) => {
       await tx.query(
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",

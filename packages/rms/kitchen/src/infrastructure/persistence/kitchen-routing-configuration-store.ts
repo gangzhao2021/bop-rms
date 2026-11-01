@@ -239,3 +239,194 @@ export async function listKitchenStationCapabilities(
     }),
   );
 }
+
+/**
+ * v15 2026-11-01 (WP-2423 item 11): whether this Store's kitchen routing is in effect at `at`. The
+ * kitchen routes an order by the routing in effect when it was confirmed and a routing is never
+ * back-dated, so a Store takes no order before this is true. Caller authorizes.
+ */
+export async function storeKitchenRoutingInEffect(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  at: string,
+): Promise<boolean> {
+  const brand = parseKitchenTicketReference(scope.brandReference);
+  const store = parseKitchenTicketReference(scope.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const { rows } = await tx.query(
+    "SELECT 1 FROM rms_kitchen.kitchen_routing_configuration WHERE brand_id=$1 AND store_id=$2 AND effective_from<=$3::timestamptz LIMIT 1",
+    [brand, store, parseKitchenTicketInstant(at)],
+  );
+  return rows.length === 1;
+}
+
+export interface StoreKitchenLine {
+  /** 0: this Store's kitchen has never been set up. */
+  readonly version: number;
+  readonly effectiveFrom: string | null;
+  readonly capabilityReferences: readonly string[];
+}
+/** The Store's one kitchen line as last recorded. Caller authorizes. */
+export async function readStoreKitchenLine(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+): Promise<StoreKitchenLine> {
+  const brand = parseKitchenTicketReference(scope.brandReference);
+  const store = parseKitchenTicketReference(scope.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const row = (
+    await tx.query(
+      "SELECT version_number,record_json->'configuration' AS configuration FROM rms_kitchen.kitchen_routing_configuration WHERE brand_id=$1 AND store_id=$2 ORDER BY version_number DESC LIMIT 1",
+      [brand, store],
+    )
+  ).rows[0] as { version_number: number; configuration: unknown } | undefined;
+  if (row === undefined)
+    return Object.freeze({ version: 0, effectiveFrom: null, capabilityReferences: [] });
+  const configuration = parseKitchenStationRoutingCandidateSetEvidence(row.configuration);
+  return Object.freeze({
+    version: row.version_number,
+    effectiveFrom: configuration.effectiveAt,
+    capabilityReferences: Object.freeze(
+      configuration.candidates.flatMap((candidate) => [...candidate.stationCapabilityReferences]),
+    ),
+  });
+}
+
+/**
+ * v15 2026-11-01 (WP-2423 item 11; Owner 取舍 5, 9: one kitchen screen per Store): records the Store's
+ * one kitchen line, which takes every dish that needs no capability it lacks, in effect from
+ * `recordedAt` (never earlier: orders already confirmed keep the routing they were confirmed under).
+ * The same line is kept when capabilities are added. Through this owner's own store, with its
+ * audit; the same operation again returns what it recorded.
+ */
+export async function recordStoreKitchenLine(
+  tx: ConsumerTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly operationReference: string;
+    readonly auditReference: string;
+    readonly expectedVersion: number;
+    readonly recordedAt: string;
+    readonly capabilityReferences: readonly string[];
+    readonly sha256: (value: string) => string;
+    readonly nextReference: () => string;
+    /** False: a new operation with nothing to change records nothing (NoChange). */
+    readonly onlyIfChanged: boolean;
+    authorize(tx: ConsumerTransaction): Promise<boolean>;
+  },
+): Promise<{
+  readonly status: "Recorded" | "AlreadyRecorded" | "NoChange";
+  readonly version: number;
+}> {
+  const brand = parseKitchenTicketReference(input.brandReference);
+  const store = parseKitchenTicketReference(input.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "KitchenRoutingConfiguration:" + brand + ":" + store,
+  ]);
+  const prior = (
+    await tx.query(
+      "SELECT version_number FROM rms_kitchen.kitchen_routing_configuration WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      [brand, store, parseKitchenTicketReference(input.operationReference)],
+    )
+  ).rows[0] as { version_number: number } | undefined;
+  if (prior !== undefined)
+    return Object.freeze({ status: "AlreadyRecorded", version: prior.version_number });
+  if (!input.onlyIfChanged)
+    return Object.freeze({ status: "NoChange", version: input.expectedVersion });
+  const latest = (
+    await tx.query(
+      "SELECT record_json AS record FROM rms_kitchen.kitchen_routing_configuration WHERE brand_id=$1 AND store_id=$2 ORDER BY version_number DESC LIMIT 1",
+      [brand, store],
+    )
+  ).rows[0] as { record: unknown } | undefined;
+  const previous =
+    latest === undefined
+      ? null
+      : parseKitchenRoutingConfigurationRecord(latest.record, input.sha256);
+  const line = previous?.configuration.candidates[0];
+  const capabilities = [...new Set(input.capabilityReferences)].sort();
+  const stationChanged =
+    line !== undefined &&
+    JSON.stringify([...line.stationCapabilityReferences].sort()) !== JSON.stringify(capabilities);
+  const version = (previous?.configuration.evidenceVersion ?? 0) + 1;
+  const record = {
+    operationReference: input.operationReference,
+    actorReference: input.actorReference,
+    purposeCode: "StoreKitchenSetup",
+    permissionCode: "organization.store.update",
+    reasonCode: "STORE_KITCHEN_SETUP",
+    recordedAt: input.recordedAt,
+    expectedVersion: input.expectedVersion,
+    configuration: rebindKitchenRoutingEvidence(
+      {
+        brandReference: brand,
+        storeReference: store,
+        evidenceReference: input.nextReference(),
+        evidenceVersion: version,
+        effectiveAt: input.recordedAt,
+        evidenceDigest: input.sha256("placeholder"),
+        candidates: [
+          {
+            stationReference: line?.stationReference ?? input.nextReference(),
+            stationVersion:
+              (line?.stationVersion ?? 0) + (line === undefined || stationChanged ? 1 : 0),
+            stationStatus: "Active",
+            stationCapabilityReferences: capabilities,
+            routingRuleReference: line?.routingRuleReference ?? input.nextReference(),
+            routingRuleVersion: line?.routingRuleVersion ?? 1,
+            routingRuleStatus: "Active",
+            selector: { kind: "AllPreparedItems" },
+            targetStationReference: "",
+            routingRuleDigest: input.sha256("placeholder"),
+          },
+        ].map((candidate) => ({
+          ...candidate,
+          targetStationReference: candidate.stationReference,
+        })),
+      },
+      input.recordedAt,
+      input.sha256,
+    ),
+  };
+  const committed = await createPostgresKitchenRoutingConfigurationStore({
+    brandReference: brand,
+    storeReference: store,
+    sha256: input.sha256,
+    authorizeRead: async () => false,
+    authorizeWrite: (t) => input.authorize(t),
+    validateConfiguration: async () => true,
+    audit: async (value) => ({
+      auditId: input.auditReference,
+      brandId: brand,
+      storeId: store,
+      actor: { type: "User", reference: value.actorReference },
+      actionCode: "KITCHEN_ROUTING_CONFIGURATION_RECORDED",
+      targetType: "KitchenRoutingConfiguration",
+      targetId: value.configuration.evidenceReference,
+      correlationId: value.operationReference,
+      reasonCode: value.reasonCode,
+      occurredAt: value.recordedAt,
+      sourceChannel: "MERCHANT_WEB",
+      afterSummary: { version: value.configuration.evidenceVersion },
+      dataClassification: "Restricted",
+      retentionPolicyCode: "KITCHEN_BUSINESS_RECORD",
+      retentionPolicyVersion: 1,
+    }),
+  }).commit({ transaction: tx, record });
+  return Object.freeze({
+    status: committed.status === "Committed" ? "Recorded" : "AlreadyRecorded",
+    version,
+  });
+}

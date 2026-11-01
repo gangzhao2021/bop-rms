@@ -36,6 +36,7 @@ import { DishEditor } from "./DishEditor.js";
 import { ComboEditor, comboDishChoices } from "./ComboEditor.js";
 import {
   MenuPageError,
+  menuReviewProblemFixHref,
   menuReviewProblemText,
   menuStage,
   parseMenuBuilderView,
@@ -94,6 +95,7 @@ export function OneStoreMenuPage({
   // Owner 2026-10-29: listed dishes guests are not shown (the guest app cannot read them).
   const [guestUnreadable, setGuestUnreadable] = useState<readonly string[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
+  const [problemFixHref, setProblemFixHref] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [rows, setRows] = useState<readonly MenuSectionRow[]>([]);
   const [saved, setSaved] = useState("");
@@ -330,6 +332,9 @@ export function OneStoreMenuPage({
             ? menuReviewProblemText(error.problem)
             : menuErrorText[error.code]
           : t("That didn't go through. Read the menu again and retry."),
+      );
+      setProblemFixHref(
+        menuReviewProblemFixHref(error instanceof MenuPageError ? error.problem : null),
       );
       reload();
     } finally {
@@ -905,6 +910,12 @@ export function OneStoreMenuPage({
       {problem ? (
         <p className="one-menu__message" role="status">
           {problem}
+          {problemFixHref ? (
+            <>
+              {" "}
+              <Link to={problemFixHref}>{t("Set up the kitchen")}</Link>
+            </>
+          ) : null}
         </p>
       ) : null}
       {shown.length === 0 ? <p className="one-menu__note">{t("No dishes match.")}</p> : null}

@@ -34,8 +34,8 @@ vi.mock("../../packages/rms/ordering/src/index.ts", () => ({
 vi.mock("../../packages/rms/inventory/src/index.ts", () => ({
   createPostgresSubmissionFinalValidationStore: named("finalValidation"),
 }));
-vi.mock("../../packages/rms/store/src/index.ts", () => ({
-  createPostgresPublishedStoreOperatingStatusReader: () => async () => seen.operating,
+vi.mock("../../apps/api/dist/store-kitchen-open-gate.js", () => ({
+  createKitchenGatedOperatingStatusReader: () => async () => seen.operating,
 }));
 for (const [path, name] of [
   [
@@ -293,6 +293,11 @@ it("keeps taking counter orders while online ordering is paused, not after picku
   expect(await seen.pipeline.takesOrder({ recordedAfterOutage: false })).toBe(true);
   seen.operating = { state: "Closed", availableServiceModes: [], scheduledServiceModes: [] };
   expect(await seen.pipeline.takesOrder({ recordedAfterOutage: false })).toBe(false);
+  // WP-2423 item 11: with no kitchen set up, not even an order recorded after an outage.
+  const closedToday = seen.operating;
+  seen.operating = { ...closedToday, kitchenNotSetUp: true };
+  expect(await seen.pipeline.takesOrder({ recordedAfterOutage: true })).toBe(false);
+  seen.operating = closedToday;
   expect(await seen.pipeline.takesOrder({ recordedAfterOutage: true })).toBe(true);
 });
 

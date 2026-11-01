@@ -10,7 +10,9 @@ import {
   menuDraftStore,
   parseStoredMenuDraft,
   MenuPageError,
+  menuReviewProblemFixHref,
   menuReviewProblemText,
+  parseMenuReviewProblem,
   orderTypeText,
   menuRevisionAction,
   menuStage,
@@ -370,4 +372,24 @@ describe("Owner 2026-10-29: staff are told which listed dishes guests cannot be 
   it("says nothing when no guest menu can be read here", async () => {
     expect(await client(null, null).guestUnreadable?.()).toBeNull();
   });
+});
+
+it("WP-2423 item 11: a listing refused for the kitchen names the Store and links to the fix", () => {
+  const store = "018f7716-0000-7000-8000-000000000099";
+  const problem = parseMenuReviewProblem({
+    missing: "Kitchen",
+    productName: null,
+    sizeName: null,
+    optionName: null,
+    quantity: null,
+    ingredientName: null,
+    storeName: "Second Street",
+    storeReference: store,
+  });
+  expect(problem).not.toBeNull();
+  expect(menuReviewProblemText(problem!)).toContain("The kitchen at Second Street is not set up");
+  expect(menuReviewProblemFixHref(problem)).toBe(
+    "/app/organization/stores/" + store + "/setup#kitchen-setup",
+  );
+  expect(menuReviewProblemFixHref(null)).toBeNull();
 });
