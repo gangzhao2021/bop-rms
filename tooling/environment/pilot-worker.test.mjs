@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import process from "node:process";
-import { createInternalWorker } from "./pilot-worker.mjs";
+import { createInternalWorker, createPilotDeliveryFailures } from "./pilot-worker.mjs";
 
 const brandReference = "0190fa46-0000-7000-8000-000000000001";
 const storeReference = "0190fa46-0000-7000-8000-000000000002";
@@ -101,4 +101,20 @@ test("a production process that is not a declared Pilot Store dispatches nothing
   const { worker, contexts } = await composeWorker();
   await worker.dispatcher.runOnce().catch(() => undefined);
   expect(contexts).toEqual([]);
+});
+
+test("v15 2026-11-01: a delivery failing with no error code makes the events health ask for attention until it is delivered", () => {
+  const failing = createPilotDeliveryFailures();
+  const running = { state: "running", cycleInFlight: false, completedCycles: 427 };
+  expect(failing.health(running)).toBe(running);
+  failing.failed("kitchen.confirmed-order:v1", "e1");
+  failing.failed("ordering.internal-original-receipt:v1", "e2");
+  expect(failing.health(running)).toEqual({ ...running, state: "attention_required" });
+  failing.delivered("kitchen.confirmed-order:v1", "e1");
+  expect(failing.health(running).state).toBe("attention_required");
+  failing.delivered("ordering.internal-original-receipt:v1", "e2");
+  expect(failing.health(running)).toBe(running);
+  // A stopped or failed workload keeps its own state.
+  failing.failed("kitchen.confirmed-order:v1", "e3");
+  expect(failing.health({ ...running, state: "failed" }).state).toBe("failed");
 });

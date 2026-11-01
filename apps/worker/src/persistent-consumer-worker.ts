@@ -19,6 +19,11 @@ export function createPersistentConsumerWorker(options: {
   readonly config?: Parameters<typeof createConsumerOutboxRuntime>[0]["config"];
   /** Event types this deployment publishes with no subscriber (see the transport). */
   readonly acknowledgedWithoutSubscribers?: readonly string[];
+  /** v15 2026-11-01: every failed delivery, for the deployment's log. */
+  readonly onDeliveryFailure?: Parameters<
+    typeof createConsumerOutboxRuntime
+  >[0]["onDeliveryFailure"];
+  readonly onDelivered?: Parameters<typeof createConsumerOutboxRuntime>[0]["onDelivered"];
   readonly pollIntervalMs: number;
   readonly drainDeadlineMs: number;
   readonly onSnapshot?: Parameters<typeof createOutboxWorkload>[0]["onSnapshot"];
@@ -41,6 +46,8 @@ export function createPersistentConsumerWorker(options: {
     ...(options.acknowledgedWithoutSubscribers
       ? { acknowledgedWithoutSubscribers: options.acknowledgedWithoutSubscribers }
       : {}),
+    ...(options.onDeliveryFailure ? { onDeliveryFailure: options.onDeliveryFailure } : {}),
+    ...(options.onDelivered ? { onDelivered: options.onDelivered } : {}),
   });
   const consumerRetries = new ConsumerRetryScheduler({
     delivery: runtime.delivery,

@@ -4,14 +4,24 @@ import console from "node:console";
  * Logs an unexpected failure as its event, error code and source frames only: never the message
  * text of a non-code error, the request, credentials or any order content.
  */
-export function reportUnexpected(event, error, context = {}) {
+const codeOf = (error) => {
   // A plain Error whose message is an error code (UPPER_SNAKE) carries that code.
   const codeMessage = /^[A-Z][A-Z0-9_]{2,79}$/.test(error?.message ?? "") ? error.message : null;
   const code = error?.code ?? codeMessage ?? error?.name;
+  return { code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE", codeMessage };
+};
+export function reportUnexpected(event, error, context = {}) {
+  const { code, codeMessage } = codeOf(error);
+  // v15 2026-11-01: a wrapped error names the code of what it wraps (owner services rewrite
+  // their own failures generically), up to three levels; codes only.
+  const causes = [];
+  for (let at = error?.cause; at !== undefined && at !== null && causes.length < 3; at = at.cause)
+    causes.push(codeOf(at).code);
   console.error(
     JSON.stringify({
       event,
-      code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE",
+      code,
+      ...(causes.length > 0 ? { causes } : {}),
       // A database error raised with a code as its message (e.g. SQLSTATE 55000 with
       // STORE_REFERENCE_SOURCE_INVALID) names that code too; never other message text.
       ...(codeMessage !== null && codeMessage !== code ? { reason: codeMessage } : {}),
@@ -24,10 +34,15 @@ export function reportUnexpected(event, error, context = {}) {
       ...(typeof context.step === "string" && /^[A-Za-z]{1,40}$/.test(context.step)
         ? { step: context.step }
         : {}),
+      // Which outbox consumer failed (its registered name, e.g. "kitchen.confirmed-order:v1").
+      ...(typeof context.consumer === "string" &&
+      /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*:v[1-9][0-9]*$/.test(context.consumer)
+        ? { consumer: context.consumer }
+        : {}),
       frames:
         String(error?.stack ?? "")
           .match(
-            /(?:apps\/api\/(?:dist|src)|packages\/[a-z]+\/[a-z-]+\/src|tooling\/environment)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
+            /(?:apps\/(?:api|worker)\/(?:dist|src)|packages\/[a-z]+\/[a-z-]+\/src|tooling\/environment)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
           )
           ?.slice(0, 5) ?? [],
     }),

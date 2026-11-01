@@ -2089,6 +2089,47 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    guest it is, with that Store's own TEST payment simulator (`stores/<name>/simulated-provider.sqlite`);
    a guest no Store knows is refused as before.
 
+   **Its kitchen and receipts — required before its paid orders reach the kitchen.** A TEST
+   Store opened with `setup` has no kitchen routing yet, so its paid orders cannot become kitchen
+   tickets (v15 2026-11-01: store 2's order and payment updates kept failing). Give it its own
+   kitchen routing, a copy of the installation Store's stations and rules under that Store's own
+   names (TEST-ONLY: a real Store needs a kitchen routing screen in the product, which does not
+   exist yet):
+
+   ```bash
+   PILOT_UID=$(id -u) PILOT_GID=$(id -g) PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 \
+     docker compose -f compose.pilot.yaml run --rm --no-deps -T -e NODE_ENV=development pilot \
+     node --import ./tooling/environment/register-workspace-typescript.mjs \
+     tooling/environment/pilot-internal-test-store-open.mjs kitchen \
+     /app/.local/pilot-v15 --database bop_rms_pilot_v15 \
+     --migration-env .local/migrate-v14/migrate-v15.env \
+     --store <new Store reference> --approver <another staff member's actor reference> \
+     --reason "Multi-store live check" --approved-by "Owner" --approval "<the approval wording>"
+   ```
+
+   It writes through Kitchen's own routing store as `<database>_internal_test_kitchen` (NOLOGIN
+   NOBYPASSRLS, only its grants), audits it under the approver with the approval wording, and
+   commits only if the services' api role then reads the routing. Run again it answers
+   `AlreadyPresent`. It refuses the installation's own Store and a Store not opened on the Stores
+   page, not active or not named "… – not production". No restart is needed. Receipts: the Store's
+   staff fill in Store setup → "Receipts and privacy" (receipt business name and contact); until
+   then its paid orders get no receipt and the receipt update keeps failing.
+
+   A failed order or payment update is logged by the business worker as `OUTBOX_CONSUMER_FAILED`
+   with the consumer, the event type and the error code (never its content), and the worker's
+   health says attention required while an update keeps failing. Updates that failed eight times
+   before the fix are dead-lettered and do not go through by themselves: after the fix, recover
+   them for that Store with `outbox-recovery-operations.mjs recover --operator <uuid>` run with
+   `PILOT_RUNTIME_DIRECTORY` set to that Store's directory (for example
+   `.local/pilot-v15/stores/demo-2`); consumers that already finished the update count it once.
+
+   **Its kitchen display.** A kitchen display belongs to one Store. On the TEST-ONLY staff page,
+   with several Stores, each person has one "Start kitchen display at <Store> as <person>" per
+   Store they work at; the display opens that Store's tickets and shows its name, and the
+   operator's shift is recorded at that Store. A kitchen page opened at another Store offers
+   "Start kitchen display here", which signs out and opens this page, where staff choose that
+   Store. Device registration and staff PINs work as before.
+
    **Its menu.** The Brand Owner switches to the new Store, opens Menu and chooses "Serve the
    menu here", then "List it". A menu is listed only when every Store it serves can sell each
    item: each has a tax rate there and a recipe there (the Brand's, or that Store's own), and each

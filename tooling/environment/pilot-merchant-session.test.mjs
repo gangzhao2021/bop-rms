@@ -5,6 +5,24 @@ const seam = vi.hoisted(() => ({
   created: [],
   selections: [],
   kdsStarts: [],
+  // "actor store" pairs that are current Store members.
+  members: new Set(),
+}));
+vi.mock("../../packages/bop/membership/src/index.ts", () => ({
+  async isActiveStoreMember(_tx, scope) {
+    return seam.members.has(scope.actorReference + " " + scope.storeReference);
+  },
+}));
+vi.mock("../../packages/bop/tenant/src/index.ts", () => ({
+  createPostgresMerchantOrganizationSource(_tx, scope) {
+    return {
+      async getStore(reference) {
+        return reference === scope.storeReference
+          ? { displayName: "DEMO Store " + reference.slice(-1) }
+          : null;
+      },
+    };
+  },
 }));
 vi.mock("../../packages/rms/kitchen/src/index.ts", () => ({
   createPostgresKdsOperatorShiftStore(options) {
@@ -76,6 +94,7 @@ beforeEach(() => {
   seam.created = [];
   seam.selections = [];
   seam.kdsStarts = [];
+  seam.members = new Set();
 });
 afterEach(() => vi.unstubAllEnvs());
 function setup(multiple = true) {
@@ -316,4 +335,46 @@ it("WP-2423 Q18: a full sign-in on a registered tablet finalizes in the transact
   expect(finalized[0].actor.actorReference).toBe(id(4));
   await session.issue("author");
   expect(finalized).toHaveLength(1);
+});
+
+// v15 2026-11-01: "Start kitchen display" always opened the installation's own Store, and a kitchen
+// display has no Store switch, so store 2 had no kitchen display. A kitchen display now belongs to
+// the Store it was started for: the session's Store and the operator's shift are that Store's.
+it("v15 2026-11-01: a kitchen display started for another served Store belongs to that Store", async () => {
+  const f = setup(),
+    storeTwo = id(9);
+  f.resources.servedStoreReferences = [storeTwo];
+  const session = await f.create();
+  seam.members = new Set([id(4) + " " + scope.storeReference, id(4) + " " + storeTwo]);
+  seam.members.add(id(5) + " " + scope.storeReference);
+  // One start per Store each person works at, by position and the Store's own name.
+  expect(await session.kitchenDisplayChoices()).toEqual([
+    { selector: "author", label: "DEMO staff author", store: "1", storeLabel: "DEMO Store 3" },
+    { selector: "reviewer", label: "DEMO staff reviewer", store: "1", storeLabel: "DEMO Store 3" },
+    { selector: "author", label: "DEMO staff author", store: "2", storeLabel: "DEMO Store 9" },
+  ]);
+  await session.issue("author", "KitchenDisplay", undefined, "2");
+  expect(seam.selections.at(-1).scope).toEqual({ ...scope, storeReference: storeTwo });
+  expect(seam.kdsStarts.at(-1).options.storeReference).toBe(storeTwo);
+  expect(seam.kdsStarts.at(-1).input.session.storeReference).toBe(storeTwo);
+  // Its own Store, as before.
+  await session.issue("author", "KitchenDisplay", undefined, "1");
+  expect(seam.selections.at(-1).scope).toEqual(scope);
+  expect(seam.kdsStarts.at(-1).options.storeReference).toBe(scope.storeReference);
+  // Not a member there, not a kitchen display, or not a served Store: refused, nothing started.
+  const before = seam.kdsStarts.length;
+  await expect(session.issue("reviewer", "KitchenDisplay", undefined, "2")).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  await expect(session.issue("author", "Workforce", undefined, "2")).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  await expect(session.issue("author", "KitchenDisplay", undefined, "3")).rejects.toThrow(
+    /^INTERNAL_MERCHANT_DENIED$/,
+  );
+  expect(seam.kdsStarts).toHaveLength(before);
+});
+it("v15 2026-11-01: with one Store the page offers one kitchen display start, as before", async () => {
+  const session = await setup().create();
+  expect(await session.kitchenDisplayChoices()).toEqual([]);
 });

@@ -162,3 +162,36 @@ test("@production a payment never finished in time says it was cancelled and not
   await expect(page.getByRole("button", { name: "Finish paying" })).toHaveCount(0);
   expect(api.calls.filter((call) => !call.path.endsWith("/payment-reconciliation"))).toEqual([]);
 });
+
+// v15 2026-11-01: "Finish paying" opened the payment form (the card form, or the TEST-ONLY
+// simulator's Confirm / Decline), and the page's next automatic check (every few seconds while the
+// payment is open) removed it again, so a guest who came back could never finish. The form stays
+// through the checks; the same payment is paid once. (The simulator's form is only offered on the
+// local InternalTest address, so this browser check uses the card form; both are the same panel.)
+test("@production a guest who comes back keeps the payment form through the automatic checks", async ({
+  page,
+}) => {
+  const api = await fixture(page);
+  await page.goto("/checkout/payment");
+  await expect(page.getByRole("heading", { name: "Payment not confirmed yet" })).toBeVisible();
+  await page.getByRole("button", { name: "Finish paying", exact: true }).click();
+  const form = page.getByText("Synthetic secure card component");
+  await expect(form).toBeVisible();
+  // The page checks the payment again on its own (after 3 s); the form stays.
+  const checks = () =>
+    api.calls.filter((call) => call.path.endsWith("/payment-reconciliation")).length;
+  const before = checks();
+  await expect.poll(checks, { timeout: 10_000 }).toBeGreaterThan(before);
+  await expect(form).toBeVisible();
+  api.approveNextRead();
+  await page.getByRole("button", { name: "Pay securely", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Payment confirmed" })).toBeVisible();
+  expect(
+    api.calls
+      .filter((call) => !call.path.endsWith("/payment-reconciliation"))
+      .map((call) => [call.path.split("/").at(-1), call.body]),
+  ).toEqual([
+    ["payment-intents", JSON.stringify({ resume: true })],
+    ["payment-handoff", "{}"],
+  ]);
+});

@@ -1,4 +1,4 @@
-import { servedStoreFor } from "./pilot-served-stores.mjs";
+import { servedStoreFor, servedStoresOf } from "./pilot-served-stores.mjs";
 import process from "node:process";
 import { randomBytes } from "node:crypto";
 import {
@@ -9,8 +9,12 @@ import {
   loadSessionEnds,
 } from "../../packages/bop/identity/src/index.ts";
 import { createPostgresKdsOperatorShiftStore } from "../../packages/rms/kitchen/src/index.ts";
+import { isActiveStoreMember } from "../../packages/bop/membership/src/index.ts";
+import { createPostgresMerchantOrganizationSource } from "../../packages/bop/tenant/src/index.ts";
 const referencePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const selectorPattern = /^[a-z][a-z0-9-]{0,39}$/u;
+/** A served Store by its position (1 = the installation's own Store), never by its reference. */
+const storeChoicePattern = /^[1-9][0-9]?$/u;
 const denied = () => {
   throw new Error("INTERNAL_MERCHANT_DENIED");
 };
@@ -206,6 +210,9 @@ export async function createInternalMerchantSession(
   const selection = createPostgresBrowserSessionSelectionStore({ validate: validateAssociation });
   // WP-2423 Q18 option A: work a staff PIN sign-in runs in the transaction creating its session.
   const finalizers = new Map();
+  // v15 2026-11-01: a kitchen display belongs to the Store it was started for (the session's
+  // Store and the operator's shift), checked against the person's Store membership here.
+  const kitchenStores = new Map();
   const crypto = await createInternalMerchantCredentials();
   const unavailable = async () => {
     throw new Error("INTERNAL_EXTERNAL_LOGIN_UNAVAILABLE");
@@ -241,11 +248,23 @@ export async function createInternalMerchantSession(
     now: clock,
     currentActor,
     onSessionCreated: async (tx, record) => {
-      await selection.write(tx, record.session, scope, clock());
+      const sessionScope = kitchenStores.get(record.session.sessionReference) ?? scope;
+      if (
+        sessionScope !== scope &&
+        (record.session.policy.code !== "NamedKdsOperator" ||
+          !(await isActiveStoreMember(tx, {
+            brandReference: sessionScope.brandReference,
+            storeReference: sessionScope.storeReference,
+            actorReference: record.session.actor.actorReference,
+            at: record.session.createdAt,
+          })))
+      )
+        return denied();
+      await selection.write(tx, record.session, sessionScope, clock());
       const finalize = finalizers.get(record.session.sessionReference);
       if (finalize !== undefined) await finalize(tx, record.session);
       if (record.session.policy.code !== "NamedKdsOperator") return;
-      await startNamedKdsOperatorShift(tx, record.session, scope, {
+      await startNamedKdsOperatorShift(tx, record.session, sessionScope, {
         nextReference: () => credentials.reference(),
         recordedAt: instant(clock()),
       });
@@ -268,6 +287,45 @@ export async function createInternalMerchantSession(
             Object.freeze({ selector: entry.selector, label: "DEMO staff " + entry.selector }),
           ),
       );
+    },
+    /**
+     * v15 2026-11-01: with more than one served Store, each kitchen display start the TEST-ONLY
+     * page offers: a configured identity and a Store they currently work at (by position, with the
+     * Store's own name). One Store: none (the page offers one start, as before).
+     */
+    async kitchenDisplayChoices() {
+      const stores = servedStoresOf(resources);
+      if (stores.length < 2) return Object.freeze([]);
+      const entries = await roster(),
+        at = instant(clock());
+      return transactions.run(async (tx) => {
+        const choices = [];
+        for (const [index, served] of stores.entries()) {
+          const found = await createPostgresMerchantOrganizationSource(tx, {
+            ...served,
+            observedAt: at,
+          }).getStore(served.storeReference);
+          if (found === null) continue;
+          for (const entry of entries)
+            if (
+              at < entry.validUntil &&
+              (await isActiveStoreMember(tx, {
+                ...served,
+                actorReference: entry.actorReference,
+                at,
+              }))
+            )
+              choices.push(
+                Object.freeze({
+                  selector: entry.selector,
+                  label: "DEMO staff " + entry.selector,
+                  store: String(index + 1),
+                  storeLabel: found.displayName,
+                }),
+              );
+        }
+        return Object.freeze(choices);
+      });
     },
     /**
      * WP-2423 Q18 option A: the ordinary WorkforceStandard session a verified staff PIN issues on a
@@ -310,9 +368,20 @@ export async function createInternalMerchantSession(
      * `finalize`, when given, runs in the transaction creating the session (WP-2423 Q18: ends
      * the PIN sessions left on a registered tablet).
      */
-    async issue(selector, purpose = "Workforce", finalize) {
+    async issue(selector, purpose = "Workforce", finalize, storeChoice) {
       if (purpose !== "Workforce" && purpose !== "KitchenDisplay") return denied();
       if (finalize !== undefined && typeof finalize !== "function") return denied();
+      // `storeChoice` (a kitchen display only): the served Store's position; absent, this Store.
+      if (
+        storeChoice !== undefined &&
+        (purpose !== "KitchenDisplay" ||
+          typeof storeChoice !== "string" ||
+          !storeChoicePattern.test(storeChoice))
+      )
+        return denied();
+      const stores = servedStoresOf(resources),
+        sessionScope = storeChoice === undefined ? scope : stores[Number(storeChoice) - 1];
+      if (sessionScope === undefined) return denied();
       const entries = await roster(),
         entry =
           selector === undefined
@@ -331,6 +400,8 @@ export async function createInternalMerchantSession(
       const context =
         configuration.environment + ":session:" + sessionReference + ":" + actor.actorReference;
       if (finalize !== undefined) finalizers.set(sessionReference, finalize);
+      if (storeChoice !== undefined && storeChoice !== "1")
+        kitchenStores.set(sessionReference, sessionScope);
       try {
         await store.createSession({
           sessionReference,
@@ -346,6 +417,7 @@ export async function createInternalMerchantSession(
         });
       } finally {
         finalizers.delete(sessionReference);
+        kitchenStores.delete(sessionReference);
       }
       return { sessionCookie: cookie, csrf };
     },

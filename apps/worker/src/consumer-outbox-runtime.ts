@@ -33,6 +33,9 @@ export function createConsumerOutboxRuntime(options: {
   readonly leaseOwner: string;
   readonly newLeaseToken: () => string;
   readonly failureRecorder?: ConsumerFailureRecorder;
+  /** v15 2026-11-01: every failed delivery, for the deployment's log (see the delivery worker). */
+  readonly onDeliveryFailure?: ConstructorParameters<typeof ConsumerDeliveryWorker>[0]["onFailure"];
+  readonly onDelivered?: ConstructorParameters<typeof ConsumerDeliveryWorker>[0]["onDelivered"];
   readonly config?: Partial<OutboxDispatcherConfig>;
   /** Event types this deployment publishes with no subscriber (see the transport). */
   readonly acknowledgedWithoutSubscribers?: readonly string[];
@@ -58,6 +61,8 @@ export function createConsumerOutboxRuntime(options: {
     database: options.database,
     registry,
     ...(options.failureRecorder ? { failureRecorder: options.failureRecorder } : {}),
+    ...(options.onDeliveryFailure ? { onFailure: options.onDeliveryFailure } : {}),
+    ...(options.onDelivered ? { onDelivered: options.onDelivered } : {}),
     consume: (transaction, registration, envelope) => {
       const service = services.get(registration.consumerName + ":" + registration.eventType);
       if (!service) throw new Error("OUTBOX_CONSUMER_SERVICE_MISSING");
