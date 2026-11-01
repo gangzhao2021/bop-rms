@@ -3,6 +3,7 @@ import { supervisedCycleFailures } from "../../apps/worker/dist/outbox-workload.
 import { isPilotRuntime } from "./pilot-environment.mjs";
 import { createOptionalBatchCancellationWorkloads } from "./pilot-batch-cancellation-workload.mjs";
 import console from "node:console";
+import { reportUnexpected } from "./pilot-unexpected.mjs";
 import { createPaymentAcceptanceWaitWorkload } from "../../apps/worker/dist/payment-acceptance-wait-workload.js";
 import { createManualOutboxRecoveryRegistry } from "../../packages/bop/eventing/src/index.ts";
 import { createConsumerOutboxTransport } from "../../apps/worker/dist/consumer-outbox-transport.js";
@@ -13,6 +14,28 @@ import {
   pilotDispatchScopes,
   pilotUnsubscribedEventTypes,
 } from "./pilot-event-routing.mjs";
+
+/**
+ * v15 2026-11-01: the consumer deliveries that failed and have not been delivered since. The
+ * events workload's health is `attention_required` while any remain (they retry, or wait for a
+ * person once dead-lettered); a later successful delivery of the same consumer and event clears it.
+ */
+export function createPilotDeliveryFailures(limit = 10_000) {
+  const open = new Set();
+  return Object.freeze({
+    failed(consumerName, eventId) {
+      if (open.size < limit) open.add(consumerName + " " + eventId);
+    },
+    delivered(consumerName, eventId) {
+      open.delete(consumerName + " " + eventId);
+    },
+    health(snapshot) {
+      return open.size > 0 && (snapshot.state === "running" || snapshot.state === "idle")
+        ? { ...snapshot, state: "attention_required" }
+        : snapshot;
+    },
+  });
+}
 export async function createInternalWorker(resources, observers = {}, options = {}, dependencies) {
   const {
     createInternalDiningCheckoutExpiryWorkload,
@@ -71,8 +94,20 @@ export async function createInternalWorker(resources, observers = {}, options = 
   const acknowledgedWithoutSubscribers = pilotUnsubscribedEventTypes(
     services.map((service) => service.registration),
   );
+  // v15 2026-11-01: deliveries failing now (a consumer and event not delivered since it failed).
+  // While any remain, the events health says attention, never "running, 0 failures".
+  const failing = createPilotDeliveryFailures();
   const runtime = createPersistentConsumerWorker({
-    onSnapshot: observers.events,
+    onSnapshot: (snapshot) => observers.events(failing.health(snapshot)),
+    // Every failed delivery is logged (consumer, event type, its code and the error's codes).
+    onDeliveryFailure: ({ consumerName, eventType, eventId, errorCode, error }) => {
+      failing.failed(consumerName, eventId);
+      reportUnexpected("OUTBOX_CONSUMER_FAILED", error ?? new Error(errorCode), {
+        step: eventType,
+        consumer: consumerName,
+      });
+    },
+    onDelivered: ({ consumerName, eventId }) => failing.delivered(consumerName, eventId),
     connections: resources.database,
     additionalWorkloads: [
       waiting,

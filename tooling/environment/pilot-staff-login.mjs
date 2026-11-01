@@ -4,7 +4,8 @@ import { URL } from "node:url";
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url)),
   express = require("express"),
   origin = "https://127.0.0.1:4443",
-  selectorPattern = /^[a-z][a-z0-9-]{0,39}$/u;
+  selectorPattern = /^[a-z][a-z0-9-]{0,39}$/u,
+  storeChoicePattern = /^[1-9][0-9]?$/u;
 const unavailable = () => {
   throw new Error("INTERNAL_STAFF_LOGIN_UNAVAILABLE");
 };
@@ -49,7 +50,29 @@ export function installInternalStaffLogin(app, merchant) {
   if (typeof merchant?.staffChoices !== "function" || typeof merchant?.issue !== "function")
     return unavailable();
   const choices = merchant.staffChoices.bind(merchant),
-    issue = merchant.issue.bind(merchant);
+    issue = merchant.issue.bind(merchant),
+    kitchenChoices =
+      typeof merchant.kitchenDisplayChoices === "function"
+        ? merchant.kitchenDisplayChoices.bind(merchant)
+        : async () => [];
+  /** v15 2026-11-01: with several Stores, one kitchen display start per Store a person works at. */
+  async function currentKitchenChoices(entries) {
+    const raw = await kitchenChoices();
+    if (!Array.isArray(raw) || raw.length > 64) return unavailable();
+    return raw.map((value) => {
+      const entry = record(value, ["selector", "label", "store", "storeLabel"]);
+      if (
+        !entries.some((known) => known.selector === entry.selector) ||
+        typeof entry.store !== "string" ||
+        !storeChoicePattern.test(entry.store) ||
+        typeof entry.storeLabel !== "string" ||
+        !entry.storeLabel.trim() ||
+        entry.storeLabel.length > 120
+      )
+        return unavailable();
+      return entry;
+    });
+  }
   async function currentChoices() {
     const raw = await choices();
     if (
@@ -100,11 +123,24 @@ export function installInternalStaffLogin(app, merchant) {
       return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
     try {
       const entries = await currentChoices(),
+        kitchen = await currentKitchenChoices(entries),
+        kitchenForm = (entry, store) =>
+          `<form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><input type="hidden" name="purpose" value="KitchenDisplay">` +
+          (store === undefined
+            ? `<button name="staffSelector" value="${escape(entry.selector)}" type="submit">Start kitchen display as ${escape(entry.label)}</button></form>`
+            : `<input type="hidden" name="store" value="${escape(store.store)}"><button name="staffSelector" value="${escape(entry.selector)}" type="submit">Start kitchen display at ${escape(store.storeLabel)} as ${escape(entry.label)}</button></form>`),
         forms = entries
           .map(
             (entry) =>
               `<form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><button name="staffSelector" value="${escape(entry.selector)}" type="submit">Enter as ${escape(entry.label)}</button></form>` +
-              `<form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><input type="hidden" name="purpose" value="KitchenDisplay"><button name="staffSelector" value="${escape(entry.selector)}" type="submit">Start kitchen display as ${escape(entry.label)}</button></form>`,
+              // One Store: one start, as before. Several: one per Store this person works at; a
+              // kitchen display then belongs to that Store.
+              (kitchen.length === 0
+                ? kitchenForm(entry)
+                : kitchen
+                    .filter((store) => store.selector === entry.selector)
+                    .map((store) => kitchenForm(entry, store))
+                    .join("")),
           )
           .join("");
       return res
@@ -121,7 +157,7 @@ export function installInternalStaffLogin(app, merchant) {
     express.urlencoded({ extended: false, limit: "1kb" }),
     async (req, res) => {
       res.set("Cache-Control", "no-store");
-      let requested, kitchenDisplay;
+      let requested, kitchenDisplay, store;
       try {
         if (
           !requestScope(req) ||
@@ -133,16 +169,23 @@ export function installInternalStaffLogin(app, merchant) {
           "confirmation",
           ...(Object.hasOwn(req.body ?? {}, "staffSelector") ? ["staffSelector"] : []),
           ...(Object.hasOwn(req.body ?? {}, "purpose") ? ["purpose"] : []),
+          ...(Object.hasOwn(req.body ?? {}, "store") ? ["store"] : []),
         ]);
         if (
           body.confirmation !== "DEMO_STAFF_LOGIN" ||
           (Object.hasOwn(body, "purpose") && body.purpose !== "KitchenDisplay") ||
           (Object.hasOwn(body, "staffSelector") &&
-            (typeof body.staffSelector !== "string" || !selectorPattern.test(body.staffSelector)))
+            (typeof body.staffSelector !== "string" ||
+              !selectorPattern.test(body.staffSelector))) ||
+          (Object.hasOwn(body, "store") &&
+            (body.purpose !== "KitchenDisplay" ||
+              typeof body.store !== "string" ||
+              !storeChoicePattern.test(body.store)))
         )
           return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
         requested = body.staffSelector;
         kitchenDisplay = body.purpose === "KitchenDisplay";
+        store = body.store;
       } catch {
         return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
       }
@@ -156,10 +199,13 @@ export function installInternalStaffLogin(app, merchant) {
         const purpose = kitchenDisplay ? "KitchenDisplay" : "Workforce";
         // On a registered tablet the full sign-in also ends the PIN session left on it.
         const tablet = tabletCookie(req);
+        // The Store a kitchen display was started for (the session checks the person works there).
         const credentials =
-          tablet === undefined
-            ? await issue(requested, purpose)
-            : await issue(requested, purpose, tablet);
+          store !== undefined
+            ? await issue(requested, purpose, tablet, store)
+            : tablet === undefined
+              ? await issue(requested, purpose)
+              : await issue(requested, purpose, tablet);
         if (
           typeof credentials?.sessionCookie !== "string" ||
           !/^[A-Za-z0-9_-]{43}$/u.test(credentials.sessionCookie)

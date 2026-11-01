@@ -22,6 +22,9 @@ import {
  *               database, audited under the approver; the Store's profile then names it). A
  *               Store that has it gets it back, nothing written. Staff then publish Store setup
  *               (Review), which carries the Store's tax settings;
+ *   kitchen   — its own kitchen routing (the installation Store's stations and rules under the
+ *               Store's own identities; database, audited under the approver), so its paid orders
+ *               reach its kitchen; a Store that has one gets it back, nothing written;
  *   stock-site — its default stock site and storage location (database, audited under the
  *               approver; a Store that has its default site gets it back, nothing written);
  *   directory — its runtime directory `stores/<name>/`, listed in `stores.json`, so the next
@@ -63,6 +66,15 @@ const flags = {
     "--approval": "approval",
   },
   "stock-site": {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--store": "storeReference",
+    "--approver": "approverActorReference",
+    "--reason": "reason",
+    "--approved-by": "approvedBy",
+    "--approval": "approval",
+  },
+  kitchen: {
     "--database": "expectedDatabaseName",
     "--migration-env": "envFile",
     "--store": "storeReference",
@@ -211,6 +223,52 @@ async function stockSite(options) {
       },
       nextReference: () => uuidV7(),
     });
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+async function kitchen(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const routing = await import("./pilot-internal-test-kitchen-routing.mjs");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  try {
+    const role = routing.kitchenRoutingRoleName(options.expectedDatabaseName);
+    for (const sql of routing.renderKitchenRoutingRoleSql(role)) await client.query(sql);
+    const result = await routing.createInternalTestKitchenRouting(client, {
+      environment: profile.environment,
+      database: options.expectedDatabaseName,
+      role,
+      binding: profile.binding,
+      storeReference: options.storeReference,
+      approverActorReference: options.approverActorReference,
+      now: () => new Date().toISOString(),
+      evidence: {
+        operationReference: uuidV7(),
+        approvedBy: options.approvedBy,
+        approval: options.approval,
+        reason: options.reason,
+      },
+      nextReference: () => uuidV7(),
+    });
+    // The kitchen's own read, as the services' role: it routes the Store's items now.
+    const routed = await routing.readStoreKitchenRouting(client, {
+      role: installation.roles.api,
+      binding: profile.binding,
+      storeReference: options.storeReference,
+      at: new Date().toISOString(),
+    });
+    if (routed === null) unavailable("read-check-failed");
+    return Object.freeze({ status: result.status, storeReference: options.storeReference });
   } finally {
     await client.end().catch(() => undefined);
   }
@@ -557,9 +615,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
               ? await stockSite(options)
               : options.command === "tax"
                 ? await storeTax(options)
-                : options.command === "provider"
-                  ? await provisionStoreSimulator(options.directory)
-                  : await directory(options);
+                : options.command === "kitchen"
+                  ? await kitchen(options)
+                  : options.command === "provider"
+                    ? await provisionStoreSimulator(options.directory)
+                    : await directory(options);
     console.log(JSON.stringify(result));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";

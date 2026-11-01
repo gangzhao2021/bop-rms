@@ -38,7 +38,10 @@ export function createSessionPaymentResultController(client: {
     }
     if (flight !== null) return flight;
     const attempt = revision;
-    publish({ status: "loading" });
+    // v15 2026-11-01: a re-check keeps the result on screen while it runs. Showing "loading"
+    // in between unmounted the guest's open payment form (Finish paying) on every automatic
+    // check, so a guest who came back could never finish paying.
+    if (!(recover && state.status === "ready")) publish({ status: "loading" });
     flight = Promise.resolve().then(async () => {
       try {
         const result = await (recover && client.reconcile

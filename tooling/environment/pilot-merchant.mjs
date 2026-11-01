@@ -1336,13 +1336,18 @@ export async function createInternalMerchant(
     ...(typeof session.issue !== "function"
       ? {}
       : {
-          issue: (selector, purpose, deviceCookie) =>
+          // v15 2026-11-01: `store`, a kitchen display started for another served Store.
+          issue: (selector, purpose, deviceCookie, store) =>
             staffPin === undefined || deviceCookie === undefined
-              ? session.issue(selector, purpose)
-              : session.issue(selector, purpose, (tx, created) =>
-                  staffPin.endTabletPinSessions(tx, deviceCookie, created),
+              ? session.issue(selector, purpose, undefined, store)
+              : session.issue(
+                  selector,
+                  purpose,
+                  (tx, created) => staffPin.endTabletPinSessions(tx, deviceCookie, created),
+                  store,
                 ),
           staffChoices: session.staffChoices,
+          kitchenDisplayChoices: session.kitchenDisplayChoices,
         }),
     persistence,
     service,

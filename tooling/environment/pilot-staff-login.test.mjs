@@ -226,3 +226,46 @@ it("rejects any other login purpose before issuing", async () => {
   expect(f.res.statusCode).toBe(400);
   expect(f.issue).not.toHaveBeenCalled();
 });
+// v15 2026-11-01: "Start kitchen display as DEMO staff staff" opened store 1, and a kitchen display
+// has no Store switch. With several Stores the page offers one start per Store a person works at,
+// and the start names its Store for the session to check and bind.
+it("v15 2026-11-01: offers one kitchen display start per Store and passes the chosen Store", async () => {
+  const f = setup();
+  f.merchant.kitchenDisplayChoices = vi.fn(async () => [
+    { selector: "author", label: "DEMO author <1>", store: "1", storeLabel: "DEMO Store 1" },
+    { selector: "author", label: "DEMO author <1>", store: "2", storeLabel: "DEMO Store 2 <b>" },
+  ]);
+  installInternalStaffLogin(
+    {
+      get: (path, handler) => f.routes.set(path, handler),
+      post: (path, ...handlers) => f.routes.set(path, handlers.at(-1)),
+    },
+    f.merchant,
+  );
+  await f.get();
+  expect(f.res.body).toContain("Start kitchen display at DEMO Store 1 as DEMO author &lt;1&gt;");
+  expect(f.res.body).toContain(
+    "Start kitchen display at DEMO Store 2 &lt;b&gt; as DEMO author &lt;1&gt;",
+  );
+  expect(f.res.body).toContain('name="store" value="2"');
+  // The reviewer works at neither listed Store: no kitchen display start, still "Enter as".
+  expect(f.res.body).not.toContain("Start kitchen display as");
+  expect(f.res.body).toContain('name="staffSelector" value="reviewer"');
+  await f.post({
+    ...base,
+    body: { ...base.body, purpose: "KitchenDisplay", store: "2" },
+  });
+  expect(f.res.statusCode).toBe(303);
+  expect(f.res.location).toBe("/operations/kitchen");
+  expect(f.issue).toHaveBeenCalledExactlyOnceWith("author", "KitchenDisplay", undefined, "2");
+  // A Store only for a kitchen display, and only by position.
+  for (const body of [
+    { ...base.body, store: "2" },
+    { ...base.body, purpose: "KitchenDisplay", store: "0" },
+    { ...base.body, purpose: "KitchenDisplay", store: "01909a3e-0000-7000-8000-000000000004" },
+  ]) {
+    await f.post({ ...base, body });
+    expect(f.res.statusCode).toBe(400);
+  }
+  expect(f.issue).toHaveBeenCalledTimes(1);
+});

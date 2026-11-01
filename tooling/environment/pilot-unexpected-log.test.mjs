@@ -70,3 +70,41 @@ it("names a refused Store switch's failing step, never ids or other text (v15 20
   ]);
   expect(JSON.stringify(lines())).not.toContain("01909a3c");
 });
+
+it("names a failed outbox consumer and the codes its error wraps (v15 2026-11-01)", () => {
+  const lines = logged();
+  const cause = Object.assign(new Error("KITCHEN_ROUTING_UNAVAILABLE"), { code: "KITCHEN" });
+  const wrapped = new Error("CONSUMER_TEMPORARY_FAILURE", { cause });
+  reportUnexpected("OUTBOX_CONSUMER_FAILED", wrapped, {
+    step: "OrderConfirmed",
+    consumer: "kitchen.confirmed-order:v1",
+  });
+  reportUnexpected("OUTBOX_CONSUMER_FAILED", new Error("guest Sam"), {
+    consumer: "not a consumer name",
+  });
+  expect(
+    lines().map(({ event, code, causes, step, consumer }) => ({
+      event,
+      code,
+      causes,
+      step,
+      consumer,
+    })),
+  ).toEqual([
+    {
+      event: "OUTBOX_CONSUMER_FAILED",
+      code: "CONSUMER_TEMPORARY_FAILURE",
+      causes: ["KITCHEN"],
+      step: "OrderConfirmed",
+      consumer: "kitchen.confirmed-order:v1",
+    },
+    {
+      event: "OUTBOX_CONSUMER_FAILED",
+      code: "Error",
+      causes: undefined,
+      step: undefined,
+      consumer: undefined,
+    },
+  ]);
+  expect(JSON.stringify(lines())).not.toContain("Sam");
+});

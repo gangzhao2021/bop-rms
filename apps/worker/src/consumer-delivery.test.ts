@@ -273,4 +273,56 @@ describe("ConsumerDeliveryWorker", () => {
     ]);
     expect(JSON.stringify(records)).not.toContain("secret-canary");
   });
+
+  it("v15 2026-11-01: tells the deployment of every failed delivery, and of the later success", async () => {
+    let fail = true;
+    const thrown = Object.assign(new Error("KITCHEN_ROUTING_UNAVAILABLE"), { code: "X" });
+    const failures: unknown[] = [];
+    const delivered: unknown[] = [];
+    const worker = new ConsumerDeliveryWorker({
+      database: { transaction: vi.fn(async (_scope, work) => work({ query: vi.fn() })) },
+      consume: vi.fn(async () => {
+        if (fail) throw thrown;
+        return { status: "processed" as const };
+      }),
+      onFailure: (failure) => failures.push(failure),
+      onDelivered: (delivery) => delivered.push(delivery),
+      registry: new ConsumerRegistry([
+        {
+          consumerName: "kitchen.confirmed-order:v1",
+          consumerVersion: 1,
+          eventType: "SyntheticChanged",
+          schemaVersions: [1],
+          ownerModule: "@bop/eventing",
+          tenantScope: "brand",
+          ordering: "none",
+          sideEffect: "synthetic-effect",
+          replaySafe: true,
+          handler: vi.fn(async () => undefined),
+        },
+      ]),
+    });
+    await expect(worker.deliver("kitchen.confirmed-order:v1", envelope)).resolves.toEqual({
+      status: "retry_required",
+      errorCode: "CONSUMER_TEMPORARY_FAILURE",
+    });
+    expect(failures).toEqual([
+      {
+        consumerName: "kitchen.confirmed-order:v1",
+        eventType: "SyntheticChanged",
+        eventId: envelope.eventId,
+        errorCode: "CONSUMER_TEMPORARY_FAILURE",
+        error: thrown,
+      },
+    ]);
+    expect(delivered).toEqual([]);
+    fail = false;
+    await expect(worker.deliver("kitchen.confirmed-order:v1", envelope)).resolves.toEqual({
+      status: "processed",
+    });
+    expect(delivered).toEqual([
+      { consumerName: "kitchen.confirmed-order:v1", eventId: envelope.eventId },
+    ]);
+    expect(failures).toHaveLength(1);
+  });
 });
