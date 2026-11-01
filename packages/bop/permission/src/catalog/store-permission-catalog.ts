@@ -74,7 +74,7 @@
  * reads and downloads Reports (tonight, sales by period, items, hours, tips) at every Store of the
  * Brand without a Store role there. No code is added; Store templates are unchanged.
  */
-export const storePermissionCatalogVersion = 22 as const;
+export const storePermissionCatalogVersion = 23 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -105,6 +105,12 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["organization.store.read", "Read Store profile, hours and service configuration", "Low"],
     ["organization.store.update", "Edit Store profile, hours and service drafts", "Medium"],
     ["organization.store.publish", "Publish or schedule Store configuration", "High"],
+    // v23 (WP-2423 取舍 15): only the Owner lets platform support change settings, and reads the log.
+    [
+      "organization.support_access.manage",
+      "Allow or stop platform support changing settings, and read the support access log",
+      "High",
+    ],
     ["organization.staff.read", "Read Store staff and assignments", "Low"],
     ["organization.staff.manage", "Invite, assign, suspend and remove Store staff", "High"],
     ["organization.brand.manage", "Manage Brand-level configuration", "High"],

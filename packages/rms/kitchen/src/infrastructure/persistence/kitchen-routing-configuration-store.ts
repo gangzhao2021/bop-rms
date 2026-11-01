@@ -320,6 +320,10 @@ export async function recordStoreKitchenLine(
     readonly nextReference: () => string;
     /** False: a new operation with nothing to change records nothing (NoChange). */
     readonly onlyIfChanged: boolean;
+    /** Who the change is under when it isn't the Store's own staff (platform support). */
+    readonly purposeCode?: string;
+    readonly permissionCode?: string;
+    readonly reasonCode?: string;
     authorize(tx: ConsumerTransaction): Promise<boolean>;
   },
 ): Promise<{
@@ -364,9 +368,9 @@ export async function recordStoreKitchenLine(
   const record = {
     operationReference: input.operationReference,
     actorReference: input.actorReference,
-    purposeCode: "StoreKitchenSetup",
-    permissionCode: "organization.store.update",
-    reasonCode: "STORE_KITCHEN_SETUP",
+    purposeCode: input.purposeCode ?? "StoreKitchenSetup",
+    permissionCode: input.permissionCode ?? "organization.store.update",
+    reasonCode: input.reasonCode ?? "STORE_KITCHEN_SETUP",
     recordedAt: input.recordedAt,
     expectedVersion: input.expectedVersion,
     configuration: rebindKitchenRoutingEvidence(

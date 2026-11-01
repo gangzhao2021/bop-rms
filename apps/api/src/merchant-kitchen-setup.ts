@@ -47,6 +47,54 @@ export function brandKitchenCapabilityReference(brandReference: string): string 
 }
 
 /**
+ * One kitchen line holding what the Brand's recipes at this Store need (or the Brand's own
+ * capability), or what it holds plus what's missing. Recorded under whoever made the change.
+ */
+export async function applyStoreKitchenLine(
+  tx: ConsumerTransaction,
+  input: {
+    readonly scope: { readonly brandReference: string; readonly storeReference: string };
+    readonly actorReference: string;
+    readonly operationReference: string;
+    readonly expectedVersion: number;
+    readonly recordedAt: string;
+    readonly nextReference: () => string;
+    authorize(tx: ConsumerTransaction): Promise<boolean>;
+    readonly purposeCode?: string;
+    readonly permissionCode?: string;
+    readonly reasonCode?: string;
+  },
+) {
+  const { scope, recordedAt: at } = input;
+  const line = await readStoreKitchenLine(tx, scope);
+  const required = await listRecipeKitchenCapabilities(tx as never, scope, at);
+  const all = [...new Set([...required.values()].flat())];
+  const uncovered = [...required.values()].some((capabilities) =>
+    capabilities.some((capability) => !line.capabilityReferences.includes(capability)),
+  );
+  const capabilities = [...new Set([...line.capabilityReferences, ...all])];
+  if (capabilities.length === 0)
+    capabilities.push(brandKitchenCapabilityReference(scope.brandReference));
+  // A retry of the same operation returns what it recorded (checked by the store).
+  return recordStoreKitchenLine(tx, {
+    ...scope,
+    actorReference: input.actorReference,
+    operationReference: input.operationReference,
+    auditReference: approvalDerivedReference(input.operationReference, "kitchen-setup"),
+    expectedVersion: input.expectedVersion,
+    recordedAt: at,
+    capabilityReferences: capabilities,
+    sha256,
+    nextReference: input.nextReference,
+    authorize: input.authorize,
+    onlyIfChanged: line.version === 0 || uncovered,
+    ...(input.purposeCode === undefined ? {} : { purposeCode: input.purposeCode }),
+    ...(input.permissionCode === undefined ? {} : { permissionCode: input.permissionCode }),
+    ...(input.reasonCode === undefined ? {} : { reasonCode: input.reasonCode }),
+  });
+}
+
+/**
  * WP-2423 item 11 (Owner 2026-11-01): the Store's kitchen setup, in Store setup. Reading needs
  * `organization.store.read`; setting up needs `organization.store.update` (Owner, Store Manager,
  * Area Manager). One kitchen line takes every dish (Owner 取舍 5, 9: one kitchen screen; dishes are
@@ -200,26 +248,14 @@ export function createMerchantKitchenSetup(options: {
               brandReference: String(current.context.brand.brandReference),
               storeReference: String(current.store.storeReference),
             };
-            const at = String(current.context.resolvedAt);
-            const line = await readStoreKitchenLine(tx, scope);
-            const { all, uncoveredDishes } = await needs(tx, scope, at, line.capabilityReferences);
-            const capabilities = [...new Set([...line.capabilityReferences, ...all])];
-            if (capabilities.length === 0)
-              capabilities.push(brandKitchenCapabilityReference(scope.brandReference));
-            // A retry of the same operation returns what it recorded (checked by the store).
-            const changes = line.version === 0 || uncoveredDishes.length > 0;
-            const result = await recordStoreKitchenLine(tx, {
-              ...scope,
+            const result = await applyStoreKitchenLine(tx, {
+              scope,
               actorReference: String(current.actorReference),
               operationReference,
-              auditReference: approvalDerivedReference(operationReference, "kitchen-setup"),
               expectedVersion,
-              recordedAt: at,
-              capabilityReferences: capabilities,
-              sha256,
+              recordedAt: String(current.context.resolvedAt),
               nextReference: options.nextReference,
               authorize: async (t) => authority.guard(t),
-              onlyIfChanged: changes,
             });
             if (result.status === "NoChange") throw new MerchantKitchenSetupError("NoChange");
             return Object.freeze({ status: result.status, version: result.version });

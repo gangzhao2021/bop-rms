@@ -326,6 +326,7 @@ export {
   loadMerchantOrderLines,
   type MerchantOrderLine,
   type MerchantOrderLineMoney,
+  listRecentStoreOrders,
 } from "./infrastructure/persistence/merchant-order-index.js";
 
 export { createPostgresOrderBatchIdentitySource } from "./infrastructure/persistence/order-batch-identity-source.js";

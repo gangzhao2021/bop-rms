@@ -27,6 +27,7 @@ import { bindMerchantReceiptTemplateArtifactCommand } from "./merchant-receipt-t
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { MerchantStoreReceiptProfileError } from "./merchant-store-receipt-profile.js";
 import { MerchantKitchenSetupError } from "./merchant-kitchen-setup.js";
+import { MerchantStoreSupportError } from "./merchant-store-support.js";
 import { MerchantStorePublicProfileError } from "./merchant-store-public-profile.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { MerchantStoreFeaturesError } from "./merchant-store-features.js";
@@ -678,6 +679,86 @@ export function installMerchantStoreSetupRoutes(
         .catch((error) => receiptTemplateArtifactsFailure(response, error));
     },
   );
+
+  // WP-2423 取舍 15: platform support staff (no Store workspace) and the Owner's side of it.
+  const supportFailure = (response: express.Response, error: unknown) => {
+    response.set("Cache-Control", NO_STORE);
+    if (!(error instanceof MerchantStoreSupportError)) {
+      response.status(503).set("Retry-After", "5").json({ error: "support_unavailable" });
+      return;
+    }
+    if (error.code === "Denied") response.status(403).json({ error: "support_denied" });
+    else if (error.code === "OwnerOnly") response.status(403).json({ error: "owner_only" });
+    else if (error.code === "NotAllowedByOwner")
+      response.status(403).json({ error: "not_allowed_by_owner" });
+    else if (error.code === "Invalid") response.status(422).json({ error: "invalid_command" });
+    else response.status(503).set("Retry-After", "5").json({ error: "support_unavailable" });
+  };
+  router.get("/support/session", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (sessionCookie === null || !options.storeSupport) {
+      denied(response);
+      return;
+    }
+    void options.storeSupport
+      .session(sessionCookie)
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => supportFailure(response, error));
+  });
+  router.post("/support/store/view", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf"),
+      body = request.body as { storeReference?: unknown } | undefined;
+    if (sessionCookie === null || csrf === null || !options.storeSupport) {
+      denied(response);
+      return;
+    }
+    void options.storeSupport
+      .view({ sessionCookie, csrf, storeReference: body?.storeReference })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => supportFailure(response, error));
+  });
+  router.post("/support/store/command", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf"),
+      body = request.body as { storeReference?: unknown; command?: unknown } | undefined;
+    if (sessionCookie === null || csrf === null || !options.storeSupport) {
+      denied(response);
+      return;
+    }
+    void options.storeSupport
+      .command({
+        sessionCookie,
+        csrf,
+        storeReference: body?.storeReference,
+        command: body?.command,
+      })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => supportFailure(response, error));
+  });
+  router.get("/store/support-access", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (sessionCookie === null || !options.storeSupportAccess) {
+      denied(response);
+      return;
+    }
+    void options.storeSupportAccess
+      .read({ sessionCookie })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => supportFailure(response, error));
+  });
+  router.post("/store/support-access", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (sessionCookie === null || csrf === null || !options.storeSupportAccess) {
+      denied(response);
+      return;
+    }
+    void options.storeSupportAccess
+      .change({ sessionCookie, csrf, command: request.body })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => supportFailure(response, error));
+  });
 
   // WP-2423 item 11: the Store's kitchen setup, read by staff who open Store setup.
   router.get("/store/kitchen-setup", safeRead(options), (request, response) => {

@@ -101,8 +101,13 @@ describe("merchant route classification", () => {
     // The Brand and Platform sign-ins run without a Store session; their pages show their own state.
     expect(pilotHiddenRedirect("/app/organization/brands", null)).toBeNull();
     expect(pilotHiddenRedirect("/platform/tenants", null)).toBeNull();
-    for (const path of ["/platform/tenants/x", "/platform/live-gates", "/platform/support-cases"])
+    for (const path of ["/platform/tenants/x", "/platform/live-gates"])
       expect(pilotHiddenRedirect(path, pilot), path).toBe("/app");
+  });
+
+  it("WP-2423 取舍 15: platform support's page is served, with or without a Store session", () => {
+    expect(pilotHiddenRedirect("/platform/support-cases", null)).toBeNull();
+    expect(pilotHiddenRedirect("/platform/support-cases", ["HOME-OVERVIEW"])).toBeNull();
   });
 
   it("sends each hidden screen to a working screen", () => {

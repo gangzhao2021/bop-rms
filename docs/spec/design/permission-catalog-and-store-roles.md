@@ -114,3 +114,9 @@
 ## 不改变
 
 不改变 Section 88 已写明的权限名与页面契约；平台级权限（平台管理员）保持现有机制；具名厨房操作员会话的最小权限档案继续生效。
+
+## 平台支持访问（2026-11-02，WP-2423 取舍 15）
+
+- 决定：权限目录 v23 新增 `organization.support_access.manage`（允许或停止平台支持更改设置，读取支持访问记录；风险 High），
+  只在 Owner 模板。详见 [DEC-PLATFORM-SUPPORT-STAFF](./platform-support-staff.md)。
+- 批准：Owner 常设批准 2026-10-14。已开通门店需安装目录 v23 并把门店角色升级到 v23（Owner 新增 1 项授权）。

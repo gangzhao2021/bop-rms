@@ -401,6 +401,11 @@ const PlatformTemplateWorkspace = lazyPage(
   () => import("./PlatformTemplateWorkspace.js"),
   "PlatformTemplateWorkspace",
 );
+const StoreSupportPage = lazyPage(() => import("./StoreSupportPage.js"), "StoreSupportPage");
+const StoreSupportAccessPanel = lazyPage(
+  () => import("./StoreSupportAccessPanel.js"),
+  "StoreSupportAccessPanel",
+);
 const SupportCasePage = lazyPage(() => import("./SupportCasePages.js"), "SupportCasePage");
 // WP-2423 (design "A"): staff PIN quick switch on a shared tablet, and its management page.
 const StoreDevicesPage = lazyPage(() => import("./StoreDevicesPage.js"), "StoreDevicesPage");
@@ -437,6 +442,7 @@ function prefetchPilotScreens(): () => void {
 
 /** Screens that work without a sign-in (and the sign-in window's last page). */
 const sessionlessPaths: ReadonlySet<string> = new Set([
+  "/platform/support-cases",
   "/operations/switch-staff",
   "/operations/sign-in",
   "/app/identity/step-up-complete",
@@ -844,6 +850,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     <StorePublicProfilePanel csrf={state.csrf} />
                     {/* WP-2423 item 11: guests can't order until the kitchen is set up. */}
                     <StoreKitchenSetupPanel csrf={state.csrf} />
+                    {/* WP-2423 取舍 15: the Owner's say over platform support, and the log. */}
+                    <StoreSupportAccessPanel csrf={state.csrf} />
                     {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
                     <StoreReceiptPrivacyPanel csrf={state.csrf} />
                     {/* Owner 2026-10-25: moved here from Approvals; hidden for other roles. */}
@@ -1010,7 +1018,11 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           path="/platform/support-cases"
           element={
             <LocalDemoRoute notice={demo?.Notice ?? null}>
-              <SupportCasePage {...clientProps(demo?.supportCase)} />
+              {demo?.supportCase ? (
+                <SupportCasePage {...clientProps(demo.supportCase)} />
+              ) : (
+                <StoreSupportPage />
+              )}
             </LocalDemoRoute>
           }
         />

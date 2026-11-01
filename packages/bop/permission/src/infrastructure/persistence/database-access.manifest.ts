@@ -3,6 +3,31 @@ const databaseAccessManifestInput = {
   module: { moduleName: "permission", packageName: "@bop/permission", layer: "BOP" },
   tables: [
     {
+      // WP-2423 取舍 15: platform support staff and the Owner's say over them.
+      table: "platform_support_person",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "store_support_permission",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "store_support_access_log",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/permission" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "platform_permission_policy_head",
       classification: "aggregate-root",
       writeOwner: { kind: "module", id: "@bop/permission" },
