@@ -105,9 +105,27 @@ describe("configured quote policies", () => {
       professionalEvidence: policy.taxConfiguration.professionalEvidence,
     });
   });
+  it("v15 2026-11-01: `tax` run while serving is picked up by the next quote, with no restart", async () => {
+    let file = policy;
+    const later = {
+      ...policy,
+      taxConfiguration: { ...policy.taxConfiguration, configurationReference: id(11) },
+    };
+    const quote = await createInternalConfiguredQuote(resources, "Pickup", {
+      loadPricingPolicy: async () => file,
+    });
+    file = later;
+    mocks.published.mockResolvedValueOnce(store(id(11)));
+    mocks.published.mockResolvedValueOnce(store(id(11)));
+    mocks.priceBook.mockResolvedValueOnce({ priceBookReference: id(1) });
+    const policies = await quote.policies({ requestedAt: at });
+    expect(policies.taxConfigurationReference).toBe(id(11));
+  });
   it("make no quote when the Store's published tax configuration and the test file disagree", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
+      // Read twice: the operating file is read again before refusing.
+      mocks.published.mockResolvedValueOnce(store(id(11)));
       mocks.published.mockResolvedValueOnce(store(id(11)));
       const quote = await compose();
       await expect(quote.policies({ requestedAt: at })).rejects.toThrow(

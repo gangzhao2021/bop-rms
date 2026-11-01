@@ -33,6 +33,8 @@ export type CustomerEntryScreenState =
       todayKind: "Holiday" | "TemporaryClosure" | "Override" | null;
       nextOpening: Readonly<{ localDate: string; startLocalTime: string }> | null;
       localDate: string | null;
+      /** WP-2423 item 11: not a closing time; this Store isn't ready to take orders yet. */
+      notReady?: true;
     }>
   /** WP-2423 item 8 ⑦ 1b: a pickup code at a Store that takes dine-in orders only. */
   | Readonly<{ kind: "PickupNotOffered"; storeDisplayName: string }>

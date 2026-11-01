@@ -45,6 +45,8 @@ export interface StoreFeatures {
     readonly enabled: boolean;
     readonly tierPercents: readonly [number, number, number];
     readonly changedAt: string | null;
+    /** The Store's published configuration has Tip Off: no one is asked, whatever is set here. */
+    readonly offInStoreSetup: boolean;
   };
 }
 /** Three whole percentages, each 1–50, from lowest to highest. */
@@ -90,7 +92,9 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
   if (
     tips === null ||
     typeof tips !== "object" ||
-    Object.keys(tips).sort().join(",") !== "changedAt,enabled,tierPercents,version" ||
+    Object.keys(tips).sort().join(",") !==
+      "changedAt,enabled,offInStoreSetup,tierPercents,version" ||
+    typeof tips.offInStoreSetup !== "boolean" ||
     !Number.isSafeInteger(tips.version) ||
     Number(tips.version) < 0 ||
     typeof tips.enabled !== "boolean" ||
@@ -178,6 +182,7 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
         number,
       ],
       changedAt: tips.changedAt as string | null,
+      offInStoreSetup: tips.offInStoreSetup,
     }),
   });
 }

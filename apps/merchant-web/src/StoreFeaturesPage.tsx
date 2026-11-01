@@ -459,6 +459,13 @@ export function StoreFeaturesPage({
         />
         <fieldset className="store-features__modules" disabled={busy}>
           <legend>{t("Tips")}</legend>
+          {view.tips.offInStoreSetup ? (
+            <p role="note">
+              {t(
+                "Tips are off in this Store's published Store setup, so no one is asked for a tip, whatever is set here. To offer tips, turn Tip on in Store setup and publish it.",
+              )}
+            </p>
+          ) : null}
           <label className="store-features__row">
             <input
               type="checkbox"

@@ -60,8 +60,8 @@ export async function readInternalQuoteTaxReadiness(resources, loadPricingPolicy
 export async function createInternalConfiguredQuote(resources, orderType, { loadPricingPolicy }) {
   if (!["Pickup", "DineIn"].includes(orderType))
     throw new Error("INTERNAL_QUOTE_CHANNEL_UNAVAILABLE");
-  const policy = await loadPricingPolicy(),
-    scope = resources.scope,
+  let policy = await loadPricingPolicy();
+  const scope = resources.scope,
     reference = resources.credentials.reference;
   const hash = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
   const audit = (actionCode, targetType, targetId, occurredAt) => ({
@@ -99,7 +99,13 @@ export async function createInternalConfiguredQuote(resources, orderType, { load
     // The Store's assigned price book (DEC-PRICE-STORE-ASSIGNMENT) and the tax configuration its
     // published configuration names at the quote's time, read for each quote.
     policies: async (input) => {
-      const tax = await readInternalQuoteTaxConfiguration(resources, policy, input.requestedAt);
+      let tax = await readInternalQuoteTaxConfiguration(resources, policy, input.requestedAt);
+      // The operating file may have named this Store's configuration after this service started
+      // (v15 2026-11-01: `tax` at Store 3 answered 503 until a restart): read it again.
+      if (!tax.ready && tax.reason === "TaxConfigurationMismatch") {
+        policy = await loadPricingPolicy();
+        tax = await readInternalQuoteTaxConfiguration(resources, policy, input.requestedAt);
+      }
       if (!tax.ready) {
         const code =
           tax.reason === "TaxConfigurationMismatch"

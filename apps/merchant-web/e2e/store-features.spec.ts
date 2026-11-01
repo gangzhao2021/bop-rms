@@ -78,6 +78,7 @@ test("@production the owner applies the full-service setup, turns a module back 
       enabled: true,
       tierPercents: [10, 15, 18],
       changedAt: null as string | null,
+      offInStoreSetup: false,
     },
     canChange: true,
   };
@@ -110,6 +111,7 @@ test("@production the owner applies the full-service setup, turns a module back 
           enabled: body.enabled === true,
           tierPercents: body.tierPercents as number[],
           changedAt: "2026-10-29T15:20:00.000Z",
+          offInStoreSetup: false,
         },
       };
       return route.fulfill({ headers, json: current });

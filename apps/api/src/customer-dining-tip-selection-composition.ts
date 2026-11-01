@@ -1,3 +1,4 @@
+import { readPublishedStoreTipOff } from "@rms/store";
 import { rethrowTipSelectionFailure } from "./customer-tip-selection-failure.js";
 import { createPersistentAdditionalDiningPreparation } from "./customer-additional-dining-preparation.js";
 import {
@@ -252,6 +253,7 @@ export function createPersistentAdditionalDiningTipSelection(
           options.transactions,
           options.preparation.scope,
           { now: () => parseCanonicalInstant(options.preparation.now()) },
+          (tx) => readPublishedStoreTipOff(tx as never, options.preparation.scope),
         ),
       },
     },

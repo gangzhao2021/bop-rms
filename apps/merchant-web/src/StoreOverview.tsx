@@ -1,6 +1,7 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
 import { useApprovalsWaiting, type ApprovalsWaiting } from "./approvals-waiting.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
 import {
@@ -464,8 +465,20 @@ export function attentionItems(
   state: OverviewTodayState,
   approvals: ApprovalsWaiting | null,
   dayStartsAt: string | null = null,
+  kitchenSetupHref: string | null = null,
 ): readonly AttentionItem[] {
   const items: AttentionItem[] = [];
+  // WP-2423 item 11: first, since no guest can order until this is done.
+  if (kitchenSetupHref !== null)
+    items.push({
+      key: "kitchen-setup",
+      title: t("The kitchen isn't set up"),
+      detail: t("Guests and staff can't place orders at this Store until it is."),
+      state: t("Not set up"),
+      tone: "danger",
+      href: kitchenSetupHref,
+      action: t("Set up the kitchen"),
+    });
   const tables = state.tables.kind === "Ready" ? state.tables.value.tables : [];
   const calls = tables.filter((table) => table.staffCall != null).length;
   if (calls > 0)
@@ -543,13 +556,15 @@ export function attentionItems(
 export function NeedsAttention({
   state,
   approvals = null,
+  kitchenSetupHref = null,
 }: {
   readonly state: OverviewTodayState;
   readonly approvals?: ApprovalsWaiting | null;
+  readonly kitchenSetupHref?: string | null;
 }) {
   const reads = [state.orders, state.pickups, state.exceptions, state.tables];
-  if (reads.every((read) => read.kind === "Hidden")) return null;
-  const items = attentionItems(state, approvals);
+  if (kitchenSetupHref === null && reads.every((read) => read.kind === "Hidden")) return null;
+  const items = attentionItems(state, approvals, null, kitchenSetupHref);
   const reading = reads.some((read) => read.kind === "Loading");
   return (
     <section
@@ -898,6 +913,28 @@ export function StoreOverview({
   const todayRef = useRef(today);
   todayRef.current = today;
   const pickupView = useRef<Parameters<typeof summarizePickups>[0] | null>(null);
+  // WP-2423 item 11: told only to those who can fix it; a failed read says nothing here (the
+  // Store setup section and the listing refusal still say it).
+  const [kitchenSetupHref, setKitchenSetupHref] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void createStoreKitchenSetupClient({ csrf, ...(fetcher ? { fetcher } : {}) })
+      .load()
+      .then(
+        (kitchen) => {
+          if (live)
+            setKitchenSetupHref(
+              kitchen.canChange && kitchen.version === 0
+                ? `/app/organization/stores/${storeReference}/setup#kitchen-setup`
+                : null,
+            );
+        },
+        () => undefined,
+      );
+    return () => {
+      live = false;
+    };
+  }, [csrf, fetcher, storeReference]);
   useEffect(() => {
     const view = pickupView.current;
     if (view !== null)
@@ -1026,7 +1063,7 @@ export function StoreOverview({
         onRefresh={() => void load(true)}
         approvals={approvals}
       />
-      <NeedsAttention state={state} approvals={approvals} />
+      <NeedsAttention state={state} approvals={approvals} kitchenSetupHref={kitchenSetupHref} />
       <DayChecklist
         state={state}
         settlement={settlement}

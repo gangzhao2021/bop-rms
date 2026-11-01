@@ -1,3 +1,4 @@
+import { readPublishedStoreTipOff } from "../../packages/rms/store/src/index.ts";
 import console from "node:console";
 import { GuestSessionService } from "../../packages/bop/identity/src/index.ts";
 import { createConfiguredCheckoutValidationService } from "../../packages/rms/ordering/src/index.ts";
@@ -248,7 +249,9 @@ export async function createInternalAdditionalSubmission(
     quoteVersion: 2,
     authorizeOrder,
     tip: {
-      repository: createPostgresPaymentTipSelectionStore(transactions, scope, { now }),
+      repository: createPostgresPaymentTipSelectionStore(transactions, scope, { now }, (tx) =>
+        readPublishedStoreTipOff(tx, scope),
+      ),
       audit: {
         create: async (record) => ({
           auditId: reference(),

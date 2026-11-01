@@ -1,5 +1,6 @@
 import { readClosedRecord } from "../../packages/bop/identity/src/index.ts";
 import { createPostgresPaymentTipSelectionStore } from "../../packages/rms/payment/src/index.ts";
+import { readPublishedStoreTipOff } from "../../packages/rms/store/src/index.ts";
 import { createCustomerCheckoutSessionRead } from "../../apps/api/dist/customer-checkout-session-read.js";
 import {
   createCustomerConfiguredPickupSessionOrderSubmission,
@@ -52,7 +53,9 @@ export function createInternalPaymentPreparation(
     return { input, options };
   }
   const tip = {
-    repository: createPostgresPaymentTipSelectionStore(transactions, scope, { now }),
+    repository: createPostgresPaymentTipSelectionStore(transactions, scope, { now }, (tx) =>
+      readPublishedStoreTipOff(tx, scope),
+    ),
     audit: {
       create: async (record) => ({
         auditId: credentials.reference(),
