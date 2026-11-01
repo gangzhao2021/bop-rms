@@ -275,7 +275,7 @@ export function createPostgresStaffOrderCancellationStore(options: {
         instant(acceptance.accepted_at) > instant(paid.confirmed_at)
           ? instant(acceptance.accepted_at)
           : instant(paid.confirmed_at);
-    } else if (!acceptance && orderType === "DineIn") {
+    } else if (!acceptance) {
       const disposed = await single(
         tx,
         "SELECT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4) AS disposed",
@@ -505,7 +505,11 @@ export function createPostgresStaffOrderCancellationStore(options: {
         occurredAt: cancelledAt,
         sourceChannel: "MERCHANT_WEB",
         afterSummary: {
-          phase: "Cancelled",
+          // Handoff 24.8: a pickup the Store never accepted ends as Rejected, not Cancelled.
+          phase:
+            record.orderType === "Pickup" && plan.previousPhase === "Submitted"
+              ? "Rejected"
+              : "Cancelled",
           previousPhase: plan.previousPhase ?? "Accepted",
           refund: refundDisposition,
         },
@@ -527,8 +531,8 @@ export function createPostgresStaffOrderCancellationStore(options: {
             expectedOrderVersion: record.expectedOrderVersion,
             terminatedOrderVersion: record.cancelledOrderVersion,
             expectedSourceCheckpoint: record.expectedSourceCheckpoint,
-            previousPhase: "Accepted",
-            phase: "Cancelled",
+            previousPhase: plan.previousPhase ?? "Accepted",
+            phase: plan.previousPhase === "Submitted" ? "Rejected" : "Cancelled",
             actorType: "User",
             actorReference,
             purposeCode: staffOrderCancellationPolicy.purposeCode,

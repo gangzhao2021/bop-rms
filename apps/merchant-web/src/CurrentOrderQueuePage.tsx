@@ -3166,7 +3166,7 @@ export function CurrentOrderQueuePage({
                         </Link>
                       )}
                     </fieldset>
-                  ) : batch.canCancel || batch.canCancelItems ? (
+                  ) : !batch.canRequestAcceptance && (batch.canCancel || batch.canCancelItems) ? (
                     <fieldset disabled={servingBusy} className="order-cancel-actions">
                       {batch.canCancel ? (
                         <StaffOrderCancelAction
@@ -3246,7 +3246,22 @@ export function CurrentOrderQueuePage({
                           }
                         />
                       ) : (
-                        acceptAction(order, batch)
+                        <>
+                          {acceptAction(order, batch)}
+                          {/* v15 2026-11-01: a Store that can't make it refuses and refunds here. */}
+                          {batch.canCancel ? (
+                            <div className="order-cancel-actions">
+                              <StaffOrderCancelAction
+                                key={batch.orderBatchReference}
+                                order={order}
+                                batch={batch}
+                                csrf={csrf}
+                                fetcher={fetcher}
+                                onSettled={() => reload(after)}
+                              />
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </fieldset>
                   ) : null

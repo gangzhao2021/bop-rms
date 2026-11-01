@@ -38,6 +38,16 @@
 6. **发布方式（2026-10-11 实现）**：工作流内容是平台定义的产品规则，由平台发布步骤 `workflow-release-install.mjs` 安装到品牌（与权限目录安装同类：
    操作人与独立批准人、批准证据、按操作编号重放）；版本无到期，内容变更只能发新版本。单人门店规则（DEC-SOLE-OPERATOR-APPROVAL）不适用于这一平台级批准。
 
+## 已付款、尚未接单的订单：门店拒单并退款（协调人 2026-11-01）
+
+依据已接受内容：Handoff §24.8（`Rejected`＝商家从未接受，须存原因、操作人、时间）、Section 88 `OPS-ORDER-DETAIL`（"accept / reject"）。
+不新建命令，扩展本决定的店员取消和 DEC-TABLE-CLOSE-GUESTS-LEFT 决定 4（当时只开放堂食）：
+
+1. 持 `ordering.order.cancel` 且可接单的员工，在等待接单的已付款订单或轮次上直接“拒单并退款”，原因沿用取消原因（`GUEST_LEFT` 不用于取餐单）。
+2. 取餐单：订单以 `Rejected` 结束（Submitted → Rejected），不是 `Cancelled`；堂食轮次沿用既有整轮取消，整单继续。
+3. 记录、审计、退款与取消相同：只追加的 `order_staff_cancellation` 与审计 `ORDER_CANCELLED_BY_STAFF`（`afterSummary` 写 `Rejected`/`Submitted`），同一事务释放库存，退款走补偿路径或刷卡机。
+4. 报表按“门店取消并全额退款”处理，当日不算销售。
+
 ## DEC-TIP-REFUND-PROPORTIONAL — 退部分商品时按比例退小费（2026-10-17，Owner 决定）
 
 状态：**Accepted（Owner 决定）**。问题：“顾客付了小费、之后退掉其中一件商品时，小费怎么退？”Owner 原话回复：“按比例退小费（推荐）”。

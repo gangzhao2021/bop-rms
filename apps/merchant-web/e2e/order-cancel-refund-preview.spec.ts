@@ -48,6 +48,7 @@ test("@production the cancel dialog says what is refunded and the detail follows
   );
   let refunded = "1424";
   let kitchenPhase: "Ready" | null = null;
+  let waiting = false;
   const order = (detail: boolean) => ({
     orderReference: id(21),
     orderNumber: "21",
@@ -60,16 +61,16 @@ test("@production the cancel dialog says what is refunded and the detail follows
       {
         orderBatchReference: id(91),
         sequence: 1,
-        acceptanceStatus: "Accepted",
-        canRequestAcceptance: false,
+        acceptanceStatus: waiting ? "NotAccepted" : "Accepted",
+        canRequestAcceptance: waiting,
         canCancel: kitchenPhase === null,
         staffCancellation: null,
         canCancelItems: false,
       },
     ],
-    canRequestAcceptance: false,
-    currentPhase: "Accepted",
-    currentVersion: 3,
+    canRequestAcceptance: waiting,
+    currentPhase: waiting ? "Submitted" : "Accepted",
+    currentVersion: waiting ? 1 : 3,
     unfulfillable: null,
     pickupNotCollected: false,
     acceptBy: null,
@@ -193,4 +194,20 @@ test("@production the cancel dialog says what is refunded and the detail follows
   await expect(page.locator(".order-workbench-phase").first()).toHaveText("Ready for pickup");
   await page.screenshot({ path: "test-results/order-detail-kitchen-ready.png" });
   await expectNoInternalText(page);
+
+  // v15 2026-11-01: paid and still waiting for acceptance: the Store accepts it, or refuses it and
+  // refunds it directly, with the same reasons and refund statement.
+  kitchenPhase = null;
+  waiting = true;
+  refunded = "0";
+  await page.reload();
+  await expect(page.getByRole("button", { name: /^Accept/u })).toBeVisible();
+  await page.getByRole("button", { name: "Refuse and refund" }).click();
+  const refuse = page.getByRole("dialog", { name: "Refuse order 21" });
+  await expect(refuse).toContainText("It was never accepted");
+  await expect(refuse.locator(".order-cancel-no-show")).toHaveCount(0);
+  await refuse.getByRole("combobox", { name: "Reason" }).selectOption("SOLD_OUT");
+  await expect(refuse.getByRole("button", { name: "Refuse and refund" })).toBeVisible();
+  await expectNoInternalText(page);
+  await refuse.getByRole("button", { name: "Keep order" }).click();
 });

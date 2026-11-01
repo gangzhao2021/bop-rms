@@ -3358,6 +3358,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save receipt and privacy details": "保存收据和隐私信息",
   "Orders cancelled and refunded in full": "已取消并全额退款的订单",
   "taken and given back": "已收款并已退回",
+  "Refuse and refund": "拒单并退款",
+  "Refuse order {orderNumber}": "拒绝订单 {orderNumber}",
+  "Refuse round {sequence} of order {orderNumber}": "拒绝订单 {orderNumber} 的第 {sequence} 轮",
+  "It was never accepted, so it hasn't reached the kitchen. The reason and your name are recorded.":
+    "此单尚未接单，还没有进入后厨。原因和您的名字都会被记录。",
   "includes the cancelled orders above: the same money, not extra":
     "包含上面已取消的订单：是同一笔钱，不是另外的退款",
   "Business name on receipts": "收据上的商家名称",

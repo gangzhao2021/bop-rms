@@ -597,14 +597,18 @@ describe("DEC-TABLE-CLOSE-GUESTS-LEFT: a paid round never accepted", () => {
       expectedOrderVersion: version,
       actorReference: actor,
     });
-  it("plans a dine-in round from its waiting payment, never a pickup", async () => {
+  it("plans a dine-in round or a pickup order from its waiting payment", async () => {
     const f = storeFixture({ orderType: "DineIn", accepted: false, paid: false, waiting: true });
     expect(await prepare(f)).toEqual({
       status: "Ready",
       plan: { ...plan, orderType: "DineIn", previousPhase: "Submitted" },
     });
     const pickup = storeFixture({ accepted: false, paid: false, waiting: true });
-    expect(await prepare(pickup)).toEqual({ status: "NotEligible", reason: "NotConfirmed" });
+    // v15 2026-11-01: a Store refuses a paid pickup it never accepted.
+    expect(await prepare(pickup)).toEqual({
+      status: "Ready",
+      plan: { ...plan, previousPhase: "Submitted" },
+    });
   });
   it("refuses a round with no waiting payment or one already disposed", async () => {
     expect(
@@ -671,9 +675,7 @@ describe("DEC-TABLE-CLOSE-GUESTS-LEFT: a paid round never accepted", () => {
       previousPhase: "Accepted",
       refundDisposition: "Refund",
     });
-    expect(() =>
-      parseStaffOrderCancellationRecord(record({ previousPhase: "Submitted" })),
-    ).toThrow();
+    expect(() => parseStaffOrderCancellationRecord(record({ previousPhase: "Closed" }))).toThrow();
     expect(
       parseStaffOrderCancellationRecord(
         record({

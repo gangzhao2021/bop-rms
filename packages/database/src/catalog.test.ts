@@ -783,6 +783,7 @@ describe("migration catalog", () => {
       "2000_139_create_store_price_change",
       "2000_140_backfill_store_reference_projection",
       "2000_141_alter_dining_table_retired",
+      "2000_142_alter_staff_cancellation_pickup_refusal",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

@@ -721,16 +721,17 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
               item.orderType !== "DineIn" &&
               (item.currentVersion !== 1 || item.currentPhase !== "Submitted")))) ||
         typeof batch.canCancel !== "boolean" ||
-        // WP-2423 Q6: only a paid, accepted batch the kitchen has not started can be cancelled.
+        // WP-2423 Q6: a paid, accepted batch the kitchen has not started can be cancelled; v15
+        // 2026-11-01: one paid and waiting for acceptance can be refused directly.
         (batch.canCancel &&
           (staffCancellation !== null ||
-            batch.acceptanceStatus !== "Accepted" ||
-            batch.canRequestAcceptance ||
+            (batch.acceptanceStatus !== "Accepted" && !batch.canRequestAcceptance) ||
+            (batch.acceptanceStatus === "Accepted" && batch.canRequestAcceptance) ||
             item.unfulfillable !== null ||
             item.pickupNotCollected !== false ||
             item.currentVersion === null ||
             !(item.orderType === "Pickup"
-              ? item.currentPhase === "Accepted"
+              ? item.currentPhase === (batch.canRequestAcceptance ? "Submitted" : "Accepted")
               : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
                   String(item.currentPhase),
                 )))) ||
