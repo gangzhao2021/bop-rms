@@ -81,7 +81,20 @@ export function createInternalKitchen(resources) {
     validateConfiguration: async () => false,
     audit: readOnly,
   });
-  function service(transaction) {
+  // v15 2026-11-01: the step a confirmed order could not get past (kitchen's own failures are one
+  // code), so the delivery failure names its cause instead of only a temporary failure.
+  const step = (diagnosis, code, read) => async (query) => {
+    let value;
+    try {
+      value = await read(query);
+    } catch (error) {
+      diagnosis.cause ??= Object.assign(new Error(code), { code, cause: error });
+      throw error;
+    }
+    if (value === null) diagnosis.cause ??= Object.assign(new Error(code), { code });
+    return value;
+  };
+  function service(transaction, diagnosis = { cause: null }) {
     const observedAt = resources.now();
     const source = createPostgresOrderKitchenSourceStore({
       ...scope,
@@ -125,14 +138,27 @@ export function createInternalKitchen(resources) {
       digests: { sha256: hash },
       clock: { now: async () => observedAt },
       repository,
-      orderingSource: { resolve: (query) => source.resolve({ transaction, query }) },
+      orderingSource: {
+        resolve: step(diagnosis, "KITCHEN_ORDER_SOURCE_UNAVAILABLE", (query) =>
+          source.resolve({ transaction, query }),
+        ),
+      },
       plans: {
         resolve: (input) =>
           createKitchenWorkPlanService({
             references,
             digests: { sha256: hash },
-            stationRouting: { resolve: (query) => routing.resolve({ transaction, query }) },
-            preparations: { resolve: (query) => preparation.resolve(transaction, query) },
+            // None: the Store had no kitchen routing in effect when the order was confirmed.
+            stationRouting: {
+              resolve: step(diagnosis, "KITCHEN_ROUTING_NOT_IN_EFFECT_AT_CONFIRMATION", (query) =>
+                routing.resolve({ transaction, query }),
+              ),
+            },
+            preparations: {
+              resolve: step(diagnosis, "KITCHEN_PREPARATION_UNAVAILABLE", (query) =>
+                preparation.resolve(transaction, query),
+              ),
+            },
           }).resolve(input),
       },
     };
@@ -177,9 +203,16 @@ export function createInternalKitchen(resources) {
   }
   const registration = Object.freeze({
     ...service().registration,
-    handler: (context) => {
+    handler: async (context) => {
       authorized(context.envelope);
-      return service(context.transaction).registration.handler(context);
+      const diagnosis = { cause: null };
+      const outcome = await service(context.transaction, diagnosis).registration.handler(context);
+      // Retried as before; the failure carries the step it stopped at (codes only).
+      if (outcome.status === "retry_required" && diagnosis.cause !== null)
+        throw Object.assign(new Error(outcome.errorCode, { cause: diagnosis.cause }), {
+          code: outcome.errorCode,
+        });
+      return outcome;
     },
   });
   return {
