@@ -33,6 +33,8 @@ export const actions = new Set<DiningTableAction>([
   "RevokeQr",
   "SetBlock",
   "ClearBlock",
+  "Rename",
+  "Retire",
 ]);
 const eventType: Record<DiningTableAction, DiningTableEvent["eventType"]> = {
   CreateDraft: "DiningTableDrafted",
@@ -42,6 +44,8 @@ const eventType: Record<DiningTableAction, DiningTableEvent["eventType"]> = {
   RevokeQr: "DiningTableQrLifecycleChanged",
   SetBlock: "DiningTableOperationalStateChanged",
   ClearBlock: "DiningTableOperationalStateChanged",
+  Rename: "DiningTableConfigurationPublished",
+  Retire: "DiningTableConfigurationPublished",
 };
 
 export function closed(value: unknown, keys: readonly string[]) {
@@ -211,7 +215,9 @@ export function parseDiningTableOperationRecord(value: unknown): DiningTableOper
       (action === "IssueQr" && table.qrStatus !== "Active") ||
       (action === "RevokeQr" && table.qrStatus !== "Revoked") ||
       (action === "SetBlock" && table.operationalState !== "TemporarilyBlocked") ||
-      (action === "ClearBlock" && table.operationalState !== "Available")
+      (action === "ClearBlock" && table.operationalState !== "Available") ||
+      (action === "Rename" && table.lifecycle !== "Published") ||
+      (action === "Retire" && (table.lifecycle !== "Retired" || table.qrStatus === "Active"))
     )
       return dependency();
     return Object.freeze({

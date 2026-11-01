@@ -7,7 +7,9 @@ import {
   type DiningSession,
 } from "./dining-session.js";
 
-export type DiningTableLifecycle = "Draft" | "Published";
+/** Retired (2026-11-01): out of service for good — no session, its code turned off; kept, never
+ * deleted, so its history stays readable. */
+export type DiningTableLifecycle = "Draft" | "Published" | "Retired";
 export type DiningTableQrStatus = "Inactive" | "Active" | "Revoked";
 export type DiningTableOperationalState = "Available" | "TemporarilyBlocked";
 export type DiningTableCode = string & { readonly __diningTableCode: unique symbol };
@@ -117,7 +119,7 @@ export function createDiningTable(value: unknown): DiningTable {
     raw.stableLabel.trim() !== raw.stableLabel ||
     !Array.isArray(raw.accessibilityAttributes) ||
     raw.accessibilityAttributes.length > 16 ||
-    (raw.lifecycle !== "Draft" && raw.lifecycle !== "Published") ||
+    (raw.lifecycle !== "Draft" && raw.lifecycle !== "Published" && raw.lifecycle !== "Retired") ||
     !["Inactive", "Active", "Revoked"].includes(raw.qrStatus as string) ||
     !["Available", "TemporarilyBlocked"].includes(raw.operationalState as string)
   )
@@ -129,6 +131,10 @@ export function createDiningTable(value: unknown): DiningTable {
     new Set(attributes).size !== attributes.length ||
     (raw.lifecycle === "Draft" &&
       (raw.qrStatus !== "Inactive" ||
+        raw.operationalState !== "Available" ||
+        raw.activeDiningSessionReference !== null)) ||
+    (raw.lifecycle === "Retired" &&
+      (raw.qrStatus === "Active" ||
         raw.operationalState !== "Available" ||
         raw.activeDiningSessionReference !== null)) ||
     (raw.operationalState === "TemporarilyBlocked") !== (blockReason !== null) ||
@@ -177,6 +183,42 @@ export function replaceDiningTableDraft(
   return createDiningTable({
     ...current,
     ...input,
+    aggregateVersion: current.aggregateVersion + 1,
+  });
+}
+
+/** 2026-11-01: a published table's name changes (staff and guests see the new one). */
+export function renameDiningTable(
+  current: DiningTable,
+  stableLabel: string,
+  observedAt: DiningInstant,
+) {
+  if (current.lifecycle !== "Published" || stableLabel === current.stableLabel)
+    return fail("DINING_TABLE_TRANSITION_INVALID");
+  return createDiningTable({
+    ...current,
+    stableLabel,
+    observedAt,
+    aggregateVersion: current.aggregateVersion + 1,
+  });
+}
+
+/**
+ * 2026-11-01: a published table with no open session leaves service. Its code is turned off (an
+ * active one is revoked, so printed codes stop at once) and any block ends with it.
+ */
+export function retireDiningTable(current: DiningTable, observedAt: DiningInstant) {
+  if (current.lifecycle !== "Published") return fail("DINING_TABLE_TRANSITION_INVALID");
+  if (current.activeDiningSessionReference !== null) return fail("DINING_TABLE_SESSION_CONFLICT");
+  return createDiningTable({
+    ...current,
+    lifecycle: "Retired",
+    ...(current.qrStatus === "Active"
+      ? { qrStatus: "Revoked", qrVersion: current.qrVersion + 1 }
+      : {}),
+    operationalState: "Available",
+    blockReasonCode: null,
+    observedAt,
     aggregateVersion: current.aggregateVersion + 1,
   });
 }

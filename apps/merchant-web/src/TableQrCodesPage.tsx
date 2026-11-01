@@ -13,7 +13,11 @@ import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
  */
 type Load =
   | { readonly kind: "Loading" }
-  | { readonly kind: "Ready"; readonly rows: readonly TableQrRow[] }
+  | {
+      readonly kind: "Ready";
+      readonly rows: readonly TableQrRow[];
+      readonly pickupLink?: string | null;
+    }
   | { readonly kind: "PermissionDenied" | "Unavailable" };
 interface Pending {
   readonly action: "Issue" | "TurnOff";
@@ -21,6 +25,15 @@ interface Pending {
   readonly operationReference: string;
   readonly unknown: boolean;
 }
+/** 2026-11-01: adding, renaming or retiring a table; the operation is kept until it is confirmed. */
+type TableChange =
+  | { readonly kind: "Add"; readonly operationReference: string; readonly unknown: boolean }
+  | {
+      readonly kind: "Rename" | "Retire";
+      readonly table: TableQrRow;
+      readonly operationReference: string;
+      readonly unknown: boolean;
+    };
 const soonDays = 30;
 const day = 24 * 60 * 60 * 1000;
 const date = (instant: string, timeZone: string | undefined) =>
@@ -58,14 +71,17 @@ export function TableQrCodesPage({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "neutral" | "error"; text: string } | null>(null);
   const active = useRef<AbortController | null>(null);
+  const [change, setChange] = useState<TableChange | null>(null);
+  const [tableName, setTableName] = useState("");
+  const [seats, setSeats] = useState("4");
   const refresh = useCallback(() => {
     active.current?.abort();
     const controller = new AbortController();
     active.current = controller;
     void client
-      .list(controller.signal)
-      .then((rows) => {
-        if (!controller.signal.aborted) setLoad({ kind: "Ready", rows });
+      .overview(controller.signal)
+      .then(({ rows, pickupLink }) => {
+        if (!controller.signal.aborted) setLoad({ kind: "Ready", rows, pickupLink });
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted)
@@ -129,6 +145,53 @@ export function TableQrCodesPage({
     }
   };
 
+  const pickupLink = load.kind === "Ready" ? (load.pickupLink ?? null) : null;
+  // The customer app's address (it names the Store by its public reference): copied, not shown.
+  const copyPickupLink = async () => {
+    if (pickupLink === null) return;
+    try {
+      await navigator.clipboard.writeText(pickupLink);
+      setMessage({
+        tone: "neutral",
+        text: t("The pickup link is copied. Paste it where guests will find it."),
+      });
+    } catch {
+      setMessage({
+        tone: "error",
+        text: t("The link could not be copied here. Print the pickup poster instead."),
+      });
+    }
+  };
+  const printPoster = async () => {
+    if (busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const poster = await client.pickupPoster();
+      const url = URL.createObjectURL(new Blob([poster.html], { type: "text/html" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = poster.fileName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setMessage({
+        tone: "neutral",
+        text: t("Downloaded {fileName}. Open it and print at 100% scale.", {
+          fileName: poster.fileName,
+        }),
+      });
+    } catch {
+      setMessage({
+        tone: "error",
+        text: t("The poster could not be downloaded. Nothing changed; try again."),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const start = (action: Pending["action"], table: TableQrRow) => {
     setPending({ action, table, operationReference: serviceOperationReference(), unknown: false });
     setUnderstood(false);
@@ -143,7 +206,7 @@ export function TableQrCodesPage({
       setLoad((current) =>
         current.kind === "Ready"
           ? {
-              kind: "Ready",
+              ...current,
               rows: current.rows.map((item) =>
                 item.tableReference === row.tableReference ? row : item,
               ),
@@ -198,6 +261,206 @@ export function TableQrCodesPage({
       setBusy(false);
     }
   };
+
+  const beginChange = (kind: TableChange["kind"], table: TableQrRow | null) => {
+    setPending(null);
+    setMessage(null);
+    setTableName(kind === "Rename" && table ? table.stableLabel : kind === "Add" ? "" : tableName);
+    if (kind === "Add") setSeats("4");
+    setChange(
+      kind === "Add" || table === null
+        ? { kind: "Add", operationReference: serviceOperationReference(), unknown: false }
+        : { kind, table, operationReference: serviceOperationReference(), unknown: false },
+    );
+  };
+  const name = tableName.trim();
+  const seatCount = Number(seats);
+  const nameValid = name.length >= 1 && name.length <= 40 && !/[<>{}$]/u.test(name);
+  const seatsValid = Number.isSafeInteger(seatCount) && seatCount >= 1 && seatCount <= 100;
+  const saveChange = async () => {
+    if (change === null || busy) return;
+    if (change.kind !== "Retire" && !nameValid) return;
+    if (change.kind === "Add" && !seatsValid) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const row = await client.manage(
+        change.kind === "Add"
+          ? {
+              action: "Add",
+              label: name,
+              capacity: seatCount,
+              operationReference: change.operationReference,
+            }
+          : change.kind === "Rename"
+            ? {
+                action: "Rename",
+                table: change.table,
+                label: name,
+                operationReference: change.operationReference,
+              }
+            : {
+                action: "Retire",
+                table: change.table,
+                operationReference: change.operationReference,
+              },
+      );
+      setLoad((current) =>
+        current.kind !== "Ready"
+          ? current
+          : change.kind === "Add"
+            ? {
+                ...current,
+                rows: [
+                  ...current.rows.filter((item) => item.tableReference !== row.tableReference),
+                  row,
+                ],
+              }
+            : change.kind === "Retire"
+              ? {
+                  ...current,
+                  rows: current.rows.filter((item) => item.tableReference !== row.tableReference),
+                }
+              : {
+                  ...current,
+                  rows: current.rows.map((item) =>
+                    item.tableReference === row.tableReference ? row : item,
+                  ),
+                },
+      );
+      setChange(null);
+      setMessage({
+        tone: "neutral",
+        text:
+          change.kind === "Add"
+            ? t("{stableLabel} is added. Create its code, then print it.", {
+                stableLabel: row.stableLabel,
+              })
+            : change.kind === "Rename"
+              ? t("The table is now called {stableLabel}. Guests see the new name.", {
+                  stableLabel: row.stableLabel,
+                })
+              : t(
+                  "{stableLabel} is retired. Its code no longer works and it takes no new guests.",
+                  { stableLabel: row.stableLabel },
+                ),
+      });
+    } catch (error) {
+      const code = error instanceof TableQrClientError ? error.code : "Unknown";
+      if (code === "Unknown") {
+        setChange({ ...change, unknown: true });
+        setMessage({
+          tone: "error",
+          text: t(
+            "We couldn't confirm whether this was done. Try again: the same request is sent, so it won't happen twice.",
+          ),
+        });
+      } else {
+        setMessage({
+          tone: "error",
+          text:
+            code === "NameTaken"
+              ? t("Another table already has this name. Choose a different name.")
+              : code === "Seated"
+                ? t("Guests are seated at this table. Close their table first, then retire it.")
+                : code === "Invalid"
+                  ? t("Check the name (up to 40 characters) and the number of seats (1 to 100).")
+                  : code === "Changed"
+                    ? t(
+                        "This table changed since the page loaded. The list is refreshed; check it and try again.",
+                      )
+                    : code === "PermissionDenied"
+                      ? t("You don't have permission to change this Store's tables.")
+                      : t("Nothing changed. Try again."),
+        });
+        if (code === "NameTaken" || code === "Invalid") setChange({ ...change, unknown: false });
+        else {
+          setChange(null);
+          refresh();
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  const tableForm = change ? (
+    <form
+      className="table-qr__confirm"
+      aria-labelledby="table-change-title"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void saveChange();
+      }}
+    >
+      <h2 id="table-change-title">
+        {change.kind === "Add"
+          ? t("Add a table")
+          : change.kind === "Rename"
+            ? t("Rename {stableLabel}", { stableLabel: change.table.stableLabel })
+            : t("Retire {stableLabel}?", { stableLabel: change.table.stableLabel })}
+      </h2>
+      {change.kind === "Retire" ? (
+        <p>
+          {t(
+            "The table leaves service: its code stops working at once and no new guests can be seated there. Its past orders are kept. To use a table again later, add it as a new table.",
+          )}
+        </p>
+      ) : (
+        <>
+          <label>
+            {t("Name staff and guests see (for example Table 5 or Patio 2)")}
+            <input
+              value={tableName}
+              maxLength={40}
+              required
+              disabled={busy || change.unknown}
+              onChange={(event) => setTableName(event.currentTarget.value)}
+            />
+          </label>
+          {change.kind === "Add" ? (
+            <label>
+              {t("Seats")}
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={100}
+                value={seats}
+                required
+                disabled={busy || change.unknown}
+                onChange={(event) => setSeats(event.currentTarget.value)}
+              />
+            </label>
+          ) : null}
+        </>
+      )}
+      <div className="table-qr__confirm-actions">
+        <button
+          type="submit"
+          disabled={
+            busy ||
+            (change.kind !== "Retire" && !nameValid) ||
+            (change.kind === "Add" && !seatsValid)
+          }
+        >
+          {busy
+            ? t("Working…")
+            : change.unknown
+              ? t("Try again")
+              : change.kind === "Add"
+                ? t("Add table")
+                : change.kind === "Rename"
+                  ? t("Save name")
+                  : t("Retire table")}
+        </button>
+        {change.unknown ? null : (
+          <button type="button" disabled={busy} onClick={() => setChange(null)}>
+            {t("Cancel")}
+          </button>
+        )}
+      </div>
+    </form>
+  ) : null;
 
   const confirmation = pending ? (
     <form
@@ -295,6 +558,13 @@ export function TableQrCodesPage({
           >
             {t("Print all codes")}
           </button>
+          <button
+            type="button"
+            disabled={busy || pending !== null || change !== null || load.kind !== "Ready"}
+            onClick={() => beginChange("Add", null)}
+          >
+            {t("Add a table")}
+          </button>
           <button type="button" disabled={busy} onClick={refresh}>
             {t("Refresh")}
           </button>
@@ -333,6 +603,7 @@ export function TableQrCodesPage({
         </StatePanel>
       ) : null}
       {confirmation}
+      {tableForm}
       {load.kind === "Loading" ? (
         <p role="status">{t("Loading tables…")}</p>
       ) : load.kind === "PermissionDenied" ? (
@@ -345,7 +616,9 @@ export function TableQrCodesPage({
         </StatePanel>
       ) : rows.length === 0 ? (
         <StatePanel heading={t("No tables")} status>
-          <p>{t("This Store has no tables yet.")}</p>
+          <p>
+            {t("This Store has no tables yet. Add its tables, then create and print their codes.")}
+          </p>
         </StatePanel>
       ) : (
         <table className="table-qr__list">
@@ -371,6 +644,29 @@ export function TableQrCodesPage({
                   {row.validUntil === null ? "—" : date(row.validUntil, timeZone)}
                 </td>
                 <td className="table-qr__actions">
+                  {row.codeState === "SetupIncomplete" ? null : (
+                    <>
+                      <button
+                        type="button"
+                        disabled={busy || pending !== null || change !== null}
+                        onClick={() => beginChange("Rename", row)}
+                      >
+                        {t("Rename")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || pending !== null || change !== null || row.seated}
+                        title={
+                          row.seated
+                            ? t("Guests are seated here; close their table first.")
+                            : undefined
+                        }
+                        onClick={() => beginChange("Retire", row)}
+                      >
+                        {t("Retire")}
+                      </button>
+                    </>
+                  )}
                   {row.codeState === "Active" ? (
                     <>
                       <button
@@ -410,6 +706,22 @@ export function TableQrCodesPage({
           </tbody>
         </table>
       )}
+      {pickupLink !== null ? (
+        <section className="table-qr__pickup" aria-labelledby="table-qr-pickup">
+          <h2 id="table-qr-pickup">{t("Pickup ordering")}</h2>
+          <p>
+            {t(
+              "Guests order for pickup at this Store from its pickup link or poster (when pickup is on in Store features). Copy the link to share it, or print the poster for the counter or window.",
+            )}
+          </p>
+          <button type="button" disabled={busy} onClick={() => void copyPickupLink()}>
+            {t("Copy pickup link")}
+          </button>{" "}
+          <button type="button" disabled={busy} onClick={() => void printPoster()}>
+            {t("Print pickup poster")}
+          </button>
+        </section>
+      ) : null}
     </WorkspacePage>
   );
 }

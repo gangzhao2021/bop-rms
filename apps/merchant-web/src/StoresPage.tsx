@@ -102,7 +102,15 @@ export function StoresPage({
             ))}
           </ul>
         </section>
-        {mayOpen ? <OpenStoreSection csrf={csrf} {...(fetcher ? { fetcher } : {})} /> : null}
+        {mayOpen ? (
+          <OpenStoreSection csrf={csrf} {...(fetcher ? { fetcher } : {})} />
+        ) : (
+          <p className="stores-page__note">
+            {t(
+              "You can switch between your stores here. Only the brand's owner opens or changes stores.",
+            )}
+          </p>
+        )}
       </div>
     </WorkspacePage>
   );

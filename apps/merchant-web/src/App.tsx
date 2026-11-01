@@ -786,8 +786,33 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     onSwitchStore={(reference) => void switchStore(reference)}
                   />
                 ) : (
-                  // Signed out or no session: fails closed as before (sign-in or unavailable).
-                  <StoreListPage />
+                  // v15 2026-11-01: never the old "not connected" placeholder — what this person can
+                  // do now, in their words (sign in again, or retry when the connection is back).
+                  <WorkspacePage title={t("Stores")}>
+                    <StatePanel
+                      heading={
+                        state.kind === "SignedOut"
+                          ? t("Sign in to see your stores")
+                          : t("Your stores can't be shown right now")
+                      }
+                      tone={state.kind === "SignedOut" ? "neutral" : "error"}
+                      status
+                    >
+                      <p>
+                        {state.kind === "SignedOut"
+                          ? t(
+                              "Your sign-in has ended. Sign in again to see the stores you work in.",
+                            )
+                          : state.kind === "Offline"
+                            ? t(
+                                "You're offline. Your stores show again when the connection is back.",
+                              )
+                            : t(
+                                "Refresh the page. If this keeps happening, tell the store's owner.",
+                              )}
+                      </p>
+                    </StatePanel>
+                  </WorkspacePage>
                 )}
               </LocalDemoRoute>
             </SessionPending>

@@ -2006,7 +2006,8 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    between Stores changes who can act there. A Store Manager or Area Manager who needs someone
    asks the Owner. Staff assigned to the new Store see it on the Stores page and switch to it;
    there, in Store setup, they set its name as guests see it, its address and contact, and its
-   receipts, and save; they add its tables (segment 3c). Tax rates and tax names are not set in
+   receipts, and save; they add its tables and print its codes (see "Its tables and pickup entry"
+   below). Tax rates and tax names are not set in
    Store setup (Tax review shows them): a TEST Store gets them in the next step. If the
    installation is down, each Store follows the outage procedure on its own (see "Several Stores
    on one installation" above).
@@ -2048,8 +2049,12 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    4. Hours: weekly hours;
    5. Tax and payment: each fee (service charge, delivery fee, tip: set or turned off), payment
       settings, receipt template. A TEST Store opened with `setup` has no receipt template of its
-      own yet (its first configuration names one that was never published): create it here
-      (new template → submit → approval by a second staff member → publish), then select it.
+      own yet (its first configuration names one that was never published): create it here, in
+      order — the layout and required-fields presets → save template draft 1 (its language) →
+      Submit → approve (a second staff member, or "Approve receipt template on my own" with sole
+      operator on) → Publish → choose the saved template → "Check published receipt template" →
+      "Use published receipt template" → "Save setup draft". Without the last two clicks the
+      setup still names the old one.
       "Keep the receipt template in use today" and "Use the live Store's settings" cannot
       supply one that does not exist; creating the configuration then says so and nothing is
       created;
@@ -2065,6 +2070,21 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    through is recorded as not done ("That request did not go through; nothing changed") and the
    step can be sent again. A step that fails unexpectedly is logged by the API as
    `MERCHANT_STORE_CONFIGURATION_UNAVAILABLE` with its step and code.
+
+   **One administrator.** A Store opened by the Brand Owner starts with one administrator, the
+   owner. Steps that need a second person (receipt template and Store configuration approval)
+   can be approved alone with sole operator on (Store setup; it is a Brand-wide setting, so turn
+   it off again when a second administrator is in place). Role assignments are not covered by
+   sole operator: assigning someone a role there always waits for another administrator.
+
+   **Its tables and pickup entry.** On Table QR codes (Store Owner or Store Manager): "Add a
+   table" with the name staff and guests see (for example "Table 5" or "Patio 2") and its seats;
+   then "Create code" and "Print" (or "Print all codes") and place each code on its table.
+   "Rename" changes a table's name; "Retire" takes a table with no guests out of service — its
+   code stops working at once and it is kept, never deleted. Guests order pickup from the Store's
+   own pickup link or poster on the same page ("Copy pickup link", "Print pickup poster"); it opens
+   pickup ordering at this Store when pickup is on in Store features. The installation's first
+   Store also keeps its address as before.
 
    **Its menu.** The Brand Owner switches to the new Store, opens Menu and chooses "Serve the
    menu here", then "List it". A menu is listed only when every Store it serves can sell each

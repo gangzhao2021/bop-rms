@@ -4,7 +4,17 @@ import type { DiningTable } from "../../domain/dining-table.js";
 import type { DiningReference, DiningInstant } from "../../contracts/dining-session.js";
 
 export type DiningTableAction =
-  "CreateDraft" | "ReplaceDraft" | "Publish" | "IssueQr" | "RevokeQr" | "SetBlock" | "ClearBlock";
+  | "CreateDraft"
+  | "ReplaceDraft"
+  | "Publish"
+  | "IssueQr"
+  | "RevokeQr"
+  | "SetBlock"
+  | "ClearBlock"
+  /** 2026-11-01: a published table's name, as staff and guests see it, changes. */
+  | "Rename"
+  /** 2026-11-01: the table leaves service (no open session); its code is turned off. */
+  | "Retire";
 
 export interface DiningTableEvent {
   readonly eventType:
