@@ -109,3 +109,21 @@ it("v15 2026-10-31: the sweep starts a Store's worker with no window open and no
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+it("WP-2423: a Store over the connection budget is reported, and its workers aren't started", async () => {
+  const created = [];
+  const sweep = createPilotInstallationSweep({
+    runtimeDirectory: ".local/pilot-v15",
+    createSweep: (options) => {
+      created.push(options.runtimeDirectory);
+      return { sweep: async () => [{ service: "api", state: "running" }] };
+    },
+    listStores: async () => ["stores/demo-2", "stores/demo-3"],
+    admit: async () => ({ admitted: ["stores/demo-2"], refused: ["stores/demo-3"] }),
+    exists: async () => true,
+  });
+  const services = await sweep.sweep();
+  expect(created).toEqual([".local/pilot-v15", ".local/pilot-v15/stores/demo-2"]);
+  expect(services).toContainEqual({ service: "stores/demo-2:api", state: "running" });
+  expect(services).toContainEqual({ service: "stores/demo-3", state: "attention_required" });
+});

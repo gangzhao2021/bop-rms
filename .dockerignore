@@ -2,6 +2,7 @@
 # host-built outputs are never copied; the runtime directory is mounted at run time.
 .git
 .local
+.cache
 .env
 .env.*
 !.env.example

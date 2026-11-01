@@ -1,8 +1,13 @@
-import { existsSync, realpathSync } from "node:fs";
-import { registerHooks } from "node:module";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { createRequire, registerHooks } from "node:module";
 import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
-import ts from "typescript";
+import {
+  workspaceTypescriptCacheName,
+  workspaceTypescriptCacheRoot,
+  workspaceTypescriptCompilerOptions,
+  workspaceTypescriptVersion,
+} from "./workspace-typescript-cache.mjs";
 
 // Local process entry only: workspace packages export source under the
 // "development" condition and built dist otherwise. This hook selects source
@@ -26,6 +31,20 @@ function isWorkspaceSource(url) {
     relative.split(path.sep).includes("src") &&
     filename.endsWith(".ts")
   );
+}
+const require = createRequire(import.meta.url);
+const cache = path.join(workspaceTypescriptCacheRoot, workspaceTypescriptVersion());
+/** The image's stored result when it has this exact source; TypeScript is loaded only otherwise. */
+function transpiled(source, fileName) {
+  try {
+    return readFileSync(path.join(cache, workspaceTypescriptCacheName(source)), "utf8");
+  } catch {
+    const ts = require("typescript");
+    return ts.transpileModule(source, {
+      fileName,
+      compilerOptions: workspaceTypescriptCompilerOptions(ts),
+    }).outputText;
+  }
 }
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -56,14 +75,7 @@ registerHooks({
     return {
       ...loaded,
       format: "module",
-      source: ts.transpileModule(String(loaded.source), {
-        fileName: fileURLToPath(url),
-        compilerOptions: {
-          module: ts.ModuleKind.ESNext,
-          target: ts.ScriptTarget.ES2024,
-          verbatimModuleSyntax: true,
-        },
-      }).outputText,
+      source: transpiled(String(loaded.source), fileURLToPath(url)),
     };
   },
 });

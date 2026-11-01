@@ -2182,6 +2182,49 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    It moves the Store's synthetic launch gate and its own tax evidence (a new synthetic tax
    version, both audited) and its files' common expiry; the Store's staff and roles have no end.
 
+## Restart time, database connections and memory per Store
+
+Each Store runs seven processes (API and HTTPS entries, five workers) in the pilot container. What
+staff and guests see during a restart stays the "We're updating" page.
+
+**How long a restart takes.** Build before 2026-11-02: 2 Stores 37-51 s, 3 Stores about 4 minutes.
+Every process transpiled about 1430 files at start (5 s and 420 MB alone), so 17 at once needed
+more memory than the VM has. The image now holds those results: one process loads its code in 1-2 s
+at about 255 MB, and 17 together in 6 s within 4 GB. Expect about a minute with 3 Stores. That is
+an estimate from those figures: write the real one here after the next window.
+
+**Measure a restart** (read-only; start it before the window, from the host):
+
+```bash
+sh tooling/environment/pilot-restart-measure.sh /tmp/restart.tsv 420 https://<customer host>
+```
+
+It prints peak connections per role, each process's peak memory, CPU and connections, the worst
+memory stall and what `/` answered each second. A 503 after the services report ready is a defect.
+
+**Connections.** Pools are sized at start from the Stores in `stores.json` and the api role's real
+limit, within `max_connections` less 20 for the other roles and less 10 for operator commands:
+
+| Stores | Needed by the api role | Pools (entry / business worker / other worker) |
+| ------ | ---------------------- | ---------------------------------------------- |
+| 1      | 31                     | 5 / 3 / 2                                      |
+| 2      | 52                     | 5 / 3 / 2                                      |
+| 3      | 73                     | 5 / 3 / 2                                      |
+| 4      | 74                     | 3 / 2 / 2                                      |
+
+**When the budget is exceeded** a Store that doesn't fit is not started and its pages aren't served.
+The Stores before it in `stores.json` keep running. The logs name it:
+`PILOT_CONNECTION_BUDGET_EXCEEDED` with `store` and `roleLimit`, and the supervisor reports
+`stores/<name>` as `attention_required`. To admit it, raise the limit and restart:
+`ALTER ROLE <api role> CONNECTION LIMIT <n>;` with `<n>` from the table, and raise `max_connections`
+first if `<n>` is above `max_connections` less 20. New installations render 80.
+
+**Sizing the VM.** Measured on v15 with 3 Stores before the change: 3.5 GB once settled (about
+200 MB a process), 8.4 GB if every process reached its own start-up peak, on a 7.75 GB VM whose
+swap was 94 % used. Allow 1.5 GB per Store settled, plus 1 GB for PostgreSQL, operations and the
+front, and keep at least 2 GB free for image builds and restarts. Anything else on the VM (test
+databases, a build) counts: run `tooling/environment` checks with `--maxWorkers=3` beside it.
+
 ## Renewing the internal test installation
 
 **InternalTest only, Owner-approved action.** The internal test installation is valid for a fixed
