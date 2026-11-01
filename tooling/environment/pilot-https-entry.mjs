@@ -94,8 +94,22 @@ export async function startConfiguredPilotHttps(
         storeCustomerConfig,
         await loadHosting(directory),
       );
+      // 2026-11-01: its own pickup link (`/#pickup=<public Store reference>`), signed with its
+      // own copy of the TEST-ONLY QR key for its own public Store reference.
+      const storeQr = createQr({
+        file: path.join(storeDirectory, "internal-test-qr-key.pem"),
+        loadProfile: storeInstallation.loadProfile,
+        expectedDatabaseName: installation.database,
+      });
       additionalStores.push({
         storeReference: storeCustomerConfig.scope.storeReference,
+        loadPickupQr: async () => {
+          const storeProfile = await storeInstallation.loadProfile();
+          return {
+            publicStoreReference: storeProfile.binding.publicStoreReference,
+            qr: await storeQr.loadInternalPickupQr(storeProfile),
+          };
+        },
         // Its customer API's local port, by its place in stores.json (pilot-api-entry).
         apiPort: 4301 + index,
         createInternalMerchant: composeMerchant(

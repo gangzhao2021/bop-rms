@@ -6,7 +6,9 @@ import {
 } from "../../contracts/dining-session.js";
 import {
   createDiningTable,
+  renameDiningTable,
   replaceDiningTableDraft,
+  retireDiningTable,
   transitionDiningTable,
   type DiningTable,
 } from "../../domain/dining-table.js";
@@ -269,12 +271,16 @@ export function createPostgresDiningTableStore(
                     accessibilityAttributes: table.accessibilityAttributes,
                     observedAt: table.observedAt,
                   })
-                : transitionDiningTable(
-                    current,
-                    action,
-                    table.observedAt,
-                    action === "SetBlock" ? table.blockReasonCode : null,
-                  );
+                : action === "Rename"
+                  ? renameDiningTable(current, table.stableLabel, table.observedAt)
+                  : action === "Retire"
+                    ? retireDiningTable(current, table.observedAt)
+                    : transitionDiningTable(
+                        current,
+                        action,
+                        table.observedAt,
+                        action === "SetBlock" ? table.blockReasonCode : null,
+                      );
             if (!same(expected, table)) return dependency();
           }
           if (current === null) {

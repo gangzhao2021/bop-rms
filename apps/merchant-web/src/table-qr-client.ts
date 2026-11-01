@@ -3,7 +3,18 @@
  * sheet. Strict readers; nothing from the server is trusted beyond the fields named here.
  */
 export class TableQrClientError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Changed" | "Unavailable" | "Unknown") {
+  constructor(
+    readonly code:
+      | "PermissionDenied"
+      | "Changed"
+      | "Unavailable"
+      | "Unknown"
+      /** 2026-11-01: another of the Store's tables has this name. */
+      | "NameTaken"
+      /** 2026-11-01: guests are seated at the table, so it cannot be retired now. */
+      | "Seated"
+      | "Invalid",
+  ) {
     super(code);
     this.name = "TableQrClientError";
   }
@@ -100,7 +111,21 @@ export function createTableQrClient(csrf: string, fetcher: typeof fetch = fetch)
     }
     if (response.status === 401 || response.status === 403)
       throw new TableQrClientError("PermissionDenied");
-    if (response.status === 409) throw new TableQrClientError("Changed");
+    if (response.status === 409 || response.status === 400) {
+      const reason = await response
+        .json()
+        .then((body: unknown) => (body as { error?: unknown } | null)?.error)
+        .catch(() => null);
+      throw new TableQrClientError(
+        reason === "dining_table_name_taken"
+          ? "NameTaken"
+          : reason === "dining_table_seated"
+            ? "Seated"
+            : response.status === 400
+              ? "Invalid"
+              : "Changed",
+      );
+    }
     if (!response.ok || !response.headers.get("content-type")?.startsWith("application/json"))
       throw new TableQrClientError(mutation && response.status >= 500 ? "Unknown" : "Unavailable");
     try {
@@ -112,10 +137,34 @@ export function createTableQrClient(csrf: string, fetcher: typeof fetch = fetch)
     }
   };
   return Object.freeze({
-    async list(signal?: AbortSignal): Promise<readonly TableQrRow[]> {
+    /** The Store's tables and (2026-11-01) its own pickup ordering link, when it has one. */
+    async overview(
+      signal?: AbortSignal,
+    ): Promise<{ readonly rows: readonly TableQrRow[]; readonly pickupLink: string | null }> {
       const data = await send("/merchant/dining/table-qr", {}, signal, false);
       if (!Array.isArray(data.items) || data.items.length > 500) return fail();
-      return Object.freeze(data.items.map(parseTableQrRow));
+      const link = data.pickupLink ?? null;
+      if (
+        link !== null &&
+        (typeof link !== "string" ||
+          link.length > 300 ||
+          !/^https:\/\/[^/#?]+\/#pickup=[0-9a-f-]{36}$/u.test(link))
+      )
+        return fail();
+      return Object.freeze({
+        rows: Object.freeze(data.items.map(parseTableQrRow)),
+        pickupLink: link,
+      });
+    },
+    async pickupPoster(): Promise<{ fileName: string; html: string }> {
+      const data = await send("/merchant/dining/table-qr/pickup-poster", {}, undefined, false);
+      if (
+        data.fileName !== "pickup-poster.html" ||
+        typeof data.html !== "string" ||
+        !data.html.startsWith("<!doctype html>")
+      )
+        return fail();
+      return { fileName: data.fileName, html: data.html };
     },
     async command(input: {
       readonly action: "Issue" | "TurnOff";
@@ -136,6 +185,52 @@ export function createTableQrClient(csrf: string, fetcher: typeof fetch = fetch)
       if (data.status !== "Applied" && data.status !== "AlreadyApplied") return fail();
       const row = parseTableQrRow(data.item);
       if (row.tableReference !== input.table.tableReference) return fail();
+      return row;
+    },
+    /** 2026-11-01: add a table (name and seats), rename one, or retire one with no guests. */
+    async manage(
+      input:
+        | {
+            readonly action: "Add";
+            readonly label: string;
+            readonly capacity: number;
+            readonly operationReference: string;
+          }
+        | {
+            readonly action: "Rename";
+            readonly table: TableQrRow;
+            readonly label: string;
+            readonly operationReference: string;
+          }
+        | {
+            readonly action: "Retire";
+            readonly table: TableQrRow;
+            readonly operationReference: string;
+          },
+    ): Promise<TableQrRow> {
+      const data = await send(
+        "/merchant/dining/table-qr/tables",
+        input.action === "Add"
+          ? {
+              action: "Add",
+              operationReference: input.operationReference,
+              label: input.label,
+              capacity: input.capacity,
+            }
+          : {
+              action: input.action,
+              operationReference: input.operationReference,
+              tableReference: input.table.tableReference,
+              expectedAggregateVersion: input.table.aggregateVersion,
+              ...(input.action === "Rename" ? { label: input.label } : {}),
+            },
+        undefined,
+        true,
+      );
+      if (data.status !== "Applied" && data.status !== "AlreadyApplied") return fail();
+      const row = parseTableQrRow(data.item);
+      if (input.action !== "Add" && row.tableReference !== input.table.tableReference)
+        return fail();
       return row;
     },
     async sheet(tableReferences: readonly string[]): Promise<{ fileName: string; html: string }> {

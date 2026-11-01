@@ -27,7 +27,9 @@ import {
 import {
   createDiningTable,
   moveActiveDiningSession,
+  renameDiningTable,
   replaceDiningTableDraft,
+  retireDiningTable,
   transitionDiningTable,
   type DiningTable,
   type DiningTableCode,
@@ -246,12 +248,16 @@ export function createDiningTableService(ports: DiningTablePorts) {
                   accessibilityAttributes: candidate.accessibilityAttributes,
                   observedAt,
                 })
-              : transitionDiningTable(
-                  current,
-                  action,
-                  observedAt,
-                  action === "SetBlock" ? (candidate.blockReasonCode as DiningTableCode) : null,
-                );
+              : action === "Rename"
+                ? renameDiningTable(current, candidate.stableLabel, observedAt)
+                : action === "Retire"
+                  ? retireDiningTable(current, observedAt)
+                  : transitionDiningTable(
+                      current,
+                      action,
+                      observedAt,
+                      action === "SetBlock" ? (candidate.blockReasonCode as DiningTableCode) : null,
+                    );
         } catch {
           throw new DiningTableWorkflowError("DINING_TABLE_LIFECYCLE_CONFLICT");
         }

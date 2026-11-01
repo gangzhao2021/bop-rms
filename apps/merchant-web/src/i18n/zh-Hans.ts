@@ -3,6 +3,55 @@
  * Keys are the English source exactly; `{name}` marks an inserted value (Owner 2026-10-24).
  */
 export const zhHans: Readonly<Record<string, string>> = Object.freeze({
+  "Copy pickup link": "复制自取链接",
+  "The pickup link is copied. Paste it where guests will find it.":
+    "自取链接已复制。请粘贴到客人能看到的地方。",
+  "The link could not be copied here. Print the pickup poster instead.":
+    "这里无法复制链接。请改为打印自取海报。",
+  "Sign in to see your stores": "请登录以查看你的门店",
+  "Your stores can't be shown right now": "暂时无法显示你的门店",
+  "Your sign-in has ended. Sign in again to see the stores you work in.":
+    "你的登录已结束。请重新登录，查看你工作的门店。",
+  "You're offline. Your stores show again when the connection is back.":
+    "你已离线。网络恢复后会重新显示你的门店。",
+  "Refresh the page. If this keeps happening, tell the store's owner.":
+    "请刷新页面。如果一直这样，请告诉店主。",
+  "You can switch between your stores here. Only the brand's owner opens or changes stores.":
+    "你可以在这里切换门店。只有品牌老板可以开店或修改门店。",
+  "Downloaded {fileName}. Open it and print at 100% scale.":
+    "已下载 {fileName}。打开后按 100% 比例打印。",
+  "The poster could not be downloaded. Nothing changed; try again.":
+    "海报无法下载。没有任何改动，请重试。",
+  "Pickup ordering": "自取点单",
+  "Guests order for pickup at this Store from its pickup link or poster (when pickup is on in Store features). Copy the link to share it, or print the poster for the counter or window.":
+    "客人可以通过本店的自取链接或海报点自取餐（需在门店功能中开启自取）。复制链接即可分享，或打印海报贴在柜台或橱窗。",
+  "Print pickup poster": "打印自取海报",
+  "{stableLabel} is added. Create its code, then print it.":
+    "已添加 {stableLabel}。请为它生成二维码，然后打印。",
+  "The table is now called {stableLabel}. Guests see the new name.":
+    "这张餐桌现在叫 {stableLabel}。客人看到的是新名称。",
+  "{stableLabel} is retired. Its code no longer works and it takes no new guests.":
+    "{stableLabel} 已停用。它的二维码已失效，不再接待新客人。",
+  "Another table already has this name. Choose a different name.":
+    "已有另一张餐桌使用这个名称。请换一个名称。",
+  "Guests are seated at this table. Close their table first, then retire it.":
+    "这张餐桌有客人在座。请先为他们结桌，再停用。",
+  "Check the name (up to 40 characters) and the number of seats (1 to 100).":
+    "请检查名称（最多 40 个字符）和座位数（1 到 100）。",
+  "You don't have permission to change this Store's tables.": "你没有权限修改本店的餐桌。",
+  "Add a table": "添加餐桌",
+  "Rename {stableLabel}": "重命名 {stableLabel}",
+  "Retire {stableLabel}?": "停用 {stableLabel}？",
+  "The table leaves service: its code stops working at once and no new guests can be seated there. Its past orders are kept. To use a table again later, add it as a new table.":
+    "这张餐桌将停止使用：它的二维码立即失效，不能再安排新客人入座。它过去的订单会保留。以后要再用，请作为新餐桌添加。",
+  "Name staff and guests see (for example Table 5 or Patio 2)":
+    "员工和客人看到的名称（例如 5 号桌或露台 2）",
+  Seats: "座位数",
+  "Add table": "添加餐桌",
+  "Retire table": "停用餐桌",
+  "This Store has no tables yet. Add its tables, then create and print their codes.":
+    "本店还没有餐桌。请添加餐桌，然后生成并打印它们的二维码。",
+  "Guests are seated here; close their table first.": "这里有客人在座，请先结桌。",
   "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.":
     "这家店还没有在用的小票模板，所以没有创建任何配置。请在第 5 步为这家店选择或新建小票模板并保存设置，然后再创建配置。",
   "{item} has no tax rate for one of this menu's order types at {store}, so guests there could not be quoted. Check {store}'s Tax review, or the product's tax class, then list it again.":

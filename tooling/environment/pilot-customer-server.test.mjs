@@ -57,7 +57,10 @@ test("a Pilot Store serves pickup entry on its address but no DEMO launcher, leg
       apiPort: api.address().port,
       keyFile: certificates.keyFile,
       certificateFile: certificates.certificateFile,
-      loadProfile: async () => ({ environment: "Pilot" }),
+      loadProfile: async () => ({
+        environment: "Pilot",
+        binding: { publicStoreReference: "0190aa21-0000-7000-8000-000000000005" },
+      }),
       loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
       // The DEMO launcher tables are never consulted in a Pilot Store.
       diningEntries: [{ selector: "table-1", label: "Table 1", tableReference: "unused" }],
@@ -100,6 +103,14 @@ test("a Pilot Store serves pickup entry on its address but no DEMO launcher, leg
     const entry = await get("/bff/customer/pickup-entry");
     expect(entry.status).toBe(200);
     expect(JSON.parse(entry.body)).toEqual({ schemaVersion: 1, qrToken: "synthetic.pickup.token" });
+    // 2026-11-01: the Store's own pickup link names it; another Store's (not served here) is not found.
+    const own = await get("/bff/customer/pickup-entry?store=0190aa21-0000-7000-8000-000000000005");
+    expect(JSON.parse(own.body)).toEqual({ schemaVersion: 1, qrToken: "synthetic.pickup.token" });
+    const other = await get(
+      "/bff/customer/pickup-entry?store=0190aa21-0000-7000-8000-000000000006",
+    );
+    expect(other.status).toBe(404);
+    expect(other.body).not.toContain("synthetic.pickup.token");
     // The InternalTest-only entries are not served here: their /bff paths fall through to the
     // API (which has none), their pages are just the customer app shell.
     for (const path of [

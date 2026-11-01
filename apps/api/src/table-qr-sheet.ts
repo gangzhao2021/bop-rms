@@ -71,3 +71,30 @@ export function renderTableQrSheet(input: {
     `<main class="sheet">${cards}</main></body></html>`
   );
 }
+
+/**
+ * 2026-11-01: the Store's pickup poster — one code that opens pickup ordering at this Store (its
+ * own address with the Store named, never a token), so it never needs reprinting when keys rotate.
+ */
+export function renderPickupPoster(input: { readonly storeName: string; readonly url: string }) {
+  const url = new URL(input.url);
+  if (url.protocol !== "https:" || !/^#pickup=[0-9a-f-]{36}$/u.test(url.hash))
+    throw new Error("PICKUP_POSTER_INVALID");
+  const svg = renderQrSvg(encodeQrMatrix(input.url), "QR code to order for pickup");
+  return (
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<title>Order for pickup · ${escape(input.storeName)}</title><style>` +
+    `@page{size:A4;margin:15mm}*{box-sizing:border-box}` +
+    `body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#111;background:#fff;text-align:center}` +
+    `.store{margin:20mm 0 0;font-size:12pt;letter-spacing:.08em;text-transform:uppercase}` +
+    `h1{margin:4mm 0 8mm;font-size:30pt}.code{display:block;width:110mm;height:110mm;margin:0 auto}` +
+    `.code svg{width:100%;height:100%}.lead{font-size:14pt;margin:8mm 0 2mm;font-weight:600}` +
+    `p{font-size:11pt;margin:1mm 0}</style></head><body>` +
+    `<p class="store">${escape(input.storeName)}</p><h1>Order for pickup</h1>` +
+    `<a class="code" href="${escape(input.url)}">${svg}</a>` +
+    `<p class="lead">Scan with your phone camera</p>` +
+    `<p>Order and pay on your phone, then collect your order at the counter.</p>` +
+    `<p>No app or account needed.</p></body></html>`
+  );
+}

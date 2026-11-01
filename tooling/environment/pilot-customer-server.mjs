@@ -89,18 +89,26 @@ export async function startInternalCustomerServer({
     next();
   });
   const pickupQr = await loadInternalPickupQr(profile);
+  // 2026-11-01: each served Store's own pickup entry, by its public Store reference.
+  const pickupByStore = new Map();
+  if (typeof profile?.binding?.publicStoreReference === "string")
+    pickupByStore.set(profile.binding.publicStoreReference, pickupQr);
   // DEC-PILOT-RUNTIME-ENVIRONMENT: the Store's own address opens pickup ordering, so the pickup
   // poster's QR code is just the customer origin and never needs reprinting when keys rotate.
   // The old InternalTest path stays for an app version cached before this change.
   const pickupEntry = (req, res) => {
     res.setHeader("Cache-Control", "no-store");
+    const keys = Object.keys(req.query);
     if (
       req.headers["sec-fetch-site"] !== "same-origin" ||
       (req.headers.origin !== undefined && req.headers.origin !== origin) ||
-      Object.keys(req.query).length !== 0
+      !(keys.length === 0 || (keys.length === 1 && typeof req.query.store === "string"))
     )
       return res.status(400).json({ code: "INTERNAL_ENTRY_UNAVAILABLE" });
-    res.json({ schemaVersion: 1, qrToken: pickupQr.token() });
+    // 2026-11-01: a Store's own pickup link names it (a Store not served here: not found).
+    const qr = keys.length === 0 ? pickupQr : pickupByStore.get(String(req.query.store));
+    if (qr === undefined) return res.status(404).json({ code: "PICKUP_ENTRY_UNKNOWN_STORE" });
+    res.json({ schemaVersion: 1, qrToken: qr.token() });
   };
   app.get("/bff/customer/pickup-entry", pickupEntry);
   if (internalTest) app.get("/bff/internal-test/pickup-entry", pickupEntry);
@@ -158,6 +166,10 @@ export async function startInternalCustomerServer({
       let storeResources = null;
       try {
         storeResources = await store.createInternalTestResources();
+        if (store.loadPickupQr !== undefined) {
+          const own = await store.loadPickupQr();
+          pickupByStore.set(own.publicStoreReference, own.qr);
+        }
         served.push({ store, resources: storeResources });
       } catch (error) {
         await storeResources?.close().catch(() => undefined);

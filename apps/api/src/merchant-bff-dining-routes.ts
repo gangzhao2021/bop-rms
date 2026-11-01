@@ -924,6 +924,13 @@ export function installMerchantDiningRoutes(
         .catch((error: unknown) => {
           if (error instanceof Error && error.message === "TABLE_QR_CONFLICT")
             response.status(409).json({ error: "dining_table_qr_changed" });
+          // 2026-11-01: adding, renaming or retiring a table, refused for a reason staff can act on.
+          else if (error instanceof Error && error.message === "TABLE_NAME_TAKEN")
+            response.status(409).json({ error: "dining_table_name_taken" });
+          else if (error instanceof Error && error.message === "TABLE_SEATED")
+            response.status(409).json({ error: "dining_table_seated" });
+          else if (error instanceof Error && error.message === "TABLE_QR_INVALID")
+            response.status(400).json({ error: "dining_table_invalid" });
           else denied(response);
         });
     });
@@ -932,6 +939,12 @@ export function installMerchantDiningRoutes(
   );
   tableQrRoute("/dining/table-qr/command", (port, input) =>
     port.command({ sessionCookie: input.sessionCookie, csrf: input.csrf, command: input.body }),
+  );
+  tableQrRoute("/dining/table-qr/tables", (port, input) =>
+    port.manage({ sessionCookie: input.sessionCookie, csrf: input.csrf, command: input.body }),
+  );
+  tableQrRoute("/dining/table-qr/pickup-poster", (port, input) =>
+    port.pickupPoster({ sessionCookie: input.sessionCookie, csrf: input.csrf, query: input.body }),
   );
   tableQrRoute("/dining/table-qr/sheet", (port, input) =>
     port.sheet({ sessionCookie: input.sessionCookie, csrf: input.csrf, query: input.body }),

@@ -71,3 +71,27 @@ test.each([
   expect(await loadInternalEntryToken({ enabled: true, location, fetcher })).toBeUndefined();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+test("2026-11-01: a Store's own pickup link opens pickup ordering at that Store", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => response());
+  const store = "0190aa21-0000-7000-8000-000000000006";
+  expect(
+    await loadInternalEntryToken({
+      enabled: true,
+      location: { ...location, origin: "https://order.store.example", hash: "#pickup=" + store },
+      fetcher,
+    }),
+  ).toBe("synthetic.qr.token");
+  expect(fetcher).toHaveBeenCalledWith(
+    "/bff/customer/pickup-entry?store=" + store,
+    expect.anything(),
+  );
+  fetcher.mockClear();
+  expect(
+    await loadInternalEntryToken({
+      enabled: true,
+      location: { ...location, hash: "#pickup=not-a-store" },
+      fetcher,
+    }),
+  ).toBeUndefined();
+  expect(fetcher).not.toHaveBeenCalled();
+});
