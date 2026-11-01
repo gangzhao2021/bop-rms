@@ -148,6 +148,35 @@ export function createPostgresStoreBusinessDateConfigurationSource(options: {
   };
 }
 
+/**
+ * v15 2026-11-01: when the Store's first published configuration took effect (null: none yet). A
+ * Store opened today has no business day before it, so "the last closed day" does not exist yet.
+ * Read under the caller's authorization in the caller's transaction.
+ */
+export async function readStoreFirstConfigurationEffectiveFrom(
+  tx: Transaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+): Promise<string | null> {
+  try {
+    const brandReference = parseBrandReference(scope.brandReference);
+    const storeReference = parseStoreReference(scope.storeReference);
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brandReference,
+      storeReference,
+    ]);
+    const result = await tx.query(
+      "SELECT min(effective_from) AS first FROM rms_store.store_configuration_version WHERE brand_id=$1 AND store_id=$2 AND lifecycle IN ('Published','Superseded','Archived')",
+      [brandReference, storeReference],
+    );
+    const rows = Object.getOwnPropertyDescriptor(result, "rows")?.value;
+    if (!Array.isArray(rows) || rows.length !== 1) return denied();
+    const first = (rows[0] as Record<string, unknown>).first;
+    return first === null ? null : instant(first);
+  } catch {
+    return denied();
+  }
+}
+
 /** Compatible point-in-time query over the same authorized configuration source. */
 export function createPostgresStoreBusinessDateSource(
   options: Parameters<typeof createPostgresStoreBusinessDateConfigurationSource>[0],

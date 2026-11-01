@@ -3356,6 +3356,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save payment configuration": "保存付款配置",
   "Save prices": "保存价格",
   "Save receipt and privacy details": "保存收据和隐私信息",
+  "Orders cancelled and refunded in full": "已取消并全额退款的订单",
+  "taken and given back": "已收款并已退回",
   "Business name on receipts": "收据上的商家名称",
   "The legal or operating name of the business that sells to your guests, as registered. Every receipt names it as the seller.":
     "向顾客销售的商家的法定名称或经营名称，与登记一致。每张收据都以它作为销售方。",

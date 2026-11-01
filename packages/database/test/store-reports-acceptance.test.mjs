@@ -78,8 +78,9 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
           }
         },
       };
-      const scope = { brandReference: id(1), storeReference: id(2) };
-      const ownerScope = { tenantReference: id(3), ...scope };
+      // Reassigned once, below, for a second Store of the Brand.
+      let scope = { brandReference: id(1), storeReference: id(2) };
+      let ownerScope = { tenantReference: id(3), ...scope };
       const ownerRunner = {
         async run(work) {
           await admin.query("BEGIN");
@@ -855,7 +856,7 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
         summaryCsv,
         new RegExp(
           // Comps (none) after discounts; cash and written-off tables (none) after the channels.
-          `\\r\\n${today},open \\(so far\\),5,4,31\\.00,0\\.00,0\\.00,0,31\\.00,0\\.00,4\\.03,4\\.03,3\\.50,38\\.53,7\\.91,30\\.62,30\\.12,8\\.41,0\\.00,0\\.00,7\\.91,0\\.00,0\\.00,0,0\\.00,CAD\\r\\n$`,
+          `\\r\\n${today},open \\(so far\\),5,4,31\\.00,0\\.00,0\\.00,0,31\\.00,0\\.00,4\\.03,4\\.03,3\\.50,38\\.53,7\\.91,30\\.62,30\\.12,8\\.41,0\\.00,0\\.00,7\\.91,0\\.00,0\\.00,0,0\\.00,0,0\\.00,CAD\\r\\n$`,
           "u",
         ),
       );
@@ -913,6 +914,138 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
       })({ sessionCookie: cookie, businessDate: today });
       assert.deepEqual(otherDay.captured, { count: 0, amountMinor: "0", currencyCode: "CAD" });
       assert.deepEqual(otherDay.refunded, { count: 0, amountMinor: "0", currencyCode: "CAD" });
+
+      // ── v15 2026-11-01 (coordinator): store 2's Tonight counted an order the store cancelled
+      // and refunded in full as gross and net sales. Recorded as the store's cancellation (the
+      // termination a staff cancellation of a pickup writes; owner-seeded TEST fact), the counter
+      // muffin order refunded on the machine leaves the sales, the taken and the refunds, and is
+      // listed as cancelled and refunded in full; what stays in the till and the match with the
+      // day-end settlement are unchanged. Every Store follows this one rule.
+      await admin.query(
+        "INSERT INTO rms_ordering.order_termination_record (termination_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,terminated_order_version,expected_source_checkpoint,previous_phase,phase,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,terminated_at) VALUES ($1,$2,$3,$4,$5,$6,2,3,$7,'Accepted','Cancelled','User',$8,'StaffCancellation','ordering.order.cancel','STORE_ERROR',$9,$10,$11,$12)",
+        [
+          id(0x4700),
+          id(0x4701),
+          scope.brandReference,
+          scope.storeReference,
+          c2.order,
+          c2.batch,
+          id(0x4702),
+          ACTOR,
+          id(0x4703),
+          id(0x4704),
+          hash(["termination", 0x4700]),
+          time(-minutes(76)),
+        ],
+      );
+      const storeOne = (await reports.tonight({ sessionCookie: cookie })).report;
+      assert.deepEqual(
+        {
+          paymentCount: storeOne.summary.paymentCount,
+          orderCount: storeOne.summary.orderCount,
+          gross: storeOne.summary.grossSalesMinor,
+          net: storeOne.summary.netSalesMinor,
+          tax: storeOne.summary.taxMinor,
+          collected: storeOne.summary.collectedMinor,
+          refundCount: storeOne.summary.refundCount,
+          refunds: storeOne.summary.refundsMinor,
+          netCollected: storeOne.summary.netCollectedMinor,
+          cancelled: [storeOne.summary.cancelledInFullCount, storeOne.summary.cancelledInFullMinor],
+        },
+        {
+          paymentCount: 4,
+          orderCount: 3,
+          gross: "2800",
+          net: "2800",
+          tax: "364",
+          collected: "3514",
+          refundCount: 1,
+          refunds: "452",
+          netCollected: "3062",
+          cancelled: [1, "339"],
+        },
+      );
+      assert.equal(storeOne.reconciliation.matchesSettlement, true);
+      assert.equal(
+        BigInt(storeOne.summary.collectedMinor) + BigInt(storeOne.summary.cancelledInFullMinor),
+        BigInt(day.captured.amountMinor) + BigInt(day.cardMachine.taken.amountMinor),
+      );
+      assert.equal(storeOne.items.find((row) => row.name === "Synthetic muffin")?.quantitySold, 3);
+
+      // A second Store of the Brand with one paid online pickup (its own session and settlement).
+      scope = { brandReference: id(1), storeReference: id(0x700) };
+      ownerScope = { tenantReference: id(3), ...scope };
+      await admin.query(
+        "INSERT INTO bop_tenant.store VALUES ($1,$2,'SYNTHETIC_STORE_TWO','Synthetic Store Two','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [scope.storeReference, scope.brandReference, time(-minutes(60 * 30))],
+      );
+      const sessionTwo = await seedMerchantAcceptanceSession({
+        admin,
+        runner: transactions,
+        scope: ownerScope,
+        // Its own Owner (one person has one Brand membership).
+        actor: id(11),
+        at: now(),
+        extraPermissions: ["reporting.sales.read", "payment.settlement.read"],
+        referencePrefix: "01a7d300",
+        sessionReferencePrefix: "01a7d301",
+      });
+      // Opened today: its first configuration took effect after today's business day began.
+      await seedJourneyStorePublication({
+        client: admin,
+        scope: ownerScope,
+        publishedAt: time(-minutes(170)),
+        businessDayStart: dayStart,
+        prefix: "01a7d200",
+      });
+      const s2 = await seedBatch({
+        n: 0x7000,
+        batch: 0,
+        orderType: "Pickup",
+        sourceChannel: "Web",
+        lines: [[latteLarge, 1]],
+        submittedAt: time(-minutes(40)),
+        businessDate: today,
+      });
+      await payOnline(s2, 0, time(-minutes(39)), 0x7500);
+      const reportsTwo = createPersistentMerchantStoreReports({
+        persistence: { ...persistence, ...sessionTwo.persistence, transactions, now },
+        resolveConfiguration,
+      });
+      const storeTwo = (await reportsTwo.tonight({ sessionCookie: sessionTwo.sessionCookie }))
+        .report;
+      assert.equal(storeTwo.summary.grossSalesMinor, "500");
+      assert.equal(storeTwo.summary.netCollectedMinor, "565");
+      assert.equal(storeTwo.summary.cancelledInFullCount, 0);
+      assert.equal(storeTwo.reconciliation.matchesSettlement, true);
+      // v15 2026-11-01: its owner opening Settlement was refused ("no access"): the last closed
+      // day was asked for, and a Store opened today has none. It is today's day, still open.
+      const settlementTwo = await createPersistentMerchantSettlement({
+        persistence: { ...persistence, ...sessionTwo.persistence, transactions, now },
+        resolveConfiguration,
+        settlementRunReference: async () => null,
+      })({ sessionCookie: sessionTwo.sessionCookie, businessDate: null });
+      assert.equal(settlementTwo.businessDate, today);
+      assert.equal(settlementTwo.window.status, "Open");
+      assert.equal(settlementTwo.captured?.amountMinor, "565");
+      // The Brand view adds up each Store's own figures: taken less refunds is each Store's net
+      // taken, and the Brand's net taken is their sum (no Store's cancellation counted twice).
+      const brand = [storeOne, storeTwo].map((view) => view.summary);
+      for (const row of brand)
+        assert.equal(
+          BigInt(row.collectedMinor) - BigInt(row.refundsMinor),
+          BigInt(row.netCollectedMinor),
+        );
+      assert.equal(
+        brand.reduce((sum, row) => sum + BigInt(row.netCollectedMinor), 0n),
+        3062n + 565n,
+      );
+      assert.equal(
+        brand.reduce((sum, row) => sum + BigInt(row.netSalesMinor), 0n),
+        2800n + 500n,
+      );
+      scope = { brandReference: id(1), storeReference: id(2) };
+      ownerScope = { tenantReference: id(3), ...scope };
 
       // ── Reading never implies exporting; without the read permission nothing is shown.
       const grant = (n) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");

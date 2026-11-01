@@ -12,6 +12,12 @@ import type { MerchantBusinessDayWindow } from "./merchant-business-day-window.j
  * - Money is integer minor units (bigint) throughout; the browser gets decimal strings of cents.
  * - Unpaid Batches (cancelled before payment) never count; staff cancellations of paid orders show
  *   as refunds.
+ * - v15 2026-11-01 (coordinator): an order the Store cancelled and refunded in full on the
+ *   business day it was paid is not a sale (a refund without a cancellation stays a refund): it leaves gross and
+ *   net sales, what was taken and refunds, and is listed as cancelled and refunded in full. Every
+ *   Store follows this one rule. The day-end settlement still counts the payment and its refund,
+ *   so the match with the settlement is checked on every payment. A refund on a later day stays a
+ *   refund of that day (a closed day's figures never change).
  * - Tips belong to the payment; the system does not record which staff member earned them.
  */
 export type StoreSalesChannel = "Online" | "CardMachine" | "Cash";
@@ -50,6 +56,14 @@ export interface StoreSalesReportInput {
   readonly mayExport: boolean;
   readonly generatedAt: string;
 }
+/** A payment line of an order refunded in full the day it was paid (what it took). */
+interface CancelledInFullLine {
+  readonly orderReference: string;
+  readonly kind: StoreSalesOrderKind | null;
+  readonly channel: StoreSalesChannel;
+  readonly takenAt: string;
+  readonly amountMinor: bigint;
+}
 
 interface Totals {
   paymentCount: number;
@@ -80,8 +94,13 @@ interface Totals {
   /** DEC-DINE-IN-PAY-LATER: tables written off unpaid (not collected, not in the sums above). */
   writeOffCount: number;
   writeOffMinor: bigint;
+  /** Orders refunded in full the day they were paid: taken and given back, not in the sums above. */
+  cancelledOrders: Set<string>;
+  cancelledMinor: bigint;
 }
 const totals = (): Totals => ({
+  cancelledOrders: new Set(),
+  cancelledMinor: 0n,
   paymentCount: 0,
   orders: new Set(),
   grossMinor: 0n,
@@ -178,7 +197,97 @@ export function taxLabel(code: string): string {
   return code.replaceAll("_", " ");
 }
 
+/**
+ * The Store sales report. Orders refunded in full on the day they were paid are taken out of the
+ * sales (and their refunds out of the refunds) and listed on their own; the match with the
+ * day-end settlement is checked on all payments and refunds as they happened.
+ */
 export function computeStoreSalesReport(input: StoreSalesReportInput) {
+  const cancelled = cancelledInFull(input);
+  if (cancelled.orders.size === 0) return computeSales(input, []);
+  const keep = <T extends { readonly orderReference: string }>(rows: readonly T[]) =>
+    rows.filter((row) => !cancelled.orders.has(row.orderReference));
+  const asHappened = computeSales(input, []);
+  const sales = computeSales(
+    {
+      ...input,
+      payments: keep(input.payments),
+      refundedPayments: keep(input.refundedPayments),
+      refunds: keep(input.refunds),
+      orders: keep(input.orders),
+      priceReductions: keep(input.priceReductions ?? []),
+    },
+    cancelled.lines,
+  );
+  return Object.freeze({ ...sales, reconciliation: asHappened.reconciliation });
+}
+
+/** Orders the Store cancelled whose payments in the range were all given back the day taken. */
+function cancelledInFull(input: StoreSalesReportInput) {
+  const dayOf = (instant: string) =>
+    input.days.find((day) => instant >= day.startsAt && instant < day.endsAt)?.businessDate ?? null;
+  const byOrder = new Map<
+    string,
+    { taken: bigint; refunded: bigint; days: Set<string | null>; lines: CancelledInFullLine[] }
+  >();
+  const entry = (orderReference: string) => {
+    const found = byOrder.get(orderReference) ?? {
+      taken: 0n,
+      refunded: 0n,
+      days: new Set<string | null>(),
+      lines: [],
+    };
+    byOrder.set(orderReference, found);
+    return found;
+  };
+  const orders = new Map(input.orders.map((order) => [order.orderReference, order]));
+  for (const payment of input.payments) {
+    const e = entry(payment.orderReference);
+    const order = orders.get(payment.orderReference);
+    e.taken += payment.totalMinor + payment.roundingMinor;
+    e.days.add(dayOf(payment.takenAt));
+    e.lines.push({
+      orderReference: payment.orderReference,
+      kind:
+        order === undefined
+          ? null
+          : order.orderType === "DineIn"
+            ? "DineIn"
+            : order.sourceChannel === "Pos"
+              ? "Counter"
+              : "Pickup",
+      channel: payment.channel,
+      takenAt: payment.takenAt,
+      amountMinor: payment.totalMinor + payment.roundingMinor,
+    });
+  }
+  // A payment taken before the range (refunded within it) keeps its refund a refund.
+  for (const payment of input.refundedPayments) entry(payment.orderReference).days.add(null);
+  for (const refund of input.refunds) {
+    const e = entry(refund.orderReference);
+    e.refunded += refund.amountMinor;
+    e.days.add(dayOf(refund.refundedAt));
+  }
+  const cancelled = new Set<string>(),
+    lines: CancelledInFullLine[] = [];
+  for (const [order, e] of byOrder)
+    if (
+      orders.get(order)?.cancelled === true &&
+      e.taken > 0n &&
+      e.refunded === e.taken &&
+      e.days.size === 1 &&
+      !e.days.has(null)
+    ) {
+      cancelled.add(order);
+      lines.push(...e.lines);
+    }
+  return { orders: cancelled, lines };
+}
+
+function computeSales(
+  input: StoreSalesReportInput,
+  cancelledLines: readonly CancelledInFullLine[],
+) {
   if (input.days.length < 1) return fail();
   for (let index = 1; index < input.days.length; index++)
     if (input.days[index]?.startsAt !== input.days[index - 1]?.endsAt) return fail();
@@ -223,6 +332,19 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     for (const t of [f.all, f.kinds.get("DineIn") ?? fail()]) {
       t.writeOffCount++;
       t.writeOffMinor += writeOff.amountMinor;
+    }
+  }
+
+  // Orders refunded in full the day they were paid: listed on their own (not sales).
+  for (const line of cancelledLines) {
+    const day = dayOf(line.takenAt);
+    if (day === null) return fail();
+    const f = facts.get(day.businessDate) ?? fail();
+    const groups = [f.all, f.channels.get(line.channel) ?? fail()];
+    if (line.kind !== null) groups.push(f.kinds.get(line.kind) ?? fail());
+    for (const t of groups) {
+      t.cancelledOrders.add(line.orderReference);
+      t.cancelledMinor += line.amountMinor;
     }
   }
 
@@ -567,6 +689,8 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
     target.writeOffCount += source.writeOffCount;
     target.compCount += source.compCount;
     for (const order of source.orders) target.orders.add(order);
+    for (const order of source.cancelledOrders) target.cancelledOrders.add(order);
+    target.cancelledMinor += source.cancelledMinor;
     for (const key of [
       "grossMinor",
       "discountMinor",
@@ -707,6 +831,9 @@ export function computeStoreSalesReport(input: StoreSalesReportInput) {
       }),
       netSalesAfterRefundsMinor: s(netSales - t.refundedNetMinor),
       netCollectedMinor: s(t.collectedMinor - t.refundedMinor),
+      // Taken and given back the same day: not in the sales, taken or refunds above.
+      cancelledInFullCount: t.cancelledOrders.size,
+      cancelledInFullMinor: s(t.cancelledMinor),
     });
   };
   // Every report row must add up: what was taken equals sales, charges, tax, tips (and anything not
@@ -902,6 +1029,9 @@ export function storeSalesReportCsv(
       "cash_rounding",
       "unpaid_write_offs",
       "unpaid_write_off_amount",
+      // Taken and given back the same day (not in the sales, collected or refunds columns).
+      "cancelled_refunded_in_full_orders",
+      "cancelled_refunded_in_full_amount",
       "currency",
     ];
     return csv([
@@ -938,6 +1068,8 @@ export function storeSalesReportCsv(
           money(sum.cashRoundingMinor),
           sum.unpaidWriteOffCount,
           money(sum.unpaidWriteOffMinor),
+          sum.cancelledInFullCount,
+          money(sum.cancelledInFullMinor),
           view.currencyCode,
         ];
       }),

@@ -59,6 +59,9 @@ export interface StoreReportSummary {
   };
   readonly netSalesAfterRefundsMinor: string;
   readonly netCollectedMinor: string;
+  /** v15 2026-11-01: orders refunded in full the day they were paid (not in the sums above). */
+  readonly cancelledInFullCount: number;
+  readonly cancelledInFullMinor: string;
 }
 export interface StoreReportItemRow {
   readonly name: string;
@@ -144,6 +147,8 @@ const summaryKeys = [
   "refunds",
   "netSalesAfterRefundsMinor",
   "netCollectedMinor",
+  "cancelledInFullCount",
+  "cancelledInFullMinor",
 ] as const;
 function summary(value: Record<string, unknown>): StoreReportSummary {
   const refunds = exact(value.refunds, [
@@ -185,6 +190,8 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
     }),
     netSalesAfterRefundsMinor: signed(value.netSalesAfterRefundsMinor),
     netCollectedMinor: signed(value.netCollectedMinor),
+    cancelledInFullCount: count(value.cancelledInFullCount),
+    cancelledInFullMinor: minor(value.cancelledInFullMinor),
   });
 }
 const channels: readonly StoreReportChannel[] = ["Online", "CardMachine", "Cash"];
