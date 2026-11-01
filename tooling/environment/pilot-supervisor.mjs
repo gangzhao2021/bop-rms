@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { createPilotRecoverySweep, storeWorkerServices } from "./pilot-recovery-sweep.mjs";
 import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { admitConfiguredStores } from "./pilot-admitted-stores.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import {
   assertPilotReady,
@@ -156,6 +157,9 @@ export function createPilotInstallationSweep({
   createSweep = createPilotRecoverySweep,
   listStores = async () =>
     loadServedStoreDirectories(path.join(await fs.realpath(process.cwd()), runtimeDirectory)),
+  // WP-2423 (2026-11-02): which of them fit the database role's connections (a refused Store is
+  // reported each sweep, so the operations monitor alerts on it, and its workers aren't started).
+  admit = async (relatives) => admitConfiguredStores(runtimeDirectory, relatives),
   exists = async (file) =>
     fs.lstat(file).then(
       () => true,
@@ -166,11 +170,14 @@ export function createPilotInstallationSweep({
     runtimeDirectory,
     workloadHealth: createPilotWorkloadHealthOptions(runtimeDirectory),
   });
-  let stores = null;
+  let stores = null,
+    refusedStores = [];
   const storeSweeps = async () => {
     if (stores !== null) return stores;
     stores = [];
-    for (const relative of await listStores()) {
+    const { admitted, refused } = await admit(await listStores());
+    refusedStores = refused;
+    for (const relative of admitted) {
       const directory = runtimeDirectory + "/" + relative;
       const settles = await exists(path.join(directory, "daily-settlement-coverage.json"));
       stores.push({
@@ -198,6 +205,8 @@ export function createPilotInstallationSweep({
           services.push({ service: store.relative, state: "attention_required" });
         }
       }
+      for (const relative of refusedStores)
+        services.push({ service: relative, state: "attention_required" });
       return services;
     },
   });

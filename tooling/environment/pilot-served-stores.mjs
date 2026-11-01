@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
+import { planPilotConnections } from "./pilot-connection-budget.mjs";
 /**
  * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores this installation serves, as Tenant/Brand/Store
  * scopes, the installation's own Store first. Every Store is of the installation's Tenant and Brand.
@@ -67,4 +69,36 @@ export async function loadServedStoreDirectories(directory) {
   )
     throw Error("PILOT_HTTPS_STORES_INVALID");
   return Object.freeze([...value.stores]);
+}
+
+/**
+ * WP-2423 (2026-11-02): which Stores can be served within the role's connections, and the rest.
+ * The installation's Store always runs; a Store that doesn't fit is named and not started, and the
+ * others keep their service (one bad Store never stops the others, 2026-10-31).
+ */
+export function admitServedStores(relatives, limit) {
+  if (limit === null) return Object.freeze({ admitted: relatives, refused: Object.freeze([]) });
+  const { admittedStores } = planPilotConnections({ storeCount: 1 + relatives.length, limit });
+  const others = Math.max(admittedStores - 1, 0);
+  return Object.freeze({
+    admitted: Object.freeze(relatives.slice(0, others)),
+    refused: Object.freeze(relatives.slice(others)),
+  });
+}
+export const PILOT_CONNECTION_BUDGET_EXCEEDED = "PILOT_CONNECTION_BUDGET_EXCEEDED";
+/** One line per refused Store, with what would admit it. Names and numbers only. */
+export function reportConnectionBudget(
+  refused,
+  limit,
+  write = (line) => process.stderr.write(line),
+) {
+  for (const store of refused)
+    write(
+      JSON.stringify({
+        level: 50,
+        event: PILOT_CONNECTION_BUDGET_EXCEEDED,
+        store,
+        roleLimit: limit,
+      }) + "\n",
+    );
 }

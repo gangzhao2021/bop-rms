@@ -33,7 +33,7 @@ describe("renderPilotAclSql", () => {
       'GRANT UPDATE ("revoked_at") ON TABLE "bop_identity"."guest_session" TO "pilot_api";',
       'GRANT USAGE ON SCHEMA "rms_kitchen" TO "pilot_api";',
       // WP-2423: all supervised pools (7 x 5) plus operator headroom fit the api role at once.
-      'ALTER ROLE "pilot_api" CONNECTION LIMIT 45;',
+      'ALTER ROLE "pilot_api" CONNECTION LIMIT 80;',
       "COMMIT;",
       "",
     ]);
@@ -107,7 +107,7 @@ describe("renderPilotAclSql", () => {
       'REVOKE UPDATE ON TABLE "rms_fulfillment"."capacity_slot" FROM "pilot_api";',
       'GRANT MAINTAIN ON TABLE "rms_fulfillment"."capacity_slot" TO "pilot_api";',
       'GRANT UPDATE ("slot_id") ON TABLE "rms_fulfillment"."capacity_slot" TO "pilot_api";',
-      'ALTER ROLE "pilot_api" CONNECTION LIMIT 45;',
+      'ALTER ROLE "pilot_api" CONNECTION LIMIT 80;',
       "COMMIT;",
       "",
     ]);

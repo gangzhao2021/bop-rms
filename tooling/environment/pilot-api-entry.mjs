@@ -6,7 +6,7 @@ import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { createConfiguredPilotApiRuntime } from "./pilot-customer-composition.mjs";
 import { startApiRuntime } from "../../apps/api/dist/server.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
-import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { loadAdmittedServedStores } from "./pilot-admitted-stores.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 
 /** Another Store's API in this process: it listens; the process signals stop the first one. */
@@ -32,7 +32,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: each other Store this installation serves has its
     // own customer API on the next local port, in this same process (stores.json order). One
     // that cannot start is logged (its code) and skipped; the others keep serving (v15 2026-10-31).
-    for (const [index, relative] of (await loadServedStoreDirectories(dir)).entries())
+    for (const [index, relative] of (await loadAdmittedServedStores(dir)).entries())
       try {
         await startStoreApiRuntime(
           await createConfiguredPilotApiRuntime(path.join(dir, relative), { port: 4301 + index }),

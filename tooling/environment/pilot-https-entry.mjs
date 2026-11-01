@@ -12,7 +12,7 @@ import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { loadPilotHosting } from "./pilot-hosting.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
-import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { loadAdmittedServedStores } from "./pilot-admitted-stores.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 export function parsePilotHttpsArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
@@ -72,7 +72,7 @@ export async function startConfiguredPilotHttps(
   // v15 2026-10-31: one Store that cannot be loaded never stops the others; it is logged (its
   // code) and not served until it is fixed and the service restarts.
   const additionalStores = [];
-  for (const [index, relative] of (await loadServedStoreDirectories(directory)).entries()) {
+  for (const [index, relative] of (await loadAdmittedServedStores(directory)).entries()) {
     try {
       const storeDirectory = path.join(directory, relative);
       const storeInstallation = await loadInstallation(storeDirectory),
