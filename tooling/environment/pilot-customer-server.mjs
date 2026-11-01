@@ -39,6 +39,154 @@ import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 import { isInternalTest, isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
 const express = require("express");
+/** v15 2026-11-01: the guest payment routes a Store's own payment stack answers. */
+const STORE_PAYMENT_ROUTE =
+  /^\/(?:api\/v1\/checkout-sessions\/[^/]+\/(?:payment-reconciliation|payment-handoff|simulation-confirm|simulation-fail)|api\/v1\/dine-in\/table-payment(?:\/[a-z-]+)?|bff\/customer\/payment-configuration)$/u;
+export const isStorePaymentRoute = (method, path) =>
+  (method === "POST" || method === "GET") && STORE_PAYMENT_ROUTE.test(path);
+
+/** One Store's guest payment stack: its own checkout, orders, payment intents and terminal. */
+async function paymentStack(f, resources, simulator) {
+  const entry = await f.createInternalCustomerEntry(resources),
+    items = await f.createInternalTestItems(resources);
+  const checkout = f.createInternalCheckout(resources, entry, items.catalogCartItems);
+  const orders = await f.createInternalOrder(resources, checkout, items.catalogCartItems);
+  const diningCheckout = f.createInternalDiningCheckout(resources, entry, checkout);
+  const diningOrders = await f.createInternalOrder(
+    resources,
+    { ...checkout, preparation: diningCheckout.preparation },
+    items.catalogCartItems,
+    "DineIn",
+  );
+  const intents = await f.createInternalChannelPayment(
+    resources,
+    checkout,
+    diningCheckout,
+    orders,
+    diningOrders,
+    simulator,
+    items.catalogCartItems,
+  );
+  const terminal = f.createInternalPaymentTerminal(resources, checkout, intents, simulator);
+  return { entry, checkout, intents, terminal };
+}
+
+/** One Store's guest payment routes, on its own payment stack and Provider (or simulator). */
+function paymentRoutes({
+  resources,
+  checkout,
+  intents,
+  terminal,
+  simulator,
+  origin,
+  registerTablePayment,
+}) {
+  const router = express.Router();
+  // DEC-DINE-IN-PAY-LATER S4: a guest pays the whole table on their phone.
+  registerTablePayment?.(router, { resources, checkout, simulator, origin });
+  router.post(
+    "/api/v1/checkout-sessions/:checkout_session_id/payment-reconciliation",
+    express.json({ limit: "2kb", strict: true }),
+    new CustomerPaymentResultHandler({
+      allowedOrigin: origin,
+      port: { read: (input) => terminal.reconcile(input) },
+    }).handler("reconcile"),
+  );
+  // DEC-STRIPE-PILOT-WIRING: the payment form the customer app shows comes from this
+  // installation's runtime configuration (payment.json), not from the build.
+  router.get("/bff/customer/payment-configuration", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (
+      req.headers["sec-fetch-site"] !== "same-origin" ||
+      (req.headers.origin !== undefined && req.headers.origin !== origin) ||
+      Object.keys(req.query).length !== 0
+    )
+      return res.status(400).json({ code: "PAYMENT_CONFIGURATION_UNAVAILABLE" });
+    res.json(
+      isStripeProvider(simulator)
+        ? {
+            schemaVersion: 1,
+            mode: "stripe",
+            publishableKey: simulator.publishableKey,
+            returnUrl: simulator.returnUrl,
+            // Apple Pay / Google Pay only on the domain registered and verified with Stripe.
+            wallets:
+              simulator.walletDomain !== null &&
+              new URL(origin).hostname === simulator.walletDomain,
+            // Wire name kept for installed apps: the Store's address opens pickup ordering
+            // (`/bff/customer/pickup-entry`), in InternalTest and in a Pilot Store alike.
+            internalTestEntry: true,
+          }
+        : { schemaVersion: 1, mode: "simulation", internalTestEntry: true },
+    );
+  });
+  if (isStripeProvider(simulator)) {
+    // The guest's ephemeral Stripe client credential, re-authorized against the current
+    // Guest, Order, payment window and owner fences before and after the Stripe read.
+    const history = createPostgresPaymentIntentCreationStore(
+      resources.transactions,
+      resources.scope,
+      { now: resources.now, generateObservationReference: resources.credentials.reference },
+    );
+    router.post(
+      "/api/v1/checkout-sessions/:checkout_session_id/payment-handoff",
+      express.json({ limit: "2kb", strict: true }),
+      new CustomerPaymentHandoffHandler({
+        allowedOrigin: origin,
+        port: {
+          async retrieve(input) {
+            const prepared = await intents.resolveRequest(input);
+            return createCustomerSessionPaymentHandoff({
+              access: checkout.accessOptions,
+              history,
+              transactions: resources.transactions,
+              currentAdmission: () => prepared.admission,
+              allowConfirmation: async () => true,
+              provider: simulator.handoff,
+            }).retrieve(input);
+          },
+        },
+      }).handler(),
+    );
+  }
+  for (const [path, confirmation] of simulator.simulation === true
+    ? [
+        ["simulation-confirm", "SIMULATE_CAPTURE"],
+        ["simulation-fail", "SIMULATE_FAILURE"],
+      ]
+    : []) {
+    const handler = new CustomerPaymentIntentHandler({
+      allowedOrigin: origin,
+      port: {
+        async create(input) {
+          await terminal.confirm(input, confirmation);
+          return intents.create(input);
+        },
+        // WP-2423 Q20: another (simulated) card after a decline, on the same payment.
+        async retry(input) {
+          return (await terminal.confirm(input, confirmation, { retry: true })).created;
+        },
+        // WP-2423 abandoned payment: confirm the guest's open attempt after they came back.
+        async resume(input) {
+          return (await terminal.confirm(input, confirmation, { resume: true })).created;
+        },
+      },
+    });
+    router.post(
+      "/api/v1/checkout-sessions/:checkout_session_id/" + path,
+      (req, res, next) => {
+        res.setHeader("Cache-Control", "no-store");
+        if (req.headers["x-bop-simulation-confirmation"] !== confirmation)
+          return res.status(400).json({ code: "SIMULATION_CONFIRMATION_REQUIRED" });
+        next();
+      },
+      express.json({ limit: "2kb", strict: true }),
+      handler.handler(),
+    );
+  }
+  return router;
+}
+
 export async function startInternalCustomerServer({
   createInternalMerchant,
   additionalStores = [],
@@ -113,14 +261,24 @@ export async function startInternalCustomerServer({
   app.get("/bff/customer/pickup-entry", pickupEntry);
   if (internalTest) app.get("/bff/internal-test/pickup-entry", pickupEntry);
   let resources, simulator;
-  const additionalResources = [];
+  const additionalResources = [],
+    additionalSimulators = [];
   // One Store: every guest request goes to the local customer API as before.
   let customerStore = null;
   try {
     resources = await createInternalTestResources();
     simulator = await createInternalSimulatedProvider();
-    const entry = await createInternalCustomerEntry(resources),
-      items = await createInternalTestItems(resources);
+    const own = {
+      createInternalCustomerEntry,
+      createInternalTestItems,
+      createInternalCheckout,
+      createInternalOrder,
+      createInternalDiningCheckout,
+      createInternalChannelPayment,
+      createInternalPaymentTerminal,
+      registerInternalDiningTablePayment,
+    };
+    const { entry, checkout, intents, terminal } = await paymentStack(own, resources, simulator);
     // WP-2423 Q11: each DEMO launcher table opens its current issued code; none issued → 503.
     // InternalTest only: a Pilot Store's guests scan the printed table codes (DIN-TABLE-LIST).
     if (internalTest)
@@ -136,27 +294,19 @@ export async function startInternalCustomerServer({
           },
         })),
       });
-    const checkout = createInternalCheckout(resources, entry, items.catalogCartItems);
-    const orders = await createInternalOrder(resources, checkout, items.catalogCartItems);
-    const diningCheckout = createInternalDiningCheckout(resources, entry, checkout);
-    const diningOrders = await createInternalOrder(
-      resources,
-      { ...checkout, preparation: diningCheckout.preparation },
-      items.catalogCartItems,
-      "DineIn",
-    );
-    const intents = await createInternalChannelPayment(
+    // v15 2026-11-01: each Store's guest payments (checkout confirm/decline, retry, resume,
+    // reconciliation, handoff and table payment) are answered by that Store's own payment stack
+    // and simulator, chosen below by the Store that owns the guest's Session.
+    const primaryPayments = paymentRoutes({
       resources,
       checkout,
-      diningCheckout,
-      orders,
-      diningOrders,
+      intents,
+      terminal,
       simulator,
-      items.catalogCartItems,
-    );
-    const terminal = createInternalPaymentTerminal(resources, checkout, intents, simulator);
-    // DEC-DINE-IN-PAY-LATER S4: a guest pays the whole table on their phone.
-    registerInternalDiningTablePayment?.(app, { resources, checkout, simulator, origin });
+      origin,
+      registerTablePayment: registerInternalDiningTablePayment,
+    });
+    const storePayments = new Map();
     // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: each Store this installation serves has its own staff
     // composition (its own Store facts); every one may select the others. One Store: as before.
     // v15 2026-10-31: a Store whose resources or staff composition fail to start is logged and not
@@ -166,6 +316,21 @@ export async function startInternalCustomerServer({
       let storeResources = null;
       try {
         storeResources = await store.createInternalTestResources();
+        if (store.customer !== undefined) {
+          const storeSimulator = await store.customer.createInternalSimulatedProvider();
+          additionalSimulators.push(storeSimulator);
+          const stack = await paymentStack(store.customer, storeResources, storeSimulator);
+          storePayments.set(
+            store.storeReference,
+            paymentRoutes({
+              resources: storeResources,
+              ...stack,
+              simulator: storeSimulator,
+              origin,
+              registerTablePayment: store.customer.registerInternalDiningTablePayment,
+            }),
+          );
+        }
         if (store.loadPickupQr !== undefined) {
           const own = await store.loadPickupQr();
           pickupByStore.set(own.publicStoreReference, own.qr);
@@ -240,106 +405,33 @@ export async function startInternalCustomerServer({
     // Owner 2026-10-24: item and option names on staff screens in the staff member's language.
     app.use("/merchant", staffContentLocaleMiddleware(), staffRoutes);
 
-    app.post(
-      "/api/v1/checkout-sessions/:checkout_session_id/payment-reconciliation",
-      express.json({ limit: "2kb", strict: true }),
-      new CustomerPaymentResultHandler({
-        allowedOrigin: origin,
-        port: { read: (input) => terminal.reconcile(input) },
-      }).handler("reconcile"),
-    );
-    // DEC-STRIPE-PILOT-WIRING: the payment form the customer app shows comes from this
-    // installation's runtime configuration (payment.json), not from the build.
-    app.get("/bff/customer/payment-configuration", (req, res) => {
-      res.setHeader("Cache-Control", "no-store");
-      if (
-        req.headers["sec-fetch-site"] !== "same-origin" ||
-        (req.headers.origin !== undefined && req.headers.origin !== origin) ||
-        Object.keys(req.query).length !== 0
-      )
-        return res.status(400).json({ code: "PAYMENT_CONFIGURATION_UNAVAILABLE" });
-      res.json(
-        isStripeProvider(simulator)
-          ? {
-              schemaVersion: 1,
-              mode: "stripe",
-              publishableKey: simulator.publishableKey,
-              returnUrl: simulator.returnUrl,
-              // Apple Pay / Google Pay only on the domain registered and verified with Stripe.
-              wallets:
-                simulator.walletDomain !== null &&
-                new URL(origin).hostname === simulator.walletDomain,
-              // Wire name kept for installed apps: the Store's address opens pickup ordering
-              // (`/bff/customer/pickup-entry`), in InternalTest and in a Pilot Store alike.
-              internalTestEntry: true,
-            }
-          : { schemaVersion: 1, mode: "simulation", internalTestEntry: true },
-      );
+    app.use(async (req, res, next) => {
+      if (customerStore === null) return primaryPayments(req, res, next);
+      if (!isStorePaymentRoute(req.method, req.path)) return next();
+      let store;
+      try {
+        store = await customerStore({
+          method: req.method,
+          url: req.url,
+          cookie: req.headers.cookie,
+        });
+      } catch {
+        return res
+          .status(503)
+          .set("Cache-Control", "no-store")
+          .json({ code: "INTERNAL_API_UNAVAILABLE" });
+      }
+      if (store.storeReference === resources.scope.storeReference)
+        return primaryPayments(req, res, next);
+      // Never another Store's payments for this Store's guest (its stack failed to start: logged).
+      const payments = storePayments.get(store.storeReference);
+      if (payments === undefined)
+        return res
+          .status(503)
+          .set("Cache-Control", "no-store")
+          .json({ code: "INTERNAL_API_UNAVAILABLE" });
+      return payments(req, res, next);
     });
-    if (isStripeProvider(simulator)) {
-      // The guest's ephemeral Stripe client credential, re-authorized against the current
-      // Guest, Order, payment window and owner fences before and after the Stripe read.
-      const history = createPostgresPaymentIntentCreationStore(
-        resources.transactions,
-        resources.scope,
-        { now: resources.now, generateObservationReference: resources.credentials.reference },
-      );
-      app.post(
-        "/api/v1/checkout-sessions/:checkout_session_id/payment-handoff",
-        express.json({ limit: "2kb", strict: true }),
-        new CustomerPaymentHandoffHandler({
-          allowedOrigin: origin,
-          port: {
-            async retrieve(input) {
-              const prepared = await intents.resolveRequest(input);
-              return createCustomerSessionPaymentHandoff({
-                access: checkout.accessOptions,
-                history,
-                transactions: resources.transactions,
-                currentAdmission: () => prepared.admission,
-                allowConfirmation: async () => true,
-                provider: simulator.handoff,
-              }).retrieve(input);
-            },
-          },
-        }).handler(),
-      );
-    }
-    for (const [path, confirmation] of simulator.simulation === true
-      ? [
-          ["simulation-confirm", "SIMULATE_CAPTURE"],
-          ["simulation-fail", "SIMULATE_FAILURE"],
-        ]
-      : []) {
-      const handler = new CustomerPaymentIntentHandler({
-        allowedOrigin: origin,
-        port: {
-          async create(input) {
-            await terminal.confirm(input, confirmation);
-            return intents.create(input);
-          },
-          // WP-2423 Q20: another (simulated) card after a decline, on the same payment.
-          async retry(input) {
-            return (await terminal.confirm(input, confirmation, { retry: true })).created;
-          },
-          // WP-2423 abandoned payment: confirm the guest's open attempt after they came back.
-          async resume(input) {
-            return (await terminal.confirm(input, confirmation, { resume: true })).created;
-          },
-        },
-      });
-      app.post(
-        "/api/v1/checkout-sessions/:checkout_session_id/" + path,
-        (req, res, next) => {
-          res.setHeader("Cache-Control", "no-store");
-          if (req.headers["x-bop-simulation-confirmation"] !== confirmation)
-            return res.status(400).json({ code: "SIMULATION_CONFIRMATION_REQUIRED" });
-          next();
-        },
-        express.json({ limit: "2kb", strict: true }),
-        handler.handler(),
-      );
-    }
     app.use((error, req, res, next) => {
       if (!error) return next();
       res.status(400).set("Cache-Control", "no-store").json({ code: "SIMULATION_REQUEST_INVALID" });
@@ -450,6 +542,7 @@ export async function startInternalCustomerServer({
         server.close(async () => {
           try {
             simulator.close();
+            for (const storeSimulator of additionalSimulators) storeSimulator.close();
             for (const storeResources of additionalResources) await storeResources.close();
             await resources.close();
           } finally {
@@ -461,6 +554,7 @@ export async function startInternalCustomerServer({
   } catch (error) {
     try {
       simulator?.close();
+      for (const storeSimulator of additionalSimulators) storeSimulator.close();
       for (const storeResources of additionalResources) await storeResources.close();
     } finally {
       await resources?.close();

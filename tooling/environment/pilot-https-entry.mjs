@@ -103,6 +103,8 @@ export async function startConfiguredPilotHttps(
       });
       additionalStores.push({
         storeReference: storeCustomerConfig.scope.storeReference,
+        // 2026-11-01: its own guest payment stack (its simulator, checkout and terminal).
+        customer: storeCustomer,
         loadPickupQr: async () => {
           const storeProfile = await storeInstallation.loadProfile();
           return {
