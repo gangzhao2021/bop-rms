@@ -376,6 +376,8 @@ export interface MerchantStoreConfigurationOrdinaryPort {
 
 export interface MerchantBffRouterOptions {
   readonly storeConfigurationOrdinary?: MerchantStoreConfigurationOrdinaryPort;
+  /** v15 2026-11-01: a Store configuration command answered 503: its failing step, for the log. */
+  readonly onStoreConfigurationUnavailable?: (step: string, error: unknown) => void;
   readonly storeConfigurationOrdinaryClock?: { readonly now: () => string };
   readonly brandStoreTopologyDraft?: ReturnType<typeof createMerchantBrandStoreTopologyDraft>;
   readonly brandStoreTopologyClock?: { readonly now: () => string };

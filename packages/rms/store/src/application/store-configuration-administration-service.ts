@@ -41,8 +41,29 @@ export class StoreConfigurationAdministrationServiceError extends Error {
 const fail = (code: StoreConfigurationAdministrationServiceErrorCode): never => {
   throw new StoreConfigurationAdministrationServiceError(code);
 };
+/**
+ * v15 2026-11-01: a setting the configuration names cannot be used at the Store (for example a
+ * receipt template with no version in effect there). The reference check says which, so staff are
+ * told what to choose again; it is not an outage. Recognised by name: the API and the tooling may
+ * load different builds of this package.
+ */
+export class StoreConfigurationReferenceUnavailableError extends Error {
+  constructor(readonly setting: "Address" | "Contact" | "Payment" | "Receipt") {
+    super("STORE_CONFIGURATION_REFERENCE_UNAVAILABLE");
+    this.name = "StoreConfigurationReferenceUnavailableError";
+  }
+}
+export const isStoreConfigurationReferenceUnavailable = (
+  error: unknown,
+): error is StoreConfigurationReferenceUnavailableError =>
+  error instanceof Error &&
+  error.name === "StoreConfigurationReferenceUnavailableError" &&
+  ["Address", "Contact", "Payment", "Receipt"].includes(
+    String((error as { setting?: unknown }).setting),
+  );
 const dependency = (error: unknown): never => {
   if (error instanceof StoreConfigurationAdministrationServiceError) throw error;
+  if (isStoreConfigurationReferenceUnavailable(error)) throw error;
   return fail("STORE_CONFIGURATION_DEPENDENCY_UNAVAILABLE");
 };
 const CODE = /^[A-Z][A-Z0-9_.:-]{0,63}$/u;

@@ -12,7 +12,7 @@ import {
   listStoreTaxClassifications,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
-import { optionRecipeCovered, type RecipeAuthoringTransaction } from "@rms/recipe";
+import { optionRecipeCovered, skusWithRecipe, type RecipeAuthoringTransaction } from "@rms/recipe";
 
 /** The pricing channel customer Quotes use (customer-menu-store-facts, pilot Quote). */
 const quoteChannel = "CUSTOMER_WEB";
@@ -199,4 +199,66 @@ export async function menuItemsWithoutTax(
       missing.push(skuReference);
   }
   return missing;
+}
+
+/** A listing gap at one of the menu's Stores (references only; the merchant API names them). */
+export interface MenuListingGap {
+  readonly storeReference: string;
+  readonly skuReference: string;
+  /** Tax: not taxed there; Recipe: no recipe there; OptionRecipe: an option's change is not published. */
+  readonly missing: "Tax" | "Recipe" | "OptionRecipe";
+  readonly optionReference: string | null;
+}
+/**
+ * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION (coordinator 2026-10-31): listing a menu makes it live at
+ * every Store it serves (`storeReferences`; the session's Store when it names none), so tax and
+ * option recipe coverage are checked at each of them, the same from whichever Store it is listed.
+ * A Store where an item has no recipe (one bound to another Store only does not count) is a Recipe
+ * gap for that item; otherwise each uncovered option is an OptionRecipe gap. Reads only; the
+ * caller owns the transaction (each Store's reads set that Store's scope).
+ */
+export async function menuListingGaps(
+  tx: ProductLifecycleTransaction,
+  input: {
+    readonly owner: { readonly brandReference: string; readonly storeReference: string };
+    readonly observedAt: string;
+    readonly menu: Pick<MenuAggregate["draft"], "sections" | "orderTypeCodes" | "storeReferences">;
+  },
+): Promise<readonly MenuListingGap[]> {
+  const stores =
+    input.menu.storeReferences.length > 0
+      ? [...new Set(input.menu.storeReferences.map(String))].sort()
+      : [input.owner.storeReference];
+  const placed = [
+    ...new Set(
+      input.menu.sections.flatMap((section) =>
+        section.placements.map((placement) => String(placement.sellableReference)),
+      ),
+    ),
+  ];
+  const gaps: MenuListingGap[] = [];
+  for (const storeReference of stores) {
+    const owner = { brandReference: input.owner.brandReference, storeReference };
+    for (const skuReference of await menuItemsWithoutTax(tx, { ...input, owner }))
+      gaps.push({ storeReference, skuReference, missing: "Tax", optionReference: null });
+    const withRecipe = await skusWithRecipe(
+      tx as unknown as RecipeAuthoringTransaction,
+      owner,
+      placed,
+      input.observedAt,
+    );
+    const options = await menuOptionsWithoutRecipes(tx, { ...input, owner });
+    for (const skuReference of new Set(options.map((item) => item.skuReference)))
+      if (!withRecipe.has(skuReference))
+        gaps.push({ storeReference, skuReference, missing: "Recipe", optionReference: null });
+    for (const item of options)
+      if (withRecipe.has(item.skuReference))
+        gaps.push({
+          storeReference,
+          skuReference: item.skuReference,
+          missing: "OptionRecipe",
+          optionReference: item.optionReference,
+        });
+  }
+  return gaps;
 }

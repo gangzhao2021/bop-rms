@@ -43,7 +43,9 @@ export class StoreSetupClientError extends Error {
       | "OpenChangeByAnother"
       | "Withdrawn"
       // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; cannot be published.
-      | "SoleOperatorApprovalInvalid",
+      | "SoleOperatorApprovalInvalid"
+      // v15 2026-11-01: the receipt template the saved setup names has no version in effect here.
+      | "ReceiptTemplateUnavailable",
   ) {
     super(t("Store setup could not be confirmed"));
     this.name = "StoreSetupClientError";

@@ -68,16 +68,21 @@ export interface MenuReviewProblem {
     | "AllergenDeclaration"
     | "AllergenList"
     /** v15 2026-10-29: nothing was named missing; `reason` is the code of why it stopped. */
-    | "Stopped";
+    | "Stopped"
+    /** 2026-10-31: an item is not taxed at one of the menu's Stores. */
+    | "Tax";
   readonly reason?: string;
   readonly productName: string | null;
   readonly sizeName: string | null;
   readonly optionName: string | null;
   readonly quantity: number | null;
   readonly ingredientName: string | null;
+  /** The Store the gap is at (a menu served at several Stores), when named. */
+  readonly storeName?: string | null;
 }
 const missingKinds = new Set<MenuReviewProblem["missing"]>([
   "Stopped",
+  "Tax",
   "Recipe",
   "SubRecipe",
   "OptionRecipe",
@@ -106,6 +111,7 @@ export function parseMenuReviewProblem(value: unknown): MenuReviewProblem | null
         ? quantity
         : null,
     ingredientName: optionalText(raw.ingredientName),
+    storeName: optionalText(raw.storeName),
   };
 }
 /** The blocked review in staff words: which item, size, option or ingredient, and where to fix it. */
@@ -128,7 +134,22 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.",
         { item: item, reason: problem.reason ?? "Unknown" },
       );
+    case "Tax":
+      return problem.storeName
+        ? t(
+            "{item} has no tax rate for one of this menu's order types at {store}, so guests there could not be quoted. Check {store}'s Tax review, or the product's tax class, then list it again.",
+            { item: item, store: problem.storeName },
+          )
+        : t(
+            "{item} has no tax rate for one of this menu's order types at one of its Stores. Check that Store's Tax review, or the product's tax class, then list it again.",
+            { item: item },
+          );
     case "Recipe":
+      if (problem.storeName)
+        return t(
+          "{item} has no recipe at {store}: its recipe is assigned to another Store only, or to none. Under Recipes, assign its recipe to this size for the whole Brand (not this store only), then list it again.",
+          { item: item, store: problem.storeName },
+        );
       return t(
         "{item} has no recipe for this menu's Stores. In this menu, declare its allergens, or mark it as a charge that uses no stock ingredients (such as tea); or publish a recipe under Recipes and assign it to this size. Then list it again.",
         { item: item },
@@ -139,6 +160,11 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         { item: item },
       );
     case "OptionRecipe":
+      if (problem.storeName)
+        return t(
+          "{item} at {store}: the option {value} has no published recipe change for the recipe used there. Set, review and publish it under Option recipes, then list it again.",
+          { item: item, store: problem.storeName, value: option ?? "chosen" },
+        );
       return t(
         "{item}: the option {value} has no published recipe change. Set, review and publish it under Option recipes, then submit again.",
         { item: item, value: option ?? "chosen" },
@@ -841,7 +867,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
               response.status === 409 && typeof payload?.part === "string"
               ? "StoppedPartWay"
               : "Unavailable",
-        code === "ReviewBlocked"
+        code === "ReviewBlocked" || code === "OptionRecipeMissing" || code === "TaxNotCovered"
           ? parseMenuReviewProblem((payload as { problem?: unknown } | null)?.problem)
           : null,
       );

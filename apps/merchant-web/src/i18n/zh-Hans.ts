@@ -3,6 +3,16 @@
  * Keys are the English source exactly; `{name}` marks an inserted value (Owner 2026-10-24).
  */
 export const zhHans: Readonly<Record<string, string>> = Object.freeze({
+  "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.":
+    "这家店还没有在用的小票模板，所以没有创建任何配置。请在第 5 步为这家店选择或新建小票模板并保存设置，然后再创建配置。",
+  "{item} has no tax rate for one of this menu's order types at {store}, so guests there could not be quoted. Check {store}'s Tax review, or the product's tax class, then list it again.":
+    "{item} 在 {store} 的某个用餐方式下没有税率，那里的客人无法报价。请检查 {store} 的税务审核或商品的税类，然后重新上架。",
+  "{item} has no tax rate for one of this menu's order types at one of its Stores. Check that Store's Tax review, or the product's tax class, then list it again.":
+    "{item} 在本菜单的某家门店的某个用餐方式下没有税率。请检查那家门店的税务审核或商品的税类，然后重新上架。",
+  "{item} has no recipe at {store}: its recipe is assigned to another Store only, or to none. Under Recipes, assign its recipe to this size for the whole Brand (not this store only), then list it again.":
+    "{item} 在 {store} 没有配方：它的配方只分配给了另一家门店，或没有分配。请在“配方”里把配方分配给这个规格并适用于整个品牌（不要只限本店），然后重新上架。",
+  "{item} at {store}: the option {value} has no published recipe change for the recipe used there. Set, review and publish it under Option recipes, then list it again.":
+    "{item}（{store}）：选项 {value} 对那里使用的配方没有已发布的配方变化。请在“选项配方”里设置、审核并发布，然后重新上架。",
   "  not split by item": "  未按商品拆分",
   "  of which sales": "  其中销售额",
   "  of which service charges": "  其中服务费",

@@ -137,6 +137,24 @@ export interface MerchantStoreConfigurationOrdinaryOptions extends Omit<
 }
 /** The common host owns COMMIT. Immutable originals are arbitrated before saved
  * Setup, current configuration, qualification or server references are acquired. */
+/**
+ * v15 2026-11-01: which step a Store configuration command failed at, for the operator's log
+ * (a fixed name; never references or content). Recorded for the error the command rejected with.
+ */
+export type MerchantStoreConfigurationStep =
+  | "Session"
+  | "Authorization"
+  | "SetupDraft"
+  | "LiveConfiguration"
+  | "Candidate"
+  | "Write"
+  | "Commit";
+const failureSteps = new WeakMap<object, MerchantStoreConfigurationStep>();
+export function storeConfigurationFailureStep(
+  error: unknown,
+): MerchantStoreConfigurationStep | null {
+  return error !== null && typeof error === "object" ? (failureSteps.get(error) ?? null) : null;
+}
 export function createMerchantStoreConfigurationOrdinary(
   options: MerchantStoreConfigurationOrdinaryOptions,
 ) {
@@ -223,6 +241,20 @@ export function createMerchantStoreConfigurationOrdinary(
     }
   };
   async function execute(
+    input: Parameters<typeof attempt>[0],
+    write: boolean,
+    historyRequest?: { beforeSequence: number | null },
+  ) {
+    const progress = { step: "Session" as MerchantStoreConfigurationStep };
+    try {
+      return await attempt(input, write, historyRequest, progress);
+    } catch (error) {
+      if (error !== null && typeof error === "object" && !failureSteps.has(error))
+        failureSteps.set(error, progress.step);
+      throw error;
+    }
+  }
+  async function attempt(
     input: {
       sessionCookie: unknown;
       csrf?: unknown;
@@ -234,6 +266,7 @@ export function createMerchantStoreConfigurationOrdinary(
     },
     write: boolean,
     historyRequest?: { beforeSequence: number | null },
+    progress: { step: MerchantStoreConfigurationStep } = { step: "Session" },
   ) {
     capture();
     const origin = parseCanonicalInstant(now.call(persistence));
@@ -305,6 +338,7 @@ export function createMerchantStoreConfigurationOrdinary(
             })
         : undefined;
     check();
+    progress.step = "Authorization";
     let finalized: (() => void) | undefined,
       sourceRegistrationOpen = true,
       sourceFailed = false,
@@ -393,6 +427,7 @@ export function createMerchantStoreConfigurationOrdinary(
         sourceRegistrationOpen = false;
         rechecked = false;
       });
+    progress.step = "Commit";
     if (!finalized) fail();
     finalized();
     for (const finalizeSource of afterCommit) finalizeSource();
@@ -716,6 +751,7 @@ export function createMerchantStoreConfigurationOrdinary(
             >
           | undefined;
         if (command.action === "Materialize") {
+          progress.step = "SetupDraft";
           setup = createPostgresStoreSetupDraftStore({
             ...fixed,
             transaction: tx,
@@ -760,6 +796,7 @@ export function createMerchantStoreConfigurationOrdinary(
           if (assessStoreSetupDraftCompleteness(snapshot.snapshot).missingPaths.length !== 0)
             throw new StoreSetupOperationError("STORE_SETUP_OPERATION_INCOMPLETE");
         }
+        progress.step = "LiveConfiguration";
         const state = (await latest("Write")) ?? (await current()),
           head = state
             ? {
@@ -794,6 +831,7 @@ export function createMerchantStoreConfigurationOrdinary(
           )
             throw new StoreSetupOperationError("STORE_SETUP_OPERATION_OUTDATED");
         }
+        progress.step = "Candidate";
         const at = check(),
           configuredOptions = configuration();
         let candidate: StoreConfigurationVersion;
@@ -840,6 +878,7 @@ export function createMerchantStoreConfigurationOrdinary(
             }
           }
         }
+        progress.step = "Write";
         const audit = next.call(options),
           committed: { input: Commit | undefined } = { input: undefined };
         const administration = createPersistentStoreConfigurationAdministration({

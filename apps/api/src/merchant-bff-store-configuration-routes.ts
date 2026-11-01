@@ -5,6 +5,7 @@ import {
   MerchantSoleOperatorGateError,
 } from "./merchant-sole-operator.js";
 import {
+  isStoreConfigurationReferenceUnavailable,
   parseStoreAdministrationReference,
   parseStoreConfigurationOrdinaryCommand,
   parseStoreConfigurationOrdinaryReceipt,
@@ -38,6 +39,7 @@ import type {
   MerchantStoreConfigurationOrdinaryPort,
 } from "./merchant-bff-contract.js";
 import { MerchantStoreHoursNoChangeError } from "./merchant-store-configuration.js";
+import { storeConfigurationFailureStep } from "./merchant-store-configuration-ordinary.js";
 import { MerchantStoreConfigurationWithdrawalError } from "./merchant-store-configuration-withdrawal.js";
 
 export function installMerchantStoreConfigurationRoutes(
@@ -66,6 +68,14 @@ export function installMerchantStoreConfigurationRoutes(
                 ? "sole_operator_off"
                 : "sole_operator_not_in_effect",
         });
+      return;
+    }
+    // v15 2026-11-01: a setting the saved setup names can no longer be used here; say which.
+    if (isStoreConfigurationReferenceUnavailable(error)) {
+      response
+        .status(409)
+        .set("Cache-Control", NO_STORE)
+        .json({ error: "store_setup_setting_unavailable", setting: error.setting });
       return;
     }
     const code =
@@ -108,6 +118,16 @@ export function installMerchantStoreConfigurationRoutes(
       code === "STORE_CONFIGURATION_REFERENCE_INVALID" ||
       code === "STORE_CONFIGURATION_VERSION_CONFLICT" ||
       code === "STORE_CONFIGURATION_LIFECYCLE_CONFLICT";
+    // v15 2026-11-01: an outage is never invisible to the operator (fixed step and code only).
+    if (!invalid && !forbidden && !conflict && error !== undefined)
+      try {
+        options.onStoreConfigurationUnavailable?.(
+          storeConfigurationFailureStep(error) ?? "Unknown",
+          error,
+        );
+      } catch {
+        // Reporting never changes the answer.
+      }
     response
       .status(invalid ? 400 : forbidden ? 403 : conflict ? 409 : 503)
       .set("Cache-Control", NO_STORE)

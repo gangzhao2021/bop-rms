@@ -291,6 +291,9 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   OutcomeUnknown: t(
     "The result is unknown. Recover the original request before sending another command.",
   ),
+  ReceiptTemplateUnavailable: t(
+    "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.",
+  ),
 };
 /** WP-2423 (v15 D6): the latest configuration was created from exactly this saved setup (its
  * setup revision), so step 8 says what became of it rather than "the configuration changed after

@@ -1,7 +1,8 @@
 // Controlled HTTP facts; this suite does not prove live Session/IAM or PostgreSQL composition.
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createStoreConfigurationOrdinaryClient,
+  ordinaryConflictReason,
   parseStoreConfigurationOrdinaryHistory,
   StoreConfigurationPublicationNotOfferedError,
   type StoreConfigurationOrdinaryCommand,
@@ -628,4 +629,21 @@ it("history late actual reader scope or selector mutation cannot display a page 
   options.beforeSequence = 2;
   release(response(historyPage()));
   await expect(pending).rejects.toMatchObject({ code: "ScopeChanged" });
+});
+
+describe("v15 2026-11-01: a saved setting that cannot be used here is named", () => {
+  it("names the receipt template, and other refusals as before", async () => {
+    const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 409 });
+    await expect(
+      ordinaryConflictReason(
+        answer({ error: "store_setup_setting_unavailable", setting: "Receipt" }),
+      ),
+    ).resolves.toBe("ReceiptTemplateUnavailable");
+    await expect(
+      ordinaryConflictReason(answer({ error: "store_setup_setting_unavailable", setting: "Tax" })),
+    ).resolves.toBeNull();
+    await expect(ordinaryConflictReason(answer({ error: "store_setup_incomplete" }))).resolves.toBe(
+      "SetupIncomplete",
+    );
+  });
 });
