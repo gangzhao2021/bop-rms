@@ -2084,7 +2084,10 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    code stops working at once and it is kept, never deleted. Guests order pickup from the Store's
    own pickup link or poster on the same page ("Copy pickup link", "Print pickup poster"); it opens
    pickup ordering at this Store when pickup is on in Store features. The installation's first
-   Store also keeps its address as before.
+   Store also keeps its address as before. A guest's payment (confirm, another card, back to an
+   open payment, the payment check, the table payment) is always handled by the Store whose
+   guest it is, with that Store's own TEST payment simulator (`stores/<name>/simulated-provider.sqlite`);
+   a guest no Store knows is refused as before.
 
    **Its menu.** The Brand Owner switches to the new Store, opens Menu and chooses "Serve the
    menu here", then "List it". A menu is listed only when every Store it serves can sell each
