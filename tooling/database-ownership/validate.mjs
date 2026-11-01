@@ -2430,7 +2430,14 @@ async function scanUnsupported(root, module, diagnostics) {
           // WP-2423 Q14: the priced items of paid Orders behind the Store sales reports (read only).
           "src/infrastructure/persistence/store-sales-order-source.ts": {
             owner: "ordering",
-            tables: ["order_header", "order_batch", "order_item"],
+            // v15 2026-11-01: whether the Store cancelled the order (staff or closure).
+            tables: [
+              "order_header",
+              "order_batch",
+              "order_item",
+              "order_staff_cancellation",
+              "order_termination_record",
+            ],
           },
           // WP-2423 Q7: the staff member and command behind a counter pickup order.
           "src/infrastructure/persistence/counter-order-entry-store.ts": {

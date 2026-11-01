@@ -9,6 +9,9 @@ import {
 
 const money = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
+// A refund given back, shown as taken off (nothing when none).
+const minusMoney = (minor: string | bigint) =>
+  BigInt(minor) === 0n ? money(minor) : "−" + money(minor);
 
 type Row =
   | { readonly kind: "Loading" }
@@ -72,6 +75,8 @@ export function BrandStoresReport({
             <th scope="col">{t("Tax")}</th>
             <th scope="col">{t("Tips")}</th>
             <th scope="col">{t("Taken")}</th>
+            <th scope="col">{t("Refunds")}</th>
+            <th scope="col">{t("Net taken")}</th>
             <th scope="col">{t("Still to take")}</th>
             <th scope="col">
               <span className="visually-hidden">{t("Actions")}</span>
@@ -93,7 +98,7 @@ export function BrandStoresReport({
                   ) : null}
                 </th>
                 {s === null || row.kind !== "Ready" ? (
-                  <td colSpan={5} data-label={t("Tonight")}>
+                  <td colSpan={7} data-label={t("Tonight")}>
                     {row.kind === "Loading"
                       ? t("Reading…")
                       : row.kind === "Denied"
@@ -106,6 +111,8 @@ export function BrandStoresReport({
                     <td data-label={t("Tax")}>{money(s.taxMinor)}</td>
                     <td data-label={t("Tips")}>{money(s.tipsMinor)}</td>
                     <td data-label={t("Taken")}>{money(s.collectedMinor)}</td>
+                    <td data-label={t("Refunds")}>{minusMoney(s.refundsMinor)}</td>
+                    <td data-label={t("Net taken")}>{money(s.netCollectedMinor)}</td>
                     <td data-label={t("Still to take")}>
                       {money(row.summary.openTablesOwedMinor)}
                     </td>
@@ -141,6 +148,12 @@ export function BrandStoresReport({
             <td data-label={t("Tax")}>{money(total((x) => x.report.summary.taxMinor))}</td>
             <td data-label={t("Tips")}>{money(total((x) => x.report.summary.tipsMinor))}</td>
             <td data-label={t("Taken")}>{money(total((x) => x.report.summary.collectedMinor))}</td>
+            <td data-label={t("Refunds")}>
+              {minusMoney(total((x) => x.report.summary.refundsMinor))}
+            </td>
+            <td data-label={t("Net taken")}>
+              {money(total((x) => x.report.summary.netCollectedMinor))}
+            </td>
             <td data-label={t("Still to take")}>{money(total((x) => x.openTablesOwedMinor))}</td>
             <td />
           </tr>

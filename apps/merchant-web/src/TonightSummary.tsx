@@ -320,6 +320,13 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
             detail={countOf(s.refundCount, "refund")}
             value={money(s.refundsMinor)}
           />
+          {s.cancelledInFullCount > 0 ? (
+            <Row
+              label={t("Orders cancelled and refunded in full")}
+              detail={countOf(s.cancelledInFullCount, "order") + " · " + t("taken and given back")}
+              value={money(s.cancelledInFullMinor)}
+            />
+          ) : null}
           <Row
             label={t("Dishes taken off a bill before payment")}
             detail={countOf(c.removedBeforePayment.dishCount, "dish")}

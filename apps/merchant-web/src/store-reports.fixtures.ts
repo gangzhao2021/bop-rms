@@ -51,6 +51,8 @@ const VIEW: Record<string, unknown> = {
     },
     netSalesAfterRefundsMinor: "2500",
     netCollectedMinor: "3175",
+    cancelledInFullCount: 0,
+    cancelledInFullMinor: "0",
   },
   byChannel: [
     {
@@ -88,6 +90,8 @@ const VIEW: Record<string, unknown> = {
       },
       netSalesAfterRefundsMinor: "2100",
       netCollectedMinor: "2673",
+      cancelledInFullCount: 0,
+      cancelledInFullMinor: "0",
     },
     {
       channel: "CardMachine",
@@ -124,6 +128,8 @@ const VIEW: Record<string, unknown> = {
       },
       netSalesAfterRefundsMinor: "400",
       netCollectedMinor: "502",
+      cancelledInFullCount: 0,
+      cancelledInFullMinor: "0",
     },
   ],
   byOrderType: [
@@ -162,6 +168,8 @@ const VIEW: Record<string, unknown> = {
       },
       netSalesAfterRefundsMinor: "1100",
       netCollectedMinor: "1343",
+      cancelledInFullCount: 0,
+      cancelledInFullMinor: "0",
     },
     {
       orderType: "Pickup",
@@ -198,6 +206,8 @@ const VIEW: Record<string, unknown> = {
       },
       netSalesAfterRefundsMinor: "1000",
       netCollectedMinor: "1330",
+      cancelledInFullCount: 0,
+      cancelledInFullMinor: "0",
     },
     {
       orderType: "Counter",
@@ -234,6 +244,8 @@ const VIEW: Record<string, unknown> = {
       },
       netSalesAfterRefundsMinor: "400",
       netCollectedMinor: "502",
+      cancelledInFullCount: 0,
+      cancelledInFullMinor: "0",
     },
   ],
   items: [
@@ -381,6 +393,8 @@ const VIEW: Record<string, unknown> = {
         },
         netSalesAfterRefundsMinor: "1000",
         netCollectedMinor: "1130",
+        cancelledInFullCount: 0,
+        cancelledInFullMinor: "0",
       },
       byChannel: [
         {
@@ -418,6 +432,8 @@ const VIEW: Record<string, unknown> = {
           },
           netSalesAfterRefundsMinor: "1000",
           netCollectedMinor: "1130",
+          cancelledInFullCount: 0,
+          cancelledInFullMinor: "0",
         },
         {
           channel: "CardMachine",
@@ -449,6 +465,8 @@ const VIEW: Record<string, unknown> = {
           },
           netSalesAfterRefundsMinor: "0",
           netCollectedMinor: "0",
+          cancelledInFullCount: 0,
+          cancelledInFullMinor: "0",
         },
       ],
       items: [
@@ -514,6 +532,8 @@ const VIEW: Record<string, unknown> = {
         },
         netSalesAfterRefundsMinor: "1500",
         netCollectedMinor: "2045",
+        cancelledInFullCount: 0,
+        cancelledInFullMinor: "0",
       },
       byChannel: [
         {
@@ -551,6 +571,8 @@ const VIEW: Record<string, unknown> = {
           },
           netSalesAfterRefundsMinor: "1100",
           netCollectedMinor: "1543",
+          cancelledInFullCount: 0,
+          cancelledInFullMinor: "0",
         },
         {
           channel: "CardMachine",
@@ -587,6 +609,8 @@ const VIEW: Record<string, unknown> = {
           },
           netSalesAfterRefundsMinor: "400",
           netCollectedMinor: "502",
+          cancelledInFullCount: 0,
+          cancelledInFullMinor: "0",
         },
       ],
       items: [

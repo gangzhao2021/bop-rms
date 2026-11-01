@@ -177,6 +177,77 @@ const today: StoreSalesReportInput = {
 };
 
 describe("store sales report (WP-2423 Q14)", () => {
+  // v15 2026-11-01: store 2's Tonight counted an order the store cancelled and refunded in full
+  // as gross and net sales, and the Brand view's Taken did not take refunds off. One rule for every
+  // Store: a store-cancelled order refunded in full the day it was paid is not a sale.
+  it("v15 2026-11-01: an order the store cancelled and refunded in full that day is not a sale", () => {
+    const cancelled = {
+      ...today,
+      orders: today.orders.map((o) =>
+        o.orderReference === c2.orderReference ? { ...o, cancelled: true as const } : o,
+      ),
+    };
+    const view = computeStoreSalesReport(cancelled);
+    expect(view.summary).toMatchObject({
+      paymentCount: 4,
+      orderCount: 3,
+      grossSalesMinor: "2950",
+      netSalesMinor: "2850",
+      taxMinor: "371",
+      collectedMinor: "3571",
+      refundCount: 2,
+      refundsMinor: "1526",
+      // What stays in the till is the same: the order was taken and given back.
+      netCollectedMinor: "2045",
+      cancelledInFullCount: 1,
+      cancelledInFullMinor: "396",
+    });
+    const machine = view.byChannel.find((entry) => entry.channel === "CardMachine");
+    expect(machine).toMatchObject({
+      paymentCount: 1,
+      collectedMinor: "502",
+      refundsMinor: "0",
+      netCollectedMinor: "502",
+      cancelledInFullCount: 1,
+      cancelledInFullMinor: "396",
+    });
+    expect(view.byOrderType.find((entry) => entry.orderType === "Counter")).toMatchObject({
+      orderCount: 1,
+      netSalesMinor: "400",
+      cancelledInFullCount: 1,
+    });
+    // The cancelled muffin is not sold (the online one and the table's two are).
+    expect(view.items.find((row) => row.name === "Muffin")?.quantitySold).toBe(3);
+    // The day-end settlement counts the payment and its refund: still a match.
+    expect(view.reconciliation).toMatchObject({
+      matchesSettlement: true,
+      reportCollectedMinor: "3967",
+      reportRefundedMinor: "1922",
+    });
+    // A refund in full without a cancellation stays a sale and a refund (as before).
+    expect(computeStoreSalesReport(today).summary).toMatchObject({
+      grossSalesMinor: "3300",
+      cancelledInFullCount: 0,
+    });
+    // Refunded on a later day: a refund of that day, the earlier day's sale unchanged.
+    const later = computeStoreSalesReport({
+      ...cancelled,
+      days,
+      payments: [p0, ...cancelled.payments],
+      refundedPayments: [],
+      orders: cancelled.orders.map((o) =>
+        o.orderReference === p0.orderReference ? { ...o, cancelled: true as const } : o,
+      ),
+      settlement: {
+        ...cancelled.settlement,
+        onlineCaptured: { count: 4, amountMinor: 4199n },
+      },
+    });
+    expect(later.days[0]?.summary).toMatchObject({
+      grossSalesMinor: "1000",
+      cancelledInFullCount: 0,
+    });
+  });
   it("summarizes a day of pickup, multi-round dine-in, counter card-machine sales, refunds and tips", () => {
     const view = computeStoreSalesReport(today);
     expect(view.summary).toMatchObject({
@@ -546,10 +617,10 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(summary.startsWith("﻿")).toBe(true);
     const lines = summary.slice(1).trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "business_date,day_status,payments,orders,gross_sales,discounts,comps_and_discounts_by_manager,comps_and_discounts_count,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,unpaid_write_offs,unpaid_write_off_amount,currency",
+      "business_date,day_status,payments,orders,gross_sales,discounts,comps_and_discounts_by_manager,comps_and_discounts_count,net_sales,service_charges,tax_synthetic_tax,tax_total,tips,total_collected,refunds,net_collected,online_collected,card_machine_collected,cash_collected,online_refunds,card_machine_refunds,cash_refunds,cash_rounding,unpaid_write_offs,unpaid_write_off_amount,cancelled_refunded_in_full_orders,cancelled_refunded_in_full_amount,currency",
     );
     expect(lines[1]).toBe(
-      "2026-10-14,open (so far),5,4,33.00,1.00,0.00,0,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,0,0.00,CAD",
+      "2026-10-14,open (so far),5,4,33.00,1.00,0.00,0,32.00,0.00,4.17,4.17,3.50,39.67,19.22,20.45,30.69,8.98,0.00,15.26,3.96,0.00,0.00,0,0.00,0,0.00,CAD",
     );
     const items = storeSalesReportCsv(view, "items").slice(1).trimEnd().split("\r\n");
     expect(items[0]).toBe(
@@ -621,7 +692,7 @@ describe("store sales report (WP-2423 Q14)", () => {
     expect(view.summary.collectedMinor).toBe(plain.summary.collectedMinor);
     expect(view.summary.grossSalesMinor).toBe(plain.summary.grossSalesMinor);
     const csv = storeSalesReportCsv(view, "summary").slice(1).trimEnd().split("\r\n");
-    expect(csv[1]?.endsWith(",1,5.37,CAD")).toBe(true);
+    expect(csv[1]?.endsWith(",1,5.37,0,0.00,CAD")).toBe(true);
     // A write-off outside the period's days is refused (never silently dropped).
     expect(() =>
       computeStoreSalesReport({

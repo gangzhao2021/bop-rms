@@ -4,6 +4,7 @@ import {
   createPostgresAsPublishedStorePublicationProof,
   createPostgresStoreBusinessDateConfigurationSource,
   createPostgresStoreClosedBusinessDateWindowSource,
+  readStoreFirstConfigurationEffectiveFrom,
   resolveStoreBusinessDate,
   resolveStoreBusinessDay,
 } from "@rms/store";
@@ -94,6 +95,18 @@ export function createMerchantBusinessDayWindows(options: {
     let date = businessDate;
     if (date === null) {
       const priorAt = new Date(Date.parse(current.startsAt) - 1).toISOString();
+      // v15 2026-11-01: a Store whose first configuration took effect today has no closed day
+      // yet; its last day is today's, still open (store 2's owner was refused Settlement).
+      if ((await options.authorize(tx)) !== true) return unavailable();
+      const first = await readStoreFirstConfigurationEffectiveFrom(tx, scope);
+      if (first === null || priorAt < first)
+        return {
+          businessDate: current.businessDate,
+          startsAt: current.startsAt,
+          endsAt: now,
+          timeZone: current.timeZone,
+          status: "Open",
+        };
       date = (await today(tx, priorAt)).businessDate;
     }
     // Every configuration in force on that day (UTC noon anchors the day's boundaries);

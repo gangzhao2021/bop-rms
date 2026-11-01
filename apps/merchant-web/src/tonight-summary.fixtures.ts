@@ -56,6 +56,8 @@ function summary(figures: Figures, extra: { writeOffs?: number; writeOffMinor?: 
     },
     netSalesAfterRefundsMinor: money(net - (figures.refundSales ?? 0)),
     netCollectedMinor: money(collected - refunds),
+    cancelledInFullCount: 0,
+    cancelledInFullMinor: "0",
   };
 }
 const add = (a: Figures, b: Figures): Figures => ({

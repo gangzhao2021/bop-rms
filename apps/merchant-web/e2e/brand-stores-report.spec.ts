@@ -91,6 +91,13 @@ test("@production Reports → Stores shows tonight at each Store and their total
   const total = table.getByRole("row", { name: /Total/u });
   await expect(total).toContainText("2 of 3 stores");
   await expect(total).toContainText("$788.50");
+  // v15 2026-11-01: taken, less refunds, is each store's net taken; the Brand's is their sum.
+  await expect(table.getByRole("columnheader", { name: "Refunds" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "Net taken" })).toBeVisible();
+  await expect(table.getByRole("row", { name: /DEMO Store 2/u })).toContainText("−$12.00");
+  await expect(table.getByRole("row", { name: /DEMO Store 2/u })).toContainText("$491.05");
+  await expect(total).toContainText("−$24.00");
+  await expect(total).toContainText("$982.10");
   expect(new Set(requested)).toEqual(
     new Set([one.storeReference, two.storeReference, three.storeReference]),
   );

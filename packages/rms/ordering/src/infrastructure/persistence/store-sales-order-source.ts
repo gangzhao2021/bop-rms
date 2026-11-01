@@ -35,6 +35,11 @@ export interface StoreSalesOrder {
   /** `Pos` is an order staff took at the counter. */
   readonly sourceChannel: "Api" | "Pos" | "Qr" | "Web";
   readonly businessDate: string;
+  /**
+   * v15 2026-11-01: the order was cancelled — by staff after it was accepted, or closed by the Store
+   * (absent: it was not cancelled).
+   */
+  readonly cancelled?: true;
   readonly batches: readonly {
     readonly orderBatchReference: string;
     readonly items: readonly StoreSalesOrderItem[];
@@ -81,7 +86,7 @@ export function createPostgresStoreSalesOrderSource(options: {
         [brand, store],
       );
       const headers = await tx.query(
-        "SELECT order_id::text AS order_id,order_type,source_channel,business_date::text AS business_date FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[])",
+        "SELECT h.order_id::text AS order_id,h.order_type,h.source_channel,h.business_date::text AS business_date,EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t WHERE t.brand_id=h.brand_id AND t.store_id=h.store_id AND t.order_id=h.order_id AND t.phase='Cancelled') OR EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=h.brand_id AND c.store_id=h.store_id AND c.order_id=h.order_id) AS cancelled FROM rms_ordering.order_header h WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=ANY($3::uuid[])",
         [brand, store, chunk],
       );
       const items = await tx.query(
@@ -209,6 +214,7 @@ export function createPostgresStoreSalesOrderSource(options: {
             orderType: row.order_type,
             sourceChannel: row.source_channel as StoreSalesOrder["sourceChannel"],
             businessDate: row.business_date,
+            ...(row.cancelled === true ? { cancelled: true as const } : {}),
             batches: Object.freeze(
               [...batches].map(([orderBatchReference, lines]) =>
                 Object.freeze({
