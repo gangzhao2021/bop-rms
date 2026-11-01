@@ -385,6 +385,12 @@ function parseOrderSummary(value: unknown, orderType: unknown) {
     tableLabel,
   });
 }
+/** An Order left out of the list because this page couldn't read it (only what names it). */
+export interface UnreadableQueuedOrder {
+  readonly orderNumber: string | null;
+  readonly orderType: "DineIn" | "Pickup" | null;
+  readonly phase: string | null;
+}
 export function parseCurrentOrderQueue(value: unknown, after: string | null = null) {
   // WP-2423 (2026-10-16 v15): earlier-day Orders listed with today's (older tables with a round
   // today, Orders still holding stock) come apart from the page (absent from an older server).
@@ -410,6 +416,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   // Orders of the page in their newest-first sequence (earlier-day Orders are outside it).
   let paged = 0;
   const seen = new Set<string>();
+  // The list itself is wrong (out of order, an Order twice): nothing in it can be relied on.
+  let brokenAnswer = false;
   const parseItem = (value: unknown, earlierDay: boolean) => {
     const withCounter =
       value !== null && typeof value === "object" && Object.hasOwn(value, "counter");
@@ -492,11 +500,17 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     const carriedOver =
       businessDate !== null && listedBusinessDate !== null && listedBusinessDate > businessDate;
     // An Order listed twice is a broken answer.
-    if (seen.has(orderReference)) return fail();
+    if (seen.has(orderReference)) {
+      brokenAnswer = true;
+      return fail();
+    }
     seen.add(orderReference);
     // WP-2423: newest first; a following page continues with older Orders.
     if (!earlierDay && !carriedOver) {
-      if (previous !== null && orderReference >= previous) return fail();
+      if (previous !== null && orderReference >= previous) {
+        brokenAnswer = true;
+        return fail();
+      }
       previous = orderReference;
       paged += 1;
     }
@@ -744,12 +758,14 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
             item.unfulfillable !== null ||
             item.pickupNotCollected !== false ||
             item.currentVersion === null)) ||
-        // A pickup cancelled by the Store is a cancelled Order; a dine-in batch is a cancelled batch.
+        // A pickup cancelled by the Store is a cancelled Order, or a Rejected one when the Store
+        // refused it before accepting (v15 2026-11-01); a dine-in batch is a cancelled batch.
         (staffCancellation !== null &&
           (batch.canRequestAcceptance ||
             (item.orderType === "DineIn"
               ? batch.acceptanceStatus !== "Cancelled"
-              : item.currentPhase !== "Cancelled")))
+              : item.currentPhase !== "Cancelled" &&
+                !(item.currentPhase === "Rejected" && batch.acceptanceStatus === "NotAccepted"))))
       )
         return fail();
       previousSequence = batch.sequence;
@@ -888,17 +904,60 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       summary,
     });
   };
+  // v15 2026-11-01: one Order this page can't read is left out and named; it never takes the other
+  // Orders away from staff for the shift. A row that doesn't even name its Order, or an answer with
+  // nothing readable (a server and page out of step), is still refused whole.
+  const unreadable: UnreadableQueuedOrder[] = [];
+  const readable = (value: unknown, earlierDay: boolean) => {
+    try {
+      return [parseItem(value, earlierDay)];
+    } catch (error) {
+      if (brokenAnswer) throw error;
+      const row = (value ?? {}) as Record<string, unknown>;
+      const orderReference = reference(row.orderReference);
+      seen.add(orderReference);
+      const carriedOver =
+        typeof row.businessDate === "string" &&
+        typeof row.listedBusinessDate === "string" &&
+        row.listedBusinessDate > row.businessDate;
+      if (
+        !earlierDay &&
+        !carriedOver &&
+        orderReference !== previous &&
+        (previous === null || orderReference < previous)
+      ) {
+        previous = orderReference;
+        paged += 1;
+      }
+      unreadable.push(
+        Object.freeze({
+          orderNumber:
+            typeof row.orderNumber === "string" && /^[A-Za-z0-9-]{1,32}$/u.test(row.orderNumber)
+              ? row.orderNumber
+              : null,
+          orderType:
+            row.orderType === "DineIn" || row.orderType === "Pickup" ? row.orderType : null,
+          phase:
+            typeof row.currentPhase === "string" && /^[A-Za-z]{1,20}$/u.test(row.currentPhase)
+              ? row.currentPhase
+              : null,
+        }),
+      );
+      return [];
+    }
+  };
   const earlier = withEarlier
-    ? (raw.earlierDayItems as unknown[]).map((value) => parseItem(value, true))
+    ? (raw.earlierDayItems as unknown[]).flatMap((value) => readable(value, true))
     : [];
-  const page = raw.items.map((value) => parseItem(value, false));
+  const page = raw.items.flatMap((value) => readable(value, false));
+  if (unreadable.length > 0 && earlier.length + page.length === 0) return fail();
   const next = raw.nextAfterOrderReference === null ? null : reference(raw.nextAfterOrderReference);
   // A following page continues after the page's last Order. The current server answers exactly 50
   // Orders then; an older one left earlier-day Orders out of a fetched page (fewer than 50).
   if (
     next !== null &&
     (withEarlier
-      ? page.length !== 50 || paged !== 50 || next !== previous
+      ? raw.items.length !== 50 || paged !== 50 || next !== previous
       : paged > 50 || previous === null || next > previous)
   )
     return fail();
@@ -906,6 +965,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   return Object.freeze({
     items: Object.freeze([...earlier, ...page]),
     nextAfterOrderReference: next,
+    unreadable: Object.freeze(unreadable),
   });
 }
 export type CurrentOrderQueue = ReturnType<typeof parseCurrentOrderQueue>;
@@ -1180,6 +1240,20 @@ export function cancelledItemsRefund(items: readonly CurrentOrderLine[]) {
 }
 export function createCurrentOrderQueueClient(fetcher: typeof fetch = fetch) {
   return Object.freeze({
+    /** Tells the operator's log that Orders were left out (kinds only; best effort). */
+    async reportUnreadable(csrf: string, rows: readonly UnreadableQueuedOrder[]) {
+      await fetcher("/merchant/orders/unreadable-report", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        headers: { "Content-Type": "application/json", "X-BOP-CSRF": csrf },
+        body: JSON.stringify({
+          count: rows.length,
+          kinds: [...new Set(rows.map((row) => (row.orderType ?? "") + (row.phase ?? "")))],
+        }),
+      }).catch(() => undefined);
+    },
     load(after: string | null, signal: AbortSignal) {
       if (after !== null) reference(after);
       return get(

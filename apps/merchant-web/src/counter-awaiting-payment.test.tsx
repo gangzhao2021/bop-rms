@@ -186,7 +186,7 @@ it("a cancelled order with no payment says so instead of a dash", () => {
   expect(
     renderToStaticMarkup(
       <CurrentOrderQueueRows
-        view={{ items: [cancelled], nextAfterOrderReference: null }}
+        view={{ items: [cancelled], nextAfterOrderReference: null, unreadable: [] }}
         timeZone="America/Toronto"
       />,
     ),

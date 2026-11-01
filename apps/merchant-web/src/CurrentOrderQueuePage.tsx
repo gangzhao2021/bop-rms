@@ -184,6 +184,7 @@ export function CurrentOrderLines({
   lines,
   refundCheck,
   cancelledBatches,
+  refusedBatches,
   unpaidCancelledBatches,
   failedPaymentBatches,
   removedItems,
@@ -196,6 +197,8 @@ export function CurrentOrderLines({
   readonly refundCheck?: ItemRefundCheckContext | undefined;
   /** WP-2423 Q6: batches the store cancelled as a whole; their remaining lines read as cancelled. */
   readonly cancelledBatches?: ReadonlySet<string> | undefined;
+  /** v15 2026-11-01: of those, pickups the store refused without accepting them. */
+  readonly refusedBatches?: ReadonlySet<string> | undefined;
   /** WP-2423: rounds cancelled automatically because their payment failed; never owed. */
   readonly unpaidCancelledBatches?: ReadonlySet<string> | undefined;
   /** WP-2423: rounds whose payment failed and that are about to be cancelled automatically. */
@@ -273,7 +276,11 @@ export function CurrentOrderLines({
         ) : null}
         {item.cancellation === null && cancelledBatches?.has(item.orderBatchReference) ? (
           <span className="order-line-cancellation">
-            <strong>{t("Cancelled by store")}</strong>
+            <strong>
+              {refusedBatches?.has(item.orderBatchReference)
+                ? t("Refused by store")
+                : t("Cancelled by store")}
+            </strong>
           </span>
         ) : unpaidLine(item) ? (
           <span className="order-line-cancellation">
@@ -976,6 +983,19 @@ export function storeCancelledBatches(view: CurrentOrderQueue): ReadonlySet<stri
   );
 }
 
+/** v15 2026-11-01: batches of pickups the store refused before accepting (they end Rejected). */
+export function storeRefusedBatches(view: CurrentOrderQueue): ReadonlySet<string> {
+  return new Set(
+    view.items
+      .filter((order) => order.orderType === "Pickup" && order.currentPhase === "Rejected")
+      .flatMap((order) =>
+        order.batches
+          .filter((batch) => batch.staffCancellation !== null)
+          .map((batch) => batch.orderBatchReference),
+      ),
+  );
+}
+
 /** "+14165550123" → "(416) 555-0123"; other countries keep the international form. */
 export function formatContactPhone(phone: string): string {
   const match = /^\+1([2-9][0-9]{2})([0-9]{3})([0-9]{4})$/u.exec(phone);
@@ -1086,6 +1106,7 @@ function QueuedOrderLines({
         lines={state.detail.lines}
         refundCheck={refundCheck}
         cancelledBatches={storeCancelledBatches(state.detail.view)}
+        refusedBatches={storeRefusedBatches(state.detail.view)}
         unpaidCancelledBatches={unpaidCancelledBatches(state.detail.view)}
         failedPaymentBatches={failedPaymentBatches(state.detail.view)}
         removedItems={removedUnpaidItems(state.detail.view)}
@@ -2294,6 +2315,9 @@ export function CurrentOrderQueuePage({
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const client = useMemo(() => createCurrentOrderQueueClient(fetcher), [fetcher]);
+  // v15 2026-11-01: Orders this page can't read are named on the page and told to the operator's
+  // log once per distinct set (the list refreshes every few seconds).
+  const reportedUnreadable = useRef("");
   const operations = useRef(
     new Map<string, ReturnType<ReturnType<typeof createOrderAcceptanceClient>["prepare"]>>(),
   );
@@ -2308,6 +2332,14 @@ export function CurrentOrderQueuePage({
   const [after, setAfter] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [state, setState] = useState<State>({ kind: "Loading" });
+  const unreadableOrders = state.kind === "Ready" ? state.view.unreadable : null;
+  useEffect(() => {
+    if (unreadableOrders === null || unreadableOrders.length === 0) return;
+    const key = JSON.stringify(unreadableOrders);
+    if (reportedUnreadable.current === key) return;
+    reportedUnreadable.current = key;
+    void client.reportUnreadable(csrf, unreadableOrders);
+  }, [client, csrf, unreadableOrders]);
   const [orderNumberSearch, setOrderNumberSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
   const [channelFilter, setChannelFilter] = useState("All");
@@ -2679,6 +2711,20 @@ export function CurrentOrderQueuePage({
                     {released}
                   </p>
                 ) : null}
+                {state.view.unreadable.length > 0 ? (
+                  <p className="order-queue-stale" role="alert">
+                    {state.view.unreadable.length === 1 &&
+                    state.view.unreadable[0]?.orderNumber != null
+                      ? t(
+                          "Order {number} can't be shown here right now. The other orders are up to date. Tell the store's owner.",
+                          { number: state.view.unreadable[0].orderNumber },
+                        )
+                      : t(
+                          "{count} orders can't be shown here right now. The other orders are up to date. Tell the store's owner.",
+                          { count: String(state.view.unreadable.length) },
+                        )}
+                  </p>
+                ) : null}
                 {stale ? (
                   <p className="order-queue-stale" role="status">
                     {t(
@@ -2910,6 +2956,7 @@ export function CurrentOrderQueuePage({
                           <CurrentOrderLines
                             lines={detail.lines}
                             cancelledBatches={storeCancelledBatches(detail.view)}
+                            refusedBatches={storeRefusedBatches(detail.view)}
                             unpaidCancelledBatches={unpaidCancelledBatches(detail.view)}
                             failedPaymentBatches={failedPaymentBatches(detail.view)}
                             removedItems={removedUnpaidItems(detail.view)}

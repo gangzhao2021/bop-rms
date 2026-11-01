@@ -92,7 +92,7 @@ it("renders actual Accepted version and visibly unresolved state without fabrica
 it("renders an empty page explicitly", () => {
   expect(
     renderToStaticMarkup(
-      <CurrentOrderQueueRows view={{ items: [], nextAfterOrderReference: null }} />,
+      <CurrentOrderQueueRows view={{ items: [], nextAfterOrderReference: null, unreadable: [] }} />,
     ),
   ).toContain("No orders yet");
 });
