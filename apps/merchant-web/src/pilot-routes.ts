@@ -122,7 +122,8 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/app/organization/entities/:id", home),
   route("/platform/live-gates", home),
   route("/platform/tenants/:id", home),
-  route("/platform/support-cases", home),
+  // WP-2423 取舍 15: platform support staff (their own sign-in; no Store workspace).
+  route("/platform/support-cases"),
   route("/app/exports", home),
   route("/app/commerce/bundles", home),
   route("/app/commerce/bundles/:id/edit", home),

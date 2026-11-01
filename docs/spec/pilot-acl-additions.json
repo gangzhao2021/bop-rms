@@ -5570,6 +5570,51 @@
       "privilege": "UPDATE",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 trade-off 18 (coordinator 2026-11-01): when a Store's Owner saves Receipts and privacy, the pilot API records that Store's receipt issuer — the business named there — as its own Store Assignment to an Active Operating Entity, ending the previous Store Assignment when the name changes"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "platform_support_person",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 15 platform support staff"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "store_support_permission",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 15 platform support staff"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "store_support_permission",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 15 platform support staff"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "store_support_access_log",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 15 platform support staff"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "store_support_access_log",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 15 platform support staff"
     }
   ]
 }

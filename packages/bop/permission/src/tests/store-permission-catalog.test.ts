@@ -228,6 +228,13 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
         risk: "High",
       });
   });
+  it("v23 WP-2423 取舍 15: only the Owner lets platform support change settings", () => {
+    expect(storePermissionCatalogVersion).toBe(23);
+    const code = "organization.support_access.manage";
+    expect(storeRoleTemplateActions("owner")).toContain(code);
+    for (const template of storeRoleTemplateCodes)
+      if (template !== "owner") expect(storeRoleTemplateActions(template)).not.toContain(code);
+  });
   it("v20 DEC-BRAND-MULTI-STORE: the Area Manager holds exactly the Store Manager's permissions, in each Store", () => {
     expect(storePermissionCatalogVersion).toBeGreaterThanOrEqual(20);
     expect(storeRoleTemplateCodes).toContain("area-manager");
@@ -261,7 +268,7 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
     expect(storeRoleTemplateActions("store-manager")).not.toContain("pricing.price_book.update");
   });
   it("v22 DEC-BRAND-MULTI-STORE: the Brand Owner reads and downloads Reports at every Store", () => {
-    expect(storePermissionCatalogVersion).toBe(22);
+    expect(storePermissionCatalogVersion).toBeGreaterThanOrEqual(22);
     const brandOwner = brandRoleTemplateActions("brand-owner");
     expect(brandOwner).toEqual(
       expect.arrayContaining(["reporting.sales.read", "reporting.sales.export"]),

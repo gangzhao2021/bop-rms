@@ -1428,6 +1428,8 @@ async function scanUnsupported(root, module, diagnostics) {
           [
             "src/infrastructure/persistence/platform-permission-store.ts",
             "src/infrastructure/persistence/platform-permission-provisioner.ts",
+            // WP-2423 取舍 15: platform support staff, and the Owner's say over them.
+            "src/infrastructure/persistence/platform-support-store.ts",
           ].includes(moduleRelative);
         const acceptedSystemMediaPromotionPermissionAsset =
           module.packageName === "@bop/permission" &&

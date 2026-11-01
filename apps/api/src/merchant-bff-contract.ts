@@ -165,6 +165,10 @@ import type {
 import type { createMerchantDiningJoinRegenerate } from "./merchant-dining-join-regenerate.js";
 import type { createMerchantStoreFeatures } from "./merchant-store-features.js";
 import type { createMerchantKitchenSetup } from "./merchant-kitchen-setup.js";
+import type {
+  createMerchantStoreSupport,
+  createMerchantStoreSupportAccess,
+} from "./merchant-store-support.js";
 import type { createMerchantDiningChase } from "./merchant-dining-chase.js";
 import type { createMerchantDiningPartySize } from "./merchant-dining-party-size.js";
 import type { createMerchantKitchenNotPrepared } from "./merchant-kitchen-not-prepared.js";
@@ -321,6 +325,11 @@ export interface MerchantBffService {
     readonly session: AuthenticationSession;
     readonly csrf: RawBrowserCredential;
     readonly workspace: unknown;
+  }>;
+  /** The session alone, for someone with no Store workspace (WP-2423 取舍 15: platform support). */
+  sessionBootstrap?(sessionCookie: unknown): Promise<{
+    readonly session: AuthenticationSession;
+    readonly csrf: RawBrowserCredential;
   }>;
   authorize(input: {
     readonly sessionCookie: unknown;
@@ -608,6 +617,9 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 item 8 ⑦: dishes the kitchen does not prepare (the menu's mark). */
   readonly kitchenNotPrepared?: ReturnType<typeof createMerchantKitchenNotPrepared>;
   /** WP-2423 item 8 ⑧ (decision 5): the kitchen sections (档口) and each dish's section. */
+  /** WP-2423 取舍 15: platform support staff, and the Owner's say over them. */
+  readonly storeSupport?: ReturnType<typeof createMerchantStoreSupport>;
+  readonly storeSupportAccess?: ReturnType<typeof createMerchantStoreSupportAccess>;
   /** WP-2423 item 11: the Store's kitchen setup (one kitchen line and what it can't take). */
   readonly kitchenSetup?: ReturnType<typeof createMerchantKitchenSetup>;
   readonly kitchenSections?: ReturnType<typeof createMerchantKitchenSections>;

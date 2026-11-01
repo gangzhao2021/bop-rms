@@ -555,6 +555,7 @@ export function createPersistentMerchantBffService(
     authorize: (input) => base.authorize(input),
     recordActivity: (input, extend) => base.recordActivity(input, extend),
     logout: (cookie) => base.logout(cookie),
+    sessionBootstrap: (cookie) => base.bootstrap(cookie),
     async bootstrap(cookie) {
       const bootstrap = await base.bootstrap(cookie);
       const finalizers: (() => void)[] = [];

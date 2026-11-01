@@ -2182,6 +2182,26 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    It moves the Store's synthetic launch gate and its own tax evidence (a new synthetic tax
    version, both audited) and its files' common expiry; the Store's staff and roles have no end.
 
+## Platform support staff
+
+Support are not Store staff. They sign in on their own page, pick a Store and read it; every look is
+listed for that Store's Owner under Store setup, Platform support, Support access log. They can
+change settings only while the Owner allows it there, and never touch money, staff, roles or payment
+accounts: they guide the Owner. If support can't be reached, the Owner can do everything alone.
+
+TEST-ONLY person, until the formal sign-in exists (Cognito external gate):
+
+```bash
+node --import ./tooling/environment/register-workspace-typescript.mjs \
+  tooling/environment/pilot-internal-test-support.mjs add /app/.local/pilot-v15 \
+  --database bop_rms_pilot_v15 --migration-env .local/migrate-v14/migrate-v15.env \
+  --name "TEST Support Sam" --reason "Internal test"
+```
+
+They then sign in at `/internal-test/support`. `end --actor <reference> --reason <why>` ends their
+access at once. The wording in the service agreement is an Owner fact and an external gate: the
+product shows a line labelled TEST ONLY.
+
 ## Restart time, database connections and memory per Store
 
 Each Store runs seven processes (API and HTTPS entries, five workers) in the pilot container. What

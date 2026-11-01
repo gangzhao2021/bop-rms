@@ -9622,3 +9622,97 @@ tr[data-drop-target="true"] {
   margin: var(--bop-space-2) 0;
   font-weight: 600;
 }
+
+/* WP-2423 取舍 15: platform support, and the Owner's side of it (no boxes: merchant visual rules). */
+.support-access {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin-block: var(--bop-space-4);
+  padding-block-start: var(--bop-space-4);
+  border-top: 1px solid var(--bop-color-border-default);
+  min-width: 0;
+}
+.support-access > *,
+.store-support > * {
+  margin-block: 0;
+}
+.support-access__hint,
+.store-support__hint {
+  color: var(--bop-color-text-muted);
+}
+.support-access__log {
+  width: 100%;
+  border-collapse: collapse;
+}
+.support-access__log th,
+.support-access__log td {
+  padding: var(--bop-space-2) var(--bop-space-3) var(--bop-space-2) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+  text-align: start;
+}
+.store-support {
+  display: grid;
+  gap: var(--bop-space-3);
+  max-width: 56rem;
+  margin-inline: auto;
+  padding: var(--bop-space-4);
+  min-width: 0;
+}
+.store-support h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.store-support h2 {
+  font-size: 20px;
+  font-weight: 600;
+}
+.store-support h3,
+.support-access h4 {
+  margin-block: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.store-support button,
+.store-support select {
+  min-height: 44px;
+  padding-inline: var(--bop-space-3);
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: var(--bop-radius-card);
+  background: var(--bop-color-surface-default);
+  font: inherit;
+}
+.store-support button {
+  cursor: pointer;
+}
+.store-support label {
+  display: grid;
+  gap: var(--bop-space-1);
+  max-width: 28rem;
+}
+.store-support__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--bop-space-1) var(--bop-space-4);
+}
+.store-support__facts dd {
+  margin: 0;
+}
+@media (max-width: 480px) {
+  .support-access__log thead {
+    display: none;
+  }
+  .support-access__log tr {
+    display: block;
+    padding-block: var(--bop-space-2);
+    border-bottom: 1px solid var(--bop-color-border-default);
+  }
+  .support-access__log td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+  .support-access__log td::before {
+    content: attr(data-label) ": ";
+    color: var(--bop-color-text-muted);
+  }
+}

@@ -41,6 +41,10 @@ import { createMerchantDiningPartySize } from "../../apps/api/dist/merchant-dini
 import { createMerchantKitchenNotPrepared } from "../../apps/api/dist/merchant-kitchen-not-prepared.js";
 import { createMerchantKitchenSections } from "../../apps/api/dist/merchant-kitchen-sections.js";
 import { createMerchantKitchenSetup } from "../../apps/api/dist/merchant-kitchen-setup.js";
+import {
+  createMerchantStoreSupport,
+  createMerchantStoreSupportAccess,
+} from "../../apps/api/dist/merchant-store-support.js";
 import { createMerchantDiningTeaCharge } from "../../apps/api/dist/merchant-dining-tea-charge.js";
 import {
   createMerchantStoreFeatures,
@@ -1610,6 +1614,18 @@ export async function createInternalMerchant(
         persistence,
         authentication: service,
         now: resources.now,
+      }),
+      // WP-2423 取舍 15: platform support staff, reaching only the Stores served here.
+      storeSupport: createMerchantStoreSupport({
+        persistence,
+        authentication: service,
+        stores: () => served,
+        nextReference: () => resources.credentials.reference(),
+        locale: "en",
+      }),
+      storeSupportAccess: createMerchantStoreSupportAccess({
+        persistence,
+        authentication: service,
       }),
       // WP-2423 item 11: the Store's kitchen setup, in the product.
       kitchenSetup: createMerchantKitchenSetup({

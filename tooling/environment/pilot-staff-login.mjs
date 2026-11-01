@@ -152,6 +152,16 @@ export function installInternalStaffLogin(app, merchant) {
       return res.status(503).json({ code: "INTERNAL_STAFF_LOGIN_UNAVAILABLE" });
     }
   });
+  // WP-2423 取舍 15, TEST-ONLY: platform support's sign-in until the formal one (Cognito gate).
+  app.get("/internal-test/support", (req, res) => {
+    res.set("Cache-Control", "no-store").set("Referrer-Policy", "same-origin");
+    if (!requestScope(req)) return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
+    return res
+      .type("html")
+      .send(
+        `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TEST platform support sign-in</title><body><h1>TEST ONLY: platform support sign-in</h1><p>For internal testing. Real support staff will sign in another way.</p><form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><button name="staffSelector" value="support-1" type="submit">Sign in as TEST support</button></form></body></html>`,
+      );
+  });
   app.post(
     "/merchant/internal-test/login",
     express.urlencoded({ extended: false, limit: "1kb" }),
@@ -193,7 +203,9 @@ export function installInternalStaffLogin(app, merchant) {
         const entries = await currentChoices();
         if (
           (requested === undefined && entries.length !== 1) ||
-          (requested !== undefined && !entries.some((entry) => entry.selector === requested))
+          (requested !== undefined &&
+            !requested.startsWith("support") &&
+            !entries.some((entry) => entry.selector === requested))
         )
           return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
         const purpose = kitchenDisplay ? "KitchenDisplay" : "Workforce";
@@ -217,7 +229,14 @@ export function installInternalStaffLogin(app, merchant) {
             credentials.sessionCookie +
             "; Path=/; Secure; HttpOnly; SameSite=Strict",
         );
-        return res.redirect(303, kitchenDisplay ? "/operations/kitchen" : "/operations/orders");
+        return res.redirect(
+          303,
+          kitchenDisplay
+            ? "/operations/kitchen"
+            : requested?.startsWith("support")
+              ? "/platform/support-cases"
+              : "/operations/orders",
+        );
       } catch {
         return res.status(503).json({ code: "INTERNAL_STAFF_LOGIN_UNAVAILABLE" });
       }

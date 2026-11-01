@@ -282,7 +282,7 @@ export async function createInternalMerchantSession(
         at = instant(clock());
       return Object.freeze(
         entries
-          .filter((entry) => at < entry.validUntil)
+          .filter((entry) => at < entry.validUntil && !entry.selector.startsWith("support"))
           .map((entry) =>
             Object.freeze({ selector: entry.selector, label: "DEMO staff " + entry.selector }),
           ),

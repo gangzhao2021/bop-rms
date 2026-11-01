@@ -6729,4 +6729,66 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The kitchen isn't set up": "厨房还没设置",
   "Guests and staff can't place orders at this Store until it is.":
     "设置好之前，本店顾客和员工都不能下单。",
+  "Looked at your Store's details and recent orders": "查看了你门店的设置和最近的订单",
+  "Set up your kitchen": "设置了你的厨房",
+  "Changed whether guests can order pickup": "更改了顾客能否下取餐单",
+  "Changed a setting": "更改了一项设置",
+  "Tried something that was refused; nothing changed": "尝试的操作被拒绝，没有任何更改",
+  "That didn't go through. Nothing changed. Try again.": "操作没有成功，没有任何更改。请重试。",
+  "Platform support": "平台支持",
+  "We can't show this right now. Nothing was changed.": "暂时无法显示，没有做任何更改。",
+  "Platform support can look at your Store's settings and recent orders to help you, without asking each time. Guest contact details stay hidden from them, and every look is listed below.":
+    "平台支持可以查看你门店的设置和最近的订单来帮你，不用每次询问。顾客的联系方式对他们是遮住的，每次查看都会列在下面。",
+  "TEST ONLY: the real wording of this in your service agreement isn't written yet.":
+    "仅供测试：服务协议里的正式措辞还没有写好。",
+  "Platform support can't change your settings.": "平台支持不能更改你的设置。",
+  "Platform support can change your settings until you turn this off.":
+    "平台支持可以更改你的设置，直到你关闭为止。",
+  "Platform support can change your settings until": "平台支持可以更改你的设置，截止到",
+  "Platform support can change your settings.": "平台支持可以更改你的设置了。",
+  "Allow platform support to change my settings": "允许平台支持帮我改设置",
+  "Allow for one hour": "允许一小时",
+  "Allowed for one hour. It ends by itself.": "已允许一小时，到时自动结束。",
+  "Platform support can't change anything now.": "平台支持现在不能更改任何内容。",
+  "Turn off now": "立即关闭",
+  "Whatever you allow here, support can never take payment, refund, comp, discount or void, or change staff, roles or payment accounts. Those stay yours, and you can do everything here without support.":
+    "无论你在这里允许什么，平台支持都不能收款、退款、免单、折让或作废，也不能更改员工、角色或收款账户。这些只能由你来做；没有平台支持，你也能完成所有操作。",
+  "Support access log": "支持访问记录",
+  "Platform support hasn't opened your Store yet.": "平台支持还没有打开过你的门店。",
+  When: "时间",
+  Who: "人员",
+  "This page is for platform support staff. Sign in with a support account.":
+    "此页面供平台支持人员使用。请用支持账号登录。",
+  "This page can't be reached right now. Owners can still do everything themselves in their Store setup.":
+    "此页面暂时无法访问。店主仍可在门店设置里自己完成所有操作。",
+  "We can't open this Store right now. Try again in a moment.": "暂时打不开这家门店，请稍后再试。",
+  "The Owner hasn't allowed changes right now. Ask them to allow it in their Store setup.":
+    "店主目前没有允许更改。请让店主在门店设置里允许。",
+  "Only the Owner can do this. Guide them through it on their own screen.":
+    "只有店主能做这项操作。请指导店主在自己的屏幕上完成。",
+  "That didn't go through. Open the Store again and retry.": "操作没有成功。请重新打开门店再试。",
+  "Signed in as {name}. Everything you open is listed for that Store's Owner.":
+    "当前登录：{name}。你打开的内容都会列给该店店主看。",
+  "Choose a Store": "选择门店",
+  "The Owner allows you to change settings.": "店主允许你更改设置。",
+  "The Owner allows you to change settings until": "店主允许你更改设置，截止到",
+  "Read-only: the Owner hasn't allowed changes right now.": "只读：店主目前没有允许更改。",
+  Settings: "设置",
+  "Set up": "已设置",
+  "Not set up: guests can't order here yet": "未设置：顾客暂时不能在此下单",
+  "The kitchen is set up.": "厨房已设置好。",
+  "Pickup changed.": "取餐设置已更改。",
+  "Turn pickup off": "关闭取餐",
+  "Turn pickup on": "打开取餐",
+  "You can't take payment, refund, comp, discount or void, or change staff, roles or payment accounts, even when changes are allowed. Guide the Owner to do those themselves.":
+    "即使店主允许更改，你也不能收款、退款、免单、折让或作废，也不能更改员工、角色或收款账户。请指导店主自己操作。",
+  "No menus yet.": "还没有菜单。",
+  Listed: "已上架",
+  "Not listed": "未上架",
+  "Recent orders": "最近的订单",
+  "No orders yet.": "还没有订单。",
+  Guest: "顾客",
+  "Guest contact details are hidden from support.": "顾客的联系方式对平台支持是遮住的。",
+  "Allow or stop platform support changing settings, and read the support access log":
+    "允许或停止平台支持更改设置，并查看支持访问记录",
 });
