@@ -2190,14 +2190,19 @@ staff and guests see during a restart stays the "We're updating" page.
 **How long a restart takes.** Build before 2026-11-02: 2 Stores 37-51 s, 3 Stores about 4 minutes.
 Every process transpiled about 1430 files at start (5 s and 420 MB alone), so 17 at once needed
 more memory than the VM has. The image now holds those results: one process loads its code in 1-2 s
-at about 255 MB, and 17 together in 6 s within 4 GB. Expect about a minute with 3 Stores. That is
-an estimate from those figures: write the real one here after the next window.
+at about 255 MB, and 17 together in 6 s within 4 GB. Measured on v15 with 3 Stores (2026-11-01,
+one restart with the VM otherwise quiet): the pages answered 9 s after the container started, all
+17 processes ran after 15 s, and the window took 17 s. The pages can answer a few seconds before
+the last worker is up.
 
 **Measure a restart** (read-only; start it before the window, from the host):
 
 ```bash
 sh tooling/environment/pilot-restart-measure.sh /tmp/restart.tsv 420 https://<customer host>
 ```
+
+Its printed summary covers every sample, including the old processes before the restart. For the
+new processes' peaks, keep only the lines from the container's start time on.
 
 It prints peak connections per role, each process's peak memory, CPU and connections, the worst
 memory stall and what `/` answered each second. A 503 after the services report ready is a defect.
@@ -2221,7 +2226,8 @@ first if `<n>` is above `max_connections` less 20. New installations render 80.
 
 **Sizing the VM.** Measured on v15 with 3 Stores before the change: 3.5 GB once settled (about
 200 MB a process), 8.4 GB if every process reached its own start-up peak, on a 7.75 GB VM whose
-swap was 94 % used. Allow 1.5 GB per Store settled, plus 1 GB for PostgreSQL, operations and the
+swap was 94 % used. After the change, same Stores: 3.6 GB settled, 4.5 GB if every process reached
+its peak (2.9 GB still free at the lowest). Allow 1.5 GB per Store settled, plus 1 GB for PostgreSQL, operations and the
 front, and keep at least 2 GB free for image builds and restarts. Anything else on the VM (test
 databases, a build) counts: run `tooling/environment` checks with `--maxWorkers=3` beside it.
 
