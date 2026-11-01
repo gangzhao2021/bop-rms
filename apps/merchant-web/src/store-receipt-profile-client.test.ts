@@ -23,6 +23,7 @@ const view = {
     privacyNoticeUrl: null,
   },
   gaps: { taxRegistrationMissing: false, privacyNoticeMissing: true },
+  issuer: { businessName: "Synthetic Kitchen Inc.", suggestedBusinessName: "Synthetic Brand" },
 };
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -48,7 +49,11 @@ describe("WP-2423 Q15/Q16 receipt and privacy details client", () => {
     const body = {
       expectedVersion: 1,
       operationReference: "01902501-0000-7000-8000-000000000001",
-      details: { ...view.details, privacyNoticeUrl: "https://example.test/privacy" },
+      details: {
+        ...view.details,
+        privacyNoticeUrl: "https://example.test/privacy",
+        businessName: "Synthetic Kitchen Inc.",
+      },
     };
     expect(await client.save(body)).toEqual({
       version: 2,
@@ -77,13 +82,14 @@ describe("WP-2423 Q15/Q16 receipt and privacy details client", () => {
       client.save({
         expectedVersion: 0,
         operationReference: "01902501-0000-7000-8000-000000000001",
-        details: view.details,
+        details: { ...view.details, businessName: "Synthetic Kitchen Inc." },
       }),
     ).rejects.toEqual(new StoreReceiptProfileClientError(code as never));
   });
 
   it("shows field mistakes in the shapes the tax authorities publish", () => {
     const ok = {
+      businessName: "Synthetic Kitchen Inc.",
       gstHstNumber: "000000000 RT 0001",
       qstNumber: "",
       pstNumber: "",
@@ -91,12 +97,14 @@ describe("WP-2423 Q15/Q16 receipt and privacy details client", () => {
     };
     expect(receiptPrivacyFieldErrors(ok)).toEqual({});
     const errors = receiptPrivacyFieldErrors({
+      businessName: " ",
       gstHstNumber: "12345",
       qstNumber: "000000000RT0001",
       pstNumber: "<b>",
       privacyNoticeUrl: "http://example.test/privacy",
     });
     expect(Object.keys(errors).sort()).toEqual([
+      "businessName",
       "gstHstNumber",
       "privacyNoticeUrl",
       "pstNumber",
@@ -118,5 +126,19 @@ describe("WP-2423 Q15/Q16 receipt and privacy details client", () => {
     expect(both).toContain("Add your privacy notice link before going live");
     expect(both).toContain("Store setup → Receipts and privacy");
     expect(render({ taxRegistrationMissing: false, privacyNoticeMissing: false })).toBe("");
+  });
+
+  it("v15 2026-11-01: reads the business the receipts name, or none yet with the Brand offered", async () => {
+    const load = (issuer: unknown) =>
+      createStoreReceiptProfileClient({
+        csrf,
+        fetcher: vi.fn().mockResolvedValue(json(200, { ...view, issuer })),
+      }).load();
+    expect(
+      (await load({ businessName: null, suggestedBusinessName: "Synthetic Brand" })).issuer,
+    ).toEqual({ businessName: null, suggestedBusinessName: "Synthetic Brand" });
+    await expect(load(undefined)).rejects.toEqual(
+      new StoreReceiptProfileClientError("Unavailable"),
+    );
   });
 });

@@ -88,6 +88,8 @@ test("@production the Owner enters receipt registrations and the privacy link; s
     privacyNoticeUrl: null,
   } as Record<string, string | null>;
   const saves: Record<string, unknown>[] = [];
+  // v15 2026-11-01: no business named on receipts until the first save; the Brand is offered.
+  let businessName: string | null = null;
   const gaps = () => ({
     taxRegistrationMissing:
       details.gstHstNumber === null && details.qstNumber === null && details.pstNumber === null,
@@ -101,7 +103,9 @@ test("@production the Owner enters receipt registrations and the privacy link; s
       saves.push(body);
       if (body.expectedVersion !== version)
         return route.fulfill({ status: 409, headers, json: { error: "profile_changed" } });
-      details = body.details as typeof details;
+      const { businessName: name, ...rest } = body.details as Record<string, string | null>;
+      details = rest;
+      businessName = name ?? null;
       version += 1;
       return route.fulfill({
         headers,
@@ -117,6 +121,7 @@ test("@production the Owner enters receipt registrations and the privacy link; s
         recordedAt: version === 0 ? null : "2026-10-14T16:00:00.000Z",
         details,
         gaps: gaps(),
+        issuer: { businessName, suggestedBusinessName: "Synthetic Brand" },
       },
     });
   });
@@ -147,6 +152,8 @@ test("@production the Owner enters receipt registrations and the privacy link; s
 
   const panel = page.getByRole("region", { name: "Receipts and privacy" });
   await expect(panel.getByText("Add your privacy notice link before going live")).toBeVisible();
+  await expect(panel.getByText(/Receipts cannot be issued at this store until/u)).toBeVisible();
+  await expect(panel.getByLabel("Business name on receipts")).toHaveValue("Synthetic Brand");
   await noOverflowOrBlockingAxe(page);
 
   // Mistakes are explained next to the field before anything is sent.
@@ -172,9 +179,11 @@ test("@production the Owner enters receipt registrations and the privacy link; s
       qstNumber: null,
       pstNumber: null,
       privacyNoticeUrl: "https://example.test/privacy",
+      businessName: "Synthetic Brand",
     },
   });
   await expect(panel.getByText("Add your privacy notice link before going live")).toHaveCount(0);
+  await expect(panel.getByText(/Receipts cannot be issued at this store until/u)).toHaveCount(0);
   await expect(panel.getByText("Last saved", { exact: false })).toBeVisible();
 
   // Tax review no longer warns.
@@ -202,6 +211,10 @@ test("@production staff who cannot change the details see them read-only", async
           privacyNoticeUrl: null,
         },
         gaps: { taxRegistrationMissing: false, privacyNoticeMissing: true },
+        issuer: {
+          businessName: "Synthetic Kitchen Inc.",
+          suggestedBusinessName: "Synthetic Brand",
+        },
       },
     }),
   );

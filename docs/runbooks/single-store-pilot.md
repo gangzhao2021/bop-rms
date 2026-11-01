@@ -2111,9 +2111,15 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    NOBYPASSRLS, only its grants), audits it under the approver with the approval wording, and
    commits only if the services' api role then reads the routing. Run again it answers
    `AlreadyPresent`. It refuses the installation's own Store and a Store not opened on the Stores
-   page, not active or not named "… – not production". No restart is needed. Receipts: the Store's
-   staff fill in Store setup → "Receipts and privacy" (receipt business name and contact); until
-   then its paid orders get no receipt and the receipt update keeps failing.
+   page, not active or not named "… – not production". No restart is needed. Receipts: the Store's Owner opens Store setup → "Receipts and
+   privacy", checks "Business name on receipts" (the legal or operating name of the business
+   that sells to guests; the Brand's name is offered the first time) and saves — with the
+   registration numbers and privacy link empty if the business has none. That save is recorded
+   and records the Store's receipt issuer; until then the Store's paid orders get no receipt and
+   the receipt update fails with `DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE`. A receipt update still
+   waiting on its normal retry is then issued by itself; one that already failed eight times is
+   recovered as below. Changing the name later names the new business on receipts issued from
+   then on; issued receipts keep theirs.
 
    A failed order or payment update is logged by the business worker as `OUTBOX_CONSUMER_FAILED`
    with the consumer, the event type and the error code (never its content), and the worker's

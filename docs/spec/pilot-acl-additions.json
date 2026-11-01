@@ -5534,6 +5534,42 @@
       "privilege": "EXECUTE",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31 rule 1, revision of trade-off 7, Owner may overrule): each Store's manager changes that Store's own prices directly; a Brand listing reaches every Store"
+    },
+    {
+      "type": "table",
+      "schema": "bop_operating_entity",
+      "object": "operating_entity",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 trade-off 18 (coordinator 2026-11-01): when a Store's Owner saves Receipts and privacy, the pilot API records that Store's receipt issuer — the business named there — as its own Store Assignment to an Active Operating Entity, ending the previous Store Assignment when the name changes"
+    },
+    {
+      "type": "table",
+      "schema": "bop_operating_entity",
+      "object": "store_operating_entity_assignment",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 trade-off 18 (coordinator 2026-11-01): when a Store's Owner saves Receipts and privacy, the pilot API records that Store's receipt issuer — the business named there — as its own Store Assignment to an Active Operating Entity, ending the previous Store Assignment when the name changes"
+    },
+    {
+      "type": "column",
+      "schema": "bop_operating_entity",
+      "object": "store_operating_entity_assignment",
+      "column": "effective_until",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 trade-off 18 (coordinator 2026-11-01): when a Store's Owner saves Receipts and privacy, the pilot API records that Store's receipt issuer — the business named there — as its own Store Assignment to an Active Operating Entity, ending the previous Store Assignment when the name changes"
+    },
+    {
+      "type": "column",
+      "schema": "bop_operating_entity",
+      "object": "store_operating_entity_assignment",
+      "column": "updated_at",
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 8 trade-off 18 (coordinator 2026-11-01): when a Store's Owner saves Receipts and privacy, the pilot API records that Store's receipt issuer — the business named there — as its own Store Assignment to an Active Operating Entity, ending the previous Store Assignment when the name changes"
     }
   ]
 }

@@ -197,7 +197,8 @@ export async function exercisePilotStoreSetupPublication(input) {
         )
       ).rows[0];
 
-    const listen = async (reader, work) => {
+    // `extra(persistence, authentication)`: more merchant BFF routes beside Store setup's own.
+    const listen = async (reader, work, extra) => {
       const bff = await createInternalStoreSetupBff(resources, {
         persistence: persistenceFor(reader),
         authentication: reader.authentication,
@@ -211,6 +212,7 @@ export async function exercisePilotStoreSetupPublication(input) {
           exactOrigin: "https://merchant.invalid",
           acceptedHost: "merchant.invalid",
           ...bff,
+          ...(extra === undefined ? {} : extra(persistenceFor(reader), reader.authentication)),
         }),
       );
       const server = app.listen(0, "127.0.0.1");

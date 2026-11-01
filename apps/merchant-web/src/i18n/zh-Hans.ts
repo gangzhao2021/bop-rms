@@ -3356,6 +3356,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save payment configuration": "保存付款配置",
   "Save prices": "保存价格",
   "Save receipt and privacy details": "保存收据和隐私信息",
+  "Business name on receipts": "收据上的商家名称",
+  "The legal or operating name of the business that sells to your guests, as registered. Every receipt names it as the seller.":
+    "向顾客销售的商家的法定名称或经营名称，与登记一致。每张收据都以它作为销售方。",
+  "Enter the name of the business that sells to your guests (up to 200 characters).":
+    "请输入向顾客销售的商家名称（最多 200 个字符）。",
+  "Receipts cannot be issued at this store until these details are saved, even if every number stays empty.":
+    "保存这些信息之前，本店无法开具收据；即使所有号码都留空也需要保存。",
   "Save setup draft": "保存设置草稿",
   "Save template draft": "保存模板草稿",
   "Save the changed template fields before submitting for review.":

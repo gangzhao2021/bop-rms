@@ -17,13 +17,22 @@ import { SourceTime } from "./StoreTime.js";
  * is entered and what is missing. Only the Owner's own facts are used; nothing is filled in.
  */
 interface Fields {
+  businessName: string;
   gstHstNumber: string;
   qstNumber: string;
   pstNumber: string;
   privacyNoticeUrl: string;
 }
-const empty: Fields = { gstHstNumber: "", qstNumber: "", pstNumber: "", privacyNoticeUrl: "" };
+const empty: Fields = {
+  businessName: "",
+  gstHstNumber: "",
+  qstNumber: "",
+  pstNumber: "",
+  privacyNoticeUrl: "",
+};
 const fieldsOf = (view: StoreReceiptProfileView): Fields => ({
+  // v15 2026-11-01: the Brand's name is offered until the Owner saves the business's own name.
+  businessName: view.issuer.businessName ?? view.issuer.suggestedBusinessName,
   gstHstNumber: view.details.gstHstNumber ?? "",
   qstNumber: view.details.qstNumber ?? "",
   pstNumber: view.details.pstNumber ?? "",
@@ -33,6 +42,15 @@ const fieldsOf = (view: StoreReceiptProfileView): Fields => ({
 /** The same shapes the server enforces, so mistakes are shown next to the field. */
 export function receiptPrivacyFieldErrors(fields: Fields): Partial<Record<keyof Fields, string>> {
   const errors: Partial<Record<keyof Fields, string>> = {};
+  const name = fields.businessName.trim();
+  if (
+    name === "" ||
+    name.length > 200 ||
+    Array.from(name).some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
+  )
+    errors.businessName = t(
+      "Enter the name of the business that sells to your guests (up to 200 characters).",
+    );
   const compact = (value: string) => value.trim().toUpperCase().replace(/\s/gu, "");
   if (
     fields.gstHstNumber.trim() !== "" &&
@@ -167,6 +185,7 @@ export function StoreReceiptPrivacyPanel({
           qstNumber: value(fields.qstNumber),
           pstNumber: value(fields.pstNumber),
           privacyNoticeUrl: value(fields.privacyNoticeUrl),
+          businessName: fields.businessName.trim(),
         },
       });
       operation.current = null;
@@ -255,6 +274,13 @@ export function StoreReceiptPrivacyPanel({
           "Customer receipts show your business name, the store address, each tax with its rate, and the registration numbers below. Customers see your privacy notice link where they enter their contact details and on their receipt. Enter only your own registered numbers and notice; leave a number empty if the business is not registered for that tax.",
         )}
       </p>
+      {view.issuer.businessName === null ? (
+        <p role="note">
+          {t(
+            "Receipts cannot be issued at this store until these details are saved, even if every number stays empty.",
+          )}
+        </p>
+      ) : null}
       <ReceiptSetupNotice gaps={view.gaps} />
       {view.recordedAt !== null ? (
         <p className="receipt-privacy__hint">
@@ -269,6 +295,13 @@ export function StoreReceiptPrivacyPanel({
           void submit();
         }}
       >
+        {field(
+          "businessName",
+          t("Business name on receipts"),
+          t(
+            "The legal or operating name of the business that sells to your guests, as registered. Every receipt names it as the seller.",
+          ),
+        )}
         {field(
           "gstHstNumber",
           t("GST/HST registration number"),

@@ -6,6 +6,20 @@ const d = vi.hoisted(() => ({
   readProfile: vi.fn(),
   storeOptions: vi.fn(),
   save: vi.fn(),
+  issuer: vi.fn(),
+  recordIssuer: vi.fn(),
+  audits: [] as Record<string, unknown>[],
+}));
+vi.mock("@bop/operating-entity", async (original) => ({
+  ...(await original<object>()),
+  createPostgresReceiptIssuerSource: () => ({ resolve: d.issuer }),
+  createPostgresStoreReceiptIssuerRecorder: () => d.recordIssuer,
+}));
+vi.mock("@bop/audit", async (original) => ({
+  ...(await original<object>()),
+  appendAuditRecordInTransaction: async (_tx: unknown, record: Record<string, unknown>) => {
+    d.audits.push(record);
+  },
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.resolve }));
 vi.mock("@rms/store", async (original) => ({
@@ -35,7 +49,7 @@ function setup() {
       new Map(actions.map((action) => [action, { effect: "Allow" as "Allow" | "Deny" }])),
   );
   const current = {
-    context: { brand: { brandReference: id(2) }, resolvedAt: at },
+    context: { brand: { brandReference: id(2), displayName: "Synthetic Brand" }, resolvedAt: at },
     store: { storeReference: id(3) },
     actorReference: id(4),
     allowed,
@@ -58,6 +72,9 @@ function setup() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  d.audits.length = 0;
+  d.issuer.mockResolvedValue(null);
+  d.recordIssuer.mockResolvedValue({ status: "Unchanged", legalName: "Synthetic Kitchen Inc." });
   d.readProfile.mockResolvedValue(profile);
   d.save.mockImplementation(async (tx: unknown, input: Record<string, unknown>) => {
     const { authorize } = d.storeOptions.mock.calls[0]?.[0] as {
@@ -153,4 +170,51 @@ it("WP-2423: a permission withdrawn or Session ended during the save refuses it 
   await expect(f.service(f.command)).rejects.toMatchObject({ code: "Denied" });
   expect(d.save).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledTimes(2);
+});
+
+// v15 2026-11-01: store 2 had no receipt issuer and no way to get one; saving with every number
+// empty answered no_change. The section now names the business (the Brand's name offered).
+it("v15 2026-11-01: reads the business the receipts name, offering the Brand's name before any", async () => {
+  const f = setup();
+  expect((await f.service.read({ sessionCookie: "synthetic-cookie" })).issuer).toEqual({
+    businessName: null,
+    suggestedBusinessName: "Synthetic Brand",
+  });
+  d.issuer.mockResolvedValue({ legalName: "Synthetic Kitchen Inc." });
+  expect((await f.service.read({ sessionCookie: "synthetic-cookie" })).issuer).toEqual({
+    businessName: "Synthetic Kitchen Inc.",
+    suggestedBusinessName: "Synthetic Brand",
+  });
+});
+it("v15 2026-11-01: a save names the business; only the name changing is still recorded", async () => {
+  const f = setup();
+  const empty = { gstHstNumber: null, qstNumber: null, pstNumber: null, privacyNoticeUrl: null };
+  const save = (businessName: string) =>
+    f.service({
+      ...f.command,
+      command: { ...f.command.command, details: { ...empty, businessName: "  " + businessName } },
+    });
+  d.recordIssuer.mockResolvedValueOnce({ status: "Recorded", legalName: "Synthetic Kitchen Inc." });
+  await expect(save("Synthetic Kitchen Inc.")).resolves.toMatchObject({ status: "Recorded" });
+  // The details reach the profile without the name; the issuer gets the trimmed name.
+  expect(d.save.mock.calls[0]?.[1]).toMatchObject({ details: empty });
+  expect(d.recordIssuer.mock.calls[0]?.[0]).toMatchObject({
+    legalName: "Synthetic Kitchen Inc.",
+    recordedAt: at,
+  });
+  expect(d.audits.map((record) => record.actionCode)).toEqual(["STORE_RECEIPT_ISSUER_RECORDED"]);
+  expect(JSON.stringify(d.audits)).not.toContain("Synthetic Kitchen");
+  // Details unchanged, a new name: recorded. Neither changed: nothing changed.
+  const { StoreReceiptProfileError } = await import("@rms/store");
+  d.save.mockRejectedValue(new StoreReceiptProfileError("STORE_RECEIPT_PROFILE_NO_CHANGE"));
+  d.recordIssuer.mockResolvedValueOnce({ status: "Recorded", legalName: "Other Kitchen Inc." });
+  await expect(save("Other Kitchen Inc.")).resolves.toMatchObject({
+    status: "Recorded",
+    version: 2,
+  });
+  await expect(save("Other Kitchen Inc.")).rejects.toMatchObject({ code: "NoChange" });
+  // An empty name is refused before anything is written.
+  d.save.mockClear();
+  await expect(save("")).rejects.toMatchObject({ code: "Invalid" });
+  expect(d.save).not.toHaveBeenCalled();
 });
