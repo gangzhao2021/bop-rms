@@ -11,6 +11,7 @@ import {
   StoreSetupReferenceError,
   StoreConfigurationOriginalError,
   StoreConfigurationAdministrationServiceError,
+  isStoreConfigurationReferenceUnavailable,
 } from "@rms/store";
 import { StorePaymentConfigurationError } from "@rms/payment";
 import { DigitalReceiptTemplateError } from "@rms/printing-device";
@@ -52,7 +53,8 @@ const bounded = (error: unknown): never => {
     error instanceof StorePaymentConfigurationError ||
     error instanceof DigitalReceiptTemplateError ||
     error instanceof BrandStoreTopologyError ||
-    error instanceof BrandConfigurationOperationError
+    error instanceof BrandConfigurationOperationError ||
+    isStoreConfigurationReferenceUnavailable(error)
   )
     throw error;
   return unavailable();

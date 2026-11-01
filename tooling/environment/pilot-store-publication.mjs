@@ -9,6 +9,7 @@ import {
   createPostgresCurrentStorePublicationProof,
   createPostgresStoreBusinessDateSource,
   StoreConfigurationAdministrationServiceError,
+  StoreConfigurationReferenceUnavailableError,
 } from "../../packages/rms/store/src/index.ts";
 import { createPostgresCurrentLiveGateSource } from "../../packages/bop/publishing/src/index.ts";
 import { currentStoreTaxConfigurationReference } from "../../packages/rms/pricing/src/index.ts";
@@ -259,7 +260,16 @@ export async function createInternalStoreConfigurationOrdinary(
         const address = await sources.address(configuration.addressReference),
           contact = await sources.contact(configuration.contactReference),
           payment = await sources.payment(configuration.paymentConfigurationReference),
-          receipt = await sources.receipt(configuration.receiptReference);
+          // v15 2026-11-01: a receipt template with no version in effect here (a TEST Store's
+          // first configuration names one that was never published) is named, not a 503.
+          receipt = await sources.receipt(configuration.receiptReference).catch((error) => {
+            if (
+              error?.name === "DigitalReceiptTemplateError" &&
+              error.code === "RECEIPT_TEMPLATE_UNAVAILABLE"
+            )
+              throw new StoreConfigurationReferenceUnavailableError("Receipt");
+            throw error;
+          });
         const ok =
           String(address.reference) === configuration.addressReference &&
           String(contact.reference) === configuration.contactReference &&

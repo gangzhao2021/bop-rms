@@ -294,6 +294,9 @@ const messages: Record<StoreSetupClientError["code"], string> = {
   SoleOperatorApprovalInvalid: t(
     "This configuration was approved by you alone while Sole operator was off, so it cannot be published. Withdraw it, then send a new change for approval.",
   ),
+  ReceiptTemplateUnavailable: t(
+    "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.",
+  ),
 };
 const root = (view: StoreSetupWorkspace) => ({
   reference: view.setup.snapshot?.setupDraftReference ?? null,

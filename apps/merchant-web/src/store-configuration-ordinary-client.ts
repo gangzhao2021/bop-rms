@@ -338,7 +338,7 @@ async function soleOperatorRefusal(
   }
 }
 /** WP-2423 (v15 D2/D3): a refusal the Owner can act on, if the answer names it. */
-async function ordinaryConflictReason(
+export async function ordinaryConflictReason(
   response: Response,
 ): Promise<
   | "SetupIncomplete"
@@ -347,12 +347,16 @@ async function ordinaryConflictReason(
   | "Withdrawn"
   | "NotYourChange"
   | "SoleOperatorApprovalInvalid"
+  | "ReceiptTemplateUnavailable"
   | null
 > {
   try {
     const text = await response.text();
     if (text.length > 4096) return null;
-    const error = (JSON.parse(text) as { error?: unknown } | null)?.error;
+    const body = JSON.parse(text) as { error?: unknown; setting?: unknown } | null,
+      error = body?.error;
+    if (error === "store_setup_setting_unavailable" && body?.setting === "Receipt")
+      return "ReceiptTemplateUnavailable";
     return error === "store_setup_incomplete"
       ? "SetupIncomplete"
       : error === "store_setup_outdated"

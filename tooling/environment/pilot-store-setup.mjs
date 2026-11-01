@@ -11,7 +11,7 @@ import { createMerchantStorePaymentConfiguration } from "../../apps/api/dist/mer
 import { createMerchantStoreSetupReferences } from "../../apps/api/dist/merchant-store-setup-references.js";
 import { createMerchantStoreSetup } from "../../apps/api/dist/merchant-store-setup.js";
 import { createMerchantStoreConfigurationWithdrawal } from "../../apps/api/dist/merchant-store-configuration-withdrawal.js";
-import { logUnexpected } from "./pilot-merchant-pickup.mjs";
+import { logUnexpected, reportUnexpected } from "./pilot-merchant-pickup.mjs";
 import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
 import {
   createInternalStoreConfigurationOrdinary,
@@ -54,6 +54,9 @@ export async function createInternalStoreSetupBff(
     }),
     storeConfigurationOrdinary,
     storeConfigurationOrdinaryClock: Object.freeze({ now: persistence.now.bind(persistence) }),
+    // v15 2026-11-01: "Create configuration from saved setup" answered 503 with nothing logged.
+    onStoreConfigurationUnavailable: (step, error) =>
+      reportUnexpected("MERCHANT_STORE_CONFIGURATION_UNAVAILABLE", error, { step }),
     // WP-2423 (v15 D2/D3): withdraw (own) or decline (another person's) a Store configuration
     // change that is not published (Store setup step 8 and Hours & ordering).
     storeConfigurationWithdrawal: logUnexpected(

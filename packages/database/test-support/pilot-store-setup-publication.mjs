@@ -364,7 +364,7 @@ export async function exercisePilotStoreSetupPublication(input) {
       assert.deepEqual(kept.body.currentVersion, liveReceipt);
       const current = await send("store-setup?storeReference=" + store);
       assert.equal(current.status, 200, JSON.stringify(current.body));
-      const head = current.body.setup.snapshot;
+      let head = current.body.setup.snapshot;
       assert.equal(head.revision, savedSetup.revision);
       const configured = (value) => ({ state: "Configured", value });
       const content = {
@@ -388,6 +388,54 @@ export async function exercisePilotStoreSetupPublication(input) {
           })),
         ),
       };
+      // v15 2026-11-01: a TEST Store's first configuration (the `setup` command) names a receipt
+      // template that was never published, and "Use the live Store's settings" carried it into
+      // the setup. Creating a configuration from it answered 503 with nothing logged. It is
+      // refused, naming the receipt template; nothing is written; recovering that request says it
+      // did not go through, and the setup can be saved again and used.
+      {
+        const unpublished = await send("store-setup", {
+          command: "SaveDraft",
+          operationReference: next(),
+          expectedSetupReference: head.setupDraftReference,
+          expectedRevision: head.revision,
+          content: { ...content, receiptReference: configured(next()) },
+        });
+        assert.equal(unpublished.status, 200, JSON.stringify(unpublished.body));
+        const before = await counts();
+        const workspace = await workspaceOf(send);
+        assert.equal(workspace.status, 200, JSON.stringify(workspace.body));
+        const refused = command(selected, "Materialize", workspace.body.expectedHead, {
+          setupSelector: {
+            setupDraftReference: unpublished.body.snapshot.setupDraftReference,
+            sourceRevision: unpublished.body.snapshot.revision,
+            sourceSnapshotDigest: hash(unpublished.body.snapshot),
+          },
+          reasonCode: "STORE_SETUP_MATERIALIZATION",
+        });
+        const answer = await send("store-configuration/ordinary-command", { command: refused });
+        assert.deepEqual(
+          [answer.status, answer.body],
+          [409, { error: "store_setup_setting_unavailable", setting: "Receipt" }],
+        );
+        assert.deepEqual(await counts(), before);
+        // "Recover original configuration request", as the page does: resolve, then re-read.
+        const cursor = {
+          ...refused,
+          profile: "StoreConfigurationOrdinaryResolveV1",
+          intentDigest: hash(refused),
+        };
+        const recovered = await send("store-configuration/ordinary-command", { command: cursor });
+        assert.equal(recovered.status, 200, JSON.stringify(recovered.body));
+        assert.equal(recovered.body.outcome, "Abandoned");
+        const reread = await send("store-configuration/ordinary-state", {
+          original: cursor,
+          expectedStoreReference: store,
+        });
+        assert.equal(reread.status, 200, JSON.stringify(reread.body));
+        assert.equal(reread.body.original?.outcome, "Abandoned");
+        head = unpublished.body.snapshot;
+      }
       const saved = await send("store-setup", {
         command: "SaveDraft",
         operationReference: next(),

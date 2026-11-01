@@ -3,6 +3,8 @@
  * Keys are the English source exactly; `{name}` marks an inserted value (Owner 2026-10-24).
  */
 export const zhHans: Readonly<Record<string, string>> = Object.freeze({
+  "This Store has no receipt template in use yet, so nothing was created. In step 5, choose or create this Store's receipt template and save the setup, then create the configuration again.":
+    "这家店还没有在用的小票模板，所以没有创建任何配置。请在第 5 步为这家店选择或新建小票模板并保存设置，然后再创建配置。",
   "{item} has no tax rate for one of this menu's order types at {store}, so guests there could not be quoted. Check {store}'s Tax review, or the product's tax class, then list it again.":
     "{item} 在 {store} 的某个用餐方式下没有税率，那里的客人无法报价。请检查 {store} 的税务审核或商品的税类，然后重新上架。",
   "{item} has no tax rate for one of this menu's order types at one of its Stores. Check that Store's Tax review, or the product's tax class, then list it again.":

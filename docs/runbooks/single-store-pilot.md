@@ -2047,14 +2047,24 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    3. Service modes;
    4. Hours: weekly hours;
    5. Tax and payment: each fee (service charge, delivery fee, tip: set or turned off), payment
-      settings, receipt template;
+      settings, receipt template. A TEST Store opened with `setup` has no receipt template of its
+      own yet (its first configuration names one that was never published): create it here
+      (new template → submit → approval by a second staff member → publish), then select it.
+      "Keep the receipt template in use today" and "Use the live Store's settings" cannot
+      supply one that does not exist; creating the configuration then says so and nothing is
+      created;
    6. Capacity: order limits;
    7. Contacts: contact details;
    8. Use the live Store's settings: tax settings (the Store's own, from `tax`), Brand settings,
       holidays and special hours, when it takes effect.
 
-   Then, on Review: Create configuration from saved setup → Validate → Submit → approval by a
-   second staff member who holds Store setup approval (not the submitter) → Publish.
+   Then, on Review, in order: "Create configuration from saved setup" → "Validate" → "Submit" →
+   "Approve configuration independently" by a second staff member with Store configuration
+   approval (not the person who submitted it) → "Publish". If a step answers "The result is
+   unknown", use "Recover original configuration request" first: a request that never went
+   through is recorded as not done ("That request did not go through; nothing changed") and the
+   step can be sent again. A step that fails unexpectedly is logged by the API as
+   `MERCHANT_STORE_CONFIGURATION_UNAVAILABLE` with its step and code.
 
    **Its menu.** The Brand Owner switches to the new Store, opens Menu and chooses "Serve the
    menu here", then "List it". A menu is listed only when every Store it serves can sell each
