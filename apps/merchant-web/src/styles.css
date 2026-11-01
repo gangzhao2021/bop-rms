@@ -8893,6 +8893,31 @@ body:has(.product-complete-draft) .bop-shell__header,
   color: var(--bop-color-danger);
 }
 
+/* WP-2423 item 11: the Store's kitchen setup (no box: merchant visual rules). */
+.kitchen-setup {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin-block: var(--bop-space-4);
+  padding-block-start: var(--bop-space-4);
+  border-top: 1px solid var(--bop-color-border-default);
+  min-width: 0;
+  scroll-margin-top: var(--bop-space-6);
+}
+.kitchen-setup > *,
+.kitchen-setup [role="alert"] > * {
+  margin-block: 0;
+}
+.kitchen-setup [role="alert"] {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+.kitchen-setup__hint {
+  color: var(--bop-color-text-muted);
+}
+.kitchen-setup__dishes {
+  padding-inline-start: var(--bop-space-4);
+}
+
 /* WP-2423: the pickup handover confirmation uses the shared dialog frame. */
 .pickup-handoff-dialog ul {
   margin: 0 0 12px;

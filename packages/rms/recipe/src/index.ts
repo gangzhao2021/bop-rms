@@ -32,6 +32,7 @@ export {
 } from "./domain/recipe-preparation-publication.js";
 export {
   createPostgresRecipePreparationContentStore,
+  listRecipeKitchenCapabilities,
   type ResolveRecipePreparationContentInput,
 } from "./infrastructure/persistence/recipe-preparation-content-store.js";
 

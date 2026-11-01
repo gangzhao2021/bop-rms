@@ -374,8 +374,13 @@ export { createPostgresKitchenTicketStore } from "./infrastructure/persistence/k
 export {
   createPostgresKitchenRoutingConfigurationStore,
   listKitchenStationCapabilities,
+  readStoreKitchenLine,
+  recordStoreKitchenLine,
+  storeKitchenRoutingInEffect,
+  type StoreKitchenLine,
 } from "./infrastructure/persistence/kitchen-routing-configuration-store.js";
 export {
+  KitchenRoutingConfigurationError,
   parseKitchenRoutingConfigurationRecord,
   rebindKitchenRoutingEvidence,
   type KitchenRoutingConfigurationRecord,

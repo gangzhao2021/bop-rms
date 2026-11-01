@@ -59,6 +59,10 @@ const StoreReceiptPrivacyPanel = lazyPage(
   () => import("./StoreReceiptPrivacyPanel.js"),
   "StoreReceiptPrivacyPanel",
 );
+const StoreKitchenSetupPanel = lazyPage(
+  () => import("./StoreKitchenSetupPanel.js"),
+  "StoreKitchenSetupPanel",
+);
 const StoreSoleOperatorPanel = lazyPage(
   () => import("./SoleOperatorSection.js"),
   "StoreSoleOperatorPanel",
@@ -838,6 +842,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                   >
                     {/* WP-2423 DEC-STORE-CUSTOMER-NAME: the name, address and phone customers see. */}
                     <StorePublicProfilePanel csrf={state.csrf} />
+                    {/* WP-2423 item 11: guests can't order until the kitchen is set up. */}
+                    <StoreKitchenSetupPanel csrf={state.csrf} />
                     {/* WP-2423 Q15/Q16: receipt registrations and the privacy notice link. */}
                     <StoreReceiptPrivacyPanel csrf={state.csrf} />
                     {/* Owner 2026-10-25: moved here from Approvals; hidden for other roles. */}
