@@ -59,14 +59,14 @@ describe("WP-2423 item 8 ⑤ phones at the table", () => {
     expect(() => parseTablePhones({ ...wire(), guestName: "x" })).toThrow();
   });
 
-  it("points out a phone for 10 minutes after it joined, never one that left", () => {
+  it("points out a phone for 3 minutes after it joined, never one that left", () => {
     const { phones } = parseTablePhones(wire());
     const at = (iso: string) => Date.parse(iso);
-    expect(newPhones(phones, at("2026-10-28T18:25:00.000Z")).map((p) => p.phoneNumber)).toEqual([
+    expect(newPhones(phones, at("2026-10-28T18:22:00.000Z")).map((p) => p.phoneNumber)).toEqual([
       3,
     ]);
-    expect(newPhones(phones, at("2026-10-28T18:30:00.000Z"))).toEqual([]);
-    expect(newPhones(phones, at("2026-10-28T18:29:59.000Z")).map((p) => p.phoneNumber)).toEqual([
+    expect(newPhones(phones, at("2026-10-28T18:23:00.000Z"))).toEqual([]);
+    expect(newPhones(phones, at("2026-10-28T18:22:59.000Z")).map((p) => p.phoneNumber)).toEqual([
       3,
     ]);
   });

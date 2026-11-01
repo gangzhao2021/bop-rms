@@ -62,6 +62,13 @@ vi.mock("../../../apps/api/src/merchant-brand-scope.ts", () => ({
   createMerchantBrandScope: () => async (tx, cookie) => signedIn.brandScopeFor(tx, cookie),
 }));
 
+// The reports' reading of another Store of the Brand: this test reads only its own Store.
+vi.mock("../../../apps/api/src/merchant-target-store-authority.ts", () => ({
+  createMerchantTargetStoreAuthority: () => async () => {
+    throw new Error("NOT_USED_ONE_STORE");
+  },
+}));
+
 const { Client } = pg;
 const id = (n) => "0190a7c6-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));

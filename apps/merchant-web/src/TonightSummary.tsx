@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useBrowserOffline } from "./stale-read.js";
-import { countOf, t } from "./i18n/i18n.js";
+import { countOf, t, saidTable } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { storeTime } from "./StoreTime.js";
 import { businessDateText } from "./StoreBusinessDay.js";
@@ -266,7 +266,7 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
                 <Row
                   key={table.tableLabel}
                   tone="action"
-                  label={t("Table {table}", { table: table.tableLabel })}
+                  label={t("Table {table}", { table: saidTable(table.tableLabel) })}
                   detail={
                     (table.phase === "Closing" ? t("Checking out") : t("Seated")) +
                     " · " +
@@ -292,7 +292,7 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
               label={t("Paid, guests still seated")}
               detail={countOf(paidSeated.length, "table")}
               value={paidSeated
-                .map((table) => t("Table {table}", { table: table.tableLabel }))
+                .map((table) => t("Table {table}", { table: saidTable(table.tableLabel) }))
                 .join(", ")}
               muted
             />
@@ -335,7 +335,13 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
           {c.cancelledAfterPayment.dishCount > 0 ? (
             <Row
               label={t("Dishes cancelled after payment (refunded)")}
-              detail={countOf(c.cancelledAfterPayment.dishCount, "dish")}
+              detail={
+                countOf(c.cancelledAfterPayment.dishCount, "dish") +
+                // v15 2026-11-01: these dishes include the cancelled orders' (one refund, not two).
+                (s.cancelledInFullCount > 0
+                  ? " · " + t("includes the cancelled orders above: the same money, not extra")
+                  : "")
+              }
               value={money(c.cancelledAfterPayment.amountMinor)}
             />
           ) : null}

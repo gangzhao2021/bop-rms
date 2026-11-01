@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
@@ -660,7 +660,7 @@ export function TableCheckout({
                       <h4 id="table-checkout-confirm">{t("Confirm the payment")}</h4>
                       <dl className="table-checkout__totals">
                         <div>
-                          <dt>{t("Table {table}", { table: table.stableLabel })}</dt>
+                          <dt>{t("Table {table}", { table: saidTable(table.stableLabel) })}</dt>
                           <dd>{method === "Cash" ? t("Cash") : t("Card machine")}</dd>
                         </div>
                         <div>
@@ -751,7 +751,7 @@ export function TableCheckout({
                         ? t(
                             "Record that the guests at table {table} left without paying the {count} parts still unpaid ({amount})? The parts already paid stay paid. A manager decides this. It stays in the reports as written off.",
                             {
-                              table: table.stableLabel,
+                              table: saidTable(table.stableLabel),
                               count: String(bill.split.parts.length - bill.split.paidParts),
                               amount: cad(bill.owed.totalMinor),
                             },
@@ -759,7 +759,7 @@ export function TableCheckout({
                         : t(
                             "Record that the guests at table {table} left without paying {amount}? A manager decides this. It stays in the reports as written off.",
                             {
-                              table: table.stableLabel,
+                              table: saidTable(table.stableLabel),
                               amount: cad(bill.owed.totalMinor),
                             },
                           )}
@@ -835,7 +835,7 @@ function TableReceipt({
   return (
     <div
       className="table-receipt"
-      aria-label={t("Receipt for table {table}", { table: tableLabel })}
+      aria-label={t("Receipt for table {table}", { table: saidTable(tableLabel) })}
     >
       <dl className="table-checkout__totals">
         <div>

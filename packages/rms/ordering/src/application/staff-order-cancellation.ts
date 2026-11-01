@@ -65,8 +65,9 @@ const invalid = (): never => {
 
 /**
  * The Batch's state when staff cancelled it: Accepted (paid and sent to the kitchen, not started),
- * or Submitted (DEC-TABLE-CLOSE-GUESTS-LEFT: a dine-in round the guest paid for that was never
- * accepted, so it never reached the kitchen; its payment is the one Ordering recorded as waiting).
+ * or Submitted (a Batch the guest paid for that was never accepted, so it never reached the kitchen;
+ * its payment is the one Ordering recorded as waiting): DEC-TABLE-CLOSE-GUESTS-LEFT for a dine-in
+ * round; v15 2026-11-01 for a pickup order the Store refuses (its order ends as Rejected).
  */
 export type StaffOrderCancellationPreviousPhase = "Accepted" | "Submitted";
 /**
@@ -163,7 +164,8 @@ function expectedVersion(value: unknown, previousPhase: StaffOrderCancellationPr
 }
 function previousPhaseOf(value: unknown, type: "Pickup" | "DineIn") {
   if (value === undefined || value === "Accepted") return "Accepted" as const;
-  if (value === "Submitted" && type === "DineIn") return "Submitted" as const;
+  if (value === "Submitted" && (type === "DineIn" || type === "Pickup"))
+    return "Submitted" as const;
   return invalid();
 }
 function refundDispositionOf(value: unknown, phase: StaffOrderCancellationPreviousPhase) {

@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
@@ -460,11 +460,13 @@ export function DiningSessionWorkspace({
           entry.tableReference === table.tableReference ? { ...entry, staffCall: null } : entry,
         ),
       );
-      setResult({ text: t("Table {table}: marked as handled.", { table: table.stableLabel }) });
+      setResult({
+        text: t("Table {table}: marked as handled.", { table: saidTable(table.stableLabel) }),
+      });
     } catch {
       setResult({
         text: t("Table {table}: not confirmed. Check the connection and try again.", {
-          table: table.stableLabel,
+          table: saidTable(table.stableLabel),
         }),
       });
     } finally {
@@ -651,10 +653,10 @@ export function DiningSessionWorkspace({
           text: done.joinCredential
             ? opened
               ? t("Table {table} is open. Give the guests the entry code below.", {
-                  table: table.stableLabel,
+                  table: saidTable(table.stableLabel),
                 })
               : t("Table {table} has a new entry code; the old one no longer works.", {
-                  table: table.stableLabel,
+                  table: saidTable(table.stableLabel),
                 })
             : t(
                 "The request already completed. Its code cannot be displayed again. Replace the entry code to get a new one.",
@@ -729,13 +731,15 @@ export function DiningSessionWorkspace({
         setResult({
           text: cleaned
             ? t("Table {table} is clean and free for the next guests.", {
-                table: table.stableLabel,
+                table: saidTable(table.stableLabel),
               })
             : action === "SetBlock"
               ? reason === "CLEANING"
-                ? t("Table {table} is back to needing cleaning.", { table: table.stableLabel })
-                : t("Table {table} is marked unavailable.", { table: table.stableLabel })
-              : t("Table {table} is available.", { table: table.stableLabel }),
+                ? t("Table {table} is back to needing cleaning.", {
+                    table: saidTable(table.stableLabel),
+                  })
+                : t("Table {table} is marked unavailable.", { table: saidTable(table.stableLabel) })
+              : t("Table {table} is available.", { table: saidTable(table.stableLabel) }),
           undo:
             undoable && cleaned
               ? () => void setAvailability(updated, "SetBlock", "CLEANING", false)
@@ -774,9 +778,11 @@ export function DiningSessionWorkspace({
       setResult({
         text:
           done === null
-            ? t("Table {table}: nothing is ready to serve any more.", { table: table.stableLabel })
+            ? t("Table {table}: nothing is ready to serve any more.", {
+                table: saidTable(table.stableLabel),
+              })
             : t("Table {table}: {summary}", {
-                table: table.stableLabel,
+                table: saidTable(table.stableLabel),
                 summary: serveReadySummary(done),
               }),
       });
@@ -788,10 +794,10 @@ export function DiningSessionWorkspace({
         text: lost
           ? t(
               "Table {table}: we could not confirm the dishes were marked served. Press it again: nothing is served twice.",
-              { table: table.stableLabel },
+              { table: saidTable(table.stableLabel) },
             )
           : t("Table {table}: nothing was marked served. Open the table and check its dishes.", {
-              table: table.stableLabel,
+              table: saidTable(table.stableLabel),
             }),
       });
     } finally {
@@ -938,7 +944,7 @@ export function DiningSessionWorkspace({
         onClick={() => select(table)}
       >
         <span className="table-row__name">
-          <strong>{t("Table {table}", { table: table.stableLabel })}</strong>
+          <strong>{t("Table {table}", { table: saidTable(table.stableLabel) })}</strong>
           <span className="table-row__meta">
             {table.currentDiningSessionReference === null
               ? t("Seats {capacity}", { capacity: table.capacity })
@@ -981,7 +987,7 @@ export function DiningSessionWorkspace({
                 disabled={paused || hostLocked}
                 onClick={() => select(table)}
               >
-                {t("Table {table}", { table: table.stableLabel })}
+                {t("Table {table}", { table: saidTable(table.stableLabel) })}
               </button>
               {table.operationalState === "Available" &&
               table.lifecycle === "Published" &&
@@ -1176,7 +1182,7 @@ export function DiningSessionWorkspace({
                 void loadRef.current(false, true).then(() =>
                   setResult({
                     text: t("Table {table} is closed. Clean it, then mark it cleaned.", {
-                      table: selected.stableLabel,
+                      table: saidTable(selected.stableLabel),
                     }),
                   }),
                 );
@@ -1280,7 +1286,7 @@ function TablePanel({
   return (
     <>
       <header className="table-panel__head">
-        <h2>{t("Table {stableLabel}", { stableLabel: table.stableLabel })}</h2>
+        <h2>{t("Table {stableLabel}", { stableLabel: saidTable(table.stableLabel) })}</h2>
         <p className="table-panel__meta">
           {[
             t("Seats {capacity}", { capacity: table.capacity }),
@@ -1405,9 +1411,9 @@ function TablePanel({
               <section
                 key={merged.orderReference}
                 className="table-panel__merged"
-                aria-label={t("From table {table}", { table: merged.fromTableLabel })}
+                aria-label={t("From table {table}", { table: saidTable(merged.fromTableLabel) })}
               >
-                <h3>{t("From table {table}", { table: merged.fromTableLabel })}</h3>
+                <h3>{t("From table {table}", { table: saidTable(merged.fromTableLabel) })}</h3>
                 <TableOrderRounds
                   orderReference={merged.orderReference}
                   csrf={csrf}
@@ -1475,7 +1481,7 @@ function TablePanel({
             <p role="note">
               {t(
                 "Table {table} has no table QR code yet, so guests can't join it and orders can't be taken for it.",
-                { table: table.stableLabel },
+                { table: saidTable(table.stableLabel) },
               )}{" "}
               {tableQrHref !== undefined ? (
                 <>
@@ -1515,7 +1521,7 @@ function TablePanel({
             className="table-panel__text-step"
             to={`/operations/order-entry?table=${encodeURIComponent(table.tableReference)}`}
           >
-            {t("Take order for table {stableLabel}", { stableLabel: table.stableLabel })}
+            {t("Take order for table {stableLabel}", { stableLabel: saidTable(table.stableLabel) })}
           </Link>
         ) : null}
         {seated && !noCode ? (

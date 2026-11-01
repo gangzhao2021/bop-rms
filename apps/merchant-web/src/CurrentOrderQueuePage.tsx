@@ -1,4 +1,4 @@
-import { systemText, displayLocale, t } from "./i18n/i18n.js";
+import { systemText, displayLocale, t, saidTable } from "./i18n/i18n.js";
 import { useRoundPhones, WithRoundPhones } from "./TablePhones.js";
 import {
   AcceptanceHoldDecision,
@@ -1422,7 +1422,8 @@ export function orderItemsText(summary: QueuedOrder["summary"]): string | null {
 /** Orders v2: who the order is for — the pickup name, the table, else how it came in. */
 export function orderWho(order: QueuedOrder): string {
   if (order.summary?.pickupName) return order.summary.pickupName;
-  if (order.summary?.tableLabel) return t("Table {label}", { label: order.summary.tableLabel });
+  if (order.summary?.tableLabel)
+    return t("Table {label}", { label: saidTable(order.summary.tableLabel) });
   return orderChannelLabel(orderChannel(order));
 }
 
@@ -3165,7 +3166,7 @@ export function CurrentOrderQueuePage({
                         </Link>
                       )}
                     </fieldset>
-                  ) : batch.canCancel || batch.canCancelItems ? (
+                  ) : !batch.canRequestAcceptance && (batch.canCancel || batch.canCancelItems) ? (
                     <fieldset disabled={servingBusy} className="order-cancel-actions">
                       {batch.canCancel ? (
                         <StaffOrderCancelAction
@@ -3245,7 +3246,22 @@ export function CurrentOrderQueuePage({
                           }
                         />
                       ) : (
-                        acceptAction(order, batch)
+                        <>
+                          {acceptAction(order, batch)}
+                          {/* v15 2026-11-01: a Store that can't make it refuses and refunds here. */}
+                          {batch.canCancel ? (
+                            <div className="order-cancel-actions">
+                              <StaffOrderCancelAction
+                                key={batch.orderBatchReference}
+                                order={order}
+                                batch={batch}
+                                csrf={csrf}
+                                fetcher={fetcher}
+                                onSettled={() => reload(after)}
+                              />
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </fieldset>
                   ) : null

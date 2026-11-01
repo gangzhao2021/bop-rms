@@ -1,5 +1,5 @@
 import { PageIntro } from "./PageIntro.js";
-import { listSeparator, t } from "./i18n/i18n.js";
+import { listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
 import { useKitchenClock } from "./kitchen-clock.js";
@@ -292,7 +292,7 @@ export function kitchenSearchHiddenText(input: {
     byNumber && !byTable
       ? t("order {value}", { value: byNumber.orderLabel?.orderNumber ?? search })
       : byTable && !byNumber
-        ? t("table {value}", { value: byTable.orderLabel?.tableLabel ?? search })
+        ? t("table {value}", { value: saidTable(byTable.orderLabel?.tableLabel ?? search) })
         : t("order or table “{search}”", { search: search });
   const allCancelled = matches.every((item) => item.status === "Cancelled");
   const capitalized = subject.charAt(0).toUpperCase() + subject.slice(1);
@@ -325,7 +325,7 @@ export function kitchenSearchAwaitingText(
     first.orderType === "DineIn" && first.tableLabel
       ? t("Order {orderNumber} (table {tableLabel})", {
           orderNumber: first.orderNumber,
-          tableLabel: first.tableLabel,
+          tableLabel: saidTable(first.tableLabel),
         })
       : t("Order {orderNumber}", { orderNumber: first.orderNumber });
   return hasKitchenWork
@@ -1107,13 +1107,17 @@ function WorkCard({
         {item.orderLabel?.movedFromTableLabel ? (
           // WP-2423 item 8 ⑧: the party moved; the ticket goes to the table it sits at now.
           <p className="kitchen-work-item__staff">
-            {t("Moved from table {table}", { table: item.orderLabel.movedFromTableLabel })}
+            {t("Moved from table {table}", {
+              table: saidTable(item.orderLabel.movedFromTableLabel),
+            })}
           </p>
         ) : null}
         {item.orderLabel?.mergedFromTableLabel ? (
           // WP-2423 item 8 ⑨: the party was merged into this table; its dishes go here now.
           <p className="kitchen-work-item__staff">
-            {t("Merged from table {table}", { table: item.orderLabel.mergedFromTableLabel })}
+            {t("Merged from table {table}", {
+              table: saidTable(item.orderLabel.mergedFromTableLabel),
+            })}
           </p>
         ) : null}
         {item.customerNote ? (
@@ -2160,7 +2164,9 @@ export function KitchenBoardScreen({
                                 {!label
                                   ? kitchenOrderLabel(first)
                                   : label.orderType === "DineIn" && label.tableLabel
-                                    ? t("Table {tableLabel}", { tableLabel: label.tableLabel })
+                                    ? t("Table {tableLabel}", {
+                                        tableLabel: saidTable(label.tableLabel),
+                                      })
                                     : label.orderNumber}
                               </span>
                               {label ? (

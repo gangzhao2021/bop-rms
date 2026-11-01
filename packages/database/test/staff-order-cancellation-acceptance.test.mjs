@@ -2314,11 +2314,72 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       assert.equal(Number((await stock()).reserved), stockBeforeAccepted - 1);
       assert.deepEqual((await closePlan(acceptedCard)).rounds, []);
 
-      // A pickup can never be cancelled as a never-accepted round, and a round without a recorded
-      // payment is not eligible either (it is cancelled by the System when its payment time ends).
+      // v15 2026-11-01: a Store that can't make a paid pickup order refuses it and refunds it
+      // without accepting it first. "Guests left" is a table's reason, never a pickup's.
       await assert.rejects(cancel(waitingPickup, 0, { reasonCode: "GUEST_LEFT" }), {
-        code: "ORDER_CANCELLATION_NOT_CANCELLABLE",
+        code: "ORDER_CANCELLATION_INPUT_INVALID",
       });
+      const stockBeforeRefusal = await stock();
+      const refused = await cancel(waitingPickup, 0, { reasonCode: "SOLD_OUT" });
+      assert.equal(refused.status, "Cancelled");
+      assert.equal(refused.refundMethod, "Online");
+      assert.equal(refused.refundStatus, "Pending");
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT t.previous_phase,t.phase,t.actor_type,t.actor_id::text AS actor,t.reason_code,c.previous_phase AS cancelled_from,c.refund_disposition FROM rms_ordering.order_termination_record t JOIN rms_ordering.order_staff_cancellation c ON c.cancellation_id=t.termination_id WHERE t.order_id=$1",
+            [waitingPickup.order],
+          )
+        ).rows,
+        [
+          {
+            previous_phase: "Submitted",
+            phase: "Rejected",
+            actor_type: "User",
+            actor: staff,
+            reason_code: "SOLD_OUT",
+            cancelled_from: "Submitted",
+            refund_disposition: "Refund",
+          },
+        ],
+      );
+      const refusedAudit = (
+        await admin.query(
+          "SELECT actor_reference::text AS actor,reason_code,after_summary_json AS after_summary FROM platform_audit.audit_record WHERE action_code='ORDER_CANCELLED_BY_STAFF' AND target_id=$1",
+          [waitingPickup.order],
+        )
+      ).rows;
+      assert.deepEqual(refusedAudit, [
+        {
+          actor: staff,
+          reason_code: "SOLD_OUT",
+          after_summary: { phase: "Rejected", previousPhase: "Submitted", refund: "Refund" },
+        },
+      ]);
+      const refusedDiscover = await scoped(async (tx) =>
+        withoutCardMachinePayments(
+          tx,
+          { brandReference: brand, storeReference: store },
+          await createPostgresOrderCompensationCandidateReader({
+            scope: { brandReference: brand, storeReference: store },
+            includeStaffCancellations: true,
+            authorize: async (_tx, input) =>
+              input.purpose === "DiscoverPaidWithoutFulfillableOrder",
+          })(tx, { afterDispositionReference: null, limit: 100 }),
+          async () => true,
+        ),
+      );
+      // Payment refunds it in full through the same compensation path as a staff cancellation.
+      assert.ok(
+        refusedDiscover.candidates.some(
+          (candidate) =>
+            candidate.reason === "CancelledByStaff" &&
+            candidate.paymentIntentReference === waitingPickup.batches[0].intent,
+        ),
+      );
+      // Its stock returned, its waiting payment is settled, it can't be refused twice.
+      assert.notDeepEqual(await stock(), stockBeforeRefusal);
+      await assert.rejects(cancel(waitingPickup, 0, { reasonCode: "SOLD_OUT" }));
       // The audit names the reason and that the round was never accepted.
       const leftAudit = (
         await admin.query(

@@ -86,14 +86,14 @@ test("@production staff see the phones at a table, pause joining by scan and rem
       {
         participantReference: id(11),
         phoneNumber: 1,
-        joinedAt: ago(5),
+        joinedAt: ago(2),
         left: false,
         removed: false,
       },
       {
         participantReference: id(12),
         phoneNumber: 2,
-        joinedAt: ago(3),
+        joinedAt: ago(1),
         left: false,
         removed: false,
       },

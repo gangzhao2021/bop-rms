@@ -702,7 +702,7 @@ it("WP-2423 item 8 ⑤: a round waiting for staff needs action (not awaiting pay
     {
       participantReference: id(61),
       phoneNumber: 2,
-      joinedAt: "2026-09-25T11:56:00.000Z",
+      joinedAt: "2026-09-25T11:58:00.000Z",
       left: false,
       removed: false,
     },
@@ -725,6 +725,6 @@ it("WP-2423 item 8 ⑤: a round waiting for staff needs action (not awaiting pay
       heldAt: "2026-09-25T11:58:00.000Z",
     },
   ]);
-  // Joined in the last 10 minutes and still at the table (phone 3 was taken off it).
-  expect(table?.newPhones).toEqual([{ phoneNumber: 2, joinedAt: "2026-09-25T11:56:00.000Z" }]);
+  // Joined in the last 3 minutes and still at the table (phone 3 was taken off it).
+  expect(table?.newPhones).toEqual([{ phoneNumber: 2, joinedAt: "2026-09-25T11:58:00.000Z" }]);
 });

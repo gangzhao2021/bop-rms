@@ -31,6 +31,7 @@ import {
 } from "@bop/identity";
 import {
   createPostgresCurrentMembershipSource,
+  MembershipContractError,
   resolveActiveMembership,
   resolveActiveStoreAssignment,
 } from "@bop/membership";
@@ -442,7 +443,15 @@ export function createPersistentMerchantBffService(
         authorizedStores.push(storeOption);
         continue;
       }
-      const target = await options.targetScope(tx, session, candidate.storeReference);
+      // v15 2026-11-01: the listing names every Store the installation serves. One this person
+      // doesn't work at is left out; it never refuses their session at the Store they do work at
+      // (a cashier at one Store was shown "Your sign-in has ended").
+      let target: Awaited<ReturnType<typeof options.targetScope>>;
+      try {
+        target = await options.targetScope(tx, session, candidate.storeReference);
+      } catch {
+        continue;
+      }
       if (target.storeReference !== candidate.storeReference)
         throw new Error("MERCHANT_BFF_UNAVAILABLE");
       if ((await options.validateAssociation(tx, session, target, context.resolvedAt)) !== true)
@@ -467,15 +476,25 @@ export function createPersistentMerchantBffService(
         targetBrand.brandReference,
         context.resolvedAt,
       );
-      const targetAssignment = resolveActiveStoreAssignment(
-        targetMembership,
-        await targetMemberships.findStoreAssignments(
-          targetMembership.membershipReference,
+      let targetAssignment: ReturnType<typeof resolveActiveStoreAssignment>;
+      try {
+        targetAssignment = resolveActiveStoreAssignment(
+          targetMembership,
+          await targetMemberships.findStoreAssignments(
+            targetMembership.membershipReference,
+            targetStore.storeReference,
+          ),
           targetStore.storeReference,
-        ),
-        targetStore.storeReference,
-        context.resolvedAt,
-      );
+          context.resolvedAt,
+        );
+      } catch (error) {
+        if (
+          error instanceof MembershipContractError &&
+          error.code === "ACTIVE_STORE_ASSIGNMENT_NOT_FOUND"
+        )
+          continue;
+        throw error;
+      }
       const decision = await policy.authorize({
         tenantContext: targetContext,
         membership: targetMembership,

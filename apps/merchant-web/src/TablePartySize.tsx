@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 
 /**
@@ -373,7 +373,7 @@ export function TablePartySize({
         >
           <label>
             {view.partySize === null
-              ? t("How many guests at table {table}?", { table: tableLabel })
+              ? t("How many guests at table {table}?", { table: saidTable(tableLabel) })
               : t("Number of guests")}
             <input
               ref={view.partySize === null ? firstAsk : undefined}

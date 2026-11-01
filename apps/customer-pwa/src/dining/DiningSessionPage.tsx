@@ -1,4 +1,4 @@
-import { dateLocale, t, useReloadOnLanguageChange } from "../i18n/i18n.js";
+import { dateLocale, t, useReloadOnLanguageChange, saidTable } from "../i18n/i18n.js";
 import {
   useCallback,
   useEffect,
@@ -670,7 +670,7 @@ function SettledTable({
     <>
       <section className="order-status__card" role="status">
         <h2>{t("This table is settled. Thank you for dining with us.")}</h2>
-        <p>{t("Table {table} has paid and closed.", { table: tableLabel })}</p>
+        <p>{t("Table {table} has paid and closed.", { table: saidTable(tableLabel) })}</p>
         <p>{t("New party? Scan the table code")}</p>
       </section>
       <SettledTableReceiptPanel {...(receipt === undefined ? {} : { client: receipt })} />
@@ -741,21 +741,27 @@ export function DiningSessionScreen({
           {state.merged ? (
             // WP-2423 item 8 ⑨: staff merged this table into the party at that table.
             <>
-              <h2>{t("Your table was merged into table {table}", { table: state.tableLabel })}</h2>
+              <h2>
+                {t("Your table was merged into table {table}", {
+                  table: saidTable(state.tableLabel),
+                })}
+              </h2>
               <p>
                 {t(
                   "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.",
-                  { table: state.tableLabel },
+                  { table: saidTable(state.tableLabel) },
                 )}
               </p>
             </>
           ) : (
             <>
-              <h2>{t("Your table moved to table {table}", { table: state.tableLabel })}</h2>
+              <h2>
+                {t("Your table moved to table {table}", { table: saidTable(state.tableLabel) })}
+              </h2>
               <p>
                 {t(
                   "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.",
-                  { table: state.tableLabel },
+                  { table: saidTable(state.tableLabel) },
                 )}
               </p>
             </>

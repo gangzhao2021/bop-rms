@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import type { StaffDiningTable } from "./dining-session-client.js";
 
@@ -136,7 +136,7 @@ export function TableMove({
       onMoved(
         t(
           "Moved to table {table}. Guests scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
-          { table: moved.tableLabel, from: moved.fromTableLabel },
+          { table: saidTable(moved.tableLabel), from: moved.fromTableLabel },
         ),
         chosen.tableReference,
       );
@@ -206,7 +206,7 @@ export function TableMove({
           ? t("Moving…")
           : chosen === null
             ? t("Move")
-            : t("Move to table {table}", { table: chosen.stableLabel })}
+            : t("Move to table {table}", { table: saidTable(chosen.stableLabel) })}
       </button>
       {problem ? <p role="alert">{problem}</p> : null}
     </section>

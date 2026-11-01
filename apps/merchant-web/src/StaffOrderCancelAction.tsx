@@ -270,7 +270,9 @@ export function StaffOrderCancelAction({
       setPreview("Failed");
     }
   };
-  const label = pickup ? t("Cancel order") : t("Cancel round");
+  // v15 2026-11-01: still waiting for acceptance, staff refuse it (it never reached the kitchen).
+  const refusing = batch.canRequestAcceptance;
+  const label = refusing ? t("Refuse and refund") : pickup ? t("Cancel order") : t("Cancel round");
   const titleId = "staff-cancel-" + batch.orderBatchReference;
   const submit = async () => {
     if (outcome === "Pending" || order.currentVersion === null) return;
@@ -353,14 +355,27 @@ export function StaffOrderCancelAction({
         }}
       >
         <h2 id={titleId}>
-          {pickup
-            ? t("Cancel order {orderNumber}", { orderNumber: order.orderNumber })
-            : t("Cancel round {sequence} of order {orderNumber}", {
-                sequence: batch.sequence,
-                orderNumber: order.orderNumber,
-              })}
+          {refusing
+            ? pickup
+              ? t("Refuse order {orderNumber}", { orderNumber: order.orderNumber })
+              : t("Refuse round {sequence} of order {orderNumber}", {
+                  sequence: batch.sequence,
+                  orderNumber: order.orderNumber,
+                })
+            : pickup
+              ? t("Cancel order {orderNumber}", { orderNumber: order.orderNumber })
+              : t("Cancel round {sequence} of order {orderNumber}", {
+                  sequence: batch.sequence,
+                  orderNumber: order.orderNumber,
+                })}
         </h2>
-        <p>{t("Only before the kitchen starts.")}</p>
+        <p>
+          {refusing
+            ? t(
+                "It was never accepted, so it hasn't reached the kitchen. The reason and your name are recorded.",
+              )
+            : t("Only before the kitchen starts.")}
+        </p>
         <p className="order-cancel-refund" aria-live="polite">
           {staffCancelRefundText(pickup, preview)}
           {preview === "Failed" ? (
@@ -377,7 +392,7 @@ export function StaffOrderCancelAction({
             ? t("The order leaves the queue and its items return to stock.")
             : t("Only this round is cancelled; the rest of the table's order continues.")}
         </p>
-        {pickup ? (
+        {pickup && !refusing ? (
           <p className="order-cancel-no-show">
             {t(
               "Customer not coming? If they told you, choose Customer request. If they just never came, keep the order: once it is ready and the one-hour pickup hold has passed, close it as not collected in",
@@ -418,13 +433,15 @@ export function StaffOrderCancelAction({
                 ? t("Retry same cancellation")
                 : outcome === "Pending"
                   ? t("Cancelling…")
-                  : pickup
-                    ? nothingToRefund
-                      ? t("Cancel order")
-                      : t("Cancel order and refund")
-                    : nothingToRefund
-                      ? t("Cancel round")
-                      : t("Cancel round and refund")}
+                  : refusing
+                    ? t("Refuse and refund")
+                    : pickup
+                      ? nothingToRefund
+                        ? t("Cancel order")
+                        : t("Cancel order and refund")
+                      : nothingToRefund
+                        ? t("Cancel round")
+                        : t("Cancel round and refund")}
             </button>
             <button
               type="button"

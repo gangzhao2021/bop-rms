@@ -1193,16 +1193,19 @@ export function createPersistentMerchantOrderQueue(options: {
                           cancelAllowed &&
                           closed === null &&
                           !uncollected.has(item.orderReference) &&
-                          batch.acceptanceStatus === "Accepted" &&
-                          confirmed.has(batch.orderBatchReference) &&
                           !cancellations.has(batch.orderBatchReference) &&
-                          !started.has(batch.orderBatchReference) &&
                           item.currentVersion !== null &&
-                          (item.orderType === "Pickup"
-                            ? item.currentPhase === "Accepted"
-                            : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
-                                String(item.currentPhase),
-                              )),
+                          // v15 2026-11-01: paid and waiting for acceptance, the Store may refuse
+                          // and refund it directly (no Accept first).
+                          (canRequestAcceptance ||
+                            (batch.acceptanceStatus === "Accepted" &&
+                              confirmed.has(batch.orderBatchReference) &&
+                              !started.has(batch.orderBatchReference) &&
+                              (item.orderType === "Pickup"
+                                ? item.currentPhase === "Accepted"
+                                : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
+                                    String(item.currentPhase),
+                                  )))),
                         staffCancellation: cancellations.get(batch.orderBatchReference) ?? null,
                         // WP-2423 Q7 slice 2: a round staff entered for the table (or null).
                         staffRound: staffRounds.get(batch.orderBatchReference) ?? null,

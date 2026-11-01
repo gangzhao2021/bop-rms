@@ -10,8 +10,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这里无法复制链接。请改为打印自取海报。",
   "Sign in to see your stores": "请登录以查看你的门店",
   "Your stores can't be shown right now": "暂时无法显示你的门店",
-  "Your sign-in has ended. Sign in again to see the stores you work in.":
-    "你的登录已结束。请重新登录，查看你工作的门店。",
+  "This sign-in can't open your stores. Sign in again; if it keeps happening, ask the store's owner to check your access.":
+    "当前登录无法打开您的门店。请重新登录；如果仍然如此，请让店主检查您的权限。",
   "You're offline. Your stores show again when the connection is back.":
     "你已离线。网络恢复后会重新显示你的门店。",
   "Refresh the page. If this keeps happening, tell the store's owner.":
@@ -3358,6 +3358,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save receipt and privacy details": "保存收据和隐私信息",
   "Orders cancelled and refunded in full": "已取消并全额退款的订单",
   "taken and given back": "已收款并已退回",
+  "Refuse and refund": "拒单并退款",
+  "Refuse order {orderNumber}": "拒绝订单 {orderNumber}",
+  "Refuse round {sequence} of order {orderNumber}": "拒绝订单 {orderNumber} 的第 {sequence} 轮",
+  "It was never accepted, so it hasn't reached the kitchen. The reason and your name are recorded.":
+    "此单尚未接单，还没有进入后厨。原因和您的名字都会被记录。",
+  "includes the cancelled orders above: the same money, not extra":
+    "包含上面已取消的订单：是同一笔钱，不是另外的退款",
   "Business name on receipts": "收据上的商家名称",
   "The legal or operating name of the business that sells to your guests, as registered. Every receipt names it as the seller.":
     "向顾客销售的商家的法定名称或经营名称，与登记一致。每张收据都以它作为销售方。",

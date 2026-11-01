@@ -7,6 +7,7 @@ import {
   displayLocale,
   initialLanguage,
   listSeparator,
+  saidTable,
   setLanguageForTest,
   t,
   withContentLocale,
@@ -144,4 +145,24 @@ it("asks /merchant reads for Store content in Chinese only while Chinese is chos
   await wrapped("https://elsewhere.example/merchant/orders");
   await wrapped("/api/v1/other");
   expect(seen).toEqual([null, "zh-Hans-CA", null, null]);
+});
+
+// v15 2026-11-01: a table an owner named "Table 1 (TEST)" read "Table Table 1 (TEST)".
+it("says a table's own name as written, and the word Table only with a number or code", () => {
+  for (const [label, english, chinese] of [
+    ["12", "Table 12", "12 号桌"],
+    ["A1", "Table A1", "A1 号桌"],
+    ["DEMO-01", "Table DEMO-01", "DEMO-01 号桌"],
+    ["Table 1 (TEST)", "Table 1 (TEST)", "Table 1 (TEST)"],
+    ["Table 1", "Table 1", "Table 1"],
+    ["Patio 3", "Patio 3", "Patio 3"],
+    ["靠窗 3 号", "靠窗 3 号", "靠窗 3 号"],
+  ] as const) {
+    setLanguageForTest("en");
+    expect(t("Table {table}", { table: saidTable(label) })).toBe(english);
+    setLanguageForTest("zh-Hans");
+    expect(t("Table {table}", { table: saidTable(label) })).toBe(chinese);
+    expect(t("Table {tableLabel}", { tableLabel: saidTable("Patio 3") })).toBe("Patio 3");
+  }
+  setLanguageForTest("en");
 });

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import type { StaffDiningTable } from "./dining-session-client.js";
 import { createTableTeaClient, type TableTeaClient } from "./TablePartySize.js";
@@ -183,7 +183,7 @@ export function TableMerge({
         t(
           "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
           {
-            table: merged.tableLabel,
+            table: saidTable(merged.tableLabel),
             from: merged.fromTableLabel,
             count: String(merged.partySize),
           },
@@ -264,7 +264,7 @@ export function TableMerge({
               ? t("Merging…")
               : chosen === null
                 ? t("Merge")
-                : t("Merge into table {table}", { table: chosen.stableLabel })}
+                : t("Merge into table {table}", { table: saidTable(chosen.stableLabel) })}
           </button>
         </>
       )}

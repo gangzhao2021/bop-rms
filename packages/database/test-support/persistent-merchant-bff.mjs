@@ -897,6 +897,22 @@ export async function verifyPersistentMerchantBff({
     restricted.workspace.authorizedStores.map((entry) => entry.storeReference),
     [f.STORE],
   );
+  // v15 2026-11-01: a person who doesn't work at the other Store the installation serves keeps
+  // their session at their own Store (a cashier was answered 403, "Your sign-in has ended").
+  const ended = await admin.query(
+    "UPDATE bop_membership.store_assignment SET lifecycle='Ended',version=version+1 WHERE actor_id=$1 AND store_id=$2 AND lifecycle='Active' RETURNING assignment_id",
+    [f.ACTOR, targetReference],
+  );
+  assert.equal(ended.rowCount, 1);
+  const elsewhereNot = await service().bootstrap(cookie.value);
+  assert.deepEqual(
+    elsewhereNot.workspace.authorizedStores.map((entry) => entry.storeReference),
+    [f.STORE],
+  );
+  await admin.query(
+    "UPDATE bop_membership.store_assignment SET lifecycle='Active',version=version+1 WHERE assignment_id=$1",
+    [ended.rows[0].assignment_id],
+  );
   await assert.rejects(
     service().switchStore({
       sessionCookie: cookie.value,

@@ -13,8 +13,11 @@ import {
   type TablePhones,
 } from "./table-phones-client.js";
 
-/** Decision 3: a phone that joined in the last 10 minutes is pointed out to staff. */
-export const newPhoneMinutes = 10;
+/**
+ * Decision 3 (coordinator 2026-11-01: 3 minutes, was 10): a phone that just joined is pointed out;
+ * the time limit ends it, with no click needed in a rush. Its row keeps when it joined.
+ */
+export const newPhoneMinutes = 3;
 
 export function newPhones(phones: readonly TablePhone[], now: number): readonly TablePhone[] {
   return phones.filter(

@@ -1,5 +1,5 @@
 import { parseComboParts, type ComboPartView } from "./combo-parts.js";
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
 export type KitchenStatus = "Queued" | "Held" | "In Progress" | "Completed" | "Cancelled";
 
 export interface KitchenSelectedOption {
@@ -566,7 +566,7 @@ export function kitchenOrderText(
     (label.orderType === "Pickup"
       ? t("Pickup")
       : label.tableLabel
-        ? t("Table {tableLabel}", { tableLabel: label.tableLabel })
+        ? t("Table {tableLabel}", { tableLabel: saidTable(label.tableLabel) })
         : t("Dine-in")) +
     t(" · Order ") +
     label.orderNumber

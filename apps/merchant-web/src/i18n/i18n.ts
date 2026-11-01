@@ -49,13 +49,31 @@ function fill(text: string, values: Readonly<Record<string, string | number>> | 
   );
 }
 
+// v15 2026-11-01: the wrapper around a table's own name (see `saidTable`), and the word of the
+// sentence it replaces ("Table {table}", "{table} 号桌", "桌台 {tableLabel}", "{table} 桌").
+const NAME_OPEN = "\uE000",
+  NAME_CLOSE = "\uE001";
+const namedTable = new RegExp(
+  `(?:[Tt]able |桌台 ?|桌号 ?)?${NAME_OPEN}([^${NAME_CLOSE}]*)${NAME_CLOSE}(?: ?号桌| ?桌)?`,
+  "gu",
+);
+/**
+ * A table's label for a sentence that says "Table {table}". A number or short code reads with the
+ * word ("Table 12", "Table A1", "DEMO-01"→"Table DEMO-01"); a name the owner gave is said as they
+ * wrote it ("Table 1 (TEST)", "Patio 3", "靠窗 3 号"), never "Table Table 1 (TEST)".
+ */
+export function saidTable(label: string): string {
+  return /^[A-Za-z0-9-]*[0-9][A-Za-z0-9-]*$/u.test(label) ? label : NAME_OPEN + label + NAME_CLOSE;
+}
+const said = (text: string) => (text.includes(NAME_OPEN) ? text.replace(namedTable, "$1") : text);
+
 /** The staff wording of an English text, in the chosen language. */
 export function t(text: string, values?: Readonly<Record<string, string | number>>): string {
   if (current === "zh-Hans") {
     const translated = zhHans[text];
-    if (translated !== undefined) return fill(translated, values);
+    if (translated !== undefined) return said(fill(translated, values));
   }
-  return fill(text, values);
+  return said(fill(text, values));
 }
 
 export function currentLanguage(): StaffLanguage {

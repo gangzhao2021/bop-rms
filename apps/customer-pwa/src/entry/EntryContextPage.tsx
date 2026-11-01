@@ -1,4 +1,4 @@
-import { listSeparator, t } from "../i18n/i18n.js";
+import { listSeparator, t, saidTable } from "../i18n/i18n.js";
 import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -455,7 +455,7 @@ function EntryState({
               {t("This table is settled. Thank you for dining with us.")}
             </StateHeading>
             <p className="entry-context">
-              {t("Table {table} has paid and closed.", { table: settled })}
+              {t("Table {table} has paid and closed.", { table: saidTable(settled) })}
             </p>
             <SettledTableReceiptPanel />
             <p>{t("New party? Ask staff to seat you, then scan again.")}</p>
