@@ -2,7 +2,7 @@
 
 ## Current continuation navigation
 
-This file preserves the 2026-09-22 transfer snapshot. Use [the candidate register](./project-candidate-register.md), [scenario evidence](../spec/design/business-scenario-coverage.md#current-scenario-evidence-view) and [Make/repository crosswalk](./project-completion-review.md#make-to-repository-acceptance-crosswalk-2026-09-23) for later recorded progress. Recheck live design access before an authorized edit; no historical version or save/reload result proves current access. Git transfers neither another host's private installation nor uncommitted candidates.
+The latest transfer is [the 2026-11-02 handoff](./development-machine-handoff-2026-11-02.md). This file preserves the 2026-09-22 transfer snapshot. Use [the candidate register](./project-candidate-register.md), [scenario evidence](../spec/design/business-scenario-coverage.md#current-scenario-evidence-view) and [Make/repository crosswalk](./project-completion-review.md#make-to-repository-acceptance-crosswalk-2026-09-23) for later recorded progress. Recheck live design access before an authorized edit; no historical version or save/reload result proves current access. Git transfers neither another host's private installation nor uncommitted candidates.
 
 This is an Owner-authorized source snapshot for continuing development on another computer.
 It is not a completed pilot, release approval, deployment, or new test certification.
