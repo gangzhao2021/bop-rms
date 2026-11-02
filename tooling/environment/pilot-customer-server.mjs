@@ -1,3 +1,4 @@
+import { pilotMerchantAppPaths } from "./pilot-merchant-app-paths.mjs";
 import { registerInternalDiningEntry } from "./pilot-dining-launcher.mjs";
 import { installInternalStaffLogin } from "./pilot-staff-login.mjs";
 import { Buffer } from "node:buffer";
@@ -522,7 +523,7 @@ export async function startInternalCustomerServer({
     const merchantAssets = resolve("apps/merchant-web/dist");
     app.use(createPilotStaticAssets(merchantAssets));
     app.use("/assets", missingPilotAsset);
-    app.get(["/app", "/app/{*path}", "/operations/{*path}"], (_req, res) =>
+    app.get([...pilotMerchantAppPaths], (_req, res) =>
       res.set("Cache-Control", "no-store").sendFile(resolve(merchantAssets, "index.html")),
     );
     app.get("/{*path}", (_req, res) =>

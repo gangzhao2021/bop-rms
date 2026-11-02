@@ -7,6 +7,26 @@ import {
   ownerOnlySupportActions,
 } from "../../../apps/api/dist/merchant-store-support.js";
 import { createMerchantStoreScope } from "../../../apps/api/dist/merchant-store-scope.js";
+import { createMerchantOrderStaffCancellation } from "../../../apps/api/dist/merchant-order-staff-cancellation.js";
+import { createMerchantOrderItemStaffCancellation } from "../../../apps/api/dist/merchant-order-item-staff-cancellation.js";
+import { createMerchantDiningItemComp } from "../../../apps/api/dist/merchant-dining-item-comp.js";
+import { createMerchantCardMachineOrdinaryRefund } from "../../../apps/api/dist/merchant-card-machine-ordinary-refund.js";
+import { createMerchantCardMachineCancellationRefund } from "../../../apps/api/dist/merchant-card-machine-refund.js";
+import { createMerchantDiningTableSettle } from "../../../apps/api/dist/merchant-dining-table-checkout.js";
+import { createMerchantStorePaymentConfiguration } from "../../../apps/api/dist/merchant-store-payment-configuration.js";
+import { createMerchantUnmatchedCaptureRefund } from "../../../apps/api/dist/merchant-unmatched-capture-refund.js";
+import { createMerchantCardMachinePayment } from "../../../apps/api/dist/merchant-card-machine-payment.js";
+import {
+  createMerchantOrdinaryRefundRequest,
+  ordinaryRefundReasonCodes,
+} from "../../../apps/api/dist/merchant-ordinary-refund-request.js";
+import { createMerchantOrdinaryRefundApproval } from "../../../apps/api/dist/merchant-ordinary-refund-approval.js";
+import { createMerchantRoleAdministration } from "../../../apps/api/dist/merchant-role-administration.js";
+import { createMerchantStaffAdministration } from "../../../apps/api/dist/merchant-staff-administration.js";
+import {
+  orderPriceReductionReasonCodes,
+  staffOrderCancellationReasonCodes,
+} from "../../rms/ordering/src/index.ts";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 import { createPaidPickupOrderSeeder } from "./ordinary-refund-paid-pickup-order.mjs";
 
@@ -265,9 +285,6 @@ export async function exercisePilotPlatformSupport(context) {
 
   // 2-6: support at work; the Owner's permission read each time.
   let pickupVersion;
-  const owner_ = {
-    allow: null,
-  };
   await listen(
     support,
     async (send) => {
@@ -285,6 +302,8 @@ export async function exercisePilotPlatformSupport(context) {
       assert.equal(viewed.body.ownerAllowsChanges, false);
       assert.equal(viewed.body.orders.length, 1);
       assert.equal(viewed.body.orders[0].guest, "S…");
+      // This seeded order has no real submission to read: said as unknown, never its first state.
+      assert.equal(viewed.body.orders[0].phase, null);
       const text = JSON.stringify(viewed.body);
       assert.equal(text.includes("Synthetic Guest"), false);
       assert.equal(text.includes(phone), false);
@@ -477,6 +496,225 @@ export async function exercisePilotPlatformSupport(context) {
       .rows[0].n;
   });
   assert.equal(Number(seen), 0);
+
+  // The Store's own money and access routes, the real routes and owner commands with a body each
+  // one accepts: refused as a denial, and nothing recorded. The body is shown good by sending a
+  // broken one first where the command reads it before asking who you are. Anything past the
+  // denial would reach `unreached`, which fails. Their role and membership are ended above.
+  const unreached = () => {
+    throw new Error("REACHED_PAST_THE_DENIAL");
+  };
+  const deps = (extra) =>
+    new Proxy(extra, { get: (target, key) => (key in target ? target[key] : unreached) });
+  const moneyRoutes = (persistence, authentication) => {
+    const common = { persistence, authentication };
+    return {
+      orderStaffCancellation: createMerchantOrderStaffCancellation(deps({ ...common })),
+      orderItemStaffCancellation: createMerchantOrderItemStaffCancellation(deps({ ...common })),
+      itemComp: createMerchantDiningItemComp(deps({ ...common })),
+      cardMachineOrdinaryRefund: createMerchantCardMachineOrdinaryRefund(deps({ ...common })),
+      cardMachinePayment: createMerchantCardMachinePayment(deps({ ...common })),
+      cardMachineRefund: createMerchantCardMachineCancellationRefund(deps({ ...common })),
+      diningTableSettle: createMerchantDiningTableSettle(deps({ ...common })),
+      unmatchedCaptureRefund: createMerchantUnmatchedCaptureRefund(deps({ ...common })),
+      storePaymentConfiguration: createMerchantStorePaymentConfiguration({
+        ...common,
+        nextReference: next,
+      }),
+      ordinaryRefundRequest: createMerchantOrdinaryRefundRequest(deps({ ...common })),
+      ordinaryRefundApproval: createMerchantOrdinaryRefundApproval(deps({ ...common })),
+      roleAdministration: createMerchantRoleAdministration({
+        ...common,
+        references: { next },
+      }),
+      staffAdministration: createMerchantStaffAdministration({
+        ...common,
+        references: { next },
+      }),
+    };
+  };
+  await admin.query("UPDATE bop_membership.membership SET lifecycle='Ended' WHERE actor_id=$1", [
+    supportActor,
+  ]);
+  const ref = () => next();
+  const whole = () => ({
+    orderReference: ref(),
+    orderBatchReference: ref(),
+    expectedOrderVersion: 1,
+    operationReference: ref(),
+    reasonCode: staffOrderCancellationReasonCodes[0],
+  });
+  const reduce = (kind, percent) => ({
+    orderReference: ref(),
+    orderItemReferences: [ref()],
+    kind,
+    percent,
+    amountOffMinor: null,
+    reasonCode: orderPriceReductionReasonCodes[0],
+    operationReference: ref(),
+  });
+  const attempts = [
+    ["orders/cancel", whole()],
+    ["orders/cancel-items", { ...whole(), orderItemReferences: [ref()] }],
+    ["orders/comp-items", reduce("Comp", null)],
+    ["orders/comp-items", reduce("Percent", 50)],
+    [
+      "payments/refunds/request",
+      {
+        orderReference: ref(),
+        requestReference: ref(),
+        operationReference: ref(),
+        expectedClaimVersion: 0,
+        reasonCode: ordinaryRefundReasonCodes[0],
+        items: [],
+      },
+    ],
+    [
+      "payments/refunds/approve",
+      {
+        orderReference: ref(),
+        requestReference: ref(),
+        approvalReference: ref(),
+      },
+    ],
+    [
+      "payments/refunds/card-machine-record",
+      {
+        operationReference: ref(),
+        orderReference: ref(),
+        requestReference: ref(),
+        slipReference: null,
+        refundedAt: null,
+      },
+    ],
+    [
+      "orders/card-machine-payment",
+      {
+        operationReference: ref(),
+        orderReference: ref(),
+        orderBatchReference: ref(),
+        expectedTotalMinor: "1000",
+        slipReference: null,
+        takenAt: null,
+      },
+    ],
+    [
+      "orders/card-machine-refund",
+      {
+        operationReference: ref(),
+        orderReference: ref(),
+        orderBatchReference: ref(),
+        slipReference: null,
+        refundedAt: null,
+      },
+    ],
+    [
+      "dining/table-settle",
+      {
+        operationReference: ref(),
+        diningSessionReference: ref(),
+        method: "Cash",
+        tip: { kind: "None" },
+        tenderedMinor: "1000",
+        slipReference: null,
+        recordedAfterOutage: false,
+        takenAt: null,
+      },
+    ],
+    [
+      "payments/unmatched-capture-refund/request",
+      { exceptionReference: ref(), idempotencyReference: ref() },
+    ],
+    [
+      "payments/unmatched-capture-refund/approve",
+      { exceptionReference: ref(), idempotencyReference: ref() },
+    ],
+    [
+      "store-setup/payment-configuration",
+      {
+        command: "ResolveOriginal",
+        operationReference: ref(),
+        expectedConfigurationReference: ref(),
+        expectedRevision: 3,
+        intentDigest: "sha256:" + "a".repeat(64),
+      },
+    ],
+    [
+      "organization/staff/command",
+      {
+        operation: "RequestRole",
+        actorReference: supportActor,
+        roleReference: ref(),
+        operationReference: ref(),
+      },
+    ],
+    [
+      "organization/roles/command",
+      {
+        operation: "Submit",
+        roleReference: ref(),
+        operationReference: ref(),
+        expectedVersion: 1,
+        reasonCode: "SYNTHETIC_REASON",
+        draft: null,
+      },
+    ],
+  ];
+  const audits = async () =>
+    Number(
+      (
+        await admin.query("SELECT count(*) n FROM platform_audit.audit_record WHERE store_id=$1", [
+          store,
+        ])
+      ).rows[0].n,
+    );
+  const auditsBefore = await audits();
+  await listen(
+    support,
+    async (send) => {
+      const results = [];
+      for (const [path, body] of attempts) {
+        const refused = await send(path, body);
+        results.push([path, refused.status, JSON.stringify(refused.body).slice(0, 60)]);
+      }
+      assert.deepEqual(
+        results.filter(([, status]) => status !== 403),
+        [],
+      );
+      for (const path of ["orders/cancel", "orders/comp-items", "orders/card-machine-payment"]) {
+        const broken = await send(path, { orderReference: "not-a-reference" });
+        assert.notEqual(
+          broken.status,
+          403,
+          path + " reads the body first, so 403 means the body was good",
+        );
+      }
+      // Nor is the Owner's own section a way in: a denial, not a fault that looks like an outage.
+      assert.equal((await send("store/support-access")).status, 403);
+      assert.equal(
+        (
+          await send("store/support-access", {
+            operationReference: ref(),
+            expectedVersion: 0,
+            mode: "Standing",
+            hours: null,
+          })
+        ).status,
+        403,
+      );
+    },
+    moneyRoutes,
+  );
+  // The same routes from the Owner, as the control: not denied for the same bodies' shape.
+  await listen(
+    session,
+    async (send) => {
+      const owner_cancel = await send("orders/cancel", whole());
+      assert.notEqual(owner_cancel.status, 400, JSON.stringify(owner_cancel.body));
+    },
+    moneyRoutes,
+  );
+  assert.equal(await audits(), auditsBefore);
 
   // Support ended: at once, nothing.
   await addPerson(2, "Ended", [], until);

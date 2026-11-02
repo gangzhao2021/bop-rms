@@ -11,9 +11,10 @@ import {
 } from "@bop/permission";
 import { listBrandMenus } from "@rms/catalog";
 import { readStoreKitchenLine } from "@rms/kitchen";
-import { listRecentStoreOrders, loadMerchantOrderListSummaries } from "@rms/ordering";
+import { createPostgresMerchantOrderIndex, loadMerchantOrderListSummaries } from "@rms/ordering";
 import { changeStoreFeatureSetting, loadStoreFeatureSetting } from "@rms/store";
 import { applyStoreKitchenLine } from "./merchant-kitchen-setup.js";
+import { createMerchantOrderQueueRead } from "./merchant-order-queue-read.js";
 import { businessTransaction } from "./merchant-ordinary-refund-approval.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -72,6 +73,7 @@ export function createMerchantStoreSupport(options: {
   }[];
   nextReference(): string;
   locale: string;
+  quoteVersion?: 1 | 2;
 }) {
   const denied = (): never => {
     throw new MerchantStoreSupportError("Denied");
@@ -162,7 +164,48 @@ export function createMerchantStoreSupport(options: {
           const kitchen = await readStoreKitchenLine(tx, scope);
           const features = await loadStoreFeatureSetting(tx as never, scope);
           const menus = await listBrandMenus(tx as never, scope);
-          const orders = await listRecentStoreOrders(tx, scope, 20);
+          // The orders of this Store, then each one's state now from the queue's own read (what
+          // staff see, from each fact's owner). One that can't be read says so, never a stale state.
+          const index = await createPostgresMerchantOrderIndex({
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            authorize: async () => true,
+          }).list({ transaction: tx, afterOrderReference: null, limit: 20, newestFirst: true });
+          const queue = createMerchantOrderQueueRead({
+            transactions: { run: (work) => work(tx) },
+            quoteVersion: options.quoteVersion ?? 2,
+            now,
+            authorize: async () => ({
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+              sessionReference: authenticated.sessionReference,
+            }),
+          });
+          const orders = [];
+          for (const order of index.items) {
+            await tx.query("SAVEPOINT support_order_state", []);
+            let phase: string | null = null;
+            try {
+              const read = await queue({
+                sessionCookie: input.sessionCookie,
+                afterOrderReference: null,
+                limit: 1,
+                onlyOrderReference: order.orderReference,
+              });
+              const item = read.items[0];
+              phase = item === undefined ? null : (item.kitchenPhase ?? item.currentPhase);
+              await tx.query("RELEASE SAVEPOINT support_order_state", []);
+            } catch {
+              await tx.query("ROLLBACK TO SAVEPOINT support_order_state", []);
+              await tx.query("RELEASE SAVEPOINT support_order_state", []);
+            }
+            await tx.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [scope.brandReference, scope.storeReference],
+            );
+            orders.push({ ...order, phase });
+          }
           const summaries = await loadMerchantOrderListSummaries(
             tx,
             scope,
@@ -194,7 +237,7 @@ export function createMerchantStoreSupport(options: {
                 orderNumber: order.orderNumber,
                 orderType: order.orderType,
                 phase: order.phase,
-                createdAt: order.createdAt,
+                createdAt: order.submittedAt,
                 lineCount: summary?.lineCount ?? null,
                 guest: maskGuestName(summary?.pickupName ?? null),
               });

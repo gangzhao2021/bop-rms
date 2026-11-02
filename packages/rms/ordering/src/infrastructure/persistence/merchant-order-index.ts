@@ -932,36 +932,3 @@ export async function listStoreOrdersOfSubmissions(
     }),
   );
 }
-
-/** WP-2423 取舍 15: the Store's most recent orders, what platform support sees. No contact. */
-export async function listRecentStoreOrders(
-  tx: ConsumerTransaction,
-  scope: { readonly brandReference: string; readonly storeReference: string },
-  limit: number,
-): Promise<
-  readonly {
-    readonly orderReference: string;
-    readonly orderNumber: string;
-    readonly orderType: string;
-    readonly phase: string;
-    readonly createdAt: string;
-  }[]
-> {
-  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
-    scope.brandReference,
-    scope.storeReference,
-  ]);
-  const { rows } = await tx.query<Record<string, unknown>>(
-    "SELECT order_id,order_number,order_type,canonical_phase,created_at FROM rms_ordering.order_header WHERE brand_id=$1 AND store_id=$2 ORDER BY created_at DESC LIMIT $3",
-    [scope.brandReference, scope.storeReference, limit],
-  );
-  return rows.map((row) =>
-    Object.freeze({
-      orderReference: String(row.order_id),
-      orderNumber: String(row.order_number),
-      orderType: String(row.order_type),
-      phase: String(row.canonical_phase),
-      createdAt: new Date(row.created_at as string).toISOString(),
-    }),
-  );
-}

@@ -46,7 +46,7 @@ const supportView = (allowed: boolean, pickup: boolean) => ({
     {
       orderNumber: "A-1042",
       orderType: "Pickup",
-      phase: "Accepted",
+      phase: "Rejected",
       createdAt: "2026-11-01T18:00:00.000Z",
       lineCount: 3,
       guest: "S…",
@@ -92,6 +92,9 @@ test("@production support picks a Store, reads it masked, and changes only what 
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Turn pickup off" })).toHaveCount(0);
   await expect(page.getByRole("cell", { name: "S…" })).toBeVisible();
+  // In staff language, never the raw code.
+  await expect(page.getByRole("cell", { name: "Refused and refunded" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Pickup", exact: true })).toBeVisible();
   await expect(page.getByText("Guide the Owner to do those themselves")).toBeVisible();
   await noOverflow(page, "support-readonly", ".store-support");
   await axe(page, ".store-support");
@@ -116,6 +119,35 @@ test("@production support picks a Store, reads it masked, and changes only what 
   await page.getByRole("button", { name: "Turn pickup on" }).click();
   await expect(page.getByRole("status")).toContainText("The Owner hasn't allowed changes");
   await expect(page.getByText("Read-only:")).toBeVisible();
+});
+
+test("@production support opening the Store workspace goes to their own page; others keep sign-in", async ({
+  page,
+}) => {
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({ status: 401, headers, json: { error: "unauthenticated" } }),
+  );
+  let support = true;
+  await page.route("**/merchant/support/session", (route) =>
+    support
+      ? route.fulfill({
+          headers,
+          json: {
+            csrf: "a".repeat(43),
+            name: "TEST Support Sam",
+            canChange: true,
+            stores: [{ storeReference: store, name: "Training Store" }],
+          },
+        })
+      : route.fulfill({ status: 403, headers, json: { error: "support_denied" } }),
+  );
+  await page.goto("/operations/orders");
+  await expect(page).toHaveURL(/\/platform\/support-cases$/u);
+  await expect(page.getByText("Signed in as TEST Support Sam")).toBeVisible();
+  support = false;
+  await page.goto("/app");
+  await expect(page.getByText("Sign in", { exact: false }).first()).toBeVisible();
+  await expect(page).not.toHaveURL(/support-cases/u);
 });
 
 test("@production someone who isn't support is told so; a failed read can be retried", async ({

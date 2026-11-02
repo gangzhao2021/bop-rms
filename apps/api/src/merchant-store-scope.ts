@@ -2,6 +2,7 @@ import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { parseCanonicalInstant } from "@bop/tenant";
 import {
   createPostgresCurrentMembershipSource,
+  MembershipContractError,
   resolveActiveMembership,
   resolveActiveStoreAssignment,
 } from "@bop/membership";
@@ -100,18 +101,31 @@ function createMerchantStoreScopeResolver(
     const store = context.store;
     if (!store) throw new Error("STORE_SERVICE_PERMISSION_DENIED");
     const actorReference = session.actor.actorReference;
+    /** Someone who isn't this Brand's staff (platform support among them) is denied, not a fault. */
+    const staffMembership = async (
+      memberships: ReturnType<typeof createPostgresCurrentMembershipSource>,
+      at: Parameters<typeof resolveActiveMembership>[3],
+    ) => {
+      const found = await memberships.findMemberships(actorReference, context.brand.brandReference);
+      try {
+        return resolveActiveMembership(found, actorReference, context.brand.brandReference, at);
+      } catch (error) {
+        if (
+          error instanceof MembershipContractError &&
+          error.code === "ACTIVE_MEMBERSHIP_NOT_FOUND"
+        )
+          return null;
+        throw error;
+      }
+    };
     const assessSelection = async (
       fresh: Awaited<ReturnType<typeof selectedContext>>,
       requestedAction: string,
     ) => {
       if (!kdsOperatorProfileAllows(session, requestedAction)) return null;
       const memberships = createPostgresCurrentMembershipSource(tx, fresh.context);
-      const membership = resolveActiveMembership(
-        await memberships.findMemberships(actorReference, context.brand.brandReference),
-        actorReference,
-        context.brand.brandReference,
-        fresh.context.resolvedAt,
-      );
+      const membership = await staffMembership(memberships, fresh.context.resolvedAt);
+      if (membership === null) return null;
       const storeAssignment = resolveActiveStoreAssignment(
         membership,
         await memberships.findStoreAssignments(
@@ -158,12 +172,8 @@ function createMerchantStoreScopeResolver(
       const unique = [...new Set(requestedActions)].filter((a) => a !== "merchant.access");
       const decisions = new Map<string, Decision>(requestedActions.map((a) => [a, null]));
       const memberships = createPostgresCurrentMembershipSource(tx, fresh.context);
-      const membership = resolveActiveMembership(
-        await memberships.findMemberships(actorReference, context.brand.brandReference),
-        actorReference,
-        context.brand.brandReference,
-        fresh.context.resolvedAt,
-      );
+      const membership = await staffMembership(memberships, fresh.context.resolvedAt);
+      if (membership === null) return decisions;
       const storeAssignment = resolveActiveStoreAssignment(
         membership,
         await memberships.findStoreAssignments(
