@@ -2230,12 +2230,16 @@ memory stall and what `/` answered each second. A 503 after the services report 
 **Connections.** Pools are sized at start from the Stores in `stores.json` and the api role's real
 limit, within `max_connections` less 20 for the other roles and less 10 for operator commands:
 
-| Stores | Needed by the api role | Pools (entry / business worker / other worker) |
-| ------ | ---------------------- | ---------------------------------------------- |
-| 1      | 31                     | 5 / 3 / 2                                      |
-| 2      | 52                     | 5 / 3 / 2                                      |
-| 3      | 73                     | 5 / 3 / 2                                      |
-| 4      | 74                     | 3 / 2 / 2                                      |
+| Stores | Needed by the api role | API entry pool | HTTPS entry pool | Business worker | Other worker |
+| ------ | ---------------------- | -------------- | ---------------- | --------------- | ------------ |
+| 1      | 33                     | 7              | 5                | 3               | 2            |
+| 2      | 56                     | 14             | 10               | 3               | 2            |
+| 3      | 79                     | 21             | 15               | 3               | 2            |
+| 4      | 74                     | 12             | 12               | 2               | 2            |
+
+Each entry serves every Store from one process and one pool, so a burst at one Store can use all of
+it. A request waits up to 5 s for a connection in an entry (2 s in a worker), the same as a statement's
+own limit, so a stuck database still fails within seconds.
 
 **When the budget is exceeded** a Store that doesn't fit is not started and its pages aren't served.
 The Stores before it in `stores.json` keep running. The logs name it:

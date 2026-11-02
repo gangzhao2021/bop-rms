@@ -74,7 +74,12 @@ export function createGuestSessionRequestAdmission(options: {
   }
   return Object.freeze({
     async consume(
-      input: Readonly<{ remoteAddress: string | null; requestedAt: string }>,
+      input: Readonly<{
+        remoteAddress: string | null;
+        requestedAt: string;
+        /** False: the code's signature is bad. Only the address pays, never the Store's budget. */
+        codeValid?: boolean;
+      }>,
     ): Promise<GuestSessionRequestAdmission> {
       try {
         const at = String(parseCanonicalInstant(now()));
@@ -92,6 +97,7 @@ export function createGuestSessionRequestAdmission(options: {
           if (!ip.allowed)
             return { status: "RateLimited", retryAfterSeconds: ip.retry_after_seconds };
         }
+        if (input.codeValid === false) return { status: "Allowed" };
         const store = await consume(keys.store(scope), guestSessionAbusePolicy.storeLimit, at);
         return store.allowed
           ? { status: "Allowed" }

@@ -1,3 +1,4 @@
+import { guestReadRetryWaitsMs } from "../network/read-retry.js";
 import type {
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
@@ -479,7 +480,15 @@ export function createCustomerEntryClient(
     if (token === null) return Object.freeze({ kind: "Missing" });
     if (!online()) return Object.freeze({ kind: "Offline" });
     try {
-      const { status, body, retryAfter } = await receive(current);
+      let answer = await receive(current);
+      // WP-2423: a 503 issued nothing, so a scan in a burst is tried again before the guest sees it.
+      for (const ms of guestReadRetryWaitsMs) {
+        if (answer.status !== 503) break;
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        if (!online() || !current()) throw new Error("entry unavailable");
+        answer = await receive(current);
+      }
+      const { status, body, retryAfter } = answer;
       if (!online() || !current()) throw new Error("entry unavailable");
       if (status === 201) {
         const context = parseSuccess(body);

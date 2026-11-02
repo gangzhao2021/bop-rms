@@ -193,8 +193,13 @@ export class GuestSessionService {
       if ((await this.#binding.validate(session, observedAt)) !== "Current") {
         throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       }
-    } catch {
-      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+    } catch (error) {
+      if (error instanceof GuestSessionError && !("dependencyFailure" in error)) throw error;
+      // WP-2423 (burst 2026-11-02): reading the binding failed: says nothing about the session.
+      throw Object.assign(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"), {
+        dependencyFailure: true,
+        cause: error,
+      });
     }
   }
 

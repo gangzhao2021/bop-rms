@@ -69,6 +69,8 @@ export async function exercisePersistentProfileEntry({
   onPickupReady,
   acquire,
   diningInvitation = false,
+  /** WP-2423 (v15 burst): once the Store takes guests, the test's own guests at the real routes. */
+  onGuestsWelcome,
   // Owner 2026-10-23: whether the published Latte also has a Simplified Chinese name.
   chineseNames = false,
 }) {
@@ -395,6 +397,10 @@ export async function exercisePersistentProfileEntry({
         },
         body: JSON.stringify({ qrToken: f.token() }),
       });
+    if (onGuestsWelcome !== undefined) {
+      await onGuestsWelcome({ base: "http://127.0.0.1:" + address.port, request });
+      return { close: () => runtime.shutdown("SIGTERM") };
+    }
     const before = await count();
     const successful = await request();
     assert.equal(successful.status, 201);

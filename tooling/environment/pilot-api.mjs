@@ -25,6 +25,7 @@ export async function createRuntime(
     createInternalTestCart,
     createInternalTestResources,
     createInternalCustomerEntry,
+    createInternalEntryCodeCheck,
     createPaymentWebhookReceiver,
     createInternalPayLaterRound,
     providerAccountReference,
@@ -170,6 +171,9 @@ export async function createRuntime(
       scope: resources.scope,
       entry,
       entryRequestAdmission: resources.requestAdmission,
+      ...(createInternalEntryCodeCheck === undefined
+        ? {}
+        : { entryCodeCheck: await createInternalEntryCodeCheck() }),
       sessionTransactions: resources.transactions,
       menuTransactions: {
         run: (work) =>

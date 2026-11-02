@@ -326,6 +326,21 @@ const headers = { "content-type": "application/json", "cache-control": "no-store
 const flush = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 };
+it("WP-2423: a scan answered 503 is tried again, and the guest gets in with no action", async () => {
+  const fetcher = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(
+      response(503, {
+        schemaVersion: 1,
+        code: "entry_service_unavailable",
+        messageKey: "customer.entry.service_unavailable",
+        recovery: { action: "RetryOrAskStaff", storeSelection: "Hidden" },
+      }),
+    )
+    .mockResolvedValueOnce(response(201, established));
+  await expect(client(fetcher).start()).resolves.toMatchObject({ kind: "Established" });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
 afterEach(() => {
   vi.useRealTimers();
   setCustomerCsrfCredential(null);

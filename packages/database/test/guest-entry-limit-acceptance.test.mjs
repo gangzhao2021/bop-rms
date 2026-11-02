@@ -41,7 +41,7 @@ it("twenty scans at one Store don't turn away guests at another or at the same S
     };
     const secret = randomBytes(32);
     const servers = [];
-    const start = async (storeReference) => {
+    const start = async (storeReference, codeCheck) => {
       const requestAdmission = await createCustomerRequestAdmission(
         { database, scope: { brandReference: id(1), storeReference } },
         { loadSecret: async () => Buffer.from(secret) },
@@ -56,6 +56,7 @@ it("twenty scans at one Store don't turn away guests at another or at the same S
           port: new Proxy({}, { get: () => async () => ({ status: "Unavailable" }) }),
           uuidV7Factory: () => id(100),
           requestAdmission,
+          ...(codeCheck === undefined ? {} : { codeCheck }),
         }).handler(),
       );
       const server = createServer(app);
@@ -117,6 +118,28 @@ it("twenty scans at one Store don't turn away guests at another or at the same S
       assert.equal(many.filter((status) => status === 429).length, 1);
       assert.equal(many.at(-1), 429);
       assert.notEqual(await scan(two), 429);
+
+      // Made-up codes: no budget of the Store's is spent, so its guests are never locked out by
+      // them; the address that sends them still runs out.
+      const budget = async () =>
+        Number(
+          (
+            await admin.query(
+              "SELECT count(*) n FROM security.abuse_bucket WHERE bucket_class='GUEST_SESSION'",
+            )
+          ).rows[0].n,
+        );
+      let real = false;
+      const four = await start(id(5), async () => real);
+      const bucketsBefore = await budget();
+      for (let n = 0; n < 310; n += 1) assert.equal(await scan(four), 422);
+      assert.equal(await budget(), bucketsBefore);
+      real = true;
+      assert.equal(await scan(four), 503, "a real code passes; the port here is a stand-in");
+      real = false;
+      const forged = [];
+      for (let n = 0; n < 121; n += 1) forged.push(await scan(four, "198.51.100.30"));
+      assert.equal(forged.at(-1), 429);
     } finally {
       for (const server of servers) await new Promise((resolve) => server.close(resolve));
       await pool.end();

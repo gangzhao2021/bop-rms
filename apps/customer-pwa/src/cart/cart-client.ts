@@ -1,3 +1,4 @@
+import { withReadRetry } from "../network/read-retry.js";
 import { CartClientError, type CartErrorCode, type CartItemDraft, type CartView } from "./types.js";
 import {
   captureCustomerCsrfContext,
@@ -282,15 +283,18 @@ async function request(url: string, init: RequestInit, decode = parse): Promise<
   const operation = async () => {
     if (controller.signal.aborted || !contextCurrent())
       throw new CartClientError("network_unknown");
-    const response = await globalThis.fetch(url, {
-      ...init,
-      signal: controller.signal,
-      mode: "cors",
-      cache: "no-store",
-      credentials: "same-origin",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
-    });
+    const send = () =>
+      globalThis.fetch(url, {
+        ...init,
+        signal: controller.signal,
+        mode: "cors",
+        cache: "no-store",
+        credentials: "same-origin",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+      });
+    // WP-2423: a read is tried again for a passing fault; a change never is, here.
+    const response = await (init.method === "GET" ? withReadRetry(send) : send());
     // An aborted or superseded response must not reveal an old Cart or clear newer Session state.
     if (controller.signal.aborted || !contextCurrent()) {
       void response.body?.cancel().catch(() => undefined);

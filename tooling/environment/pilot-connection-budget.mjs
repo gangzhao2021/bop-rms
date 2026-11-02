@@ -9,10 +9,18 @@ export const pilotApiRoleConnectionLimit = 80;
 export const pilotOperatorHeadroom = 10;
 /** Of `max_connections`, what the admin and worker roles may need. */
 export const pilotOtherRolesReserve = 20;
-const processClasses = (entry, business, worker) => ({ entry, business, worker });
-const comfortable = processClasses(5, 3, 2);
-const smallest = processClasses(3, 2, 2);
-const perStore = ({ entry, business, worker }) => 2 * entry + business + 4 * worker;
+const processClasses = (api, https, business, worker) => ({ api, https, business, worker });
+// WP-2423 (burst 2026-11-02): guests' reads all land on the API entry, so it has the most.
+const comfortable = processClasses(7, 5, 3, 2);
+const smallest = processClasses(3, 3, 2, 2);
+const perStore = ({ api, https, business, worker }) => api + https + business + 4 * worker;
+/**
+ * How long a request waits for a connection in an entry: long enough for a burst of guests to be
+ * served in turn, no longer than one stuck statement's own limit (5 s) so a stuck database still
+ * fails fast. Workers keep 2 s: they retry on their next cycle.
+ */
+export const pilotEntryAcquireMs = 5000;
+export const pilotWorkerAcquireMs = 2000;
 /** Below this the role can't run even one Store: reported not ready. */
 export const pilotApiRoleMinimumLimit = perStore(smallest) + pilotOperatorHeadroom;
 /** What the database allows this role: its own limit, within what `max_connections` leaves. */
@@ -35,9 +43,13 @@ export function planPilotConnections({ storeCount, limit }) {
   });
 }
 /** This process's pool, from the entry it was started with; anything else is an operator command. */
+export const isPilotEntryProcess = (entryFile) =>
+  /pilot-(api|https)-entry\.mjs$/u.test(String(entryFile ?? ""));
 export function pilotProcessPoolSize(plan, entryFile) {
   const name = String(entryFile ?? "");
-  if (/pilot-(api|https)-entry\.mjs$/u.test(name)) return plan.pools.entry;
+  // An entry serves every Store from one process and one pool: a burst at one Store can use it all.
+  if (/pilot-api-entry\.mjs$/u.test(name)) return plan.pools.api * plan.admittedStores;
+  if (/pilot-https-entry\.mjs$/u.test(name)) return plan.pools.https * plan.admittedStores;
   if (/pilot-business-worker\.mjs$/u.test(name)) return plan.pools.business;
   if (/pilot-[a-z-]+-worker\.mjs$/u.test(name)) return plan.pools.worker;
   return 2;

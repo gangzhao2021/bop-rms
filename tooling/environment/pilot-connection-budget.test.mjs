@@ -16,11 +16,12 @@ const stores = (n) => Array.from({ length: n }, (_, i) => "stores/demo-" + (i + 
 /** Every process of every Store at its pool size, plus the operators' headroom. */
 const total = (plan, storeCount) => {
   const size = (file) => pilotProcessPoolSize(plan, "/app/tooling/environment/" + file);
+  // One process and one pool per entry, serving every Store; five workers per Store.
   return (
+    size("pilot-api-entry.mjs") +
+    size("pilot-https-entry.mjs") +
     storeCount *
-      (size("pilot-api-entry.mjs") +
-        size("pilot-https-entry.mjs") +
-        size("pilot-business-worker.mjs") +
+      (size("pilot-business-worker.mjs") +
         size("pilot-kitchen-queue-worker.mjs") +
         size("pilot-reconciliation-worker.mjs") +
         size("pilot-daily-settlement-worker.mjs") +
@@ -40,10 +41,12 @@ it("every process of every admitted Store fits the role's limit, whatever the St
 it("three Stores fit at the new limit with room for guests, four with smaller pools", () => {
   const three = planPilotConnections({ storeCount: 3, limit: pilotApiRoleConnectionLimit });
   expect(three.admittedStores).toBe(3);
-  expect(three.pools).toEqual({ entry: 5, business: 3, worker: 2 });
+  expect(three.pools).toEqual({ api: 7, https: 5, business: 3, worker: 2 });
+  expect(pilotProcessPoolSize(three, "x/pilot-api-entry.mjs")).toBe(21);
+  expect(pilotProcessPoolSize(three, "x/pilot-https-entry.mjs")).toBe(15);
   const four = planPilotConnections({ storeCount: 4, limit: pilotApiRoleConnectionLimit });
   expect(four.admittedStores).toBe(4);
-  expect(four.pools).toEqual({ entry: 3, business: 2, worker: 2 });
+  expect(four.pools).toEqual({ api: 3, https: 3, business: 2, worker: 2 });
   expect(planPilotConnections({ storeCount: 5, limit: 80 }).admittedStores).toBe(4);
 });
 
