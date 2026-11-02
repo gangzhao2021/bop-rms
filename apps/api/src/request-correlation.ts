@@ -39,10 +39,7 @@ export interface RequestCompletionLogger {
     readonly event: "http_request_completed";
     readonly requestId: string;
     readonly resultCode:
-      | "HTTP_CLIENT_ERROR"
-      | "HTTP_RETRY_LATER"
-      | "HTTP_SERVER_ERROR"
-      | "HTTP_SUCCESS";
+      "HTTP_CLIENT_ERROR" | "HTTP_RETRY_LATER" | "HTTP_SERVER_ERROR" | "HTTP_SUCCESS";
     readonly statusCode: number;
     readonly trustedContext: CorrelationContext;
     /** A server error's safe cause code (and SQLSTATE), when the route recorded one. */

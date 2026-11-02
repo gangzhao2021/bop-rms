@@ -1231,7 +1231,10 @@ function postgresDependencies(
         tableLabel,
         checkedAt: now(),
         ...timing,
-        order: (order.payLaterRounds?.size ?? 0) > 0 ? { ...order, tableBill: await tableBill() } : order,
+        order:
+          (order.payLaterRounds?.size ?? 0) > 0
+            ? { ...order, tableBill: await tableBill() }
+            : order,
       };
     },
   };

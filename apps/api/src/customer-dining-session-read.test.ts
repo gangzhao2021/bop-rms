@@ -132,7 +132,12 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
       ...facts(),
       order: {
         ...mergeBillOrderFacts(own, [merged]),
-        tableBill: { owedMinor: 6203n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
+        tableBill: {
+          owedMinor: 6203n,
+          pointsUsedMinor: 0n,
+          takenOffMinor: 0n,
+          taxRoundingMinor: 0n,
+        },
       },
       paymentTiming: "PayLater",
     });
@@ -151,7 +156,12 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
         paymentOutcomes: new Map(),
         payments: [],
         payLaterRounds: new Set([id(30), id(40)]),
-        tableBill: { owedMinor: 3900n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
+        tableBill: {
+          owedMinor: 3900n,
+          pointsUsedMinor: 0n,
+          takenOffMinor: 0n,
+          taxRoundingMinor: 0n,
+        },
         delivery: new Map([
           [id(31), { phase: "InProgress", deliveredQuantity: 0 }],
           [id(41), { phase: "Accepted", deliveredQuantity: 0 }],
@@ -196,7 +206,12 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
         paymentOutcomes: new Map(),
         payments: [],
         payLaterRounds: new Set([id(30), id(40)]),
-        tableBill: { owedMinor: 3900n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
+        tableBill: {
+          owedMinor: 3900n,
+          pointsUsedMinor: 0n,
+          takenOffMinor: 0n,
+          taxRoundingMinor: 0n,
+        },
         staffCancellations: new Map([
           [id(30), { reason: "SoldOut", refundedMinor: 0n, pendingMinor: 0n }],
         ]),

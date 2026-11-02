@@ -181,8 +181,18 @@ it("v15 2026-11-02: the receipt while the table is still open says what points t
           totalMinor: "4366",
           taxRoundingMinor: "0",
           items: [
-            { displayName: "Noodles", subtotalMinor: "3000", totalMinor: "3051", reduction: { kind: "Amount", percent: null, amountMinor: "339", points: true } },
-            { displayName: "Tea", subtotalMinor: "1000", totalMinor: "0", reduction: { kind: "Comp", percent: null, amountMinor: "1130" } },
+            {
+              displayName: "Noodles",
+              subtotalMinor: "3000",
+              totalMinor: "3051",
+              reduction: { kind: "Amount", percent: null, amountMinor: "339", points: true },
+            },
+            {
+              displayName: "Tea",
+              subtotalMinor: "1000",
+              totalMinor: "0",
+              reduction: { kind: "Comp", percent: null, amountMinor: "1130" },
+            },
           ],
         },
       ],
