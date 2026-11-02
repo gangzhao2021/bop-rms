@@ -615,7 +615,7 @@ export function StoreReportsPage({
       <nav className="store-reports__tabs" aria-label={t("Reports")}>
         {(
           [
-            ["Tonight", t("Tonight")],
+            ["Tonight", t("Today's summary")],
             ["Period", t("Sales by period")],
             ...(stores.length >= 2 ? ([["Stores", t("Stores")]] as const) : []),
           ] as const

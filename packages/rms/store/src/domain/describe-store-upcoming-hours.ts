@@ -171,3 +171,43 @@ export function describeStoreUpcomingHours(input: StoreUpcomingHoursInput): Stor
     nextOpening,
   });
 }
+
+export type StoreBusinessDayClosing =
+  /** No hours are published at all: nothing here can say when the Store closes. */
+  | { readonly kind: "NoPublishedHours" }
+  /** Hours are published and this day has none (a holiday, a closure, a day off). */
+  | { readonly kind: "ClosedToday" }
+  /** The end of the day's last period; the local date is the next one when it runs past midnight. */
+  | { readonly kind: "Closes"; readonly localDate: string; readonly localTime: string };
+
+/**
+ * WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on one business day. A dated exception
+ * replaces that date's weekday hours, as in the open gate.
+ */
+export function describeStoreBusinessDayClosing(
+  input: Pick<StoreUpcomingHoursInput, "weeklySchedule" | "exceptions"> & {
+    readonly businessDate: string;
+  },
+): StoreBusinessDayClosing {
+  if (!datePattern.test(input.businessDate)) throw new Error("STORE_UPCOMING_HOURS_INPUT_INVALID");
+  const exception = input.exceptions.find((entry) => entry.localDate === input.businessDate);
+  const anyHours =
+    exception !== undefined || input.weeklySchedule.some((day) => day.intervals.length > 0);
+  if (!anyHours) return Object.freeze({ kind: "NoPublishedHours" });
+  const intervals =
+    exception?.intervals ??
+    input.weeklySchedule.find((day) => day.isoWeekday === isoWeekday(input.businessDate))
+      ?.intervals ??
+    [];
+  if (intervals.length === 0) return Object.freeze({ kind: "ClosedToday" });
+  const end = Math.max(
+    ...intervals.map(
+      (interval) => seconds(interval.endLocalTime) + (interval.endsNextDay ? 86_400 : 0),
+    ),
+  );
+  return Object.freeze({
+    kind: "Closes",
+    localDate: shiftDate(input.businessDate, Math.floor(end / 86_400)),
+    localTime: clock(end),
+  });
+}

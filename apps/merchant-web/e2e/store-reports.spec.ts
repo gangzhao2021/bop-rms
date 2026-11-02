@@ -97,7 +97,7 @@ test("@production Reports show sales, items, hours and tips for a period, downlo
       .first(),
   ).toHaveAttribute("aria-current", "page");
   // WP-2423 item 8 ②: the page opens on tonight's summary; the period reports are one tab over.
-  await expect(page.getByRole("button", { name: "Tonight", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "Today's summary", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );

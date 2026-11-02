@@ -38,7 +38,7 @@ const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
   },
   get QrPaused() {
     return t(
-      "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s code.",
+      "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s join code.",
     );
   },
   get NotOpen() {
@@ -266,7 +266,7 @@ export function DiningAdmissionView({
               disabled={!online}
               onClick={onUseCode}
             >
-              {t("I have a table code")}
+              {t("I have a join code")}
             </button>
           )}
         </div>
@@ -274,7 +274,7 @@ export function DiningAdmissionView({
       {showCode && (
         <form onSubmit={onSubmit} noValidate>
           <p id="dining-admission-help">
-            {t("Ask staff, or the person who joined your table first, for the table’s code.")}
+            {t("Ask staff, or the person who joined your table first, for the table’s join code.")}
           </p>
           <label htmlFor="dining-join-credential">{t("Join code or invitation")}</label>
           <input

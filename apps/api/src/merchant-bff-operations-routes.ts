@@ -135,6 +135,9 @@ export function installMerchantOperationsRoutes(
           observedAt: day.observedAt,
           // WP-2423 item 8 ③ follow-up: when guests stop ordering in this period (or null).
           lastOrdersAt: day.lastOrdersAt ?? null,
+          // DEC-CLOSING-SUMMARY: when this business day closes; neither when it can't be read.
+          closesAt: day.closesAt ?? null,
+          closedToday: day.closedToday ?? false,
         }),
       )
       .catch(() => denied(response));

@@ -111,6 +111,6 @@ test("@production Reports → Stores shows tonight at each Store and their total
 test("@production with one Store there is no Stores tab", async ({ page }) => {
   await workspace(page, [one]);
   await page.goto("/app/reports/operations");
-  await expect(page.getByRole("button", { name: "Tonight" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Today's summary" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Stores" })).toHaveCount(0);
 });

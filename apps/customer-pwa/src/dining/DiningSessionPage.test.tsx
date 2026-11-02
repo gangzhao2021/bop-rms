@@ -245,7 +245,7 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     const plain = render({ status: "settled", tableLabel: "DEMO-02" });
     expect(plain).toContain("This table is settled. Thank you for dining with us.");
     expect(plain).toContain("Table DEMO-02 has paid and closed.");
-    expect(plain).toContain("New party? Scan the table code");
+    expect(plain).toContain("New party? Scan the table QR code");
     expect(plain).toContain("Loading receipt");
     expect(plain).not.toContain("/orders/");
     expect(plain).not.toContain("Join your table first");

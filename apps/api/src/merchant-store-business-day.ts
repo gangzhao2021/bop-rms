@@ -3,6 +3,7 @@ import {
   createPostgresCurrentStorePublicationProof,
   createPostgresStoreBusinessDaySource,
   createStoreConfigurationPublicationHash,
+  describeStoreBusinessDayClosing,
   describeStoreUpcomingHours,
   resolveStoreLocalInstant,
   resolveStoreOperatingLocalFields,
@@ -32,7 +33,13 @@ export function createMerchantStoreBusinessDay(options: {
 }): (
   tx: Transaction,
   at: string,
-) => Promise<StoreBusinessDay & { readonly lastOrdersAt: string | null }> {
+) => Promise<
+  StoreBusinessDay & {
+    readonly lastOrdersAt: string | null;
+    readonly closesAt: string | null;
+    readonly closedToday: boolean;
+  }
+> {
   const setupSnapshotReferences = {
     canonicalize: canonicalizeRfc8785,
     hashIntent: (canonical: string) => "sha256:" + sha256Hex(canonical),
@@ -68,6 +75,7 @@ export function createMerchantStoreBusinessDay(options: {
     return Object.freeze({
       ...day,
       lastOrdersAt: lastOrdersInstant(published, options.timeZone, at),
+      ...businessDayClosing(published, options.timeZone, String(day.businessDate)),
     });
   };
 }
@@ -112,6 +120,46 @@ function lastOrdersInstant(
   }
 }
 
+/**
+ * WP-2423 DEC-CLOSING-SUMMARY: when this business day closes, from the same verified publication.
+ * Unreadable, or nothing published: neither closesAt nor closedToday, and the screen falls back.
+ */
+function businessDayClosing(
+  published:
+    | { readonly configuration: { readonly weeklySchedule: unknown; readonly exceptions: unknown } }
+    | undefined,
+  timeZone: string,
+  businessDate: string,
+): { readonly closesAt: string | null; readonly closedToday: boolean } {
+  const unknown = { closesAt: null, closedToday: false };
+  if (published === undefined) return unknown;
+  try {
+    const closing = describeStoreBusinessDayClosing({
+      businessDate,
+      weeklySchedule: published.configuration.weeklySchedule as Parameters<
+        typeof describeStoreBusinessDayClosing
+      >[0]["weeklySchedule"],
+      exceptions: published.configuration.exceptions as Parameters<
+        typeof describeStoreBusinessDayClosing
+      >[0]["exceptions"],
+    });
+    if (closing.kind === "ClosedToday") return { closesAt: null, closedToday: true };
+    if (closing.kind === "NoPublishedHours") return unknown;
+    return {
+      closesAt: String(
+        resolveStoreLocalInstant({
+          timeZone,
+          localDate: closing.localDate,
+          localTime: closing.localTime,
+        }).instant,
+      ),
+      closedToday: false,
+    };
+  } catch {
+    return unknown;
+  }
+}
+
 /** What the browser receives: the day and its boundaries, no configuration identity. */
 export function merchantBusinessDayView(day: {
   readonly businessDate: string;
@@ -120,6 +168,8 @@ export function merchantBusinessDayView(day: {
   readonly timeZone: string;
   readonly observedAt: string;
   readonly lastOrdersAt?: string | null;
+  readonly closesAt?: string | null;
+  readonly closedToday?: boolean;
 }) {
   return Object.freeze({
     businessDate: String(day.businessDate),
@@ -128,5 +178,7 @@ export function merchantBusinessDayView(day: {
     timeZone: day.timeZone,
     observedAt: String(day.observedAt),
     lastOrdersAt: day.lastOrdersAt ?? null,
+    closesAt: day.closesAt ?? null,
+    closedToday: day.closedToday ?? false,
   });
 }

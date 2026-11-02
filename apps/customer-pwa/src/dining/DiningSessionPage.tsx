@@ -671,7 +671,7 @@ function SettledTable({
       <section className="order-status__card" role="status">
         <h2>{t("This table is settled. Thank you for dining with us.")}</h2>
         <p>{t("Table {table} has paid and closed.", { table: saidTable(tableLabel) })}</p>
-        <p>{t("New party? Scan the table code")}</p>
+        <p>{t("New party? Scan the table QR code")}</p>
       </section>
       <SettledTableReceiptPanel {...(receipt === undefined ? {} : { client: receipt })} />
     </>
@@ -776,7 +776,7 @@ export function DiningSessionScreen({
           <h2>{t("Join your table first")}</h2>
           <p>
             {t(
-              "Ask a staff member, or the person who joined your table first, for your table's code and enter it after scanning the table's QR code. Then you can see what your table has ordered.",
+              "Ask a staff member, or the person who joined your table first, for your table's join code and enter it after scanning the table's QR code. Then you can see what your table has ordered.",
             )}
           </p>
           <Link className="order-status__back" to="/">

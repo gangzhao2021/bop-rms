@@ -81,7 +81,7 @@ export function moveTargetProblem(table: StaffDiningTable): string | null {
     return t("has a party (two parties can't share a table)");
   if (table.lifecycle !== "Published" || table.operationalState !== "Available")
     return table.blockReasonCode === "CLEANING" ? t("being cleaned") : t("not in use");
-  if (table.qrCodeValidUntil === null) return t("no table code");
+  if (table.qrCodeValidUntil === null) return t("no table QR code");
   return null;
 }
 
@@ -149,7 +149,7 @@ export function TableMove({
           : code === "TargetUnavailable"
             ? t("That table is not free to use now (being cleaned or not in use).")
             : code === "TargetNoCode"
-              ? t("That table has no table code guests can scan. Choose another table.")
+              ? t("That table has no table QR code guests can scan. Choose another table.")
               : code === "TargetTooSmall"
                 ? t("That table seats fewer guests than this party. Choose a bigger table.")
                 : code === "CheckingOut"

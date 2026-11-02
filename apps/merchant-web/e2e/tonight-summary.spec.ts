@@ -4,9 +4,9 @@ import { tonightSummaryFixture } from "../src/tonight-summary.fixtures.js";
 import { expectNoInternalText } from "./internal-text-guard";
 
 /**
- * WP-2423 item 8 ② (Figma 47-2): at closing the Owner or Store Manager sees tonight's figures —
- * sales, what each payment method took (card-machine batch check, the drawer's table cash), the
- * tables still open and tonight's cancellations — and a reminder on Home in the evening. If the
+ * WP-2423 item 8 ② (Figma 47-2): at closing the Owner or Store Manager sees today's figures —
+ * sales, what each payment method took (card-machine batch check, the table cash this system recorded), the
+ * tables still open and today's cancellations — and a reminder on Home around closing. If the
  * store system can't be reached, the last figures stay with what to do. Synthetic figures.
  */
 const id = (n: number) => "018f7731-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -74,18 +74,20 @@ test("@production tonight's summary adds up, checks the card machine and drawer,
     return route.fulfill({ headers, json: tonightSummaryFixture() });
   });
   await page.goto("/app/reports/operations");
-  await expect(page.getByRole("button", { name: "Tonight", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "Today's summary", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(page.getByRole("heading", { name: "Tonight · Tue, Oct 27" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Today's summary · Tue, Oct 27" })).toBeVisible();
   const sales = page.getByRole("region", { name: /^Sales/u });
   await expect(sales).toContainText("Gross sales$412.50");
   await expect(sales).toContainText("Comps and discounts by a manager3 dishes−$18.25");
   await expect(sales).toContainText("Net sales$394.25");
   const takings = page.getByRole("region", { name: /^Taken, by payment method/u });
   await expect(takings.getByRole("table")).toContainText("Card machine8$27.40$219.50");
-  await expect(takings).toContainText("Table cash that should be in the drawer$86.95");
+  await expect(takings).toContainText(
+    "Table cash this system recorded (not the whole cash drawer)$86.95",
+  );
   await expect(takings).toContainText("Total taken$503.05");
   await expect(takings).toContainText("Net taken$491.05");
   await expect(takings).toContainText("The batch total should be $219.50");
@@ -124,7 +126,9 @@ test("@production tonight's summary adds up, checks the card machine and drawer,
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   const offline = page.getByRole("status", { name: "Can't reach the store system" });
   await expect(offline).toContainText("showing the figures from 21:42");
-  await expect(offline).toContainText("check the card machine's batch and the drawer's table cash");
+  await expect(offline).toContainText(
+    "check the card machine's batch and the table cash this system recorded",
+  );
   await expect(sales).toContainText("Net sales$394.25");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: "test-results/tonight-summary-offline-390.png", fullPage: true });
@@ -145,7 +149,7 @@ test("@production in the evening Home reminds the manager what is still open and
   await page.goto("/app");
   const reminder = page.getByRole("region", { name: "Before closing" });
   await expect(reminder).toContainText("Before closing: 2 tables not paid yet · $86.40");
-  await expect(reminder).toContainText("Tonight's net taken $491.05");
+  await expect(reminder).toContainText("Today's net taken $491.05");
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -154,6 +158,43 @@ test("@production in the evening Home reminds the manager what is still open and
     await reminder.screenshot({ path: `test-results/closing-reminder-${width}.png` });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  await reminder.getByRole("link", { name: "See tonight" }).click();
-  await expect(page.getByRole("heading", { name: "Tonight · Tue, Oct 27" })).toBeVisible();
+  await reminder.getByRole("link", { name: "See today's summary" }).click();
+  await expect(page.getByRole("heading", { name: "Today's summary · Tue, Oct 27" })).toBeVisible();
+});
+
+test("@production a lunch-only Store: an unpaid table still surfaces after closing, and nothing else does", async ({
+  page,
+}) => {
+  await workspace(page);
+  await page.route("**/merchant/business-day", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        businessDate: "2026-10-27",
+        startsAt: "2026-10-27T08:00:00.000Z",
+        endsAt: "2026-10-28T08:00:00.000Z",
+        timeZone: "America/Toronto",
+        observedAt: evening,
+        lastOrdersAt: null,
+        closesAt: "2026-10-27T18:30:00.000Z", // 14:30 in Toronto, seven hours ago.
+        closedToday: false,
+      },
+    }),
+  );
+  let paid = false;
+  await page.route("**/merchant/reports/tonight", (route) =>
+    route.fulfill({
+      headers,
+      json: paid
+        ? { ...tonightSummaryFixture(), openTables: [], openTablesOwedMinor: "0" }
+        : tonightSummaryFixture(),
+    }),
+  );
+  await page.goto("/app");
+  const reminder = page.getByRole("region", { name: "After closing" });
+  await expect(reminder).toContainText("After closing: 2 tables not paid yet · $86.40");
+  paid = true;
+  await page.reload();
+  // Read on this page's answer: once every table is paid the reminder has nothing to say.
+  await expect.poll(async () => page.getByRole("region", { name: /closing/u }).count()).toBe(0);
 });

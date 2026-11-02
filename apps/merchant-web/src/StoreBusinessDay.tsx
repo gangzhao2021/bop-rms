@@ -11,6 +11,10 @@ export interface StoreBusinessDay {
   /** Start (inclusive) and end (exclusive) of the day; null until the Store's read has answered. */
   readonly startsAt: string | null;
   readonly endsAt: string | null;
+  /** DEC-CLOSING-SUMMARY: when this day's last published period ends; absent when not known. */
+  readonly closesAt?: string | null;
+  /** Hours are published and this day has none (a holiday, a day off). */
+  readonly closedToday?: boolean;
 }
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/u;
@@ -32,6 +36,8 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
   readonly observedAt: string;
   /** WP-2423 item 8 ③ follow-up: when guests stop ordering in the current period, or null. */
   readonly lastOrdersAt: string | null;
+  readonly closesAt: string | null;
+  readonly closedToday: boolean;
 } {
   const raw = value as Record<string, unknown> | null;
   const keys = [
@@ -42,6 +48,12 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
     "observedAt",
     ...(raw !== null && typeof raw === "object" && Object.hasOwn(raw, "lastOrdersAt")
       ? ["lastOrdersAt"]
+      : []),
+    ...(raw !== null && typeof raw === "object" && Object.hasOwn(raw, "closesAt")
+      ? ["closesAt"]
+      : []),
+    ...(raw !== null && typeof raw === "object" && Object.hasOwn(raw, "closedToday")
+      ? ["closedToday"]
       : []),
   ];
   if (
@@ -58,6 +70,8 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
     raw.timeZone.length === 0 ||
     raw.timeZone.length > 64 ||
     (raw.lastOrdersAt !== undefined && raw.lastOrdersAt !== null && !isInstant(raw.lastOrdersAt)) ||
+    (raw.closesAt !== undefined && raw.closesAt !== null && !isInstant(raw.closesAt)) ||
+    (raw.closedToday !== undefined && typeof raw.closedToday !== "boolean") ||
     !(raw.startsAt <= raw.observedAt && raw.observedAt < raw.endsAt) ||
     // A business day lasts 23 to 25 hours (daylight-saving changes included).
     Date.parse(raw.endsAt) - Date.parse(raw.startsAt) < 23 * 3_600_000 ||
@@ -71,6 +85,8 @@ export function parseStoreBusinessDay(value: unknown): StoreBusinessDay & {
     timeZone: raw.timeZone,
     observedAt: raw.observedAt,
     lastOrdersAt: (raw.lastOrdersAt as string | null | undefined) ?? null,
+    closesAt: (raw.closesAt as string | null | undefined) ?? null,
+    closedToday: raw.closedToday === true,
   });
 }
 
@@ -114,7 +130,13 @@ export const BUSINESS_DAY_RETRY_MS = 60_000;
  * recheck() reads at once when the known day has ended (a screen woken after the night).
  */
 export function trackStoreBusinessDay(options: {
-  load(signal: AbortSignal): Promise<{ businessDate: string; startsAt: string; endsAt: string }>;
+  load(signal: AbortSignal): Promise<{
+    businessDate: string;
+    startsAt: string;
+    endsAt: string;
+    closesAt?: string | null;
+    closedToday?: boolean;
+  }>;
   onDay(day: StoreBusinessDay): void;
   now?: () => number;
 }) {
@@ -143,6 +165,8 @@ export function trackStoreBusinessDay(options: {
           businessDate: value.businessDate,
           startsAt: value.startsAt,
           endsAt: value.endsAt,
+          ...(value.closesAt === undefined ? {} : { closesAt: value.closesAt }),
+          ...(value.closedToday === undefined ? {} : { closedToday: value.closedToday }),
         }),
       );
       schedule(Date.parse(value.endsAt) - now() + 1_000);
@@ -194,7 +218,9 @@ export function StoreBusinessDayProvider({
           previous !== null &&
           previous.businessDate === value.businessDate &&
           previous.startsAt === value.startsAt &&
-          previous.endsAt === value.endsAt
+          previous.endsAt === value.endsAt &&
+          previous.closesAt === value.closesAt &&
+          previous.closedToday === value.closedToday
             ? previous
             : value,
         ),

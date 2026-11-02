@@ -16,7 +16,7 @@ describe("contextual Dining admission screen", () => {
   it("offers one tap to join the scanned table, and the code entry only on request", () => {
     const html = renderToStaticMarkup(<DiningAdmissionView state="Ready" online />);
     expect(html).toContain("Join this table</button>");
-    expect(html).toContain("I have a table code");
+    expect(html).toContain("I have a join code");
     expect(html).not.toContain("<input");
   });
   it.each([
@@ -38,7 +38,7 @@ describe("contextual Dining admission screen", () => {
     expect(html).toContain('for="dining-join-credential"');
     expect(html).toContain('aria-describedby="dining-admission-help"');
     expect(html).not.toMatch(/value=|name=/u);
-    expect(html).toContain("for the table’s code");
+    expect(html).toContain("for the table’s join code");
   });
   it.each([
     ["Invalid", "Enter the six-digit code"],

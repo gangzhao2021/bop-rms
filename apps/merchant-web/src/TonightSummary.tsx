@@ -111,7 +111,7 @@ function Row({
 /**
  * WP-2423 item 8 ② (Figma 47-2): tonight's closing summary — today's report so far (the same
  * figures as the reports page and, once the day closes, the day-end settlement), what each
- * payment method took with a card-machine batch check and the drawer's table cash, the tables
+ * payment method took with a card-machine batch check and the table cash this system recorded, the tables
  * still open, and tonight's refunds and cancellations (listed, not sales).
  */
 export function TonightSummaryView({ summary }: { readonly summary: TonightSummary }) {
@@ -133,7 +133,7 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
   return (
     <div className="tonight">
       <header className="tonight__head">
-        <h2>{t("Tonight · {date}", { date: businessDateText(report.from) })}</h2>
+        <h2>{t("Today's summary · {date}", { date: businessDateText(report.from) })}</h2>
         <p>
           <span className="tonight__status" data-open={day?.status === "Open"}>
             {day?.status === "Open"
@@ -216,7 +216,10 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
               value={minus(cash.refundsMinor)}
               muted
             />
-            <Row label={t("Table cash that should be in the drawer")} value={money(drawer)} />
+            <Row
+              label={t("Table cash this system recorded (not the whole cash drawer)")}
+              value={money(drawer)}
+            />
           </dl>
         ) : null}
         <dl>
@@ -366,13 +369,13 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
         {matches ? null : (
           <p role="alert" className="command-error">
             {t(
-              "Some of tonight's payments are not counted in these figures yet. Refresh; if it stays, check the day in Settlement and tell the manager before closing.",
+              "Some of today's payments are not counted in these figures yet. Refresh; if it stays, check the day in Settlement and tell the manager before closing.",
             )}
           </p>
         )}
         <p className="tonight__detail">
           {t(
-            "These are the reports' figures for today so far, from the same records as tomorrow's day-end settlement. Payments taken after the business day ends count on the next day.",
+            "These are the reports' figures for today so far, from the same records as the settlement made when this business day ends. Payments taken after the business day ends count on the next day.",
           )}
         </p>
         <p className="tonight__links">
@@ -428,7 +431,7 @@ export function TonightReport({
   if (state.kind === "Loading")
     return (
       <p role="status" className="bop-muted">
-        {t("Reading tonight's figures…")}
+        {t("Reading today's figures…")}
       </p>
     );
   if (state.kind === "PermissionDenied")
@@ -480,7 +483,7 @@ function TonightOffline({
       {children ? <p>{children}</p> : null}
       <p>
         {t(
-          "Card and cash taken since then are not counted yet. At closing, check the card machine's batch and the drawer's table cash against your paper slips; once the slips are entered, this page and tomorrow's day-end settlement include them.",
+          "Card and cash taken since then are not counted yet. At closing, check the card machine's batch and the table cash this system recorded against your paper slips; once the slips are entered, this page and the settlement made when this business day ends include them.",
         )}
       </p>
     </section>

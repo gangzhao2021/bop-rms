@@ -148,7 +148,7 @@ describe("WP-2423 DEC-DINING-GUEST-INVITATION panel", () => {
     [{ status: "replaced" }, "This code was replaced. Make a new one."],
     [{ status: "ended" }, "This code no longer works. A staff member can give a code"],
     [{ status: "not-host" }, "Only the person who joined this table first can make codes."],
-    [{ status: "table-changed" }, "Ask a staff member for a code for your new table."],
+    [{ status: "table-changed" }, "Ask a staff member for a join code for your new table."],
     [
       { status: "too-many", retryAt: expiresAt },
       `You can make another at ${formatClockTime(expiresAt)}, or ask a staff member for one.`,

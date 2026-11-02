@@ -144,7 +144,7 @@ export function TablePanelPhones({
       </header>
       <p className="table-phones__mode">
         {state.paused
-          ? t("Joining by scan is paused. New guests need a table code from you or the host.")
+          ? t("Joining by scan is paused. New guests need a join code from you or the host.")
           : t("Guests join by scanning the table's QR code.")}
       </p>
       <ul className="table-phones__list">

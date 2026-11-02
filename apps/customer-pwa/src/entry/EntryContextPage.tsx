@@ -503,13 +503,13 @@ function EntryState({
       <div className="entry-state entry-state--warning" role="alert">
         <StateHeading headingRef={headingRef}>
           {state.replaced
-            ? t("This table code was replaced")
-            : t("This table code is no longer in use")}
+            ? t("This table QR code was replaced")
+            : t("This table QR code is no longer in use")}
         </StateHeading>
         <p>
           {state.replaced
-            ? t("This table code was replaced. Please ask a staff member.")
-            : t("This table code is no longer in use. Please ask a staff member.")}
+            ? t("This table QR code was replaced. Please ask a staff member.")
+            : t("This table QR code is no longer in use. Please ask a staff member.")}
         </p>
       </div>
     );

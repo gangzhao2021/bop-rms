@@ -126,7 +126,7 @@ export function TableQrCodesPage({
             value:
               tables.length === 1
                 ? "the code for table " + (tables[0]?.stableLabel ?? "")
-                : String(tables.length) + " table codes",
+                : String(tables.length) + " table QR codes",
           }) + t("Open it and print at 100% scale."),
       });
     } catch (error) {
@@ -136,7 +136,7 @@ export function TableQrCodesPage({
           error instanceof TableQrClientError && error.code === "Changed"
             ? t("A code changed since this page loaded. The list is refreshed; print again.")
             : error instanceof TableQrClientError && error.code === "PermissionDenied"
-              ? t("You don't have permission to print table codes.")
+              ? t("You don't have permission to print table QR codes.")
               : t("The codes could not be downloaded. Nothing changed; try again."),
       });
       if (error instanceof TableQrClientError && error.code === "Changed") refresh();
@@ -252,7 +252,7 @@ export function TableQrCodesPage({
                   "This table changed since the page loaded. The list is refreshed; check it and try again.",
                 )
               : code === "PermissionDenied"
-                ? t("You don't have permission to change table codes.")
+                ? t("You don't have permission to change table QR codes.")
                 : t("Nothing changed. Try again."),
         });
         refresh();
@@ -502,7 +502,7 @@ export function TableQrCodesPage({
                 "Guests are seated at this table now. Their phones stop working with this table's code and there is no new code to scan: they ask a staff member to order or pay. Their orders and bill are not affected.",
               )
             : t(
-                "Guests are seated at this table now. Their phones stop working with the old code: they scan the new code and enter the table's joining code again. Their orders and bill are not affected.",
+                "Guests are seated at this table now. Their phones stop working with the old code: they scan the new code and enter the table's join code again. Their orders and bill are not affected.",
               )}
         </p>
       ) : null}

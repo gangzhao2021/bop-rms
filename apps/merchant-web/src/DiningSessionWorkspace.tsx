@@ -354,7 +354,7 @@ export function tableAttentionNotices(
 }
 
 /**
- * A newly issued table entry code with what to do with it. Hiding the code hides the instruction
+ * A newly issued table join code with what to do with it. Hiding the code hides the instruction
  * too, so no sentence is left pointing at a code that is no longer shown.
  */
 export function DiningEntryCode({
@@ -368,9 +368,9 @@ export function DiningEntryCode({
     <div className="dining-entry-code">
       <p>{t("Share this one-time code with the party at this table.")}</p>
       <p>
-        {t("Entry code:")} <strong>{code}</strong>
+        {t("Join code:")} <strong>{code}</strong>
       </p>
-      <button onClick={onHide}>{t("Hide entry code")}</button>
+      <button onClick={onHide}>{t("Hide join code")}</button>
     </div>
   );
 }
@@ -485,7 +485,7 @@ export function DiningSessionWorkspace({
       /* The list still shows each table's own state; the dishes are read again with it. */
     }
   };
-  /** `background`: an automatic re-read; the selected table and any shown entry code stay. */
+  /** `background`: an automatic re-read; the selected table and any shown join code stay. */
   const load = async (more = false, background = false) => {
     if ((pending.current && !pending.current.signal.aborted) || state === "Unknown" || hostLocked)
       return;
@@ -591,7 +591,7 @@ export function DiningSessionWorkspace({
     if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 1023px)").matches)
       requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "start" }));
   };
-  /** Open a free table (or give a seated one a new entry code). Not confirmed: it says the code. */
+  /** Open a free table (or give a seated one a new join code). Not confirmed: it says the code. */
   const startSession = async (table: StaffDiningTable) => {
     if (
       paused ||
@@ -652,14 +652,14 @@ export function DiningSessionWorkspace({
         setResult({
           text: done.joinCredential
             ? opened
-              ? t("Table {table} is open. Give the guests the entry code below.", {
+              ? t("Table {table} is open. Give the guests the join code below.", {
                   table: saidTable(table.stableLabel),
                 })
-              : t("Table {table} has a new entry code; the old one no longer works.", {
+              : t("Table {table} has a new join code; the old one no longer works.", {
                   table: saidTable(table.stableLabel),
                 })
             : t(
-                "The request already completed. Its code cannot be displayed again. Replace the entry code to get a new one.",
+                "The request already completed. Its code cannot be displayed again. Replace the join code to get a new one.",
               ),
         });
         reread();
@@ -1532,8 +1532,8 @@ function TablePanel({
             onClick={onStart}
           >
             {state === "Unknown" && unknownAction === "Session"
-              ? t("Try the new entry code again")
-              : t("New entry code")}
+              ? t("Try the new join code again")
+              : t("New join code")}
           </button>
         ) : null}
         {seated && canTransferHost && table.currentDiningSessionReference ? (

@@ -291,7 +291,7 @@ test.describe("@production guests invite each other at the table", () => {
     await tableView(guest.page, false);
     await cart(guest.page, "guest");
     await guest.page.goto("/#qr=aaa.bbb.ccc");
-    await guest.page.getByRole("button", { name: "I have a table code" }).click();
+    await guest.page.getByRole("button", { name: "I have a join code" }).click();
     const field = guest.page.getByLabel("Join code or invitation", { exact: true });
     await expect(
       guest.page.getByText("Ask staff, or the person who joined your table first", {
@@ -309,7 +309,7 @@ test.describe("@production guests invite each other at the table", () => {
     const third = await phone("third");
     await joinRoutes(third.context);
     await third.page.goto("/#qr=aaa.bbb.ccc");
-    await third.page.getByRole("button", { name: "I have a table code" }).click();
+    await third.page.getByRole("button", { name: "I have a join code" }).click();
     await third.page.getByLabel("Join code or invitation", { exact: true }).fill(issuedCode);
     await third.page.getByRole("button", { name: "Join with this code", exact: true }).click();
     await expect(third.page.getByRole("alert")).toContainText(

@@ -53,13 +53,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Ask a staff member for an accessible ordering option. Tell staff about allergies before ordering; the QR code does not record allergy or health information.":
     "如需其他点单方式，请向店员求助。点单前请告知店员过敏情况；扫码点单不会记录过敏或健康信息。",
   "Ask a staff member if you need help.": "需要帮助请问店员。",
-  "Ask a staff member, or the person who joined your table first, for your table's code and enter it after scanning the table's QR code. Then you can see what your table has ordered.":
+  "Ask a staff member, or the person who joined your table first, for your table's join code and enter it after scanning the table's QR code. Then you can see what your table has ordered.":
     "请向店员或同桌最先加入的人索取入桌码，扫描桌上的二维码后输入，即可查看你们这桌点了什么。",
   "Ask staff before ordering. The menu never promises that an item is allergen-free, and staff can take your order another way.":
     "点单前请先询问店员。菜单从不保证任何商品不含过敏原，店员也可以用其他方式帮你点单。",
   "Ask staff for help continuing your order.": "请向店员求助以继续点单。",
   "Ask staff to order in person": "请向店员当面点单",
-  "Ask staff, or the person who joined your table first, for the table’s code. Scanning the table QR code alone does not join the table.":
+  "Ask staff, or the person who joined your table first, for the table’s join code. Scanning the table QR code alone does not join the table.":
     "请向店员或同桌最先加入的人索取入桌码。只扫描桌上的二维码并不会加入这一桌。",
   "Automatic checks stopped. Check again or contact the store.":
     "已停止自动检查。请再检查一次或联系门店。",
@@ -266,7 +266,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Part {number} paid by": "第 {number} 份付款方式",
   "We couldn’t load the receipt. Check your connection and try again.":
     "收据没能加载。请检查网络后重试。",
-  "New party? Scan the table code": "新的一桌？扫桌上的码",
+  "New party? Scan the table QR code": "新的一桌？扫桌台二维码",
   "Keep a copy": "保留一份",
   "Keep browsing": "继续浏览",
   "Keep them": "保留",
@@ -632,7 +632,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Someone joined with this code. For someone else, make another code.":
     "已有人用这个代码加入。如还有其他人，请再生成一个代码。",
   "Someone joining you? Make a code on this phone. They scan the QR code on the table, then enter the code to order with you.":
-    "有人要和你一起点单？在这部手机上生成代码，对方扫描桌上的二维码后输入代码，就能和你一起点单。",
+    "有人要和你一起点单？在这部手机上生成邀请码，对方扫描桌上的二维码后输入邀请码，就能和你一起点单。",
   "Something in your cart can’t be ordered as selected. Review your cart, then refresh.":
     "你购物车里有东西不能按所选方式下单。请检查购物车后刷新。",
   Sponsored: "赞助",
@@ -648,7 +648,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Status: "状态",
   "Status may be delayed": "状态可能延迟",
   "Status not confirmed": "状态未确认",
-  "Still at your table and want to order more? Scan the table QR code again. If it asks for a table code, a staff member can give it to you.":
+  "Still at your table and want to order more? Scan the table QR code again. If it asks for a join code, a staff member can give it to you.":
     "还在座位上想再点？请重新扫描桌上的二维码。如果需要入桌码，店员可以给你。",
   "Store handoff": "门店交接",
   "Store hours and address": "营业时间和地址",
@@ -800,11 +800,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This size is sold out": "这个规格已售罄",
   "This size is sold out right now. Please choose another size.":
     "这个规格目前已售罄，请选择其他规格。",
-  "This table code is no longer in use": "这个入桌码已停用",
-  "This table code is no longer in use. Please ask a staff member.":
-    "这个入桌码已停用，请询问店员。",
-  "This table code was replaced": "这个入桌码已被替换",
-  "This table code was replaced. Please ask a staff member.": "这个入桌码已被替换，请询问店员。",
+  "This table QR code is no longer in use": "这个桌台二维码已停用",
+  "This table QR code is no longer in use. Please ask a staff member.":
+    "这个桌台二维码已停用，请询问店员。",
+  "This table QR code was replaced": "这个桌台二维码已被替换",
+  "This table QR code was replaced. Please ask a staff member.":
+    "这个桌台二维码已被替换，请询问店员。",
   Tip: "小费",
   "Tip ({symbol})": "小费（{symbol}）",
   "Tip amount": "小费金额",
@@ -1014,7 +1015,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你在 {storeDisplayName} 的堂食桌位已确认。",
   "Your table connection is confirmed. You can continue to the menu. No order has been placed.":
     "已确认你的桌位，可以继续查看菜单。尚未下单。",
-  "Your table was changed. Ask a staff member for a code for your new table.":
+  "Your table was changed. Ask a staff member for a join code for your new table.":
     "你的桌位已更换，请向店员索取新桌位的入桌码。",
   "Your table · {tableLabel}": "你的桌位 · {tableLabel}",
   "Your table's earlier cart timed out, so items that hadn't been ordered were cleared. Orders already placed are not affected.":
@@ -1240,8 +1241,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Still to pay": "还要付",
   "The table is paying the bill in {count} parts; {paid} paid so far. Each part has its own tip, and cash is rounded to the nearest 5 cents.":
     "这桌分成 {count} 份付款，已付 {paid} 份。每份各自加小费，现金按 5 分取整。",
-  "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s code.":
-    "店员暂停了这桌的扫码加入。请向店员或先入桌的人要桌码。",
+  "Staff have paused joining by scan at this table. Ask staff, or the person who joined first, for the table’s join code.":
+    "店员暂停了这桌的扫码加入。请向店员或先入桌的人要入桌码。",
   "This table isn’t open yet. Please ask staff to seat you.": "这张桌还没开台，请找店员。",
   "This table is paying the bill, so no one new can join. Please ask staff.":
     "这张桌正在结账，不能再加入。请找店员。",
@@ -1249,10 +1250,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张桌刚加入了很多手机，请找店员帮忙。",
   "Tap to join the people at this table. You don’t need an account.":
     "点一下就能和同桌的人一起点餐，不用注册账号。",
-  "I have a table code": "我有桌码",
-  "Ask staff, or the person who joined your table first, for the table’s code.":
-    "请向店员或先入桌的人要桌码。",
-  "Join with this code": "用桌码加入",
+  "I have a join code": "我有入桌码",
+  "Ask staff, or the person who joined your table first, for the table’s join code.":
+    "请向店员或先入桌的人要入桌码。",
+  "Join with this code": "用入桌码加入",
   "Look at the menu first": "先看看菜单",
   "Waiting for staff to confirm": "等店员确认",
   "This is the first round from this phone, so staff confirm it before the kitchen.":
@@ -1277,9 +1278,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your table moved to table {table}": "您这桌已换到 {table} 桌",
   "Your table was merged into table {table}": "你们这桌已并到 {table} 桌",
   "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.":
-    "店员已把你们并到 {table} 桌，你们点过的菜都在那桌的账单上。请扫 {table} 桌的桌码继续点餐和一起付款。",
+    "店员已把你们并到 {table} 桌，你们点过的菜都在那桌的账单上。请扫 {table} 桌的桌台二维码继续点餐和一起付款。",
   "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.":
-    "店员已把您这桌换到 {table} 桌，已点的菜和账单都一起转过去了。请扫 {table} 桌的桌码，继续一起点单和付款。",
+    "店员已把您这桌换到 {table} 桌，已点的菜和账单都一起转过去了。请扫 {table} 桌的桌台二维码，继续一起点单和付款。",
   "isn’t taking orders yet": "暂时还不能下单",
   "This store is still getting ready. Please ask a staff member, or try again later.":
     "这家店还在准备中。请询问店员，或稍后再试。",

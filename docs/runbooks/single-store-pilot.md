@@ -818,17 +818,17 @@ Do these in order, before resuming online ordering.
 
 ### 5b. Closing up during or after an outage (WP-2423 item 8 ②)
 
-`Reports` → `Tonight` is the closing summary (sales, what each payment method took, the tables
-still open, tonight's cancellations). If it can't reach the store system it keeps the last figures
+`Reports` → `Today's summary` is the closing summary (sales, what each payment method took, the tables
+still open, today's cancellations). If it can't reach the store system it keeps the last figures
 with their time ("Can't reach the store system · showing the figures from …"); card and cash taken
 since then are not in them. At closing:
 
 1. Run the card machine's batch (settlement) and compare its total with "Card machine … taken" less
    card refunds, plus the card-machine slips on the incident sheet taken after that time.
-2. Count the table cash: "Table cash that should be in the drawer" plus the cash on the incident
+2. Count the table cash: "Table cash this system recorded (not the whole cash drawer)" plus the cash on the incident
    sheet. The drawer also holds cash from the merchant's own register; count it separately.
 3. Write any difference on the incident sheet. Once the paper slips are entered (step 5), refresh
-   `Tonight`: it and the next day's settlement include them.
+   `Today's summary`: it and that business day's settlement include them.
 
 ### 6. Day-end reconciliation after an outage day
 
