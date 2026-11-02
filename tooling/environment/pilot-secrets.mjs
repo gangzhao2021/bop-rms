@@ -49,6 +49,8 @@ export const MANAGED_SECRET_KEYS = Object.freeze([
   // DEC-PILOT-INSTALLATION: one-time order links sent to guests (DEC-PILOT-NOTIFICATIONS R1).
   Object.freeze({ name: "order-recovery-pepper", purpose: "order links", versioned: true }),
   Object.freeze({ name: "order-recovery-abuse-key", purpose: "order link request limits" }),
+  // WP-2423 取舍 18 DEC-MEMBER-POINTS: protects member phone numbers, codes and sessions.
+  Object.freeze({ name: "member-contact-key", purpose: "member phone numbers" }),
 ]);
 /** Table QR signing: current private key and kid, optional previous public key (Overlap). */
 export const QR_SECRET_FILES = Object.freeze({

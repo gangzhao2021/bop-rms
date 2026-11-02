@@ -57,6 +57,12 @@ import {
 import { createMerchantDiningUnpaidDeparture } from "../../../apps/api/src/merchant-dining-unpaid-departure.ts";
 import { createMerchantDiningUnpaidItemRemoval } from "../../../apps/api/src/merchant-dining-unpaid-item-removal.ts";
 import { createMerchantDiningItemComp } from "../../../apps/api/src/merchant-dining-item-comp.ts";
+import { createCustomerMember } from "../../../apps/api/src/customer-member.ts";
+import { createMemberPointsSweep } from "../../../apps/api/src/member-points-sweep.ts";
+import {
+  createMemberPhoneProtector,
+  createMemberPointsStore,
+} from "../../rms/customer-loyalty/src/index.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
 import { loadStoreSalesReportSources } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
 import { readTonightFacts } from "../../../apps/api/src/merchant-tonight-summary.ts";
@@ -178,6 +184,13 @@ it("a table's bill is charged its whole-bill tax; the rounding is recorded and p
 // paid once, by its own method, with its own tip and cash rounding; a whole-table payment, a
 // second payment of a part and a new split once paying started are all refused.
 it("a table splits the bill evenly and pays it part by part", () => journey("PaidSplit"));
+// WP-2423 取舍 18 DEC-MEMBER-POINTS: points on a real bill: a comp and a redemption come off what
+// earns, tax and tip never earn, the reports and settlement still agree, refunds take back.
+it("a member earns and spends points on a table's bill, and the books still agree", () =>
+  journey("MemberPoints"));
+it("each paid part of a split bill earns on its own, once, and answers for its own refund", () =>
+  journey("MemberPointsSplit"));
+it("points spent on a table that never paid come back", () => journey("MemberPointsWrittenOff"));
 // WP-2423 item 8 ④: a split table pays one part in cash (some of it refunded), the guests leave;
 // the manager writes off exactly the parts still unpaid, and the day's ledger keeps each.
 it("a split table that paid one part and left is written off for the rest", () =>
@@ -274,21 +287,27 @@ async function journey(ending) {
                 ? "wp2423_plcomp"
                 : ending === "CompedWhole"
                   ? "wp2423_plcwhole"
-                  : ending === "PaidSplit"
-                    ? "wp2423_plsplit"
-                    : ending === "SplitWrittenOff"
-                      ? "wp2423_plsplwo"
-                      : ending === "Held"
-                        ? "wp2423_plheld"
-                        : ending === "TipsOff"
-                          ? "wp2423_pltips"
-                          : ending === "TeaCharge"
-                            ? "wp2423_pltea"
-                            : ending === "Moved"
-                              ? "wp2423_plmove"
-                              : ending === "Merged"
-                                ? "wp2423_plmerge"
-                                : "wp2423_plon",
+                  : ending === "MemberPoints"
+                    ? "wp2423_plmember"
+                    : ending === "MemberPointsSplit"
+                      ? "wp2423_plmembsp"
+                      : ending === "MemberPointsWrittenOff"
+                        ? "wp2423_plmembwo"
+                        : ending === "PaidSplit"
+                          ? "wp2423_plsplit"
+                          : ending === "SplitWrittenOff"
+                            ? "wp2423_plsplwo"
+                            : ending === "Held"
+                              ? "wp2423_plheld"
+                              : ending === "TipsOff"
+                                ? "wp2423_pltips"
+                                : ending === "TeaCharge"
+                                  ? "wp2423_pltea"
+                                  : ending === "Moved"
+                                    ? "wp2423_plmove"
+                                    : ending === "Merged"
+                                      ? "wp2423_plmerge"
+                                      : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -2384,7 +2403,7 @@ async function journey(ending) {
           return;
         }
         // The Comped ending keeps round 2 on the bill: its one dish is comped instead (v15 case).
-        if (ending !== "Comped" && ending !== "TaxRounding") {
+        if (ending !== "Comped" && ending !== "TaxRounding" && !ending.startsWith("MemberPoints")) {
           const removeOperation = fresh();
           const beforeRemoval = await versionNow();
           // Without the cancel permission nothing is written.
@@ -2462,7 +2481,7 @@ async function journey(ending) {
         // Round 2's only dish came off: the whole round is off the bill (it owes nothing).
         assert.equal(items2.length, 1);
         const removedMinor =
-          ending === "Comped" || ending === "TaxRounding"
+          ending === "Comped" || ending === "TaxRounding" || ending.startsWith("MemberPoints")
             ? 0n
             : items2[0].pricing.total.amountMinor;
         // Paying before checkout started is refused: rounds can still be added.
@@ -2475,7 +2494,8 @@ async function journey(ending) {
         const round1Minor = items1.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
         const round2Minor =
           items2.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n) - removedMinor;
-        if (ending !== "Comped" && ending !== "TaxRounding") assert.equal(round2Minor, 0n);
+        if (ending !== "Comped" && ending !== "TaxRounding" && !ending.startsWith("MemberPoints"))
+          assert.equal(round2Minor, 0n);
         const open = await bill();
         assert.equal(open.paymentTiming, "PayLater");
         assert.equal(open.sessionPhase, "Closing");
@@ -2834,6 +2854,7 @@ async function journey(ending) {
           if (
             ending !== "Comped" &&
             ending !== "TaxRounding" &&
+            !ending.startsWith("MemberPoints") &&
             ending !== "Merged" &&
             cooked === orderReference
           ) {
@@ -4274,6 +4295,399 @@ async function journey(ending) {
             })(tx, window),
           );
           assert.deepEqual([captures.captureCount, captures.capturedAmountMinor], [1, due]);
+        }
+        if (ending.startsWith("MemberPoints")) {
+          const protector = createMemberPhoneProtector(Uint8Array.from({ length: 32 }, () => 9));
+          const clock = () => new Date().toISOString();
+          const sent = [];
+          const messages = {
+            send: async (message) => {
+              sent.push(message);
+            },
+          };
+          const switchLoyalty = async (on) => {
+            const [current] = await rows(
+              "SELECT coalesce(max(version),0) v FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2",
+              [scope.brandReference, scope.storeReference],
+            );
+            await admin.query(
+              "INSERT INTO rms_store.store_feature_setting (tenant_id,brand_id,store_id,version,operation_id,template_code,counter_order,pickup,inventory,loyalty,compliance_documents,actor_id,occurred_at) " +
+                "VALUES ($1,$2,$3,$4,$5,'Custom',false,false,false,$6,false,$7,date_trunc('milliseconds',now()))",
+              [
+                tenant,
+                scope.brandReference,
+                scope.storeReference,
+                Number(current.v) + 1,
+                fresh(),
+                on,
+                fresh(),
+              ],
+            );
+          };
+          const access = {
+            scope,
+            transactions: transactions(),
+            credentials: tablePhone.identity.session.credentials,
+            now: clock,
+            binding: () => ({ validate: async () => "Current" }),
+          };
+          const port = createCustomerMember({
+            access,
+            tenantReference: tenant,
+            protector,
+            messages,
+            budget: { consume: async () => ({ allowed: true, retryAfterSeconds: 0 }) },
+            nextReference: fresh,
+          });
+          const guest = (memberToken = null) => ({
+            sessionCredential: tablePhone.sessionCredential,
+            csrfCredential: tablePhone.csrfCredential,
+            memberToken,
+          });
+          const ledger = createMemberPointsStore({
+            brandReference: scope.brandReference,
+            storeReference: scope.storeReference,
+            nextReference: fresh,
+            now: clock,
+            protector,
+          });
+          const sweep = createMemberPointsSweep({
+            scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+            transactions: transactions(),
+            protector,
+            messages,
+            nextReference: fresh,
+            now: clock,
+          });
+          const join = async (phone) => {
+            await port.sendCode(guest(), phone, "198.51.100.8");
+            const code = /(\d{6})/u.exec(sent.at(-1).text)[1];
+            const joined = await port.verify(
+              guest(),
+              { phone, code, marketingConsent: false, claim: false, partNumber: null },
+              "198.51.100.8",
+            );
+            assert.equal(joined.joined, true);
+            return joined.token;
+          };
+          const accountOf = (token) =>
+            transactions().run((tx) => ledger.memberOfSession(tx, token));
+          const pointsOf = async (token) => (await port.home(guest(token))).availablePoints;
+          const refundCash = (amountMinor, partNumber) =>
+            createMerchantDiningTableCashRefund({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+              nextReference: fresh,
+            })({
+              ...as(manager),
+              command: {
+                orderReference,
+                operationReference: fresh(),
+                amountMinor,
+                reasonCode: "FOOD_ISSUE",
+                ...(partNumber === undefined ? {} : { partNumber }),
+              },
+            });
+          const reportAddsUp = async () => {
+            const report = await transactions().run((tx) => ledger.report(tx));
+            assert.equal(
+              report.issuedPoints + report.returnedPoints + report.owedPoints,
+              report.usedPoints +
+                report.reversedPoints +
+                report.expiredPoints +
+                report.forfeitedPoints +
+                report.outstandingPoints,
+              JSON.stringify(report),
+            );
+            return report;
+          };
+
+          // Off by default: nothing is offered, and ordering never needed any of it.
+          assert.deepEqual(await port.state(guest()), { offered: false, signedIn: false });
+          await switchLoyalty(true);
+          assert.equal((await port.state(guest())).offered, true);
+          assert.equal((await port.state(guest())).claim, null, "nothing paid yet");
+
+          if (ending === "MemberPointsSplit") {
+            const first = await join("+16135550111"),
+              second = await join("+16135550112");
+            const split = await createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "Even",
+                people: 3,
+                rounds: null,
+              },
+            });
+            assert.equal(split.status, "Recorded");
+            const parts = split.bill.split.parts;
+            // Points can't be used on a split bill: its parts were worked out without them.
+            await assert.rejects(
+              port.redeem(guest(first), {
+                operationReference: fresh(),
+                points: 300,
+                rewardProductReference: null,
+              }),
+              { code: "MEMBER_REDEEM_SPLIT" },
+            );
+            const pay = (partNumber) =>
+              settleWith(server, {
+                partNumber,
+                tip: { kind: "Percent", percent: 15 },
+                tenderedMinor: "100000",
+              });
+            await pay(1);
+            await pay(2);
+            const state = await port.state(guest(first));
+            const expected = (part) => Number((BigInt(part.subtotalMinor) * 3n) / 100n);
+            assert.deepEqual(state.claim.parts, [
+              { partNumber: 1, points: expected(parts[0]) },
+              { partNumber: 2, points: expected(parts[1]) },
+            ]);
+            // Two unclaimed parts: this phone says which is theirs.
+            await assert.rejects(port.claim(guest(first), null), {
+              code: "MEMBER_NOTHING_TO_CLAIM",
+            });
+            assert.equal((await port.claim(guest(first), 1)).earnedPoints, expected(parts[0]));
+            assert.equal((await port.claim(guest(second), 2)).earnedPoints, expected(parts[1]));
+            // Each part once, by anyone; the unpaid part has nothing to earn yet.
+            await assert.rejects(port.claim(guest(second), 1), { code: "MEMBER_NOTHING_TO_CLAIM" });
+            await assert.rejects(port.claim(guest(first), 3), { code: "MEMBER_NOTHING_TO_CLAIM" });
+            await pay(3);
+            assert.equal((await port.claim(guest(second), 3)).earnedPoints, expected(parts[2]));
+            await assertSalesCountEveryRoundOnce();
+            // A refund of part 1 takes back only part 1's points.
+            const secondBefore = await pointsOf(second);
+            const part1Total = BigInt((await bill()).split.parts[0].payment.totalMinor);
+            assert.equal((await refundCash("500", 1)).status, "Recorded");
+            assert.ok((await sweep.settlePoints()) > 0);
+            assert.equal(
+              await pointsOf(first),
+              expected(parts[0]) - Math.floor((expected(parts[0]) * 500) / Number(part1Total)),
+            );
+            assert.equal(await pointsOf(second), secondBefore);
+            assert.equal(await sweep.settlePoints(), 0, "running it again changes nothing");
+            await reportAddsUp();
+            return;
+          }
+
+          const token = await join("+16135550121");
+          assert.ok(!sent.at(-1).text.includes("6135550121"), "a message never quotes the number");
+          const account = await accountOf(token);
+          // Points from an earlier visit at another payment.
+          await transactions().run(async (tx) =>
+            ledger.earn(tx, {
+              accountReference: account,
+              sourceReference: fresh(),
+              orderReference: fresh(),
+              paidDishesMinor: 33_400n,
+              rule: await ledger.currentRule(tx),
+            }),
+          );
+          assert.equal(await pointsOf(token), 1002);
+
+          if (ending === "MemberPointsWrittenOff") {
+            // Two redemptions of one balance at once, with dishes for both: the second waits and
+            // finds the balance gone; it leaves no reduction behind.
+            const raced = await Promise.allSettled([
+              port.redeem(guest(token), {
+                operationReference: fresh(),
+                points: 600,
+                rewardProductReference: null,
+              }),
+              port.redeem(guest(token), {
+                operationReference: fresh(),
+                points: 600,
+                rewardProductReference: null,
+              }),
+            ]);
+            assert.deepEqual(raced.map((result) => result.status).sort(), [
+              "fulfilled",
+              "rejected",
+            ]);
+            assert.equal(
+              raced.find((result) => result.status === "rejected").reason.code,
+              "MEMBER_NOT_ENOUGH_POINTS",
+            );
+            assert.equal(await pointsOf(token), 402);
+            const [reduced] = await rows(
+              "SELECT sum(total_minor)::text t,sum(net_minor)::text n FROM rms_ordering.order_item_price_reduction WHERE reason_code='POINTS_REDEMPTION'",
+            );
+            const [spentOn] = await rows(
+              "SELECT sum(total_minor)::text t,sum(points)::text p FROM rms_loyalty.loyalty_redemption",
+            );
+            assert.deepEqual([reduced.t, reduced.n, spentOn.p], [spentOn.t, "600", "600"]);
+            const served = await cookAndServeRound1([round1, round2]);
+            const left = await departure(manager, served.currentOrderVersion);
+            assert.ok(left);
+            assert.ok((await sweep.settlePoints()) > 0);
+            assert.equal(await pointsOf(token), 1002, "a bill that was never paid gives them back");
+            assert.equal(await sweep.settlePoints(), 0);
+            await assertSalesCountEveryRoundOnce();
+            await reportAddsUp();
+            return;
+          }
+
+          // A manager comps a served dish: it earns nothing.
+          await cookAndServeRound1([round1, round2]);
+          const compedDish = price(items2[0]);
+          await comp(manager, { orderItemReferences: [String(items2[0].orderItemReference)] });
+          const options = await port.redemptionOptions(guest(token));
+          assert.equal(options.available, true);
+          assert.equal(options.availablePoints, 1002);
+
+          // Refused amounts change nothing.
+          for (const [points, code] of [
+            [250, "MEMBER_REDEEM_INVALID"],
+            [350, "MEMBER_REDEEM_INVALID"],
+            [1100, "MEMBER_NOT_ENOUGH_POINTS"],
+          ])
+            await assert.rejects(
+              port.redeem(guest(token), {
+                operationReference: fresh(),
+                points,
+                rewardProductReference: null,
+              }),
+              { code },
+            );
+          const before = await bill();
+          const operation = fresh();
+          const redeemed = await port.redeem(guest(token), {
+            operationReference: operation,
+            points: 300,
+            rewardProductReference: null,
+          });
+          assert.equal(redeemed.status, "Recorded");
+          // The same request again: its result, not a second redemption.
+          assert.equal(
+            (
+              await port.redeem(guest(token), {
+                operationReference: operation,
+                points: 300,
+                rewardProductReference: null,
+              })
+            ).status,
+            "AlreadyRecorded",
+          );
+          assert.equal(await pointsOf(token), 702);
+          // $3.00 off the dishes; the tax on it comes off too, never paid by points on its own.
+          const after = await bill();
+          assert.equal(BigInt(before.owed.subtotalMinor) - BigInt(after.owed.subtotalMinor), 300n);
+          assert.equal(
+            BigInt(before.owed.totalMinor) - BigInt(after.owed.totalMinor),
+            BigInt(redeemed.takenOffMinor),
+          );
+
+          // Every record names who: never a staff member's permission for a guest's points.
+          const permissions = await rows(
+            "SELECT DISTINCT permission_code p FROM rms_ordering.order_item_price_reduction WHERE reason_code='POINTS_REDEMPTION'",
+          );
+          assert.deepEqual(permissions, [{ p: "loyalty.points.redeem" }]);
+
+          // The table pays with a tip. Points earn on what the dishes cost after the comp and the
+          // points: not tax, not the tip.
+          const owed = await bill();
+          const settled = await settleWith(server, {
+            tip: { kind: "Percent", percent: 15 },
+            tenderedMinor: "100000",
+          });
+          assert.ok(BigInt(settled.bill.settlement.tipMinor) > 0n);
+          const dishes = BigInt(owed.owed.subtotalMinor);
+          assert.equal(
+            dishes,
+            BigInt(open.owed.subtotalMinor) - compedDish.net - 300n,
+            "the comp and the points are not what earns",
+          );
+          const expected = Number((dishes * 3n) / 100n);
+          assert.deepEqual((await port.state(guest(token))).claim.parts, [
+            { partNumber: null, points: expected },
+          ]);
+          assert.equal((await port.claim(guest(token), null)).earnedPoints, expected);
+          await assert.rejects(port.claim(guest(token), null), { code: "MEMBER_NOTHING_TO_CLAIM" });
+
+          // A redemption is a discount: the sale stands, the reports and settlement still agree.
+          const report = await assertSalesCountEveryRoundOnce();
+          assert.equal(
+            BigInt(report.summary.compsMinor),
+            compedDish.net + 300n,
+            "reports show what came off, nothing hidden",
+          );
+          assert.equal(
+            BigInt(report.summary.grossSalesMinor),
+            BigInt(open.owed.subtotalMinor),
+            "the sale stays recorded at its price",
+          );
+
+          // Part of it refunded: the same share of what was earned and spent follows.
+          const paidMinor = BigInt(settled.bill.settlement.totalMinor);
+          const balance = await pointsOf(token);
+          assert.equal((await refundCash("1000")).status, "Recorded");
+          assert.ok((await sweep.settlePoints()) > 0);
+          const reversed = Number((BigInt(expected) * 1000n) / paidMinor);
+          const returned = Number((300n * 1000n) / paidMinor);
+          assert.equal(await pointsOf(token), balance - reversed + returned);
+          assert.equal(await sweep.settlePoints(), 0, "running it again changes nothing");
+          await assertSalesCountEveryRoundOnce();
+
+          // The rest refunded: all of it, what was already spent becoming a debt.
+          const spendable = await pointsOf(token);
+          await transactions().run(async (tx) =>
+            ledger.redeem(tx, {
+              accountReference: account,
+              operationReference: fresh(),
+              orderReference: fresh(),
+              points: spendable,
+              netMinor: 1n,
+              totalMinor: 1n,
+              rewardProductReference: null,
+              rule: await ledger.currentRule(tx),
+            }),
+          );
+          assert.equal((await refundCash((paidMinor - 1000n).toString())).status, "Recorded");
+          assert.ok((await sweep.settlePoints()) > 0);
+          const home = await port.home(guest(token));
+          assert.equal(home.availablePoints, Math.max(0, 300 - returned - (expected - reversed)));
+          assert.equal(home.pointsOwed, Math.max(0, expected - reversed - (300 - returned)));
+          await reportAddsUp();
+
+          // The Store switches points off: nothing new here, what they have is untouched, and
+          // leaving still works.
+          const kept = await pointsOf(token);
+          await switchLoyalty(false);
+          assert.deepEqual(await port.state(guest(token)), { offered: false, signedIn: false });
+          await assert.rejects(
+            port.redeem(guest(token), {
+              operationReference: fresh(),
+              points: 300,
+              rewardProductReference: null,
+            }),
+            { code: "MEMBER_NOT_OFFERED" },
+          );
+          const offHome = await port.home(guest(token));
+          assert.equal(offHome.offeredHere, false);
+          assert.equal(offHome.availablePoints, kept);
+          assert.deepEqual(await sweep.expirePoints(), { notified: 0, expired: 0 });
+          await port.leave(guest(token));
+          await assert.rejects(port.home(guest(token)), { code: "MEMBER_SIGN_IN_REQUIRED" });
+          const [phones] = await rows(
+            "SELECT count(*)::int n FROM rms_loyalty.loyalty_member_contact",
+          );
+          assert.equal(phones.n, 0);
+          const final = await reportAddsUp();
+          assert.equal(final.members, 0);
+          await assertSalesCountEveryRoundOnce();
+          // The phone number is nowhere in the ledger or the audit trail.
+          const trail = await rows(
+            "SELECT count(*)::int n FROM platform_audit.audit_record a WHERE a::text LIKE '%6135550121%'",
+          );
+          assert.equal(trail[0].n, 0);
+          return;
         }
         if (ending === "WrittenOff") {
           await writtenOffEnding();

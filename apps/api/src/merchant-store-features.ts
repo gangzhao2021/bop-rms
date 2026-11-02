@@ -729,3 +729,17 @@ export function tipRefusal(
     return "TipChoicesChanged";
   return null;
 }
+
+/**
+ * WP-2423 取舍 18: points are off until the Store turns them on. A Store that never chose anything
+ * keeps its other modules (version 0), but not this one: nobody is enrolled by a default.
+ */
+export async function storeOffersPoints(
+  tx: QueryTransaction,
+  scope: { brandReference: string; storeReference: string },
+): Promise<boolean> {
+  const setting = (await readStoreFeatures(tx, scope, "Refuse")) as StoreFeatureModules & {
+    readonly version?: number;
+  };
+  return setting.loyalty === true && (setting.version ?? 0) >= 1;
+}
