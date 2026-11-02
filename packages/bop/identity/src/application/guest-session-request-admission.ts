@@ -1,13 +1,18 @@
 import { parseCanonicalInstant, parseOpaqueUuidV7 } from "../contracts/identity-actor.js";
 
 export const guestSessionAbusePolicy = Object.freeze({
-  version: "GUEST_SESSION_ABUSE_V1",
+  version: "GUEST_SESSION_ABUSE_V2",
   windowSeconds: 600,
-  ipLimit: 20,
+  // WP-2423 (v15 rush 2026-11-02): per address per Store, sized for one busy restaurant's Wi-Fi or
+  // one carrier address: a full 60-seat room turning over, some rescanning, within ten minutes.
+  ipLimit: 120,
   storeLimit: 300,
 });
 export interface GuestSessionAbuseKeys {
-  ip(address: string): Uint8Array;
+  ip(
+    address: string,
+    scope: Readonly<{ brandReference: string; storeReference: string }>,
+  ): Uint8Array;
   store(scope: Readonly<{ brandReference: string; storeReference: string }>): Uint8Array;
 }
 export interface GuestSessionAbuseBudget {
@@ -74,11 +79,19 @@ export function createGuestSessionRequestAdmission(options: {
       try {
         const at = String(parseCanonicalInstant(now()));
         const requestedAt = String(parseCanonicalInstant(input.requestedAt));
-        if (requestedAt > at || typeof input.remoteAddress !== "string")
-          return { status: "Unavailable" };
-        const ip = await consume(keys.ip(input.remoteAddress), guestSessionAbusePolicy.ipLimit, at);
-        if (!ip.allowed)
-          return { status: "RateLimited", retryAfterSeconds: ip.retry_after_seconds };
+        if (requestedAt > at) return { status: "Unavailable" };
+        // No true address (behind a hop that doesn't state one): the Store's limit alone, never
+        // one key shared by everyone.
+        if (input.remoteAddress !== null) {
+          if (typeof input.remoteAddress !== "string") return { status: "Unavailable" };
+          const ip = await consume(
+            keys.ip(input.remoteAddress, scope),
+            guestSessionAbusePolicy.ipLimit,
+            at,
+          );
+          if (!ip.allowed)
+            return { status: "RateLimited", retryAfterSeconds: ip.retry_after_seconds };
+        }
         const store = await consume(keys.store(scope), guestSessionAbusePolicy.storeLimit, at);
         return store.allowed
           ? { status: "Allowed" }

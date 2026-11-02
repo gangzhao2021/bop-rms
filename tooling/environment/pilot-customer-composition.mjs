@@ -133,6 +133,7 @@ export function composeCustomerDependencies(directory, installation, config, hos
   return {
     // hosting.json customerOrigin: exact Origin/Host the customer and staff pages are served on.
     publicOrigin: hosting?.origin ?? INTERNAL_CUSTOMER_ORIGIN,
+    stateClientAddress: hosting?.clientAddress === "connection",
     paymentChannel: "InternalTestOnlineCardAutomatic",
     ...account,
     createInternalCustomerEntry: entry,

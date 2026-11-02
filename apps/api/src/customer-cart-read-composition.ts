@@ -1,3 +1,4 @@
+import { logGuestFailure } from "./guest-failure-log.js";
 import { CartError, type CustomerCartDisplayView } from "@rms/ordering";
 import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
 
@@ -26,9 +27,10 @@ export function createCustomerCartReadPort(query: CustomerCartDisplayQuery): Cus
       const view = await readCartView(query, input, displayLocale);
       return view === null ? { status: "NotFound" } : { status: "Found", view };
     } catch (error) {
-      return error instanceof CartError && error.code === "CART_PERMISSION_DENIED"
-        ? { status: "SessionExpired" }
-        : unavailable;
+      if (error instanceof CartError && error.code === "CART_PERMISSION_DENIED")
+        return { status: "SessionExpired" };
+      logGuestFailure("CUSTOMER_CART_READ_UNAVAILABLE", error);
+      return unavailable;
     }
   };
   return Object.freeze({

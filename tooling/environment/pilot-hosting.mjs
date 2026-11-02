@@ -10,6 +10,8 @@
 //     "secretsDirectory": "/run/secrets/bop-rms",   // Pilot only: one value per file (0400)
 //     "tls": { "mode": "front", "certificateFile": "/run/tls/fullchain.pem",
 //              "keyFile": "/run/tls/privkey.pem" }  // or { "mode": "proxy" }
+//     "clientAddress": "connection"                 // only if a connection's peer at `front` is the
+//                                                   // guest (no port forward or balancer hides them)
 //   }
 import { X509Certificate, createPrivateKey } from "node:crypto";
 import fs from "node:fs/promises";
@@ -79,9 +81,17 @@ export function parsePilotHosting(value, options) {
       ...parsePublicOrigin(INTERNAL_CUSTOMER_ORIGIN),
       secretsDirectory: null,
       tls: Object.freeze({ mode: "internal" }),
+      clientAddress: null,
     });
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail("keys");
-  const allowed = ["schemaVersion", "environment", "customerOrigin", "secretsDirectory", "tls"];
+  const allowed = [
+    "schemaVersion",
+    "environment",
+    "customerOrigin",
+    "secretsDirectory",
+    "tls",
+    "clientAddress",
+  ];
   if (Object.keys(value).some((key) => !allowed.includes(key))) return fail("keys");
   if (value.schemaVersion !== 1) return fail("schemaVersion");
   if (!matchesPilotEnvironment(value.environment, options)) return fail("environment");
@@ -93,6 +103,9 @@ export function parsePilotHosting(value, options) {
   // DEMO staff login and simulated payments are never served on a public name either.
   else if (value.secretsDirectory !== undefined) return fail("secretsDirectory");
   else if (origin.origin !== INTERNAL_CUSTOMER_ORIGIN) return fail("customerOrigin.internal-test");
+  if (value.clientAddress !== undefined && value.clientAddress !== "connection")
+    return fail("clientAddress");
+  const clientAddress = value.clientAddress ?? null;
   let mode = Object.freeze({ mode: "internal" });
   if (value.tls !== undefined) {
     const t = value.tls;
@@ -109,7 +122,7 @@ export function parsePilotHosting(value, options) {
       mode = Object.freeze({ mode: "proxy" });
     } else return fail("tls.mode");
   }
-  return Object.freeze({ configured: true, ...origin, secretsDirectory, tls: mode });
+  return Object.freeze({ configured: true, ...origin, secretsDirectory, tls: mode, clientAddress });
 }
 
 export async function loadPilotHosting(runtimeDirectory, options) {

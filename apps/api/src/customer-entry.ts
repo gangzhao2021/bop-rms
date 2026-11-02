@@ -1,3 +1,4 @@
+import { trustedClientAddress } from "./client-address.js";
 import {
   serializeGuestSessionCookie,
   type GuestRawCredential,
@@ -577,7 +578,7 @@ export class CustomerEntryHandler {
         const requestedAt = parseCanonicalInstant(this.#now());
         const admission = await this.#requestAdmission?.consume(
           Object.freeze({
-            remoteAddress: request.socket.remoteAddress ?? null,
+            remoteAddress: trustedClientAddress(request),
             requestedAt,
           }),
         );

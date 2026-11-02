@@ -1,3 +1,4 @@
+import { trustedClientAddress } from "./client-address.js";
 import {
   OrderRecoveryError,
   serializeGuestSessionCookie,
@@ -104,7 +105,8 @@ export function createCustomerOrderRecoveryHandler(options: {
     try {
       const result = await options.port({
         token: value,
-        peerAddress: request.socket.remoteAddress ?? "",
+        // Unknown behind the proxy: one bucket per Order, as the budget keys it.
+        peerAddress: trustedClientAddress(request) ?? "127.0.0.1",
       });
       if (!reference.test(result.orderReference)) throw new Error();
       privateHeaders(response);

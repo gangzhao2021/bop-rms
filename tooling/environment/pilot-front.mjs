@@ -23,6 +23,7 @@ import process from "node:process";
 import tls from "node:tls";
 import { fileURLToPath, pathToFileURL, URL } from "node:url";
 import { loadPilotHosting } from "./pilot-hosting.mjs";
+import { pilotProxyLine } from "./pilot-client-address.mjs";
 import { activePlannedMaintenance, readPlannedMaintenance } from "./pilot-ops-maintenance.mjs";
 
 export const FRONT_PORT = 14443;
@@ -231,6 +232,12 @@ export async function startPilotFront({
     if (client.destroyed) return null;
     return attempt();
   };
+  // WP-2423: tell the entry whose connection this is, first, before any of the guest's bytes.
+  const announced = (client, upstream) => {
+    const line = pilotProxyLine(client);
+    if (line !== null) upstream.write(line);
+    return upstream;
+  };
   const relay = (a, b) => {
     a.pipe(b).on("error", () => a.destroy());
     b.pipe(a).on("error", () => b.destroy());
@@ -250,8 +257,9 @@ export async function startPilotFront({
       clear.pause();
       void connectUpstream(clear, () => ({
         socket: tls.connect({
-          host: upstreamHost,
-          port: upstreamPort,
+          ...(hosting.clientAddress === "connection"
+            ? { socket: announced(clear, net.connect({ host: upstreamHost, port: upstreamPort })) }
+            : { host: upstreamHost, port: upstreamPort }),
           ...(current.upstreamCa ? { ca: current.upstreamCa } : {}),
           ALPNProtocols: ["http/1.1"],
           timeout: connectTimeoutMs,
@@ -283,6 +291,7 @@ export async function startPilotFront({
       void connectUpstream(socket, () => {
         const attempt = net.connect({ host: upstreamHost, port: upstreamPort });
         attempt.setTimeout(connectTimeoutMs);
+        if (hosting.clientAddress === "connection") announced(socket, attempt);
         return { socket: attempt, ready: "connect" };
       }).then((upstream) => {
         if (upstream !== null) {

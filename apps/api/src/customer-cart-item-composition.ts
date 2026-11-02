@@ -1,3 +1,4 @@
+import { logGuestFailure } from "./guest-failure-log.js";
 import { createCustomerPickupCartInventoryAuthorization } from "./customer-pickup-cart-inventory-authorization.js";
 import {
   createCustomerCartSelectionInventory,
@@ -95,7 +96,10 @@ export function createCustomerCartItemPort(options: {
   async function failure(error: unknown, input: Add | Update): Promise<CustomerCartPortResult> {
     if (error instanceof CartCheckoutInProgressError)
       return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
-    if (!(error instanceof CartError)) return unavailable;
+    if (!(error instanceof CartError)) {
+      logGuestFailure("CUSTOMER_CART_CHANGE_UNAVAILABLE", error);
+      return unavailable;
+    }
     switch (error.code) {
       case "CART_PERMISSION_DENIED":
         return { status: "SessionExpired" };

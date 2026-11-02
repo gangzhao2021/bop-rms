@@ -171,7 +171,12 @@ export class GuestSessionService {
       ) {
         throw error;
       }
-      throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
+      // WP-2423 (v15 rush 2026-11-02): the store failed, the session may be fine: said apart, so a
+      // guest isn't told their session expired because of a passing database failure.
+      throw Object.assign(new GuestSessionError("GUEST_SESSION_UNAVAILABLE"), {
+        dependencyFailure: true,
+        cause: error,
+      });
     }
   }
 
@@ -316,7 +321,8 @@ export class GuestSessionService {
       );
       if (touched === null) throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
       return assertGuestSessionUsable(this.#record(touched).session, observedAt);
-    } catch {
+    } catch (error) {
+      if ((error as { dependencyFailure?: unknown }).dependencyFailure === true) throw error;
       throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
     }
   }
@@ -372,7 +378,8 @@ export class GuestSessionService {
       const session = assertGuestSessionUsable(this.#record(record).session, observedAt);
       await this.#assertCurrent(session, observedAt);
       return session;
-    } catch {
+    } catch (error) {
+      if ((error as { dependencyFailure?: unknown }).dependencyFailure === true) throw error;
       throw new GuestSessionError("GUEST_SESSION_UNAVAILABLE");
     }
   }

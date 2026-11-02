@@ -46,7 +46,11 @@ export function createGuestSessionAbuseKeys(pepper: Uint8Array): GuestSessionAbu
       .update(value, "utf8")
       .digest();
   return Object.freeze({
-    ip: (address: string) => digest("ip", canonicalPeer(address)),
+    ip: (address: string, scope: Parameters<GuestSessionAbuseKeys["ip"]>[1]) =>
+      digest(
+        "ip",
+        JSON.stringify([canonicalPeer(address), scope.brandReference, scope.storeReference]),
+      ),
     store: (scope: Parameters<GuestSessionAbuseKeys["store"]>[0]) =>
       digest("store", JSON.stringify([scope.brandReference, scope.storeReference])),
   });

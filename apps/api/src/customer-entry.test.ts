@@ -669,6 +669,24 @@ describe("Customer entry request admission", () => {
       expect(port.calls).toHaveLength(0);
     }
   });
+  it("WP-2423: behind the entry only its own header names the guest; loopback never does", async () => {
+    const inputs: unknown[] = [];
+    await post(
+      await listen(
+        customerEntry(new MutablePort(), referenceFactory(), {
+          consume: async (input) => {
+            inputs.push(input);
+            return { status: "Allowed" };
+          },
+        }),
+      ),
+      { qrToken: TOKEN },
+      requestHeaders({ "x-bop-client-address": "198.51.100.20" }),
+    );
+    expect(inputs).toEqual([
+      { remoteAddress: "198.51.100.20", requestedAt: "2026-07-30T05:00:00.000Z" },
+    ]);
+  });
   it("passes only direct peer address and server time, ignoring forged forwarding headers", async () => {
     const inputs: unknown[] = [];
     const port = new MutablePort();
@@ -688,9 +706,7 @@ describe("Customer entry request admission", () => {
       }),
     );
     expect(response.status).toBe(201);
-    expect(inputs).toEqual([
-      { remoteAddress: "127.0.0.1", requestedAt: "2026-07-30T05:00:00.000Z" },
-    ]);
+    expect(inputs).toEqual([{ remoteAddress: null, requestedAt: "2026-07-30T05:00:00.000Z" }]);
     expect(port.calls).toHaveLength(1);
   });
 });
