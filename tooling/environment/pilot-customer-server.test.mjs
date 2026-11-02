@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import console from "node:console";
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { registerInternalMember } from "./pilot-member.mjs";
 import { startInternalCustomerServer } from "./pilot-customer-server.mjs";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -280,3 +282,137 @@ test.each(["simulator", "entry"])(
     }
   },
 );
+
+// v15 650d8f50: a mounted Store route the Store routing doesn't name falls through to the API
+// proxy, so at a multi-Store installation every guest got the API's generic 404.
+test("WP-2423 取舍 18: a guest's member request reaches their own Store's handler, at every Store", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const directory = await mkdtemp(join(tmpdir(), "bop-member-route-"));
+  const { createTestCertificates } = await import("./pilot-test-certificates.mjs");
+  const certificates = await createTestCertificates(directory, { hostname: "localhost" });
+  const origin = "https://localhost";
+  const reached = [];
+  const stack = (store) => ({
+    createInternalSimulatedProvider: async () => ({ close: vi.fn() }),
+    createInternalCustomerEntry: async () => ({ dining: {} }),
+    createInternalTestItems: async () => ({ catalogCartItems: [] }),
+    createInternalCheckout: () => ({ preparation: {}, accessOptions: {} }),
+    createInternalOrder: async () => ({}),
+    createInternalDiningCheckout: () => ({ preparation: {} }),
+    createInternalChannelPayment: async () => ({}),
+    createInternalPaymentTerminal: () => ({}),
+    // The real route, its handler and its port; only this Store's database is a stand-in that
+    // says which Store it is.
+    registerInternalDiningTablePayment: (router, options) =>
+      registerInternalMember(router, {
+        directory,
+        origin: options.origin,
+        resources: {
+          ...options.resources,
+          publicProfile: { binding: { tenantReference: "tenant" } },
+          credentials: { reference: () => "reference" },
+        },
+        providerAccountReference: "provider",
+        access: {
+          scope: { brandReference: "brand", storeReference: store },
+          transactions: {
+            run: async () => {
+              reached.push(store);
+              throw new Error("DATABASE_STAND_IN");
+            },
+          },
+          now: () => new Date().toISOString(),
+        },
+      }),
+  });
+  const resourcesOf = (storeReference) => ({
+    scope: { storeReference, brandReference: "brand" },
+    publicProfile: { binding: { publicStoreReference: "public-" + storeReference } },
+    credentials: { sessions: { hashCredential: () => "selector" } },
+    transactions: {},
+    close: vi.fn(async () => undefined),
+  });
+  const merchant = async () => ({
+    staffSignInMode: "cognito",
+    persistence: { transactions: {}, identity: { hasher: {} }, now: () => "" },
+    bff: { exactOrigin: origin, acceptedHost: "localhost" },
+  });
+  const guests = { ["a".repeat(43)]: "store-1", ["b".repeat(43)]: "store-2" };
+  let server;
+  try {
+    server = await startInternalCustomerServer({
+      publicOrigin: origin,
+      listenPort: 0,
+      apiPort: 1,
+      keyFile: certificates.keyFile,
+      certificateFile: certificates.certificateFile,
+      loadProfile: async () => ({ environment: "InternalTest" }),
+      loadInternalPickupQr: async () => ({ token: () => "synthetic.pickup.token" }),
+      diningEntries: [],
+      createInternalTestResources: async () => resourcesOf("store-1"),
+      createInternalMerchant: merchant,
+      ...stack("store-1"),
+      additionalStores: [
+        {
+          storeReference: "store-2",
+          apiPort: 2,
+          customer: {
+            ...stack("store-2"),
+            createInternalTestResources: undefined,
+          },
+          createInternalTestResources: async () => resourcesOf("store-2"),
+          createInternalMerchant: merchant,
+        },
+      ],
+      // Which Store a guest's Session belongs to is decided by the real routing elsewhere.
+      createStoreRouting:
+        () =>
+        async ({ cookie }) => ({
+          storeReference: guests[/__Host-bop-guest=([^;]+)/u.exec(cookie)?.[1]],
+        }),
+    });
+    if (!server.listening) await new Promise((resolve) => server.once("listening", resolve));
+    const { request } = await import("node:https");
+    const ask = (guest) =>
+      new Promise((resolve, reject) => {
+        const body = JSON.stringify({ action: "State" });
+        const call = request(
+          {
+            host: "127.0.0.1",
+            port: server.address().port,
+            path: "/bff/customer/member",
+            method: "POST",
+            servername: "localhost",
+            ca: [certificates.root],
+            headers: {
+              host: "localhost",
+              origin,
+              "sec-fetch-site": "same-origin",
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(body),
+              "x-csrf-token": "c".repeat(43),
+              cookie: `__Host-bop-guest=${guest}`,
+            },
+          },
+          (response) => {
+            let text = "";
+            response.on("data", (chunk) => (text += String(chunk)));
+            response.on("end", () => resolve({ status: response.statusCode, text }));
+          },
+        );
+        call.on("error", reject);
+        call.end(body);
+      });
+    for (const [guest, store] of Object.entries(guests)) {
+      reached.length = 0;
+      const answer = await ask(guest);
+      // The handler answered (its own code), not the API proxy or a generic 404.
+      expect(JSON.parse(answer.text).error?.code, store).toBe("member_unavailable");
+      expect(answer.status, store).toBe(503);
+      expect(reached, store).toEqual([store]);
+    }
+  } finally {
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

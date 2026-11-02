@@ -228,6 +228,14 @@ it("earns, spends one balance once, takes back after a refund, expires, leaves a
       assert.equal(candidate.accountReference, account);
       assert.equal(memberExpiryStep({ ...candidate, now: now(), rule }), "SendNotice");
       assert.equal(await as(api, (tx) => a1.phoneForMessage(tx, account)), phone);
+      // A failed text records nothing; once told, another Store's sweep doesn't tell them again.
+      const claim = { accountReference: account, lastActivityAt: candidate.lastActivityAt };
+      assert.equal(await as(api, (tx) => a2.claimExpiryNotice(tx, claim)), phone);
+      assert.equal(
+        await as(api, (tx) => a1.claimExpiryNotice(tx, { ...claim, lastActivityAt: now() })),
+        null,
+        "activity since the sweep read wins",
+      );
       await as(api, (tx) =>
         a1.recordExpiryNotice(tx, {
           accountReference: account,
@@ -235,6 +243,7 @@ it("earns, spends one balance once, takes back after a refund, expires, leaves a
           expiresAt: new Date(due).toISOString(),
         }),
       );
+      assert.equal(await as(api, (tx) => a2.claimExpiryNotice(tx, claim)), null);
       const [noticed] = await as(api, (tx) => a1.expiryCandidates(tx, rule, 10));
       assert.equal(memberExpiryStep({ ...noticed, now: now(), rule }), "None");
       clock = due + 2 * 86_400_000;

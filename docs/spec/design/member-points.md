@@ -117,3 +117,5 @@ Expire。新增一种 `Return`（退款时退回用掉的积分）。不建第�
 - **过期扫描和退款扫描**跑在安静的 dining-exception worker 上，每 5 分钟一次，失败只报告，不影响它原来的工作。
 - **密钥**：新增托管密钥 `member-contact-key`；InternalTest 在运行目录生成 `internal-test-member-key`。读不到时只有积分不可用，门店不受影响。
 - **发送优惠**：产品里没有。勾选只留下同意记录和后台一列“优惠短信”。
+- **多店**：一个安装就是一个品牌，密钥和 InternalTest 收件箱都在安装目录（`stores/<店>` 的上两级），各店共用；路由按访客 Cookie 到访客所在门店。托管密钥也从安装目录的 `hosting.json` 读取。
+- **地址未知时**（入口没有说明客人地址，`hosting.json` 的 `clientAddress` 是托管关口）：不按地址限额，只按手机号；绝不让所有客人共用一个地址额度。

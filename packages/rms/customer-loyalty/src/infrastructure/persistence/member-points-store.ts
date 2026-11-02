@@ -742,6 +742,33 @@ export function createMemberPointsStore(options: {
       return row === undefined ? null : options.protector.open(row.phone_ciphertext as Uint8Array);
     },
 
+    /**
+     * The number to tell, holding the account until commit, or null when this stretch of inactivity
+     * was already told, or has ended. Each of the Brand's Stores runs this sweep: one text, not many.
+     */
+    async claimExpiryNotice(
+      tx: MemberPointsTransaction,
+      input: { readonly accountReference: string; readonly lastActivityAt: string },
+    ): Promise<string | null> {
+      const held = await lockAccount(tx, input.accountReference);
+      if (held.account.status !== "Active" || held.lastActivityAt !== input.lastActivityAt)
+        return null;
+      const told = (
+        await tx.query(
+          "SELECT 1 FROM rms_loyalty.loyalty_expiry_notice WHERE brand_id=$1 AND account_id=$2 AND activity_at=$3",
+          [brand, input.accountReference, input.lastActivityAt],
+        )
+      ).rows[0];
+      if (told !== undefined) return null;
+      const row = (
+        await tx.query(
+          "SELECT phone_ciphertext FROM rms_loyalty.loyalty_member_contact WHERE brand_id=$1 AND account_id=$2",
+          [brand, input.accountReference],
+        )
+      ).rows[0];
+      return row === undefined ? null : options.protector.open(row.phone_ciphertext as Uint8Array);
+    },
+
     async recordExpiryNotice(
       tx: MemberPointsTransaction,
       input: {

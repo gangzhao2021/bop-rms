@@ -184,6 +184,8 @@ export async function createPilotOrderMessaging({
 
   return Object.freeze({
     settings,
+    // WP-2423 取舍 18: member codes and expiry notices use the same text account.
+    sms: messaging.sms,
     sending,
     availability,
     recovery: (input) => recovery.consume(input),

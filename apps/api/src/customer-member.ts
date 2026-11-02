@@ -223,6 +223,13 @@ export function createCustomerMember(options: {
   ): Promise<readonly ClaimSource[]> => {
     const owner = await loadOrderGuestSession(tx as never, scope, orderReference);
     if (owner === null || String(owner) !== String(guest.sessionReference)) return [];
+    // A table that pays at the end earns on its settlement, once; the same dishes can't also earn
+    // here through the Order's own receipt.
+    const settled = await createPostgresDiningTableSettlementStore({
+      scope,
+      authorize: async () => true,
+    }).listByOrders(tx as never, [orderReference]);
+    if (settled.length > 0) return [];
     const endsAt = new Date(Date.parse(now()) + 1000).toISOString();
     const ledger = await createPostgresStoreSalesPaymentLedger({
       scope: {
@@ -397,12 +404,9 @@ export function createCustomerMember(options: {
           86_400,
           memberCodeBudgets.sendPerPhoneDay,
         );
-        await check(
-          "address-hour",
-          address ?? "unknown",
-          3600,
-          memberCodeBudgets.sendPerAddressHour,
-        );
+        // An address nobody can state is nobody's: never one budget shared by every guest.
+        if (address !== null)
+          await check("address-hour", address, 3600, memberCodeBudgets.sendPerAddressHour);
         const { code } = await run((tx) => points.createChallenge(tx as never, phone));
         try {
           await options.messages.send({ phone, kind: "Code", text: memberCodeText(code) });
@@ -435,13 +439,15 @@ export function createCustomerMember(options: {
         return fail("MEMBER_CODE_WRONG");
       const code = input.code;
       return translated(async () => {
-        const budget = await options.budget.consume(
-          "MEMBER_CODE_CHECK",
-          options.protector.budgetKey("check-address", address ?? "unknown"),
-          { windowSeconds: 3600, limit: memberCodeBudgets.checkPerAddressHour },
-        );
-        if (!budget.allowed)
-          throw new CustomerMemberError("MEMBER_RATE_LIMITED", budget.retryAfterSeconds);
+        if (address !== null) {
+          const budget = await options.budget.consume(
+            "MEMBER_CODE_CHECK",
+            options.protector.budgetKey("check-address", address),
+            { windowSeconds: 3600, limit: memberCodeBudgets.checkPerAddressHour },
+          );
+          if (!budget.allowed)
+            throw new CustomerMemberError("MEMBER_RATE_LIMITED", budget.retryAfterSeconds);
+        }
         // Its own transaction: a wrong try must count even though the answer is a refusal.
         const checked = await run(async (tx) => {
           await visit(tx, credentials);
