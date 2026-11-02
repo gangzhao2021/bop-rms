@@ -5,6 +5,7 @@ import { setTimeout } from "node:timers";
 import { URL } from "node:url";
 import pg from "pg";
 import { it, vi } from "vitest";
+import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
 import { loadOutboxEnvelope } from "../../bop/eventing/src/index.ts";
 import {
   changeDiningRoundHoldSetting,
@@ -112,6 +113,7 @@ import {
   createMerchantDiningTablePaymentRead,
 } from "../../../apps/api/src/merchant-dining-table-payment.ts";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import { createPaidPickupOrderSeeder } from "../test-support/ordinary-refund-paid-pickup-order.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
@@ -191,6 +193,8 @@ it("a member earns and spends points on a table's bill, and the books still agre
 it("each paid part of a split bill earns on its own, once, and answers for its own refund", () =>
   journey("MemberPointsSplit"));
 it("points spent on a table that never paid come back", () => journey("MemberPointsWrittenOff"));
+it("a paid pickup earns for the guest who ordered it, once, and for nobody else", () =>
+  journey("MemberPointsPickup"));
 // WP-2423 item 8 ④: a split table pays one part in cash (some of it refunded), the guests leave;
 // the manager writes off exactly the parts still unpaid, and the day's ledger keeps each.
 it("a split table that paid one part and left is written off for the rest", () =>
@@ -287,27 +291,29 @@ async function journey(ending) {
                 ? "wp2423_plcomp"
                 : ending === "CompedWhole"
                   ? "wp2423_plcwhole"
-                  : ending === "MemberPoints"
-                    ? "wp2423_plmember"
-                    : ending === "MemberPointsSplit"
-                      ? "wp2423_plmembsp"
-                      : ending === "MemberPointsWrittenOff"
-                        ? "wp2423_plmembwo"
-                        : ending === "PaidSplit"
-                          ? "wp2423_plsplit"
-                          : ending === "SplitWrittenOff"
-                            ? "wp2423_plsplwo"
-                            : ending === "Held"
-                              ? "wp2423_plheld"
-                              : ending === "TipsOff"
-                                ? "wp2423_pltips"
-                                : ending === "TeaCharge"
-                                  ? "wp2423_pltea"
-                                  : ending === "Moved"
-                                    ? "wp2423_plmove"
-                                    : ending === "Merged"
-                                      ? "wp2423_plmerge"
-                                      : "wp2423_plon",
+                  : ending === "MemberPointsPickup"
+                    ? "wp2423_plmembpk"
+                    : ending === "MemberPoints"
+                      ? "wp2423_plmember"
+                      : ending === "MemberPointsSplit"
+                        ? "wp2423_plmembsp"
+                        : ending === "MemberPointsWrittenOff"
+                          ? "wp2423_plmembwo"
+                          : ending === "PaidSplit"
+                            ? "wp2423_plsplit"
+                            : ending === "SplitWrittenOff"
+                              ? "wp2423_plsplwo"
+                              : ending === "Held"
+                                ? "wp2423_plheld"
+                                : ending === "TipsOff"
+                                  ? "wp2423_pltips"
+                                  : ending === "TeaCharge"
+                                    ? "wp2423_pltea"
+                                    : ending === "Moved"
+                                      ? "wp2423_plmove"
+                                      : ending === "Merged"
+                                        ? "wp2423_plmerge"
+                                        : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -4334,6 +4340,8 @@ async function journey(ending) {
           const port = createCustomerMember({
             access,
             tenantReference: tenant,
+            providerAccountReference: provider,
+            environment: "Test",
             protector,
             messages,
             budget: { consume: async () => ({ allowed: true, retryAfterSeconds: 0 }) },
@@ -4407,6 +4415,52 @@ async function journey(ending) {
           await switchLoyalty(true);
           assert.equal((await port.state(guest())).offered, true);
           assert.equal((await port.state(guest())).claim, null, "nothing paid yet");
+
+          if (ending === "MemberPointsPickup") {
+            const token = await join("+16135550161");
+            const ids = (n) =>
+              n === 5002
+                ? tableGuest
+                : "01909994-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+            await createPaidPickupOrderSeeder({
+              admin,
+              ownerRunner: ownerRunner(),
+              scope: ownerScope,
+              id: ids,
+              hash: (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value)),
+              fresh,
+              time,
+              minutes,
+              acceptorReference: id(0x700),
+              provider,
+              lines: [
+                {
+                  unitAmountMinor: 2000,
+                  quantity: 4,
+                  localizedNames: { "en-CA": "Synthetic noodles" },
+                },
+                {
+                  unitAmountMinor: 1000,
+                  quantity: 2,
+                  localizedNames: { "en-CA": "Synthetic tea" },
+                },
+              ],
+              tipMinor: 300n,
+              capturedMinor: 11600n,
+            })(5000);
+            const pickup = ids(5001);
+            // $100.00 of dishes earns 300; the tax and tip on it don't.
+            const state = await port.state(guest(token), pickup);
+            assert.deepEqual(state.claim.parts, [{ partNumber: null, points: 300 }]);
+            assert.equal((await port.claim(guest(token), null, pickup)).earnedPoints, 300);
+            await assert.rejects(port.claim(guest(token), null, pickup), {
+              code: "MEMBER_NOTHING_TO_CLAIM",
+            });
+            // Someone else's Order: nothing to claim, and nothing said about it.
+            assert.equal((await port.state(guest(token), orderReference)).claim, null);
+            await reportAddsUp();
+            return;
+          }
 
           if (ending === "MemberPointsSplit") {
             const first = await join("+16135550111"),
