@@ -4,7 +4,7 @@ import { createStoreFeaturesClient, parseStoreFeatures } from "./store-features-
 const view = {
   version: 2,
   templateCode: "Custom",
-  modules: { counterOrder: true, pickup: true, inventory: false },
+  modules: { counterOrder: true, pickup: true, inventory: false, loyalty: false },
   changedAt: "2026-10-29T15:05:00.000Z",
   services: {
     version: 1,
@@ -30,12 +30,13 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
       counterOrder: true,
       pickup: true,
       inventory: false,
+      loyalty: false,
     });
     for (const bad of [
       { ...view, version: -1 },
       { ...view, templateCode: "Cafe" },
       { ...view, changedAt: "yesterday" },
-      { ...view, modules: { counterOrder: true, inventory: false } },
+      { ...view, modules: { counterOrder: true, inventory: false, loyalty: false } },
       { ...view, modules: { ...view.modules, inventory: "no" } },
       { ...view, services: { ...view.services, staffCall: "yes" } },
       { ...view, services: undefined },
@@ -83,13 +84,13 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
     await client.change({
       operationReference: "0190a7f2-0000-7000-8000-000000000001",
       expectedVersion: 1,
-      modules: { counterOrder: true, pickup: false, inventory: false },
+      modules: { counterOrder: true, pickup: false, inventory: false, loyalty: false },
     });
     expect(sent[0]).toEqual({
       action: "Change",
       operationReference: "0190a7f2-0000-7000-8000-000000000001",
       expectedVersion: 1,
-      modules: { counterOrder: true, pickup: false, inventory: false },
+      modules: { counterOrder: true, pickup: false, inventory: false, loyalty: false },
     });
     await expect(client.read()).rejects.toMatchObject({ code: "Changed" });
   });

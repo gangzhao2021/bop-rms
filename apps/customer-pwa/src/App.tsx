@@ -29,6 +29,7 @@ import { DeliveryStatusPage } from "./delivery-status/DeliveryStatusPage.js";
 import { DiningSessionPage } from "./dining/DiningSessionPage.js";
 import type { CustomerDemoDependencies } from "./customer-demo.js";
 import type { CustomerStoreContext } from "./journey/CustomerPage.js";
+import { MemberPage } from "./member/MemberPage.js";
 
 function useDemoForOrderRoute(
   demo: CustomerDemoDependencies | undefined,
@@ -275,6 +276,8 @@ export function App({
           path="/orders/:orderReference/receipt"
           element={<CustomerReceiptRoute demo={demo} store={store} />}
         />
+        {/* WP-2423 取舍 18 DEC-MEMBER-POINTS: CUST-LOYALTY. */}
+        <Route path="/member" element={<MemberPage store={store} />} />
         <Route path="*" element={<CustomerShell />} />
       </Routes>
     </>

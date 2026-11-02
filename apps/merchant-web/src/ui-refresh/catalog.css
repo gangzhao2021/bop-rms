@@ -708,3 +708,86 @@ fieldset.store-features__modules {
   display: block;
   color: var(--bop-color-text-muted);
 }
+
+/* WP-2423 取舍 18 DEC-MEMBER-POINTS: rows and hairlines, like the other back-office pages. */
+.member-points {
+  display: grid;
+  gap: var(--bop-space-5);
+  min-width: 0;
+}
+.member-points > *,
+.member-points section > * {
+  margin-block: 0;
+}
+.member-points section {
+  display: grid;
+  gap: var(--bop-space-3);
+  padding-block-start: var(--bop-space-4);
+  border-top: 1px solid var(--bop-color-border-default);
+  min-width: 0;
+}
+.member-points__report {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--bop-space-3);
+  margin: 0;
+}
+.member-points__report dt {
+  color: var(--bop-color-text-muted);
+}
+.member-points__report dd {
+  margin: 0;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.member-points__rules {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--bop-space-3);
+  align-items: end;
+}
+.member-points__rules label {
+  display: grid;
+  gap: var(--bop-space-1);
+}
+.member-points__rules input {
+  width: 100%;
+  min-height: 44px;
+}
+.member-points__members {
+  width: 100%;
+  border-collapse: collapse;
+}
+.member-points__members th,
+.member-points__members td {
+  padding-block: var(--bop-space-2);
+  padding-inline-end: var(--bop-space-3);
+  text-align: start;
+  border-top: 1px solid var(--bop-color-border-default);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .member-points__members thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .member-points__members tr {
+    display: grid;
+    padding-block: var(--bop-space-2);
+    border-top: 1px solid var(--bop-color-border-default);
+  }
+  .member-points__members td {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--bop-space-3);
+    border-top: 0;
+    padding-block: 2px;
+  }
+  .member-points__members td::before {
+    content: attr(data-label);
+    color: var(--bop-color-text-muted);
+  }
+}

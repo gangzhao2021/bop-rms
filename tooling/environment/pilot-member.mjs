@@ -10,7 +10,7 @@ import { createCustomerMember } from "../../apps/api/dist/customer-member.js";
 import { createMemberPointsSweep } from "../../apps/api/dist/member-points-sweep.js";
 import { createMemberPhoneProtector } from "../../packages/rms/customer-loyalty/src/index.ts";
 import { createAbuseBudgetConsumer } from "../../packages/database/src/index.ts";
-import { currentPilotEnvironment } from "./pilot-environment.mjs";
+import { currentPilotEnvironment, pilotProviderEnvironment } from "./pilot-environment.mjs";
 import { loadPilotManagedSecrets } from "./pilot-secrets.mjs";
 
 const ROUTE = "/bff/customer/member";
@@ -97,23 +97,36 @@ const budgetOf = (resources) =>
     },
   });
 
-export async function registerInternalMember(app, { directory, resources, access, origin, sms }) {
-  const port = createCustomerMember({
-    access,
-    tenantReference: resources.publicProfile.binding.tenantReference,
-    protector: createMemberPhoneProtector(await loadMemberKey(directory)),
-    messages: memberMessages({ directory, sms }),
-    budget: budgetOf(resources),
-    nextReference: resources.credentials.reference,
-  });
-  app.post(ROUTE, ...new CustomerMemberHandler({ allowedOrigin: origin, port }).handler());
+export function registerInternalMember(
+  app,
+  { directory, resources, access, origin, sms = null, providerAccountReference },
+) {
+  let port = null;
+  const load = () =>
+    (port ??= loadMemberKey(directory)
+      .then((key) =>
+        createCustomerMember({
+          access,
+          tenantReference: resources.publicProfile.binding.tenantReference,
+          providerAccountReference,
+          environment: pilotProviderEnvironment(),
+          protector: createMemberPhoneProtector(key),
+          messages: memberMessages({ directory, sms }),
+          budget: budgetOf(resources),
+          nextReference: resources.credentials.reference,
+        }),
+      )
+      .catch((error) => {
+        port = null;
+        throw error;
+      }));
+  app.post(ROUTE, ...new CustomerMemberHandler({ allowedOrigin: origin, port: load }).handler());
 }
 
 export async function createInternalMemberSweep({
   directory,
   resources,
   providerAccountReference,
-  environment,
   sms = null,
 }) {
   return createMemberPointsSweep({
@@ -121,7 +134,7 @@ export async function createInternalMemberSweep({
       tenantReference: resources.publicProfile.binding.tenantReference,
       ...resources.scope,
       providerAccountReference,
-      environment,
+      environment: pilotProviderEnvironment(),
     },
     transactions: resources.transactions,
     protector: createMemberPhoneProtector(await loadMemberKey(directory)),

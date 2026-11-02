@@ -165,6 +165,7 @@ import type {
 import type { createMerchantDiningJoinRegenerate } from "./merchant-dining-join-regenerate.js";
 import type { createMerchantStoreFeatures } from "./merchant-store-features.js";
 import type { createMerchantKitchenSetup } from "./merchant-kitchen-setup.js";
+import type { createMerchantMemberPoints } from "./merchant-member-points.js";
 import type {
   createMerchantStoreSupport,
   createMerchantStoreSupportAccess,
@@ -242,6 +243,8 @@ export const merchantNavigation = Object.freeze({
   // WP-2423 P1: day-end settlement (Section 88 PAY-RECONCILIATION) under its own read permission
   // (catalog v17, Owner "单独加权限（推荐）"), apart from exception handling.
   "PAY-RECONCILIATION": ["/app/operations/payment-reconciliation", "payment.settlement.read"],
+  // WP-2423 取舍 18: the Brand's points (Section 88 LOY-PROGRAM-LIST).
+  "LOY-PROGRAM-LIST": ["/app/customers/loyalty-programs", "loyalty.member.read"],
   // WP-2423 Q14: sales, item, hourly and tip reports with CSV export (Section 88 RPT-OPS-DASHBOARD).
   "RPT-OPS-DASHBOARD": ["/app/reports/operations", "reporting.sales.read"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
@@ -619,6 +622,7 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 item 8 ⑧ (decision 5): the kitchen sections (档口) and each dish's section. */
   /** WP-2423 取舍 15: platform support staff, and the Owner's say over them. */
   readonly storeSupport?: ReturnType<typeof createMerchantStoreSupport>;
+  readonly memberPoints?: ReturnType<typeof createMerchantMemberPoints>;
   readonly storeSupportAccess?: ReturnType<typeof createMerchantStoreSupportAccess>;
   /** WP-2423 item 11: the Store's kitchen setup (one kitchen line and what it can't take). */
   readonly kitchenSetup?: ReturnType<typeof createMerchantKitchenSetup>;

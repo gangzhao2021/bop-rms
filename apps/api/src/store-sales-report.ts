@@ -52,6 +52,8 @@ export interface StoreSalesReportInput {
     readonly orderReference: string;
     readonly orderBatchReference: string;
     readonly decidedAt: string;
+    /** WP-2423 取舍 18: the part of it that was a guest's points. */
+    readonly pointsNetMinor?: bigint;
   }[];
   readonly mayExport: boolean;
   readonly generatedAt: string;
@@ -904,6 +906,10 @@ function computeSales(
     });
   const days = [...facts.values()];
   return Object.freeze({
+    // WP-2423 取舍 18: how much of what came off was guests' points (in the comps line).
+    pointsUsedMinor: (input.priceReductions ?? [])
+      .reduce((sum, reduction) => sum + (reduction.pointsNetMinor ?? 0n), 0n)
+      .toString(),
     screenId: "RPT-OPS-DASHBOARD" as const,
     queryName: "store_sales_reports_v1" as const,
     storeLabel: input.storeLabel,

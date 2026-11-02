@@ -789,6 +789,7 @@ describe("migration catalog", () => {
       "2000_145_create_member_points",
       "2000_146_alter_order_price_reduction_points",
       "2000_147_alter_abuse_bucket_member_code",
+      "2000_148_alter_store_feature_points_offered",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

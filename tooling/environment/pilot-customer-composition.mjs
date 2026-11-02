@@ -236,7 +236,7 @@ export function composeCustomerDependencies(directory, installation, config, hos
       createInternalPaymentTerminal(r, c, i, s, account),
     // DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table on their phone.
     registerInternalDiningTablePayment: (app, options) =>
-      registerInternalDiningTablePayment(app, { ...options, ...account }),
+      registerInternalDiningTablePayment(app, { ...options, ...account, directory }),
     createInternalChannelPayment: (r, c, d, o, orders, simulator, items) =>
       createInternalChannelPayment(r, c, d, o, orders, simulator, items, {
         createPaymentIntent: (resources, checkout, order, provider, type = "Pickup") =>

@@ -649,3 +649,31 @@ export function createPostgresOrderPriceReductionStore(options: {
     },
   });
 }
+
+/**
+ * WP-2423 取舍 18: what the dishes of each round of this Order cost before tax, less any discount
+ * and reduction on them; what points earn on.
+ */
+export async function listOrderRoundDishes(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<ReadonlyMap<string, bigint>> {
+  const brand = String(parseOrderingReference(scope.brandReference)),
+    store = String(parseOrderingReference(scope.storeReference)),
+    order = String(parseOrderingReference(orderReference));
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const rows = (
+    await tx.query(
+      "SELECT i.order_batch_id::text AS batch,sum(((i.transaction_snapshot_json->'pricing'->'subtotal'->>'amountMinor')::bigint)-" +
+        "((i.transaction_snapshot_json->'pricing'->'discount'->>'amountMinor')::bigint)-" +
+        "COALESCE((SELECT r.net_minor FROM rms_ordering.order_item_price_reduction r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.order_item_id=i.order_item_id),0))::text AS net " +
+        "FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 GROUP BY i.order_batch_id",
+      [brand, store, order],
+    )
+  ).rows as Record<string, unknown>[];
+  return new Map(rows.map((row) => [String(row.batch), minor(row.net)]));
+}

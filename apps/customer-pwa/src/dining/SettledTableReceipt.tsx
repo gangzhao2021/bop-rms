@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { t, saidTable } from "../i18n/i18n.js";
 import { formatMoney } from "../journey/format.js";
+import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { getSettledTableReceiptCsrf } from "../session/customer-transaction-context.js";
 
 /**
@@ -282,5 +283,10 @@ export function SettledTableReceiptPanel({
         </button>
       </section>
     );
-  return <SettledTableReceiptView receipt={state.receipt} />;
+  return (
+    <>
+      <SettledTableReceiptView receipt={state.receipt} />
+      <MemberJoinPanel />
+    </>
+  );
 }

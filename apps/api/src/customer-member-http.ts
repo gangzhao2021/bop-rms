@@ -43,6 +43,11 @@ const cookieOf = (request: Request, name: string) => {
     .filter(([key]) => key === name);
   return found.length === 1 && found[0]?.length === 2 ? (found[0][1] ?? null) : null;
 };
+const orderOf = (value: unknown): string | null => {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string" && operation.test(value)) return value;
+  throw new Error("MEMBER_INPUT");
+};
 const part = (value: unknown): number | null => {
   if (value === undefined || value === null) return null;
   if (Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 20)
@@ -52,10 +57,14 @@ const part = (value: unknown): number | null => {
 
 export class CustomerMemberHandler {
   readonly #origin: string;
-  readonly #port: CustomerMemberPort;
-  constructor(options: { readonly allowedOrigin: string; readonly port: CustomerMemberPort }) {
+  readonly #load: () => Promise<CustomerMemberPort>;
+  constructor(options: {
+    readonly allowedOrigin: string;
+    /** Composed on first use: without its key, points are unavailable, never the Store. */
+    readonly port: () => Promise<CustomerMemberPort>;
+  }) {
     this.#origin = options.allowedOrigin;
-    this.#port = options.port;
+    this.#load = options.port;
   }
   #credentials(request: Request) {
     if (
@@ -93,17 +102,29 @@ export class CustomerMemberHandler {
           return;
         }
         const address = trustedClientAddress(request);
+        let port: CustomerMemberPort;
+        try {
+          port = await this.#load();
+        } catch {
+          response.setHeader("Retry-After", "30");
+          response.status(503).json({ schemaVersion: 1, error: { code: "member_unavailable" } });
+          return;
+        }
         try {
           const body = (request.body ?? {}) as Record<string, unknown>;
           let answer: unknown;
           switch (body.action) {
-            case "State":
-              readClosedRecord(body, ["action"]);
-              answer = await this.#port.state(credentials);
+            case "State": {
+              const raw = readClosedRecord(body, [
+                "action",
+                ...(Object.hasOwn(body, "orderReference") ? ["orderReference"] : []),
+              ]);
+              answer = await port.state(credentials, orderOf(raw.orderReference));
               break;
+            }
             case "SendCode": {
               const raw = readClosedRecord(body, ["action", "phone"]);
-              answer = await this.#port.sendCode(credentials, raw.phone, address);
+              answer = await port.sendCode(credentials, raw.phone, address);
               break;
             }
             case "Verify": {
@@ -114,10 +135,11 @@ export class CustomerMemberHandler {
                 "marketingConsent",
                 "claim",
                 ...(Object.hasOwn(body, "partNumber") ? ["partNumber"] : []),
+                ...(Object.hasOwn(body, "orderReference") ? ["orderReference"] : []),
               ]);
               if (typeof raw.marketingConsent !== "boolean" || typeof raw.claim !== "boolean")
                 throw new Error("MEMBER_INPUT");
-              const result = await this.#port.verify(
+              const result = await port.verify(
                 credentials,
                 {
                   phone: raw.phone,
@@ -125,6 +147,7 @@ export class CustomerMemberHandler {
                   marketingConsent: raw.marketingConsent,
                   claim: raw.claim,
                   partNumber: part(raw.partNumber),
+                  orderReference: orderOf(raw.orderReference),
                 },
                 address,
               );
@@ -141,17 +164,22 @@ export class CustomerMemberHandler {
               const raw = readClosedRecord(body, [
                 "action",
                 ...(Object.hasOwn(body, "partNumber") ? ["partNumber"] : []),
+                ...(Object.hasOwn(body, "orderReference") ? ["orderReference"] : []),
               ]);
-              answer = await this.#port.claim(credentials, part(raw.partNumber));
+              answer = await port.claim(
+                credentials,
+                part(raw.partNumber),
+                orderOf(raw.orderReference),
+              );
               break;
             }
             case "Home":
               readClosedRecord(body, ["action"]);
-              answer = await this.#port.home(credentials);
+              answer = await port.home(credentials);
               break;
             case "RedemptionOptions":
               readClosedRecord(body, ["action"]);
-              answer = await this.#port.redemptionOptions(credentials);
+              answer = await port.redemptionOptions(credentials);
               break;
             case "Redeem": {
               const raw = readClosedRecord(body, [
@@ -173,7 +201,7 @@ export class CustomerMemberHandler {
                 (points !== null && !Number.isSafeInteger(points))
               )
                 throw new Error("MEMBER_INPUT");
-              answer = await this.#port.redeem(credentials, {
+              answer = await port.redeem(credentials, {
                 operationReference: raw.operationReference,
                 points: points as number | null,
                 rewardProductReference: reward as string | null,
@@ -183,7 +211,7 @@ export class CustomerMemberHandler {
             case "SetMarketingConsent": {
               const raw = readClosedRecord(body, ["action", "given"]);
               if (typeof raw.given !== "boolean") throw new Error("MEMBER_INPUT");
-              answer = await this.#port.setMarketingConsent(credentials, raw.given);
+              answer = await port.setMarketingConsent(credentials, raw.given);
               break;
             }
             case "SignOut":
@@ -191,8 +219,8 @@ export class CustomerMemberHandler {
               readClosedRecord(body, ["action"]);
               answer =
                 body.action === "SignOut"
-                  ? await this.#port.signOut(credentials)
-                  : await this.#port.leave(credentials);
+                  ? await port.signOut(credentials)
+                  : await port.leave(credentials);
               response.setHeader(
                 "Set-Cookie",
                 `${memberSessionCookieName}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax`,

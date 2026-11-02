@@ -238,3 +238,82 @@
 .customer-page .dining-session__split label[data-status="Mine"] {
   color: var(--bop-color-text-muted);
 }
+
+/* WP-2423 取舍 18 DEC-MEMBER-POINTS: joining, using points and the member page. */
+.customer-page .member-panel,
+.customer-page .member-at-table {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin-block: var(--bop-space-4);
+  padding-block-start: var(--bop-space-4);
+  border-top: 1px solid var(--bop-color-border-default);
+  min-width: 0;
+}
+.customer-page .member-panel > *,
+.customer-page .member-at-table > * {
+  margin-block: 0;
+}
+.customer-page .member-panel__link {
+  margin-block: var(--bop-space-3);
+}
+.customer-page .member-panel__parts {
+  display: grid;
+  gap: var(--bop-space-2);
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.customer-page .member-form {
+  display: grid;
+  gap: var(--bop-space-3);
+  min-width: 0;
+}
+.customer-page .member-form > * {
+  margin-block: 0;
+}
+.customer-page .member-form label,
+.customer-page .member-at-table__use label {
+  display: grid;
+  gap: var(--bop-space-1);
+}
+.customer-page .member-form input:not([type="checkbox"]),
+.customer-page .member-at-table select {
+  width: 100%;
+  min-height: 44px;
+}
+.customer-page .member-form .member-form__consent {
+  display: block;
+}
+.customer-page .member-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bop-space-2);
+}
+.customer-page .member-at-table__use {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+.customer-page .member-page__balance h2 {
+  font-size: 28px;
+}
+.customer-page .member-page__history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.customer-page .member-page__history li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--bop-space-1) var(--bop-space-3);
+  padding-block: var(--bop-space-2);
+  border-top: 1px solid var(--bop-color-border-default);
+}
+.customer-page .member-page__history li span:nth-child(2) {
+  grid-row: 2;
+  color: var(--bop-color-text-muted);
+}
+.customer-page .member-page__history li strong {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}

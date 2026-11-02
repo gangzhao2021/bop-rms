@@ -4311,8 +4311,8 @@ async function journey(ending) {
               [scope.brandReference, scope.storeReference],
             );
             await admin.query(
-              "INSERT INTO rms_store.store_feature_setting (tenant_id,brand_id,store_id,version,operation_id,template_code,counter_order,pickup,inventory,loyalty,compliance_documents,actor_id,occurred_at) " +
-                "VALUES ($1,$2,$3,$4,$5,'Custom',false,false,false,$6,false,$7,date_trunc('milliseconds',now()))",
+              "INSERT INTO rms_store.store_feature_setting (tenant_id,brand_id,store_id,version,operation_id,template_code,counter_order,pickup,inventory,loyalty,points_offered,compliance_documents,actor_id,occurred_at) " +
+                "VALUES ($1,$2,$3,$4,$5,'Custom',false,false,false,false,$6,false,$7,date_trunc('milliseconds',now()))",
               [
                 tenant,
                 scope.brandReference,
@@ -4618,6 +4618,7 @@ async function journey(ending) {
             compedDish.net + 300n,
             "reports show what came off, nothing hidden",
           );
+          assert.equal(report.pointsUsedMinor, "300", "and how much of it was points");
           assert.equal(
             BigInt(report.summary.grossSalesMinor),
             BigInt(open.owed.subtotalMinor),

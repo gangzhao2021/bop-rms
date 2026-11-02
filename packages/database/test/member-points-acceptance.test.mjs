@@ -7,10 +7,12 @@ import { it } from "vitest";
 import {
   createMemberPhoneProtector,
   createMemberPointsStore,
+  memberCodeBudgets,
   memberExpiryStep,
   memberPointsDefaultRule,
   memberPointsExpireAt,
 } from "../../rms/customer-loyalty/src/index.ts";
+import { createAbuseBudgetConsumer } from "../src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
@@ -306,6 +308,24 @@ it("earns, spends one balance once, takes back after a refund, expires, leaves a
         ),
         { code: "MEMBER_ALREADY_EARNED" },
       );
+
+      // The budget for sending codes, as the API role: the sixth in the hour is refused and says
+      // how long to wait. It commits on its own, so a refused request still counts.
+      const budget = createAbuseBudgetConsumer({
+        bucketClass: "MEMBER_CODE_SEND",
+        windowSeconds: 3600,
+        limitCount: memberCodeBudgets.sendPerPhoneHour,
+        now,
+        query: (sql, values) => as(api, (tx) => tx.query(sql, [...values])),
+      });
+      const key = protector.budgetKey("phone-hour:" + brandA, phone);
+      const sends = [];
+      for (let n = 0; n < 6; n += 1) sends.push(await budget.consume(key));
+      assert.deepEqual(
+        sends.map((result) => result.allowed),
+        [true, true, true, true, true, false],
+      );
+      assert.ok(sends[5].retry_after_seconds > 0);
 
       // Rules: an older version is refused; the worker role holds nothing here.
       const changed = await as(api, (tx) =>

@@ -16,9 +16,14 @@ import {
 import { listDiningSessionMergedInto } from "@rms/dining";
 import {
   createPostgresOrderPriceReductionStore,
+  listOrderRoundDishes,
+  loadOrderGuestSession,
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
-import { createPostgresDiningTableSettlementStore } from "@rms/payment";
+import {
+  createPostgresDiningTableSettlementStore,
+  createPostgresStoreSalesPaymentLedger,
+} from "@rms/payment";
 import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
 import { storeOffersPoints } from "./merchant-store-features.js";
@@ -27,7 +32,7 @@ import { storeOffersPoints } from "./merchant-store-features.js";
  * WP-2423 取舍 18 DEC-MEMBER-POINTS: a guest's side of the Brand's points. Ordering never needs any
  * of this: nothing here runs unless the guest chooses to join, sign in or use points. A guest's
  * Session says which Store and table they are at; the member's own session says who they are. The
- * browser never names an Order, a table or an amount.
+ * browser names only its own Order, checked against its Session, and never an amount.
  */
 export type CustomerMemberErrorCode =
   | "MEMBER_NOT_OFFERED"
@@ -98,6 +103,9 @@ interface ClaimSource {
 export function createCustomerMember(options: {
   readonly access: StatusReadOptions;
   readonly tenantReference: string;
+  /** The Provider account this Store settles: what says a paid round was paid. */
+  readonly providerAccountReference: string;
+  readonly environment: "Test" | "Live";
   readonly protector: MemberPhoneProtector;
   readonly messages: MemberMessagePort | null;
   readonly budget: MemberBudget;
@@ -204,14 +212,55 @@ export function createCustomerMember(options: {
     }
     return sources.sort((a, b) => (a.partNumber ?? 0) - (b.partNumber ?? 0));
   };
+  /**
+   * Pickup, and a table that pays each round first: each paid round of the guest's own Order earns
+   * on its own. The guest's Session lives at most a day, so two days of payments covers it.
+   */
+  const orderSources = async (
+    tx: ConsumerTransaction,
+    guest: { readonly sessionReference?: unknown },
+    orderReference: string,
+  ): Promise<readonly ClaimSource[]> => {
+    const owner = await loadOrderGuestSession(tx as never, scope, orderReference);
+    if (owner === null || String(owner) !== String(guest.sessionReference)) return [];
+    const endsAt = new Date(Date.parse(now()) + 1000).toISOString();
+    const ledger = await createPostgresStoreSalesPaymentLedger({
+      scope: {
+        ...scope,
+        providerAccountReference: options.providerAccountReference,
+        environment: options.environment,
+      },
+      authorize: async () => true,
+    })(tx, {
+      startsAt: new Date(Date.parse(now()) - 2 * 86_400_000).toISOString(),
+      endsAt,
+      observedAt: endsAt,
+    });
+    const paid = new Set(
+      ledger.payments
+        .filter((payment) => payment.orderReference === orderReference && !payment.splitPart)
+        .map((payment) => payment.orderBatchReference),
+    );
+    const dishes = await listOrderRoundDishes(tx, scope, orderReference);
+    return [...paid].sort().map((batch) => ({
+      sourceReference: batch,
+      orderReference,
+      partNumber: null,
+      paidDishesMinor: dishes.get(batch) ?? 0n,
+    }));
+  };
   const unclaimed = async (
     tx: ConsumerTransaction,
-    guest: { readonly diningSessionReference?: unknown },
+    guest: { readonly diningSessionReference?: unknown; readonly sessionReference?: unknown },
     rule: MemberPointsRule,
+    orderReference: string | null = null,
   ) => {
-    const session = await billSessionOf(tx, guest);
-    if (session === null) return [];
-    const sources = await claimSources(tx, session);
+    const session = orderReference === null ? await billSessionOf(tx, guest) : null;
+    if (session === null && orderReference === null) return [];
+    const sources =
+      orderReference !== null
+        ? await orderSources(tx, guest, orderReference)
+        : await claimSources(tx, session as string);
     const earned = await points.earnedSources(
       tx as never,
       sources.map((source) => source.sourceReference),
@@ -240,24 +289,31 @@ export function createCustomerMember(options: {
     accountReference: string,
     rule: MemberPointsRule,
     partNumber: number | null,
+    orderReference: string | null = null,
   ): Promise<number> => {
-    const sources = await unclaimed(tx, guest, rule);
-    const source =
-      partNumber === null
-        ? sources.length === 1
-          ? sources[0]
-          : undefined
-        : sources.find((entry) => entry.partNumber === partNumber);
-    if (source === undefined) return fail("MEMBER_NOTHING_TO_CLAIM");
-    return (
-      await points.earn(tx as never, {
-        accountReference,
-        sourceReference: source.sourceReference,
-        orderReference: source.orderReference,
-        paidDishesMinor: source.paidDishesMinor,
-        rule,
-      })
-    ).points;
+    const sources = await unclaimed(tx, guest, rule, orderReference);
+    // A table's split parts are the guest's to name; an Order's paid rounds all belong to it.
+    const chosen =
+      orderReference !== null
+        ? sources
+        : partNumber === null
+          ? sources.length === 1
+            ? sources
+            : []
+          : sources.filter((entry) => entry.partNumber === partNumber);
+    if (chosen.length === 0) return fail("MEMBER_NOTHING_TO_CLAIM");
+    let earned = 0;
+    for (const source of chosen)
+      earned += (
+        await points.earn(tx as never, {
+          accountReference,
+          sourceReference: source.sourceReference,
+          orderReference: source.orderReference,
+          paidDishesMinor: source.paidDishesMinor,
+          rule,
+        })
+      ).points;
+    return earned;
   };
   const translated = async <T>(work: () => Promise<T>): Promise<T> => {
     try {
@@ -285,7 +341,7 @@ export function createCustomerMember(options: {
 
   return Object.freeze({
     /** What the receipt and checkout show. A guest who isn't a member gets the offer alone. */
-    async state(credentials: MemberCredentials) {
+    async state(credentials: MemberCredentials, orderReference: string | null = null) {
       return translated(() =>
         run(async (tx) => {
           const guest = await visit(tx, credentials);
@@ -299,7 +355,7 @@ export function createCustomerMember(options: {
             rule: ruleView(rule),
             messagesAvailable: options.messages !== null,
             claim: claimView(
-              await unclaimed(tx, guest, rule),
+              await unclaimed(tx, guest, rule, orderReference),
               rule,
               String((guest as { absoluteExpiresAt: unknown }).absoluteExpiresAt),
             ),
@@ -369,6 +425,7 @@ export function createCustomerMember(options: {
         readonly marketingConsent: boolean;
         readonly claim: boolean;
         readonly partNumber: number | null;
+        readonly orderReference?: string | null;
       },
       address: string | null,
     ) {
@@ -412,7 +469,14 @@ export function createCustomerMember(options: {
             const guest = await visit(tx, credentials);
             if (!(await offered(tx))) return 0;
             const rule = await points.currentRule(tx as never);
-            return earn(tx, guest, signedIn.account, rule, input.partNumber);
+            return earn(
+              tx,
+              guest,
+              signedIn.account,
+              rule,
+              input.partNumber,
+              input.orderReference ?? null,
+            );
           }).catch(() => 0);
         return Object.freeze({
           joined: signedIn.joined,
@@ -424,7 +488,11 @@ export function createCustomerMember(options: {
     },
 
     /** Credit a paid order to the signed-in member. */
-    async claim(credentials: MemberCredentials, partNumber: number | null) {
+    async claim(
+      credentials: MemberCredentials,
+      partNumber: number | null,
+      orderReference: string | null = null,
+    ) {
       return translated(() =>
         run(async (tx) => {
           const guest = await visit(tx, credentials);
@@ -433,7 +501,14 @@ export function createCustomerMember(options: {
           if (account === null) return fail("MEMBER_SIGN_IN_REQUIRED");
           const rule = await points.currentRule(tx as never);
           return Object.freeze({
-            earnedPoints: await earn(tx, guest, account as string, rule, partNumber),
+            earnedPoints: await earn(
+              tx,
+              guest,
+              account as string,
+              rule,
+              partNumber,
+              orderReference,
+            ),
           });
         }),
       );
