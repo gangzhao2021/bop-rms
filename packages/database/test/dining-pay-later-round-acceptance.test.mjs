@@ -4662,15 +4662,25 @@ async function journey(ending) {
           assert.deepEqual((await port.state(guest(token))).claim.parts, [
             { partNumber: null, points: expected },
           ]);
-          // The same dishes can't also earn through the Order's own receipt, even for its owner.
+          // The same dishes can't also earn through the Order's own receipt, even for its owner
+          // (this guest made the owner here: the test's own edit of an append-only record).
+          await admin.query("BEGIN");
           await admin.query(
-            "ALTER TABLE rms_ordering.order_submission_record DISABLE TRIGGER USER",
+            "ALTER TABLE rms_ordering.order_submission_record DISABLE RULE order_submission_record_no_update",
           );
           await admin.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [scope.brandReference, scope.storeReference],
+          );
+          const madeOwner = await admin.query(
             "UPDATE rms_ordering.order_submission_record SET guest_session_id=$1 WHERE order_id=$2 AND submission_kind='Initial'",
             [tableGuest, orderReference],
           );
-          await admin.query("ALTER TABLE rms_ordering.order_submission_record ENABLE TRIGGER USER");
+          assert.equal(madeOwner.rowCount, 1);
+          await admin.query(
+            "ALTER TABLE rms_ordering.order_submission_record ENABLE RULE order_submission_record_no_update",
+          );
+          await admin.query("COMMIT");
           assert.equal((await port.state(guest(token), orderReference)).claim, null);
           assert.equal((await port.claim(guest(token), null)).earnedPoints, expected);
           await assert.rejects(port.claim(guest(token), null), { code: "MEMBER_NOTHING_TO_CLAIM" });
