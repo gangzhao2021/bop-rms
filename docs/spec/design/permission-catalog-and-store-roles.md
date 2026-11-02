@@ -120,3 +120,4 @@
 - 决定：权限目录 v23 新增 `organization.support_access.manage`（允许或停止平台支持更改设置，读取支持访问记录；风险 High），
   只在 Owner 模板。详见 [DEC-PLATFORM-SUPPORT-STAFF](./platform-support-staff.md)。
 - 批准：Owner 常设批准 2026-10-14。已开通门店需安装目录 v23 并把门店角色升级到 v23（Owner 新增 1 项授权）。
+- 决定（Owner 2026-11-02）：本文“店内无人可批时由平台客服签名批准”中的签名人是单独的平台审批人，不是平台支持人员，见 [DEC-PLATFORM-SUPPORT-STAFF](./platform-support-staff.md)。

@@ -24,10 +24,10 @@
 
 ## 与已接受决定的关系
 
-- 冲突（已上报协调人，未改动）：DEC-PERM-CATALOG 写的是“店内无人可批时，平台客服签名批准角色分配”，Owner 取舍 15 写的是
-  支持人员永远不能做“员工与角色”。两者都已接受。本项不提供这个签名批准，它仍由平台方持密钥用 `store-role-provisioning`
-  （`prepare-assignment`、`sign-assignment`、`apply-assignment`）完成。放进产品需要单独的平台审批人身份（不是支持人员）和正式
-  登录，不是同一条小路径，也要 Owner 明确两条决定如何并存。
+- 店内无人可批时的角色分配（Owner 2026-11-02 原话“同意，按你的建议，继续”）：DEC-PERM-CATALOG 与取舍 15 并存。
+  “平台客服签名批准”由单独的平台审批人身份完成，它不是支持人员，也不进支持页面；支持人员永远不能碰员工与角色。
+  等 Cognito 正式登录到位后再放进产品；在此之前，平台方持密钥用 `store-role-provisioning`（`prepare-assignment`、
+  `sign-assignment`、`apply-assignment`）完成，所以开新店的这一步还不能完全在产品里做。
 - 服务协议措辞：查看写进开通时的服务协议是 Owner 的法律事实，属外部关口。产品里只显示标明 TEST ONLY 的一行。
 - 没有复用 `PlatformPermissionPolicy`：它的用途固定为品牌模板，并且要求带 MFA 的平台登录，那在 Cognito 外部关口之后。正式登录
   建成时替换身份来源，`platform_support_person` 仍是权限记录。
