@@ -852,6 +852,7 @@ export const overviewScreens = Object.freeze({
   tables: "DIN-FLOOR-BOARD",
   settlement: "PAY-RECONCILIATION",
   service: "ORG-STORE-LIST",
+  kitchenSetup: "STORE-SETUP",
 } as const);
 export function StoreOverview({
   csrf,
@@ -895,6 +896,7 @@ export function StoreOverview({
       tables: ids.includes(overviewScreens.tables),
       settlement: ids.includes(overviewScreens.settlement),
       service: ids.includes(overviewScreens.service),
+      kitchenSetup: ids.includes(overviewScreens.kitchenSetup),
     };
   }, [screenKey]);
   const hidden = { kind: "Hidden" } as const;
@@ -917,6 +919,7 @@ export function StoreOverview({
   // Store setup section and the listing refusal still say it).
   const [kitchenSetupHref, setKitchenSetupHref] = useState<string | null>(null);
   useEffect(() => {
+    if (!permitted.kitchenSetup) return;
     let live = true;
     void createStoreKitchenSetupClient({ csrf, ...(fetcher ? { fetcher } : {}) })
       .load()
@@ -934,7 +937,7 @@ export function StoreOverview({
     return () => {
       live = false;
     };
-  }, [csrf, fetcher, storeReference]);
+  }, [csrf, fetcher, storeReference, permitted.kitchenSetup]);
   useEffect(() => {
     const view = pickupView.current;
     if (view !== null)

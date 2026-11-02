@@ -107,6 +107,17 @@ async function pilotHome(
     unexpected.push(new URL(route.request().url()).pathname);
     return route.fulfill({ status: 404, headers, json: { error: "not_found" } });
   });
+  await page.route("**/merchant/store/kitchen-setup", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canChange: true,
+        version: 1,
+        inEffectFrom: "2026-11-01T15:00:00.000Z",
+        uncoveredDishes: [],
+      },
+    }),
+  );
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,

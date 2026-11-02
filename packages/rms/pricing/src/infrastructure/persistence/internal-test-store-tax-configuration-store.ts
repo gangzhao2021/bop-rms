@@ -131,7 +131,7 @@ const ruleRead = `SELECT tax_configuration_rule_id::text "ruleReference",tax_cla
   compound_on_prior_tax "compoundOnPriorTax",exception_evidence_id::text "exceptionEvidenceReference",
   receipt_presentation_code "receiptPresentationCode"
   FROM rms_pricing.tax_configuration_rule WHERE brand_id=$1 AND store_id=$2 AND tax_configuration_version_id=$3
-  ORDER BY tax_configuration_rule_id`;
+  ORDER BY tax_configuration_rule.tax_configuration_rule_id`;
 
 /** Creates the TEST Store's synthetic tax configuration, or answers the one it has. */
 export async function createInternalTestStoreTaxConfiguration(

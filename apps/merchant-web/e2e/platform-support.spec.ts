@@ -128,12 +128,16 @@ test("@production support picks a Store, reads it masked, and changes only what 
 test("@production support opening the Store workspace goes to their own page; others keep sign-in", async ({
   page,
 }) => {
-  await page.route("**/merchant/session", (route) =>
-    route.fulfill({ status: 401, headers, json: { error: "unauthenticated" } }),
-  );
   let support = true;
-  await page.route("**/merchant/support/session", (route) =>
+  let probes = 0;
+  await page.route("**/merchant/session", (route) =>
     support
+      ? route.fulfill({ status: 403, headers, json: { error: "platform_support" } })
+      : route.fulfill({ status: 401, headers, json: { error: "unauthenticated" } }),
+  );
+  await page.route("**/merchant/support/session", (route) => {
+    probes += 1;
+    return support
       ? route.fulfill({
           headers,
           json: {
@@ -143,15 +147,18 @@ test("@production support opening the Store workspace goes to their own page; ot
             stores: [{ storeReference: store, name: "Training Store" }],
           },
         })
-      : route.fulfill({ status: 403, headers, json: { error: "support_denied" } }),
-  );
+      : route.fulfill({ status: 403, headers, json: { error: "support_denied" } });
+  });
   await page.goto("/operations/orders");
   await expect(page).toHaveURL(/\/platform\/support-cases$/u);
   await expect(page.getByText("Signed in as TEST Support Sam")).toBeVisible();
   support = false;
+  probes = 0;
   await page.goto("/app");
   await expect(page.getByText("Sign in", { exact: false }).first()).toBeVisible();
   await expect(page).not.toHaveURL(/support-cases/u);
+  // Only support's own path asks the support route.
+  expect(probes).toBe(0);
 });
 
 test("@production someone who isn't support is told so; a failed read can be retried", async ({

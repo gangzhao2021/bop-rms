@@ -1,4 +1,4 @@
-import type { BillTaxRoundingItem } from "../../domain/bill-tax-rounding.js";
+import type { BillTaxRoundingItem } from "../../application/bill-tax-rounding.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
 import { DigitalReceiptError } from "../../domain/digital-receipt.js";

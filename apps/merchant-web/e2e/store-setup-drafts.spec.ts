@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { serveStoreSetupPanels } from "./store-setup-panels";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 import {
@@ -32,6 +33,7 @@ const respond = (route: Route, value: unknown, status = 200) =>
     body: JSON.stringify(value),
   });
 async function install(page: Page) {
+  await serveStoreSetupPanels(page);
   const control = {
     loseNext: false,
     denyResolve: false,

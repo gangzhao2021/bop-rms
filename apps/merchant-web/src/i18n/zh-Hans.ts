@@ -6686,7 +6686,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No stock has been received at this store yet. Record its first delivery and guests can order it.":
     "本店还没有收过货。记下第一次到货后，顾客就能点这道菜。",
   "Kitchen setup is unavailable": "厨房设置暂时不可用",
-  "Kitchen setup is unavailable. Nothing was changed.": "厨房设置暂时不可用，没有做任何更改。",
+  "We can't show the kitchen setup right now. Nothing was changed.":
+    "暂时无法显示厨房设置。没有做任何更改。",
   "Loading the kitchen…": "正在加载厨房…",
   "Guests can't order at this Store until its kitchen is set up: an order here would be paid and never reach a kitchen.":
     "本店厨房设置好之前，顾客无法下单：否则订单付了款，却到不了厨房。",

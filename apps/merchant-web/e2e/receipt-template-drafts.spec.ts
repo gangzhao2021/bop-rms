@@ -1,4 +1,5 @@
 import { parseDigitalReceiptTemplatePublishedCurrent } from "../../../packages/rms/printing-device/src/contracts/digital-receipt-template-published-current.js";
+import { serveStoreSetupPanels } from "./store-setup-panels";
 import {
   createStoreSetupDraft,
   replaceStoreSetupDraftContent,
@@ -92,6 +93,7 @@ async function cursors(page: Page, submission: boolean | "Lifecycle" | "Setup" =
   );
 }
 async function install(page: Page) {
+  await serveStoreSetupPanels(page);
   const selectedScope = { ...scope };
   const state = {
     loseSetup: false,
