@@ -7,6 +7,7 @@ import {
   createRequestCorrelationMiddleware,
   getRequestCorrelationContext,
   markRequestFailure,
+  markRequestRetryLater,
   type RequestCorrelationContext,
 } from "./request-correlation.js";
 import { customerFailureCode, withFailureCause } from "./customer-failure-diagnostic.js";
@@ -209,6 +210,30 @@ describe("v15 2026-10-16: a server error logs its safe cause code", () => {
       { code: "TENANT_DATABASE_TRANSACTION_CONFLICT_SQL_40P01", value: undefined },
       undefined,
       undefined,
+    ]);
+  });
+
+  it("v15 2026-11-02: an expected wait is not logged as a server error", async () => {
+    const entries: unknown[] = [];
+    const app = express();
+    app.use(
+      createRequestCorrelationMiddleware({
+        logger: { info: (entry) => entries.push(entry) },
+      }),
+    );
+    app.get("/waiting", (request, response) => {
+      markRequestRetryLater(request);
+      response.status(503).end();
+    });
+    app.get("/failed", (_request, response) => {
+      response.status(503).end();
+    });
+    const base = await listen(app);
+    for (const path of ["/waiting", "/failed"]) await fetch(base + path);
+    await expect.poll(() => entries.length).toBe(2);
+    expect(entries.map((entry) => (entry as { resultCode: string }).resultCode)).toEqual([
+      "HTTP_RETRY_LATER",
+      "HTTP_SERVER_ERROR",
     ]);
   });
 

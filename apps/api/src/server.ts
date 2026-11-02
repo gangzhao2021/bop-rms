@@ -206,6 +206,7 @@ export function createApiCoreTelemetry(options: CoreTelemetryOptions = {}): Core
         "API_SHUTDOWN_FAILED",
         "API_START_FAILED",
         "HTTP_CLIENT_ERROR",
+        "HTTP_RETRY_LATER",
         "HTTP_SERVER_ERROR",
         "HTTP_SUCCESS",
         "SUCCESS",

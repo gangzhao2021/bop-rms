@@ -266,6 +266,16 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
           : {
               method: paid.method,
               roundsMinor: paid.roundsMinor,
+              // WP-2423 取舍 18: already off the rounds; said so the receipt explains the amount.
+              pointsUsedMinor: bill.rounds
+                .flatMap((round) => round.items)
+                .reduce(
+                  (sum, item) =>
+                    sum +
+                    (item.reduction?.points === true ? BigInt(item.reduction.amountMinor) : 0n),
+                  0n,
+                )
+                .toString(),
               tipMinor: paid.tipMinor,
               roundingMinor: paid.roundingMinor,
               totalMinor: paid.totalMinor,

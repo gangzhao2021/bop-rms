@@ -418,6 +418,19 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
               <dd>−{money(summary.pointsUsed)}</dd>
             </div>
           ) : null}
+          {/* v15 2026-11-02: every line between what was ordered and what is to pay. */}
+          {summary.takenOff !== undefined ? (
+            <div>
+              <dt>{t("Taken off by the restaurant")}</dt>
+              <dd>−{money(summary.takenOff)}</dd>
+            </div>
+          ) : null}
+          {summary.taxRounding !== undefined ? (
+            <div>
+              <dt>{t("Tax rounding")}</dt>
+              <dd>{money(summary.taxRounding)}</dd>
+            </div>
+          ) : null}
           {/* DEC-DINE-IN-PAY-LATER: the table's one payment, line by line up to what was paid. */}
           {summary.tableTip !== undefined && nonZero(summary.tableTip) ? (
             <div>
@@ -549,12 +562,19 @@ export function DiningSessionPage({
     "view" in state && state.view !== null && state.view.rounds.length > 0,
   );
   const pending = useRef<AbortController | null>(null);
+  // v15 2026-11-02: asked to read while a read is under way (points were just used): that read
+  // may already be out of date, so read once more as soon as it ends.
+  const readAgain = useRef(false);
+  const [readAgainTick, setReadAgainTick] = useState(0);
   // v15 2026-10-27: right after the first round the order is prepared within seconds; the page
   // waits and reads again (a bounded number of times) instead of saying "join your table".
   const processingRetries = useRef(0);
   const [retryTick, setRetryTick] = useState(0);
   const load = useCallback(async () => {
-    if (pending.current) return;
+    if (pending.current) {
+      readAgain.current = true;
+      return;
+    }
     const controller = new AbortController();
     pending.current = controller;
     setState((prior) =>
@@ -602,8 +622,15 @@ export function DiningSessionPage({
         }));
     } finally {
       if (pending.current === controller) pending.current = null;
+      if (readAgain.current) {
+        readAgain.current = false;
+        setReadAgainTick((value) => value + 1);
+      }
     }
   }, [client]);
+  useEffect(() => {
+    if (readAgainTick > 0) void load();
+  }, [readAgainTick, load]);
   useEffect(() => {
     if (retryTick === 0) return;
     const timer = window.setTimeout(() => void load(), 2000);
@@ -826,6 +853,7 @@ export function DiningSessionScreen({
             // The table's total and rounds are read again (paid in full, or checkout started).
             onRefresh();
           }}
+          onBillChanged={onRefresh}
         />
       ) : null}
       {view && view.rounds.length > 0 ? (

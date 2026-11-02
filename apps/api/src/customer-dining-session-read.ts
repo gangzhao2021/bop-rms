@@ -26,7 +26,6 @@ import {
   createPostgresStaffOrderCancellationReader,
   listDiningOrderBatchAuthorship,
   listOrderItemPrices,
-  listOrderPriceReductions,
   listOrderBillOrders,
   listOrderDiningSessions,
   listStoreDiningBatchPaymentDeadlines,
@@ -54,6 +53,7 @@ import { withFailureCause } from "./customer-failure-diagnostic.js";
 import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { createDiningOrderDeliveryProgress } from "./dining-order-delivery-progress.js";
 import { readItemCancellationRefundStatus } from "./merchant-order-item-staff-cancellation.js";
+import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
 import { readStaffCancellationRefundPosition } from "./merchant-order-staff-cancellation.js";
 
 /**
@@ -128,17 +128,24 @@ export interface CustomerDiningSessionFacts {
     readonly heldRounds?: ReadonlyMap<string, OrderRoundHoldReason>;
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment (if paid). */
     readonly tableSettlement?: { readonly tipMinor: bigint; readonly roundingMinor: bigint } | null;
-    /** WP-2423 取舍 18: what guests' points took off this bill, tax included. */
-    readonly pointsUsedMinor?: bigint;
+    /**
+     * v15 2026-11-02: a table paying at the end, from the table's bill (what the pay panel and staff
+     * read), so the summary can never owe a different amount from them: still owed, what points and
+     * what staff (comps, discounts) took off, tax included, and the bill's tax rounding.
+     */
+    readonly tableBill?: {
+      readonly owedMinor: bigint;
+      readonly pointsUsedMinor: bigint;
+      readonly takenOffMinor: bigint;
+      readonly taxRoundingMinor: bigint;
+    };
     /**
      * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
-     * there are and are paid, and what the paid parts covered of the rounds (taken off what is
-     * still to pay until every part is paid).
+     * there are and are paid.
      */
     readonly splitParts?: {
       readonly count: number;
       readonly paid: number;
-      readonly paidRoundsMinor: bigint;
     } | null;
     readonly unpaidCancellations: ReadonlySet<string>;
     /** WP-2423 item 8 ⑦ 4b-3: the order items that are the table's per-head tea (still charged). */
@@ -265,6 +272,10 @@ export interface CustomerDiningSessionView {
     readonly splitParts?: { readonly count: number; readonly paid: number };
     /** WP-2423 取舍 18: why what was paid is less than what was ordered. */
     readonly pointsUsed?: CustomerMoney;
+    /** v15 2026-11-02: what staff took off (comps, discounts), tax included. */
+    readonly takenOff?: CustomerMoney;
+    /** v15 2026-11-02: the bill's tax rounding (DEC-TAX-WHOLE-RECEIPT), which can be negative. */
+    readonly taxRounding?: CustomerMoney;
     /** WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill: what one guest's tea costs, and how many. */
     readonly teaCharge?: { readonly perGuest: CustomerMoney; readonly guests: number };
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
@@ -438,12 +449,10 @@ export function composeCustomerDiningSession(
       payment = "Paid";
       status = kitchenStatus();
     } else if (outcome === undefined && order.payLaterRounds?.has(reference) === true) {
-      // In the kitchen and owed until the table pays at the end; never cancelled for payment.
+      // In the kitchen and on the table's bill until it pays at the end; never cancelled for
+      // payment. What it owes is the bill's, below.
+      if (order.tableBill === undefined) return unavailable();
       payment = "OnTableBill";
-      due += items.reduce(
-        (sum, item) => sum + (item.cancelled ? 0n : item.lineTotal.amountMinor),
-        0n,
-      );
       status = kitchenStatus();
     } else if (outcome === undefined) {
       status = "AwaitingPayment";
@@ -539,20 +548,19 @@ export function composeCustomerDiningSession(
             tableTip: money(order.tableSettlement.tipMinor),
             cashRounding: money(order.tableSettlement.roundingMinor),
           }),
-      ...((order.pointsUsedMinor ?? 0n) > 0n
-        ? { pointsUsed: money(order.pointsUsedMinor as bigint) }
+      ...((order.tableBill?.pointsUsedMinor ?? 0n) > 0n
+        ? { pointsUsed: money(order.tableBill?.pointsUsedMinor as bigint) }
+        : {}),
+      ...((order.tableBill?.takenOffMinor ?? 0n) > 0n
+        ? { takenOff: money(order.tableBill?.takenOffMinor as bigint) }
+        : {}),
+      ...((order.tableBill?.taxRoundingMinor ?? 0n) !== 0n
+        ? { taxRounding: money(order.tableBill?.taxRoundingMinor as bigint) }
         : {}),
       paid: money(paid),
       refunded: money(refunded),
       refundPending: money(refundPending),
-      // A split bill: the parts already paid are not still to pay.
-      due: money(
-        order.splitParts != null && due > order.splitParts.paidRoundsMinor
-          ? due - order.splitParts.paidRoundsMinor
-          : order.splitParts != null
-            ? 0n
-            : due,
-      ),
+      due: money(due + (order.tableBill?.owedMinor ?? 0n)),
       ...(order.splitParts == null
         ? {}
         : { splitParts: { count: order.splitParts.count, paid: order.splitParts.paid } }),
@@ -1161,13 +1169,7 @@ function postgresDependencies(
               : {
                   count: splitPlan.parts.length,
                   paid: tableSettlements.filter((settlement) => settlement.part !== null).length,
-                  paidRoundsMinor: tableSettlements
-                    .filter((settlement) => settlement.part !== null)
-                    .reduce((sum, settlement) => sum + settlement.roundsMinor, 0n),
                 },
-          pointsUsedMinor: (await listOrderPriceReductions(transaction, scope, [orderReference]))
-            .filter((reduction) => reduction.reasonCode === "POINTS_REDEMPTION")
-            .reduce((sum, reduction) => sum + reduction.totalMinor, 0n),
           tableSettlement:
             tableSettlements.length === 0
               ? null
@@ -1215,14 +1217,45 @@ function postgresDependencies(
         if (memberSession === undefined) return unavailable();
         mergedOrders.push(await orderFacts(member, memberSession, false));
       }
+      const order = mergeBillOrderFacts(ownOrder, mergedOrders);
+      const tableBill = async () =>
+        options.diningScope === undefined
+          ? unavailable()
+          : readCustomerTableBillFacts(transaction, options.diningScope, {
+              diningSessionReference,
+              observedAt: now(),
+              authorize: stillAuthorized,
+            });
       return {
         diningSessionReference,
         tableLabel,
         checkedAt: now(),
         ...timing,
-        order: mergeBillOrderFacts(ownOrder, mergedOrders),
+        order: (order.payLaterRounds?.size ?? 0) > 0 ? { ...order, tableBill: await tableBill() } : order,
       };
     },
+  };
+}
+
+/** v15 2026-11-02: what the guest's table page says of a table paying at the end: its bill's. */
+export async function readCustomerTableBillFacts(
+  transaction: ConsumerTransaction,
+  scope: Parameters<typeof readDiningTableBill>[1],
+  input: Parameters<typeof readDiningTableBill>[2],
+): Promise<NonNullable<NonNullable<CustomerDiningSessionFacts["order"]>["tableBill"]>> {
+  const bill = await readDiningTableBill(transaction, scope, input);
+  const reductions = bill.rounds.flatMap((round) =>
+    round.items.flatMap((item) => (item.reduction === null ? [] : [item.reduction])),
+  );
+  const sum = (points: boolean) =>
+    reductions
+      .filter((reduction) => (reduction.points === true) === points)
+      .reduce((total, reduction) => total + BigInt(reduction.amountMinor), 0n);
+  return {
+    owedMinor: BigInt(bill.owed.totalMinor),
+    pointsUsedMinor: sum(true),
+    takenOffMinor: sum(false),
+    taxRoundingMinor: BigInt(bill.taxRoundingMinor),
   };
 }
 
@@ -1251,7 +1284,6 @@ export function mergeBillOrderFacts(
     batches: all
       .flatMap((facts) => facts.batches)
       .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0)),
-    pointsUsedMinor: all.reduce((sum, facts) => sum + (facts.pointsUsedMinor ?? 0n), 0n),
     authorship: maps((facts) => facts.authorship),
     staffRounds: sets((facts) => facts.staffRounds),
     delivery: maps((facts) => facts.delivery),

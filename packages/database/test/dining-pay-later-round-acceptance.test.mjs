@@ -66,6 +66,7 @@ import {
 } from "../../rms/customer-loyalty/src/index.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
 import { loadStoreSalesReportSources } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
+import { readCustomerTableBillFacts } from "../../../apps/api/src/customer-dining-session-read.ts";
 import { readTonightFacts } from "../../../apps/api/src/merchant-tonight-summary.ts";
 import {
   computeStoreSalesReport,
@@ -785,6 +786,22 @@ async function journey(ending) {
             persistence: persistenceOf(who),
             authentication: who.authentication,
           })({ ...as(who), query: { diningSessionReference: sessionReference } });
+        // v15 2026-11-02: what the guest's table page reads of a table paying at the end, under the
+        // pilot API's grants, is what staff read, whatever came off the bill. (The journey builds no
+        // order-status projection, so the page's whole read is covered in the browser suite.)
+        const pageFacts = async () => {
+          const facts = await transactions({ guc: true }).run((tx) =>
+            readCustomerTableBillFacts(tx, ownerScope, {
+              diningSessionReference: sessionReference,
+              observedAt: now(),
+              authorize: async () => true,
+            }),
+          );
+          const owed = await bill();
+          assert.equal(facts.owedMinor.toString(), owed.owed.totalMinor);
+          assert.equal(facts.taxRoundingMinor.toString(), owed.taxRoundingMinor);
+          return facts;
+        };
         const settleWith = (who, command) =>
           createMerchantDiningTableSettle({
             persistence: persistenceOf(who),
@@ -3193,6 +3210,10 @@ async function journey(ending) {
             ],
           );
           // The bill: round 2 owes nothing, round 1 less its discount; the dishes stay on it.
+          // Comped and discounted dishes: the page says what came off, and owes what staff see.
+          const pageAfterComps = await pageFacts();
+          assert.ok(pageAfterComps.takenOffMinor > 0n);
+          assert.equal(pageAfterComps.pointsUsedMinor, 0n);
           const owedNow = await bill();
           assert.equal(owedNow.consistent, true);
           assert.deepEqual(
@@ -4673,6 +4694,10 @@ async function journey(ending) {
           // $3.00 off the dishes; the tax on it comes off too, never paid by points on its own.
           const after = await bill();
           assert.equal(BigInt(before.owed.subtotalMinor) - BigInt(after.owed.subtotalMinor), 300n);
+          const pageAfterPoints = await pageFacts();
+          assert.equal(pageAfterPoints.pointsUsedMinor.toString(), redeemed.takenOffMinor);
+          // The manager's comp above stays apart from what points took off.
+          assert.ok(pageAfterPoints.takenOffMinor > 0n);
           assert.equal(
             BigInt(before.owed.totalMinor) - BigInt(after.owed.totalMinor),
             BigInt(redeemed.takenOffMinor),

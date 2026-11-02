@@ -452,6 +452,21 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     );
   });
 
+  it("v15 2026-11-02: every line between what was ordered and what is to pay", () => {
+    const summary = {
+      ...priced.summary,
+      pointsUsed: cad("339"),
+      takenOff: cad("150"),
+      taxRounding: cad("1"),
+      paid: cad("0"),
+      due: cad("3412"),
+    } as typeof priced.summary;
+    const html = text(render({ status: "ready", view: { ...priced, summary }, refreshing: false }));
+    expect(html).toContain(
+      "Total ordered $39.00 Points used −$3.39 Taken off by the restaurant −$1.50 Tax rounding $0.01",
+    );
+  });
+
   it("lists items before tax, then each round's and the table's subtotal, tax and total", () => {
     const html = text(render({ status: "ready", view: priced, refreshing: false }));
     expect(html).toContain("2 × Ramen $26.55");

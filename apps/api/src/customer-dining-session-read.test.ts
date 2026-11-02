@@ -130,7 +130,10 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     };
     const view = composeCustomerDiningSession({
       ...facts(),
-      order: mergeBillOrderFacts(own, [merged]),
+      order: {
+        ...mergeBillOrderFacts(own, [merged]),
+        tableBill: { owedMinor: 6203n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
+      },
       paymentTiming: "PayLater",
     });
     // Its round is listed (ordered by "another guest", never this phone) and on the table's bill.
@@ -148,6 +151,7 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
         paymentOutcomes: new Map(),
         payments: [],
         payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: { owedMinor: 3900n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
         delivery: new Map([
           [id(31), { phase: "InProgress", deliveredQuantity: 0 }],
           [id(41), { phase: "Accepted", deliveredQuantity: 0 }],
@@ -165,12 +169,34 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.paid).toEqual(cad(0n));
   });
 
+  it("v15 2026-11-02: a table paying at the end owes what its bill owes, with what came off", () => {
+    const view = composeCustomerDiningSession({
+      ...facts({
+        paymentOutcomes: new Map(),
+        payments: [],
+        payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: {
+          owedMinor: 3412n,
+          pointsUsedMinor: 339n,
+          takenOffMinor: 150n,
+          taxRoundingMinor: 1n,
+        },
+      }),
+      paymentTiming: "PayLater",
+    });
+    expect(view.summary?.due).toEqual(cad(3412n));
+    expect(view.summary?.pointsUsed).toEqual(cad(339n));
+    expect(view.summary?.takenOff).toEqual(cad(150n));
+    expect(view.summary?.taxRounding).toEqual(cad(1n));
+  });
+
   it("v15 2026-10-29: a round staff cancelled on a table paying at the end was never charged", () => {
     const view = composeCustomerDiningSession({
       ...facts({
         paymentOutcomes: new Map(),
         payments: [],
         payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: { owedMinor: 3900n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
         staffCancellations: new Map([
           [id(30), { reason: "SoldOut", refundedMinor: 0n, pendingMinor: 0n }],
         ]),
@@ -189,6 +215,7 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
         paymentOutcomes: new Map(),
         payments: [{ status: "Succeeded", amount: cad(4410n) }],
         payLaterRounds: new Set([id(30), id(40)]),
+        tableBill: { owedMinor: 0n, pointsUsedMinor: 0n, takenOffMinor: 0n, taxRoundingMinor: 0n },
         settledRounds: new Set([id(30), id(40)]),
       }),
       paymentTiming: "PayLater",
@@ -512,9 +539,13 @@ describe("WP-2423 item 8 ④ v15 a: a split bill paid part by part", () => {
           paymentOutcomes: new Map(),
           payments: [{ status: "Succeeded", amount: cad(679n) }],
           payLaterRounds: new Set([id(30)]),
-          ...(paidRoundsMinor === null
-            ? {}
-            : { splitParts: { count: 3, paid: 2, paidRoundsMinor } }),
+          tableBill: {
+            owedMinor: 1018n - (paidRoundsMinor ?? 0n),
+            pointsUsedMinor: 0n,
+            takenOffMinor: 0n,
+            taxRoundingMinor: 0n,
+          },
+          ...(paidRoundsMinor === null ? {} : { splitParts: { count: 3, paid: 2 } }),
         }),
       ).summary;
     expect(summary(null)?.due.amountMinor).toBe(1018n);
