@@ -27,6 +27,7 @@ import { bindMerchantReceiptTemplateArtifactCommand } from "./merchant-receipt-t
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { MerchantStoreReceiptProfileError } from "./merchant-store-receipt-profile.js";
 import { MerchantKitchenSetupError } from "./merchant-kitchen-setup.js";
+import { MerchantMemberPointsError } from "./merchant-member-points.js";
 import { MerchantStoreSupportError } from "./merchant-store-support.js";
 import { MerchantStorePublicProfileError } from "./merchant-store-public-profile.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
@@ -36,6 +37,58 @@ export function installMerchantStoreSetupRoutes(
   router: Router,
   options: MerchantBffRouterOptions,
 ): void {
+  // WP-2423 取舍 18 DEC-MEMBER-POINTS: the Brand's points rules, members and report.
+  const memberPointsFailure = (response: Parameters<typeof denied>[0], error: unknown) => {
+    const code = error instanceof MerchantMemberPointsError ? error.code : null;
+    if (code === "MEMBER_POINTS_PERMISSION_DENIED") {
+      denied(response);
+      return;
+    }
+    if (code === "MEMBER_POINTS_INPUT_INVALID") {
+      response.status(422).set("Cache-Control", NO_STORE).json({ error: "member_points_invalid" });
+      return;
+    }
+    if (code === "MEMBER_POINTS_CHANGED") {
+      response.status(409).set("Cache-Control", NO_STORE).json({ error: "member_points_changed" });
+      return;
+    }
+    response
+      .status(503)
+      .set("Retry-After", "5")
+      .set("Cache-Control", NO_STORE)
+      .json({ error: "member_points_unavailable" });
+  };
+  router.get("/member-points", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (sessionCookie === null || Object.keys(request.query).length !== 0) {
+      denied(response);
+      return;
+    }
+    if (!options.memberPoints) {
+      memberPointsFailure(response, null);
+      return;
+    }
+    void options.memberPoints
+      .read({ sessionCookie })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => memberPointsFailure(response, error));
+  });
+  router.post("/member-points/rule", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (sessionCookie === null || csrf === null) {
+      denied(response);
+      return;
+    }
+    if (!options.memberPoints) {
+      memberPointsFailure(response, null);
+      return;
+    }
+    void options.memberPoints
+      .changeRule({ sessionCookie, csrf, command: request.body })
+      .then((rule) => response.set("Cache-Control", NO_STORE).json(rule))
+      .catch((error: unknown) => memberPointsFailure(response, error));
+  });
   // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: read or change the modules the Store uses.
   router.post("/store/features", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),

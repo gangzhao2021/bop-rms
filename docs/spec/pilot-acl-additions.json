@@ -5615,6 +5615,222 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 15 platform support staff"
+    },
+    {
+      "type": "schema",
+      "schema": "rms_loyalty",
+      "object": null,
+      "column": null,
+      "privilege": "USAGE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_rule_version",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_rule_version",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_account",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_account",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_account",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_points_transaction",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_points_transaction",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_member_contact",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_member_contact",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_member_contact",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_marketing_consent",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_marketing_consent",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_redemption",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_redemption",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_expiry_notice",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_expiry_notice",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_phone_challenge",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_phone_challenge",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_phone_challenge",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_phone_challenge",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_member_session",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_member_session",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
+    },
+    {
+      "type": "table",
+      "schema": "rms_loyalty",
+      "object": "loyalty_member_session",
+      "column": null,
+      "privilege": "DELETE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"), WP-2423 取舍 18 DEC-MEMBER-POINTS"
     }
   ]
 }

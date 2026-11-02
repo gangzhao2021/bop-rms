@@ -83,6 +83,8 @@ export interface StoreReportHourRow {
   readonly collectedMinor: string;
 }
 export interface StoreReportsView {
+  /** WP-2423 取舍 18: the part of the comps line that was guests' points. */
+  readonly pointsUsedMinor: string;
   readonly storeLabel: string;
   readonly timeZone: string;
   readonly currencyCode: "CAD";
@@ -263,6 +265,9 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
     "reconciliation",
     "permissions",
     "generatedAt",
+    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "pointsUsedMinor")
+      ? ["pointsUsedMinor"]
+      : []),
   ]);
   if (
     raw.screenId !== "RPT-OPS-DASHBOARD" ||
@@ -270,6 +275,7 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
     raw.currencyCode !== "CAD"
   )
     return fail();
+  const pointsUsed = raw.pointsUsedMinor === undefined ? "0" : minor(raw.pointsUsedMinor);
   const from = date(raw.from),
     to = date(raw.to);
   if (from > to) return fail();
@@ -283,6 +289,7 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
   ]);
   const permissions = exact(raw.permissions, ["mayExport"]);
   return Object.freeze({
+    pointsUsedMinor: pointsUsed,
     storeLabel: text(raw.storeLabel, 100),
     timeZone: text(raw.timeZone, 64),
     currencyCode: "CAD",

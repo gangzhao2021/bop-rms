@@ -23,6 +23,7 @@ import {
 } from "../journey/format.js";
 import { StoreContactCard } from "../journey/StoreContact.js";
 import { PrivacyNoticeLink } from "../journey/PrivacyNotice.js";
+import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 
 function money(value: ReceiptMoneyView): string {
   return formatMoney(value.amountMinor, value.currencyCode);
@@ -567,6 +568,9 @@ export function ReceiptPage({
           </section>
         ) : null}
         {view ? <ReceiptContent view={view} online={state.status === "ready"} /> : null}
+        {view && state.status === "ready" ? (
+          <MemberJoinPanel orderReference={orderReference} />
+        ) : null}
       </div>
     </CustomerPage>
   );

@@ -43,6 +43,7 @@
     "@rms/dining": "workspace:*",
     "@rms/fulfillment": "workspace:*",
     "@rms/inventory": "workspace:*",
+    "@rms/customer-loyalty": "workspace:*",
     "@rms/kitchen": "workspace:*",
     "@rms/ordering": "workspace:*",
     "@rms/payment": "workspace:*",

@@ -43,11 +43,13 @@ interface Modules {
   readonly counterOrder: boolean;
   readonly pickup: boolean;
   readonly inventory: boolean;
+  readonly loyalty: boolean;
 }
 const modulesOf = (view: StoreFeatures): Modules => ({
   counterOrder: view.modules.counterOrder,
   pickup: view.modules.pickup,
   inventory: view.modules.inventory,
+  loyalty: view.modules.loyalty,
 });
 const rows: readonly { key: keyof Modules; name: () => string; detail: () => string }[] = [
   {
@@ -70,6 +72,14 @@ const rows: readonly { key: keyof Modules; name: () => string; detail: () => str
     detail: () =>
       t(
         "Stock items, receiving, counts, waste and recipes. Turned off, these pages are hidden; stock already recorded is kept, and sold out is still set in Item availability.",
+      ),
+  },
+  {
+    key: "loyalty",
+    name: () => t("Points for guests"),
+    detail: () =>
+      t(
+        "After paying, guests can join with their phone number, earn points on dishes and use them on a bill, on orders they place by scanning the QR code. Turned off, guests aren't asked here and members keep their points.",
       ),
   },
 ];
@@ -196,7 +206,8 @@ export function StoreFeaturesPage({
   const changed =
     draft.counterOrder !== view.modules.counterOrder ||
     draft.pickup !== view.modules.pickup ||
-    draft.inventory !== view.modules.inventory;
+    draft.inventory !== view.modules.inventory ||
+    draft.loyalty !== view.modules.loyalty;
   const fullService =
     view.templateCode === "FullService" &&
     !view.modules.counterOrder &&

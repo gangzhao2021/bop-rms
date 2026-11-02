@@ -228,8 +228,22 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
         risk: "High",
       });
   });
+  it("v24 WP-2423 取舍 18: the Owner changes the points rules; managers read members; others neither", () => {
+    expect(storePermissionCatalogVersion).toBe(24);
+    expect(storeRoleTemplateActions("owner")).toEqual(
+      expect.arrayContaining(["loyalty.program.manage", "loyalty.member.read"]),
+    );
+    for (const template of ["store-manager", "area-manager"] as const) {
+      expect(storeRoleTemplateActions(template)).toContain("loyalty.member.read");
+      expect(storeRoleTemplateActions(template)).not.toContain("loyalty.program.manage");
+    }
+    for (const template of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      expect(
+        storeRoleTemplateActions(template).filter((code) => code.startsWith("loyalty.")),
+      ).toEqual([]);
+  });
   it("v23 WP-2423 取舍 15: only the Owner lets platform support change settings", () => {
-    expect(storePermissionCatalogVersion).toBe(23);
+    expect(storePermissionCatalogVersion).toBeGreaterThanOrEqual(23);
     const code = "organization.support_access.manage";
     expect(storeRoleTemplateActions("owner")).toContain(code);
     for (const template of storeRoleTemplateCodes)

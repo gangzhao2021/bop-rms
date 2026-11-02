@@ -13,11 +13,14 @@ import {
 import { createInternalDiningProjection } from "./pilot-dining-projection.mjs";
 import { createPilotWorkloadHealthObserver } from "./pilot-workload-health.mjs";
 import { reportUnexpected } from "./pilot-unexpected.mjs";
+import { createInternalMemberSweep } from "./pilot-member.mjs";
+import { memberPointsSweepIntervalMs } from "../../apps/api/dist/member-points-sweep.js";
 export async function startPilotDiningExceptionWorker({
   directory,
   createResources,
   providerAccountReference,
   createRecovery = createInternalDiningProjection,
+  createMemberSweep = createInternalMemberSweep,
   startRuntime = startWorkerRuntime,
 }) {
   const resources = await createResources();
@@ -25,6 +28,24 @@ export async function startPilotDiningExceptionWorker({
   const close = () => (closing ??= Promise.resolve().then(() => resources.close()));
   try {
     const recover = createRecovery({ resources, providerAccountReference });
+    // WP-2423 取舍 18: points follow refunds and expire after notice, on this quiet worker.
+    let memberSweep = null;
+    let memberSweptAt = 0;
+    const sweepMembers = async () => {
+      if (
+        resources.publicProfile === undefined ||
+        Date.now() - memberSweptAt < memberPointsSweepIntervalMs
+      )
+        return;
+      memberSweptAt = Date.now();
+      try {
+        memberSweep ??= await createMemberSweep({ directory, resources, providerAccountReference });
+        await memberSweep.settlePoints();
+        await memberSweep.expirePoints();
+      } catch (error) {
+        reportUnexpected("MEMBER_POINTS_SWEEP_UNAVAILABLE", error);
+      }
+    };
     const loop = createOutboxWorkload({
       pollIntervalMs: 5000,
       drainDeadlineMs: 25000,
@@ -34,6 +55,7 @@ export async function startPilotDiningExceptionWorker({
       onSnapshot: createPilotWorkloadHealthObserver(directory, "dining-exception-worker"),
       dispatcher: {
         runOnce: async () => {
+          await sweepMembers();
           const result = await recover();
           if (
             !result ||

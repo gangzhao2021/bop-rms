@@ -113,6 +113,7 @@ const PLACEMENT: Readonly<
   "INV-WASTE-RECORD": ["supply", 3],
   "INV-LOCATION-LIST": ["supply", 4],
   "INV-OPENING-COUNT": ["supply", 5],
+  "LOY-PROGRAM-LIST": ["customers", 0],
   "RPT-OPS-DASHBOARD": ["reports", 0],
   "CMP-ALLERGEN-REVIEW": ["compliance", 0],
   "STORE-SETUP": ["organization", 0],

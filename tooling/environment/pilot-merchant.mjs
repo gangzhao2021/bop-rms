@@ -41,6 +41,7 @@ import { createMerchantDiningPartySize } from "../../apps/api/dist/merchant-dini
 import { createMerchantKitchenNotPrepared } from "../../apps/api/dist/merchant-kitchen-not-prepared.js";
 import { createMerchantKitchenSections } from "../../apps/api/dist/merchant-kitchen-sections.js";
 import { createMerchantKitchenSetup } from "../../apps/api/dist/merchant-kitchen-setup.js";
+import { createMerchantMemberPoints } from "../../apps/api/dist/merchant-member-points.js";
 import {
   createMerchantStoreSupport,
   createMerchantStoreSupportAccess,
@@ -1626,6 +1627,12 @@ export async function createInternalMerchant(
       storeSupportAccess: createMerchantStoreSupportAccess({
         persistence,
         authentication: service,
+      }),
+      // WP-2423 取舍 18 DEC-MEMBER-POINTS: the Brand's points rules, members and report.
+      memberPoints: createMerchantMemberPoints({
+        persistence,
+        authentication: service,
+        nextReference: () => resources.credentials.reference(),
       }),
       // WP-2423 item 11: the Store's kitchen setup, in the product.
       kitchenSetup: createMerchantKitchenSetup({

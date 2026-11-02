@@ -130,6 +130,13 @@ export function createPilotWorkspaceListing({ served, optionSets = () => false, 
           href: "/operations/order-exceptions",
           permission: "operations.order-exception.manage",
         },
+        // WP-2423 取舍 18: the Brand's points: rules, members (last four digits), report.
+        {
+          screenId: "LOY-PROGRAM-LIST",
+          label: "Points",
+          href: "/app/customers/loyalty-programs",
+          permission: "loyalty.member.read",
+        },
         // WP-2423 Q14: sales, item, hourly and tip reports with CSV export (Owner, Store Manager).
         {
           screenId: "RPT-OPS-DASHBOARD",

@@ -39,6 +39,7 @@ export interface MerchantNavigationItem {
     | "OPS-ORDER-EXCEPTION"
     | "PAY-RECONCILIATION"
     | "RPT-OPS-DASHBOARD"
+    | "LOY-PROGRAM-LIST"
     | "KIT-KITCHEN-QUEUE"
     | "FUL-PICKUP-QUEUE"
     | "DIN-FLOOR-BOARD"
@@ -93,6 +94,7 @@ const NAVIGATION = Object.freeze({
   // (catalog v17, Owner "单独加权限（推荐）"), apart from exception handling.
   "PAY-RECONCILIATION": ["/app/operations/payment-reconciliation", "payment.settlement.read"],
   // WP-2423 Q14: sales, item, hourly and tip reports with CSV export (Section 88 RPT-OPS-DASHBOARD).
+  "LOY-PROGRAM-LIST": ["/app/customers/loyalty-programs", "loyalty.member.read"],
   "RPT-OPS-DASHBOARD": ["/app/reports/operations", "reporting.sales.read"],
   "KIT-KITCHEN-QUEUE": ["/operations/kitchen", "kitchen.operate"],
   "FUL-PICKUP-QUEUE": ["/operations/pickup", "fulfillment.operate"],

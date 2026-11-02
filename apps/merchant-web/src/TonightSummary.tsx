@@ -156,10 +156,20 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
         <dl>
           <Row label={t("Gross sales")} value={money(s.grossSalesMinor)} />
           <Row
-            label={t("Comps and discounts by a manager")}
+            label={
+              BigInt(summary.report.pointsUsedMinor) > 0n
+                ? t("Comps, discounts and points used")
+                : t("Comps and discounts by a manager")
+            }
             detail={countOf(s.compCount, "dish")}
             value={minus(s.compsMinor)}
           />
+          {BigInt(summary.report.pointsUsedMinor) > 0n ? (
+            <Row
+              label={t("Of that, points guests used")}
+              value={money(summary.report.pointsUsedMinor)}
+            />
+          ) : null}
           {s.discountsMinor !== "0" ? (
             <Row label={t("Discounts")} value={minus(s.discountsMinor)} />
           ) : null}

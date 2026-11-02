@@ -159,7 +159,8 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/app/integrations/kds-profiles", home),
   route("/app/customers", home),
   route("/app/customers/:id", home),
-  route("/app/customers/loyalty-programs", home),
+  // WP-2423 取舍 18: served when the session lists it.
+  listedRoute("/app/customers/loyalty-programs", "LOY-PROGRAM-LIST", home),
   route("/app/customers/loyalty-programs/:id", home),
   route("/app/customers/loyalty-accounts/:id", home),
   route("/app/customers/loyalty-exceptions", home),

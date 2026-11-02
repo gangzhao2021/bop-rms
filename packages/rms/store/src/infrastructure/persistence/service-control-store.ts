@@ -300,7 +300,7 @@ const featureModules = [
   ["counterOrder", "counter_order"],
   ["pickup", "pickup"],
   ["inventory", "inventory"],
-  ["loyalty", "loyalty"],
+  ["loyalty", "points_offered"],
   ["complianceDocuments", "compliance_documents"],
 ] as const;
 /** A change that saw another version first, or reused an operation for something else. */
@@ -342,7 +342,7 @@ export async function loadStoreFeatureSetting(
   const { brand, store } = await featureScope(tx, scope);
   const found = rowsOf(
     await tx.query(
-      "SELECT version,template_code,counter_order,pickup,inventory,loyalty,compliance_documents,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+      "SELECT version,template_code,counter_order,pickup,inventory,points_offered,compliance_documents,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
       [brand, store],
     ),
   )[0];
@@ -353,7 +353,8 @@ export async function loadStoreFeatureSetting(
       counterOrder: true,
       pickup: true,
       inventory: true,
-      loyalty: true,
+      // WP-2423 取舍 18: off until the Store turns it on, unlike the modules before it.
+      loyalty: false,
       complianceDocuments: true,
       changedAt: null,
     });
@@ -404,7 +405,7 @@ export async function changeStoreFeatureSetting(
   ]);
   const prior = rowsOf(
     await tx.query(
-      "SELECT template_code,counter_order,pickup,inventory,loyalty,compliance_documents FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      "SELECT template_code,counter_order,pickup,inventory,points_offered,compliance_documents FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
       [brand, store, operation],
     ),
   )[0];
@@ -424,7 +425,7 @@ export async function changeStoreFeatureSetting(
   )
     return current;
   await tx.query(
-    "INSERT INTO rms_store.store_feature_setting (tenant_id,brand_id,store_id,version,operation_id,template_code,counter_order,pickup,inventory,loyalty,compliance_documents,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
+    "INSERT INTO rms_store.store_feature_setting (tenant_id,brand_id,store_id,version,operation_id,template_code,counter_order,pickup,inventory,points_offered,compliance_documents,actor_id,occurred_at,loyalty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,false)",
     [
       parseStoreAdministrationReference(scope.tenantReference),
       brand,

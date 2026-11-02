@@ -2202,6 +2202,46 @@ They then sign in at `/internal-test/support`. `end --actor <reference> --reason
 access at once. The wording in the service agreement is an Owner fact and an external gate: the
 product shows a line labelled TEST ONLY.
 
+## Members and points (WP-2423 DEC-MEMBER-POINTS)
+
+Off until the Owner turns on `Points for guests` in Store features. Rules, members (last four digits
+of a phone only) and the issued, used and outstanding report are under `Customers` → `Points`.
+
+**At the table.** Points never hold up ordering or paying. If a guest's code doesn't arrive, the
+points system is down or their phone has no signal: take payment as usual and tell them they can
+add the order's points from the receipt on the same phone until the time shown there (at most about
+24 hours after the visit started). After that, those points can't be added; there is no way for staff
+to add them. A guest who used points sees the lower bill; it shows on the staff bill as a reduction
+on the dishes. A guest can't undo it. If the table leaves without paying and is written off, the
+points go back by themselves within about five minutes.
+
+**Refunds.** Refund as usual. Within about five minutes the same share of the points earned on that
+payment is taken back and the same share of points spent on the bill returned. Points already spent
+become points owed: new points pay them off first; nobody is asked to pay.
+
+**Split bills.** Points can only be used before the bill is split. To use them after, put it back on
+one bill first. Each paid part earns once, for whoever adds it first.
+
+**Text messages.** A Pilot Store uses the SMS channel in `notification.json`; with none configured,
+guests are told codes can't be sent and points don't expire. InternalTest writes the newest message
+for a number to `<runtime>/member-messages-test-only/<last four digits>.json` (0600), read with
+`docker exec`; it refuses to run in a production configuration. The file holds a code: don't copy it
+into a ticket or a log.
+
+**Limits.** Per phone 5 codes an hour and 10 a day; per address 30 an hour (a restaurant's guests may
+share one) and 60 code checks an hour; a code lasts 10 minutes and ends after 5 wrong tries. At a limit
+the guest is told how long to wait.
+
+**Expiry.** After 18 months with no earning or using at any of the Brand's Stores. A text goes 30 days
+before, and points only expire once that text is at least 30 days old, so a failed text delays expiry.
+It stops while points are off at every Store of the Brand.
+
+**Leaving.** A guest leaves from their member page, at any Store, whatever its switch. Their phone
+number is deleted at once. The ledger keeps an anonymous account so the report still adds up. Staff
+have no way to see or recover a whole phone number. A guest who asks staff to remove them without their
+phone: _Owner input needed; there is no staff path in this version, because staff can't identify them
+by more than four digits._
+
 ## Restart time, database connections and memory per Store
 
 Each Store runs seven processes (API and HTTPS entries, five workers) in the pilot container. What

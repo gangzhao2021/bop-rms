@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
+import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
 import { v7 as uuidv7 } from "uuid";
 import { t } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
@@ -266,6 +268,7 @@ export function TablePayPanel({
           </div>
         </dl>
         <p>{t("Thank you! Your table is paid in full.")}</p>
+        <MemberJoinPanel />
       </section>
     );
   }
@@ -280,6 +283,7 @@ export function TablePayPanel({
             count: String(view.split.parts.length),
           })}
         </p>
+        <MemberJoinPanel />
       </section>
     );
 
@@ -335,6 +339,7 @@ export function TablePayPanel({
         </>
       ) : (
         <>
+          <MemberPointsAtTable onBillChanged={() => void read()} />
           {view.state === "Failed" ? (
             <p role="alert">
               {t("The payment didn’t go through. You can try again with another card.")}

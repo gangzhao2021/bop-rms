@@ -19,3 +19,6 @@ export * from "./domain/consent-preference.js";
 export * from "./contracts/consent-preference.js";
 export * from "./application/consent-preference-service.js";
 export * from "./application/ports/consent-preference-ports.js";
+export * from "./domain/member-points.js";
+export * from "./infrastructure/persistence/member-points-store.js";
+export * from "./infrastructure/persistence/member-phone-protector.js";

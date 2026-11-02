@@ -109,7 +109,7 @@ export interface StoreFeaturesView {
   readonly version: number;
   /** "FullService" when the modules are the full-service template's; null when never set. */
   readonly templateCode: StoreFeatureSetting["templateCode"];
-  readonly modules: Pick<StoreFeatureModules, "counterOrder" | "pickup" | "inventory">;
+  readonly modules: Pick<StoreFeatureModules, "counterOrder" | "pickup" | "inventory" | "loyalty">;
   readonly changedAt: string | null;
   /** Owner decision 4: guests call staff, servers chase a dish (Dining's own switches). */
   readonly services: {
@@ -197,7 +197,10 @@ export function createMerchantStoreFeatures(options: {
       operationReference: string;
       expectedVersion: number;
       template: "FullService" | null;
-      modules: Pick<StoreFeatureModules, "counterOrder" | "pickup" | "inventory"> | null;
+      modules: Pick<
+        StoreFeatureModules,
+        "counterOrder" | "pickup" | "inventory" | "loyalty"
+      > | null;
     } = null;
     try {
       const action =
@@ -298,7 +301,12 @@ export function createMerchantStoreFeatures(options: {
           "expectedVersion",
           "modules",
         ]);
-        const modules = readClosedRecord(raw.modules, ["counterOrder", "pickup", "inventory"]);
+        const modules = readClosedRecord(raw.modules, [
+          "counterOrder",
+          "pickup",
+          "inventory",
+          "loyalty",
+        ]);
         if (
           raw.action !== "Change" ||
           !Number.isSafeInteger(raw.expectedVersion) ||
@@ -314,6 +322,7 @@ export function createMerchantStoreFeatures(options: {
             counterOrder: modules.counterOrder === true,
             pickup: modules.pickup === true,
             inventory: modules.inventory === true,
+            loyalty: modules.loyalty === true,
           },
         };
       }
@@ -447,6 +456,7 @@ function storeFeaturesView(
       counterOrder: setting.counterOrder,
       pickup: setting.pickup,
       inventory: setting.inventory,
+      loyalty: setting.loyalty,
     }),
     changedAt: setting.changedAt,
     services: Object.freeze({
@@ -728,4 +738,12 @@ export function tipRefusal(
   if (tip.kind === "Percent" && !choices.tierPercents.includes(tip.percent))
     return "TipChoicesChanged";
   return null;
+}
+
+/** WP-2423 取舍 18: whether this Store offers points; off until its Owner turns them on. */
+export async function storeOffersPoints(
+  tx: QueryTransaction,
+  scope: { brandReference: string; storeReference: string },
+): Promise<boolean> {
+  return (await readStoreFeatures(tx, scope, "Refuse")).loyalty === true;
 }

@@ -9,6 +9,7 @@ import {
 import { createDiningTableOnlinePayments } from "../../apps/api/dist/dining-table-online-payment.js";
 import { createRetrieveIntentRequest } from "../../packages/rms/payment/src/index.ts";
 import { pilotProviderEnvironment } from "./pilot-environment.mjs";
+import { registerInternalMember } from "./pilot-member.mjs";
 import { isStripeProvider } from "./pilot-stripe-provider.mjs";
 
 const ROUTE = "/api/v1/dine-in/table-payment";
@@ -35,7 +36,7 @@ export function createInternalDiningTablePayments(
 
 export function registerInternalDiningTablePayment(
   app,
-  { resources, checkout, simulator, origin, providerAccountReference },
+  { resources, checkout, simulator, origin, providerAccountReference, directory },
 ) {
   const payments = createInternalDiningTablePayments(resources, simulator.adapter, {
     providerAccountReference,
@@ -48,6 +49,15 @@ export function registerInternalDiningTablePayment(
   });
   const handler = new CustomerDiningTablePaymentHandler({ allowedOrigin: origin, port });
   app.post(ROUTE, ...handler.handler());
+  // WP-2423 取舍 18 DEC-MEMBER-POINTS: the same guest access, for joining and using points.
+  if (directory !== undefined)
+    registerInternalMember(app, {
+      directory,
+      resources,
+      access: checkout.accessOptions,
+      origin,
+      providerAccountReference,
+    });
   if (isStripeProvider(simulator)) app.post(ROUTE + "/handoff", ...handler.handoffHandler());
   // TEST-ONLY simulator: finish the guest's own open payment, approved or declined.
   if (simulator.simulation === true)

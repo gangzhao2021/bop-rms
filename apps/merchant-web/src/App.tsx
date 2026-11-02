@@ -214,6 +214,7 @@ const LoyaltyProgramEditorPage = lazyPage(
   () => import("./LoyaltyProgramPages.js"),
   "LoyaltyProgramEditorPage",
 );
+const MemberPointsPage = lazyPage(() => import("./MemberPointsPage.js"), "MemberPointsPage");
 const LoyaltyProgramListPage = lazyPage(
   () => import("./LoyaltyProgramPages.js"),
   "LoyaltyProgramListPage",
@@ -1858,7 +1859,26 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           }
         />
         <Route path="/app/customers" element={<CustomerListPage />} />
-        <Route path="/app/customers/loyalty-programs" element={<LoyaltyProgramListPage />} />
+        <Route
+          path="/app/customers/loyalty-programs"
+          element={
+            state.kind === "Ready" &&
+            !state.switching &&
+            state.workspace.navigation.some((item) => item.screenId === "LOY-PROGRAM-LIST") ? (
+              // WP-2423 取舍 18 DEC-MEMBER-POINTS: rules, members and the report.
+              <MemberPointsPage
+                key={state.workspace.selectedScope.storeReference + state.csrf}
+                csrf={state.csrf}
+                storeFeaturesHref={
+                  state.workspace.navigation.find((item) => item.screenId === "STORE-CAPABILITY")
+                    ?.href ?? null
+                }
+              />
+            ) : (
+              <LoyaltyProgramListPage />
+            )
+          }
+        />
         <Route path="/app/customers/loyalty-programs/:id" element={<LoyaltyProgramEditorPage />} />
         <Route path="/app/customers/loyalty-accounts/:id" element={<LoyaltyAccountDetailPage />} />
         <Route path="/app/customers/loyalty-exceptions" element={<PointsReviewPage />} />
