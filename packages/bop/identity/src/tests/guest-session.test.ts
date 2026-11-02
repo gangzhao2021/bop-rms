@@ -767,6 +767,35 @@ async function recoveryFixture(
   });
   return { service, store, credentials };
 }
+it("WP-2423: a database fault reading the binding is a dependency failure, not an ended session", async () => {
+  const f = await recoveryFixture();
+  const fault = Object.assign(new Error("acquire"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+  const service = new GuestSessionService({
+    store: f.store,
+    credentials: f.credentials,
+    admission: { consume: async () => null },
+    binding: {
+      validate: async () => {
+        throw fault;
+      },
+    },
+    now: () => now,
+  });
+  await expect(
+    service.resolve({ sessionCredential, activity: "Background" }),
+  ).rejects.toMatchObject({
+    code: "GUEST_SESSION_UNAVAILABLE",
+    dependencyFailure: true,
+    cause: fault,
+  });
+  // A binding that really has ended is still the guest's session, not a fault.
+  const ended = await recoveryFixture({}, "Unavailable");
+  const refused = await ended.service
+    .resolve({ sessionCredential, activity: "Background" })
+    .catch((error: unknown) => error);
+  expect(refused).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+  expect(refused).not.toHaveProperty("dependencyFailure");
+});
 it("recovers foreground CSRF without touching lifetime or persisting credentials", async () => {
   const f = await recoveryFixture();
   const before = JSON.stringify([...f.store.records.values()]);

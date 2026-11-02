@@ -1,3 +1,4 @@
+import { withReadRetry } from "../network/read-retry.js";
 import { currentLanguage } from "../i18n/i18n.js";
 import type { CustomerMenuClient, MenuJourneyContext, MenuLoadResult } from "./types.js";
 import { boundedFetch } from "../network/bounded-fetch.js";
@@ -49,15 +50,17 @@ export function createCustomerMenuClient(
       if (pending !== undefined) return pending;
       const request = (async (): Promise<MenuLoadResult> => {
         try {
-          const response = await boundedFetch(
-            boundary.fetch,
-            `/api/v1/public/stores/${context.publicStoreReference}/menu?${parameters.toString()}`,
-            {
-              method: "GET",
-              credentials: "same-origin",
-              cache: "no-store",
-              referrerPolicy: "no-referrer",
-            },
+          const response = await withReadRetry(() =>
+            boundedFetch(
+              boundary.fetch,
+              `/api/v1/public/stores/${context.publicStoreReference}/menu?${parameters.toString()}`,
+              {
+                method: "GET",
+                credentials: "same-origin",
+                cache: "no-store",
+                referrerPolicy: "no-referrer",
+              },
+            ),
           );
           if (response.status === 403) return Object.freeze({ kind: "PermissionDenied" });
           const payload: unknown = await response.json();

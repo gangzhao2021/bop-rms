@@ -22,6 +22,7 @@ it("passes all existing customer routes and configured resources to the API runt
           [
             "createInternalCartReplacement",
             "createInternalDiningCheckout",
+            "createInternalEntryCodeCheck",
             "createInternalChannelQuote",
             "createInternalDiningCart",
             "createInternalPickupReadiness",

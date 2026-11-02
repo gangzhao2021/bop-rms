@@ -122,7 +122,10 @@ export function createPersistentCustomerEntryComposition(
           if (result.status !== "Established") throw new Error("CUSTOMER_ENTRY_ROLLBACK");
           return result;
         });
-      } catch {
+      } catch (error) {
+        // WP-2423 (burst 2026-11-02): the database, not the code: a retry, not "can't be used".
+        const failed = (error as { code?: unknown } | null)?.code;
+        if (typeof failed === "string" && failed.startsWith("TENANT_DATABASE_")) throw error;
         const retiredCode = retired as RetiredTableQrError | null;
         if (retiredCode !== null)
           return Object.freeze({ status: "QrRetired", reason: retiredCode.reason } as const);

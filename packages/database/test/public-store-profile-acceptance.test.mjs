@@ -1,3 +1,12 @@
+import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
+import {
+  pilotApiRoleConnectionLimit,
+  pilotEntryAcquireMs,
+  pilotProcessPoolSize,
+  planPilotConnections,
+} from "../../../tooling/environment/pilot-connection-budget.mjs";
+import console from "node:console";
+import process from "node:process";
 import { prepareCurrentEntryProfile } from "../test-support/current-entry-profile.mjs";
 import { exercisePersistentProfileEntry } from "../test-support/persistent-profile-entry.mjs";
 import { createPersistentPublicStoreProfileReader } from "../../../apps/api/src/persistent-public-store-profile.ts";
@@ -547,9 +556,10 @@ it.each([
   ["Dining", false],
   ["Pickup", true],
   ["Pickup", false],
+  ["Pickup", false, true],
 ])(
-  "continues current-clock %s Entry through its owner workflow (Chinese name published: %s)",
-  async (channel, chineseNames) => {
+  "continues current-clock %s Entry through its owner workflow (Chinese name published: %s, burst: %s)",
+  async (channel, chineseNames, burst = false) => {
     await withIsolatedDatabase({ caseId: "wp2402_current_entry" }, async (env) => {
       const client = new pg.Client(env.clientConfig);
       await client.connect();
@@ -603,6 +613,117 @@ it.each([
         await client.query(
           "GRANT SELECT,INSERT,UPDATE ON rms_store.public_store_profile_timing TO " + role,
         );
+        // v15 burst: the pilot's own limits and transaction runner, instead of a connection each.
+        const pool = new pg.Pool({
+          ...env.clientConfig,
+          max: Number(
+            process.env.BURST_POOL ??
+              pilotProcessPoolSize(
+                planPilotConnections({ storeCount: 3, limit: pilotApiRoleConnectionLimit }),
+                "pilot-api-entry.mjs",
+              ),
+          ),
+          connectionTimeoutMillis: Number(process.env.BURST_WAIT ?? pilotEntryAcquireMs),
+          query_timeout: 5000,
+          idleTimeoutMillis: 5000,
+        });
+        pool.on("connect", (c) => void c.query("SET ROLE " + role));
+        let peakWaiting = 0,
+          acquired = 0,
+          heldTotal = 0,
+          heldMax = 0,
+          burstBinding = null;
+        const connect = pool.connect.bind(pool);
+        pool.connect = async () => {
+          peakWaiting = Math.max(peakWaiting, pool.waitingCount + 1);
+          acquired += 1;
+          const c = await connect();
+          const at0 = Date.now();
+          const release = c.release.bind(c);
+          c.release = (...a) => {
+            const held = Date.now() - at0;
+            heldTotal += held;
+            heldMax = Math.max(heldMax, held);
+            c.release = release;
+            return release(...a);
+          };
+          return c;
+        };
+        let tenantRun = null;
+        const hold = Number(process.env.BURST_HOLD ?? 500);
+        // The time each transaction holds its connection: a loaded host, as in the v15 burst.
+        const burstRun = async (work) =>
+          tenantRun === null
+            ? run(work)
+            : tenantRun.run(async (tx) => {
+                await new Promise((resolve) => globalThis.setTimeout(resolve, hold));
+                return work(tx);
+              });
+        const guestBurst = async ({ base, request }) => {
+          const guests = Number(process.env.BURST_GUESTS ?? 30);
+          tenantRun = createTenantTransactionRunner(pool, {
+            brandId: burstBinding.brandReference,
+            storeId: burstBinding.storeReference,
+          });
+          const statuses = {};
+          const times = [];
+          const timed = async (name, call) => {
+            const at0 = Date.now();
+            const response = await call();
+            times.push(Date.now() - at0);
+            const key = name + " " + response.status;
+            statuses[key] = (statuses[key] ?? 0) + 1;
+            return response;
+          };
+          const headers = {
+            origin: "https://customer.invalid",
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-mode": "cors",
+          };
+          const guest = async () => {
+            const entered = await timed("entry", request);
+            if (entered.status !== 201) return;
+            const cookie = entered.headers.getSetCookie()[0].split(";")[0];
+            const body = await entered.json();
+            await timed("menu", () =>
+              globalThis.fetch(
+                base +
+                  "/api/v1/public/stores/" +
+                  body.publicStoreReference +
+                  "/menu?channel=CUSTOMER_PWA&orderType=PICKUP&locale=en-CA",
+                {
+                  headers,
+                },
+              ),
+            );
+            await timed("cart", () =>
+              globalThis.fetch(base + "/bff/customer/cart", { headers: { ...headers, cookie } }),
+            );
+          };
+          const start = Date.now();
+          await Promise.all(Array.from({ length: guests }, guest));
+          tenantRun = null;
+          times.sort((a, b) => a - b);
+          console.log(
+            "BURST " +
+              JSON.stringify({
+                guests,
+                pool: pool.options.max,
+                wallMs: Date.now() - start,
+                statuses,
+                p50: times[Math.floor(times.length / 2)],
+                p90: times[Math.floor(times.length * 0.9)],
+                max: times.at(-1),
+                acquired,
+                acquiresPerRequest: +(acquired / times.length).toFixed(1),
+                heldAvgMs: Math.round(heldTotal / Math.max(acquired, 1)),
+                heldMax,
+                peakWaiting,
+              }),
+          );
+          for (const key of Object.keys(statuses))
+            assert.match(key, /(201|200|404)$/u, JSON.stringify(statuses));
+        };
         let activeWorkerConnections = 0;
         const acquire = async () => {
           const connection = new pg.Client({
@@ -755,7 +876,8 @@ it.each([
         const journey = await exercisePersistentProfileEntry({
           admin: client,
           role,
-          run,
+          run: burst ? ((burstBinding = publicOptions.binding), burstRun) : run,
+          ...(burst ? { onGuestsWelcome: guestBurst } : {}),
           publicOptions,
           at,
           currentClock: true,
@@ -777,6 +899,7 @@ it.each([
           acquire,
         });
         await journey.close();
+        await pool.end();
         assert.equal(activeWorkerConnections, 0);
       } finally {
         await client.end();

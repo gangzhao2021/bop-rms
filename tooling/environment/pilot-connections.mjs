@@ -5,7 +5,10 @@ import process from "node:process";
 import { createTenantTransactionRunner } from "../../packages/database/dist/transaction-runner.js";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 import {
+  isPilotEntryProcess,
   pilotApiRoleMinimumLimit,
+  pilotEntryAcquireMs,
+  pilotWorkerAcquireMs,
   pilotEffectiveRoleLimit,
   pilotProcessPoolSize,
   planPilotConnections,
@@ -66,6 +69,34 @@ async function servedStoreCount(argument = process.argv[2]) {
     return 1;
   }
 }
+/**
+ * WP-2423 (burst 2026-11-02): one pool per process and role. An entry serves every Store from one
+ * process; separate pools left one Store's guests waiting beside another Store's idle connections.
+ */
+const sharedPools = new Map();
+async function openPool(service, config) {
+  // Sized from the Stores served and the role's real limit, so the pools of every process fit.
+  // Unreadable: the smallest pool, and the first real query reports the cause.
+  const limit = await readPilotRoleLimit({ ...config, connectionTimeoutMillis: 2000 });
+  const pool = new Pool({
+    ...config,
+    max:
+      service === "api" && limit !== null
+        ? pilotProcessPoolSize(
+            planPilotConnections({ storeCount: await servedStoreCount(), limit }),
+            process.argv[1],
+          )
+        : 2,
+    connectionTimeoutMillis: isPilotEntryProcess(process.argv[1])
+      ? pilotEntryAcquireMs
+      : pilotWorkerAcquireMs,
+    query_timeout: 5000,
+    idleTimeoutMillis: 5000,
+    statement_timeout: 5000,
+  });
+  guardPilotPoolConnections(pool);
+  return pool;
+}
 export async function createApplicationDatabase(
   service,
   { passwordFile, host, port, database, user },
@@ -86,24 +117,10 @@ export async function createApplicationDatabase(
   if (!/^[a-f0-9]{64}$/u.test(password))
     throw new Error("LOCAL_DATABASE_CONFIGURATION_UNAVAILABLE");
   const config = { host, port, database, user: user(service), password, ssl: false };
-  // WP-2423 (2026-11-02): sized from the Stores served and the role's real limit, so the pools of
-  // every process fit. Unreadable: the smallest pool, and the first real query reports the cause.
-  const limit = await readPilotRoleLimit({ ...config, connectionTimeoutMillis: 2000 });
-  const pool = new Pool({
-    ...config,
-    max:
-      service === "api" && limit !== null
-        ? pilotProcessPoolSize(
-            planPilotConnections({ storeCount: await servedStoreCount(), limit }),
-            process.argv[1],
-          )
-        : 2,
-    connectionTimeoutMillis: 2000,
-    query_timeout: 5000,
-    idleTimeoutMillis: 5000,
-    statement_timeout: 5000,
-  });
-  guardPilotPoolConnections(pool);
+  const shared = sharedPools.get(service + ":" + database);
+  const pool = shared?.pool ?? (await openPool(service, config));
+  if (shared === undefined) sharedPools.set(service + ":" + database, { pool, users: 1 });
+  else shared.users += 1;
   let closing;
   return Object.freeze({
     transactions: (scope) => createTenantTransactionRunner(pool, scope),
@@ -130,7 +147,13 @@ export async function createApplicationDatabase(
       }
     },
     close() {
-      closing ??= pool.end();
+      // The last user of the process's pool ends it.
+      closing ??= (async () => {
+        const entry = sharedPools.get(service + ":" + database);
+        if (entry === undefined || --entry.users > 0) return;
+        sharedPools.delete(service + ":" + database);
+        await pool.end();
+      })();
       return closing;
     },
   });

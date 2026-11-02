@@ -1,3 +1,4 @@
+import { hasValidQrSignature } from "../../packages/rms/dining/src/index.ts";
 import { join } from "node:path";
 import process from "node:process";
 import { createConfiguredPilotResources } from "./pilot-configured-resources.mjs";
@@ -137,6 +138,18 @@ export function composeCustomerDependencies(directory, installation, config, hos
     paymentChannel: "InternalTestOnlineCardAutomatic",
     ...account,
     createInternalCustomerEntry: entry,
+    // WP-2423: a code good under this Store's pickup or table keys; either is a real code here.
+    createInternalEntryCodeCheck: async () => {
+      const profile = await installation.loadProfile();
+      const sets = [
+        await qr.loadInternalPickupQr(profile),
+        await qr.loadIssuedTableQrKeys(profile),
+      ];
+      return async (qrToken) => {
+        for (const set of sets) if (await hasValidQrSignature(set, qrToken)) return true;
+        return false;
+      };
+    },
     createInternalTestCart: cart,
     createInternalCartReplacement: (r, e) =>
       createInternalCartReplacement(r, e, { createCart: cart, ...account }),

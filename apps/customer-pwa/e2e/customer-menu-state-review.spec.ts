@@ -22,7 +22,7 @@ test("CUST-MENU Empty and Unavailable match the Figma Review at 1440, 390, and 3
   page,
 }) => {
   const errors: string[] = [];
-  let state: "Empty" | "Unavailable" = "Empty";
+  let state: "Empty" | "Unavailable" | "FailsOnce" = "Empty";
   let menuRequests = 0;
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
@@ -52,7 +52,9 @@ test("CUST-MENU Empty and Unavailable match the Figma Review at 1440, 390, and 3
   );
   await page.context().route(`**/api/v1/public/stores/${storeReference}/menu**`, async (route) => {
     menuRequests += 1;
-    if (state === "Unavailable")
+    const failsNow = state === "Unavailable" || state === "FailsOnce";
+    if (state === "FailsOnce") state = "Empty";
+    if (failsNow)
       return route.fulfill({
         status: 503,
         contentType: "application/json; charset=utf-8",
@@ -117,6 +119,16 @@ test("CUST-MENU Empty and Unavailable match the Figma Review at 1440, 390, and 3
     });
   }
 
+  // WP-2423: one failed read in a burst is read again; the guest does nothing and sees no error.
+  state = "FailsOnce";
+  const requestsBeforeBurst = menuRequests;
+  const burstPage = await page.context().newPage();
+  await burstPage.goto("/menu");
+  await expect(burstPage.getByRole("heading", { name: "No items available" })).toBeVisible();
+  await expect(burstPage.locator(".menu-state--error")).toHaveCount(0);
+  expect(menuRequests).toBeGreaterThanOrEqual(requestsBeforeBurst + 2);
+  await burstPage.close();
+
   state = "Unavailable";
   const unavailablePage = await page.context().newPage();
   unavailablePage.on("pageerror", (error) => errors.push(error.message));
@@ -136,7 +148,7 @@ test("CUST-MENU Empty and Unavailable match the Figma Review at 1440, 390, and 3
     .evaluate((node) => (node as HTMLElement).blur());
   const requestCountBeforeRetry = menuRequests;
   await unavailable.getByRole("button", { name: "Try again" }).click();
-  await expect.poll(() => menuRequests).toBe(requestCountBeforeRetry + 1);
+  await expect.poll(() => menuRequests).toBeGreaterThan(requestCountBeforeRetry);
   await expect(unavailable.getByRole("heading", { name: "Menu is unavailable" })).toBeVisible();
   for (const width of [1440, 390, 320]) {
     await unavailablePage.setViewportSize({ width, height: width === 1440 ? 900 : 844 });

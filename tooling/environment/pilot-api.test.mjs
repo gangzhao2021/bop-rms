@@ -77,6 +77,7 @@ function dependencies() {
         diningStaffCall: port("diningStaffCall"),
         binding: port("binding"),
       }),
+      createInternalEntryCodeCheck: async () => async () => true,
       createInternalTestItems: async () => ({ catalogCartItems }),
       createInternalDiningCart: () => ({ catalogDiningCart: port("diningCart") }),
       createInternalChannelQuote: async () => ({

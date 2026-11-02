@@ -113,7 +113,7 @@ export interface CustomerEntryPort {
 
 export interface CustomerEntryRequestAdmission {
   consume(
-    input: Readonly<{ remoteAddress: string | null; requestedAt: string }>,
+    input: Readonly<{ remoteAddress: string | null; requestedAt: string; codeValid?: boolean }>,
   ): Promise<
     | { readonly status: "Allowed" }
     | { readonly status: "RateLimited"; readonly retryAfterSeconds: number }
@@ -123,6 +123,8 @@ export interface CustomerEntryRequestAdmission {
 
 export interface CustomerEntryHandlerOptions {
   readonly requestAdmission?: CustomerEntryRequestAdmission;
+  /** WP-2423: a code's signature, checked first so a made-up code can't spend the Store's budget. */
+  readonly codeCheck?: (qrToken: string) => Promise<boolean>;
   readonly allowedOrigin: string;
   readonly now?: () => string;
   readonly port: CustomerEntryPort;
@@ -537,6 +539,7 @@ export class CustomerEntryHandler {
   readonly #port: CustomerEntryPort;
   readonly #uuidV7Factory: () => string;
   readonly #requestAdmission: CustomerEntryRequestAdmission | undefined;
+  readonly #codeCheck: ((qrToken: string) => Promise<boolean>) | undefined;
 
   constructor({
     allowedOrigin,
@@ -544,12 +547,14 @@ export class CustomerEntryHandler {
     port,
     uuidV7Factory,
     requestAdmission,
+    codeCheck,
   }: CustomerEntryHandlerOptions) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
     this.#uuidV7Factory = uuidV7Factory;
     this.#requestAdmission = requestAdmission;
+    this.#codeCheck = codeCheck;
   }
 
   handler(): RequestHandler {
@@ -576,10 +581,13 @@ export class CustomerEntryHandler {
 
       try {
         const requestedAt = parseCanonicalInstant(this.#now());
+        // A check that can't answer leaves the code to the full entry check below.
+        const codeValid = await this.#codeCheck?.(qrToken).catch(() => undefined);
         const admission = await this.#requestAdmission?.consume(
           Object.freeze({
             remoteAddress: trustedClientAddress(request),
             requestedAt,
+            ...(codeValid === undefined ? {} : { codeValid }),
           }),
         );
         if (admission?.status === "RateLimited") {
@@ -599,6 +607,11 @@ export class CustomerEntryHandler {
           return;
         }
         closedRecord(admission, ["status"]);
+        // A made-up code goes no further: the same answer as any unusable code, no database.
+        if (codeValid === false) {
+          sendError(response, "entry_unavailable");
+          return;
+        }
         const entryRequestReference = parseUuidV7(this.#uuidV7Factory());
         const operationReference = parseUuidV7(this.#uuidV7Factory());
         if (entryRequestReference === operationReference) {

@@ -114,6 +114,7 @@ export interface LocalCustomerRuntimeOptions {
   readonly entryRequestAdmission?: ConstructorParameters<
     typeof CustomerEntryHandler
   >[0]["requestAdmission"];
+  readonly entryCodeCheck?: (qrToken: string) => Promise<boolean>;
   readonly merchantRuntime?: ApiServerRuntimeOptions["merchantRuntime"];
   readonly orderSubmission?: CustomerOrderSubmissionPort;
   readonly channelOrderSubmission?: Readonly<{
@@ -782,6 +783,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       ...(options.entryRequestAdmission === undefined
         ? {}
         : { requestAdmission: options.entryRequestAdmission }),
+      ...(options.entryCodeCheck === undefined ? {} : { codeCheck: options.entryCodeCheck }),
       port: customerEntry,
       allowedOrigin: options.allowedOrigin,
       now,

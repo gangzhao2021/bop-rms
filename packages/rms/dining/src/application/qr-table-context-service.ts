@@ -188,3 +188,30 @@ export function assertCurrentDiningGuestTableContext(input: unknown, value: unkn
     throw new QrContractError();
   }
 }
+
+/**
+ * WP-2423: whether a code carries a good signature from this Store's keys. No database, no budget;
+ * a yes says nothing about the table or the code's state, which the entry still checks in full.
+ */
+export async function hasValidQrSignature(
+  ports: Pick<QrTableContextPorts, "keys" | "verifier">,
+  qrToken: string,
+): Promise<boolean> {
+  try {
+    if (!hasValidCompactFraming(qrToken)) return false;
+    const compact = parseQrCompact(qrToken);
+    const keySet = parseQrVerificationKeySetEvidence(await ports.keys.load());
+    const matches = keySet.keys.filter((key) => key.kid === compact.header.kid);
+    if (matches.length !== 1 || matches[0] === undefined) return false;
+    return (
+      (await ports.verifier.verify({
+        algorithm: "ES256",
+        publicKeyReference: matches[0].publicKeyReference,
+        signingInput: compact.signingInput,
+        signature: compact.signature,
+      })) === "Verified"
+    );
+  } catch {
+    return false;
+  }
+}
