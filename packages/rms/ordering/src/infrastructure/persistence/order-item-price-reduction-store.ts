@@ -24,6 +24,9 @@ export const orderPriceReductionReasonCodes = [
   "GOODWILL",
 ] as const;
 export type OrderPriceReductionReasonCode = (typeof orderPriceReductionReasonCodes)[number];
+/** WP-2423 取舍 18: a guest's points on the bill. Never a reason a manager can choose. */
+export const orderPointsRedemptionReason = "POINTS_REDEMPTION" as const;
+export const orderPointsRedemptionPermission = "loyalty.points.redeem" as const;
 export type OrderPriceReductionKind = "Comp" | "Percent" | "Amount";
 export type OrderPriceReductionChoice =
   | { readonly kind: "Comp" }
@@ -42,7 +45,7 @@ export interface OrderPriceReductionRecord {
   readonly taxMinor: bigint;
   readonly feeMinor: bigint;
   readonly totalMinor: bigint;
-  readonly reasonCode: OrderPriceReductionReasonCode;
+  readonly reasonCode: OrderPriceReductionReasonCode | typeof orderPointsRedemptionReason;
   readonly actorReference: string;
   readonly decidedAt: string;
 }
@@ -117,7 +120,10 @@ function recordFrom(row: Record<string, unknown>): OrderPriceReductionRecord {
   const reason = row.reason_code;
   if (
     (kind !== "Comp" && kind !== "Percent" && kind !== "Amount") ||
-    !(orderPriceReductionReasonCodes as readonly unknown[]).includes(reason)
+    !(
+      (orderPriceReductionReasonCodes as readonly unknown[]).includes(reason) ||
+      reason === orderPointsRedemptionReason
+    )
   )
     return unavailable();
   const record: OrderPriceReductionRecord = {
@@ -132,7 +138,7 @@ function recordFrom(row: Record<string, unknown>): OrderPriceReductionRecord {
     taxMinor: minor(row.tax),
     feeMinor: minor(row.fee),
     totalMinor: minor(row.total),
-    reasonCode: reason as OrderPriceReductionReasonCode,
+    reasonCode: reason as OrderPriceReductionRecord["reasonCode"],
     actorReference: String(parseOrderingReference(row.actor)),
     decidedAt: instant(row.decided_at),
   };
@@ -327,6 +333,192 @@ export function createPostgresOrderPriceReductionStore(options: {
       if (rows.length > 50) return unavailable();
       const records = rows.map(recordFrom);
       if (records[0] !== undefined) await allowed(tx, records[0].orderReference);
+      return Object.freeze(records);
+    },
+
+    /**
+     * What these Orders' dishes can still take off: every dish of a pay-later round that isn't
+     * cancelled or already reduced, largest first. Under each Order's fence (held to commit).
+     */
+    async listRedeemableDishes(tx: ConsumerTransaction, orderReferences: readonly string[]) {
+      const orders = [
+        ...new Set(orderReferences.map((o) => String(parseOrderingReference(o)))),
+      ].sort();
+      await tx.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [brand, store],
+      );
+      const dishes: {
+        orderReference: string;
+        orderBatchReference: string;
+        orderItemReference: string;
+        productReference: string | null;
+        netMinor: bigint;
+        taxMinor: bigint;
+        feeMinor: bigint;
+      }[] = [];
+      for (const order of orders) {
+        await allowed(tx, order);
+        await fence(tx, order);
+        const rows = (
+          await tx.query(
+            "SELECT i.order_item_id::text AS item FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 " +
+              "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_item_price_reduction r WHERE r.brand_id=i.brand_id AND r.store_id=i.store_id AND r.order_item_id=i.order_item_id) " +
+              "ORDER BY i.order_item_id LIMIT 500",
+            [brand, store, order],
+          )
+        ).rows as Record<string, unknown>[];
+        for (const row of rows) {
+          const item = String(parseOrderingReference(row.item));
+          const checked = await evaluate(tx, order, [item], { kind: "Comp" });
+          if (checked.status !== "Ready") continue;
+          const line = checked.plan.lines[0];
+          if (line === undefined) continue;
+          const product = (
+            await tx.query(
+              "SELECT COALESCE(transaction_snapshot_json->>'productId',transaction_snapshot_json->>'productReference') AS product FROM rms_ordering.order_item WHERE brand_id=$1 AND store_id=$2 AND order_item_id=$3",
+              [brand, store, item],
+            )
+          ).rows[0] as Record<string, unknown> | undefined;
+          dishes.push(
+            Object.freeze({
+              orderReference: order,
+              orderBatchReference: line.orderBatchReference,
+              orderItemReference: line.orderItemReference,
+              productReference: typeof product?.product === "string" ? product.product : null,
+              netMinor: line.netMinor,
+              taxMinor: line.taxMinor,
+              feeMinor: line.feeMinor,
+            }),
+          );
+        }
+      }
+      return Object.freeze(
+        dishes.sort((a, b) =>
+          a.netMinor === b.netMinor
+            ? a.orderItemReference.localeCompare(b.orderItemReference)
+            : a.netMinor > b.netMinor
+              ? -1
+              : 1,
+        ),
+      );
+    },
+
+    /**
+     * WP-2423 取舍 18: points off the bill, as a reduction on each dish like any other discount: the
+     * dish stays sold at its price. Whole dishes while the amount lasts, then part of the next; each
+     * dish's tax follows it. A dish left free carries no tax; points never pay tax on their own.
+     */
+    async commitPointsRedemption(
+      tx: ConsumerTransaction,
+      input: {
+        lines: readonly { orderItemReference: string; orderReference: string; netMinor: bigint }[];
+        operationReference: string;
+        accountReference: string;
+        decidedAt: string;
+        nextReference(): string;
+      },
+    ): Promise<readonly OrderPriceReductionRecord[]> {
+      const operation = String(parseOrderingReference(input.operationReference)),
+        actor = String(parseOrderingReference(input.accountReference)),
+        decidedAt = String(parseOrderingInstant(input.decidedAt));
+      const records: OrderPriceReductionRecord[] = [];
+      await tx.query("SAVEPOINT ordering_points_redemption", []);
+      try {
+        for (const wanted of input.lines) {
+          await allowed(tx, wanted.orderReference);
+          await fence(tx, wanted.orderReference);
+          const whole = await evaluate(tx, wanted.orderReference, [wanted.orderItemReference], {
+            kind: "Comp",
+          });
+          if (whole.status !== "Ready") return conflict();
+          const wholeLine = whole.plan.lines[0];
+          if (wholeLine === undefined) return conflict();
+          const choice: OrderPriceReductionChoice =
+            wanted.netMinor === wholeLine.netMinor
+              ? { kind: "Comp" }
+              : { kind: "Amount", netMinor: wanted.netMinor };
+          const checked = await evaluate(
+            tx,
+            wanted.orderReference,
+            [wanted.orderItemReference],
+            choice,
+          );
+          if (checked.status !== "Ready") return conflict();
+          const line = checked.plan.lines[0];
+          if (line === undefined) return conflict();
+          const reduction = String(parseOrderingReference(input.nextReference()));
+          const audit = String(parseOrderingReference(input.nextReference()));
+          await tx.query(
+            "INSERT INTO rms_ordering.order_item_price_reduction (reduction_id,operation_id,brand_id,store_id,order_id,order_batch_id,order_item_id," +
+              "kind,percent,net_minor,tax_minor,fee_minor,total_minor,currency_code,reason_code,actor_id,permission_code,audit_id,decided_at) " +
+              "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,$9,$10,$11,$12,'CAD',$13,$14,$15,$16,$17)",
+            [
+              reduction,
+              operation,
+              brand,
+              store,
+              wanted.orderReference,
+              line.orderBatchReference,
+              line.orderItemReference,
+              choice.kind,
+              line.netMinor.toString(),
+              line.taxMinor.toString(),
+              line.feeMinor.toString(),
+              line.totalMinor.toString(),
+              orderPointsRedemptionReason,
+              actor,
+              orderPointsRedemptionPermission,
+              audit,
+              decidedAt,
+            ],
+          );
+          await appendAuditRecordInTransaction(
+            tx,
+            validateAuditRecord({
+              auditId: audit,
+              brandId: brand,
+              storeId: store,
+              actor: { type: "System" },
+              actionCode: "ORDER_ITEM_POINTS_REDEEMED",
+              targetType: "OrderItem",
+              targetId: line.orderItemReference,
+              correlationId: operation,
+              reasonCode: orderPointsRedemptionReason,
+              occurredAt: decidedAt,
+              sourceChannel: "CUSTOMER_PWA",
+              afterSummary: {
+                kind: choice.kind,
+                reductionMinor: line.totalMinor.toString(),
+              },
+              dataClassification: "Restricted",
+              retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+              retentionPolicyVersion: 1,
+            }),
+          );
+          records.push(
+            Object.freeze({
+              reductionReference: reduction,
+              operationReference: operation,
+              orderReference: wanted.orderReference,
+              orderBatchReference: line.orderBatchReference,
+              orderItemReference: line.orderItemReference,
+              kind: choice.kind,
+              percent: null,
+              netMinor: line.netMinor,
+              taxMinor: line.taxMinor,
+              feeMinor: line.feeMinor,
+              totalMinor: line.totalMinor,
+              reasonCode: orderPointsRedemptionReason,
+              actorReference: actor,
+              decidedAt,
+            }),
+          );
+        }
+      } catch (error) {
+        await tx.query("ROLLBACK TO SAVEPOINT ordering_points_redemption", []);
+        throw error;
+      }
       return Object.freeze(records);
     },
 

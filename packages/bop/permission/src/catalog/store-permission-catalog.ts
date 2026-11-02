@@ -73,8 +73,11 @@
  * Owner template also holds reporting.sales.read and reporting.sales.export, so the Brand Owner
  * reads and downloads Reports (tonight, sales by period, items, hours, tips) at every Store of the
  * Brand without a Store role there. No code is added; Store templates are unchanged.
+ * v24 (2026-11-02, WP-2423 取舍 18 DEC-MEMBER-POINTS): loyalty.program.manage changes the Brand's points
+ * rules (Owner, Brand Owner); loyalty.member.read reads the member list, with only the last four
+ * digits of a phone, and the points report (Owner, Store Manager, Area Manager, Brand Owner).
  */
-export const storePermissionCatalogVersion = 23 as const;
+export const storePermissionCatalogVersion = 24 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -321,6 +324,8 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["ordering.order.close", "Close an order", "Medium"],
     // v19 (WP-2423 item 8 ①): money off a table's bill, so a manager's and High.
     ["ordering.order.comp", "Comp or discount dishes before the table pays", "High"],
+    ["loyalty.program.manage", "Change the points rules", "High"],
+    ["loyalty.member.read", "See members and the points report", "Medium"],
     ["ordering.order.fulfill", "Mark an order fulfilled", "Medium"],
   ]),
   ...define("kitchen", [
@@ -561,6 +566,8 @@ const storeManagerTemplate: readonly string[] = Object.freeze([
   "recipe.read",
   // v21 (DEC-BRAND-MULTI-STORE segment 9): this Store's own prices.
   "pricing.store_price.manage",
+  // v24 (DEC-MEMBER-POINTS): members and the points report.
+  "loyalty.member.read",
 ]);
 /** DEC-PERM-CATALOG Store role templates; an Owner may adjust a Store's copy. */
 export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly string[]>> =
@@ -702,6 +709,8 @@ export const brandRoleTemplates: Readonly<Record<BrandRoleTemplateCode, readonly
         // v22: Reports at every Store of the Brand (read and download only).
         "reporting.sales.read",
         "reporting.sales.export",
+        // v24 (DEC-MEMBER-POINTS): the Brand's points rules, members and report.
+        "loyalty.",
         "identity.role.",
         "catalog.",
         "pricing.",

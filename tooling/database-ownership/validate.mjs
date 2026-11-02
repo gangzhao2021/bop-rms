@@ -1431,6 +1431,14 @@ async function scanUnsupported(root, module, diagnostics) {
             // WP-2423 取舍 15: platform support staff, and the Owner's say over them.
             "src/infrastructure/persistence/platform-support-store.ts",
           ].includes(moduleRelative);
+        // WP-2423 取舍 18 DEC-MEMBER-POINTS: the Brand's members and points.
+        const acceptedMemberPointsAsset =
+          module.packageName === "@rms/customer-loyalty" &&
+          module.manifest.ownedDatabase?.schema === "rms_loyalty" &&
+          [
+            "src/infrastructure/persistence/member-points-store.ts",
+            "src/infrastructure/persistence/member-phone-protector.ts",
+          ].includes(moduleRelative);
         const acceptedSystemMediaPromotionPermissionAsset =
           module.packageName === "@bop/permission" &&
           module.manifest.ownedDatabase?.schema === "bop_permission" &&
@@ -4032,7 +4040,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedCartQuoteAsset &&
           !acceptedCheckoutSessionAllocationAsset &&
           !acceptedCheckoutSessionAsset &&
-          !acceptedCheckoutDetailsAsset
+          !acceptedCheckoutDetailsAsset &&
+          !acceptedMemberPointsAsset
         )
           diagnostics.push(
             diag(

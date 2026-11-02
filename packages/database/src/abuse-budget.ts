@@ -5,6 +5,8 @@ const classes = [
   "ORDER_RESUME",
   "PICKUP_PROOF_FAILURE",
   "TRANSACTION_CREATE",
+  "MEMBER_CODE_SEND",
+  "MEMBER_CODE_CHECK",
 ] as const;
 export type AbuseBucketClass = (typeof classes)[number];
 export interface AbuseBudgetResult {

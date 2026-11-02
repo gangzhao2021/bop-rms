@@ -786,6 +786,9 @@ describe("migration catalog", () => {
       "2000_142_alter_staff_cancellation_pickup_refusal",
       "2000_143_create_platform_support_access",
       "2000_144_alter_platform_support_public_revoke",
+      "2000_145_create_member_points",
+      "2000_146_alter_order_price_reduction_points",
+      "2000_147_alter_abuse_bucket_member_code",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
