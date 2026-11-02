@@ -29,12 +29,17 @@ export async function startPilotDiningExceptionWorker({
   try {
     const recover = createRecovery({ resources, providerAccountReference });
     // WP-2423 取舍 18: points follow refunds and expire after notice, on this quiet worker.
-    const memberSweep = await createMemberSweep({ directory, resources, providerAccountReference });
+    let memberSweep = null;
     let memberSweptAt = 0;
     const sweepMembers = async () => {
-      if (Date.now() - memberSweptAt < memberPointsSweepIntervalMs) return;
+      if (
+        resources.publicProfile === undefined ||
+        Date.now() - memberSweptAt < memberPointsSweepIntervalMs
+      )
+        return;
       memberSweptAt = Date.now();
       try {
+        memberSweep ??= await createMemberSweep({ directory, resources, providerAccountReference });
         await memberSweep.settlePoints();
         await memberSweep.expirePoints();
       } catch (error) {

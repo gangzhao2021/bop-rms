@@ -231,6 +231,7 @@ it("DEC-PILOT-SECRETS: the catalog covers every key the internal test key file a
       "guest-abuse-pepper",
       "guest-binding-key",
       "guest-session-key",
+      "member-contact-key",
       "merchant-encryption-key",
       "merchant-selector-key",
       "order-recovery-abuse-key",

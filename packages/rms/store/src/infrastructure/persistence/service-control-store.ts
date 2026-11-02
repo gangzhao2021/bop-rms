@@ -405,7 +405,7 @@ export async function changeStoreFeatureSetting(
   ]);
   const prior = rowsOf(
     await tx.query(
-      "SELECT template_code,counter_order,pickup,inventory,loyalty,compliance_documents FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      "SELECT template_code,counter_order,pickup,inventory,points_offered,compliance_documents FROM rms_store.store_feature_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
       [brand, store, operation],
     ),
   )[0];

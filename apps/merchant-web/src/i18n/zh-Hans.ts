@@ -6850,6 +6850,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Offers by text": "优惠短信",
   "{points} owed": "欠 {points} 分",
   "Points for guests": "客人积分",
+  "Change the points rules": "修改积分规则",
+  "See members and the points report": "查看会员和积分报表",
   "After paying, guests can join with their phone number, earn points on dishes and use them on a bill, on orders they place by scanning the QR code. Turned off, guests aren't asked here and members keep their points.":
     "客人付款后可以用手机号加入，菜品可以积分，也可以在账单上使用积分，只限扫码点的单。关闭后不会请这里的客人加入，会员的积分保留。",
   "Comps, discounts and points used": "免单、折扣和积分抵扣",
