@@ -1,3 +1,4 @@
+import { storeSupportClient } from "./store-support-client.js";
 import { StoresPage } from "./StoresPage.js";
 import { t } from "./i18n/i18n.js";
 import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
@@ -573,6 +574,21 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   }, []);
   // Without a sign-in (the PIN screen, a signed-out staff page) the screen shows what this tab
   // last knew, labelled with when it was checked; nothing is read without a Session.
+  // WP-2423 取舍 15: platform support has no Store workspace; their page is their own.
+  useEffect(() => {
+    if (state.kind !== "SignedOut" || !pathname.startsWith("/")) return;
+    if (pathname.startsWith("/platform/") || sessionlessPaths.has(pathname)) return;
+    let active = true;
+    void storeSupportClient.session().then(
+      () => {
+        if (active) window.location.assign("/platform/support-cases");
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [state.kind, pathname]);
   const remembered = useMemo(
     () =>
       demo === null &&

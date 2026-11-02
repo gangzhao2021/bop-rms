@@ -14,6 +14,33 @@ import { SourceTime } from "./StoreTime.js";
  * the closed list here, only while the Owner allows it. If this page can't be reached, the Owner
  * can still do everything alone in their own Store setup.
  */
+const orderTypeText = (type: string) =>
+  type === "Pickup" ? t("Pickup") : type === "DineIn" ? t("Dine-in") : t("Other");
+/** The order's state as staff say it; one this page doesn't know is "In progress", never a code. */
+const orderPhaseText = (phase: string | null) => {
+  switch (phase) {
+    case "Submitted":
+      return t("Waiting to be accepted");
+    case "Accepted":
+      return t("Accepted");
+    case "InProgress":
+      return t("Being made");
+    case "Ready":
+      return t("Ready");
+    case "Completed":
+    case "Closed":
+      return t("Done");
+    case "Cancelled":
+      return t("Cancelled");
+    case "Rejected":
+      return t("Refused and refunded");
+    case null:
+      return t("Can't read this right now");
+    default:
+      return t("In progress");
+  }
+};
+
 export function StoreSupportPage() {
   const [session, setSession] = useState<StoreSupportSession | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "denied" | "unavailable">("loading");
@@ -210,6 +237,8 @@ export function StoreSupportPage() {
                 <tr>
                   <th scope="col">{t("Order")}</th>
                   <th scope="col">{t("When")}</th>
+                  <th scope="col">{t("Type")}</th>
+                  <th scope="col">{t("Status")}</th>
                   <th scope="col">{t("Items")}</th>
                   <th scope="col">{t("Guest")}</th>
                 </tr>
@@ -221,6 +250,8 @@ export function StoreSupportPage() {
                     <td data-label={t("When")}>
                       <SourceTime instant={order.createdAt} />
                     </td>
+                    <td data-label={t("Type")}>{orderTypeText(order.orderType)}</td>
+                    <td data-label={t("Status")}>{orderPhaseText(order.phase)}</td>
                     <td data-label={t("Items")}>{order.lineCount ?? "—"}</td>
                     <td data-label={t("Guest")}>{order.guest ?? "—"}</td>
                   </tr>

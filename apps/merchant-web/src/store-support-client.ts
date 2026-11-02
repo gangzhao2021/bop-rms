@@ -18,7 +18,7 @@ export interface StoreSupportView {
   readonly orders: readonly {
     readonly orderNumber: string;
     readonly orderType: string;
-    readonly phase: string;
+    readonly phase: string | null;
     readonly createdAt: string;
     readonly lineCount: number | null;
     readonly guest: string | null;

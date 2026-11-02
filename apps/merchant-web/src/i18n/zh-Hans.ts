@@ -6791,4 +6791,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guest contact details are hidden from support.": "顾客的联系方式对平台支持是遮住的。",
   "Allow or stop platform support changing settings, and read the support access log":
     "允许或停止平台支持更改设置，并查看支持访问记录",
+  "Waiting to be accepted": "等待接单",
+  "Refused and refunded": "已拒单并退款",
+  "Can't read this right now": "暂时读取不到",
 });
