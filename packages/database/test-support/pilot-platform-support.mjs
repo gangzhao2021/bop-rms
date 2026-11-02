@@ -15,6 +15,7 @@ import { createMerchantCardMachineCancellationRefund } from "../../../apps/api/d
 import { createMerchantDiningTableSettle } from "../../../apps/api/dist/merchant-dining-table-checkout.js";
 import { createMerchantStorePaymentConfiguration } from "../../../apps/api/dist/merchant-store-payment-configuration.js";
 import { createMerchantUnmatchedCaptureRefund } from "../../../apps/api/dist/merchant-unmatched-capture-refund.js";
+import { createMerchantDiningTableCashRefund } from "../../../apps/api/dist/merchant-dining-table-payment.js";
 import { createMerchantCardMachinePayment } from "../../../apps/api/dist/merchant-card-machine-payment.js";
 import {
   createMerchantOrdinaryRefundRequest,
@@ -27,6 +28,7 @@ import {
   orderPriceReductionReasonCodes,
   staffOrderCancellationReasonCodes,
 } from "../../rms/ordering/src/index.ts";
+import { diningTableCashRefundReasons } from "../../rms/payment/src/index.ts";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 import { createPaidPickupOrderSeeder } from "./ordinary-refund-paid-pickup-order.mjs";
 
@@ -516,6 +518,7 @@ export async function exercisePilotPlatformSupport(context) {
       cardMachinePayment: createMerchantCardMachinePayment(deps({ ...common })),
       cardMachineRefund: createMerchantCardMachineCancellationRefund(deps({ ...common })),
       diningTableSettle: createMerchantDiningTableSettle(deps({ ...common })),
+      tableCashRefund: createMerchantDiningTableCashRefund(deps({ ...common })),
       unmatchedCaptureRefund: createMerchantUnmatchedCaptureRefund(deps({ ...common })),
       storePaymentConfiguration: createMerchantStorePaymentConfiguration({
         ...common,
@@ -553,6 +556,12 @@ export async function exercisePilotPlatformSupport(context) {
     reasonCode: orderPriceReductionReasonCodes[0],
     operationReference: ref(),
   });
+  const cashRefund = {
+    orderReference: ref(),
+    operationReference: ref(),
+    amountMinor: "100",
+    reasonCode: diningTableCashRefundReasons[0],
+  };
   const attempts = [
     ["orders/cancel", whole()],
     ["orders/cancel-items", { ...whole(), orderItemReferences: [ref()] }],
@@ -621,6 +630,7 @@ export async function exercisePilotPlatformSupport(context) {
         takenAt: null,
       },
     ],
+    ["orders/table-payment/cash-refund", cashRefund],
     [
       "payments/unmatched-capture-refund/request",
       { exceptionReference: ref(), idempotencyReference: ref() },

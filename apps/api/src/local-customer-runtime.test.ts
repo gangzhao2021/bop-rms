@@ -782,7 +782,8 @@ describe("optional local Cart runtime", () => {
         "sec-fetch-mode": "cors",
       },
     });
-    expect(denied.status).toBe(401);
+    // WP-2423 (v15 rush 2026-11-02): the database failed, so a retry, not "Session expired".
+    expect(denied.status).toBe(503);
     expect(denied.headers.get("cache-control")).toContain("no-store");
     expect(await denied.text()).not.toContain("synthetic database unavailable");
     expect(run).toHaveBeenCalledOnce();

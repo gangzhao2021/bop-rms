@@ -34,7 +34,7 @@ describe("Guest request abuse policy", () => {
         input.observedAt,
       ]),
     ).toEqual([
-      [600, 20, at],
+      [600, 120, at],
       [600, 300, at],
     ]);
     expect(consume.mock.calls[0]?.[0].keyHash).not.toEqual(consume.mock.calls[1]?.[0].keyHash);
@@ -64,10 +64,28 @@ describe("Guest request abuse policy", () => {
     expect(await setup(consume).consume(request)).toEqual({ status: "Unavailable" });
     expect(consume).toHaveBeenCalledTimes(2);
   });
+  it("WP-2423: with no true address only the Store's limit counts, never one shared key", async () => {
+    const consume = vi
+      .fn<GuestSessionAbuseBudget["consume"]>()
+      .mockResolvedValue({ allowed: true, remaining: 3, retry_after_seconds: 0 });
+    expect(await setup(consume).consume({ ...request, remoteAddress: null })).toEqual({
+      status: "Allowed",
+    });
+    expect(consume).toHaveBeenCalledTimes(1);
+    expect(consume.mock.calls[0]?.[0].limitCount).toBe(300);
+  });
+  it("WP-2423: one address at two Stores spends two budgets", () => {
+    const provider = keys();
+    expect(provider.ip("192.0.2.1", scope)).not.toEqual(
+      provider.ip("192.0.2.1", {
+        ...scope,
+        storeReference: "0190ab20-0000-7000-8000-000000000099",
+      }),
+    );
+  });
   it("fails closed before budget access for invalid peer or future request", async () => {
     const consume = vi.fn();
     for (const input of [
-      { ...request, remoteAddress: null },
       { ...request, remoteAddress: "192.0.2.1, 192.0.2.2" },
       { ...request, remoteAddress: "fe80::1%eth0" },
       { ...request, requestedAt: "2026-09-19T12:00:01.000Z" },
@@ -77,7 +95,7 @@ describe("Guest request abuse policy", () => {
   });
   it("rejects malformed or impossible budget output", async () => {
     for (const result of [
-      { allowed: true, remaining: 20, retry_after_seconds: 0 },
+      { allowed: true, remaining: 120, retry_after_seconds: 0 },
       { allowed: false, remaining: 0, retry_after_seconds: 601 },
       { allowed: true, remaining: 1, retry_after_seconds: 1 },
     ])
@@ -87,22 +105,26 @@ describe("Guest request abuse policy", () => {
 describe("Guest abuse keyed scopes", () => {
   it("canonicalizes IPv4-mapped IPv6 and groups equivalent IPv6 /64 peers", () => {
     const provider = keys();
-    expect(provider.ip("::ffff:192.0.2.1")).toEqual(provider.ip("192.0.2.1"));
-    expect(provider.ip("0:0:0:0:0:ffff:c000:201")).toEqual(provider.ip("192.0.2.1"));
-    expect(provider.ip("2001:db8:1:2::1")).toEqual(provider.ip("2001:0DB8:0001:0002:ffff::abcd"));
-    expect(provider.ip("2001:db8:1:3::1")).not.toEqual(provider.ip("2001:db8:1:2::1"));
+    expect(provider.ip("::ffff:192.0.2.1", scope)).toEqual(provider.ip("192.0.2.1", scope));
+    expect(provider.ip("0:0:0:0:0:ffff:c000:201", scope)).toEqual(provider.ip("192.0.2.1", scope));
+    expect(provider.ip("2001:db8:1:2::1", scope)).toEqual(
+      provider.ip("2001:0DB8:0001:0002:ffff::abcd", scope),
+    );
+    expect(provider.ip("2001:db8:1:3::1", scope)).not.toEqual(
+      provider.ip("2001:db8:1:2::1", scope),
+    );
   });
   it("separates stores/peppers and copies the pepper", () => {
     const pepper = new Uint8Array(32).fill(1);
     const provider = createGuestSessionAbuseKeys(pepper);
     pepper.fill(0);
-    expect(provider.ip("192.0.2.1")).toEqual(keys().ip("192.0.2.1"));
+    expect(provider.ip("192.0.2.1", scope)).toEqual(keys().ip("192.0.2.1", scope));
     expect(provider.store(scope)).not.toEqual(
       provider.store({ ...scope, storeReference: scope.brandReference }),
     );
-    expect(provider.ip("192.0.2.1")).not.toEqual(
-      createGuestSessionAbuseKeys(pepper).ip("192.0.2.1"),
+    expect(provider.ip("192.0.2.1", scope)).not.toEqual(
+      createGuestSessionAbuseKeys(pepper).ip("192.0.2.1", scope),
     );
-    expect(provider.ip("192.0.2.1")).toHaveLength(32);
+    expect(provider.ip("192.0.2.1", scope)).toHaveLength(32);
   });
 });

@@ -285,3 +285,26 @@ it("DEC-PILOT-MAINTENANCE-PAGE: the page has no internal terms, no scripts and a
     renderUnavailable(Buffer.from("\x16\x03\x01garbage\r\n\r\n"), { updating: false }),
   ).toBeNull();
 });
+
+it("WP-2423: with clientAddress set, the entry learns the guest's address from front, first", async () => {
+  await fs.copyFile(certificates.certificateFile, path.join(runtime, "customer-tls-cert.pem"));
+  await fs.copyFile(certificates.keyFile, path.join(runtime, "customer-tls-key.pem"));
+  const seen = [];
+  const entry = net.createServer((socket) => {
+    socket.once("data", (data) => {
+      seen.push(String(data).split("\r\n")[0]);
+      socket.destroy();
+    });
+  });
+  const upstreamPort = await listen(entry);
+  const port = await front({
+    hosting: { ...parsePilotHosting(null, internal), clientAddress: "connection" },
+    upstreamPort,
+  });
+  await new Promise((resolve) => {
+    const client = net.connect(port, "127.0.0.1", () => client.write("hello"));
+    client.on("close", resolve);
+    client.on("error", resolve);
+  });
+  expect(seen[0]).toMatch(/^PROXY TCP4 127\.0\.0\.1 127\.0\.0\.1 \d+ \d+$/u);
+});

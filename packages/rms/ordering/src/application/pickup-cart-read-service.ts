@@ -82,7 +82,10 @@ export function createPickupCartReadService(ports: PickupCartReadPorts) {
         activity: "Background",
         observedAt,
       });
-    } catch {
+    } catch (error) {
+      // The session's store failed: a passing fault, not an expired session.
+      if ((error as { dependencyFailure?: unknown } | null)?.dependencyFailure === true)
+        throw Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), { cause: error });
       throw new CartError("CART_PERMISSION_DENIED");
     }
     try {

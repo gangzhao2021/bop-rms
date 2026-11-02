@@ -46,6 +46,7 @@ it("passes all existing customer routes and configured resources to the API runt
             "paymentChannel",
             // DEC-PILOT-MAINTENANCE-PAGE: hosting.json customerOrigin (default the local entry).
             "publicOrigin",
+            "stateClientAddress",
             "registerInternalDiningTablePayment",
           ].sort(),
         );

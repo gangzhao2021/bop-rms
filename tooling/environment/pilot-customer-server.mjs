@@ -1,3 +1,4 @@
+import { createPilotEntryListener, withClientAddress } from "./pilot-client-address.mjs";
 import { pilotMerchantAppPaths } from "./pilot-merchant-app-paths.mjs";
 import { registerInternalDiningEntry } from "./pilot-dining-launcher.mjs";
 import { installInternalStaffLogin } from "./pilot-staff-login.mjs";
@@ -208,6 +209,7 @@ export async function startInternalCustomerServer({
   certificateFile,
   productImageDirectory,
   publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
+  stateClientAddress = false,
   // The local entry and API ports (tests pass their own; the pilot always uses 4443 and 4300).
   listenPort = 4443,
   apiPort = 4300,
@@ -229,6 +231,7 @@ export async function startInternalCustomerServer({
     stat.uid !== process.getuid()
   )
     throw new Error("INTERNAL_TLS_UNAVAILABLE");
+  let entryListener = null;
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -479,7 +482,10 @@ export async function startInternalCustomerServer({
           port,
           path: req.url,
           method: req.method,
-          headers: { ...req.headers, host, connection: "close" },
+          headers: withClientAddress(
+            { ...req.headers, host, connection: "close" },
+            entryListener?.clientAddress(req) ?? null,
+          ),
         },
         (response) => {
           // WP-2423 Q30: the public menu answer is sent compressed when the browser accepts it.
@@ -529,10 +535,13 @@ export async function startInternalCustomerServer({
     app.get("/{*path}", (_req, res) =>
       res.set("Cache-Control", "no-store").sendFile(resolve(assets, "index.html")),
     );
-    const server = createServer(
-      { key: await readFile(keyFile), cert: await readFile(certificateFile) },
-      app,
-    );
+    const secure = { key: await readFile(keyFile), cert: await readFile(certificateFile) };
+    // WP-2423: `front` states each guest's address only when hosting.json says it can.
+    let server;
+    if (stateClientAddress) {
+      entryListener = createPilotEntryListener({ ...secure, app });
+      server = entryListener.server;
+    } else server = createServer(secure, app);
     server.listen(listenPort, "127.0.0.1", () =>
       process.stdout.write(
         "Pilot customer HTTPS listening on 127.0.0.1:" + server.address().port + "\n",

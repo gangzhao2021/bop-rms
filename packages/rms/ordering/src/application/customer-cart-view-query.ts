@@ -397,9 +397,10 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             warnings: Object.freeze([] as string[]),
           }),
         });
-      } catch {
+      } catch (error) {
         if (authorizationErrorCode !== null) throw new CartError(authorizationErrorCode);
-        return unavailable();
+        // Keep what failed, for the log at the edge.
+        throw Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), { cause: error });
       }
     },
   });

@@ -103,16 +103,15 @@ export function createMerchantStoreSupport(options: {
       throw error;
     throw new MerchantStoreSupportError("Unavailable");
   };
+  const storeFacts = (tx: unknown, scope: { brandReference: string; storeReference: string }) =>
+    createPostgresMerchantOrganizationSource(tx as never, {
+      ...scope,
+      observedAt: now(),
+    }).getStore(scope.storeReference as never);
   const storeName = async (
     tx: unknown,
     scope: { brandReference: string; storeReference: string },
-  ) =>
-    (
-      await createPostgresMerchantOrganizationSource(tx as never, {
-        ...scope,
-        observedAt: now(),
-      }).getStore(scope.storeReference as never)
-    )?.displayName ?? "—";
+  ) => (await storeFacts(tx, scope))?.displayName ?? "—";
   return Object.freeze({
     /** Who is signed in, what they may do and which Stores they can pick. */
     async session(sessionCookie: unknown) {
@@ -159,7 +158,7 @@ export function createMerchantStoreSupport(options: {
             subjectCode: "StoreDetails",
             occurredAt: at,
           });
-          const name = await storeName(tx, scope);
+          const facts = await storeFacts(tx, scope);
           const permission = await readStoreSupportPermission(tx as never, scope, at);
           const kitchen = await readStoreKitchenLine(tx, scope);
           const features = await loadStoreFeatureSetting(tx as never, scope);
@@ -213,7 +212,8 @@ export function createMerchantStoreSupport(options: {
             options.locale,
           );
           return Object.freeze({
-            name,
+            name: facts?.displayName ?? "—",
+            timeZone: facts?.timeZone ?? null,
             ownerAllowsChanges: found.actions.includes("platform.support.change")
               ? permission.changesAllowed
               : false,

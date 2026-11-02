@@ -8,6 +8,8 @@ export interface StoreSupportSession {
 }
 export interface StoreSupportView {
   readonly name: string;
+  /** The Store's own zone: its times are shown as staff there read them. */
+  readonly timeZone: string | null;
   readonly ownerAllowsChanges: boolean;
   readonly allowedUntil: string | null;
   readonly kitchenSetUp: boolean;

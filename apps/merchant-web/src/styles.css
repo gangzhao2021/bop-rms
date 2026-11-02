@@ -9658,6 +9658,15 @@ tr[data-drop-target="true"] {
   padding: var(--bop-space-4);
   min-width: 0;
 }
+.store-support__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--bop-space-3);
+}
+.store-support__head h1 {
+  margin: 0;
+}
 .store-support h1 {
   font-size: 28px;
   font-weight: 600;

@@ -463,10 +463,10 @@ export async function exercisePersistentProfileEntry({
       assert.deepEqual(
         attempts.rows,
         [
-          { limit_count: 20, attempts: 2 },
+          // Loopback is no one's address: the Store's limit alone (WP-2423).
           { limit_count: 300, attempts: 2 },
         ],
-        "both budgets persist the failed Entry transaction's attempt",
+        "the budget persists the failed Entry transaction's attempt",
       );
     }
     failCommit = false;
@@ -895,7 +895,8 @@ export async function exercisePersistentProfileEntry({
     assert.deepEqual(await count(), afterBinding);
     if (currentClock) {
       let limited = false;
-      for (let attempt = 0; attempt < 21; attempt++) {
+      // Behind the proxy no address is known here: the Store's own limit (WP-2423).
+      for (let attempt = 0; attempt < 301; attempt++) {
         const response = await request();
         if (response.status === 429) {
           assert.ok(Number(response.headers.get("retry-after")) > 0);
@@ -912,10 +913,9 @@ export async function exercisePersistentProfileEntry({
       const budgets = await admin.query(
         "SELECT limit_count,sum(attempt_count)::int AS attempts FROM security.abuse_bucket WHERE bucket_class='GUEST_SESSION' GROUP BY limit_count ORDER BY limit_count",
       );
-      assert.deepEqual(budgets.rows, [
-        { limit_count: 20, attempts: 21 },
-        { limit_count: 300, attempts: 20 },
-      ]);
+      assert.equal(budgets.rows.length, 1);
+      assert.equal(budgets.rows[0].limit_count, 300);
+      assert.ok(budgets.rows[0].attempts >= 300);
     }
     Object.assign(f.payload, pickupPayload);
     diningTable = undefined;

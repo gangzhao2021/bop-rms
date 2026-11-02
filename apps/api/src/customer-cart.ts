@@ -1,3 +1,4 @@
+import { logGuestFailure } from "./guest-failure-log.js";
 import { CartError, CartReplacementPendingError } from "@rms/ordering";
 import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
@@ -625,7 +626,8 @@ async function invoke(
 ): Promise<void> {
   try {
     handleResult(response, await operation, created, now);
-  } catch {
+  } catch (error) {
+    logGuestFailure("CUSTOMER_CART_UNAVAILABLE", error);
     sendError(response, "cart_service_unavailable");
   }
 }

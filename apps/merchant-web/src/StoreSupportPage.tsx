@@ -6,7 +6,8 @@ import {
   type StoreSupportSession,
   type StoreSupportView,
 } from "./store-support-client.js";
-import { SourceTime } from "./StoreTime.js";
+import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
+import { SourceTime, StoreTimeZoneContext } from "./StoreTime.js";
 
 /**
  * WP-2423 取舍 15 (Owner 2026-10-28), Section 88 PLT-SUPPORT-CASE: what platform support works from.
@@ -129,7 +130,10 @@ export function StoreSupportPage() {
     );
   return (
     <main className="store-support">
-      <h1>{t("Platform support")}</h1>
+      <header className="store-support__head">
+        <h1>{t("Platform support")}</h1>
+        <LanguageSwitch />
+      </header>
       <p className="store-support__hint">
         {t("Signed in as {name}. Everything you open is listed for that Store's Owner.", {
           name: session.name,
@@ -153,7 +157,7 @@ export function StoreSupportPage() {
       </label>
       {message === null ? null : <p role="status">{message}</p>}
       {view === null ? null : (
-        <>
+        <StoreTimeZoneContext.Provider value={view.timeZone ?? undefined}>
           <h2>{view.name}</h2>
           <p>
             {view.ownerAllowsChanges ? (
@@ -262,7 +266,7 @@ export function StoreSupportPage() {
           <p className="store-support__hint">
             {t("Guest contact details are hidden from support.")}
           </p>
-        </>
+        </StoreTimeZoneContext.Provider>
       )}
     </main>
   );

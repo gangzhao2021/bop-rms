@@ -2424,6 +2424,12 @@ on the internet).
 }
 ```
 
+- `clientAddress` (optional, `"connection"`): set it only when a connection's peer at `front` really
+  is the guest, so no port forward or load balancer hides them. `front` then tells the entry each
+  guest's address, and scans are limited to 120 per address per Store per 10 minutes as well as 300
+  per Store. Without it (v15 today: Docker's port forward shows every guest as one address) only the
+  Store's 300 applies. A guest cannot state their own address: the entry replaces the header. A load
+  balancer in front of `front` is not supported yet: it needs PROXY protocol from that balancer.
 - `customerOrigin`: the address printed on table QR codes and the only Origin/Host the pages and
   API accept. **Changing it means Replace and print for every table code.**
 - `secretsDirectory`: the managed secret files; the list, rotation and QR key switch are in
