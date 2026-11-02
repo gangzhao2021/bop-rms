@@ -411,6 +411,13 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
             <dt>{t("Total ordered")}</dt>
             <dd>{money(summary.ordered.total)}</dd>
           </div>
+          {/* WP-2423 取舍 18: the sale stands at its price; this is why less was paid. */}
+          {summary.pointsUsed !== undefined ? (
+            <div>
+              <dt>{t("Points used")}</dt>
+              <dd>−{money(summary.pointsUsed)}</dd>
+            </div>
+          ) : null}
           {/* DEC-DINE-IN-PAY-LATER: the table's one payment, line by line up to what was paid. */}
           {summary.tableTip !== undefined && nonZero(summary.tableTip) ? (
             <div>

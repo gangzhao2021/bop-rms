@@ -26,6 +26,7 @@ import {
   createPostgresStaffOrderCancellationReader,
   listDiningOrderBatchAuthorship,
   listOrderItemPrices,
+  listOrderPriceReductions,
   listOrderBillOrders,
   listOrderDiningSessions,
   listStoreDiningBatchPaymentDeadlines,
@@ -127,6 +128,8 @@ export interface CustomerDiningSessionFacts {
     readonly heldRounds?: ReadonlyMap<string, OrderRoundHoldReason>;
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment (if paid). */
     readonly tableSettlement?: { readonly tipMinor: bigint; readonly roundingMinor: bigint } | null;
+    /** WP-2423 取舍 18: what guests' points took off this bill, tax included. */
+    readonly pointsUsedMinor?: bigint;
     /**
      * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
      * there are and are paid, and what the paid parts covered of the rounds (taken off what is
@@ -260,6 +263,8 @@ export interface CustomerDiningSessionView {
     readonly due: CustomerMoney;
     /** WP-2423 item 8 ④: the table pays in parts (count, how many are paid). */
     readonly splitParts?: { readonly count: number; readonly paid: number };
+    /** WP-2423 取舍 18: why what was paid is less than what was ordered. */
+    readonly pointsUsed?: CustomerMoney;
     /** WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill: what one guest's tea costs, and how many. */
     readonly teaCharge?: { readonly perGuest: CustomerMoney; readonly guests: number };
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
@@ -534,6 +539,9 @@ export function composeCustomerDiningSession(
             tableTip: money(order.tableSettlement.tipMinor),
             cashRounding: money(order.tableSettlement.roundingMinor),
           }),
+      ...((order.pointsUsedMinor ?? 0n) > 0n
+        ? { pointsUsed: money(order.pointsUsedMinor as bigint) }
+        : {}),
       paid: money(paid),
       refunded: money(refunded),
       refundPending: money(refundPending),
@@ -1157,6 +1165,9 @@ function postgresDependencies(
                     .filter((settlement) => settlement.part !== null)
                     .reduce((sum, settlement) => sum + settlement.roundsMinor, 0n),
                 },
+          pointsUsedMinor: (await listOrderPriceReductions(transaction, scope, [orderReference]))
+            .filter((reduction) => reduction.reasonCode === "POINTS_REDEMPTION")
+            .reduce((sum, reduction) => sum + reduction.totalMinor, 0n),
           tableSettlement:
             tableSettlements.length === 0
               ? null
@@ -1240,6 +1251,7 @@ export function mergeBillOrderFacts(
     batches: all
       .flatMap((facts) => facts.batches)
       .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0)),
+    pointsUsedMinor: all.reduce((sum, facts) => sum + (facts.pointsUsedMinor ?? 0n), 0n),
     authorship: maps((facts) => facts.authorship),
     staffRounds: sets((facts) => facts.staffRounds),
     delivery: maps((facts) => facts.delivery),

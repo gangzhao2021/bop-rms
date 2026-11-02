@@ -131,6 +131,8 @@ export interface DiningTableBill {
         readonly kind: "Comp" | "Percent" | "Amount";
         readonly percent: number | null;
         readonly amountMinor: string;
+        /** WP-2423 取舍 18: a guest's points, not a manager's decision. */
+        readonly points?: true;
       };
     }[];
     readonly subtotalMinor: string;
@@ -510,6 +512,10 @@ export async function readDiningTableBill(
                 : Object.freeze({
                     kind: (off(item) as NonNullable<ReturnType<typeof off>>).kind,
                     percent: (off(item) as NonNullable<ReturnType<typeof off>>).percent,
+                    ...((off(item) as NonNullable<ReturnType<typeof off>>).reasonCode ===
+                    "POINTS_REDEMPTION"
+                      ? { points: true as const }
+                      : {}),
                     amountMinor: (
                       off(item) as NonNullable<ReturnType<typeof off>>
                     ).totalMinor.toString(),

@@ -1,3 +1,4 @@
+import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { listSeparator, useReloadOnLanguageChange } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router";
@@ -1358,6 +1359,14 @@ export function OrderStatusPage({
             {state.refreshing ? orderStatusText.refreshing : orderStatusText.refreshNow}
           </button>
         </section>
+      ) : null}
+      {/* WP-2423 取舍 18: a signed-in member's points for what this phone paid, without asking. */}
+      {view && state.status === "ready" ? (
+        <MemberJoinPanel
+          orderReference={view.order.orderReference}
+          automaticOnly
+          refresh={view.sources?.payments?.length ?? 0}
+        />
       ) : null}
       {view?.sources?.storeContact ? (
         <StoreContactCard contact={view.sources.storeContact} storeName={store?.storeName} />

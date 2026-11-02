@@ -13,31 +13,59 @@ export const scanToOrderOnlyText = () =>
  */
 export function MemberJoinPanel({
   orderReference = null,
+  automaticOnly = false,
+  refresh = 0,
   client = memberClient,
 }: {
   readonly orderReference?: string | null;
+  /** Where joining isn't offered (the order page): only adds a signed-in member's points. */
+  readonly automaticOnly?: boolean;
+  /** A change reads again (the order was just paid). */
+  readonly refresh?: unknown;
   readonly client?: MemberClient;
 }) {
   useLanguage();
   const [state, setState] = useState<MemberState | null>(null);
   const [part, setPart] = useState<number | null>(null);
   const [earned, setEarned] = useState<number | null>(null);
+  const [auto, setAuto] = useState(0);
   const [skipped, setSkipped] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let live = true;
-    void client
-      .state(orderReference)
-      .then((value) => {
-        if (live) setState(value);
-      })
-      .catch(() => undefined);
+    void (async () => {
+      let current = await client.state(orderReference);
+      // A signed-in member who certainly paid: their points, without asking. A failure leaves the
+      // button; nothing here can get in the way of the receipt or of paying.
+      if (current.signedIn && current.claim) {
+        let added = 0;
+        for (const part of current.claim.parts)
+          if (part.certain === true)
+            added += await client
+              .claim(part.partNumber, orderReference)
+              .then((answer) => answer.earnedPoints)
+              .catch(() => 0);
+        if (added > 0) {
+          if (live) setAuto(added);
+          current = await client.state(orderReference);
+        }
+      }
+      if (live) setState(current);
+    })().catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [client, orderReference]);
+  }, [client, orderReference, refresh]);
   if (state === null || !state.offered) return null;
+  const addedNote =
+    auto > 0 ? (
+      <p className="member-panel__added" role="status">
+        {t("{points} points added for this order.", { points: String(auto) })}{" "}
+        <Link to="/member">{t("See your points")}</Link>
+      </p>
+    ) : null;
+  if (automaticOnly) return addedNote;
   if (earned !== null)
     return (
       <section className="member-panel" aria-labelledby="member-panel-title">
@@ -54,7 +82,9 @@ export function MemberJoinPanel({
     );
   const claim = state.claim ?? null;
   if (claim === null)
-    return state.signedIn ? (
+    return addedNote !== null ? (
+      addedNote
+    ) : state.signedIn ? (
       <p className="member-panel__link">
         <Link to="/member">{t("See your points")}</Link>
       </p>
@@ -91,6 +121,7 @@ export function MemberJoinPanel({
   };
   return (
     <section className="member-panel" aria-labelledby="member-panel-title">
+      {addedNote}
       <h2 id="member-panel-title">
         {state.signedIn
           ? t("Add {points} points for this order", { points: String(points) })

@@ -319,7 +319,13 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
           displayName: item.displayName,
           subtotalMinor: item.subtotalMinor,
           reduced:
-            item.reduction === null ? null : item.reduction.kind === "Comp" ? "Comp" : "Discount",
+            item.reduction === null
+              ? null
+              : item.reduction.points === true
+                ? "Points"
+                : item.reduction.kind === "Comp"
+                  ? "Comp"
+                  : "Discount",
         })),
         subtotalMinor: round.subtotalMinor,
         taxMinor: round.taxMinor,
@@ -331,6 +337,14 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
         BigInt(sum(rounds.map((round) => round.taxMinor))) - BigInt(bill.taxRoundingMinor)
       ).toString(),
       taxRoundingMinor: bill.taxRoundingMinor,
+      // WP-2423 取舍 18: already off the subtotal and tax above; said so the receipt adds up.
+      pointsUsedMinor: sum(
+        rounds.flatMap((round) =>
+          round.items.flatMap((item) =>
+            item.reduction?.points === true ? [item.reduction.amountMinor] : [],
+          ),
+        ),
+      ),
       ordersTotalMinor: sum(rounds.map((round) => round.totalMinor)),
       tipMinor: sum(payments.map((entry) => entry.tipMinor)),
       roundingMinor: sum(payments.map((entry) => entry.roundingMinor)),

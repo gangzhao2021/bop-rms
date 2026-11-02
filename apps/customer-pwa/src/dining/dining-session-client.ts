@@ -134,6 +134,8 @@ export interface DiningSessionView {
     readonly cashRounding?: DiningMoney;
     /** WP-2423 item 8 ④: the table pays in parts — how many, and how many are paid. */
     readonly splitParts?: { readonly count: number; readonly paid: number };
+    /** WP-2423 取舍 18: what points took off the bill, tax included. */
+    readonly pointsUsed?: DiningMoney;
     /** WP-2423 D5: what the table ordered: items before tax, tax and total including tax. */
     readonly ordered?: {
       readonly subtotal: DiningMoney;
@@ -379,7 +381,12 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       session.summary !== null &&
       typeof session.summary === "object" &&
       Object.hasOwn(session.summary, "teaCharge");
+    const withPoints =
+      session.summary !== null &&
+      typeof session.summary === "object" &&
+      Object.hasOwn(session.summary, "pointsUsed");
     const raw = record(session.summary, [
+      ...(withPoints ? ["pointsUsed"] : []),
       ...(withTea ? ["teaCharge"] : []),
       ...(withSettlement ? ["tableTip", "cashRounding"] : []),
       ...(withSplit ? ["splitParts"] : []),
@@ -408,6 +415,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       refundPending: money(raw.refundPending),
       due: money(raw.due),
       ...(ordered === null ? {} : { ordered }),
+      ...(withPoints ? { pointsUsed: money(raw.pointsUsed) } : {}),
       ...(withSettlement
         ? { tableTip: money(raw.tableTip), cashRounding: money(raw.cashRounding) }
         : {}),

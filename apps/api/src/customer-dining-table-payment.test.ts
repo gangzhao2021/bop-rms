@@ -2,7 +2,10 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterEach, expect, it, vi } from "vitest";
-import { CustomerDiningTablePaymentHandler } from "./customer-dining-table-payment.js";
+import {
+  CustomerDiningTablePaymentHandler,
+  customerSettledTableReceiptBody,
+} from "./customer-dining-table-payment.js";
 import { DiningTableOnlinePaymentError } from "./dining-table-online-payment.js";
 
 const servers: Server[] = [];
@@ -149,4 +152,49 @@ it("says plainly when another guest is paying or the table already paid", async 
   const down = await f.send({ action: "Read" });
   expect(down.status).toBe(503);
   expect(await down.text()).not.toContain("private");
+});
+
+// WP-2423 取舍 18: the receipt says what points took off, and marks those dishes; a manager's comp
+// on the same bill isn't counted as points.
+it("a settled receipt says what points took off, apart from a manager's comp", () => {
+  const item = (displayName: string, reduction: unknown) => ({
+    displayName,
+    subtotalMinor: "2000",
+    totalMinor: "2260",
+    reduction,
+  });
+  const body = customerSettledTableReceiptBody({
+    bill: {
+      tableLabel: "T1",
+      taxRoundingMinor: "0",
+      settlement: {
+        method: "Cash",
+        tipMinor: "0",
+        roundingMinor: "0",
+        totalMinor: "4000",
+        recordedAt: "2026-11-02T18:00:00.000Z",
+      },
+      split: null,
+      rounds: [
+        {
+          roundNumber: 1,
+          fromTableLabel: null,
+          subtotalMinor: "3700",
+          taxMinor: "300",
+          totalMinor: "4000",
+          items: [
+            item("Noodles", { kind: "Amount", percent: null, amountMinor: "339", points: true }),
+            item("Tea", { kind: "Comp", percent: null, amountMinor: "2260" }),
+            item("Rice", null),
+          ],
+        },
+      ],
+    },
+  } as never);
+  expect(body.receipt.pointsUsedMinor).toBe("339");
+  expect(body.receipt.rounds[0]?.items.map((entry) => entry.reduced)).toEqual([
+    "Points",
+    "Comp",
+    null,
+  ]);
 });

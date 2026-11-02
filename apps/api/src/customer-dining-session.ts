@@ -161,6 +161,9 @@ export class CustomerDiningSessionHandler {
                           guests: view.summary.teaCharge.guests,
                         },
                       }),
+                  ...(view.summary.pointsUsed === undefined
+                    ? {}
+                    : { pointsUsed: money(view.summary.pointsUsed) }),
                   // DEC-DINE-IN-PAY-LATER: the table's one payment's tip and cash rounding.
                   ...(view.summary.cashRounding === undefined || view.summary.tableTip === undefined
                     ? {}
