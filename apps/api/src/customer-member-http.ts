@@ -58,13 +58,17 @@ const part = (value: unknown): number | null => {
 export class CustomerMemberHandler {
   readonly #origin: string;
   readonly #load: () => Promise<CustomerMemberPort>;
+  readonly #clientAddress: (request: Request) => string | null;
   constructor(options: {
     readonly allowedOrigin: string;
     /** Composed on first use: without its key, points are unavailable, never the Store. */
     readonly port: () => Promise<CustomerMemberPort>;
+    /** Who this is when this server took the connection itself; null when it can't say. */
+    readonly clientAddress?: (request: Request) => string | null;
   }) {
     this.#origin = options.allowedOrigin;
     this.#load = options.port;
+    this.#clientAddress = options.clientAddress ?? (() => null);
   }
   #credentials(request: Request) {
     if (
@@ -101,7 +105,7 @@ export class CustomerMemberHandler {
             .json({ schemaVersion: 1, error: { code: "member_request_invalid" } });
           return;
         }
-        const address = trustedClientAddress(request);
+        const address = this.#clientAddress(request) ?? trustedClientAddress(request);
         let port: CustomerMemberPort;
         try {
           port = await this.#load();

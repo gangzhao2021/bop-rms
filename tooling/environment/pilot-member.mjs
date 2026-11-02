@@ -2,9 +2,9 @@
 // number never reaches a log, a URL or an error from here.
 import { Buffer } from "node:buffer";
 import process from "node:process";
-import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { randomBytes, randomUUID } from "node:crypto";
+import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { CustomerMemberHandler } from "../../apps/api/dist/customer-member-http.js";
 import { createCustomerMember } from "../../apps/api/dist/customer-member.js";
 import { createMemberPointsSweep } from "../../apps/api/dist/member-points-sweep.js";
@@ -17,9 +17,28 @@ const ROUTE = "/bff/customer/member";
 export const INTERNAL_TEST_MEMBER_INBOX = "member-messages-test-only";
 
 /**
+ * The installation's own directory, from one of its Stores' (`stores/<name>` below it). Its Stores
+ * are one Brand: a member's phone must hash the same at each, and a session must open at each, so
+ * the key lives here, not in each Store's directory.
+ */
+export async function memberInstallationDirectory(directory) {
+  const parent = dirname(directory);
+  if (basename(parent) !== "stores") return directory;
+  const root = dirname(parent);
+  try {
+    await lstat(join(root, "stores.json"));
+    return root;
+  } catch (error) {
+    if (error?.code === "ENOENT") return directory;
+    throw error;
+  }
+}
+
+/**
  * TEST-ONLY, InternalTest installations only: stands in for the text-message account that doesn't
  * exist yet. The tester reads the newest message for a number from a private file, one per last
- * four digits, in `<runtime>/member-messages-test-only/` (`docker exec`), so nothing is logged.
+ * four digits, in the installation's `member-messages-test-only/` (`docker exec`, whichever Store
+ * sent it), so nothing is logged.
  * Guests and staff never see that this is not a real text. Refuses any production configuration.
  */
 export function createInternalTestMemberMessages(directory, { env = process.env } = {}) {
@@ -29,10 +48,10 @@ export function createInternalTestMemberMessages(directory, { env = process.env 
     currentPilotEnvironment({ unset: "development", env }) !== "InternalTest"
   )
     throw new Error("MEMBER_TEST_MESSAGES_REFUSED");
-  const folder = join(directory, INTERNAL_TEST_MEMBER_INBOX);
   return Object.freeze({
     testOnly: true,
     async send({ phone, kind, text }) {
+      const folder = join(await memberInstallationDirectory(directory), INTERNAL_TEST_MEMBER_INBOX);
       await mkdir(folder, { recursive: true, mode: 0o700 });
       const file = join(folder, phone.slice(-4) + ".json");
       const temporary = file + "." + randomBytes(6).toString("hex");
@@ -44,7 +63,8 @@ export function createInternalTestMemberMessages(directory, { env = process.env 
 }
 
 /** The key that protects phone numbers: managed in a Pilot, a local generated file in InternalTest. */
-async function loadMemberKey(directory, { env = process.env } = {}) {
+export async function loadMemberKey(storeDirectory, { env = process.env } = {}) {
+  const directory = await memberInstallationDirectory(storeDirectory);
   if (currentPilotEnvironment({ unset: "development", env }) === "Pilot")
     return (await loadPilotManagedSecrets(directory)).key("member-contact-key");
   const file = join(directory, "internal-test-member-key");
@@ -69,7 +89,14 @@ async function loadMemberKey(directory, { env = process.env } = {}) {
 export function memberMessages({ directory, sms = null, env = process.env }) {
   if (sms !== null)
     return Object.freeze({
-      send: ({ phone, text }) => sms.send({ channel: "Sms", destination: phone, text }),
+      send: ({ phone, text }) =>
+        sms.send({
+          channel: "Sms",
+          destination: phone,
+          subject: null,
+          text,
+          idempotencyKey: randomUUID(),
+        }),
     });
   return currentPilotEnvironment({ unset: "development", env }) === "Pilot"
     ? null
@@ -99,7 +126,7 @@ const budgetOf = (resources) =>
 
 export function registerInternalMember(
   app,
-  { directory, resources, access, origin, sms = null, providerAccountReference },
+  { directory, resources, access, origin, sms = null, providerAccountReference, clientAddress },
 ) {
   let port = null;
   const load = () =>
@@ -120,14 +147,21 @@ export function registerInternalMember(
         port = null;
         throw error;
       }));
-  app.post(ROUTE, ...new CustomerMemberHandler({ allowedOrigin: origin, port: load }).handler());
+  app.post(
+    ROUTE,
+    ...new CustomerMemberHandler({
+      allowedOrigin: origin,
+      port: load,
+      ...(clientAddress === undefined ? {} : { clientAddress }),
+    }).handler(),
+  );
 }
 
 export async function createInternalMemberSweep({
   directory,
   resources,
   providerAccountReference,
-  sms = null,
+  sms = resources.orderMessaging?.sms ?? null,
 }) {
   return createMemberPointsSweep({
     scope: {

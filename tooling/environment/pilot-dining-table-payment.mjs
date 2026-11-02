@@ -36,7 +36,7 @@ export function createInternalDiningTablePayments(
 
 export function registerInternalDiningTablePayment(
   app,
-  { resources, checkout, simulator, origin, providerAccountReference, directory },
+  { resources, checkout, simulator, origin, providerAccountReference, directory, clientAddress },
 ) {
   const payments = createInternalDiningTablePayments(resources, simulator.adapter, {
     providerAccountReference,
@@ -57,6 +57,8 @@ export function registerInternalDiningTablePayment(
       access: checkout.accessOptions,
       origin,
       providerAccountReference,
+      sms: resources.orderMessaging?.sms ?? null,
+      ...(clientAddress === undefined ? {} : { clientAddress }),
     });
   if (isStripeProvider(simulator)) app.post(ROUTE + "/handoff", ...handler.handoffHandler());
   // TEST-ONLY simulator: finish the guest's own open payment, approved or declined.

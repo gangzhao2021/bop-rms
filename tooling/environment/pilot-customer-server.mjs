@@ -41,9 +41,12 @@ import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 import { isInternalTest, isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 const require = createRequire(new URL("../../apps/api/package.json", import.meta.url));
 const express = require("express");
-/** v15 2026-11-01: the guest payment routes a Store's own payment stack answers. */
+/**
+ * v15 2026-11-01: the guest routes a Store's own payment stack answers. Anything mounted by
+ * `paymentRoutes` must be named here, or at a multi-Store installation it falls through to the API.
+ */
 const STORE_PAYMENT_ROUTE =
-  /^\/(?:api\/v1\/checkout-sessions\/[^/]+\/(?:payment-reconciliation|payment-handoff|simulation-confirm|simulation-fail)|api\/v1\/dine-in\/table-payment(?:\/[a-z-]+)?|bff\/customer\/payment-configuration)$/u;
+  /^\/(?:api\/v1\/checkout-sessions\/[^/]+\/(?:payment-reconciliation|payment-handoff|simulation-confirm|simulation-fail)|api\/v1\/dine-in\/table-payment(?:\/[a-z-]+)?|bff\/customer\/payment-configuration|bff\/customer\/member)$/u;
 export const isStorePaymentRoute = (method, path) =>
   (method === "POST" || method === "GET") && STORE_PAYMENT_ROUTE.test(path);
 
@@ -82,10 +85,11 @@ function paymentRoutes({
   simulator,
   origin,
   registerTablePayment,
+  clientAddress,
 }) {
   const router = express.Router();
   // DEC-DINE-IN-PAY-LATER S4: a guest pays the whole table on their phone.
-  registerTablePayment?.(router, { resources, checkout, simulator, origin });
+  registerTablePayment?.(router, { resources, checkout, simulator, origin, clientAddress });
   router.post(
     "/api/v1/checkout-sessions/:checkout_session_id/payment-reconciliation",
     express.json({ limit: "2kb", strict: true }),
@@ -210,6 +214,7 @@ export async function startInternalCustomerServer({
   productImageDirectory,
   publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
   stateClientAddress = false,
+  createStoreRouting = createCustomerStoreRouting,
   // The local entry and API ports (tests pass their own; the pilot always uses 4443 and 4300).
   listenPort = 4443,
   apiPort = 4300,
@@ -232,6 +237,8 @@ export async function startInternalCustomerServer({
   )
     throw new Error("INTERNAL_TLS_UNAVAILABLE");
   let entryListener = null;
+  // This server takes these requests itself: the guest's address is what `front` stated, if it did.
+  const entryAddress = (req) => entryListener?.clientAddress(req) ?? null;
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -309,6 +316,7 @@ export async function startInternalCustomerServer({
       simulator,
       origin,
       registerTablePayment: registerInternalDiningTablePayment,
+      clientAddress: entryAddress,
     });
     const storePayments = new Map();
     // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: each Store this installation serves has its own staff
@@ -332,6 +340,7 @@ export async function startInternalCustomerServer({
               simulator: storeSimulator,
               origin,
               registerTablePayment: store.customer.registerInternalDiningTablePayment,
+              clientAddress: entryAddress,
             }),
           );
         }
@@ -384,7 +393,7 @@ export async function startInternalCustomerServer({
       ports.set(resources.scope.storeReference, apiPort);
       // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 4: guest requests go to their Store's
       // customer API (the next local ports, in stores.json order).
-      customerStore = createCustomerStoreRouting({
+      customerStore = createStoreRouting({
         stores: [resources, ...additionalResources].map((storeResources) => ({
           storeReference: storeResources.scope.storeReference,
           brandReference: storeResources.scope.brandReference,

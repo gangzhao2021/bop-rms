@@ -176,27 +176,29 @@ export function createMemberPointsSweep(options: {
         const step = memberExpiryStep({ ...candidate, now: options.now(), rule: due.rule });
         const expiresAt = memberPointsExpireAt(candidate.lastActivityAt, due.rule);
         if (step === "SendNotice" && messages !== null) {
-          const phone = await options.transactions.run((tx) =>
-            points.phoneForMessage(tx as never, candidate.accountReference),
-          );
-          if (phone === null) continue;
-          try {
-            await messages.send({
-              phone,
-              kind: "ExpiryNotice",
-              text: memberExpiryText(candidate.availablePoints, expiresAt.slice(0, 10)),
-            });
-          } catch {
-            continue;
-          }
-          await options.transactions.run((tx) =>
-            points.recordExpiryNotice(tx as never, {
-              accountReference: candidate.accountReference,
-              lastActivityAt: candidate.lastActivityAt,
-              expiresAt,
-            }),
-          );
-          notified += 1;
+          // Sent while holding the account, and recorded with it: a failed text records nothing,
+          // and another Store's sweep waits, then sees it was told.
+          const told = await options.transactions
+            .run(async (tx) => {
+              const phone = await points.claimExpiryNotice(tx as never, {
+                accountReference: candidate.accountReference,
+                lastActivityAt: candidate.lastActivityAt,
+              });
+              if (phone === null) return false;
+              await messages.send({
+                phone,
+                kind: "ExpiryNotice",
+                text: memberExpiryText(candidate.availablePoints, expiresAt.slice(0, 10)),
+              });
+              await points.recordExpiryNotice(tx as never, {
+                accountReference: candidate.accountReference,
+                lastActivityAt: candidate.lastActivityAt,
+                expiresAt,
+              });
+              return true;
+            })
+            .catch(() => false);
+          if (told) notified += 1;
         } else if (step === "Expire") {
           const result = await options.transactions.run((tx) =>
             points.expire(tx as never, {

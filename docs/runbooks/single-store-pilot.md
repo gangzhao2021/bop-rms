@@ -2224,7 +2224,8 @@ one bill first. Each paid part earns once, for whoever adds it first.
 
 **Text messages.** A Pilot Store uses the SMS channel in `notification.json`; with none configured,
 guests are told codes can't be sent and points don't expire. InternalTest writes the newest message
-for a number to `<runtime>/member-messages-test-only/<last four digits>.json` (0600), read with
+for a number to `<installation>/member-messages-test-only/<last four digits>.json` (0600), whichever
+Store sent it, read with
 `docker exec`; it refuses to run in a production configuration. The file holds a code: don't copy it
 into a ticket or a log.
 

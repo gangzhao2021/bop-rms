@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import console from "node:console";
 import process from "node:process";
 const health = vi.hoisted(() => ({ snapshots: [] }));
 vi.mock("./pilot-workload-health.mjs", () => ({
@@ -83,3 +84,43 @@ it("requires one explicit bounded installation directory", () => {
   ])
     expect(() => parseDiningExceptionWorkerArguments(args)).toThrow();
 });
+
+// WP-2423 取舍 18: each Store's own worker settles points for its directory; a failure is reported
+// and never stops the worker's own work.
+it("sweeps points for its own Store's directory, at most every five minutes, and survives a failure", async () => {
+  const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const settlePoints = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("MEMBER_SWEEP_STAND_IN"))
+    .mockResolvedValue(0);
+  const expirePoints = vi.fn().mockResolvedValue({ notified: 0, expired: 0 });
+  const createMemberSweep = vi.fn(async () => ({ settlePoints, expirePoints }));
+  const recover = vi.fn(async () => ({ projectedCount: 0, scanComplete: true }));
+  const resources = { close: vi.fn(async () => undefined), publicProfile: { binding: {} } };
+  const stopped = new Promise((resolve) => {
+    void startPilotDiningExceptionWorker({
+      directory: "stores/demo-2",
+      providerAccountReference: "provider",
+      createResources: async () => resources,
+      createRecovery: () => recover,
+      createMemberSweep,
+      startRuntime: async ({ workload }) => {
+        await workload.start();
+        await vi.waitFor(() => expect(recover).toHaveBeenCalled(), { timeout: 8000 });
+        await workload.stop();
+        resolve();
+      },
+    });
+  });
+  await stopped;
+  expect(createMemberSweep).toHaveBeenCalledWith({
+    directory: "stores/demo-2",
+    resources,
+    providerAccountReference: "provider",
+  });
+  expect(settlePoints).toHaveBeenCalledTimes(1);
+  expect(recover).toHaveBeenCalled();
+  expect(String(report.mock.calls[0]?.[0])).toContain("MEMBER_POINTS_SWEEP_UNAVAILABLE");
+  expect(String(report.mock.calls[0]?.[0])).not.toContain("613");
+  report.mockRestore();
+}, 15000);

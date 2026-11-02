@@ -4662,6 +4662,16 @@ async function journey(ending) {
           assert.deepEqual((await port.state(guest(token))).claim.parts, [
             { partNumber: null, points: expected },
           ]);
+          // The same dishes can't also earn through the Order's own receipt, even for its owner.
+          await admin.query(
+            "ALTER TABLE rms_ordering.order_submission_record DISABLE TRIGGER USER",
+          );
+          await admin.query(
+            "UPDATE rms_ordering.order_submission_record SET guest_session_id=$1 WHERE order_id=$2 AND submission_kind='Initial'",
+            [tableGuest, orderReference],
+          );
+          await admin.query("ALTER TABLE rms_ordering.order_submission_record ENABLE TRIGGER USER");
+          assert.equal((await port.state(guest(token), orderReference)).claim, null);
           assert.equal((await port.claim(guest(token), null)).earnedPoints, expected);
           await assert.rejects(port.claim(guest(token), null), { code: "MEMBER_NOTHING_TO_CLAIM" });
 

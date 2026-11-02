@@ -1,11 +1,13 @@
 import console from "node:console";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   INTERNAL_TEST_MEMBER_INBOX,
   createInternalTestMemberMessages,
+  loadMemberKey,
+  memberInstallationDirectory,
   memberMessages,
 } from "./pilot-member.mjs";
 
@@ -45,7 +47,13 @@ it("a configured text account is used wherever it exists, with the number only i
   const send = vi.fn(async () => undefined);
   const port = memberMessages({ directory: "/nowhere", sms: { send }, env: internalTest });
   await port.send({ phone: "+16135550131", kind: "Code", text: "t" });
-  expect(send).toHaveBeenCalledWith({ channel: "Sms", destination: "+16135550131", text: "t" });
+  expect(send).toHaveBeenCalledWith({
+    channel: "Sms",
+    destination: "+16135550131",
+    subject: null,
+    text: "t",
+    idempotencyKey: expect.any(String),
+  });
 });
 
 it("the tester reads the newest message from a private file; nothing is logged", async () => {
@@ -63,4 +71,28 @@ it("the tester reads the newest message from a private file; nothing is logged",
   expect((await stat(join(folder, "0132.json"))).mode & 0o777).toBe(0o600);
   expect((await stat(folder)).mode & 0o777).toBe(0o700);
   for (const spy of logged) expect(spy).not.toHaveBeenCalled();
+});
+
+it("every Store of an installation shares the key and the test inbox: one member at all of them", async () => {
+  const root = await directory();
+  await writeFile(join(root, "stores.json"), "{}");
+  const store = join(root, "stores", "demo-2");
+  await mkdir(store, { recursive: true });
+  expect(await memberInstallationDirectory(store)).toBe(root);
+  expect(await memberInstallationDirectory(root)).toBe(root);
+  const own = await loadMemberKey(root, { env: internalTest });
+  expect((await loadMemberKey(store, { env: internalTest })).equals(own)).toBe(true);
+  expect(await readdir(store)).toEqual([]);
+  const port = memberMessages({ directory: store, env: internalTest });
+  await port.send({ phone: "+16135550133", kind: "Code", text: "code 333333" });
+  expect(await readdir(join(root, INTERNAL_TEST_MEMBER_INBOX))).toEqual(["0133.json"]);
+  expect(await readdir(store)).toEqual([]);
+  // Two processes starting together end up with one key.
+  const fresh = await directory();
+  const [first, second] = await Promise.all([
+    loadMemberKey(fresh, { env: internalTest }),
+    loadMemberKey(fresh, { env: internalTest }),
+  ]);
+  expect(first.equals(second)).toBe(true);
+  expect(first.length).toBe(32);
 });
