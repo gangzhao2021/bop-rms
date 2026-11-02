@@ -880,6 +880,7 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
             ? {
                 method: "Online",
                 roundsMinor: "2034",
+                pointsUsedMinor: "339",
                 tipMinor: "270",
                 roundingMinor: "0",
                 totalMinor: "2304",
@@ -961,6 +962,9 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
     await expect(receipt).toContainText("$23.04", { timeout: 10000 });
     await expect(receipt).toContainText("Card on a guest’s phone");
     await expect(receipt).toContainText("$2.70");
+    // Points already came off the table's order; the receipt says so while the table is open.
+    await expect(receipt).toContainText("Points used (already taken off)");
+    await expect(receipt).toContainText("$3.39");
     // Paid in full: the table's total says so (read again), and nothing more is offered to order.
     await expect(
       page.getByRole("region", { name: "Table total" }).getByText("$23.04", { exact: true }),
@@ -971,6 +975,107 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
       await page.setViewportSize({ width, height: 900 });
       await expectNoHorizontalOverflow(page);
     }
+    await expectNoInternalText(page);
+  });
+
+  test("v15 2026-11-02: using points changes the table's total at once, even while it is being read", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/payment-configuration", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          mode: "stripe",
+          publishableKey: "pk_test_SyntheticBrowserOnly",
+          returnUrl: "https://synthetic-return.invalid/return",
+          wallets: false,
+          internalTestEntry: false,
+        },
+      }),
+    );
+    const before = {
+      schemaVersion: 1,
+      session: {
+        ...session.session,
+        paymentTiming: "PayLater",
+        rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+        summary: { ...session.session.summary, paid: cad("0"), due: cad("2034") },
+      },
+    };
+    const after = {
+      ...before,
+      session: {
+        ...before.session,
+        summary: { ...before.session.summary, pointsUsed: cad("339"), due: cad("1695") },
+      },
+    };
+    let redeemed = false;
+    await page.route("**/bff/customer/member", (route) => {
+      const { action } = route.request().postDataJSON() as { action: string };
+      const rule = {
+        earnPointsPerDollar: 3,
+        redeemPointsPerDollar: 100,
+        minimumRedemptionPoints: 300,
+        redemptionIncrementPoints: 100,
+        rewards: [],
+      };
+      if (action === "Redeem") redeemed = true;
+      return route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json:
+          action === "Redeem"
+            ? { schemaVersion: 1, status: "Recorded", points: 300 }
+            : action === "RedemptionOptions"
+              ? { schemaVersion: 1, available: true, largestPoints: 300, rule, rewards: [] }
+              : { schemaVersion: 1, offered: true, signedIn: true, rule, claim: null },
+      });
+    });
+    await page.route("**/api/v1/dine-in/table-payment", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          payment: {
+            tableLabel: "12",
+            checkingOut: true,
+            rounds: [],
+            owed: redeemed
+              ? { subtotalMinor: "1500", taxMinor: "195", totalMinor: "1695" }
+              : { subtotalMinor: "1800", taxMinor: "234", totalMinor: "2034" },
+            consistent: true,
+            state: "NotPaid",
+            attempt: null,
+            receipt: null,
+            split: null,
+          },
+        },
+      }),
+    );
+    await enterTable(page, () => ({ status: 200, json: redeemed ? after : before }));
+    const total = page.getByRole("region", { name: "Table total" });
+    await expect(total).toContainText("$20.34");
+    await page.getByRole("button", { name: "Use points" }).click();
+    // A read of the table is under way when the points go through: its answer is already old.
+    const { promise: held, resolve: release } = Promise.withResolvers<undefined>();
+    let holding = true;
+    await page.route("**/api/v1/dine-in/session", async (route) => {
+      if (!holding) return route.fallback();
+      holding = false;
+      await held;
+      return route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: before,
+      });
+    });
+    await page.getByRole("button", { name: "Refresh now" }).click();
+    await page.getByRole("button", { name: "Use my points" }).click();
+    await expect(page.getByText("300 points used on this bill.")).toBeVisible();
+    release(undefined);
+    // At once, not at the next timed read.
+    await expect(total).toContainText("$16.95", { timeout: 2000 });
     await expectNoInternalText(page);
   });
 

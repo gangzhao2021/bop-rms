@@ -60,6 +60,8 @@ export interface TablePaymentView {
   readonly receipt: null | {
     readonly method: "CardMachine" | "Cash" | "Online";
     readonly roundsMinor: string;
+    /** WP-2423 取舍 18: already off `roundsMinor`; said so the receipt adds up with the order. */
+    readonly pointsUsedMinor: string;
     readonly tipMinor: string;
     readonly roundingMinor: string;
     readonly totalMinor: string;
@@ -175,6 +177,7 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
                 ? receipt.method
                 : fail(),
             roundsMinor: amount(receipt.roundsMinor),
+            pointsUsedMinor: amount(receipt.pointsUsedMinor),
             tipMinor: amount(receipt.tipMinor),
             roundingMinor: amount(receipt.roundingMinor),
             totalMinor: amount(receipt.totalMinor),

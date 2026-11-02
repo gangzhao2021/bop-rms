@@ -36,6 +36,7 @@ it("DEC-DINE-IN-PAY-LATER S4: reads the table's bill and its phone payment", () 
       receipt: {
         method: "Online",
         roundsMinor: "2034",
+        pointsUsedMinor: "339",
         tipMinor: "270",
         roundingMinor: "0",
         totalMinor: "2304",
@@ -44,6 +45,7 @@ it("DEC-DINE-IN-PAY-LATER S4: reads the table's bill and its phone payment", () 
     }),
   );
   expect(paid.receipt?.method).toBe("Online");
+  expect(paid.receipt?.pointsUsedMinor).toBe("339");
 });
 
 it("refuses an unknown state, method or a malformed amount", () => {
@@ -58,6 +60,7 @@ it("refuses an unknown state, method or a malformed amount", () => {
         receipt: {
           method: "Bitcoin",
           roundsMinor: "1",
+          pointsUsedMinor: "0",
           tipMinor: "0",
           roundingMinor: "0",
           totalMinor: "1",

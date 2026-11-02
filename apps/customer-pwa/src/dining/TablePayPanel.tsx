@@ -87,10 +87,13 @@ const saveTip = (choice: TipChoice | null) => {
 export function TablePayPanel({
   client: provided,
   onStatus,
+  onBillChanged,
 }: {
   readonly client?: ReturnType<typeof createTablePaymentClient>;
   /** Called when checkout or payment changes, so the table page reads itself again. */
   readonly onStatus?: (status: TablePayStatus) => void;
+  /** v15 2026-11-02: the bill changed here (points used): the table's page reads it at once too. */
+  readonly onBillChanged?: () => void;
 }) {
   const [client] = useState(() => provided ?? createTablePaymentClient());
   const [view, setView] = useState<TablePaymentView | null>(null);
@@ -240,6 +243,12 @@ export function TablePayPanel({
             <dt>{t("Your table’s order")}</dt>
             <dd>{money(receipt.roundsMinor)}</dd>
           </div>
+          {receipt.pointsUsedMinor !== "0" ? (
+            <div>
+              <dt>{t("Points used (already taken off)")}</dt>
+              <dd>{money(receipt.pointsUsedMinor)}</dd>
+            </div>
+          ) : null}
           {receipt.tipMinor !== "0" ? (
             <div>
               <dt>{t("Tip")}</dt>
@@ -339,7 +348,12 @@ export function TablePayPanel({
         </>
       ) : (
         <>
-          <MemberPointsAtTable onBillChanged={() => void read()} />
+          <MemberPointsAtTable
+            onBillChanged={() => {
+              void read();
+              onBillChanged?.();
+            }}
+          />
           {view.state === "Failed" ? (
             <p role="alert">
               {t("The payment didn’t go through. You can try again with another card.")}

@@ -136,6 +136,10 @@ export interface DiningSessionView {
     readonly splitParts?: { readonly count: number; readonly paid: number };
     /** WP-2423 取舍 18: what points took off the bill, tax included. */
     readonly pointsUsed?: DiningMoney;
+    /** v15 2026-11-02: what staff took off (comps, discounts), tax included. */
+    readonly takenOff?: DiningMoney;
+    /** v15 2026-11-02: the bill's tax rounding, so the lines add up to what is to pay. */
+    readonly taxRounding?: DiningMoney;
     /** WP-2423 D5: what the table ordered: items before tax, tax and total including tax. */
     readonly ordered?: {
       readonly subtotal: DiningMoney;
@@ -385,8 +389,16 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       session.summary !== null &&
       typeof session.summary === "object" &&
       Object.hasOwn(session.summary, "pointsUsed");
+    const has = (key: string) =>
+      session.summary !== null &&
+      typeof session.summary === "object" &&
+      Object.hasOwn(session.summary, key);
+    const withTakenOff = has("takenOff");
+    const withTaxRounding = has("taxRounding");
     const raw = record(session.summary, [
       ...(withPoints ? ["pointsUsed"] : []),
+      ...(withTakenOff ? ["takenOff"] : []),
+      ...(withTaxRounding ? ["taxRounding"] : []),
       ...(withTea ? ["teaCharge"] : []),
       ...(withSettlement ? ["tableTip", "cashRounding"] : []),
       ...(withSplit ? ["splitParts"] : []),
@@ -416,6 +428,8 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       due: money(raw.due),
       ...(ordered === null ? {} : { ordered }),
       ...(withPoints ? { pointsUsed: money(raw.pointsUsed) } : {}),
+      ...(withTakenOff ? { takenOff: money(raw.takenOff) } : {}),
+      ...(withTaxRounding ? { taxRounding: money(raw.taxRounding) } : {}),
       ...(withSettlement
         ? { tableTip: money(raw.tableTip), cashRounding: money(raw.cashRounding) }
         : {}),

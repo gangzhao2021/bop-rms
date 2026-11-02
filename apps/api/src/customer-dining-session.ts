@@ -2,7 +2,7 @@ import { GuestSessionError, readClosedRecord } from "@bop/identity";
 import { OrderStatusProjectionError } from "@rms/ordering";
 import type { RequestHandler, Response } from "express";
 import { customerFailureCode } from "./customer-failure-diagnostic.js";
-import { markRequestFailure } from "./request-correlation.js";
+import { markRequestFailure, markRequestRetryLater } from "./request-correlation.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
 import {
   DiningOrderStillProcessingError,
@@ -164,6 +164,12 @@ export class CustomerDiningSessionHandler {
                   ...(view.summary.pointsUsed === undefined
                     ? {}
                     : { pointsUsed: money(view.summary.pointsUsed) }),
+                  ...(view.summary.takenOff === undefined
+                    ? {}
+                    : { takenOff: money(view.summary.takenOff) }),
+                  ...(view.summary.taxRounding === undefined
+                    ? {}
+                    : { taxRounding: money(view.summary.taxRounding) }),
                   // DEC-DINE-IN-PAY-LATER: the table's one payment's tip and cash rounding.
                   ...(view.summary.cashRounding === undefined || view.summary.tableTip === undefined
                     ? {}
@@ -200,6 +206,7 @@ export class CustomerDiningSessionHandler {
         }
         // v15 2026-10-27: the first round's Order is still being prepared — read again shortly.
         if (error instanceof DiningOrderStillProcessingError) {
+          markRequestRetryLater(request);
           protect(response);
           response.setHeader("Retry-After", "2");
           response.status(503).json({

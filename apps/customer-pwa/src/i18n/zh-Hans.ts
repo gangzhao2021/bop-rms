@@ -1383,5 +1383,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Stay a member": "继续做会员",
   "Your points": "我的积分",
   "Points used": "积分抵扣",
+  "Taken off by the restaurant": "店家减免",
   "Points used (already taken off)": "积分抵扣（已减去）",
 });
