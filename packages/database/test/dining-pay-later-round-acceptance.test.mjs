@@ -193,6 +193,8 @@ it("a member earns and spends points on a table's bill, and the books still agre
 it("each paid part of a split bill earns on its own, once, and answers for its own refund", () =>
   journey("MemberPointsSplit"));
 it("points spent on a table that never paid come back", () => journey("MemberPointsWrittenOff"));
+it("a member's points are added without asking only when this phone certainly paid", () =>
+  journey("MemberPointsOnline"));
 it("a paid pickup earns for the guest who ordered it, once, and for nobody else", () =>
   journey("MemberPointsPickup"));
 // WP-2423 item 8 ④: a split table pays one part in cash (some of it refunded), the guests leave;
@@ -291,29 +293,31 @@ async function journey(ending) {
                 ? "wp2423_plcomp"
                 : ending === "CompedWhole"
                   ? "wp2423_plcwhole"
-                  : ending === "MemberPointsPickup"
-                    ? "wp2423_plmembpk"
-                    : ending === "MemberPoints"
-                      ? "wp2423_plmember"
-                      : ending === "MemberPointsSplit"
-                        ? "wp2423_plmembsp"
-                        : ending === "MemberPointsWrittenOff"
-                          ? "wp2423_plmembwo"
-                          : ending === "PaidSplit"
-                            ? "wp2423_plsplit"
-                            : ending === "SplitWrittenOff"
-                              ? "wp2423_plsplwo"
-                              : ending === "Held"
-                                ? "wp2423_plheld"
-                                : ending === "TipsOff"
-                                  ? "wp2423_pltips"
-                                  : ending === "TeaCharge"
-                                    ? "wp2423_pltea"
-                                    : ending === "Moved"
-                                      ? "wp2423_plmove"
-                                      : ending === "Merged"
-                                        ? "wp2423_plmerge"
-                                        : "wp2423_plon",
+                  : ending === "MemberPointsOnline"
+                    ? "wp2423_plmembon"
+                    : ending === "MemberPointsPickup"
+                      ? "wp2423_plmembpk"
+                      : ending === "MemberPoints"
+                        ? "wp2423_plmember"
+                        : ending === "MemberPointsSplit"
+                          ? "wp2423_plmembsp"
+                          : ending === "MemberPointsWrittenOff"
+                            ? "wp2423_plmembwo"
+                            : ending === "PaidSplit"
+                              ? "wp2423_plsplit"
+                              : ending === "SplitWrittenOff"
+                                ? "wp2423_plsplwo"
+                                : ending === "Held"
+                                  ? "wp2423_plheld"
+                                  : ending === "TipsOff"
+                                    ? "wp2423_pltips"
+                                    : ending === "TeaCharge"
+                                      ? "wp2423_pltea"
+                                      : ending === "Moved"
+                                        ? "wp2423_plmove"
+                                        : ending === "Merged"
+                                          ? "wp2423_plmerge"
+                                          : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -4042,7 +4046,7 @@ async function journey(ending) {
           );
         }
 
-        async function paidOnlineEnding() {
+        function providerStandIn() {
           const intents = new Map();
           let created = 0;
           const answer = (request, intent) => ({
@@ -4089,6 +4093,10 @@ async function journey(ending) {
               return answer(request, intent);
             },
           };
+          return { intents, stripe, created: () => created };
+        }
+        async function paidOnlineEnding() {
+          const { intents, stripe, created } = providerStandIn();
           const payments = createDiningTableOnlinePayments({
             scope: ownerScope,
             providerAccountReference: provider,
@@ -4125,7 +4133,7 @@ async function journey(ending) {
           assert.equal(started.attempt?.mine, true);
           // The same request again comes back to the same payment (nothing new with the Provider).
           await payments.start(me, { operationReference: firstOperation, tip: fifteen });
-          assert.equal(created, 1);
+          assert.equal(created(), 1);
           assert.deepEqual(await attempts(), [
             { total: due.toString(), tip: tipMinor.toString(), status: null },
           ]);
@@ -4180,12 +4188,12 @@ async function journey(ending) {
             }),
             { code: "TABLE_ONLINE_PAYMENT_INPUT_INVALID" },
           );
-          assert.equal(created, 1);
+          assert.equal(created(), 1);
           await payments.start(me, {
             operationReference: fresh(),
             tip: { kind: "Amount", amountMinor: "250" },
           });
-          assert.equal(created, 2);
+          assert.equal(created(), 2);
           assert.deepEqual((await attempts()).at(-1), {
             total: (round1Minor + 250n).toString(),
             tip: "250",
@@ -4416,6 +4424,37 @@ async function journey(ending) {
           assert.equal((await port.state(guest())).offered, true);
           assert.equal((await port.state(guest())).claim, null, "nothing paid yet");
 
+          if (ending === "MemberPointsOnline") {
+            const token = await join("+16135550171");
+            // The bill's money: dishes earn, whichever phone is asking.
+            const { intents, stripe } = providerStandIn();
+            const payments = createDiningTableOnlinePayments({
+              scope: ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+              provider: stripe,
+              transactions: transactions(),
+              now,
+              nextReference: fresh,
+            });
+            const payer = {
+              diningSessionReference: sessionReference,
+              guestSessionReference: tableGuest,
+              allowed: async () => true,
+            };
+            const paying = await payments.start(payer, {
+              operationReference: fresh(),
+              tip: { kind: "None" },
+            });
+            intents.get(paying.attempt.providerIntentReference).status = "Captured";
+            await payments.refresh(payer);
+            const dishes = BigInt(open.owed.subtotalMinor);
+            assert.deepEqual((await port.state(guest(token))).claim.parts, [
+              { partNumber: null, points: Number((dishes * 3n) / 100n), certain: true },
+            ]);
+            return;
+          }
+
           if (ending === "MemberPointsPickup") {
             const token = await join("+16135550161");
             const ids = (n) =>
@@ -4451,7 +4490,7 @@ async function journey(ending) {
             const pickup = ids(5001);
             // $100.00 of dishes earns 300; the tax and tip on it don't.
             const state = await port.state(guest(token), pickup);
-            assert.deepEqual(state.claim.parts, [{ partNumber: null, points: 300 }]);
+            assert.deepEqual(state.claim.parts, [{ partNumber: null, points: 300, certain: true }]);
             assert.equal((await port.claim(guest(token), null, pickup)).earnedPoints, 300);
             await assert.rejects(port.claim(guest(token), null, pickup), {
               code: "MEMBER_NOTHING_TO_CLAIM",
@@ -4501,8 +4540,9 @@ async function journey(ending) {
             const state = await port.state(guest(first));
             const expected = (part) => Number((BigInt(part.subtotalMinor) * 3n) / 100n);
             assert.deepEqual(state.claim.parts, [
-              { partNumber: 1, points: expected(parts[0]) },
-              { partNumber: 2, points: expected(parts[1]) },
+              // Paid at the counter at a table of two phones: this phone can't be sure, so it asks.
+              { partNumber: 1, points: expected(parts[0]), certain: false },
+              { partNumber: 2, points: expected(parts[1]), certain: false },
             ]);
             // Two unclaimed parts: this phone says which is theirs.
             await assert.rejects(port.claim(guest(first), null), {
@@ -4660,7 +4700,7 @@ async function journey(ending) {
           );
           const expected = Number((dishes * 3n) / 100n);
           assert.deepEqual((await port.state(guest(token))).claim.parts, [
-            { partNumber: null, points: expected },
+            { partNumber: null, points: expected, certain: false },
           ]);
           // The same dishes can't also earn through the Order's own receipt, even for its owner
           // (this guest made the owner here: the test's own edit of an append-only record).

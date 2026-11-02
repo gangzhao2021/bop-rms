@@ -1382,4 +1382,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Leave and delete": "退出并删除",
   "Stay a member": "继续做会员",
   "Your points": "我的积分",
+  "Points used": "积分抵扣",
+  "Points used (already taken off)": "积分抵扣（已减去）",
 });

@@ -290,6 +290,23 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
           })}
         />,
       );
+    // WP-2423 取舍 18: what points took off, marked as already out of the subtotal and tax.
+    const withPoints = receipt(
+      [
+        {
+          partNumber: null,
+          method: "Cash",
+          tipMinor: "0",
+          roundingMinor: "0",
+          totalMinor: "111",
+          paidAt: "2026-10-30T23:00:00.000Z",
+        },
+      ],
+      { pointsUsedMinor: "339" },
+    );
+    expect(withPoints).toContain("Points used (already taken off)");
+    expect(withPoints).toContain("−$3.39");
+
     const cash = receipt([{ partNumber: null, method: "Cash", totalMinor: "1865" }], {
       roundingMinor: "1",
       paidMinor: "1866",
@@ -419,6 +436,21 @@ describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
     },
   });
   const text = (html: string) => html.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " ");
+
+  it("WP-2423 取舍 18: says what points took off, so what was paid adds up", () => {
+    const summary = {
+      ...priced.summary,
+      pointsUsed: cad("339"),
+      paid: cad("3561"),
+      due: cad("0"),
+    } as typeof priced.summary;
+    const html = text(render({ status: "ready", view: { ...priced, summary }, refreshing: false }));
+    expect(html).toContain("Total ordered $39.00 Points used −$3.39");
+    expect(html).toContain("Paid so far $35.61");
+    expect(text(render({ status: "ready", view: priced, refreshing: false }))).not.toContain(
+      "Points used",
+    );
+  });
 
   it("lists items before tax, then each round's and the table's subtotal, tax and total", () => {
     const html = text(render({ status: "ready", view: priced, refreshing: false }));

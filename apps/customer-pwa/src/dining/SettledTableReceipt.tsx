@@ -19,7 +19,7 @@ export interface SettledTableReceipt {
     readonly items: readonly {
       readonly displayName: string;
       readonly subtotalMinor: string;
-      readonly reduced: "Comp" | "Discount" | null;
+      readonly reduced: "Comp" | "Discount" | "Points" | null;
     }[];
   }[];
   readonly subtotalMinor: string;
@@ -27,6 +27,8 @@ export interface SettledTableReceipt {
   readonly taxMinor: string;
   /** WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding (older server: 0). */
   readonly taxRoundingMinor: string;
+  /** WP-2423 取舍 18: what points took off, already out of the subtotal and tax (older server: 0). */
+  readonly pointsUsedMinor: string;
   readonly ordersTotalMinor: string;
   readonly tipMinor: string;
   readonly roundingMinor: string;
@@ -83,7 +85,10 @@ export function parseSettledTableReceipt(payload: unknown): SettledTableReceipt 
             displayName: text(item.displayName),
             subtotalMinor: minor(item.subtotalMinor),
             reduced:
-              item.reduced === null || item.reduced === "Comp" || item.reduced === "Discount"
+              item.reduced === null ||
+              item.reduced === "Comp" ||
+              item.reduced === "Discount" ||
+              item.reduced === "Points"
                 ? item.reduced
                 : fail(),
           });
@@ -94,6 +99,7 @@ export function parseSettledTableReceipt(payload: unknown): SettledTableReceipt 
     taxMinor: minor(receipt.taxMinor),
     taxRoundingMinor:
       receipt.taxRoundingMinor === undefined ? "0" : minor(receipt.taxRoundingMinor),
+    pointsUsedMinor: receipt.pointsUsedMinor === undefined ? "0" : minor(receipt.pointsUsedMinor),
     ordersTotalMinor: minor(receipt.ordersTotalMinor),
     tipMinor: minor(receipt.tipMinor),
     roundingMinor: minor(receipt.roundingMinor),
@@ -185,7 +191,9 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
                     ? ` · ${t("On the house")}`
                     : item.reduced === "Discount"
                       ? ` · ${t("Discounted")}`
-                      : null}
+                      : item.reduced === "Points"
+                        ? ` · ${t("Points used")}`
+                        : null}
                 </dt>
                 <dd>{money(item.subtotalMinor)}</dd>
               </div>
@@ -206,6 +214,12 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
           <div>
             <dt>{t("Tax rounding")}</dt>
             <dd>{money(receipt.taxRoundingMinor)}</dd>
+          </div>
+        ) : null}
+        {receipt.pointsUsedMinor !== "0" ? (
+          <div>
+            <dt>{t("Points used (already taken off)")}</dt>
+            <dd>−{money(receipt.pointsUsedMinor)}</dd>
           </div>
         ) : null}
         {receipt.tipMinor !== "0" ? (

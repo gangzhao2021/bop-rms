@@ -171,6 +171,65 @@ for (const width of widths)
     });
   });
 
+test.describe("@production a signed-in member after paying", () => {
+  test.use({ serviceWorkers: "block" });
+  const claimOf = (parts: unknown[]) => ({
+    body: {
+      schemaVersion: 1,
+      offered: true,
+      signedIn: true,
+      messagesAvailable: true,
+      rule,
+      claim: { until: "2026-11-03T18:00:00.000Z", parts },
+    },
+  });
+  test("this phone certainly paid: added without pressing anything, once", async ({ page }) => {
+    let added = false;
+    const asked = await serve(page, {
+      State: () =>
+        added
+          ? { body: { schemaVersion: 1, offered: true, signedIn: true, rule, claim: null } }
+          : claimOf([{ partNumber: null, points: 45, certain: true }]),
+      Claim: () => {
+        added = true;
+        return { body: { schemaVersion: 1, earnedPoints: 45 } };
+      },
+    });
+    await page.goto("/orders/" + orderReference + "/receipt");
+    await expect(page.getByText("45 points added for this order.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add my points" })).toHaveCount(0);
+    expect(asked.filter((body) => body.action === "Claim")).toHaveLength(1);
+  });
+  test("it might be someone else's part: the button stays, and pressing it adds them", async ({
+    page,
+  }) => {
+    const asked = await serve(page, {
+      State: () => claimOf([{ partNumber: null, points: 45, certain: false }]),
+      Claim: () => ({ body: { schemaVersion: 1, earnedPoints: 45 } }),
+    });
+    await page.goto("/orders/" + orderReference + "/receipt");
+    const button = page.getByRole("button", { name: "Add my points" });
+    await expect(button).toBeVisible();
+    expect(asked.filter((body) => body.action === "Claim")).toHaveLength(0);
+    await button.click();
+    await expect(page.getByText("45 points added for this order.")).toBeVisible();
+  });
+  test("adding them fails: the receipt stands and the button is there to try again", async ({
+    page,
+  }) => {
+    await serve(page, {
+      State: () => claimOf([{ partNumber: null, points: 45, certain: true }]),
+      Claim: () => ({
+        status: 503,
+        body: { schemaVersion: 1, error: { code: "member_unavailable" } },
+      }),
+    });
+    await page.goto("/orders/" + orderReference + "/receipt");
+    await expect(page.getByRole("heading", { name: "Receipt", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add my points" })).toBeVisible();
+  });
+});
+
 test.describe("@production member points when something is down", () => {
   test.use({ serviceWorkers: "block" });
   test("no text account: the page says so and the order's points wait until a stated time", async ({

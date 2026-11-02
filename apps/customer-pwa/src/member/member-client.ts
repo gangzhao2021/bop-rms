@@ -53,7 +53,12 @@ export interface MemberState {
   readonly rule?: MemberRule;
   readonly claim?: null | {
     readonly until: string;
-    readonly parts: readonly { readonly partNumber: number | null; readonly points: number }[];
+    readonly parts: readonly {
+      readonly partNumber: number | null;
+      readonly points: number;
+      /** This phone certainly paid it: a signed-in member's points are added without asking. */
+      readonly certain?: boolean;
+    }[];
   };
 }
 export interface MemberHistoryEntry {

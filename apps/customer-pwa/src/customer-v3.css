@@ -317,3 +317,6 @@
   grid-row: 1 / span 2;
   align-self: center;
 }
+.customer-page .member-panel__added {
+  margin-block: var(--bop-space-3);
+}

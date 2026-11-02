@@ -13,7 +13,7 @@ import {
   type MemberPhoneProtector,
   type MemberPointsRule,
 } from "@rms/customer-loyalty";
-import { listDiningSessionMergedInto } from "@rms/dining";
+import { listDiningSessionMergedInto, loadDiningSessionPhones } from "@rms/dining";
 import {
   createPostgresOrderPriceReductionStore,
   listOrderRoundDishes,
@@ -98,6 +98,8 @@ interface ClaimSource {
   readonly orderReference: string;
   readonly partNumber: number | null;
   readonly paidDishesMinor: bigint;
+  /** This phone certainly paid it: a signed-in member's points are added without asking. */
+  readonly certain: boolean;
 }
 
 export function createCustomerMember(options: {
@@ -175,10 +177,28 @@ export function createCustomerMember(options: {
   const claimSources = async (
     tx: ConsumerTransaction,
     diningSessionReference: string,
+    guest: { readonly sessionReference?: unknown; readonly diningParticipantReference?: unknown },
   ): Promise<readonly ClaimSource[]> => {
     const bill = await billOf(tx, diningSessionReference);
     const order = bill.orderReference;
     if (order === null) return [];
+    const settlementStore = createPostgresDiningTableSettlementStore({
+      scope,
+      authorize: async () => true,
+    });
+    const online = await settlementStore.listOnlinePaymentsByOrders(tx as never, [order]);
+    const paidOnThisPhone = (settlement: { readonly onlinePaymentReference: string | null }) =>
+      settlement.onlinePaymentReference !== null &&
+      online.some(
+        (attempt) =>
+          attempt.onlinePaymentReference === settlement.onlinePaymentReference &&
+          String(attempt.guestSessionReference) === String(guest.sessionReference),
+      );
+    // Paid at the counter or on the card machine: certain only when this is the table's one phone.
+    const phones = await loadDiningSessionPhones(tx as never, scope, diningSessionReference);
+    const onlyPhone =
+      phones.length === 1 &&
+      String(phones[0]?.participantReference) === String(guest.diningParticipantReference);
     if (bill.settlementRecord !== null && bill.settlementRecord.part === null)
       return [
         {
@@ -189,13 +209,11 @@ export function createCustomerMember(options: {
             (sum, round) => sum + BigInt(round.subtotalMinor),
             0n,
           ),
+          certain: paidOnThisPhone(bill.settlementRecord) || onlyPhone,
         },
       ];
     if (bill.splitPlanRecord === null) return [];
-    const settlements = await createPostgresDiningTableSettlementStore({
-      scope,
-      authorize: async () => true,
-    }).listByOrders(tx as never, [order]);
+    const settlements = await settlementStore.listByOrders(tx as never, [order]);
     const sources: ClaimSource[] = [];
     for (const settlement of settlements) {
       if (settlement.part?.splitPlanReference !== bill.splitPlanRecord.splitPlanReference) continue;
@@ -208,6 +226,7 @@ export function createCustomerMember(options: {
         orderReference: order,
         partNumber: part.partNumber,
         paidDishesMinor: part.subtotalMinor,
+        certain: paidOnThisPhone(settlement) || onlyPhone,
       });
     }
     return sources.sort((a, b) => (a.partNumber ?? 0) - (b.partNumber ?? 0));
@@ -254,11 +273,17 @@ export function createCustomerMember(options: {
       orderReference,
       partNumber: null,
       paidDishesMinor: dishes.get(batch) ?? 0n,
+      // The guest's own Order, checked above.
+      certain: true,
     }));
   };
   const unclaimed = async (
     tx: ConsumerTransaction,
-    guest: { readonly diningSessionReference?: unknown; readonly sessionReference?: unknown },
+    guest: {
+      readonly diningSessionReference?: unknown;
+      readonly diningParticipantReference?: unknown;
+      readonly sessionReference?: unknown;
+    },
     rule: MemberPointsRule,
     orderReference: string | null = null,
   ) => {
@@ -267,7 +292,7 @@ export function createCustomerMember(options: {
     const sources =
       orderReference !== null
         ? await orderSources(tx, guest, orderReference)
-        : await claimSources(tx, session as string);
+        : await claimSources(tx, session as string, guest);
     const earned = await points.earnedSources(
       tx as never,
       sources.map((source) => source.sourceReference),
@@ -287,6 +312,7 @@ export function createCustomerMember(options: {
             Object.freeze({
               partNumber: source.partNumber,
               points: pointsForPaidDishes(source.paidDishesMinor, rule),
+              certain: source.certain,
             }),
           ),
         });
