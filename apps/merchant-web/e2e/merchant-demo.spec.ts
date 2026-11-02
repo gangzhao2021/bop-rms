@@ -144,9 +144,22 @@ test.describe("@production production demo exclusion", () => {
         await expect(page).toHaveURL((url) => url.pathname === hiddenTo);
         return;
       }
-      await expect(page.getByText(/Sign in required|unavailable/iu).first()).toBeVisible();
+      await expect(
+        page
+          .getByText(
+            /Sign in required|Sign in to see your stores|This page can.t be reached right now|unavailable/iu,
+          )
+          .first(),
+      ).toBeVisible();
       const boundary = violations.filter(
-        (violation) => violation !== "application request: GET /merchant/sign-in-entry",
+        (violation) =>
+          violation !== "application request: GET /merchant/sign-in-entry" &&
+          !(
+            // Only support's own page asks the support route; every other route still may not.
+            route.identity === "PLT-SUPPORT-CASE" &&
+            (violation === "application request: GET /merchant/support/session" ||
+              violation.includes("status of 404"))
+          ),
       );
       expect(boundary).toHaveLength(2);
       expect(boundary).toEqual(

@@ -1,4 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
+import { serveStoreSetupPanels } from "./store-setup-panels";
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
@@ -68,6 +69,8 @@ async function session(page: Page) {
   );
 }
 const heading = "Name and contact shown to customers";
+
+test.beforeEach(({ page }) => serveStoreSetupPanels(page));
 
 test("@production the Owner publishes the store name, address and phone customers see", async ({
   page,

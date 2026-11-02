@@ -520,4 +520,4 @@ export * from "./infrastructure/persistence/order-pay-later-confirmation-store.j
 export * from "./infrastructure/persistence/pay-later-item-cancellation-store.js";
 export * from "./infrastructure/persistence/order-item-price-reduction-store.js";
 export * from "./infrastructure/persistence/order-tax-rounding-store.js";
-export * from "./domain/bill-tax-rounding.js";
+export * from "./application/bill-tax-rounding.js";

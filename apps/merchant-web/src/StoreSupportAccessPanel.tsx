@@ -69,7 +69,7 @@ export function StoreSupportAccessPanel({ csrf }: { readonly csrf: string }) {
     >
       <h3 id="support-access-heading">{t("Platform support")}</h3>
       {state === "unavailable" || view === null ? (
-        <div role="alert">
+        <div role="status">
           <p>{t("We can't show this right now. Nothing was changed.")}</p>
           <button type="button" onClick={() => void load()}>
             {t("Try again")}

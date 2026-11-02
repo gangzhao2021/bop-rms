@@ -785,6 +785,7 @@ describe("migration catalog", () => {
       "2000_141_alter_dining_table_retired",
       "2000_142_alter_staff_cancellation_pickup_refusal",
       "2000_143_create_platform_support_access",
+      "2000_144_alter_platform_support_public_revoke",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -2004,6 +2005,9 @@ describe("migration catalog", () => {
       ["2000_010_create_brand_role_provisioning", "@bop/permission", "bop_permission"],
       // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9: Brand Owner authority read.
       ["2000_134_create_brand_owner_authority", "@bop/permission", "bop_permission"],
+      // WP-2423 取舍 15: platform support, and PUBLIC's rights removed once the gate caught them.
+      ["2000_143_create_platform_support_access", "@bop/permission", "bop_permission"],
+      ["2000_144_alter_platform_support_public_revoke", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

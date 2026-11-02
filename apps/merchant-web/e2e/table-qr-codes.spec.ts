@@ -170,10 +170,10 @@ test("@production Table QR codes: print one, replace a lost code at a seated tab
     .getByRole("button", { name: "Create code" })
     .click();
   await page
-    .getByRole("form", { name: "Create a code for table Patio 3?" })
+    .getByRole("form", { name: "Create a code for Patio 3?" })
     .getByRole("button", { name: "Create code" })
     .click();
-  await expect(page.getByText("Table Patio 3 has a code. Print it now.")).toBeVisible();
+  await expect(page.getByText("Patio 3 has a code. Print it now.")).toBeVisible();
   await expect(page.getByRole("row", { name: /Patio 3/u })).toContainText("Ready to print");
   expect(commands[1]).toMatchObject({ action: "Issue", tableReference: id(3) });
 

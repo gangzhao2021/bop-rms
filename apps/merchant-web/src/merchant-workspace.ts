@@ -349,6 +349,14 @@ async function boundedRequest(
   }
 }
 
+/** WP-2423 取舍 15: signed in as platform support, who have no Store workspace. */
+export class MerchantPlatformSupportSession extends Error {
+  constructor() {
+    super("MERCHANT_PLATFORM_SUPPORT_SESSION");
+    this.name = "MerchantPlatformSupportSession";
+  }
+}
+
 export function createMerchantWorkspaceClient(
   request: typeof fetch = globalThis.fetch,
 ): MerchantWorkspaceClient {
@@ -358,7 +366,12 @@ export function createMerchantWorkspaceClient(
       credentials: "same-origin",
       headers: { Accept: "application/json" },
     });
-    if (response.status === 401 || response.status === 403 || response.status === 404) return null;
+    if (response.status === 403) {
+      const denial = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      if (denial?.error === "platform_support") throw new MerchantPlatformSupportSession();
+      return null;
+    }
+    if (response.status === 401 || response.status === 404) return null;
     if (!response.ok) throw new Error("MERCHANT_WORKSPACE_UNAVAILABLE");
     const input = record(await response.json(), ["authenticated", "csrf", "workspace"]);
     if (

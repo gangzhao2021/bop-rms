@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { serveStoreSetupPanels } from "./store-setup-panels";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
@@ -623,6 +624,8 @@ async function cursor(page: Page) {
       }),
   );
 }
+
+test.beforeEach(({ page }) => serveStoreSetupPanels(page));
 
 test("ordinary Store Review materializes validates submits independently approves and publishes @production", async ({
   page,

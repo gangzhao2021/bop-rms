@@ -83,8 +83,8 @@ export function StoreKitchenSetupPanel({ csrf }: { readonly csrf: string }) {
       <h3 id="kitchen-setup-heading">{t("Kitchen")}</h3>
       {state === "loading" ? <p role="status">{t("Loading the kitchen…")}</p> : null}
       {state === "unavailable" ? (
-        <div role="alert">
-          <p>{t("Kitchen setup is unavailable. Nothing was changed.")}</p>
+        <div role="status">
+          <p>{t("We can't show the kitchen setup right now. Nothing was changed.")}</p>
           <button type="button" onClick={() => void load()}>
             {t("Try again")}
           </button>

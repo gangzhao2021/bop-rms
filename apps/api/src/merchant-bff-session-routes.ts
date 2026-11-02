@@ -191,12 +191,26 @@ export function installMerchantSessionRoutes(
           ),
         });
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (
           error instanceof BrandStoreTopologyError &&
           error.code === "BRAND_STORE_TOPOLOGY_DEPENDENCY_UNAVAILABLE"
         ) {
           response.status(503).json({ error: "merchant_workspace_unavailable" });
+          return;
+        }
+        // WP-2423 取舍 15: signed in with no Store workspace may be platform support, who have their
+        // own page. Said here so nobody else's browser ever asks the support route.
+        const sessionCookie = cookie(request, "__Host-bop-merchant");
+        const support =
+          sessionCookie !== null &&
+          options.storeSupport !== undefined &&
+          (await options.storeSupport.session(sessionCookie).then(
+            () => true,
+            () => false,
+          ));
+        if (support) {
+          response.status(403).set("Cache-Control", NO_STORE).json({ error: "platform_support" });
           return;
         }
         denied(response);

@@ -3,7 +3,7 @@ import {
   billTaxRoundingRule,
   type BillTaxRounding,
   type BillTaxRoundingLine,
-} from "../../domain/bill-tax-rounding.js";
+} from "../../application/bill-tax-rounding.js";
 import { parseOrderingInstant, parseOrderingReference } from "../../domain/cart.js";
 
 /**

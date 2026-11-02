@@ -6515,6 +6515,44 @@ it("accepts closed Brand navigation and rejects malformed authority paths withou
   expect(read).not.toHaveBeenCalled();
 });
 
+it("WP-2423 取舍 15: the merchant session names platform support, and asks only with a Session", async () => {
+  const service = fakeService();
+  const session = vi.fn(async () => ({}));
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service,
+      storeSupport: { session } as unknown as NonNullable<MerchantBffRouterOptions["storeSupport"]>,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  const root = `http://127.0.0.1:${address.port}`;
+  const withCookie = { ...safeHeaders, Cookie: `__Host-bop-merchant=${sessionCookie}` };
+  vi.mocked(service.bootstrap).mockRejectedValue(new Error("no Store workspace"));
+
+  const support = await request(root, "/merchant/session", { headers: withCookie });
+  expect(support.status).toBe(403);
+  expect(support.headers.get("cache-control")).toBe("no-store");
+  expect(await support.json()).toEqual({ error: "platform_support" });
+
+  session.mockRejectedValueOnce(new Error("not support"));
+  const refused = await request(root, "/merchant/session", { headers: withCookie });
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).not.toEqual({ error: "platform_support" });
+
+  session.mockClear();
+  const signedOut = await request(root, "/merchant/session", { headers: safeHeaders });
+  expect(signedOut.status).toBe(403);
+  expect(session).not.toHaveBeenCalled();
+});
+
 it("keeps unavailable Brand navigation distinct from rejected session authority", async () => {
   const service = fakeService();
   const root = await serve(service);

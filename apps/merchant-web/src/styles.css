@@ -8904,10 +8904,10 @@ body:has(.product-complete-draft) .bop-shell__header,
   scroll-margin-top: var(--bop-space-6);
 }
 .kitchen-setup > *,
-.kitchen-setup [role="alert"] > * {
+.kitchen-setup [role="status"] > * {
   margin-block: 0;
 }
-.kitchen-setup [role="alert"] {
+.kitchen-setup [role="status"] {
   display: grid;
   gap: var(--bop-space-2);
 }

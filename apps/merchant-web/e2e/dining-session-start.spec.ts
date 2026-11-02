@@ -201,7 +201,7 @@ test("@production staff starts a table and recovers a lost entry code without du
   await expect(elapsedTile).toContainText("Seats 2 · 17 min");
   const free = page.getByRole("region", { name: "Free tables" });
   await expect(free).toContainText("Table T1Open");
-  await expect(free).toContainText("Table Window counter seat 14Unavailable");
+  await expect(free).toContainText("Window counter seat 14Unavailable");
   await elapsedTile.screenshot({ path: "test-results/dining-elapsed-1440.png" });
   expect(tableReads).toBe(1);
 

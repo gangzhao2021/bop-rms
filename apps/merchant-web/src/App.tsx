@@ -1,4 +1,3 @@
-import { storeSupportClient } from "./store-support-client.js";
 import { StoresPage } from "./StoresPage.js";
 import { t } from "./i18n/i18n.js";
 import { CurrentOrderDetailRoute, CurrentOrderQueuePage } from "./CurrentOrderQueuePage.js";
@@ -46,6 +45,7 @@ import { FULL_SIGN_IN_REQUIRED, needsFullSignIn } from "./full-sign-in.js";
 import { lazyModule, lazyPage, PageChunkBoundary, WithModule } from "./route-chunks.js";
 import {
   createMerchantWorkspaceClient,
+  MerchantPlatformSupportSession,
   type MerchantWorkspaceClient,
   type MerchantWorkspaceSnapshot,
 } from "./merchant-workspace.js";
@@ -574,21 +574,6 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   }, []);
   // Without a sign-in (the PIN screen, a signed-out staff page) the screen shows what this tab
   // last knew, labelled with when it was checked; nothing is read without a Session.
-  // WP-2423 取舍 15: platform support has no Store workspace; their page is their own.
-  useEffect(() => {
-    if (state.kind !== "SignedOut" || !pathname.startsWith("/")) return;
-    if (pathname.startsWith("/platform/") || sessionlessPaths.has(pathname)) return;
-    let active = true;
-    void storeSupportClient.session().then(
-      () => {
-        if (active) window.location.assign("/platform/support-cases");
-      },
-      () => undefined,
-    );
-    return () => {
-      active = false;
-    };
-  }, [state.kind, pathname]);
   const remembered = useMemo(
     () =>
       demo === null &&
@@ -646,8 +631,17 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
               },
         );
       })
-      .catch(() => {
-        if (active) setState({ kind: navigator.onLine ? "Failure" : "Offline" });
+      .catch((error: unknown) => {
+        if (!active) return;
+        if (error instanceof MerchantPlatformSupportSession) {
+          // WP-2423 取舍 15: platform support has no Store workspace; their page is their own.
+          setState({ kind: "SignedOut" });
+          const here = window.location.pathname;
+          if (!here.startsWith("/platform/") && !sessionlessPaths.has(here))
+            window.location.assign("/platform/support-cases");
+          return;
+        }
+        setState({ kind: navigator.onLine ? "Failure" : "Offline" });
       });
     return () => {
       active = false;

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { URL } from "node:url";
 import { createRequire } from "node:module";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { merchantRoutes } from "../../apps/merchant-web/src/pilot-routes.ts";
@@ -29,7 +30,7 @@ afterAll(() => {
   server.close();
   rmSync(directory, { recursive: true, force: true });
 });
-const page = async (address) => (await fetch(origin + address)).text();
+const page = async (address) => (await globalThis.fetch(origin + address)).text();
 
 it("the server's own file sends this list to the merchant app", async () => {
   const { readFile } = await import("node:fs/promises");

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { computeBillTaxRounding, type BillTaxRoundingRound } from "../domain/bill-tax-rounding.js";
+import {
+  computeBillTaxRounding,
+  type BillTaxRoundingRound,
+} from "../application/bill-tax-rounding.js";
 
 const id = (n: number) => `018fb000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const hst = (taxAmountMinor: bigint) => ({
@@ -24,6 +27,70 @@ const round = (
 });
 
 describe("WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding", () => {
+  // The value the code gave in src/domain before it moved to src/application (full regression
+  // 2026-11-02): amounts and the digest kept on the receipt must never change with a move.
+  it("gives the recorded result for two taxes, a compound and a comp", () => {
+    const tax = (code: string, rate: string, order: number, taxAmountMinor: bigint) => ({
+      taxComponentCode: code,
+      treatment: "Taxable" as const,
+      rate,
+      roundingMode: "HalfUp" as const,
+      calculationOrder: order,
+      compoundOnPriorTax: order === 2,
+      taxAmountMinor,
+    });
+    const result = computeBillTaxRounding([
+      {
+        orderReference: "o1",
+        orderBatchReference: "b1",
+        items: [
+          {
+            orderItemReference: "i1",
+            netMinor: 333n,
+            reduction: null,
+            taxComponents: [tax("GST", "0.05", 1, 17n), tax("PST", "0.08", 2, 28n)],
+          },
+          {
+            orderItemReference: "i2",
+            netMinor: 1099n,
+            reduction: { netMinor: 99n, taxMinor: 5n },
+            taxComponents: [tax("GST", "0.05", 1, 55n), tax("PST", "0.08", 2, 92n)],
+          },
+        ],
+      },
+      {
+        orderReference: "o2",
+        orderBatchReference: "b2",
+        items: [
+          {
+            orderItemReference: "i3",
+            netMinor: 777n,
+            reduction: null,
+            taxComponents: [tax("GST", "0.05", 1, 39n), tax("PST", "0.08", 2, 65n)],
+          },
+        ],
+      },
+    ]);
+    expect(result).toEqual({
+      totalMinor: -7n,
+      lines: [
+        {
+          orderReference: "o1",
+          orderBatchReference: "b1",
+          taxComponentCode: "GST",
+          amountMinor: -3n,
+        },
+        {
+          orderReference: "o1",
+          orderBatchReference: "b1",
+          taxComponentCode: "PST",
+          amountMinor: -4n,
+        },
+      ],
+      basisDigest: "sha256:f860907f15c5cdfd693a75f84b2782d677283d269f34c5375158c7034be457ae",
+    });
+  });
+
   it("brings three rounds of $1.05 (14¢ tax each) to the whole bill's 41¢", () => {
     const result = computeBillTaxRounding([
       round(1, 105n, 14n),

@@ -177,7 +177,10 @@ test("@production a stale kitchen says so and shows what it is now; a failed rea
   });
   await page.goto(setupHref);
   const panel = page.locator("#kitchen-setup");
-  await expect(panel.getByRole("alert")).toContainText("Nothing was changed");
+  await expect(panel.getByRole("status")).toContainText("Nothing was changed");
+  // One failed read on this page never adds a second alert, and staff words only.
+  await expect(panel).toContainText("We can't show the kitchen setup right now");
+  await expect(panel.getByRole("alert")).toHaveCount(0);
   await panel.getByRole("button", { name: "Try again" }).click();
   await panel.getByRole("button", { name: "Set up one kitchen line for all dishes" }).click();
   await expect(panel.getByRole("status")).toContainText("Someone else changed this kitchen");
