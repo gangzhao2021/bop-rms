@@ -24,9 +24,11 @@ test("@production A replaced table code tells the guest to ask staff, with no se
     });
   });
   await page.goto("/#qr=aaa.bbb.ccc");
-  await expect(page.getByRole("heading", { name: "This table code was replaced" })).toBeFocused();
   await expect(
-    page.getByText("This table code was replaced. Please ask a staff member.", { exact: true }),
+    page.getByRole("heading", { name: "This table QR code was replaced" }),
+  ).toBeFocused();
+  await expect(
+    page.getByText("This table QR code was replaced. Please ask a staff member.", { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
   expect(calls).toBe(1);

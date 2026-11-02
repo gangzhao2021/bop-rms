@@ -223,7 +223,7 @@ it("WP-2423 abandoned payment: says how to cancel an unpaid round only where the
   expect(guestRoundCancelHint(mixed, at(5 * 60_000), true)).toBeNull();
 });
 
-it("2026-10-21 live check: keeps the sharing instruction with the entry code it refers to", () => {
+it("2026-10-21 live check: keeps the sharing instruction with the join code it refers to", () => {
   const html = renderToStaticMarkup(
     createElement(DiningEntryCode, { code: "123456", onHide: () => undefined }),
   );
@@ -231,6 +231,6 @@ it("2026-10-21 live check: keeps the sharing instruction with the entry code it 
   // no sentence is left pointing at a code that is no longer shown.
   expect(html).toBe(
     '<div class="dining-entry-code"><p>Share this one-time code with the party at this table.</p>' +
-      "<p>Entry code: <strong>123456</strong></p><button>Hide entry code</button></div>",
+      "<p>Join code: <strong>123456</strong></p><button>Hide join code</button></div>",
   );
 });

@@ -273,7 +273,7 @@ export function DiningInvitationView({
       ) : null}
       {state.status === "table-changed" ? (
         <p role="status">
-          {t("Your table was changed. Ask a staff member for a code for your new table.")}
+          {t("Your table was changed. Ask a staff member for a join code for your new table.")}
         </p>
       ) : null}
       {state.status === "too-many" ? (

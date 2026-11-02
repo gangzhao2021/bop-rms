@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("@production staff starts a table and recovers a lost entry code without duplicate start", async ({
+test("@production staff starts a table and recovers a lost join code without duplicate start", async ({
   page,
 }) => {
   const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -290,14 +290,14 @@ test("@production staff starts a table and recovers a lost entry code without du
   await freeT1.getByRole("button", { name: "Try opening again", exact: true }).click();
   await expect(
     page.getByText(
-      "The request already completed. Its code cannot be displayed again. Replace the entry code to get a new one.",
+      "The request already completed. Its code cannot be displayed again. Replace the join code to get a new one.",
       { exact: true },
     ),
   ).toBeVisible();
-  await details.getByRole("button", { name: "New entry code", exact: true }).click();
+  await details.getByRole("button", { name: "New join code", exact: true }).click();
   await expect(page.getByText("123456", { exact: true })).toBeVisible();
   await expect(page.locator(".table-result")).toContainText(
-    "Table T1 has a new entry code; the old one no longer works.",
+    "Table T1 has a new join code; the old one no longer works.",
   );
   // 2026-10-21 live check: the sharing instruction sits with the code and goes away with it.
   const shareCode = page.getByText("Share this one-time code with the party at this table.");
@@ -307,7 +307,7 @@ test("@production staff starts a table and recovers a lost entry code without du
   expect(starts).toHaveLength(2);
   expect(starts[1]).toBe(starts[0]);
   expect(regens).toHaveLength(1);
-  await page.getByRole("button", { name: "Hide entry code", exact: true }).click();
+  await page.getByRole("button", { name: "Hide join code", exact: true }).click();
   await expect(page.getByText("123456", { exact: true })).toHaveCount(0);
   await expect(shareCode).toHaveCount(0);
   // The skip link is painted only while it has keyboard focus (it showed in a scrolled capture).

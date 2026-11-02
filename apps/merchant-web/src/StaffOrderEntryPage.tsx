@@ -1106,7 +1106,7 @@ export function StaffOrderEntryPage({
           {tableMode && ordering ? (
             <p className="field-hint">
               {t(
-                "Sending gives this order its own table code, so a table code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.",
+                "Sending gives this order its own join code, so a join code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.",
               )}
             </p>
           ) : null}

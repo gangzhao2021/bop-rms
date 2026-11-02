@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
-import { inClosingWindow } from "./ClosingReminder.js";
+import { closingReminderPhase, inClosingWindow } from "./ClosingReminder.js";
 import { parseTonightSummary } from "./store-reports-client.js";
 import { tonightProblems, TonightSummaryView } from "./TonightSummary.js";
 import { tonightSummaryFixture } from "./tonight-summary.fixtures.js";
@@ -53,7 +53,7 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       "$191.60",
       "$219.50",
       "$91.95",
-      "Table cash that should be in the drawer",
+      "Table cash this system recorded (not the whole cash drawer)",
       "$86.95",
       "$503.05",
       "$491.05",
@@ -107,7 +107,32 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     expect(notPaid).not.toContain("Table 3");
     expect(notPaid).not.toContain("$0.00");
   });
-  it("shows the closing reminder in the last 8 hours of the business day only", () => {
+  it("times the closing reminder by the Store's published closing", () => {
+    const endsAt = "2026-10-28T08:00:00.000Z"; // 04:00 the next morning, Toronto.
+    const at = (instant: string) => Date.parse(instant);
+    // Lunch-only, closing 14:30 Toronto (18:30Z): an hour before and after, then only unpaid tables.
+    const lunch = { endsAt, closesAt: "2026-10-27T18:30:00.000Z", closedToday: false };
+    expect(closingReminderPhase(lunch, at("2026-10-27T17:29:00.000Z"))).toBe("Hidden");
+    expect(closingReminderPhase(lunch, at("2026-10-27T17:30:00.000Z"))).toBe("BeforeClosing");
+    expect(closingReminderPhase(lunch, at("2026-10-27T18:30:00.000Z"))).toBe("AfterClosing");
+    expect(closingReminderPhase(lunch, at("2026-10-27T19:30:00.000Z"))).toBe("UnpaidTablesOnly");
+    expect(closingReminderPhase(lunch, at("2026-10-28T00:30:00.000Z"))).toBe("UnpaidTablesOnly");
+    // Overnight, closing 01:30 Toronto: not at 20:00, as the old rule would have been.
+    const overnight = { endsAt, closesAt: "2026-10-28T05:30:00.000Z", closedToday: false };
+    expect(closingReminderPhase(overnight, at("2026-10-28T00:30:00.000Z"))).toBe("Hidden");
+    expect(closingReminderPhase(overnight, at("2026-10-28T05:00:00.000Z"))).toBe("BeforeClosing");
+    expect(closingReminderPhase(overnight, at("2026-10-28T06:00:00.000Z"))).toBe("AfterClosing");
+    // Closed today: only an unpaid table is worth saying.
+    const closed = { endsAt, closesAt: null, closedToday: true };
+    expect(closingReminderPhase(closed, at("2026-10-27T18:00:00.000Z"))).toBe("UnpaidTablesOnly");
+    // Hours unreadable or not published: the last 8 hours of the day, not silence.
+    const unknown = { endsAt, closesAt: null, closedToday: false };
+    expect(closingReminderPhase(unknown, at("2026-10-28T00:30:00.000Z"))).toBe("BeforeClosing");
+    expect(closingReminderPhase(unknown, at("2026-10-27T23:00:00.000Z"))).toBe("Hidden");
+    expect(closingReminderPhase({ endsAt }, at("2026-10-28T00:30:00.000Z"))).toBe("BeforeClosing");
+    expect(closingReminderPhase(null, at("2026-10-28T00:30:00.000Z"))).toBe("Hidden");
+  });
+  it("shows the fallback closing reminder in the last 8 hours of the business day only", () => {
     const endsAt = "2026-10-28T08:00:00.000Z";
     expect(inClosingWindow(endsAt, Date.parse("2026-10-28T00:30:00.000Z"))).toBe(true);
     expect(inClosingWindow(endsAt, Date.parse("2026-10-27T23:00:00.000Z"))).toBe(false);

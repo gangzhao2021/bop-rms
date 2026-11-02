@@ -141,7 +141,7 @@ test("@production staff see the phones at a table, pause joining by scan and rem
   await expect(phones.getByRole("button", { name: "Pause joining by scan" })).toHaveCount(1);
   // Pause: new guests then need a code.
   await phones.getByRole("button", { name: "Pause joining by scan" }).click();
-  await expect(phones).toContainText("Joining by scan is paused. New guests need a table code");
+  await expect(phones).toContainText("Joining by scan is paused. New guests need a join code");
   await expect(phones.getByRole("button", { name: "Resume joining by scan" })).toBeVisible();
 
   // Remove phone 2 (asked once more first).

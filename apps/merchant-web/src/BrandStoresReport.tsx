@@ -66,7 +66,7 @@ export function BrandStoresReport({
     ready.reduce((sum, summary) => sum + BigInt(pick(summary)), 0n);
   return (
     <section aria-labelledby="brand-stores" className="brand-stores">
-      <h2 id="brand-stores">{t("Tonight at each store")}</h2>
+      <h2 id="brand-stores">{t("Today at each store")}</h2>
       <table className="brand-stores__table">
         <thead>
           <tr>
@@ -98,7 +98,7 @@ export function BrandStoresReport({
                   ) : null}
                 </th>
                 {s === null || row.kind !== "Ready" ? (
-                  <td colSpan={7} data-label={t("Tonight")}>
+                  <td colSpan={7} data-label={t("Today's summary")}>
                     {row.kind === "Loading"
                       ? t("Reading…")
                       : row.kind === "Denied"

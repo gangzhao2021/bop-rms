@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { describeStoreUpcomingHours } from "../domain/describe-store-upcoming-hours.js";
+import {
+  describeStoreBusinessDayClosing,
+  describeStoreUpcomingHours,
+} from "../domain/describe-store-upcoming-hours.js";
 
 const period = (start: string, end: string, cutoffMinutes = 0, endsNextDay = false) => ({
   startLocalTime: start,
@@ -111,6 +114,59 @@ describe("WP-2423 item 8 ③ decision 16: the Store's hours ahead", () => {
     expect(overnight("2026-12-23", "01:20:00")).toMatchObject({
       pastLastOrders: true,
       lastOrders: { localDate: "2026-12-23", localTime: "01:15:00" },
+    });
+  });
+});
+
+describe("WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on a business day", () => {
+  const closing = (
+    businessDate: string,
+    schedule: readonly { isoWeekday: number; intervals: ReturnType<typeof period>[] }[],
+    dated: Parameters<typeof describeStoreBusinessDayClosing>[0]["exceptions"] = [],
+  ) =>
+    describeStoreBusinessDayClosing({ businessDate, weeklySchedule: schedule, exceptions: dated });
+  // 2026-12-22 is a Tuesday (2).
+  it("gives a lunch-only Store's closing at the end of lunch", () => {
+    expect(
+      closing("2026-12-22", [{ isoWeekday: 2, intervals: [period("11:00:00", "14:30:00")] }]),
+    ).toEqual({ kind: "Closes", localDate: "2026-12-22", localTime: "14:30:00" });
+  });
+  it("gives the day's last period when there is a break, in any order", () => {
+    expect(
+      closing("2026-12-22", [
+        {
+          isoWeekday: 2,
+          intervals: [period("17:00:00", "22:00:00"), period("11:00:00", "14:00:00")],
+        },
+      ]),
+    ).toEqual({ kind: "Closes", localDate: "2026-12-22", localTime: "22:00:00" });
+  });
+  it("gives the next date for a period that runs past midnight", () => {
+    expect(
+      closing("2026-12-22", [
+        {
+          isoWeekday: 2,
+          intervals: [{ ...period("18:00:00", "01:30:00"), endsNextDay: true }],
+        },
+      ]),
+    ).toEqual({ kind: "Closes", localDate: "2026-12-23", localTime: "01:30:00" });
+  });
+  it("says closed on a day off and on a holiday, and a dated exception replaces the weekday", () => {
+    const tuesday = [{ isoWeekday: 2, intervals: [period("11:00:00", "22:00:00")] }];
+    expect(closing("2026-12-23", tuesday)).toEqual({ kind: "ClosedToday" });
+    expect(
+      closing("2026-12-22", tuesday, [{ localDate: "2026-12-22", kind: "Holiday", intervals: [] }]),
+    ).toEqual({ kind: "ClosedToday" });
+    expect(
+      closing("2026-12-22", tuesday, [
+        { localDate: "2026-12-22", kind: "Override", intervals: [period("11:00:00", "16:00:00")] },
+      ]),
+    ).toEqual({ kind: "Closes", localDate: "2026-12-22", localTime: "16:00:00" });
+  });
+  it("says nothing is published rather than closed when no hours exist", () => {
+    expect(closing("2026-12-22", [])).toEqual({ kind: "NoPublishedHours" });
+    expect(closing("2026-12-22", [{ isoWeekday: 2, intervals: [] }])).toEqual({
+      kind: "NoPublishedHours",
     });
   });
 });

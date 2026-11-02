@@ -604,7 +604,7 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       main.getByRole("heading", { name: "This table is settled. Thank you for dining with us." }),
     ).toBeVisible();
     await expect(main).toContainText("Table 12 has paid and closed.");
-    await expect(main).toContainText("New party? Scan the table code");
+    await expect(main).toContainText("New party? Scan the table QR code");
     const card = main.getByRole("region", { name: "Receipt" });
     await expect(card).toContainText("Milk tea");
     await expect(card).toContainText("Subtotal before tax$4.50");
@@ -625,7 +625,7 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     // In Chinese.
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(main.getByRole("heading", { name: "这桌已结账，谢谢光临" })).toBeVisible();
-    await expect(main).toContainText("新的一桌？扫桌上的码");
+    await expect(main).toContainText("新的一桌？扫桌台二维码");
     await expect(main.getByRole("region", { name: "收据" })).toContainText("现金");
     await page.screenshot({
       path: "test-results/customer-dining-settled-zh-390.png",

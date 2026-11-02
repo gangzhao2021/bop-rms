@@ -141,7 +141,7 @@ test("@production staff move a table's party to a free table with a code", async
     "Choose a table",
     "T7 · seats 4",
     "T8 — has a party (two parties can't share a table)",
-    "T9 — no table code",
+    "T9 — no table QR code",
     "T10 — being cleaned",
   ]);
   for (const name of [/^T8 /u, /^T9 /u, /^T10 /u])

@@ -1090,7 +1090,7 @@ export const orderStatusText = Object.freeze({
     },
     get atTable() {
       return t(
-        "Still at your table and want to order more? Scan the table QR code again. If it asks for a table code, a staff member can give it to you.",
+        "Still at your table and want to order more? Scan the table QR code again. If it asks for a join code, a staff member can give it to you.",
       );
     },
     get pickup() {

@@ -26,7 +26,7 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
     page.getByRole("heading", { name: "Dining UI Training Store", exact: true }),
   ).toBeVisible();
   // WP-2423 item 8 ⑤: joining by scan is one tap; a code is entered on request.
-  await page.getByRole("button", { name: "I have a table code" }).click();
+  await page.getByRole("button", { name: "I have a join code" }).click();
   const field = page.getByLabel("Join code or invitation", { exact: true });
   await expect(field).toHaveAttribute("type", "password");
   await field.fill("12");
@@ -78,7 +78,7 @@ test("@demo Dining admission pauses offline and never resumes on reconnect", asy
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto("/?scenario=dining-admission");
   // WP-2423 item 8 ⑤: joining by scan is one tap; a code is entered on request.
-  await page.getByRole("button", { name: "I have a table code" }).click();
+  await page.getByRole("button", { name: "I have a join code" }).click();
   const field = page.getByLabel("Join code or invitation", { exact: true });
   await field.fill("123456");
   await context.setOffline(true);

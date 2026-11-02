@@ -201,8 +201,8 @@ describe("WP-2423 Q14 store reports page", () => {
         <StoreReportsPage storeLabel="Synthetic Store" fetcher={vi.fn() as typeof fetch} />
       </MemoryRouter>,
     );
-    expect(html).toContain('aria-pressed="true">Tonight');
-    expect(html).toContain("Reading tonight&#x27;s figures…");
+    expect(html).toContain('aria-pressed="true">Today&#x27;s summary');
+    expect(html).toContain("Reading today&#x27;s figures…");
     expect(html).not.toContain("Last 7 days");
   });
 });
