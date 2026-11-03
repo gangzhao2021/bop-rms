@@ -1,4 +1,4 @@
-import { loadDiningGuestPhones } from "./dining-guest-phones.js";
+import { loadDiningGuestPhonesBySession } from "./dining-guest-phones.js";
 import { createHash } from "node:crypto";
 import { readClosedRecord } from "@bop/identity";
 import {
@@ -384,15 +384,15 @@ export function createMerchantDiningTables(options: {
           }
           const joinedAt = Date.parse(parseDiningInstant(options.persistence.now()));
           const newPhones = new Map<string, { phoneNumber: number; joinedAt: string }[]>();
+          const phonesBySession = await loadDiningGuestPhonesBySession(
+            tx as unknown as Parameters<typeof loadDiningGuestPhonesBySession>[0],
+            ownerScope,
+            activeReferences.map((reference) => String(reference)),
+          );
           for (const session of activeReferences) {
-            const phones = await loadDiningGuestPhones(
-              tx as unknown as Parameters<typeof loadDiningGuestPhones>[0],
-              ownerScope,
-              String(session),
-            );
             newPhones.set(
               String(session),
-              phones
+              (phonesBySession.get(String(session)) ?? [])
                 .filter(
                   (phone) =>
                     !phone.left && joinedAt - Date.parse(phone.joinedAt) < newPhoneMinutes * 60_000,

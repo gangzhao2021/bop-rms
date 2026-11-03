@@ -347,7 +347,11 @@ test("@production the owner applies the full-service setup, turns a module back 
     "Tea (TEST) 茶位",
     "Jasmine tea (TEST) — hidden from this store on the menu; show it to choose it",
   ]);
-  await expect(teaItem.getByRole("option", { name: /^Jasmine tea/u })).toBeDisabled();
+  // The option's own `disabled`: Playwright's toBeDisabled reads an <option> as enabled.
+  await expect(teaItem.getByRole("option", { name: /^Jasmine tea/u })).toHaveJSProperty(
+    "disabled",
+    true,
+  );
   await teaItem.selectOption({ label: "Tea (TEST) 茶位" });
   await page.getByRole("button", { name: "Save tea charge" }).click();
   await expect(

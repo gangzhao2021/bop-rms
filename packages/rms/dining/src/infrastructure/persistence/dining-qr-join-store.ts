@@ -500,44 +500,65 @@ export async function loadDiningSessionPhones(
   /** Admissions that are not phones (staff entering a round): left out and not numbered. */
   options: { readonly excludeAdmissions?: readonly string[] } = {},
 ): Promise<readonly DiningQrJoinPhone[]> {
+  const session = parseDiningReference(diningSessionReference);
+  const phones = await loadDiningSessionsPhones(tx, scopeInput, [session], options);
+  return phones.get(session) ?? Object.freeze([]);
+}
+
+/** One read for a page of open tables, polled every few seconds; each Session numbers its own. */
+export async function loadDiningSessionsPhones(
+  tx: DiningTableTransaction,
+  scopeInput: DiningTableStoreScope,
+  diningSessionReferences: readonly string[],
+  options: { readonly excludeAdmissions?: readonly string[] } = {},
+): Promise<ReadonlyMap<string, readonly DiningQrJoinPhone[]>> {
   const tenant = parseDiningReference(scopeInput.tenantReference);
   const brand = parseDiningReference(scopeInput.brandReference);
   const store = parseDiningReference(scopeInput.storeReference);
-  const session = parseDiningReference(diningSessionReference);
+  const sessions = diningSessionReferences.map((value) => parseDiningReference(value));
+  const phones = new Map<string, DiningQrJoinPhone[]>();
+  if (sessions.length === 0) return phones;
   await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
     brand,
     store,
   ]);
+  const maximum = sessions.length * 200;
   const participants = rows(
     await tx.query(
-      `SELECT p.participant_id, p.status, p.participant_snapshot->>'joinedAt' AS joined_at,
+      `SELECT p.session_id, p.participant_id, p.status, p.participant_snapshot->>'joinedAt' AS joined_at,
  EXISTS (SELECT 1 FROM rms_dining.dining_participant_removal r WHERE r.tenant_id=p.tenant_id AND r.brand_id=p.brand_id
   AND r.store_id=p.store_id AND r.session_id=p.session_id AND r.participant_id=p.participant_id) AS removed
- FROM rms_dining.dining_participant p WHERE p.tenant_id=$1 AND p.brand_id=$2 AND p.store_id=$3 AND p.session_id=$4
+ FROM rms_dining.dining_participant p WHERE p.tenant_id=$1 AND p.brand_id=$2 AND p.store_id=$3 AND p.session_id=ANY($4::uuid[])
  AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_session_join_operation o WHERE o.tenant_id=p.tenant_id AND o.brand_id=p.brand_id
   AND o.store_id=p.store_id AND o.session_id=p.session_id AND o.participant_id=p.participant_id AND o.admission_id=ANY($5::uuid[]))
- ORDER BY p.participant_snapshot->>'joinedAt', p.participant_id LIMIT 201`,
+ ORDER BY p.session_id, p.participant_snapshot->>'joinedAt', p.participant_id LIMIT $6`,
       [
         tenant,
         brand,
         store,
-        session,
+        sessions,
         (options.excludeAdmissions ?? []).map((value) => parseDiningReference(value)),
+        maximum + 1,
       ],
     ),
-    200,
+    maximum,
   );
-  return Object.freeze(
-    participants.map((row, index) =>
+  for (const row of participants) {
+    const session = parseDiningReference(row.session_id);
+    const listed = phones.get(session) ?? [];
+    if (listed.length === 200) return fail();
+    listed.push(
       Object.freeze({
         participantReference: parseDiningReference(row.participant_id),
-        phoneNumber: index + 1,
+        phoneNumber: listed.length + 1,
         joinedAt: parseDiningInstant(row.joined_at),
         left: row.status === "Left",
         removed: row.removed === true,
       }),
-    ),
-  );
+    );
+    phones.set(session, listed);
+  }
+  return phones;
 }
 
 /** WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff". */

@@ -1,4 +1,4 @@
-import { loadDiningSessionPhones } from "@rms/dining";
+import { loadDiningSessionPhones, loadDiningSessionsPhones } from "@rms/dining";
 import { listStaffDiningRoundAdmissions } from "@rms/ordering";
 
 type Transaction = Parameters<typeof loadDiningSessionPhones>[0];
@@ -15,10 +15,23 @@ export async function loadDiningGuestPhones(
   diningSessionReference: string,
 ) {
   return loadDiningSessionPhones(tx, scope, diningSessionReference, {
+    excludeAdmissions: await listStaffDiningRoundAdmissions(tx as never, scope, [
+      diningSessionReference,
+    ]),
+  });
+}
+
+/** The same for a page of open tables, in two reads however many tables are open. */
+export async function loadDiningGuestPhonesBySession(
+  tx: Transaction,
+  scope: Scope,
+  diningSessionReferences: readonly string[],
+) {
+  return loadDiningSessionsPhones(tx, scope, diningSessionReferences, {
     excludeAdmissions: await listStaffDiningRoundAdmissions(
       tx as never,
       scope,
-      diningSessionReference,
+      diningSessionReferences,
     ),
   });
 }

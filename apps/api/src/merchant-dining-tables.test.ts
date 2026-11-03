@@ -52,7 +52,7 @@ vi.mock("@rms/dining", async (original) => ({
   // WP-2423 item 8 ⑨: no party was merged into these tables.
   listDiningSessionMergesInto: async () => new Map(),
   createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
-  loadDiningSessionPhones: mock.phones,
+  loadDiningSessionsPhones: mock.phones,
   // DEC-DINE-IN-PAY-LATER: the Store opens tables pay first; no open table was opened otherwise.
   createPostgresDiningPaymentTimingStore: vi.fn(() => ({
     load: async () => ({ paymentTiming: timing.store }),
@@ -99,7 +99,7 @@ function setup() {
   mock.paidOnline.mockResolvedValue(new Set());
   mock.staffCalls.mockResolvedValue(new Map());
   mock.waitingRounds.mockResolvedValue([]);
-  mock.phones.mockResolvedValue([]);
+  mock.phones.mockResolvedValue(new Map());
   mock.list.mockResolvedValue({
     items: [
       {
@@ -692,29 +692,37 @@ it("WP-2423 item 8 ⑤: a round waiting for staff needs action (not awaiting pay
       release: null,
     },
   ]);
-  mock.phones.mockResolvedValueOnce([
-    {
-      participantReference: id(60),
-      phoneNumber: 1,
-      joinedAt: "2026-09-25T11:43:00.000Z",
-      left: false,
-      removed: false,
-    },
-    {
-      participantReference: id(61),
-      phoneNumber: 2,
-      joinedAt: "2026-09-25T11:58:00.000Z",
-      left: false,
-      removed: false,
-    },
-    {
-      participantReference: id(62),
-      phoneNumber: 3,
-      joinedAt: "2026-09-25T11:57:00.000Z",
-      left: true,
-      removed: true,
-    },
-  ]);
+  mock.phones.mockResolvedValueOnce(
+    new Map([
+      [
+        id(5),
+        [
+          {
+            participantReference: id(60),
+            phoneNumber: 1,
+            joinedAt: "2026-09-25T11:43:00.000Z",
+            left: false,
+            removed: false,
+          },
+          {
+            participantReference: id(61),
+            phoneNumber: 2,
+            joinedAt: "2026-09-25T11:58:00.000Z",
+            left: false,
+            removed: false,
+          },
+          {
+            participantReference: id(62),
+            phoneNumber: 3,
+            joinedAt: "2026-09-25T11:57:00.000Z",
+            left: true,
+            removed: true,
+          },
+        ],
+      ],
+    ]),
+  );
+
   const [table] = (await f.read(f.input)).items;
   expect(table?.guestRoundsAwaitingPayment).toEqual([]);
   expect(table?.heldRounds).toEqual([

@@ -148,7 +148,8 @@ test("CUST-MENU Empty and Unavailable match the Figma Review at 1440, 390, and 3
     .evaluate((node) => (node as HTMLElement).blur());
   const requestCountBeforeRetry = menuRequests;
   await unavailable.getByRole("button", { name: "Try again" }).click();
-  await expect.poll(() => menuRequests).toBeGreaterThan(requestCountBeforeRetry);
+  // One press is one bounded read: the first try and the burst's two (guestReadRetryWaitsMs).
+  await expect.poll(() => menuRequests).toBe(requestCountBeforeRetry + 3);
   await expect(unavailable.getByRole("heading", { name: "Menu is unavailable" })).toBeVisible();
   for (const width of [1440, 390, 320]) {
     await unavailablePage.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
@@ -158,7 +159,7 @@ test("CUST-MENU Empty and Unavailable match the Figma Review at 1440, 390, and 3
       fullPage: true,
     });
   }
-  expect(menuRequests).toBe(requestCountBeforeRetry + 1);
+  expect(menuRequests).toBe(requestCountBeforeRetry + 3);
   expect(errors).toEqual([]);
   await unavailablePage.close();
 });

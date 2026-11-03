@@ -1472,10 +1472,12 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
       // the offered actions now come from one permission read with the read's own, and card-machine
       // payments are read once per page: tables 65 (with the session-Order read for closing),
       // order queue 131, order detail 133.
+      // 2026-11-03: telling staff from phones adds two fixed reads (tables 82), one for the page
+      // however many tables are open; each open table used to cost two phone reads of its own.
       const budgets = {
         orderQueue: 160,
         orderDetail: 160,
-        diningTables: 80,
+        diningTables: 85,
         diningOrderProgress: 130,
         kitchenUntilProjection: 60,
         pickup: 75,

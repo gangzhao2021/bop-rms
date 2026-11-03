@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, expect, test, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -108,6 +109,8 @@ test("rejects unbound keys, Live and other Store before changing the journal", a
 test("exposes scoped independent capture/refund window evidence from its persistent journal", async () => {
   const f = await fixture();
   await f.p.adapter.refundPayment(f.refund("ordinary-refund:", 7, 130n));
+  // The window ends before its end instant, so that instant must be after the capture and refund.
+  await delay(2);
   const input = {
     brandReference: id(1),
     storeReference: id(2),

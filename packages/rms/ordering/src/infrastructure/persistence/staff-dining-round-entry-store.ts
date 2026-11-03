@@ -113,20 +113,27 @@ const select = `SELECT jsonb_build_object('brandReference',e.brand_id,'storeRefe
 export async function listStaffDiningRoundAdmissions(
   tx: AuditTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
-  diningSessionReference: string,
+  diningSessionReferences: readonly string[],
 ): Promise<readonly string[]> {
+  if (diningSessionReferences.length === 0) return Object.freeze([]);
   const brand = parseOrderingReference(scope.brandReference);
   const store = parseOrderingReference(scope.storeReference);
   await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
     brand,
     store,
   ]);
+  const maximum = diningSessionReferences.length * 1000;
   const found = await tx.query(
-    "SELECT dining_admission_id::text AS admission FROM rms_ordering.staff_dining_round_entry WHERE brand_id=$1 AND store_id=$2 AND dining_session_id=$3 AND dining_admission_id IS NOT NULL LIMIT 1001",
-    [brand, store, parseOrderingReference(diningSessionReference)],
+    "SELECT dining_admission_id::text AS admission FROM rms_ordering.staff_dining_round_entry WHERE brand_id=$1 AND store_id=$2 AND dining_session_id=ANY($3::uuid[]) AND dining_admission_id IS NOT NULL LIMIT $4",
+    [
+      brand,
+      store,
+      diningSessionReferences.map((value) => parseOrderingReference(value)),
+      maximum + 1,
+    ],
   );
   const rows = (found as unknown as { rows: readonly { admission: string }[] }).rows;
-  if (rows.length > 1000) throw new Error("STAFF_DINING_ROUND_ENTRY_UNAVAILABLE");
+  if (rows.length > maximum) throw new Error("STAFF_DINING_ROUND_ENTRY_UNAVAILABLE");
   return Object.freeze(rows.map((row) => String(parseOrderingReference(row.admission))));
 }
 
