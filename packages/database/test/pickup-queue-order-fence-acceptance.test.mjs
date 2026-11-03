@@ -336,11 +336,41 @@ it("fences the pickup queue's Orders in ascending Order reference, so it never d
       // While it waited for the lower Order, the queue held the Orders below it and none above.
       assert.equal(heldHigher, false);
       assert.equal(heldLowest, true);
-      // The page keeps pickup-reference order and lists every Ready pickup.
+      // WP-2423 (v15 2026-11-03): references do not follow time, so the page goes by when each
+      // pickup was created: the longest-waiting first, or the newest first once handed-over orders
+      // are included; paging one at a time under the API role walks the same order, each pickup once.
+      const created = (
+        await admin.query(
+          "SELECT fulfillment_id::text AS id FROM rms_fulfillment.fulfillment " +
+            "WHERE brand_id=$1 AND store_id=$2 ORDER BY created_at,fulfillment_id",
+          [brand, store],
+        )
+      ).rows.map((row) => row.id);
+      assert.equal(new Set(created).size, pickups.length);
+      assert.notDeepEqual(created, [...created].sort(), "references do not follow creation time");
       assert.deepEqual(
         queued.value.items.map((item) => String(item.fulfillmentReference)),
-        pickups.map((pickup) => pickup.fulfillment).sort(),
+        created,
       );
+      const walk = async (includeCompleted) => {
+        const seen = [];
+        let after = null;
+        do {
+          const reader = await open(api);
+          const page = await queueStore.listPickupQueue({
+            transaction: reader.tx,
+            afterFulfillmentReference: after,
+            limit: 1,
+            includeCompleted,
+          });
+          await reader.commit();
+          seen.push(...page.items.map((item) => String(item.fulfillmentReference)));
+          after = page.nextAfterFulfillmentReference;
+        } while (after !== null);
+        return seen;
+      };
+      assert.deepEqual(await walk(false), created);
+      assert.deepEqual(await walk(true), [...created].reverse());
       assert.deepEqual(
         queued.value.items.map((item) => String(item.orderReference)).sort(),
         byOrder.map((pickup) => pickup.order),

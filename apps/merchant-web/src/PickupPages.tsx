@@ -224,22 +224,25 @@ function PickupCard({
         </ul>
       ) : null}
       <dl>
-        <div>
-          <dt>{t("Pickup code")}</dt>
-          <dd>
-            {counter
-              ? t("Not needed · taken at the counter")
-              : item.proofReadiness === "Expired"
-                ? t("Code expired · check in person")
-                : item.proofReadiness === "Locked"
-                  ? t("Too many wrong codes · check in person")
-                  : item.proofReadiness === "NotIssued"
-                    ? t("No code sent · check in person")
-                    : item.proofReadiness === "Ready"
-                      ? t("Sent to customer")
-                      : t("Not known yet · check in person")}
-          </dd>
-        </div>
+        {/* Owner 2026-11-03: once handed over there is no code to check. */}
+        {completed ? null : (
+          <div>
+            <dt>{t("Pickup code")}</dt>
+            <dd>
+              {counter
+                ? t("Not needed · taken at the counter")
+                : item.proofReadiness === "Expired"
+                  ? t("Code expired · check in person")
+                  : item.proofReadiness === "Locked"
+                    ? t("Too many wrong codes · check in person")
+                    : item.proofReadiness === "NotIssued"
+                      ? t("No code sent · check in person")
+                      : item.proofReadiness === "Ready"
+                        ? t("Sent to customer")
+                        : t("Not known yet · check in person")}
+            </dd>
+          </div>
+        )}
         {/* Owner 2026-11-03: a fact shows when there is one; no "Not set" rows on every card. */}
         {item.stagingLocation ? (
           <div>

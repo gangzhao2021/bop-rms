@@ -504,4 +504,6 @@ it("v15 2026-11-03: an earlier day's handed-over order is not one to check and c
   expect(html).toContain("From Fri, Aug 7");
   expect(html).toContain("Handed over");
   expect(html).toContain("No orders waiting today · 1 handed over");
+  // Handed over: no code left to check.
+  expect(html).not.toContain("Pickup code");
 });

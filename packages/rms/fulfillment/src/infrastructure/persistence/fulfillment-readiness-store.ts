@@ -372,7 +372,10 @@ export function createPostgresFulfillmentReadinessStore(options: {
         await tx.query<{ fulfillment_id: string; order_id: string }>(
           "SELECT f.fulfillment_id,f.order_id FROM rms_fulfillment.fulfillment f " +
             "WHERE f.brand_id=$1 AND f.store_id=$2 AND f.fulfillment_type='Pickup' " +
-            "AND ($3::uuid IS NULL OR f.fulfillment_id>$3::uuid) " +
+            "AND ($3::uuid IS NULL OR (f.created_at,f.fulfillment_id)" +
+            (input.includeCompleted ? "<" : ">") +
+            "(SELECT p.created_at,p.fulfillment_id FROM rms_fulfillment.fulfillment p " +
+            "WHERE p.brand_id=$1 AND p.store_id=$2 AND p.fulfillment_id=$3::uuid)) " +
             "AND (EXISTS (SELECT 1 FROM rms_fulfillment.fulfillment_ready_operation r " +
             "WHERE r.brand_id=f.brand_id AND r.store_id=f.store_id AND r.fulfillment_id=f.fulfillment_id AND r.phase_after='Ready') " +
             // WP-2423 Q6: cancelling the last unfinished lines also makes the pickup Ready.
@@ -382,7 +385,11 @@ export function createPostgresFulfillmentReadinessStore(options: {
             "WHERE n.brand_id=f.brand_id AND n.store_id=f.store_id AND n.fulfillment_id=f.fulfillment_id) " +
             "AND ($4::boolean OR NOT EXISTS (SELECT 1 FROM rms_fulfillment.pickup_handoff_operation h " +
             "WHERE h.brand_id=f.brand_id AND h.store_id=f.store_id AND h.fulfillment_id=f.fulfillment_id AND h.phase_after='Completed')) " +
-            "ORDER BY f.fulfillment_id LIMIT $5",
+            // WP-2423 (v15 2026-11-03): references do not follow time. Waiting orders go longest
+            // first; a list with handed-over orders goes newest first, so today's are on page one.
+            (input.includeCompleted
+              ? "ORDER BY f.created_at DESC,f.fulfillment_id DESC LIMIT $5"
+              : "ORDER BY f.created_at,f.fulfillment_id LIMIT $5"),
           [brand, store, after, input.includeCompleted, input.limit + 1],
         )
       ).rows;
