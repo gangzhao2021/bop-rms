@@ -39,6 +39,11 @@ import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 export interface OrdersSummary {
   readonly open: number;
   readonly awaitingAcceptance: number;
+  /**
+   * WP-2423 (2026-11-03): accepted pickups of earlier days the kitchen never finished. Those it did
+   * finish are on Pickup's own earlier-days count.
+   */
+  readonly earlierUnfinished: number;
   /** WP-2423: rounds awaiting acceptance (a table may have several) and paid ones waiting long. */
   readonly awaitingRounds: number;
   readonly urgentRounds: number;
@@ -141,6 +146,9 @@ export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): Ord
   return {
     open: open.length,
     awaitingAcceptance: ordersAwaitingAcceptance(queue),
+    earlierUnfinished: queue.items.filter(
+      (order) => order.earlierOpenPickup && order.kitchenPhase !== "Ready",
+    ).length,
     awaitingRounds: rounds.rounds,
     urgentRounds: rounds.urgentRounds,
     readyToServe: dineIn.filter((order) =>
@@ -375,6 +383,17 @@ export function OverviewToday({
           href="/operations/pickup"
           linkLabel={t("View pickups")}
         />
+        {state.orders.kind === "Ready" && state.orders.value.earlierUnfinished > 0 ? (
+          <Count
+            label={t("Earlier orders not finished")}
+            read={state.orders}
+            value={(o) => String(o.earlierUnfinished)}
+            detail={() => t("Make it if the guest comes back; otherwise cancel it and refund them")}
+            href="/operations/orders"
+            linkLabel={t("View orders")}
+            attention={() => true}
+          />
+        ) : null}
         {pickups.kind === "Ready" && pickups.value.earlierDays > 0 ? (
           // WP-2423 (3cd0f8dd L7): earlier days' uncollected orders apart from today's, with the
           // Pickup page's "check and close" section.
@@ -527,6 +546,16 @@ export function attentionItems(
       tone: "warning",
       href: "/app/approvals",
       action: t("Review approvals"),
+    });
+  if (state.orders.kind === "Ready" && state.orders.value.earlierUnfinished > 0)
+    items.push({
+      key: "earlier-orders",
+      title: t("Earlier orders not finished"),
+      detail: t("Make it if the guest comes back; otherwise cancel it and refund them"),
+      state: t("To check"),
+      tone: "warning",
+      href: "/operations/orders",
+      action: t("View orders"),
     });
   if (state.pickups.kind === "Ready" && state.pickups.value.earlierDays > 0)
     items.push({

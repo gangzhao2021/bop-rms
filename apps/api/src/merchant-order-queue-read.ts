@@ -11,6 +11,7 @@ import {
 } from "@rms/kitchen";
 import { withOptionalRead } from "./merchant-round-business-date.js";
 import {
+  readEarlierOpenPickupOrders,
   readEarlierOrdersHoldingStock,
   type EarlierOrderHoldingStock,
 } from "./merchant-stock-holding-orders.js";
@@ -128,9 +129,21 @@ export function createMerchantOrderQueueRead(options: {
         )
           heldByOrder.set(entry.orderReference, entry);
       }
+      // WP-2423 (2026-11-03): an accepted pickup of an earlier day that never ended is listed too,
+      // held stock or not, so a guest who paid and got nothing is not left unseen.
+      const openEarlierPickups = new Set(
+        today === null
+          ? []
+          : await withOptionalRead(
+              transaction,
+              () => readEarlierOpenPickupOrders(transaction, scope, today, input.limit),
+              [] as readonly string[],
+            ),
+      );
       const carriedOrders = new Set([
         ...carried.map((order) => order.orderReference),
         ...heldByOrder.keys(),
+        ...openEarlierPickups,
       ]);
       const listing = input.onlyOrderReference === undefined;
       // WP-2423 (2026-10-16 v15): the earlier-day Orders listed with today's (first page only) are
@@ -139,7 +152,11 @@ export function createMerchantOrderQueueRead(options: {
       // Order. Earlier-day Orders beyond this count stay on the page of the day they were opened.
       const earlierList = listing
         ? [
-            ...new Set([...carried.map((order) => order.orderReference), ...heldByOrder.keys()]),
+            ...new Set([
+              ...carried.map((order) => order.orderReference),
+              ...heldByOrder.keys(),
+              ...openEarlierPickups,
+            ]),
           ].slice(0, input.limit)
         : [];
       const earlier = new Set(earlierList);
@@ -436,6 +453,8 @@ export function createMerchantOrderQueueRead(options: {
                     orderBatchReference: held.orderBatchReference,
                     productionStarted: held.productionStarted,
                   }))(heldByOrder.get(item.orderReference)),
+            /** WP-2423 (2026-11-03): an accepted pickup of an earlier day that never ended. */
+            earlierOpenPickup: openEarlierPickups.has(item.orderReference),
             batches: Object.freeze(current.batches.map((batch) => Object.freeze(batch))),
             currentPhase: current.phase,
             currentVersion: current.version,

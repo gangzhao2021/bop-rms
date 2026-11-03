@@ -422,6 +422,10 @@ with `Hours & ordering` → `Pause service` / `Resume`.
 4. **Pickups from earlier days**: Home shows them apart from today's. On `Pickup` → "From earlier
    days — check and close": hand over any the customer is collecting now; a manager marks the rest
    `Mark not collected`.
+   **Earlier orders not finished**: accepted pickups the kitchen never finished are on neither
+   `Pickup` nor today's tickets, so Home counts them apart and `Orders` lists them first. Contact the
+   guest if you can; make and hand over the order if they come back, otherwise cancel it from
+   `Orders`, which refunds them. Closing the kitchen ticket refunds nothing.
 5. **Tables still open from before**: on `Tables`, a manager or the owner closes each table whose
    guests have left.
 6. Open `Orders` and `Kitchen` (kitchen display) and leave them on for the day; the Orders screen

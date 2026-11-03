@@ -9,9 +9,12 @@ type Order = CurrentOrderQueue["items"][number];
  * WP-2423 (2026-10-16 v15 stock leak): what staff read on an Order of an earlier business day that
  * still has stock set aside, so stock is never held unseen and staff know what to do with it.
  */
-export function heldStockText(order: Pick<Order, "heldStock" | "orderType">): string | null {
+export function heldStockText(
+  order: Pick<Order, "heldStock" | "orderType"> &
+    Partial<Pick<Order, "earlierOpenPickup" | "kitchenPhase">>,
+): string | null {
   const held = order.heldStock;
-  if (held === null) return null;
+  if (held === null) return order.earlierOpenPickup ? earlierOpenPickupText(order) : null;
   if (held.state === "Ended")
     return held.productionStarted
       ? t(
@@ -30,6 +33,17 @@ export function heldStockText(order: Pick<Order, "heldStock" | "orderType">): st
       )
     : t(
         "Still open from an earlier day and holding ingredients that cannot be sold. Serve it, or cancel the round — the guest is refunded and the ingredients go back into stock.",
+      );
+}
+
+/** WP-2423 (2026-11-03): an accepted pickup of an earlier day that nobody finished or closed. */
+export function earlierOpenPickupText(order: Partial<Pick<Order, "kitchenPhase">>): string {
+  return order.kitchenPhase === "Ready"
+    ? t(
+        "Made on an earlier day and never handed over. Hand it over if the guest comes back; otherwise a manager marks it not collected on Pickup.",
+      )
+    : t(
+        "Still open from an earlier day and never finished. Contact the guest if you can. Make it and hand it over if they come back; otherwise cancel it and they are refunded.",
       );
 }
 

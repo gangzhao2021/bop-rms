@@ -23,7 +23,11 @@ import {
 } from "./StaffOrderCancelAction.js";
 import { TablePaymentPanel } from "./TablePaymentPanel.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
-import { HeldStockReleaseAction, heldStockReleasedText } from "./HeldStockNotice.js";
+import {
+  earlierOpenPickupText,
+  HeldStockReleaseAction,
+  heldStockReleasedText,
+} from "./HeldStockNotice.js";
 import {
   ItemRefundCheck,
   StaffItemCancelAction,
@@ -132,6 +136,7 @@ export function filterCurrentOrderItems(
         orderNumber !== "" ||
         order.listedBusinessDate === filters.today ||
         order.heldStock !== null ||
+        order.earlierOpenPickup ||
         isAwaitingAcceptance(order)) &&
       (filters.type === "All" || order.orderType === filters.type) &&
       (filters.channel === "All" || orderChannel(order) === filters.channel) &&
@@ -1370,6 +1375,8 @@ function OrderStatusNotes({
             ? t("Still holds its ingredients")
             : t("Finished · ingredients still set aside")}
         </span>
+      ) : order.earlierOpenPickup ? (
+        <span className="order-held-stock-tag">{t("From an earlier day · not finished")}</span>
       ) : null}
       {order.counter?.recordedAfterOutage ? (
         <span className="order-counter-outage" data-tier="warning">
@@ -1836,6 +1843,7 @@ function OrderDetailBody({
               <dt>{t("Business day")}</dt>
               <dd>
                 {order.heldStock === null &&
+                !order.earlierOpenPickup &&
                 order.listedBusinessDate !== null &&
                 order.listedBusinessDate !== order.businessDate
                   ? openedEarlierText(order.businessDate, order.listedBusinessDate, today)
@@ -1985,11 +1993,12 @@ export function CurrentOrderQueueRows({
     const day = order.listedBusinessDate;
     if (day === null) continue;
     // WP-2423 (2026-10-16): earlier-day orders still holding stock lead the list as one group.
-    const group = order.heldStock !== null ? "held" : day;
+    const unfinished = order.heldStock !== null || order.earlierOpenPickup;
+    const group = unfinished ? "held" : day;
     if (group !== previous)
       dayHeadings.set(
         order.orderReference,
-        order.heldStock !== null ? t("Earlier days · not finished") : businessDateLabel(day, today),
+        unfinished ? t("Earlier days · not finished") : businessDateLabel(day, today),
       );
     previous = group;
   }
@@ -2248,7 +2257,8 @@ export function ordersSummary(
     );
   // An earlier-day order still holding stock is listed with today's but is not one of them.
   const todays = view.items.filter(
-    (order) => order.listedBusinessDate === today && order.heldStock === null,
+    (order) =>
+      order.listedBusinessDate === today && order.heldStock === null && !order.earlierOpenPickup,
   ).length;
   const earlier =
     filterCurrentOrderItems(view.items, {
@@ -2282,11 +2292,33 @@ function OrderAttention({
   readonly onShowHeld: () => void;
 }) {
   const holding = view.items.filter((order) => order.heldStock !== null);
+  const unfinished = view.items.filter(
+    (order) => order.heldStock === null && order.earlierOpenPickup,
+  );
   const outage = view.items.some((order) => order.acceptanceHold !== null);
-  if (holding.length === 0 && !outage) return null;
+  if (holding.length === 0 && unfinished.length === 0 && !outage) return null;
   return (
     <section className="order-attention" aria-labelledby="order-attention-heading">
       <h2 id="order-attention-heading">{t("Needs attention")}</h2>
+      {unfinished.length === 0 ? null : (
+        <ul>
+          {unfinished.map((order) => (
+            <li key={order.orderReference}>
+              <div>
+                <p>
+                  {t("Order {orderNumber} from an earlier day isn't finished.", {
+                    orderNumber: orderLabel(order, today),
+                  })}
+                </p>
+                <p className="order-attention__hint">{earlierOpenPickupText(order)}</p>
+              </div>
+              <button type="button" onClick={() => onOpen(order)}>
+                {t("Show order {orderNumber}", { orderNumber: orderLabel(order, today) })}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {holding.length === 0 ? null : (
         <ul>
           {holding.map((order) => (

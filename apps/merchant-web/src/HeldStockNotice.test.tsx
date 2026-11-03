@@ -1,3 +1,4 @@
+import { filterCurrentOrderItems } from "./CurrentOrderQueuePage.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { parseCurrentOrderQueue } from "./current-order-queue-client.js";
@@ -53,6 +54,35 @@ const parse = (value: unknown) => {
   if (item === undefined) throw new Error("no row");
   return item;
 };
+
+it("WP-2423 (2026-11-03): an unfinished pickup of an earlier day says what to do, stock or not", () => {
+  const read = (extra: Record<string, unknown>) => {
+    const item = parseCurrentOrderQueue({
+      items: [{ ...row(null), earlierOpenPickup: true, ...extra }],
+      nextAfterOrderReference: null,
+    }).items[0];
+    if (item === undefined) throw new Error("no row");
+    return item;
+  };
+  const unmade = read({});
+  expect(unmade.earlierOpenPickup).toBe(true);
+  expect(heldStockText(unmade)).toContain("never finished");
+  expect(heldStockText(read({ kitchenPhase: "Ready" }))).toContain("never handed over");
+  // It leads today's list although it was opened on an earlier day; an older server sends nothing.
+  expect(
+    filterCurrentOrderItems([{ ...unmade, listedBusinessDate: "2026-10-10" }], {
+      orderNumber: "",
+      type: "All",
+      channel: "All",
+      phase: "All",
+      day: "Today",
+      today: "2026-10-16",
+    }),
+  ).toHaveLength(1);
+  expect(parse(null).earlierOpenPickup).toBe(false);
+  expect(heldStockText(parse(null))).toBeNull();
+  expect(() => read({ earlierOpenPickup: "yes" })).toThrow();
+});
 
 it("WP-2423 (2026-10-16): an earlier-day order holding stock tells staff what to do, without codes", () => {
   const open = parse(held("Open"));

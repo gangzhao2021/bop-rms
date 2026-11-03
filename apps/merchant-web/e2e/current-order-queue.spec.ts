@@ -1393,3 +1393,93 @@ test("@production an order's own page leads back to the list as staff left it", 
   await expect(page).toHaveURL(/\/operations\/orders$/u);
   await expect(tab(/^All/u)).toHaveAttribute("aria-pressed", "true");
 });
+
+test("@production a paid pickup of an earlier day that nobody finished leads Orders with what to do", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-11-03",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const order = {
+    orderReference: id(21),
+    orderNumber: "4",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    businessDate: "2026-11-02",
+    listedBusinessDate: "2026-11-03",
+    heldStock: null,
+    earlierOpenPickup: true,
+    submittedAt: "2026-11-02T15:59:00.000Z",
+    observedAt: "2026-11-03T14:00:00.000Z",
+    initialBatchReference: id(91),
+    batches: [
+      {
+        orderBatchReference: id(91),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: true,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: "Accepted",
+    currentVersion: 3,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    paidOnline: { amountMinor: "1568", currencyCode: "CAD" },
+  };
+  await page.route("**/merchant/orders", (route) =>
+    route.fulfill({
+      headers,
+      json: { earlierDayItems: [order], items: [], nextAfterOrderReference: null },
+    }),
+  );
+  await page.goto("/operations/orders");
+  const attention = page.getByRole("region", { name: "Needs attention" });
+  await expect(attention).toContainText("from an earlier day isn't finished");
+  await expect(attention).toContainText("otherwise cancel it and they are refunded");
+  await expect(page.getByText("Earlier days · not finished")).toBeVisible();
+  // The one order shown opens in the side panel, which says so too.
+  await expect(orderPanel(page)).toContainText("From an earlier day · not finished");
+  await expect(page.locator("li.order-row:visible")).toHaveCount(1);
+  await expectNoInternalText(page);
+  await page.goto("/app");
+  const home = page.getByText("Earlier orders not finished").first();
+  await expect(home).toBeVisible();
+  await page.screenshot({ path: "test-results/earlier-open-pickup-home.png" });
+});

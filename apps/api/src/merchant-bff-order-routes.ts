@@ -82,6 +82,7 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
     listedBusinessDate: item.listedBusinessDate,
     // WP-2423 (2026-10-16): stock still set aside for an Order of an earlier day.
     heldStock: item.heldStock,
+    earlierOpenPickup: item.earlierOpenPickup,
     submittedAt: item.submittedAt,
     initialBatchReference: item.initialBatchReference,
     canRequestAcceptance: item.canRequestAcceptance,

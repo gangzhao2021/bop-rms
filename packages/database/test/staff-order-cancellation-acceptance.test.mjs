@@ -35,6 +35,7 @@ import {
 } from "../../../apps/api/src/merchant-order-staff-cancellation.ts";
 import {
   createMerchantEndedOrderStockRelease,
+  readEarlierOpenPickupOrders,
   readEarlierOrdersHoldingStock,
 } from "../../../apps/api/src/merchant-stock-holding-orders.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
@@ -1342,6 +1343,19 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
           )
         ).length,
         0,
+      );
+      // WP-2423 (2026-11-03): an accepted pickup of an earlier day is found from the Order, with
+      // or without held stock; the ended legacy Order, a table and today's pickups are not.
+      const openPickups = (date, within = scope) =>
+        scoped((tx) => readEarlierOpenPickupOrders(tx, within, { businessDate: date }, 50));
+      const earlierOpen = await openPickups(nextDay);
+      assert.ok(earlierOpen.includes(pickup.order));
+      assert.ok(!earlierOpen.includes(legacy.order));
+      assert.ok(!earlierOpen.includes(dineIn.order));
+      assert.deepEqual([...(await openPickups(businessDate))], []);
+      assert.deepEqual(
+        [...(await openPickups(nextDay, { ...scope, storeReference: otherStore }))],
+        [],
       );
       const stockRelease = createMerchantEndedOrderStockRelease({
         persistence: {

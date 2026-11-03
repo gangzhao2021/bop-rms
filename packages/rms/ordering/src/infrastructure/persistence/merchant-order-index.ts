@@ -873,6 +873,49 @@ export interface StoreSubmissionOrder {
 }
 
 /**
+ * WP-2423 (2026-11-03): the Store's accepted pickups of business days before `beforeBusinessDate`
+ * that Ordering has not seen end, oldest first. They need no stock set aside to be found: a guest
+ * who paid and was never served is a fact of the Order. Not-collected pickup closure is
+ * Fulfillment's fact, so callers combine it themselves. Caller authorizes and owns the transaction.
+ */
+export async function listStoreEarlierOpenPickupOrders(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: { readonly beforeBusinessDate: string; readonly limit: number },
+): Promise<readonly string[]> {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(input.beforeBusinessDate))
+    throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 500)
+    throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const rows = (
+    await transaction.query(
+      `SELECT h.order_id::text order_id
+        FROM rms_ordering.order_header h
+        WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_type='Pickup' AND h.business_date<$3::date
+          AND EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a
+              WHERE a.brand_id=h.brand_id AND a.store_id=h.store_id AND a.order_id=h.order_id)
+          AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
+              WHERE t.brand_id=h.brand_id AND t.store_id=h.store_id AND t.order_id=h.order_id)
+          AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_fulfillment_completion_record c
+              WHERE c.brand_id=h.brand_id AND c.store_id=h.store_id AND c.order_id=h.order_id)
+          AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_closure_version z
+              WHERE z.brand_id=h.brand_id AND z.store_id=h.store_id AND z.order_id=h.order_id AND z.status='Closed')
+          AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation s
+              JOIN rms_ordering.order_batch b ON b.brand_id=s.brand_id AND b.store_id=s.store_id AND b.order_batch_id=s.order_batch_id
+              WHERE b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.order_id=h.order_id)
+        ORDER BY h.business_date,h.order_id
+        LIMIT $4`,
+      [scope.brandReference, scope.storeReference, input.beforeBusinessDate, input.limit],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  return Object.freeze(rows.map((row) => parseOrderingReference(row.order_id)));
+}
+
+/**
  * WP-2423 (2026-10-16 v15 stock leak): the Store's Orders for the given rounds (submissions), with
  * their business day and whether Ordering recorded that they ended. Rounds of other Stores are not
  * returned. Caller authorizes and owns the transaction.

@@ -4,6 +4,7 @@ import { readClosedRecord } from "@bop/identity";
 import { listStoreUncollectedPickupOrders } from "@rms/fulfillment";
 import { listStoreSubmissionsHoldingStock } from "@rms/inventory";
 import {
+  listStoreEarlierOpenPickupOrders,
   listStoreOrdersOfSubmissions,
   parseOrderingInstant,
   parseOrderingReference,
@@ -108,6 +109,34 @@ export async function readEarlierOrdersHoldingStock(
       ];
     }),
   );
+}
+
+/**
+ * WP-2423 (2026-11-03): accepted pickups of earlier business days that were neither handed over,
+ * cancelled nor closed as not collected, oldest first, whether or not they hold stock. Without it a
+ * paid pickup the kitchen never finished appeared on no page staff open the next day. Read only;
+ * the caller authorizes and owns the transaction.
+ */
+export async function readEarlierOpenPickupOrders(
+  transaction: ConsumerTransaction,
+  scope: StoreScope,
+  today: Readonly<{ businessDate: string }>,
+  limit: number,
+): Promise<readonly string[]> {
+  const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
+  const open = await listStoreEarlierOpenPickupOrders(transaction, owner, {
+    beforeBusinessDate: today.businessDate,
+    limit,
+  });
+  const uncollected = new Set<string>();
+  for (let i = 0; i < open.length; i += 100)
+    for (const reference of await listStoreUncollectedPickupOrders(
+      transaction,
+      owner,
+      open.slice(i, i + 100),
+    ))
+      uncollected.add(reference);
+  return Object.freeze(open.filter((reference) => !uncollected.has(reference)));
 }
 
 export const endedOrderStockReleaseErrorCodes = [

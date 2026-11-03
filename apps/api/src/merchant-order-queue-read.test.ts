@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   carried: vi.fn(),
   holding: vi.fn(),
+  earlierOpen: vi.fn(),
   state: vi.fn(),
   fence: vi.fn(),
   remakes: vi.fn(async (): Promise<unknown[]> => []),
@@ -21,6 +22,7 @@ vi.mock("@rms/kitchen", async (original) => ({
 }));
 vi.mock("./merchant-stock-holding-orders.js", () => ({
   readEarlierOrdersHoldingStock: mocks.holding,
+  readEarlierOpenPickupOrders: mocks.earlierOpen,
 }));
 vi.mock("@rms/ordering", () => ({
   parseOrderingInstant: (value: string) => value,
@@ -62,6 +64,8 @@ beforeEach(() => {
   mocks.carried.mockReset();
   mocks.holding.mockReset();
   mocks.holding.mockResolvedValue([]);
+  mocks.earlierOpen.mockReset();
+  mocks.earlierOpen.mockResolvedValue([]);
   mocks.state.mockReset();
   mocks.state.mockResolvedValue(null);
   mocks.fence.mockReset();
@@ -273,6 +277,47 @@ it("WP-2423 (2026-10-16 v15): a full page with earlier-day Orders holding stock 
   expect(new Set([...first.items, ...second.items].map((item) => item.orderReference)).size).toBe(
     80,
   );
+});
+
+it("WP-2423 (2026-11-03): an accepted pickup of an earlier day is listed with today's without holding stock", async () => {
+  mocks.cancelled.mockResolvedValue({ phase: "Cancelled", orderVersion: 2 });
+  mocks.carried.mockResolvedValue([]);
+  mocks.earlierOpen.mockResolvedValue([id(100)]);
+  mocks.list.mockImplementation(
+    async (input: { onlyOrderReference?: string; excludeOrderReferences?: string[] }) =>
+      input.onlyOrderReference !== undefined
+        ? { items: [indexItem(100, "2026-10-14")], nextAfterOrderReference: null }
+        : {
+            items: [indexItem(101, "2026-10-15")].filter(
+              (item) => !(input.excludeOrderReferences ?? []).includes(item.orderReference),
+            ),
+            nextAfterOrderReference: null,
+          },
+  );
+  const run = createMerchantOrderQueueRead({
+    transactions: {
+      run: async (work) => work({ query: async () => ({ rows: [], rowCount: 0 }) }),
+    },
+    authorize: async () => scope,
+    quoteVersion: 1,
+    now: () => "2026-10-16T06:00:00.000Z",
+    today: async () => ({ businessDate: "2026-10-15", startsAt: "2026-10-15T08:00:00.000Z" }),
+  });
+  const view = await run({ sessionCookie: "synthetic", afterOrderReference: null, limit: 50 });
+  const [earlier, todays] = view.items;
+  expect(earlier).toMatchObject({
+    orderReference: id(100),
+    earlierDay: true,
+    earlierOpenPickup: true,
+    businessDate: "2026-10-14",
+    listedBusinessDate: "2026-10-15",
+    heldStock: null,
+  });
+  expect(todays).toMatchObject({ orderReference: id(101), earlierOpenPickup: false });
+  // An unreadable answer never blanks the Orders page.
+  mocks.earlierOpen.mockRejectedValue(new Error("unavailable"));
+  const without = await run({ sessionCookie: "synthetic", afterOrderReference: null, limit: 50 });
+  expect(without.items.map((item) => item.orderReference)).toEqual([id(101)]);
 });
 
 it("WP-2423: counts a table's items ready to serve in any round, as the Tables close dialog does", async () => {

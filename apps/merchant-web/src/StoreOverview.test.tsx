@@ -40,6 +40,7 @@ describe("WP-2423 P2 store overview", () => {
     expect(summarizeOrders(queue)).toEqual({
       open: 3,
       awaitingAcceptance: 1,
+      earlierUnfinished: 0,
       awaitingRounds: 1,
       urgentRounds: 0,
       // The fixture's only Ready order is a pickup; pickup readiness is counted from the pickup queue.
@@ -109,6 +110,13 @@ describe("WP-2423 P2 store overview", () => {
     const queue = parseCurrentOrderQueue({ ...fixture, items: [table, ready] }, null);
     const summary = summarizeOrders(queue, now);
     expect(summary).toMatchObject({ awaitingAcceptance: 1, awaitingRounds: 2, urgentRounds: 1 });
+    // WP-2423 (2026-11-03): what the kitchen never finished; made ones are on Pickup's own count.
+    const earlier = (kitchenPhase: "Ready" | null) =>
+      queue.items.slice(0, 1).map((order) => ({ ...order, earlierOpenPickup: true, kitchenPhase }));
+    expect(
+      summarizeOrders({ ...queue, items: [...earlier(null), ...earlier("Ready")] }, now)
+        .earlierUnfinished,
+    ).toBe(1);
     expect(
       awaitingAcceptanceText({
         orders: summary.awaitingAcceptance,
@@ -234,6 +242,7 @@ describe("WP-2423 P2 store overview", () => {
               value: {
                 open: 50,
                 awaitingAcceptance: 4,
+                earlierUnfinished: 0,
                 awaitingRounds: 4,
                 urgentRounds: 0,
                 readyToServe: 2,
@@ -298,6 +307,7 @@ describe("WP-2423 P2 store overview", () => {
               value: {
                 open: 3,
                 awaitingAcceptance: 1,
+                earlierUnfinished: 0,
                 awaitingRounds: 1,
                 urgentRounds: 0,
                 readyToServe: 0,
@@ -347,6 +357,7 @@ describe("WP-2423 P2 store overview", () => {
               value: {
                 open: 5,
                 awaitingAcceptance: 0,
+                earlierUnfinished: 0,
                 awaitingRounds: 0,
                 urgentRounds: 0,
                 readyToServe: 0,
@@ -593,6 +604,7 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
         value: {
           open: 2,
           awaitingAcceptance: 0,
+          earlierUnfinished: 0,
           awaitingRounds: 0,
           urgentRounds: 0,
           readyToServe: 0,
@@ -694,6 +706,7 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
   const orders = {
     open: 3,
     awaitingAcceptance: 1,
+    earlierUnfinished: 0,
     awaitingRounds: 0,
     urgentRounds: 0,
     readyToServe: 0,

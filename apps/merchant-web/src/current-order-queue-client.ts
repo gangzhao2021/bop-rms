@@ -441,6 +441,10 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 (2026-10-16): stock still set aside for an earlier-day Order (absent from an older server).
     const withHeldStock =
       value !== null && typeof value === "object" && Object.hasOwn(value, "heldStock");
+    // WP-2423 (2026-11-03): an accepted pickup of an earlier day that never ended (absent from an
+    // older server).
+    const withEarlierOpen =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "earlierOpenPickup");
     // WP-2423 item 8 ⑤: a dine-in Order's table session (absent from an older server).
     const withSession =
       value !== null && typeof value === "object" && Object.hasOwn(value, "diningSessionReference");
@@ -469,6 +473,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       ...(withRemaking ? ["remakingItemCount"] : []),
       ...(withKitchen ? ["kitchenPhase"] : []),
       ...(withHeldStock ? ["heldStock"] : []),
+      ...(withEarlierOpen ? ["earlierOpenPickup"] : []),
       ...(withSession ? ["diningSessionReference"] : []),
       ...(withCounter ? ["counter"] : []),
       ...(withPaidOnline ? ["paidOnline"] : []),
@@ -574,6 +579,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     const submittedAt = instant(item.submittedAt),
       observedAt = instant(item.observedAt);
     const heldStock = withHeldStock ? parseHeldStock(item.heldStock) : null;
+    const earlierOpenPickup = withEarlierOpen ? item.earlierOpenPickup : false;
+    if (
+      typeof earlierOpenPickup !== "boolean" ||
+      (earlierOpenPickup && item.orderType !== "Pickup")
+    )
+      return fail();
     const summary = withSummary ? parseOrderSummary(item.summary, item.orderType) : null;
     if (observedAt < submittedAt) return fail();
     // WP-2423 Q1: only a paid pickup still awaiting acceptance has a deadline.
@@ -852,6 +863,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
        * aside — Open (still to make and hand over, or cancel) or Ended (only the stock is left).
        */
       heldStock,
+      /** WP-2423 (2026-11-03): an accepted pickup of an earlier day that never ended. */
+      earlierOpenPickup,
       /** WP-2423 item 8 ⑤: the table's session of a dine-in Order (which phone sent each round). */
       diningSessionReference:
         !withSession || item.diningSessionReference === null || item.orderType !== "DineIn"
