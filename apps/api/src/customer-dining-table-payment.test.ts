@@ -61,7 +61,17 @@ async function setup() {
     }),
     handoff: vi.fn(),
     ownAttempt: vi.fn(),
-    settledReceipt: vi.fn().mockResolvedValue({ bill, attempt: null }),
+    settledReceipt: vi.fn().mockResolvedValue({
+      bill: {
+        ...bill,
+        rounds: bill.rounds.map((round) => ({
+          ...round,
+          fromTableLabel: null,
+          items: round.items.map((item) => ({ ...item, reduction: null })),
+        })),
+      },
+      attempt: null,
+    }),
   };
   const handler = new CustomerDiningTablePaymentHandler({
     allowedOrigin: "https://pilot.example",
