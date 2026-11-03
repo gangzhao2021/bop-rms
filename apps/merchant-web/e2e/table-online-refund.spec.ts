@@ -114,8 +114,9 @@ test("@production who can't refund is told so instead of being offered the form"
 }) => {
   await orderPage(page, () => ({
     orderReference: id(1),
-    payment: { ...payment, canRefund: false },
+    payment,
     parts: [],
+    canRefund: false,
   }));
   await page.goto("/operations/orders");
   await expect(page.getByText("Refunds are made by a manager.")).toBeVisible();

@@ -750,9 +750,27 @@ fieldset.store-features__modules {
   display: grid;
   gap: var(--bop-space-1);
 }
-.member-points__rules input {
+.member-points__rules input,
+.member-points__rules select {
   width: 100%;
+  min-width: 0;
   min-height: 44px;
+}
+.member-points__rules label {
+  min-width: 0;
+}
+.member-points__rules > h3,
+.member-points__rules > p,
+.member-points__rules > ul,
+.member-points__rules > [role="group"] {
+  grid-column: 1 / -1;
+  margin-block: 0;
+}
+.member-points__rules > [role="group"] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--bop-space-3);
+  align-items: end;
 }
 .member-points__members {
   width: 100%;

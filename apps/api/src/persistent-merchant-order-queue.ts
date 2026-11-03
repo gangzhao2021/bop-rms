@@ -752,6 +752,11 @@ export function createPersistentMerchantOrderQueue(options: {
                 businessTransaction,
                 payLaterOrders,
               );
+              const writtenOff = new Set(
+                (await tableStore.listWriteOffsByOrders(businessTransaction, payLaterOrders)).map(
+                  (entry) => String(entry.orderReference),
+                ),
+              );
               // WP-2423 item 8 ④: a split bill counts as paid once every part of its split is.
               const splitOrders = [
                 ...new Set(
@@ -790,6 +795,11 @@ export function createPersistentMerchantOrderQueue(options: {
                 ]);
               // The table's bill on the Orders list: what it paid, else what its rounds come to.
               for (const order of payLaterOrders) {
+                // The guests left and a manager wrote it off: nothing is waiting to be paid.
+                if (writtenOff.has(order)) {
+                  tableBills.set(order, { totalMinor: "0", paid: null });
+                  continue;
+                }
                 const settlement = settlements.find(
                   (entry) => String(entry.orderReference) === order && entry.part === null,
                 );

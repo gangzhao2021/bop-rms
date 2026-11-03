@@ -423,8 +423,10 @@ export function TableCheckout({
                           // WP-2423 item 8 ① segment 2: what a manager took off this dish.
                           <span className="table-checkout__comp">
                             {" · "}
-                            {compedText(item.reduction.kind, item.reduction.percent)} −
-                            {cad(item.reduction.amountMinor)}
+                            {item.reduction.points === true
+                              ? t("Points used")
+                              : compedText(item.reduction.kind, item.reduction.percent)}{" "}
+                            −{cad(item.reduction.amountMinor)}
                           </span>
                         ) : null}
                       </span>

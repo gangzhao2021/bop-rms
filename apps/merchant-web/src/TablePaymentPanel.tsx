@@ -120,22 +120,26 @@ const parseOne = (value: unknown): TablePayment => {
       ),
     ),
     refundableMinor: amount(p.refundableMinor),
-    canRefund: p.canRefund !== false,
+    canRefund: true,
   });
 };
 
 export function parseTablePayment(value: unknown): TablePayment | null {
-  const raw = (value ?? {}) as { payment?: unknown };
-  return raw.payment === null || raw.payment === undefined ? null : parseOne(raw.payment);
+  const raw = (value ?? {}) as { payment?: unknown; canRefund?: unknown };
+  return raw.payment === null || raw.payment === undefined
+    ? null
+    : { ...parseOne(raw.payment), canRefund: raw.canRefund !== false };
 }
 
 /** The whole table's payment, or one per paid part of a split bill. */
 export function parseTablePayments(value: unknown): readonly TablePayment[] {
-  const raw = (value ?? {}) as { parts?: unknown };
+  const raw = (value ?? {}) as { parts?: unknown; canRefund?: unknown };
   const whole = parseTablePayment(value);
   return Object.freeze([
     ...(whole === null ? [] : [whole]),
-    ...(Array.isArray(raw.parts) ? raw.parts.map(parseOne) : []),
+    ...(Array.isArray(raw.parts)
+      ? raw.parts.map((part) => ({ ...parseOne(part), canRefund: raw.canRefund !== false }))
+      : []),
   ]);
 }
 

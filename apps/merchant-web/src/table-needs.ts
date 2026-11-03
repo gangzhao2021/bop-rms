@@ -176,6 +176,15 @@ export function tableNeed(
         detail: cad(order.bill.paid.amountMinor),
         step: null,
       };
+    // Points or comps took off the whole bill, or a manager wrote it off.
+    if (order?.bill?.totalMinor === "0")
+      return {
+        tone: "done",
+        rank: 4,
+        words: t("Nothing to pay · close when the guests leave"),
+        detail: null,
+        step: null,
+      };
     return {
       tone: "action",
       rank: 3,

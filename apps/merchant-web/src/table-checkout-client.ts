@@ -50,6 +50,8 @@ export interface TableBill {
         readonly kind: "Comp" | "Percent" | "Amount";
         readonly percent: number | null;
         readonly amountMinor: string;
+        /** Taken off with a guest's points, not by staff. */
+        readonly points?: boolean;
       };
     }[];
     readonly subtotalMinor: string;
@@ -399,6 +401,7 @@ function reductionOf(value: unknown) {
     kind: entry.kind,
     percent: entry.percent as number | null,
     amountMinor: amount(entry.amountMinor),
+    ...(entry.points === true ? { points: true } : {}),
   });
 }
 

@@ -56,6 +56,14 @@ it("WP-2423 item 8 ①: names what each table needs, with its one next step", ()
       now,
     ),
   ).toMatchObject({ words: "Waiting for payment", detail: "$94.92", step: "TakePayment" });
+  // Points or comps took off everything, or a manager wrote it off: nothing to take.
+  expect(
+    tableNeed(
+      table(8, { session: { phase: "Closing", version: 3, orderReference: id(208) } }),
+      facts({ bill: { totalMinor: "0", paid: null } }),
+      now,
+    ),
+  ).toMatchObject({ words: "Nothing to pay · close when the guests leave", step: null });
   expect(
     tableNeed(
       table(8, { session: { phase: "Closing", version: 3, orderReference: id(208) } }),

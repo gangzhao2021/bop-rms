@@ -5941,6 +5941,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid at the table · card machine": "已在桌上付清 · 刷卡机",
   "Written off": "已核销",
   "Refunds are made by a manager.": "退款由店长操作。",
+  "Nothing to pay · close when the guests leave": "无需付款 · 客人离开后关台",
+  "Points used": "已用积分",
   "No dishes yet. Guests can still use points on the bill.":
     "还没有可换的菜。客人仍可用积分抵账单。",
   "Remove {dish}": "移除 {dish}",
