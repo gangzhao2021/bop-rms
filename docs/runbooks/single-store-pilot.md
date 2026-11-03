@@ -2812,6 +2812,15 @@ minutes. Without a planned-update window that raises "Customer ordering page is 
 (urgent) on the Home and on every outbound channel. Every deploy or planned restart therefore
 opens a window first and closes it once the pages load:
 
+**One deploy at a time.** Every build uses the same image name, `bop-rms-pilot:local`, so when two
+people or sessions deploy together, a restart can run the other one's image (2026-11-03). Before
+building, take the lock from the main checkout: `mkdir .local/pilot-v15-deploy.lock`. `mkdir`
+refuses if the lock exists, which means someone else is deploying: wait, and do not build. Write
+who holds it and the revision into `.local/pilot-v15-deploy.lock/owner`. Release it with
+`rm -r .local/pilot-v15-deploy.lock` after the health check, including after a failed deploy or a
+rollback. Remove someone else's lock only when it is over an hour old, no build is running
+(`pgrep -fl 'docker.*build'` finds nothing) and `status` shows no planned-update window in force.
+
 1. **Build first, while the old version keeps serving** (a build can take over 10 minutes and the
    window is at most 15): `docker compose -f compose.pilot.yaml build pilot`.
    The build shares CPU and memory with the running store, so never build on a busy store host. On

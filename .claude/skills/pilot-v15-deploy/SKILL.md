@@ -32,6 +32,19 @@ Shell variables do not persist between Bash calls here, so prefix each command w
 `PILOT_RUNTIME_DIRECTORY` the compose default would point at old data; without
 `PILOT_OFFSITE_DIR` compose refuses to start (by design).
 
+## One deploy at a time
+
+Every build uses the tag `bop-rms-pilot:local`, so a parallel deploy can restart onto the other
+session's image (2026-11-03). Take the lock in the main checkout before tagging or building:
+
+```bash
+mkdir .local/pilot-v15-deploy.lock && echo "<session> <sha> $(date -u +%FT%TZ)" > .local/pilot-v15-deploy.lock/owner
+```
+
+If `mkdir` refuses, another deploy is running: read `owner` and wait; do not build. Release with
+`rm -r .local/pilot-v15-deploy.lock` after step 7, also after a failed deploy or a rollback. The
+stale-lock rule is in the runbook.
+
 ## Steps
 
 1. **Pre-checks.** Working tree committed; note the revision `<sha>`. Tag the current image so
