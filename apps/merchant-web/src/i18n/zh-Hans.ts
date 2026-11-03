@@ -3778,7 +3778,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start dining session": "开始堂食会话",
   "Start from": "起始",
   "Start kitchen display": "启动后厨屏",
-  "Start kitchen display here": "在此启动后厨屏",
+  "Sign out and start kitchen display": "退出并启动后厨屏",
   "Start opening count": "开始期初盘点",
   "Start remake": "开始重做",
   "Start selling": "开始售卖",
@@ -5013,8 +5013,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你和{who}都需要再次用验证器验证码确认，然后批准。",
   "You are editing your own change (version {configurationVersion}, {value}). Saving again replaces it; it then needs to be sent and approved again.":
     "你正在编辑你自己的更改（版本 {configurationVersion}，{value}）。再次保存会替换它；之后需要重新提交并批准。",
-  "You are signed in for the counter or office, so this screen cannot work kitchen steps. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.":
-    '你是以柜台或办公室身份登录的，因此此屏幕不能操作后厨步骤。要在本设备上处理票据，请启动后厨屏：这会让你在此退出，然后为自己选择"启动后厨屏"。',
   "You asked for this refund and you are the only person who can approve refunds at this store (sole operator). Check it before approving it yourself: order {orderNumber}, {amountMinor}, {reasonCode}. It will be recorded as approved by you alone and shown at day-end settlement.":
     "这笔退款由你申请，而你是本店唯一可以批准退款的人（独立经营者）。自行批准前请先核对：订单 {orderNumber}，{amountMinor}，{reasonCode}。它会被记录为由你单独批准，并在日结中显示。",
   "You asked for this refund. Another owner or finance member must approve it.":
@@ -5746,7 +5744,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // Owner 2026-10-25: one-line page intros; the detail behind "More about this".
   "More about this": "了解更多",
   "Shared by every Store of the Brand.": "品牌下所有门店共用。",
-  "This sign-in cannot work kitchen steps.": "当前登录身份不能操作后厨步骤。",
   "To change prices, start a new price book and publish it.": "要改价，请新建一个价目表并发布。",
   "Mark a size sold out when it runs out.": "某个规格卖完时，把它标为售罄。",
   "What customers can order at this Store right now.": "顾客此刻在本店可以点什么。",

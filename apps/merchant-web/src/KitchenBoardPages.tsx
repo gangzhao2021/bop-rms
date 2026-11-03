@@ -1,4 +1,3 @@
-import { PageIntro } from "./PageIntro.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { listSeparator, t, saidTable, systemText } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
@@ -590,15 +589,9 @@ function KitchenBoardLock({
   if (operatorStatus === "Unverified")
     return (
       <div className="kitchen-board-lock">
+        {/* Owner 2026-11-03: the button says it signs out, so nothing needs explaining behind "more". */}
         <StatePanel heading={t("View only on this screen")} tone="neutral" status>
-          <PageIntro summary={t("This sign-in cannot work kitchen steps.")}>
-            <p>
-              {t(
-                "You are signed in for the counter or office, so this screen cannot work kitchen steps. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.",
-              )}
-            </p>
-          </PageIntro>
-          <StaffSwitchButton label={t("Start kitchen display here")} />
+          <StaffSwitchButton label={t("Sign out and start kitchen display")} />
         </StatePanel>
       </div>
     );
@@ -1689,7 +1682,13 @@ export function KitchenBoardScreen({
         aria-describedby={`kitchen-reference-search-hint-${layout}`}
         placeholder={t("Order number or table")}
         value={orderInput}
-        onChange={(event) => setOrderInput(event.currentTarget.value)}
+        onChange={(event) => {
+          const value = event.currentTarget.value;
+          setOrderInput(value);
+          // Owner 2026-11-03: the row finds as staff type, so a touch screen needs no key or button.
+          if (layout === "desktop")
+            setOrderSearch(kitchenOrderSearchTerm(value) === null ? null : value.trim());
+        }}
         maxLength={40}
         autoComplete="off"
         spellCheck={false}
@@ -1897,6 +1896,12 @@ export function KitchenBoardScreen({
                 <span className="kitchen-board-autorefresh">{t("Auto-refresh every 10 s")}</span>
               ) : null}
             </p>
+            {!stale && readOnly && view.operatorStatus === "Unverified" ? (
+              <KitchenBoardLock
+                operatorStatus={view.operatorStatus}
+                freshnessStatus={view.freshnessStatus}
+              />
+            ) : null}
           </div>
           <div className="kitchen-board-heading__actions">
             {/* Owner 2026-10-26: recently finished sits in the top bar, so a wrong dish is found
@@ -1996,25 +2001,16 @@ export function KitchenBoardScreen({
             freshnessStatus={view.freshnessStatus}
           />
         ) : null}
-        {/* Owner 2026-11-03: "view only" is a quiet fact at the end of the filter row, not a row. */}
-        <div className="kitchen-toolbar-row">
-          <div className="kitchen-queue-bar">
-            <header className="kitchen-queue-heading">
-              <h2 id="kitchen-queue-heading" tabIndex={-1}>
-                {t("Queue")}
-              </h2>
-            </header>
-            <div className="kitchen-filter-toolbar">
-              {renderOrderSearch("desktop")}
-              {renderFilters("desktop")}
-            </div>
+        <div className="kitchen-queue-bar">
+          <header className="kitchen-queue-heading">
+            <h2 id="kitchen-queue-heading" tabIndex={-1}>
+              {t("Queue")}
+            </h2>
+          </header>
+          <div className="kitchen-filter-toolbar">
+            {renderOrderSearch("desktop")}
+            {renderFilters("desktop")}
           </div>
-          {!stale && readOnly && view.operatorStatus === "Unverified" ? (
-            <KitchenBoardLock
-              operatorStatus={view.operatorStatus}
-              freshnessStatus={view.freshnessStatus}
-            />
-          ) : null}
         </div>
         <dialog
           className="kitchen-filter-sheet"
@@ -3027,7 +3023,7 @@ export function KitchenBoardPage(
   }, []);
   const named = Boolean(props.csrf && props.storeReference);
   // A counter or office sign-in has no kitchen shift to hand over; its board offers
-  // "Start kitchen display here" instead (WP-2423).
+  // "Sign out and start kitchen display" instead (WP-2423).
   const [operator, setOperator] = useState<KitchenBoardView["operatorStatus"] | null>(
     props.knownOperator ?? null,
   );

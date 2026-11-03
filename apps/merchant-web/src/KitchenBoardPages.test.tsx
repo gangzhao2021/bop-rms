@@ -576,8 +576,7 @@ it("does not present permission as proof of an active named operator session", (
   // WP-2423: a counter/office sign-in sees the board and is told how to start the kitchen display.
   expect(html).toContain('data-operator="Unverified">View only');
   expect(html).toContain("View only on this screen");
-  expect(html).toContain("You are signed in for the counter or office");
-  expect(html).toContain(">Start kitchen display here</button>");
+  expect(html).toContain(">Sign out and start kitchen display</button>");
   expect(html).toContain('disabled=""');
   expect(html).not.toContain("Unverified operator");
   expect(html).not.toContain("KDS");

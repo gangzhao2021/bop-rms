@@ -226,7 +226,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.getByText("View only", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Start kitchen display here", exact: true }),
+    page.getByRole("button", { name: "Sign out and start kitchen display", exact: true }),
   ).toBeEnabled();
   await expect(page.getByRole("button", { name: "Hand over / sign out" })).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText("KDS");
@@ -337,10 +337,6 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
           .filter((track) => Number.parseFloat(track) > 0).length,
     );
     expect(mobileColumns).toBe(1);
-    const lockNotice = page.getByRole("heading", { name: "View only on this screen" });
-    expect((await filterToggle.boundingBox())?.y).toBeLessThan(
-      (await lockNotice.boundingBox())?.y ?? 0,
-    );
     const filterSheet = page.getByRole("dialog", { name: "Filter Kitchen work" });
     await expect(filterSheet).not.toBeVisible();
     await tabTo(page, filterToggle);
@@ -454,7 +450,6 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     page.locator(".kitchen-reference-search--desktop").getByRole("button", { name: "Find" }),
   ).toHaveCount(0);
   await orderInput.fill("Order 14");
-  await orderInput.press("Enter");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
   await expect(orderInput).toHaveValue("Order 14");
@@ -488,7 +483,6 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
   await page.getByRole("button", { name: "Clear search" }).click();
   await orderInput.fill("99");
-  await orderInput.press("Enter");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(0);
   await expect(
     page.getByText(
@@ -892,7 +886,7 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
     // (Owner 2026-11-03).
     await expect(card("Synthetic held")).toHaveCSS("border-left-width", "0px");
     const late = page.locator('.kitchen-ticket[data-age="late"]').first();
-    await expect(late).toHaveCSS("border-top-width", "1px");
+    await expect(late).toHaveCSS("border-top-width", "0px");
     await expect(late.locator(".kitchen-ticket__timer")).toHaveCSS("color", "rgb(191, 85, 82)");
     // The active state is the one coloured tag (no box, Owner 2026-10-25); every tag carries its
     // label.
@@ -1042,7 +1036,9 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   await expect(accept).toBeEnabled();
   // WP-2423: the kitchen display sign-in hands over; it is not asked to start the display again.
   await expect(page.getByRole("button", { name: "Hand over / sign out" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start kitchen display here" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Sign out and start kitchen display" }),
+  ).toHaveCount(0);
   await expect(page.getByText("Kitchen display", { exact: true }).first()).toBeVisible();
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
@@ -1738,7 +1734,9 @@ test("@production a view-only Kitchen starts the kitchen display on this device"
       );
     await page.screenshot({ path: `test-results/kitchen-view-only-${width}.png`, fullPage: true });
   }
-  await page.getByRole("button", { name: "Start kitchen display here", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Sign out and start kitchen display", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/internal-test\/staff$/u);
   expect(loggedOut).toBe(1);
 });

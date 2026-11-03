@@ -807,16 +807,6 @@
 
 /* ---- Owner 2026-11-03 ("还没做好我都已经觉得不好看了"), after a design critique: title, one filter
    row, then the work. Everything on the page lines up on the left edge; nothing here has a box. */
-.kitchen-toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px 24px;
-}
-.kitchen-toolbar-row:empty {
-  display: none;
-}
 .kitchen-shell--workspace .kitchen-board-heading__actions > button.workspace-page__language {
   color: var(--bop-color-text-muted);
   font-weight: 400;
@@ -944,4 +934,114 @@
 }
 .kitchen-shell--workspace .kitchen-board-empty .bop-state-card p {
   font-size: 14px;
+}
+
+/* ---- Owner 2026-11-03 ("不知道是线条太多还是排得太密"): in the back office the top of the board has
+   no rules and room to breathe: the title, one quiet line of facts, then a row of plain filters.
+   Blue is left for the one thing this screen asks of a viewer. */
+.kitchen-shell--workspace .kitchen-board-workspace {
+  gap: 28px;
+}
+.kitchen-shell--workspace .kitchen-board-heading {
+  align-items: flex-start;
+  gap: 8px 32px;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+.kitchen-shell--workspace .kitchen-board-heading > div:first-child {
+  display: flex;
+  flex: 1 1 18rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  min-width: 0;
+}
+.kitchen-shell--workspace .kitchen-board-heading h1 {
+  flex: 0 0 100%;
+  font-size: 24px;
+  font-weight: 600;
+}
+.kitchen-shell--workspace .kitchen-board-freshness,
+.kitchen-shell--workspace .kitchen-board-freshness > *,
+.kitchen-shell--workspace .kitchen-board-freshness .kitchen-queue-count {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-shell--workspace .kitchen-board-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+.kitchen-shell--workspace .kitchen-board-heading .kitchen-board-lock {
+  margin: 0;
+}
+.kitchen-shell--workspace .kitchen-board-heading .staff-session__switch button {
+  margin-block: -14px;
+}
+.kitchen-shell--workspace .kitchen-board-heading__actions {
+  gap: 0 20px;
+}
+.kitchen-shell--workspace .kitchen-board-heading__actions > :is(button, a) {
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-shell--workspace .kitchen-board-heading__actions > button.kitchen-sound-toggle,
+.kitchen-shell--workspace .kitchen-board-heading__actions > button.workspace-page__language {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+/* Filters: words, not fields. The line returns on focus, where it says where typing goes. */
+.workspace-layout.workspace-layout
+  .kitchen-shell--workspace
+  .kitchen-filter-toolbar
+  :is(input, select):not(:focus) {
+  border-bottom-color: transparent;
+}
+.workspace-layout.workspace-layout .kitchen-shell--workspace .kitchen-filter-toolbar input {
+  padding-inline-start: 24px;
+  background: var(--bop-color-surface-default)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23767676' stroke-width='1.5'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='m11 11 3.5 3.5'/%3E%3C/svg%3E")
+    no-repeat left center;
+}
+.kitchen-shell--workspace .kitchen-filter-toolbar {
+  gap: 0 24px;
+}
+.kitchen-shell--workspace .kitchen-filter-toolbar .kitchen-board-filters {
+  gap: 0 20px;
+}
+.kitchen-shell--workspace .kitchen-filter-toggle {
+  justify-content: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 14px;
+}
+.kitchen-shell--workspace .kitchen-board-workspace .kitchen-earlier-days summary {
+  min-height: 32px;
+}
+/* An empty remake lane holds no space, so the gaps down the page are even. */
+.kitchen-board-remakes:empty {
+  display: none;
+}
+.kitchen-shell--workspace .kitchen-board-heading .staff-session__switch button {
+  padding-inline: 0;
+}
+@media (max-width: 767px) {
+  .kitchen-shell--workspace .kitchen-board-heading__actions {
+    display: flex;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    margin-inline-start: 0;
+  }
+  .kitchen-shell--workspace .kitchen-board-heading__actions > :is(button, a) {
+    flex: 0 0 auto;
+    padding-inline: 0;
+  }
+}
+/* Tickets separate by space here; the display keeps its rule between rows read from a distance. */
+.kitchen-shell--workspace .kitchen-order-group.kitchen-ticket.kitchen-ticket {
+  border-top: 0;
 }
