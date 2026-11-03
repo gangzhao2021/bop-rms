@@ -56,7 +56,12 @@ it.skipIf(process.platform !== "linux")(
       await expect(fs.lstat(store + "/kitchen-queue-worker.pid")).rejects.toMatchObject({
         code: "ENOENT",
       });
-      expect((await fs.lstat(store + "/business-worker.restart-lock")).isDirectory()).toBe(true);
+      await expect(fs.lstat(store + "/business-worker.restart-lock")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(
+        (await fs.lstat(runtimeDirectory + "/business-worker.restart-lock")).isDirectory(),
+      ).toBe(true);
       await fs.lstat(runtimeDirectory + "/maintenance.lock");
       await fs.rm(runtimeDirectory + "/maintenance.lock");
       // After: no PID names it, so it is confirmed stopped (start then launches it).
