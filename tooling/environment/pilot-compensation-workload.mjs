@@ -41,10 +41,13 @@ export async function createOptionalCompensationWorkloads({
       execute: (value) => service.execute(value),
       afterExecute: (candidate, result) => service.afterExecute(candidate, result),
       recordFailure: (candidate, code) => service.recordFailure(candidate, code),
+      ...(typeof service.stillWaiting === "function"
+        ? { stillWaiting: (candidate, result) => service.stillWaiting(candidate, result) }
+        : {}),
       pageSize: 5,
       pollIntervalMs: 5000,
       // An unchanged open case is rechecked at least every minute, so a case closes within a minute
-      // of the Store recording its operations reconciliation.
+      // of the Store recording its operations reconciliation (by a read while it only waits).
       unchangedBackoffMaxMs: 60_000,
       drainDeadlineMs: 25000,
       supervision: supervisedCycleFailures,

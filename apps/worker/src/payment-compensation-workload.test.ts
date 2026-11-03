@@ -198,3 +198,69 @@ it("backs off a candidate whose result is unchanged and resets when it changes",
   expect(changed).toBe(unchangedRuns + 2);
   await workload.stop();
 });
+
+it("rechecks a waiting candidate by a read alone, and executes as soon as its next step arrives", async () => {
+  vi.useFakeTimers();
+  let clock = 0;
+  const candidate = { dispositionReference: "a" };
+  let waiting = true;
+  const stillWaiting = vi.fn(async () => waiting);
+  const execute = vi.fn(async () => ({ status: "AwaitingOperationsReconciliation" }));
+  const workload = createPaymentCompensationWorkload({
+    discover: async () => ({ candidates: [candidate], nextAfterDispositionReference: null }),
+    execute,
+    stillWaiting,
+    recordFailure: async () => undefined,
+    pageSize: 5,
+    pollIntervalMs: 10,
+    drainDeadlineMs: 100,
+    unchangedBackoffMaxMs: 40,
+    fullRecheckMs: 1000,
+    now: () => clock,
+  });
+  await workload.start();
+  for (clock = 10; clock <= 500; clock += 10) await vi.advanceTimersByTimeAsync(10);
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(stillWaiting.mock.calls.length).toBeGreaterThan(5);
+  // The Store recorded it: the next due check executes.
+  waiting = false;
+  for (; clock <= 600; clock += 10) await vi.advanceTimersByTimeAsync(10);
+  expect(execute.mock.calls.length).toBeGreaterThan(1);
+  // A safety full recheck still runs, however long it has waited.
+  waiting = true;
+  const before = execute.mock.calls.length;
+  for (; clock <= 2000; clock += 10) await vi.advanceTimersByTimeAsync(10);
+  expect(execute.mock.calls.length).toBe(before + 1);
+  await workload.stop();
+  vi.useRealTimers();
+});
+
+it("retries a failing candidate with a doubling delay, and records each failure", async () => {
+  vi.useFakeTimers();
+  let clock = 0;
+  const candidate = { dispositionReference: "a" };
+  const discover = vi.fn(async () => ({
+    candidates: [candidate],
+    nextAfterDispositionReference: null,
+  }));
+  const execute = vi.fn(async () => {
+    throw new Error("still failing");
+  });
+  const recordFailure = vi.fn(async () => undefined);
+  const workload = createPaymentCompensationWorkload({
+    discover,
+    execute,
+    recordFailure,
+    pageSize: 5,
+    pollIntervalMs: 10,
+    drainDeadlineMs: 100,
+    unchangedBackoffMaxMs: 80,
+    now: () => clock,
+  });
+  await workload.start();
+  for (clock = 10; clock <= 800; clock += 10) await vi.advanceTimersByTimeAsync(10);
+  expect(execute.mock.calls.length).toBeLessThan(discover.mock.calls.length / 3);
+  expect(recordFailure).toHaveBeenCalledTimes(execute.mock.calls.length);
+  await workload.stop();
+  vi.useRealTimers();
+});

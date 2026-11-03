@@ -4,7 +4,9 @@ import { createOutboxWorkload, type OutboxWorkloadSnapshot } from "./outbox-work
  * Cursors are scan progress only: restart/full-round reset replays durable owner work.
  * A candidate whose result did not change is re-executed with doubling delay (up to
  * `unchangedBackoffMaxMs`): an open case awaiting a person or the Provider is still rechecked, without
- * claiming a fresh lease on every poll. A changed result or a failure resets the delay.
+ * claiming a fresh lease on every poll. A changed result resets the delay. A failure is retried with
+ * the same doubling delay. While `stillWaiting` says a case's next step has not arrived, the recheck
+ * is that read alone: nothing is claimed or appended, except a full recheck every `fullRecheckMs`.
  */
 export function createPaymentCompensationWorkload<
   T extends { readonly dispositionReference: string },
@@ -30,6 +32,10 @@ export function createPaymentCompensationWorkload<
   readonly supervision?: Parameters<typeof createOutboxWorkload>[0]["supervision"];
   /** Longest delay before an unchanged candidate is executed again; default five minutes. */
   readonly unchangedBackoffMaxMs?: number;
+  /** A read only: true when nothing has arrived that executing this candidate could act on. */
+  readonly stillWaiting?: (candidate: T, result: unknown) => Promise<boolean>;
+  /** Longest time a waiting candidate goes without a full execution; default one hour. */
+  readonly fullRecheckMs?: number;
   /** Test seam: the clock (milliseconds). */
   readonly now?: () => number;
 }) {
@@ -45,7 +51,12 @@ export function createPaymentCompensationWorkload<
       typeof item === "bigint" ? String(item) : item,
     );
   /** Per candidate: the last result, its current delay and when it is due again. */
-  const settled = new Map<string, { result: string; waitMs: number; dueAt: number }>();
+  const settled = new Map<
+    string,
+    { result: string; value: unknown; waitMs: number; dueAt: number; executedAt: number }
+  >();
+  const failed = new Map<string, { waitMs: number; dueAt: number }>();
+  const fullRecheckMs = options.fullRecheckMs ?? 3_600_000;
   let seen = new Set<string>();
   let cursor: string | null = null,
     stopping = false;
@@ -83,6 +94,17 @@ export function createPaymentCompensationWorkload<
           seen.add(reference);
           const prior = settled.get(reference);
           if (prior !== undefined && now() < prior.dueAt) continue;
+          const failure = failed.get(reference);
+          if (failure !== undefined && now() < failure.dueAt) continue;
+          if (
+            prior !== undefined &&
+            options.stillWaiting !== undefined &&
+            now() - prior.executedAt < fullRecheckMs &&
+            (await options.stillWaiting(candidate, prior.value).catch(() => false))
+          ) {
+            prior.dueAt = now() + prior.waitMs;
+            continue;
+          }
           try {
             const result = await options.execute(candidate);
             await options.afterExecute?.(candidate, result);
@@ -91,9 +113,21 @@ export function createPaymentCompensationWorkload<
               prior?.result === key
                 ? Math.min(Math.max(prior.waitMs * 2, options.pollIntervalMs), backoffMax)
                 : 0;
-            settled.set(reference, { result: key, waitMs, dueAt: now() + waitMs });
+            settled.set(reference, {
+              result: key,
+              value: result,
+              waitMs,
+              dueAt: now() + waitMs,
+              executedAt: now(),
+            });
+            failed.delete(reference);
           } catch {
             settled.delete(reference);
+            const waitMs = Math.min(
+              Math.max((failure?.waitMs ?? 0) * 2, options.pollIntervalMs),
+              backoffMax,
+            );
+            failed.set(reference, { waitMs, dueAt: now() + waitMs });
             // Never forward raw Provider/errors to generic worker logging.
             await options.recordFailure(candidate, "COMPENSATION_EXECUTION_FAILED");
           }
@@ -105,6 +139,8 @@ export function createPaymentCompensationWorkload<
           if (cursor === null) {
             for (const reference of settled.keys())
               if (!seen.has(reference)) settled.delete(reference);
+            for (const reference of failed.keys())
+              if (!seen.has(reference)) failed.delete(reference);
             seen = new Set();
           }
         }

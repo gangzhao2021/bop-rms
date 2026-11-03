@@ -93,7 +93,35 @@ export function createInternalCompensationService({
       },
     ]),
   );
+  const operationsAccess = (identity) => ({
+    authorize: async (_tx, access) =>
+      active() &&
+      access.action === "Read" &&
+      access.actorReference === null &&
+      access.brandReference === scope.brandReference &&
+      access.storeReference === scope.storeReference &&
+      access.caseReference === identity.identities.case &&
+      access.purpose === "ReconcilePaidWithoutFulfillableOrder",
+    validateEvidence: async () => false,
+  });
   return Object.freeze({
+    /**
+     * v15 2026-11-03: a refunded case waits for the Store to record its reconciliation. While no
+     * receipt exists there is nothing to do, so it is checked by this read, without a lease.
+     */
+    async stillWaiting(value, result) {
+      if (!active() || result?.status !== "AwaitingOperationsReconciliation") return false;
+      const identity = createInternalCompensationIdentity(
+        parsePaidWithoutFulfillableOrderDisposition(value),
+        resources.now,
+      );
+      const receipt = await createPostgresPaymentCompensationOperationsStore({
+        ...operationsAccess(identity),
+        scope,
+        transactions: resources.transactions,
+      }).resolve({ compensationCaseReference: identity.identities.case });
+      return receipt === null;
+    },
     // WP-2423 Q7: discovery already leaves out payments taken on the Store's card machine.
     discover: candidates.discover,
     readReconciliationExceptions: createInternalReconciliationExceptions(resources),
@@ -108,9 +136,21 @@ export function createInternalCompensationService({
     async afterExecute(value) {
       const disposition = parsePaidWithoutFulfillableOrderDisposition(value);
       const identity = createInternalCompensationIdentity(disposition, resources.now);
-      const result = await project(disposition, identity.identities.case);
-      await receipt(disposition, identity.identities.case);
-      return result;
+      try {
+        const result = await project(disposition, identity.identities.case);
+        await receipt(disposition, identity.identities.case);
+        return result;
+      } catch (error) {
+        // v15 2026-11-03: the failure audit has no cause; its code (no data) goes to the log, once.
+        const code = String(error?.code ?? error?.message ?? "UNKNOWN");
+        if (/^[A-Z][A-Z0-9_]{2,79}$/u.test(code) && !reportedFailures.has(code)) {
+          reportedFailures.add(code);
+          console.error(
+            JSON.stringify({ event: "INTERNAL_COMPENSATION_AFTER_EXECUTE_FAILED", code }),
+          );
+        }
+        throw error;
+      }
     },
     async recordFailure(value, code) {
       if (code !== "COMPENSATION_EXECUTION_FAILED" || !active()) return deny();
@@ -147,17 +187,7 @@ export function createInternalCompensationService({
       )
         return deny();
       const identity = createInternalCompensationIdentity(disposition, resources.now);
-      const operations = {
-        authorize: async (_tx, access) =>
-          active() &&
-          access.action === "Read" &&
-          access.actorReference === null &&
-          access.brandReference === scope.brandReference &&
-          access.storeReference === scope.storeReference &&
-          access.caseReference === identity.identities.case &&
-          access.purpose === "ReconcilePaidWithoutFulfillableOrder",
-        validateEvidence: async () => false,
-      };
+      const operations = operationsAccess(identity);
       const receipts = createPostgresPaymentCompensationOperationsStore({
         ...operations,
         scope,
