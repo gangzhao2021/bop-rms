@@ -14,6 +14,8 @@ export async function prepareEntryOperatingPublication({
   binding,
   at,
   currentWindow = false,
+  /** The Store's own tax configuration, when a real Quote reads it (default: a synthetic one). */
+  taxConfigurationReference,
 }) {
   const id = (n) =>
     n === 90
@@ -39,7 +41,7 @@ export async function prepareEntryOperatingPublication({
     addressReference: id(5),
     contactReference: id(6),
     receiptReference: id(7),
-    taxConfigurationReference: id(8),
+    taxConfigurationReference: taxConfigurationReference ?? id(8),
     paymentConfigurationReference: id(9),
     capacityConfigurationReference: null,
     enabledServiceModes: ["DineIn", "Pickup"],

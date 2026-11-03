@@ -353,8 +353,11 @@ export function createMerchantDiningTeaCharge(options: {
       };
       // Fewer guests: take tea lines off (newest first) until no more than the guests are charged.
       let charged = state.open.reduce((sum, line) => sum + line.quantity, 0);
-      for (const line of [...state.open].reverse()) {
-        if (charged <= target) break;
+      // Newest line first, read again each time: a removal moves the Order's version, so the next
+      // line must carry the current one (v15 2026-11-03, a drop spanning two lines failed).
+      for (let left = state.open.length; left > 0 && charged > target; left -= 1) {
+        const line = state.open.at(-1);
+        if (line === undefined) break;
         const done = await step(() =>
           options.removeItems({
             sessionCookie: input.sessionCookie,

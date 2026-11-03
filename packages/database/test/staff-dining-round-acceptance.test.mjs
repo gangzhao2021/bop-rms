@@ -97,6 +97,8 @@ import { seedSubmissionInventoryStock } from "../test-support/submission-invento
 import { seedSubmissionInventoryRecipe } from "../test-support/submission-inventory-recipe.mjs";
 import { seedSubmissionInventoryWorkflow } from "../test-support/submission-inventory-workflow.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import { prepareRealStaffRoundStore } from "../test-support/real-staff-round-store.mjs";
+import { createPilotApiRole } from "../test-support/sole-operator-brand-gate.mjs";
 import {
   journeyRound,
   seedJourneyAcceptance,
@@ -189,10 +191,11 @@ async function withinBudget(label, work) {
  * Ordering's payment consumer reads it, and the "Entered by staff" marks on the order queue, the
  * kitchen and the guests' table view.
  *
- * Not covered here: the customer cart, sold-out, quote and checkout steps the command drives (the
- * same owner ports the customer acceptance tests run; their use by the command is unit-tested),
- * and the acceptance-to-kitchen-ticket step after payment (unchanged code behind the paid context
- * checked here, accepted in the dine-in journey and additional-round acceptance tests).
+ * This journey seeds its rounds, to reach the screens and the money after a round: its submission
+ * has test-only policies, and the command's pipeline is a Proxy that must not be touched. The next
+ * test drives the command itself. Not covered here: the acceptance-to-kitchen-ticket step after
+ * payment (unchanged code behind the paid context checked here, accepted in the dine-in journey and
+ * additional-round acceptance tests).
  */
 it("enters a dine-in round by staff, takes its card-machine payment and marks it on every screen", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_staff_round" }, async (context) => {
@@ -1346,6 +1349,209 @@ it("enters a dine-in round by staff, takes its card-machine payment and marks it
       signedIn.cookies = new Set();
       signedIn.scopeFor = null;
       for (const name of [api, worker]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 item 10: the real staff round command on a real Store. A party is seated; the pilot's own
+ * composition (createInternalCounterOrder, tooling/environment) takes the round through table QR
+ * entry, Join, Dining binding, the table's Cart, Quote v2 with tax, details, checkout, submission
+ * and tip, under the restricted API role holding the rendered pilot ACL. Then the card machine
+ * takes it through the dine-in payment admission. Only owner setup facts are seeded (see the helper).
+ */
+it("the real staff round command takes a round from table entry to the card machine", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_real_round" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_rr");
+    let store = null;
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api, paymentTiming: "PayFirst" });
+      const { soup, tableReference, reference } = store;
+      const rows = async (sql, values = []) => (await admin.query(sql, values)).rows;
+      const serverActor = id(0x710);
+      const server = await store.staff(serverActor, [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+      ]);
+      const tablesOnly = await store.staff(id(0x711), ["dining.operate"]);
+      const as = (who) => ({ sessionCookie: who.sessionCookie, csrf: who.csrf });
+      const line = (quantity, sellableReference = soup.skuReference, note = null) => ({
+        sellableReference,
+        quantity,
+        optionSelections: [],
+        note,
+      });
+      const send = async (who, command) =>
+        (await store.counterFor(who)).staffDiningRound({
+          ...as(who),
+          command: {
+            operationReference: reference(),
+            tableReference,
+            tip: { kind: "None" },
+            recordedAfterOutage: false,
+            ...command,
+          },
+        });
+      const counts = async () =>
+        (
+          await rows(
+            "SELECT (SELECT count(*)::int FROM rms_ordering.order_batch) AS batches,(SELECT count(*)::int FROM rms_ordering.staff_dining_round_entry) AS entries,(SELECT count(*)::int FROM rms_inventory.stock_reservation_version) AS reservations",
+          )
+        )[0];
+      const balance = async () =>
+        (await rows("SELECT on_hand,reserved,available FROM rms_inventory.stock_balance"))[0];
+      assert.equal((await store.seatTable(server)).status, "Issued");
+      const empty = await counts();
+
+      // Without the staff ordering permission nothing is touched.
+      await assert.rejects(send(tablesOnly, { lines: [line(1)] }), {
+        code: "STAFF_ROUND_PERMISSION_DENIED",
+      });
+      assert.deepEqual(await counts(), empty);
+
+      // The first round: priced by the Quote from the Owner's price, with 13 % tax and a 15 % tip,
+      // all integer minor units. The amount staff charge is its total.
+      const firstOperation = reference();
+      const firstLines = [line(2, soup.skuReference, "no onions")];
+      const first = await send(server, {
+        operationReference: firstOperation,
+        lines: firstLines,
+        tip: { kind: "Percent", percent: 15 },
+      });
+      assert.deepEqual(
+        [
+          first.status,
+          first.payLater,
+          first.recordedAfterOutage,
+          first.orderMinor,
+          first.tipMinor,
+          first.totalMinor,
+          first.tableLabel,
+        ],
+        ["Placed", false, false, "1469", "195", "1664", "T01"],
+      );
+      assert.ok(Date.parse(first.payBy) > Date.now(), "the card machine has a deadline");
+      assert.deepEqual(
+        await rows(
+          "SELECT quantity,transaction_snapshot_json->'catalog'->>'sellableReference' AS sku,transaction_snapshot_json->>'customerNote' AS customer_note FROM rms_ordering.order_item WHERE order_batch_id=$1",
+          [first.orderBatchReference],
+        ),
+        [{ quantity: 2, sku: soup.skuReference, customer_note: "no onions" }],
+      );
+      // Who entered it, for which table, audited; and its stock is held.
+      const entry = async () =>
+        rows(
+          "SELECT e.actor_id::text AS actor,e.table_id::text AS table_ref,e.recorded_after_outage,a.action_code,a.actor_reference::text AS audit_actor FROM rms_ordering.staff_dining_round_entry e JOIN platform_audit.audit_record a ON a.audit_id=e.audit_id ORDER BY e.created_at",
+        );
+      assert.deepEqual((await entry())[0], {
+        actor: serverActor,
+        table_ref: tableReference,
+        recorded_after_outage: false,
+        action_code: "ORDERING_STAFF_DINING_ROUND_STARTED",
+        audit_actor: serverActor,
+      });
+      const held = await balance();
+      assert.deepEqual([held.reserved, held.available], ["2", "98"]);
+
+      // A retry of the same command returns the same round and sends nothing.
+      const placed = await counts();
+      const retried = await send(server, {
+        operationReference: firstOperation,
+        lines: firstLines,
+        tip: { kind: "Percent", percent: 15 },
+      });
+      assert.equal(retried.status, "AlreadyPlaced");
+      assert.equal(retried.orderBatchReference, first.orderBatchReference);
+      assert.equal(retried.totalMinor, first.totalMinor);
+      assert.deepEqual(await counts(), placed);
+      // The same operation for another round is refused, not merged.
+      await assert.rejects(send(server, { operationReference: firstOperation, lines: [line(1)] }), {
+        code: "STAFF_ROUND_IDEMPOTENCY_CONFLICT",
+      });
+      assert.deepEqual(await counts(), placed);
+
+      // ── The card machine takes the first round through the real payment admission.
+      const { cardMachinePayment } = await store.counterFor(server);
+      const pay = (overrides = {}) =>
+        cardMachinePayment({
+          ...as(server),
+          command: {
+            operationReference: reference(),
+            orderReference: first.orderReference,
+            orderBatchReference: first.orderBatchReference,
+            expectedTotalMinor: first.totalMinor,
+            slipReference: "AUTH 771204",
+            takenAt: null,
+            ...overrides,
+          },
+        });
+      await assert.rejects(pay({ expectedTotalMinor: "1" }), {
+        code: "CARD_MACHINE_AMOUNT_CHANGED",
+        totalMinor: first.totalMinor,
+      });
+      const operationReference = reference();
+      const paid = await pay({ operationReference });
+      assert.deepEqual([paid.status, paid.amountMinor], ["Recorded", "1664"]);
+      assert.equal((await pay({ operationReference })).status, "AlreadyRecorded");
+
+      // More than the stock left: the Cart's own stock check names the line, nothing is ordered,
+      // and the next round is not refused for it.
+      await assert.rejects(send(server, { lines: [line(99)] }), {
+        code: "STAFF_ROUND_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+      assert.deepEqual(await counts(), { ...placed, entries: placed.entries + 1 });
+      assert.deepEqual(await balance(), held);
+
+      // A later round of the table's Order, a paper round taken during an outage.
+      const second = await send(server, { lines: [line(1)], recordedAfterOutage: true });
+      assert.deepEqual(
+        [second.status, second.orderReference, second.recordedAfterOutage, second.totalMinor],
+        ["Placed", first.orderReference, true, "735"],
+      );
+      assert.notEqual(second.orderBatchReference, first.orderBatchReference);
+      assert.equal((await entry()).at(-1).recorded_after_outage, true);
+      assert.deepEqual((await balance()).reserved, "3");
+
+      const paidLater = await pay({
+        orderBatchReference: second.orderBatchReference,
+        expectedTotalMinor: second.totalMinor,
+      });
+      assert.deepEqual([paidLater.status, paidLater.amountMinor], ["Recorded", "735"]);
+
+      assert.deepEqual(
+        await rows(
+          "SELECT order_allocation_minor::text AS round,tip_minor::text AS tip,total_minor::text AS total,slip_reference FROM rms_payment.card_machine_payment ORDER BY total_minor DESC",
+        ),
+        [
+          { round: "1469", tip: "195", total: "1664", slip_reference: "AUTH 771204" },
+          { round: "735", tip: "0", total: "735", slip_reference: "AUTH 771204" },
+        ],
+      );
+
+      // The restricted role is what ran all this: it is not the owner and cannot bypass RLS.
+      assert.deepEqual(
+        await store.asApi(async (tx) => {
+          const seen = await tx.query(
+            "SELECT current_user AS who,(SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user) AS bypass",
+            [],
+          );
+          return seen.rows[0];
+        }),
+        { who: api, bypass: false },
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
         await admin.query("DROP OWNED BY " + name).catch(() => undefined);
         await admin.query("DROP ROLE " + name).catch(() => undefined);
       }

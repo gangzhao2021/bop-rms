@@ -7,6 +7,8 @@ export async function seedSubmissionInventoryRecipe({
   at,
   cart,
   stock,
+  /** The ingredient's allergen declaration, for a recipe a menu listing review reads. */
+  allergenDeclarationReference,
 }) {
   const id = (n) =>
     n === 2
@@ -42,6 +44,7 @@ export async function seedSubmissionInventoryRecipe({
         unitCostMinorNumerator: "3",
         unitCostDenominator: "1000000",
         allergens: [],
+        ...(allergenDeclarationReference === undefined ? {} : { allergenDeclarationReference }),
       },
     ],
     preparationVersionReference: id(5),
