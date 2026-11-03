@@ -208,16 +208,15 @@ export function createMerchantPickupQuery(options: {
           .reduce((sum, remake) => sum + remake.openQuantity, 0);
       };
       // WP-2423: what staff hand over, by name: Ordering's own read of each order's immutable item
-      // snapshots (the Orders page's order detail), only for pickups still to be handed over.
+      // snapshots (the Orders page's order detail). Owner 2026-11-03: handed-over orders too, so
+      // staff can see what was in the bag when a guest comes back about it.
       const lineLabels = new Map<
         string,
         { readonly name: string; readonly options: readonly { name: string; quantity: number }[] }
       >();
       for (const order of new Set(
         result.items
-          .filter(
-            (item) => item.phase !== "Completed" && !cancelled.has(String(item.orderReference)),
-          )
+          .filter((item) => !cancelled.has(String(item.orderReference)))
           .map((item) => String(item.orderReference)),
       )) {
         // A snapshot that can't be read leaves that order's items unnamed ("Item 1"), never the

@@ -242,7 +242,7 @@ it("WP-2423: marks the orders staff took at the counter so they are handed over 
   );
 });
 
-it("WP-2423: names each item to hand over from Ordering's item snapshots, only for pickups not yet completed", async () => {
+it("WP-2423: names each item from Ordering's item snapshots, on handed-over pickups too", async () => {
   const f = setup();
   const line = (n: number) => ({
     fulfillmentItemReference: id(60 + n),
@@ -272,17 +272,20 @@ it("WP-2423: names each item to hand over from Ordering's item snapshots, only f
     ],
     nextAfterFulfillmentReference: null,
   });
-  doubles.lines.mockResolvedValue({
-    items: [
-      {
-        orderItemReference: id(71),
-        name: "Latte",
-        options: [{ name: "Oat milk", quantity: 1 }],
-        quantity: 2,
-      },
-    ],
+  doubles.lines.mockImplementation(async (_tx: unknown, _scope: unknown, order: string) => ({
+    items:
+      order === id(51)
+        ? [
+            {
+              orderItemReference: id(71),
+              name: "Latte",
+              options: [{ name: "Oat milk", quantity: 1 }],
+              quantity: 2,
+            },
+          ]
+        : [{ orderItemReference: id(73), name: "Mocha", options: [], quantity: 2 }],
     totals: {},
-  });
+  }));
   const result = (await f.operation(f.input)) as {
     items: { items: Record<string, unknown>[] }[];
   };
@@ -303,16 +306,18 @@ it("WP-2423: names each item to hand over from Ordering's item snapshots, only f
       handedOverQuantity: 0,
     },
   ]);
-  expect(result.items[1]?.items[0]).not.toHaveProperty("name");
-  // One Ordering read, scoped to this Store, for the pickup still to be handed over.
-  expect(doubles.lines).toHaveBeenCalledTimes(1);
-  expect(doubles.lines).toHaveBeenCalledWith(
-    expect.anything(),
-    { brandReference: id(3), storeReference: id(4) },
-    id(51),
-    // Owner 2026-10-24: the staff member's chosen language first, then the Store's.
-    ["en-CA"],
-  );
+  // Owner 2026-11-03: a handed-over order still says what was in the bag.
+  expect(result.items[1]?.items[0]).toMatchObject({ name: "Mocha", options: [] });
+  // One Ordering read per order, scoped to this Store.
+  expect(doubles.lines).toHaveBeenCalledTimes(2);
+  for (const order of [id(51), id(52)])
+    expect(doubles.lines).toHaveBeenCalledWith(
+      expect.anything(),
+      { brandReference: id(3), storeReference: id(4) },
+      order,
+      // Owner 2026-10-24: the staff member's chosen language first, then the Store's.
+      ["en-CA"],
+    );
 });
 
 it("WP-2423: keeps the queue readable when an order's item snapshots can't be read", async () => {
