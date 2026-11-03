@@ -1045,3 +1045,18 @@
 .kitchen-shell--workspace .kitchen-order-group.kitchen-ticket.kitchen-ticket {
   border-top: 0;
 }
+/* In the search row focus is the 2px line alone (no box around it), and "Clear" is a plain word. */
+.workspace-layout.workspace-layout
+  .kitchen-shell--workspace
+  .kitchen-filter-toolbar
+  :is(input, select):focus-visible {
+  outline: none;
+}
+.workspace-content
+  .kitchen-shell--workspace
+  .kitchen-filter-toolbar
+  .kitchen-reference-search
+  button:not([type="submit"]) {
+  border: 0;
+  background: none;
+}
