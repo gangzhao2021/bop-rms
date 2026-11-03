@@ -627,20 +627,24 @@ export function createMerchantStaffDiningRound(options: {
       const credentials = bound.credentials;
       const tipSelectionReference = String(parseOrderingReference(options.nextReference()));
       const entry = await inScope(async (tx, scope, allowed) =>
-        entries(scope, allowed).record(tx, {
-          brandReference: parseOrderingReference(scope.selected.brandReference),
-          storeReference: parseOrderingReference(scope.selected.storeReference),
-          operationReference: parseOrderingReference(command.operationReference),
-          intentHash,
-          actorReference: parseOrderingReference(scope.actorReference),
-          tableReference: parseOrderingReference(command.tableReference),
-          diningSessionReference: parseOrderingReference(table.diningSessionReference),
-          guestSessionReference: parseOrderingReference(bound.guestSessionReference),
-          tipSelectionReference: parseOrderingReference(tipSelectionReference),
-          recordedAfterOutage: command.recordedAfterOutage,
-          createdAt: parseOrderingInstant(now()),
-          auditReference: parseOrderingReference(options.nextReference()),
-        }),
+        entries(scope, allowed).record(
+          tx,
+          {
+            brandReference: parseOrderingReference(scope.selected.brandReference),
+            storeReference: parseOrderingReference(scope.selected.storeReference),
+            operationReference: parseOrderingReference(command.operationReference),
+            intentHash,
+            actorReference: parseOrderingReference(scope.actorReference),
+            tableReference: parseOrderingReference(command.tableReference),
+            diningSessionReference: parseOrderingReference(table.diningSessionReference),
+            guestSessionReference: parseOrderingReference(bound.guestSessionReference),
+            tipSelectionReference: parseOrderingReference(tipSelectionReference),
+            recordedAfterOutage: command.recordedAfterOutage,
+            createdAt: parseOrderingInstant(now()),
+            auditReference: parseOrderingReference(options.nextReference()),
+          },
+          joined.admissionReference,
+        ),
       );
       // A concurrent retry recorded the same command first: it owns its own table guest (and
       // the table session, which this attempt then never closes).

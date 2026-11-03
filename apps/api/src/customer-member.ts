@@ -13,7 +13,8 @@ import {
   type MemberPhoneProtector,
   type MemberPointsRule,
 } from "@rms/customer-loyalty";
-import { listDiningSessionMergedInto, loadDiningSessionPhones } from "@rms/dining";
+import { listDiningSessionMergedInto } from "@rms/dining";
+import { loadDiningGuestPhones } from "./dining-guest-phones.js";
 import {
   createPostgresOrderPriceReductionStore,
   listOrderRoundDishes,
@@ -195,7 +196,7 @@ export function createCustomerMember(options: {
           String(attempt.guestSessionReference) === String(guest.sessionReference),
       );
     // Paid at the counter or on the card machine: certain only when this is the table's one phone.
-    const phones = await loadDiningSessionPhones(tx as never, scope, diningSessionReference);
+    const phones = await loadDiningGuestPhones(tx as never, scope, diningSessionReference);
     const onlyPhone =
       phones.length === 1 &&
       String(phones[0]?.participantReference) === String(guest.diningParticipantReference);

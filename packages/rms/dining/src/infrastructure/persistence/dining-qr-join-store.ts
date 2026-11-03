@@ -497,6 +497,8 @@ export async function loadDiningSessionPhones(
   tx: DiningTableTransaction,
   scopeInput: DiningTableStoreScope,
   diningSessionReference: string,
+  /** Admissions that are not phones (staff entering a round): left out and not numbered. */
+  options: { readonly excludeAdmissions?: readonly string[] } = {},
 ): Promise<readonly DiningQrJoinPhone[]> {
   const tenant = parseDiningReference(scopeInput.tenantReference);
   const brand = parseDiningReference(scopeInput.brandReference);
@@ -512,8 +514,16 @@ export async function loadDiningSessionPhones(
  EXISTS (SELECT 1 FROM rms_dining.dining_participant_removal r WHERE r.tenant_id=p.tenant_id AND r.brand_id=p.brand_id
   AND r.store_id=p.store_id AND r.session_id=p.session_id AND r.participant_id=p.participant_id) AS removed
  FROM rms_dining.dining_participant p WHERE p.tenant_id=$1 AND p.brand_id=$2 AND p.store_id=$3 AND p.session_id=$4
+ AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_session_join_operation o WHERE o.tenant_id=p.tenant_id AND o.brand_id=p.brand_id
+  AND o.store_id=p.store_id AND o.session_id=p.session_id AND o.participant_id=p.participant_id AND o.admission_id=ANY($5::uuid[]))
  ORDER BY p.participant_snapshot->>'joinedAt', p.participant_id LIMIT 201`,
-      [tenant, brand, store, session],
+      [
+        tenant,
+        brand,
+        store,
+        session,
+        (options.excludeAdmissions ?? []).map((value) => parseDiningReference(value)),
+      ],
     ),
     200,
   );

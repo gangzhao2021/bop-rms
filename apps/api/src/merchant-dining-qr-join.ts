@@ -1,3 +1,4 @@
+import { loadDiningGuestPhones } from "./dining-guest-phones.js";
 import { readClosedRecord } from "@bop/identity";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
@@ -157,7 +158,10 @@ export function createMerchantDiningQrJoin(options: {
               observedAt,
             });
           }
-          const state = await store.state(command.diningSessionReference);
+          const state = {
+            ...(await store.state(command.diningSessionReference)),
+            phones: await loadDiningGuestPhones(tx as never, scope, command.diningSessionReference),
+          };
           // Decision 4: which phone sent each round (the order's own item records); staff rounds
           // have none.
           const owner = {

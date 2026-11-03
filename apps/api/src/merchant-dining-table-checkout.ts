@@ -1,3 +1,4 @@
+import { loadDiningGuestPhones } from "./dining-guest-phones.js";
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { canonicalizeRfc8785 } from "@bop/audit";
@@ -7,7 +8,6 @@ import {
   createPostgresDiningSessionReadStore,
   listDiningSessionTableLabels,
   parseDiningReference,
-  loadDiningSessionPhones,
   listDiningSessionsMergedIn,
   listDiningSessionMergesInto,
 } from "@rms/dining";
@@ -427,7 +427,7 @@ export async function readDiningTableBill(
     ...(billOrders.length > 1 ? await listDiningSessionsMergedIn(tx as never, scope, session) : []),
   ]) {
     const offset = phoneOf.size;
-    for (const phone of await loadDiningSessionPhones(tx as never, scope, party))
+    for (const phone of await loadDiningGuestPhones(tx as never, scope, party))
       phoneOf.set(String(phone.participantReference), offset + phone.phoneNumber);
   }
   // Rounds staff entered for the table (DEC-STAFF-DINE-IN-ROUND) were sent by no phone.

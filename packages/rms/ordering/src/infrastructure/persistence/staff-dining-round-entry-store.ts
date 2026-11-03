@@ -106,6 +106,30 @@ const select = `SELECT jsonb_build_object('brandReference',e.brand_id,'storeRefe
  'createdAt',to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
  'auditReference',e.audit_id) AS record FROM rms_ordering.staff_dining_round_entry e`;
 
+/**
+ * v15 2026-11-03: the Dining admissions staff joined this dining session with to send rounds (they
+ * are not a guest's phone). Caller authorizes the transaction.
+ */
+export async function listStaffDiningRoundAdmissions(
+  tx: AuditTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  diningSessionReference: string,
+): Promise<readonly string[]> {
+  const brand = parseOrderingReference(scope.brandReference);
+  const store = parseOrderingReference(scope.storeReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const found = await tx.query(
+    "SELECT dining_admission_id::text AS admission FROM rms_ordering.staff_dining_round_entry WHERE brand_id=$1 AND store_id=$2 AND dining_session_id=$3 AND dining_admission_id IS NOT NULL LIMIT 1001",
+    [brand, store, parseOrderingReference(diningSessionReference)],
+  );
+  const rows = (found as unknown as { rows: readonly { admission: string }[] }).rows;
+  if (rows.length > 1000) throw new Error("STAFF_DINING_ROUND_ENTRY_UNAVAILABLE");
+  return Object.freeze(rows.map((row) => String(parseOrderingReference(row.admission))));
+}
+
 /** The round (Order batch) a staff entry's table guest session submitted. */
 export interface StaffDiningRoundBatch {
   readonly orderReference: OrderingReference;
@@ -160,7 +184,12 @@ export function createPostgresStaffDiningRoundEntryStore(options: {
   return Object.freeze({
     loadByOperation,
     /** Records the staff command once its table guest session exists; a retry replays it. */
-    async record(tx: AuditTransaction, value: StaffDiningRoundEntryRecord) {
+    async record(
+      tx: AuditTransaction,
+      value: StaffDiningRoundEntryRecord,
+      /** The Dining admission staff joined with: not a guest's phone. */
+      diningAdmissionReference: string | null = null,
+    ) {
       const entry = parseStaffDiningRoundEntryRecord(value);
       if (entry.brandReference !== brand || entry.storeReference !== store) return fail();
       await context(tx);
@@ -176,7 +205,7 @@ export function createPostgresStaffDiningRoundEntryStore(options: {
       await tx.query(
         `INSERT INTO rms_ordering.staff_dining_round_entry (brand_id,store_id,operation_id,intent_hash,
  actor_id,table_id,dining_session_id,guest_session_id,tip_selection_id,recorded_after_outage,created_at,
- audit_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+ audit_id,dining_admission_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [
           brand,
           store,
@@ -190,6 +219,9 @@ export function createPostgresStaffDiningRoundEntryStore(options: {
           entry.recordedAfterOutage,
           entry.createdAt,
           entry.auditReference,
+          diningAdmissionReference === null
+            ? null
+            : parseOrderingReference(diningAdmissionReference),
         ],
       );
       await appendAuditRecordInTransaction(tx, {

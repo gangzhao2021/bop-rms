@@ -1,3 +1,4 @@
+import { loadDiningGuestPhones } from "../../../apps/api/src/dining-guest-phones.ts";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { appendFile, readFile } from "node:fs/promises";
@@ -1537,6 +1538,15 @@ it("the real staff round command takes a round from table entry to the card mach
           { round: "1469", tip: "195", total: "1664", slip_reference: "AUTH 771204" },
           { round: "735", tip: "0", total: "735", slip_reference: "AUTH 771204" },
         ],
+      );
+
+      // Staff sending rounds are no phones at the table (2026-11-03: "Phone 1 just joined").
+      const [{ session }] = await rows(
+        "SELECT dining_session_id::text AS session FROM rms_ordering.staff_dining_round_entry LIMIT 1",
+      );
+      assert.deepEqual(
+        await store.asApi((tx) => loadDiningGuestPhones(tx, store.ownerScope, session)),
+        [],
       );
 
       // The restricted role is what ran all this: it is not the owner and cannot bypass RLS.

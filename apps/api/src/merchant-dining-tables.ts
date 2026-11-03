@@ -1,3 +1,4 @@
+import { loadDiningGuestPhones } from "./dining-guest-phones.js";
 import { createHash } from "node:crypto";
 import { readClosedRecord } from "@bop/identity";
 import {
@@ -6,7 +7,6 @@ import {
   createPostgresDiningTableQrStore,
   createPostgresDiningTableStore,
   listDiningSessionMergesInto,
-  loadDiningSessionPhones,
   parseDiningInstant,
   parseDiningReference,
 } from "@rms/dining";
@@ -385,8 +385,8 @@ export function createMerchantDiningTables(options: {
           const joinedAt = Date.parse(parseDiningInstant(options.persistence.now()));
           const newPhones = new Map<string, { phoneNumber: number; joinedAt: string }[]>();
           for (const session of activeReferences) {
-            const phones = await loadDiningSessionPhones(
-              tx as unknown as Parameters<typeof loadDiningSessionPhones>[0],
+            const phones = await loadDiningGuestPhones(
+              tx as unknown as Parameters<typeof loadDiningGuestPhones>[0],
               ownerScope,
               String(session),
             );

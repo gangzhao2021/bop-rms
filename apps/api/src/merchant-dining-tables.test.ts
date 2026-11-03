@@ -18,6 +18,7 @@ const mock = vi.hoisted(() => ({
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
+  listStaffDiningRoundAdmissions: async () => [],
   createPostgresStaffDiningRoundEntryStore: vi.fn(() => ({
     listAwaitingPaymentByTables: mock.awaiting,
   })),
