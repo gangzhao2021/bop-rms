@@ -231,7 +231,9 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-in_container psql --dbname=postgres -qAtX -c "CREATE DATABASE \"$drill\"" </dev/null >/dev/null ||
+# v15 2026-11-02: the accepted baseline's locale, whatever the cluster default: a restore onto a new
+# volume otherwise comes back en_US, and the migration runner rightly refuses that database.
+in_container psql --dbname=postgres -qAtX -c "CREATE DATABASE \"$drill\" TEMPLATE template0 ENCODING 'UTF8' LOCALE 'C'" </dev/null >/dev/null ||
   fail "create drill database"
 started=$(date -u +%s)
 # pg_restore's own messages go to a private file beside the backups (same trust boundary as the

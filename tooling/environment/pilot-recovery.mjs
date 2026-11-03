@@ -187,7 +187,9 @@ async function runPilotRecoveryInMaintenance(args) {
     await sourceClient.query("COMMIT");
     if ((await stopPilotRuntime({ runtimeDirectory: plan.runtimeDirectory })).state !== "stopped")
       throw Error("QUIESCENCE_LOST");
-    await sourceClient.query("CREATE DATABASE " + quote(target) + " TEMPLATE template0");
+    await sourceClient.query(
+      "CREATE DATABASE " + quote(target) + " TEMPLATE template0 ENCODING 'UTF8' LOCALE 'C'",
+    );
     const dumpInput = await open(folder + "/database.dump", "r");
     try {
       await command(
