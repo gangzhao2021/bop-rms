@@ -2819,7 +2819,7 @@ refuses if the lock exists, which means someone else is deploying: wait, and do 
 who holds it and the revision into `.local/pilot-v15-deploy.lock/owner`. Release it with
 `rm -r .local/pilot-v15-deploy.lock` after the health check, including after a failed deploy or a
 rollback. Remove someone else's lock only when it is over an hour old, no build is running
-(`pgrep -fl 'docker.*build'` finds nothing) and `status` shows no planned-update window in force.
+(`pgrep -fl 'docker.* build '` finds nothing) and `status` shows no planned-update window in force.
 
 1. **Build first, while the old version keeps serving** (a build can take over 10 minutes and the
    window is at most 15): `docker compose -f compose.pilot.yaml build pilot`.
