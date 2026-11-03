@@ -1461,7 +1461,8 @@ test("@production a paid pickup of an earlier day that nobody finished leads Ord
     pickupNotCollected: false,
     acceptBy: null,
     awaitingPayment: false,
-    paidOnline: { amountMinor: "1568", currencyCode: "CAD" },
+    paidOnline: { amountMinor: "3137", currencyCode: "CAD" },
+    paymentPosition: { refundedMinor: "1569", refundPendingMinor: "0" },
   };
   await page.route("**/merchant/orders", (route) =>
     route.fulfill({
@@ -1478,6 +1479,24 @@ test("@production a paid pickup of an earlier day that nobody finished leads Ord
   await expect(orderPanel(page)).toContainText("From an earlier day · not finished");
   await expect(page.locator("li.order-row:visible")).toHaveCount(1);
   await expectNoInternalText(page);
+  // The row says what the Store kept and what went back, lined up, at every width.
+  const money = page.locator("li.order-row .order-row__money");
+  const refunded = page.locator("li.order-row .order-row__refunded");
+  await expect(money).toHaveText("$15.68");
+  await expect(refunded).toHaveText("$15.69 refunded");
+  await page.getByRole("button", { name: "Close details" }).click();
+  for (const width of [1440, 1024, 861, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(refunded).toBeVisible();
+    const [top, bottom] = [await money.boundingBox(), await refunded.boundingBox()];
+    if (top === null || bottom === null) throw new Error("no amount");
+    expect(Math.abs(top.x + top.width - (bottom.x + bottom.width))).toBeLessThanOrEqual(1);
+    const cell = await page.locator("li.order-row .order-workbench-amount").boundingBox();
+    if (cell === null) throw new Error("no amount");
+    expect(top.x + top.width).toBeLessThanOrEqual(cell.x + cell.width + 1);
+    expect(bottom.x).toBeGreaterThanOrEqual(cell.x - 1);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/app");
   const home = page.getByText("Earlier orders not finished").first();
   await expect(home).toBeVisible();

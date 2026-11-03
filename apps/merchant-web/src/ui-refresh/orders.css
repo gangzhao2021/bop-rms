@@ -448,7 +448,8 @@
 .orders-page .order-row__refunded {
   color: var(--bop-color-text-muted);
   font-size: 13px;
-  white-space: nowrap;
+  text-align: end;
+  white-space: normal;
 }
 .orders-page .order-workbench-next {
   display: flex;
@@ -1322,7 +1323,7 @@
     grid-template-columns: minmax(0, 1fr) 9.5rem;
   }
   .orders-page .order-row__summary {
-    grid-template-columns: 5rem minmax(0, 1fr) 7.5rem 4.5rem;
+    grid-template-columns: 5rem minmax(0, 1fr) 7.5rem 5.5rem;
   }
   .orders-page .order-row__paid {
     display: none;
