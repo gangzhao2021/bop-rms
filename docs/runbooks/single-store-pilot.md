@@ -865,7 +865,11 @@ Added after the 2026-10-17 store-day rehearsal (WP-2423 `3cd0f8dd` M8). What the
   guest it is submitted. It keeps being sent automatically until the provider answers, never twice,
   so nothing goes on the incident sheet. If it shows "Card company refused", no money moved: refund
   it again, and if refused again the Owner contacts the provider. The daily settlement waits until
-  every refund has an answer. A table paid on the card machine can't be refunded this way yet.
+  every refund has an answer.
+- **A table paid on the card machine** (`Record a card machine refund`, manager PIN): make the refund
+  on the machine first, to the card that paid, then record it with the slip reference. Recording
+  moves no money. If the machine is down nothing is refunded and nothing is recorded: do both when
+  it is back, and it counts on the day it is recorded, so note it for that day's machine total.
 - **Online payment, cancelling items** (`Cancel item and refund`): the items are cancelled at once
   (the kitchen stops them) and the refund stays "refund pending". When the provider is back, a
   manager or the owner presses `Check refund` on the cancelled item; it sends the refund then (never

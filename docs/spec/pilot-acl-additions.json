@@ -5867,6 +5867,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TABLE-ONLINE-REFUND (Owner 2026-11-02 \"开启长时间任务，按你建议做，无需问我\", known gap 11): a manager refunds a table paid on a guest's phone; the Provider's answer is recorded; settlement and reports read them"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_card_refund",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TABLE-ONLINE-REFUND (Owner 2026-11-03 \"按你建议即可 无需问我\", known gap 5): a manager records a refund made on the card machine of a table paid there; settlement and reports read it"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_card_refund",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TABLE-ONLINE-REFUND (Owner 2026-11-03 \"按你建议即可 无需问我\", known gap 5): a manager records a refund made on the card machine of a table paid there; settlement and reports read it"
     }
   ]
 }

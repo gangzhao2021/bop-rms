@@ -14,6 +14,7 @@ import type { createMerchantDiningItemComp } from "./merchant-dining-item-comp.j
 import type {
   createMerchantDiningTableCashRefund,
   createMerchantDiningTableOnlineRefund,
+  createMerchantDiningTableCardRefund,
   createMerchantDiningTablePaymentRead,
 } from "./merchant-dining-table-payment.js";
 import type {
@@ -661,6 +662,8 @@ export interface MerchantBffRouterOptions {
   readonly tableCashRefund?: ReturnType<typeof createMerchantDiningTableCashRefund>;
   /** WP-2423 DEC-TABLE-ONLINE-REFUND: a manager refunds a table paid on a guest's phone. */
   readonly tableOnlineRefund?: ReturnType<typeof createMerchantDiningTableOnlineRefund>;
+  /** A manager records a refund made on the card machine, of a table paid there. */
+  readonly tableCardRefund?: ReturnType<typeof createMerchantDiningTableCardRefund>;
   readonly unpaidItemRemoval?: ReturnType<typeof createMerchantDiningUnpaidItemRemoval>;
   /** WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays. */
   readonly itemComp?: ReturnType<typeof createMerchantDiningItemComp>;

@@ -81,6 +81,7 @@ import { createInternalDiningTablePayments } from "./pilot-dining-table-payment.
 import {
   createMerchantDiningTableCashRefund,
   createMerchantDiningTableOnlineRefund,
+  createMerchantDiningTableCardRefund,
   createMerchantDiningTablePaymentRead,
 } from "../../apps/api/dist/merchant-dining-table-payment.js";
 import { createDiningOrderCloseConfiguration } from "../../apps/api/dist/dining-order-close-configuration.js";
@@ -971,6 +972,11 @@ export async function createInternalMerchant(
     authentication: service,
     nextReference: () => resources.credentials.reference(),
   });
+  const tableCardRefund = createMerchantDiningTableCardRefund({
+    persistence,
+    authentication: service,
+    nextReference: () => resources.credentials.reference(),
+  });
   // WP-2423 DEC-TABLE-ONLINE-REFUND: back to the card of a table paid on a guest's phone.
   const tableOnlineRefund =
     cancellationRefundProvider === undefined
@@ -1700,6 +1706,7 @@ export async function createInternalMerchant(
       orderUnpaidDeparture,
       tablePayment,
       tableCashRefund,
+      tableCardRefund,
       ...(tableOnlineRefund === undefined ? {} : { tableOnlineRefund }),
       unpaidItemRemoval,
       itemComp,

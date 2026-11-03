@@ -191,7 +191,14 @@ export function createPersistentMerchantSettlement(options: {
      */
     const tableWindows = new Map<string, Promise<TableWindow>>();
     interface TableWindow {
-      readonly card: { count: number; amountMinor: bigint; tipMinor: bigint; backEntered: number };
+      readonly card: {
+        count: number;
+        amountMinor: bigint;
+        tipMinor: bigint;
+        backEntered: number;
+        refundCount: number;
+        refundedMinor: bigint;
+      };
       readonly cash: {
         count: number;
         amountMinor: bigint;
@@ -220,7 +227,14 @@ export function createPersistentMerchantSettlement(options: {
           },
           authorize: async (t) => t === tx && (await guard(scope)(tx)),
         }).listWindow(tx, { from: window.startsAt, to: window.endsAt });
-        const card = { count: 0, amountMinor: 0n, tipMinor: 0n, backEntered: 0 };
+        const card = {
+          count: 0,
+          amountMinor: 0n,
+          tipMinor: 0n,
+          backEntered: 0,
+          refundCount: 0,
+          refundedMinor: 0n,
+        };
         const cash = {
           count: 0,
           amountMinor: 0n,
@@ -240,6 +254,10 @@ export function createPersistentMerchantSettlement(options: {
           totals.tipMinor += settlement.tipMinor;
           if (settlement.recordingReason === "RecordedAfterOutage") totals.backEntered++;
           if (settlement.method === "Cash") cash.roundingMinor += settlement.roundingMinor;
+        }
+        for (const refund of listed.cardRefunds) {
+          card.refundCount++;
+          card.refundedMinor += refund.amountMinor;
         }
         for (const refund of listed.cashRefunds) {
           cash.refundCount++;
@@ -407,8 +425,8 @@ export function createPersistentMerchantSettlement(options: {
             tipMinor: (summary.tipMinor + table.tipMinor).toString(),
             recordedAfterOutageCount: summary.backEnteredCount + table.backEntered,
             refunded: {
-              count: summary.refundCount,
-              amountMinor: summary.refundedMinor.toString(),
+              count: summary.refundCount + table.refundCount,
+              amountMinor: (summary.refundedMinor + table.refundedMinor).toString(),
               currencyCode: "CAD" as const,
             },
           };

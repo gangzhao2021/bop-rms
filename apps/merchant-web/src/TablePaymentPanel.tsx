@@ -24,6 +24,12 @@ export interface TablePayment {
     readonly reasonCode: CashRefundReason;
     readonly refundedAt: string;
   }[];
+  /** WP-2423 DEC-TABLE-ONLINE-REFUND: refunds made on the card machine. */
+  readonly cardRefunds: readonly {
+    readonly amountMinor: string;
+    readonly reasonCode: CashRefundReason;
+    readonly refundedAt: string;
+  }[];
   /** WP-2423 DEC-TABLE-ONLINE-REFUND: money going back to the guest's card. */
   readonly onlineRefunds: readonly {
     readonly amountMinor: string;
@@ -70,6 +76,7 @@ const parseOne = (value: unknown): TablePayment => {
   )
     return fail();
   const onlineRefunds = Array.isArray(p.onlineRefunds) ? p.onlineRefunds : [];
+  const cardRefunds = Array.isArray(p.cardRefunds) ? p.cardRefunds : [];
   return Object.freeze({
     partNumber: typeof p.partNumber === "number" ? p.partNumber : null,
     method: p.method,
@@ -81,6 +88,15 @@ const parseOne = (value: unknown): TablePayment => {
     recordedAfterOutage: p.recordedAfterOutage === true,
     cashRefunds: Object.freeze(
       p.cashRefunds.map((r: Record<string, unknown>) =>
+        Object.freeze({
+          amountMinor: amount(r.amountMinor),
+          reasonCode: reason(r.reasonCode),
+          refundedAt: typeof r.refundedAt === "string" ? r.refundedAt : fail(),
+        }),
+      ),
+    ),
+    cardRefunds: Object.freeze(
+      cardRefunds.map((r: Record<string, unknown>) =>
         Object.freeze({
           amountMinor: amount(r.amountMinor),
           reasonCode: reason(r.reasonCode),
@@ -216,18 +232,22 @@ function TablePaymentBlock({
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const amountMinor = useMemo(() => dollarsToMinor(amount), [amount]);
   const online = payment.method === "Online";
+  const onMachine = payment.method === "CardMachine";
+  const [slip, setSlip] = useState("");
+  const slipValid = slip.trim() === "" || /^[A-Za-z0-9][A-Za-z0-9 #./-]{0,39}$/u.test(slip.trim());
 
   const refundable = BigInt(payment.refundableMinor);
   const give = async () => {
     if (
       busy ||
       reason === "" ||
+      !slipValid ||
       amountMinor === null ||
       amountMinor <= 0n ||
       amountMinor > refundable
     )
       return;
-    const key = amountMinor.toString() + ":" + reason;
+    const key = amountMinor.toString() + ":" + reason + ":" + slip.trim();
     if (operation.current?.key !== key)
       operation.current = { key, reference: serviceOperationReference() };
     setBusy(true);
@@ -237,13 +257,16 @@ function TablePaymentBlock({
         fetcher,
         online
           ? "/merchant/orders/table-payment/online-refund"
-          : "/merchant/orders/table-payment/cash-refund",
+          : onMachine
+            ? "/merchant/orders/table-payment/card-refund"
+            : "/merchant/orders/table-payment/cash-refund",
         csrf,
         {
           orderReference,
           operationReference: operation.current.reference,
           amountMinor: amountMinor.toString(),
           reasonCode: reason,
+          ...(onMachine ? { slipReference: slip.trim() === "" ? null : slip.trim() } : {}),
           ...(payment.partNumber === null ? {} : { partNumber: payment.partNumber }),
         },
       );
@@ -253,12 +276,13 @@ function TablePaymentBlock({
         setRefunding(false);
         setAmount("");
         setReason("");
+        setSlip("");
         return;
       }
       operation.current = null;
       setProblem(
         status === 401 || status === 403
-          ? online
+          ? online || onMachine
             ? t(
                 "A manager refunds this payment. Ask an Owner or Store Manager to sign in with their PIN.",
               )
@@ -266,12 +290,14 @@ function TablePaymentBlock({
                 "A manager gives cash back. Ask an Owner or Store Manager to sign in with their PIN.",
               )
           : payload?.error === "too_much"
-            ? online
+            ? online || onMachine
               ? t("That is more than is left of this payment.")
               : t("That is more than is left of this cash payment.")
             : online
               ? t("The refund wasn't sent. Try again.")
-              : t("The cash refund wasn't recorded. Try again."),
+              : onMachine
+                ? t("The refund wasn't recorded. Try again.")
+                : t("The cash refund wasn't recorded. Try again."),
       );
       onStale();
     } catch {
@@ -284,8 +310,12 @@ function TablePaymentBlock({
       setBusy(false);
     }
   };
-  const canRefund = (payment.method === "Cash" || online) && refundable > 0n;
-  const openLabel = online ? t("Refund to the card") : t("Give cash back");
+  const canRefund = refundable > 0n;
+  const openLabel = online
+    ? t("Refund to the card")
+    : onMachine
+      ? t("Record a card machine refund")
+      : t("Give cash back");
   return (
     <section
       className="table-payment"
@@ -335,6 +365,16 @@ function TablePaymentBlock({
             <dd>−{cad(refund.amountMinor)}</dd>
           </div>
         ))}
+        {payment.cardRefunds.map((refund, index) => (
+          <div key={index}>
+            <dt>
+              {t("Refunded on the card machine · {reason}", {
+                reason: reasonText(refund.reasonCode),
+              })}
+            </dt>
+            <dd>−{cad(refund.amountMinor)}</dd>
+          </div>
+        ))}
         {payment.onlineRefunds.map((refund, index) => (
           <div key={index}>
             <dt>{onlineRefundLabel(refund)}</dt>
@@ -343,7 +383,7 @@ function TablePaymentBlock({
             </dd>
           </div>
         ))}
-        {(payment.method === "Cash" || online) && refundable !== BigInt(payment.totalMinor) ? (
+        {refundable !== BigInt(payment.totalMinor) ? (
           <div>
             <dt>{t("Left to refund")}</dt>
             <dd>{cad(refundable)}</dd>
@@ -364,16 +404,11 @@ function TablePaymentBlock({
       {payment.onlineRefunds.some((refund) => refund.state === "Refused") ? (
         <p role="note">{t("A refused refund moved no money. You can refund it again.")}</p>
       ) : null}
-      {payment.method === "CardMachine" ? (
-        <p role="note">
-          {t("A table paid on the card machine can't be refunded here yet. Ask the Owner.")}
-        </p>
-      ) : null}
       {canRefund ? (
         refunding ? (
           <div role="group" aria-label={openLabel} className="table-payment__refund">
             <label className="table-checkout__field">
-              {online ? t("Amount to refund") : t("Amount to give back")}
+              {online || onMachine ? t("Amount to refund") : t("Amount to give back")}
               <input
                 inputMode="decimal"
                 value={amount}
@@ -396,11 +431,29 @@ function TablePaymentBlock({
                 ))}
               </select>
             </label>
+            {onMachine ? (
+              <>
+                <p role="note">
+                  {t(
+                    "Make the refund on the card machine first, to the card that paid, then record it here. This only records it: no money moves from this screen.",
+                  )}
+                </p>
+                <label className="table-checkout__field">
+                  {t("Slip reference (optional)")}
+                  <input
+                    value={slip}
+                    aria-invalid={!slipValid}
+                    onChange={(event) => setSlip(event.currentTarget.value)}
+                  />
+                </label>
+              </>
+            ) : null}
             <button
               type="button"
               className="table-checkout__primary"
               disabled={
                 busy ||
+                !slipValid ||
                 reason === "" ||
                 amountMinor === null ||
                 amountMinor <= 0n ||
@@ -415,7 +468,11 @@ function TablePaymentBlock({
                 : amountMinor !== null && amountMinor > 0n
                   ? online
                     ? t("Refund {amount} to the card", { amount: cad(amountMinor) })
-                    : t("Give back {amount} in cash", { amount: cad(amountMinor) })
+                    : onMachine
+                      ? t("Record {amount} refunded on the card machine", {
+                          amount: cad(amountMinor),
+                        })
+                      : t("Give back {amount} in cash", { amount: cad(amountMinor) })
                   : openLabel}
             </button>{" "}
             <button type="button" disabled={busy} onClick={() => setRefunding(false)}>

@@ -369,6 +369,29 @@ export function createPostgresStoreSalesPaymentLedger(options: {
         }),
       );
     }
+    // WP-2423 DEC-TABLE-ONLINE-REFUND: a refund made on the card machine of a table paid there.
+    const tableCardRefunded = { count: 0, amountMinor: 0n };
+    for (const refund of table.cardRefunds) {
+      const settlement = tableSettlements.get(refund.settlementReference) ?? fail();
+      const last =
+        settlement.lines.findLast((line) => line.orderReference === refund.orderReference) ??
+        settlement.lines.at(-1) ??
+        fail();
+      tableCardRefunded.count++;
+      tableCardRefunded.amountMinor += refund.amountMinor;
+      refunds.push(
+        Object.freeze({
+          channel: "CardMachine" as const,
+          kind: "CardMachine" as const,
+          refundReference: refund.cardRefundReference,
+          orderReference: last.orderReference,
+          paymentIntentReference: lineKey(settlement.settlementReference, last.lineNumber),
+          amountMinor: refund.amountMinor,
+          refundedAt: refund.refundedAt,
+          items: null,
+        }),
+      );
+    }
     // WP-2423 DEC-TABLE-ONLINE-REFUND: money back to a table's phone payment (an amount, like cash),
     // on the day the Provider created the refund.
     const tableOnlineRefunded = { count: 0, amountMinor: 0n };
@@ -574,8 +597,8 @@ export function createPostgresStoreSalesPaymentLedger(options: {
           tipMinor: cardSummary.tipMinor + tableCard.tipMinor,
         },
         cardMachineRefunded: {
-          count: cardSummary.refundCount,
-          amountMinor: cardSummary.refundedMinor,
+          count: cardSummary.refundCount + tableCardRefunded.count,
+          amountMinor: cardSummary.refundedMinor + tableCardRefunded.amountMinor,
         },
         cashTaken,
         cashRefunded,

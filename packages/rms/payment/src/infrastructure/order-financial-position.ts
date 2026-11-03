@@ -327,9 +327,19 @@ export function createPostgresOrderFinancialPosition(options: {
           ? await tableStore.listOnlineRefundsByOrders(tx, [bill])
           : []
       ).filter((refund) => refund.requestedAt <= query.observedAt);
+      const tableCardRefunds = (
+        tableSettlements.some((settlement) => settlement.method === "CardMachine")
+          ? await tableStore.listCardRefundsByOrders(tx, [bill])
+          : []
+      ).filter((refund) => refund.recordedAt <= query.observedAt);
       const tableConfirmedRefunds = [
         ...tableCashRefunds.map((refund) => ({
           reference: refund.cashRefundReference,
+          settlementReference: refund.settlementReference,
+          amountMinor: refund.amountMinor,
+        })),
+        ...tableCardRefunds.map((refund) => ({
+          reference: refund.cardRefundReference,
           settlementReference: refund.settlementReference,
           amountMinor: refund.amountMinor,
         })),

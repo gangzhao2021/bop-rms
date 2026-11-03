@@ -12,6 +12,7 @@ const payment = {
   takenAt: "2026-11-02T20:00:00.000Z",
   recordedAfterOutage: false,
   cashRefunds: [],
+  cardRefunds: [] as unknown[],
   onlineRefunds: [] as unknown[],
   refundableMinor: "4600",
 };
@@ -195,8 +196,8 @@ test("@production a split bill shows each paid part with its own refund", async 
     });
   });
   await page.goto("/operations/orders");
-  await expect(page.getByRole("region", { name: /part 2$/u })).toContainText(
-    "can't be refunded here yet",
+  await expect(page.getByRole("region", { name: /part 2$/u })).not.toContainText(
+    "Record a card machine refund",
   );
   await fill(page, "10");
   await page.getByRole("button", { name: /10\.00 to the card$/u }).click();
@@ -214,3 +215,48 @@ for (const width of [1440, 1024, 390])
     );
     expect(overflow).toBeLessThanOrEqual(0);
   });
+
+test("@production a manager records a refund made on the card machine of a table paid there", async ({
+  page,
+}) => {
+  const machine = { ...payment, method: "CardMachine" };
+  await orderPage(page, () => ({ orderReference: id(1), payment: machine, parts: [] }));
+  const bodies: Record<string, unknown>[] = [];
+  await page.route("**/merchant/orders/table-payment/card-refund", (route) => {
+    bodies.push(JSON.parse(route.request().postData() ?? "{}"));
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        payment: {
+          ...machine,
+          cardRefunds: [
+            {
+              amountMinor: "1000",
+              reasonCode: "FOOD_ISSUE",
+              refundedAt: "2026-11-02T20:10:00.000Z",
+            },
+          ],
+          refundableMinor: "3600",
+        },
+        parts: [],
+      },
+    });
+  });
+  await page.goto("/operations/orders");
+  await page.getByRole("button", { name: "Record a card machine refund", exact: true }).click();
+  await expect(page.getByText(/no money moves from this screen/u)).toBeVisible();
+  await page.getByLabel("Amount to refund").fill("10");
+  await page.getByRole("combobox", { name: /Reason/u }).selectOption("FOOD_ISSUE");
+  await page.getByLabel("Slip reference (optional)").fill("4242424242424242 4242");
+  await page.getByLabel("Slip reference (optional)").fill("AUTH 771");
+  await page.getByRole("button", { name: /10\.00 refunded on the card machine$/u }).click();
+  await expect(page.getByText(/^Refunded on the card machine/u)).toBeVisible();
+  await expect(page.getByText("Left to refund", { exact: true })).toBeVisible();
+  expect(bodies[0]).toMatchObject({
+    orderReference: id(1),
+    amountMinor: "1000",
+    reasonCode: "FOOD_ISSUE",
+    slipReference: "AUTH 771",
+  });
+});

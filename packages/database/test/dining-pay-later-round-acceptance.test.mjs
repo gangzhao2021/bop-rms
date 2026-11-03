@@ -112,6 +112,7 @@ import {
 } from "../../rms/payment/src/index.ts";
 import { readStoreTipChoices } from "../../../apps/api/src/merchant-store-features.ts";
 import {
+  createMerchantDiningTableCardRefund,
   createMerchantDiningTableCashRefund,
   createMerchantDiningTableOnlineRefund,
   createMerchantDiningTablePaymentRead,
@@ -5543,6 +5544,68 @@ async function journey(ending) {
             recordedAfterOutage: false,
           });
           assert.equal(card.bill.split.paidParts, 1);
+          // DEC-TABLE-ONLINE-REFUND: a manager records a refund made on the machine, of that part.
+          const cardRefund = (actor, amountMinor, operationReference = fresh(), partNumber = 1) =>
+            createMerchantDiningTableCardRefund({
+              persistence: persistenceOf(actor),
+              authentication: actor.authentication,
+              nextReference: fresh,
+            })({
+              ...as(actor),
+              command: {
+                orderReference,
+                operationReference,
+                amountMinor,
+                reasonCode: "FOOD_ISSUE",
+                slipReference: "REFUND 771",
+                partNumber,
+              },
+            });
+          const part1Total = BigInt(part1.payment.totalMinor);
+          await assert.rejects(cardRefund(server, "100"), {
+            code: "TABLE_PAYMENT_PERMISSION_DENIED",
+          });
+          await assert.rejects(cardRefund(manager, (part1Total + 1n).toString()), {
+            code: "TABLE_PAYMENT_TOO_MUCH",
+          });
+          await assert.rejects(cardRefund(manager, "100", fresh(), 2), {
+            code: "TABLE_PAYMENT_NOT_PAID",
+          });
+          const cardOperation = fresh();
+          const recordedCard = await cardRefund(manager, "700", cardOperation);
+          assert.equal(recordedCard.status, "Recorded");
+          const cardPart = recordedCard.parts.find((entry) => entry.partNumber === 1);
+          assert.deepEqual(
+            cardPart.cardRefunds.map((entry) => [entry.amountMinor, entry.reasonCode]),
+            [["700", "FOOD_ISSUE"]],
+          );
+          assert.equal(cardPart.refundableMinor, (part1Total - 700n).toString());
+          assert.doesNotMatch(JSON.stringify(cardPart), /REFUND 771/u);
+          // A retry records nothing new; the same operation can't become a different refund.
+          assert.equal((await cardRefund(manager, "700", cardOperation)).status, "AlreadyRecorded");
+          await assert.rejects(cardRefund(manager, "701", cardOperation), {
+            code: "TABLE_PAYMENT_IDEMPOTENCY_CONFLICT",
+          });
+          assert.deepEqual(
+            await rows(
+              "SELECT r.amount_minor::text AS amount,r.slip_reference AS slip,a.action_code FROM rms_payment.dining_table_card_refund r JOIN platform_audit.audit_record a ON a.audit_id=r.audit_id WHERE r.order_id=$1",
+              [orderReference],
+            ),
+            [
+              {
+                amount: "700",
+                slip: "REFUND 771",
+                action_code: "PAYMENT_DINING_TABLE_CARD_REFUNDED",
+              },
+            ],
+          );
+          const cardDay = await ledgerNow();
+          assert.deepEqual(cardDay.settlement.cardMachineRefunded, { count: 1, amountMinor: 700n });
+          assert.deepEqual(
+            cardDay.refunds.map((entry) => [entry.channel, entry.kind, entry.amountMinor]),
+            [["CardMachine", "CardMachine", 700n]],
+          );
+          await assertSalesCountEveryRoundOnce();
           // Locked once a part is paid; a part is paid once.
           await assert.rejects(splitWith({ people: 2 }), { code: "TABLE_CHECKOUT_SPLIT_LOCKED" });
           // v15 2026-10-28: once a part is paid, checkout can't be cancelled (back to ordering).

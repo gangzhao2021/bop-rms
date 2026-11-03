@@ -2418,6 +2418,7 @@ async function scanUnsupported(root, module, diagnostics) {
               "dining_table_settlement_round",
               "order_unpaid_write_off",
               "dining_table_cash_refund",
+              "dining_table_card_refund",
               "dining_table_online_refund",
               "dining_table_online_refund_outcome",
               "dining_table_online_payment",

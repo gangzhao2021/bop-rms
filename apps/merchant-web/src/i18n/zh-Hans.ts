@@ -5865,6 +5865,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recorded after an outage.": "断网后补录。",
   "Give cash back": "退现金",
   "Refund to the card": "退回客人的卡",
+  "Record a card machine refund": "登记刷卡机退款",
+  "Record {amount} refunded on the card machine": "登记已在刷卡机退款 {amount}",
+  "Refunded on the card machine · {reason}": "已在刷卡机退款 · {reason}",
+  "Make the refund on the card machine first, to the card that paid, then record it here. This only records it: no money moves from this screen.":
+    "先在刷卡机上退回原付款的卡，再在这里登记。这里只做记录，不会动钱。",
+  "The refund wasn't recorded. Try again.": "退款没有记录，请重试。",
   "Left to refund": "还可退",
   "  refunds not split by item are not taken off the next line":
     "  未按商品拆分的退款没有从下一行扣除",
@@ -5881,8 +5887,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "正在发给发卡方。系统会一直发送直到对方答复，不用再按。",
   "It can take a few days to show on the guest's card.": "可能要几天才会显示在客人的卡上。",
   "A refused refund moved no money. You can refund it again.": "被拒绝的退款没有动钱，可以重新退。",
-  "A table paid on the card machine can't be refunded here yet. Ask the Owner.":
-    "刷卡机结的桌暂时不能在这里退款，请找店主。",
   "Paid at the table · part {number}": "在桌上付款 · 第 {number} 份",
   "This table's payment and refunds are shown above.": "这桌的付款和退款显示在上方。",
   "Amount to give back": "退还金额",

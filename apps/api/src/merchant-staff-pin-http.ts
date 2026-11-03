@@ -36,6 +36,7 @@ export const fullSignInMutationPaths: ReadonlySet<string> = new Set([
   "/orders/close-unpaid-departure",
   "/orders/table-payment/cash-refund",
   "/orders/table-payment/online-refund",
+  "/orders/table-payment/card-refund",
   "/orders/cancel-items",
   "/orders/cancel-items/refund",
   // DEC-DINE-IN-PAY-LATER: dishes taken off an unpaid table's bill (attributed to who confirmed).

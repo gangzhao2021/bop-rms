@@ -228,6 +228,48 @@ function splitPlanFrom(row: Record<string, unknown>): DiningTableSplitPlanRecord
   });
 }
 
+/** WP-2423 DEC-TABLE-ONLINE-REFUND: a refund made on the card machine, of a table paid there. */
+export interface DiningTableCardRefundRecord {
+  readonly cardRefundReference: string;
+  readonly operationReference: string;
+  readonly intentDigest: string;
+  readonly settlementReference: string;
+  readonly orderReference: string;
+  readonly amountMinor: bigint;
+  readonly reasonCode: DiningTableCashRefundReason;
+  readonly slipReference: string | null;
+  readonly approvedByActorReference: string;
+  readonly refundedAt: string;
+  readonly recordedAt: string;
+}
+const cardRefundSelect = `SELECT r.card_refund_id::text AS refund,r.tenant_id::text AS tenant,r.operation_id::text AS operation,
+ r.intent_digest,r.settlement_id::text AS settlement,r.order_id::text AS "order",r.amount_minor::text AS amount,
+ r.reason_code,r.slip_reference,r.approved_by_actor_id::text AS approved_by,${instant("r.refunded_at")} AS refunded_at,
+ ${instant("r.recorded_at")} AS recorded_at
+ FROM rms_payment.dining_table_card_refund r WHERE r.brand_id=$1 AND r.store_id=$2`;
+function cardRefundFrom(row: Record<string, unknown>): DiningTableCardRefundRecord {
+  return Object.freeze({
+    cardRefundReference: ref(row.refund),
+    operationReference: ref(row.operation),
+    intentDigest:
+      typeof row.intent_digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(row.intent_digest)
+        ? row.intent_digest
+        : fail(),
+    settlementReference: ref(row.settlement),
+    orderReference: ref(row.order),
+    amountMinor: minor(row.amount, 1n),
+    reasonCode: diningTableCashRefundReasons.includes(
+      row.reason_code as DiningTableCashRefundReason,
+    )
+      ? (row.reason_code as DiningTableCashRefundReason)
+      : fail(),
+    slipReference: row.slip_reference === null ? null : String(row.slip_reference),
+    approvedByActorReference: ref(row.approved_by),
+    refundedAt: String(parsePaymentInstant(row.refunded_at)),
+    recordedAt: String(parsePaymentInstant(row.recorded_at)),
+  });
+}
+
 /**
  * WP-2423 DEC-TABLE-ONLINE-REFUND: money going back to the card of a table paid on a guest's phone.
  * The approval fixes the amount and the Provider key; `outcome` is null until the Provider answers.
@@ -631,7 +673,107 @@ export function createPostgresDiningTableSettlementStore(options: {
       return onlineRefundFrom(row);
     });
   };
+  const cardRefunds = async (tx: AuditTransaction, where: string, values: readonly unknown[]) => {
+    await context(tx);
+    const found = rows(
+      await tx.query(
+        `${cardRefundSelect} AND ${where} ORDER BY r.refunded_at,r.card_refund_id LIMIT 10001`,
+        [brand, store, ...values],
+      ),
+    );
+    if (found.length > 10000) return fail();
+    return found.map((row) => {
+      if (ref(row.tenant) !== tenant) return fail();
+      return cardRefundFrom(row);
+    });
+  };
   return Object.freeze({
+    /** Refunds made on the card machine from these Orders' table payments, oldest first. */
+    async listCardRefundsByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
+      if (orderReferences.length === 0) return Object.freeze([]);
+      if (orderReferences.length > 200) return fail();
+      const orders = orderReferences.map(ref);
+      for (const order of orders) await allowed(tx, order);
+      return Object.freeze(await cardRefunds(tx, "r.order_id=ANY($3::uuid[])", [orders]));
+    },
+
+    /**
+     * Records a refund the manager made on the card machine. A retry with the same operation and
+     * intent returns the same record.
+     */
+    async recordCardRefund(
+      tx: AuditTransaction,
+      input: DiningTableCardRefundRecord & {
+        readonly auditReference: string;
+        readonly correlationReference: string;
+      },
+    ) {
+      const order = ref(input.orderReference);
+      await allowed(tx, order);
+      if (
+        !diningTableCashRefundReasons.includes(input.reasonCode) ||
+        input.amountMinor <= 0n ||
+        !/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)
+      )
+        return fail();
+      const prior = await cardRefunds(tx, "r.operation_id=$3", [ref(input.operationReference)]);
+      if (prior.length > 0) {
+        const same = prior[0] as DiningTableCardRefundRecord;
+        if (same.intentDigest !== input.intentDigest || same.orderReference !== order)
+          return fail("DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT");
+        return Object.freeze({ status: "AlreadyRecorded" as const, refund: same });
+      }
+      const refundedAt = String(parsePaymentInstant(input.refundedAt)),
+        recordedAt = String(parsePaymentInstant(input.recordedAt));
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_card_refund (card_refund_id,tenant_id,brand_id,store_id,operation_id,
+ intent_digest,settlement_id,order_id,amount_minor,currency_code,reason_code,slip_reference,approved_by_actor_id,refunded_at,recorded_at,audit_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'CAD',$10,$11,$12,$13,$14,$15)`,
+        [
+          ref(input.cardRefundReference),
+          tenant,
+          brand,
+          store,
+          ref(input.operationReference),
+          input.intentDigest,
+          ref(input.settlementReference),
+          order,
+          input.amountMinor.toString(),
+          input.reasonCode,
+          input.slipReference,
+          ref(input.approvedByActorReference),
+          refundedAt,
+          recordedAt,
+          ref(input.auditReference),
+        ],
+      );
+      await appendAuditRecordInTransaction(tx, {
+        auditId: ref(input.auditReference),
+        brandId: brand,
+        storeId: store,
+        actor: { type: "User", reference: ref(input.approvedByActorReference) },
+        actionCode: "PAYMENT_DINING_TABLE_CARD_REFUNDED",
+        targetType: "Order",
+        targetId: order,
+        afterSummary: {
+          amountMinor: input.amountMinor.toString(),
+          settlement: ref(input.settlementReference),
+        },
+        reasonCode: input.reasonCode,
+        correlationId: ref(input.correlationReference),
+        occurredAt: recordedAt,
+        sourceChannel: "MERCHANT_WEB",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const [saved] = await cardRefunds(tx, "r.card_refund_id=$3", [
+        ref(input.cardRefundReference),
+      ]);
+      if (saved === undefined) return fail();
+      return Object.freeze({ status: "Recorded" as const, refund: saved });
+    },
+
     /** Refunds to the card from these Orders' phone payments, oldest first. */
     async listOnlineRefundsByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
       if (orderReferences.length === 0) return Object.freeze([]);
@@ -918,6 +1060,10 @@ export function createPostgresDiningTableSettlementStore(options: {
       if ((await options.authorize(tx, { orderReference: "" })) !== true)
         return fail("DINING_TABLE_SETTLEMENT_PERMISSION_DENIED");
       const refunds = await cashRefunds(tx, "r.refunded_at>=$3 AND r.refunded_at<$4", [from, to]);
+      const cardInWindow = await cardRefunds(tx, "r.refunded_at>=$3 AND r.refunded_at<$4", [
+        from,
+        to,
+      ]);
       const onlineInWindow = await onlineRefunds(
         tx,
         "o.status='Succeeded' AND o.provider_created_at>=$3 AND o.provider_created_at<$4",
@@ -931,7 +1077,13 @@ export function createPostgresDiningTableSettlementStore(options: {
         [
           from,
           to,
-          [...new Set([...refunds, ...onlineInWindow].map((refund) => refund.settlementReference))],
+          [
+            ...new Set(
+              [...refunds, ...cardInWindow, ...onlineInWindow].map(
+                (refund) => refund.settlementReference,
+              ),
+            ),
+          ],
         ],
       );
       // DEC-DINE-IN-PAY-LATER (decision 4): bills written off when the guests left, by when the
@@ -940,6 +1092,7 @@ export function createPostgresDiningTableSettlementStore(options: {
       return Object.freeze({
         settlements: Object.freeze(taken),
         cashRefunds: Object.freeze(refunds),
+        cardRefunds: Object.freeze(cardInWindow),
         onlineRefunds: Object.freeze(onlineInWindow),
         writeOffs: Object.freeze(writtenOff),
       });

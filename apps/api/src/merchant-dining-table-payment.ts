@@ -6,6 +6,7 @@ import {
   createPostgresDiningTableSettlementStore,
   DiningTableSettlementStoreError,
   diningTableCashRefundReasons,
+  parseCardMachineSlipReference,
   type DiningTableCashRefundReason,
   type PaymentProviderAdapter,
 } from "@rms/payment";
@@ -30,6 +31,7 @@ export type TablePaymentErrorCode =
   | "TABLE_PAYMENT_PERMISSION_DENIED"
   | "TABLE_PAYMENT_NOT_CASH"
   | "TABLE_PAYMENT_NOT_ONLINE"
+  | "TABLE_PAYMENT_NOT_CARD_MACHINE"
   | "TABLE_PAYMENT_NOT_PAID"
   | "TABLE_PAYMENT_TOO_MUCH"
   | "TABLE_PAYMENT_IDEMPOTENCY_CONFLICT"
@@ -73,6 +75,7 @@ async function view(
   const settlements = await store.listByOrders(tx, [orderReference]);
   const allRefunds = await store.listCashRefundsByOrders(tx, [orderReference]);
   const allOnlineRefunds = await store.listOnlineRefundsByOrders(tx, [orderReference]);
+  const allCardRefunds = await store.listCardRefundsByOrders(tx, [orderReference]);
   // WP-2423 item 8 ④: each payment of the table — the whole table's, or one per part of a split
   // bill — with its own cash refunds; a refund comes from one payment's cash.
   const describe = (settlement: (typeof settlements)[number]) => {
@@ -88,6 +91,10 @@ async function view(
     const toCard = onlineRefunds
       .filter((refund) => refund.outcome?.status !== "Failed")
       .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+    const cardRefunds = allCardRefunds.filter(
+      (refund) => refund.settlementReference === settlement.settlementReference,
+    );
+    const onCard = cardRefunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
     return Object.freeze({
       partNumber: settlement.part?.partNumber ?? null,
       method: settlement.method,
@@ -99,6 +106,16 @@ async function view(
       recordedAfterOutage: settlement.recordingReason === "RecordedAfterOutage",
       cashRefunds: Object.freeze(
         refunds.map((refund) =>
+          Object.freeze({
+            amountMinor: refund.amountMinor.toString(),
+            reasonCode: refund.reasonCode,
+            refundedAt: refund.refundedAt,
+          }),
+        ),
+      ),
+      // On the machine: never its slip here, which stays on the record for matching.
+      cardRefunds: Object.freeze(
+        cardRefunds.map((refund) =>
           Object.freeze({
             amountMinor: refund.amountMinor.toString(),
             reasonCode: refund.reasonCode,
@@ -125,7 +142,7 @@ async function view(
         ? settlement.totalMinor - refunded
         : settlement.method === "Online"
           ? settlement.totalMinor - toCard
-          : 0n
+          : settlement.totalMinor - onCard
       ).toString(),
     });
   };
@@ -499,6 +516,158 @@ export function createMerchantDiningTableOnlineRefund(options: {
       )
         return fail("TABLE_PAYMENT_IDEMPOTENCY_CONFLICT");
       // Another manager refunded at the same moment: the database refused going over the payment.
+      if ((error as { code?: unknown } | null)?.code === "23514")
+        return fail("TABLE_PAYMENT_TOO_MUCH");
+      return fail("TABLE_PAYMENT_UNAVAILABLE");
+    }
+  };
+}
+
+/**
+ * WP-2423 DEC-TABLE-ONLINE-REFUND: a manager (`payment.refund.approve`, PIN-confirmed) records a
+ * refund made on the Store's card machine, of a table paid there: amount, reason and slip. Nothing
+ * is sent anywhere: the money moved on the machine, and this keeps it in the books.
+ */
+export function createMerchantDiningTableCardRefund(options: {
+  persistence: PersistentMerchantBffOptions;
+  authentication: Pick<MerchantBffService, "authorize">;
+  nextReference(): string;
+}) {
+  const resolve = createMerchantStoreScope(options.persistence);
+  return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
+    const authenticated = await options.authentication.authorize(input);
+    let command: {
+      orderReference: string;
+      operationReference: string;
+      amountMinor: bigint;
+      reasonCode: DiningTableCashRefundReason;
+      partNumber: number | null;
+      slipReference: string | null;
+    };
+    try {
+      const value = input.command;
+      const raw = readClosedRecord(value, [
+        "orderReference",
+        "operationReference",
+        "amountMinor",
+        "reasonCode",
+        "slipReference",
+        ...(value !== null && typeof value === "object" && Object.hasOwn(value, "partNumber")
+          ? ["partNumber"]
+          : []),
+      ]);
+      if (
+        raw.partNumber !== undefined &&
+        raw.partNumber !== null &&
+        !(
+          Number.isSafeInteger(raw.partNumber) &&
+          (raw.partNumber as number) >= 1 &&
+          (raw.partNumber as number) <= 20
+        )
+      )
+        throw new Error();
+      if (
+        typeof raw.amountMinor !== "string" ||
+        !/^[1-9][0-9]{0,8}$/u.test(raw.amountMinor) ||
+        !diningTableCashRefundReasons.includes(raw.reasonCode as DiningTableCashRefundReason)
+      )
+        throw new Error();
+      command = {
+        orderReference: reference(raw.orderReference),
+        operationReference: reference(raw.operationReference),
+        amountMinor: BigInt(raw.amountMinor),
+        reasonCode: raw.reasonCode as DiningTableCashRefundReason,
+        partNumber: (raw.partNumber as number | null | undefined) ?? null,
+        slipReference: parseCardMachineSlipReference(raw.slipReference),
+      };
+    } catch {
+      return fail("TABLE_PAYMENT_INPUT_INVALID");
+    }
+    const intentDigest =
+      "sha256:" +
+      createHash("sha256")
+        .update(
+          canonicalizeRfc8785({
+            kind: "DiningTableCardRefund/v1",
+            orderReference: command.orderReference,
+            amountMinor: command.amountMinor.toString(),
+            reasonCode: command.reasonCode,
+            slipReference: command.slipReference,
+            ...(command.partNumber === null ? {} : { partNumber: command.partNumber }),
+          }),
+        )
+        .digest("hex");
+    try {
+      return await options.persistence.transactions.run((transaction) =>
+        withMerchantTransactionAuthorization(
+          {
+            transaction,
+            resolve: async () => {
+              const current = await resolve(
+                transaction,
+                input.sessionCookie,
+                tableCashRefundPermission,
+                authenticated.sessionReference,
+              ).catch(() => fail("TABLE_PAYMENT_PERMISSION_DENIED"));
+              if ((await current.allowed()) !== true)
+                return fail("TABLE_PAYMENT_PERMISSION_DENIED");
+              return current;
+            },
+            recheck: async (current) => (await current.allowed()) === true,
+            denied: () => fail("TABLE_PAYMENT_PERMISSION_DENIED"),
+          },
+          async (authority) => {
+            const tx = transaction as unknown as ConsumerTransaction;
+            const scope = scopeOf(authority.scope);
+            const guard = () => authority.guard();
+            const store = createPostgresDiningTableSettlementStore({
+              scope,
+              authorize: async (_tx, value) =>
+                value.orderReference === command.orderReference && (await guard()) === true,
+            });
+            const settlement = (await store.listByOrders(tx, [command.orderReference])).find(
+              (entry) => (entry.part?.partNumber ?? null) === command.partNumber,
+            );
+            if (settlement === undefined) return fail("TABLE_PAYMENT_NOT_PAID");
+            if (settlement.method !== "CardMachine") return fail("TABLE_PAYMENT_NOT_CARD_MACHINE");
+            const all = await store.listCardRefundsByOrders(tx, [command.orderReference]);
+            if (!all.some((refund) => refund.operationReference === command.operationReference)) {
+              const taken = all
+                .filter((refund) => refund.settlementReference === settlement.settlementReference)
+                .reduce((sum, refund) => sum + refund.amountMinor, 0n);
+              if (taken + command.amountMinor > settlement.totalMinor)
+                return fail("TABLE_PAYMENT_TOO_MUCH");
+            }
+            const now = new Date(Date.parse(options.persistence.now())).toISOString();
+            const recorded = await store.recordCardRefund(tx, {
+              cardRefundReference: options.nextReference(),
+              operationReference: command.operationReference,
+              intentDigest,
+              settlementReference: settlement.settlementReference,
+              orderReference: command.orderReference,
+              amountMinor: command.amountMinor,
+              reasonCode: command.reasonCode,
+              slipReference: command.slipReference,
+              approvedByActorReference: String(authority.scope.actorReference),
+              refundedAt: now,
+              recordedAt: now,
+              auditReference: options.nextReference(),
+              correlationReference: command.operationReference,
+            });
+            return Object.freeze({
+              status: recorded.status,
+              ...(await view(tx, scope, command.orderReference, guard)),
+            });
+          },
+        ),
+      );
+    } catch (error) {
+      if (error instanceof TablePaymentError) throw error;
+      if (
+        error instanceof DiningTableSettlementStoreError &&
+        error.code === "DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT"
+      )
+        return fail("TABLE_PAYMENT_IDEMPOTENCY_CONFLICT");
       if ((error as { code?: unknown } | null)?.code === "23514")
         return fail("TABLE_PAYMENT_TOO_MUCH");
       return fail("TABLE_PAYMENT_UNAVAILABLE");
