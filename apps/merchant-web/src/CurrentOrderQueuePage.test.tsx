@@ -13,6 +13,8 @@ import {
   onlinePaymentText,
   storeTime,
   filterCurrentOrderItems,
+  ordersListSearch,
+  readOrdersListSearch,
   acceptanceWindow,
   awaitingBatchReferences,
   orderChannel,
@@ -474,6 +476,32 @@ it("WP-2423: an accepted order the kitchen shows nothing for yet counts under In
   expect(count("Ready")).toBe(1);
   // The "Accepted" status filter still means exactly that.
   expect(count("Accepted")).toBe(2);
+});
+
+it("WP-2423: the list's filters survive in its address, and only what the page offers is read", () => {
+  const filters = {
+    orderNumber: "6",
+    type: "DineIn",
+    channel: "TableQr",
+    phase: "InProgress",
+    day: "All" as const,
+  };
+  expect(ordersListSearch(filters)).toBe(
+    "?order=6&type=DineIn&channel=TableQr&status=InProgress&day=All",
+  );
+  expect(readOrdersListSearch(ordersListSearch(filters))).toEqual(filters);
+  const defaults = {
+    orderNumber: "",
+    type: "All",
+    channel: "All",
+    phase: "All",
+    day: "Today" as const,
+  };
+  expect(ordersListSearch(defaults)).toBe("");
+  expect(readOrdersListSearch("")).toEqual(defaults);
+  expect(readOrdersListSearch("?type=Delivery&channel=Fax&status=Gone&day=Yesterday")).toEqual(
+    defaults,
+  );
 });
 
 it("WP-2423 Q1: grades the acceptance window and shows it only while the order can be accepted", () => {

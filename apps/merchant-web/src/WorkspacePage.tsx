@@ -8,6 +8,7 @@ import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
  * same everywhere.
  */
 export function WorkspacePage({
+  back,
   title,
   meta,
   status,
@@ -15,6 +16,8 @@ export function WorkspacePage({
   className,
   children,
 }: {
+  /** The way back from a page opened out of a list, above its title. */
+  readonly back?: ReactNode;
   readonly title: ReactNode;
   readonly meta?: ReactNode;
   readonly status?: ReactNode;
@@ -28,6 +31,7 @@ export function WorkspacePage({
       tabIndex={-1}
       className={`bop-shell__main workspace-page${className ? ` ${className}` : ""}`}
     >
+      {back ? <p className="workspace-page__back">{back}</p> : null}
       <header className="workspace-page__header">
         <div className="workspace-page__title">
           <h1>{title}</h1>

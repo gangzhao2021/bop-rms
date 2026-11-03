@@ -6890,6 +6890,20 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0;
   padding: 24px clamp(16px, 3vw, 32px) 48px;
 }
+.workspace-page__back {
+  margin: 0 0 8px;
+}
+.workspace-page__back a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
+}
+.workspace-page__back a:hover {
+  text-decoration: underline;
+}
 .workspace-page__header {
   display: flex;
   flex-wrap: wrap;

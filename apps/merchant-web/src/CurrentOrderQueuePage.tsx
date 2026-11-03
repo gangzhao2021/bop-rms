@@ -53,7 +53,7 @@ export { storeTime } from "./StoreTime.js";
 export { counterAwaitingCardMachine, counterPayByText, counterPayByTier };
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
-import { Link, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
 import {
   orderChannel,
@@ -161,6 +161,53 @@ export function filterCurrentOrderItems(
                         order.currentPhase === "Accepted" &&
                         order.kitchenPhase === null)))),
   );
+}
+const ordersListPhases: ReadonlySet<string> = new Set([
+  "AwaitingAcceptance",
+  "InProgress",
+  "Ready",
+  "Fulfilled",
+  "Submitted",
+  "Accepted",
+  "Rejected",
+  "Cancelled",
+  "OutageHeld",
+  "Expired",
+  "AwaitingPayment",
+  "NotCollected",
+]);
+const ordersListChannels: ReadonlySet<string> = new Set(
+  orderChannelFilterOptions.map((option) => option.value),
+);
+type OrdersListFilters = Required<Omit<CurrentOrderFilters, "today">>;
+/**
+ * The list's filters live in its address, so coming back from an order, the browser's back button
+ * and a reload all find the list as staff left it. Defaults stay out of the address.
+ */
+export function ordersListSearch(filters: OrdersListFilters): string {
+  const params = new URLSearchParams();
+  const number = filters.orderNumber.trim();
+  if (number !== "") params.set("order", number);
+  if (filters.type !== "All") params.set("type", filters.type);
+  if (filters.channel !== "All") params.set("channel", filters.channel);
+  if (filters.phase !== "All") params.set("status", filters.phase);
+  if (filters.day !== "Today") params.set("day", filters.day);
+  const search = params.toString();
+  return search === "" ? "" : `?${search}`;
+}
+/** Reads what `ordersListSearch` wrote; anything else in the address is the default. */
+export function readOrdersListSearch(search: string): OrdersListFilters {
+  const params = new URLSearchParams(search);
+  const type = params.get("type");
+  const channel = params.get("channel");
+  const phase = params.get("status");
+  return {
+    orderNumber: params.get("order") ?? "",
+    type: type === "DineIn" || type === "Pickup" ? type : "All",
+    channel: channel !== null && ordersListChannels.has(channel) ? channel : "All",
+    phase: phase !== null && ordersListPhases.has(phase) ? phase : "All",
+    day: params.get("day") === "All" ? "All" : "Today",
+  };
 }
 /** WP-2423 Q6 step 2: what "Check refund" on a cancelled item needs (omitted: not offered). */
 export interface ItemRefundCheckContext {
@@ -2350,11 +2397,27 @@ export function CurrentOrderQueuePage({
     reportedUnreadable.current = key;
     void client.reportUnreadable(csrf, unreadableOrders);
   }, [client, csrf, unreadableOrders]);
-  const [orderNumberSearch, setOrderNumberSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("All");
-  const [channelFilter, setChannelFilter] = useState("All");
-  const [phaseFilter, setPhaseFilter] = useState("All");
-  const [dayFilter, setDayFilter] = useState<"Today" | "All">("Today");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [initialFilters] = useState(() =>
+    readOrdersListSearch(orderReference === undefined ? location.search : ""),
+  );
+  const [orderNumberSearch, setOrderNumberSearch] = useState(initialFilters.orderNumber);
+  const [typeFilter, setTypeFilter] = useState(initialFilters.type);
+  const [channelFilter, setChannelFilter] = useState(initialFilters.channel);
+  const [phaseFilter, setPhaseFilter] = useState(initialFilters.phase);
+  const [dayFilter, setDayFilter] = useState(initialFilters.day);
+  const listSearch = ordersListSearch({
+    orderNumber: orderNumberSearch,
+    type: typeFilter,
+    channel: channelFilter,
+    phase: phaseFilter,
+    day: dayFilter,
+  });
+  useEffect(() => {
+    if (orderReference !== undefined || listSearch === location.search) return;
+    void navigate({ search: listSearch }, { replace: true });
+  }, [listSearch, location.search, navigate, orderReference]);
   const [now, setNow] = useState(() => Date.now());
   const [stale, setStale] = useState(false);
   /** Orders v2: when the list was last read without error (the header's "Updated 9:40"). */
@@ -2653,6 +2716,19 @@ export function CurrentOrderQueuePage({
   return (
     <WorkspacePage
       className="orders-page"
+      back={
+        single ? (
+          <Link
+            to={{
+              pathname: "/operations/orders",
+              // The list as staff left it, when they came from it.
+              search: ordersListSearch(readOrdersListSearch(listSearchFromLink(location.state))),
+            }}
+          >
+            <span aria-hidden="true">←</span> {t("All orders")}
+          </Link>
+        ) : null
+      }
       title={
         single
           ? detail === undefined
@@ -2680,7 +2756,6 @@ export function CurrentOrderQueuePage({
       }
       actions={
         <>
-          {single ? <Link to="/operations/orders">{t("All orders")}</Link> : null}
           <button
             ref={refreshButton}
             type="button"
@@ -3023,6 +3098,7 @@ export function CurrentOrderQueuePage({
                       <Link
                         className="order-panel__page-link"
                         to={`/operations/orders/${order.orderReference}`}
+                        state={{ ordersListSearch: listSearch }}
                       >
                         {t("Open full page")}
                       </Link>
@@ -3218,6 +3294,7 @@ export function CurrentOrderQueuePage({
                         <Link
                           className="order-cancel-items-link"
                           to={`/operations/orders/${order.orderReference}`}
+                          state={{ ordersListSearch: listSearch }}
                         >
                           {t("Take dishes off the bill")}
                         </Link>
@@ -3250,6 +3327,7 @@ export function CurrentOrderQueuePage({
                         <Link
                           className="order-cancel-items-link"
                           to={`/operations/orders/${order.orderReference}`}
+                          state={{ ordersListSearch: listSearch }}
                         >
                           {t("Cancel items")}
                         </Link>
@@ -3382,6 +3460,14 @@ export function CurrentOrderQueuePage({
 }
 
 const orderRoute = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+/** The list's address a link to an order carried; "" when the order was opened any other way. */
+function listSearchFromLink(state: unknown): string {
+  const search =
+    state !== null && typeof state === "object" && "ordersListSearch" in state
+      ? state.ordersListSearch
+      : "";
+  return typeof search === "string" ? search : "";
+}
 /** WP-2423 OPS-ORDER-DETAIL at /operations/orders/:id. */
 export function CurrentOrderDetailRoute(props: {
   readonly storeLabel: string;

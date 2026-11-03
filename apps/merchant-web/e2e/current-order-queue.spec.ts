@@ -125,7 +125,7 @@ test("@production current queue pages and clears old orders after denied refresh
   await chooseOrderFilter(page, "Channel", "Online");
   await page
     .getByRole("group", { name: "Show orders" })
-    .getByRole("button", { name: /^In progress/u })
+    .getByRole("button", { name: /^Ready/u })
     .click();
   await expect(page.getByRole("heading", { name: "No orders match these filters" })).toBeVisible();
   await page.getByRole("button", { name: "Clear order filters" }).click();
@@ -1240,4 +1240,156 @@ test("@production Coordinator 2026-10-30: a dish that can't come off the bill sa
     await expectNoInternalText(page);
     await page.screenshot({ path: `test-results/remove-refused-${mode}-${width}.png` });
   }
+});
+
+test("@production an order's own page leads back to the list as staff left it", async ({
+  page,
+}) => {
+  const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const money = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-18",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "OPS-ORDER-QUEUE",
+              label: "Orders",
+              href: "/operations/orders",
+              permission: "ordering.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const order = {
+    orderReference: id(21),
+    orderNumber: "21",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-18T15:00:00.000Z",
+    observedAt: "2026-10-18T15:01:00.000Z",
+    initialBatchReference: id(91),
+    batches: [
+      {
+        orderBatchReference: id(91),
+        sequence: 1,
+        acceptanceStatus: "Accepted",
+        canRequestAcceptance: false,
+        canCancel: false,
+        staffCancellation: null,
+        canCancelItems: false,
+      },
+    ],
+    canRequestAcceptance: false,
+    currentPhase: "Accepted",
+    currentVersion: 3,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    paidOnline: money("1300"),
+  };
+  const listed = { items: [order], nextAfterOrderReference: null };
+  await page.route("**/merchant/orders", (route) => route.fulfill({ headers, json: listed }));
+  await page.route("**/merchant/orders?*", (route) => route.fulfill({ headers, json: listed }));
+  await page.route("**/merchant/orders/detail?*", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "OPS-ORDER-DETAIL",
+        pickupContact: null,
+        order: { ...order, kitchenPhase: null },
+        paymentPosition: { refundedMinor: "0", refundPendingMinor: "0" },
+        lines: {
+          items: [
+            {
+              orderItemReference: id(201),
+              orderBatchReference: id(91),
+              name: "Mocha",
+              options: [],
+              quantity: 1,
+              customerNote: null,
+              unitPrice: money("1150"),
+              subtotal: money("1150"),
+              discount: money("0"),
+              tax: money("150"),
+              fee: money("0"),
+              total: money("1300"),
+              canCancel: false,
+              cancellation: null,
+            },
+          ],
+          totals: {
+            subtotal: money("1150"),
+            discount: money("0"),
+            tax: money("150"),
+            fee: money("0"),
+            total: money("1300"),
+          },
+        },
+      },
+    }),
+  );
+  const tab = (name: RegExp) =>
+    page.getByRole("group", { name: "Show orders" }).getByRole("button", { name });
+  const back = page.getByRole("link", { name: "All orders" });
+
+  await page.goto("/operations/orders");
+  await expect(back).toHaveCount(0);
+  // An accepted order the kitchen has not started is on the In progress tab, and the tab is kept.
+  await tab(/^In progress/u).click();
+  await expect(tab(/^In progress/u)).toHaveAttribute("aria-pressed", "true");
+  await expect(tab(/^In progress/u)).toContainText("1");
+  await expect(page).toHaveURL(/\/operations\/orders\?status=InProgress$/u);
+  // The one match opens in the side panel by itself.
+  await orderPanel(page).getByRole("link", { name: "Open full page" }).click();
+  await expect(page).toHaveURL(new RegExp(`/operations/orders/${id(21)}$`, "u"));
+  await expect(page.getByRole("heading", { name: "Order 21", exact: true })).toBeVisible();
+
+  // The way back is above the title, on every width, and is the one link of its kind on the page.
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const link = await back.boundingBox();
+    const title = await page.getByRole("heading", { name: "Order 21", exact: true }).boundingBox();
+    expect(link !== null && title !== null && link.y + link.height <= title.y).toBe(true);
+    expect(link !== null && link.height >= 44).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/order-back-link-${width}.png` });
+  }
+  await expect(back).toHaveCount(1);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+
+  await back.click();
+  await expect(page).toHaveURL(/\/operations\/orders\?status=InProgress$/u);
+  await expect(tab(/^In progress/u)).toHaveAttribute("aria-pressed", "true");
+
+  // A reload keeps the list too; an order opened straight from its address leads to the whole list.
+  await page.reload();
+  await expect(tab(/^In progress/u)).toHaveAttribute("aria-pressed", "true");
+  await page.goto(`/operations/orders/${id(21)}`);
+  await back.click();
+  await expect(page).toHaveURL(/\/operations\/orders$/u);
+  await expect(tab(/^All/u)).toHaveAttribute("aria-pressed", "true");
 });
