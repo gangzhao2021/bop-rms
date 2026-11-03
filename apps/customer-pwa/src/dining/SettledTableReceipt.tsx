@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { t, saidTable, withNameLocale } from "../i18n/i18n.js";
+import { t, saidTable, nameLocale } from "../i18n/i18n.js";
 import { formatMoney } from "../journey/format.js";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { getSettledTableReceiptCsrf } from "../session/customer-transaction-context.js";
@@ -139,7 +139,7 @@ export function createSettledTableReceiptClient(
       if (csrf === null) return fail("none");
       let response: Response;
       try {
-        response = await request(withNameLocale("/api/v1/dine-in/table-payment"), {
+        response = await request("/api/v1/dine-in/table-payment", {
           method: "POST",
           credentials: "include",
           cache: "no-store",
@@ -149,7 +149,10 @@ export function createSettledTableReceiptClient(
             "content-type": "application/json",
             "x-csrf-token": csrf,
           },
-          body: JSON.stringify({ action: "SettledReceipt" }),
+          body: JSON.stringify({
+            action: "SettledReceipt",
+            ...(nameLocale() === null ? {} : { locale: nameLocale() }),
+          }),
         });
       } catch {
         return fail();

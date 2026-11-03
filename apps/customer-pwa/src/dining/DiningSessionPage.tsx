@@ -759,10 +759,16 @@ export function DiningSessionScreen({
   const [again, setAgain] = useState<{ key: string; item: DiningItem } | null>(null);
   // Dishes can be added while the table orders: not while it checks out, after it paid, or once
   // everything is closed. A table paying at the end can still order after everything is served.
+  const paidOff =
+    tablePay?.paid === true ||
+    (view?.paymentTiming === "PayLater" &&
+      view.summary !== null &&
+      view.summary.due.amountMinor === "0" &&
+      view.summary.paid.amountMinor !== "0");
   const canOrderAgain =
     state.status === "ready" &&
     (active || view?.paymentTiming === "PayLater") &&
-    tablePay?.paid !== true &&
+    !paidOff &&
     tablePay?.checkingOut !== true;
   return (
     <CustomerPage step="table" store={store} className="order-status dining-session">
@@ -919,7 +925,7 @@ export function DiningSessionScreen({
       ) : null}
       {/* DEC-DINE-IN-PAY-LATER: during checkout no more rounds are sent; paid, nothing to add. */}
       {/* A settled table's visit has ended: nothing more to order here. */}
-      {state.status === "settled" || tablePay?.paid ? null : tablePay?.checkingOut ? (
+      {state.status === "settled" || paidOff ? null : tablePay?.checkingOut ? (
         <p className="order-status__back" role="note">
           {t("Your table is checking out. To add dishes, ask a staff member.")}
         </p>

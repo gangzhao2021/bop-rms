@@ -43,6 +43,14 @@ it("WP-2423 item 8 ①: names what each table needs, with its one next step", ()
   );
   // A guest waiting at the table comes before dishes at the pass.
   expect(call).toMatchObject({ tone: "action", step: "Handled", detail: "2 min ago · A question" });
+  // Owner 2026-11-03: before its bill is read, a table checking out is never said to owe.
+  expect(
+    tableNeed(
+      table(8, { session: { phase: "Closing", version: 3, orderReference: id(208) } }),
+      null,
+      now,
+    ),
+  ).toMatchObject({ words: "Checking the bill", step: null });
   // Owner 2026-11-03: a phone joining never hides a dish waiting to be served.
   expect(
     tableNeed(

@@ -155,6 +155,15 @@ export function tableNeed(
       step: "ServeAll",
     };
   if (table.session?.phase === "Closing") {
+    // Owner 2026-11-03 walkthrough: the bill is not read yet. A paid table never flashes "to pay".
+    if (order === null)
+      return {
+        tone: "progress",
+        rank: 55,
+        words: t("Checking the bill"),
+        detail: null,
+        step: null,
+      };
     if (order?.bill?.paid)
       return {
         tone: "done",

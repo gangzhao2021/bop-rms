@@ -388,6 +388,20 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(keepsReadingTable({ status: "ready", view: served, refreshing: false })).toBe(true);
     expect(keepsReadingTable({ status: "settled", tableLabel: "T1" })).toBe(false);
   });
+  it("Owner 2026-11-03: a table that paid offers no more ordering", () => {
+    const paid = view({
+      paymentTiming: "PayLater",
+      rounds: [round({ status: "Served" })],
+      summary: {
+        ...view().summary!,
+        due: { amountMinor: "0", currencyCode: "CAD" },
+        paid: { amountMinor: "3041", currencyCode: "CAD" },
+      },
+    });
+    const html = render({ status: "ready", view: paid, refreshing: false });
+    expect(html).not.toContain("Order more from the menu");
+    expect(html).not.toContain("Order again");
+  });
   it("Owner 2026-11-03: what the guest ordered comes before the table total", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>

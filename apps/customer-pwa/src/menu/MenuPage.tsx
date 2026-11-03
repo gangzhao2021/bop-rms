@@ -164,7 +164,8 @@ function useMenuLoad(
     };
   }, [client, input, revision]);
   useEffect(() => {
-    if (state.kind !== "Loading") heading.current?.focus();
+    // Owner 2026-11-03 walkthrough: moving the focus never moves the guest off where they were.
+    if (state.kind !== "Loading") heading.current?.focus({ preventScroll: true });
   }, [state.kind]);
   return { state, heading, retry: () => setRevision((value) => value + 1) };
 }

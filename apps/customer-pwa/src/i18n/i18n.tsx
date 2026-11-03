@@ -76,6 +76,11 @@ export function menuLocale(language: CustomerLanguage, entryLocale: string): str
  * names in the chosen language: Chinese adds `locale=zh-Hans-CA` (names without a Chinese name come
  * back in the menu language); English asks nothing extra, so the session's own locale is used.
  */
+/** The locale names are asked in, for a request that carries it in its body (null: as stored). */
+export function nameLocale(): string | null {
+  return current === "zh-Hans" ? CHINESE_LOCALE : null;
+}
+
 export function withNameLocale(path: string): string {
   if (current !== "zh-Hans") return path;
   return `${path}${path.includes("?") ? "&" : "?"}locale=${CHINESE_LOCALE}`;

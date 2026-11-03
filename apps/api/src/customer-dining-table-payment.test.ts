@@ -61,6 +61,7 @@ async function setup() {
     }),
     handoff: vi.fn(),
     ownAttempt: vi.fn(),
+    settledReceipt: vi.fn().mockResolvedValue({ bill, attempt: null }),
   };
   const handler = new CustomerDiningTablePaymentHandler({
     allowedOrigin: "https://pilot.example",
@@ -133,6 +134,15 @@ it("refuses a chosen amount or table, a cross-site request and an unknown tip", 
     expect((await f.send(body)).status).toBe(400);
   expect((await f.send({ action: "Read" }, { "sec-fetch-site": "cross-site" })).status).toBe(400);
   expect(f.port.read).not.toHaveBeenCalled();
+});
+
+it("Owner 2026-11-03: a settled receipt is read in the language the guest chose", async () => {
+  const f = await setup();
+  expect((await f.send({ action: "SettledReceipt", locale: "zh-Hans-CA" })).status).toBe(200);
+  expect(f.port.settledReceipt).toHaveBeenLastCalledWith(expect.anything(), "zh-Hans-CA");
+  expect((await f.send({ action: "SettledReceipt" })).status).toBe(200);
+  expect(f.port.settledReceipt).toHaveBeenLastCalledWith(expect.anything(), null);
+  expect((await f.send({ action: "SettledReceipt", locale: "<zh>" })).status).toBe(400);
 });
 
 it("says plainly when another guest is paying or the table already paid", async () => {

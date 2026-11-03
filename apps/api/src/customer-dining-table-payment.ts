@@ -449,7 +449,7 @@ export class CustomerDiningTablePaymentHandler {
         const credentials = this.credentials(request);
         let command:
           | { action: "Read" }
-          | { action: "SettledReceipt" }
+          | { action: "SettledReceipt"; displayLocale: string | null }
           | {
               action: "Start";
               operationReference: string;
@@ -463,8 +463,14 @@ export class CustomerDiningTablePaymentHandler {
             readClosedRecord(body, ["action"]);
             command = { action: "Read" };
           } else if (body.action === "SettledReceipt") {
-            readClosedRecord(body, ["action"]);
-            command = { action: "SettledReceipt" };
+            const raw = readClosedRecord(body, ["action", "locale"]);
+            // Owner 2026-11-03 walkthrough: a receipt in the language the guest chose.
+            command = {
+              action: "SettledReceipt",
+              displayLocale: customerDisplayLocale(
+                raw.locale === undefined ? {} : { locale: raw.locale },
+              ),
+            };
           } else if (body.action === "Start") {
             const raw = readClosedRecord(body, [
               "action",
@@ -526,10 +532,7 @@ export class CustomerDiningTablePaymentHandler {
               .status(200)
               .json(
                 customerSettledTableReceiptBody(
-                  await this.#port.settledReceipt(
-                    credentials,
-                    customerDisplayLocale(request.query),
-                  ),
+                  await this.#port.settledReceipt(credentials, command.displayLocale),
                 ),
               );
             return;
