@@ -401,10 +401,15 @@ export function createPostgresOrderCompensationCandidateReader(options: {
       ? await transaction.query(
           "SELECT disposition_id,payment_event_id,source FROM (" +
             "SELECT disposition_id::uuid AS disposition_id,payment_event_id::uuid AS payment_event_id,'Disposition' AS source FROM rms_ordering.order_payment_disposition_record " +
-            "WHERE brand_id=$1 AND store_id=$2 AND disposition='PaidWithoutFulfillableOrder' AND ($3::uuid IS NULL OR disposition_id>$3::uuid) " +
+            "d WHERE brand_id=$1 AND store_id=$2 AND disposition='PaidWithoutFulfillableOrder' AND ($3::uuid IS NULL OR disposition_id>$3::uuid) " +
+            // One payment, one refund: a staff cancellation and a disposition can both name the
+            // same payment moments apart. Only the first is a candidate, as its case records it;
+            // the second would be refused at every cycle for not matching.
+            "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=d.brand_id AND c.store_id=d.store_id AND c.payment_event_id=d.payment_event_id AND c.refund_disposition='Refund' AND c.cancellation_id::uuid<d.disposition_id::uuid) " +
             "UNION ALL SELECT cancellation_id::uuid,payment_event_id::uuid,'StaffCancellation' FROM rms_ordering.order_staff_cancellation " +
             // DEC-TABLE-CLOSE-GUESTS-LEFT: an already refunded round owes nothing; no compensation.
-            "WHERE brand_id=$1 AND store_id=$2 AND refund_disposition='Refund' AND ($3::uuid IS NULL OR cancellation_id>$3::uuid)" +
+            "c WHERE brand_id=$1 AND store_id=$2 AND refund_disposition='Refund' AND ($3::uuid IS NULL OR cancellation_id>$3::uuid) " +
+            "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record d WHERE d.brand_id=c.brand_id AND d.store_id=c.store_id AND d.payment_event_id=c.payment_event_id AND d.disposition='PaidWithoutFulfillableOrder' AND d.disposition_id::uuid<c.cancellation_id::uuid)" +
             ") candidates ORDER BY disposition_id LIMIT $4",
           [brandReference, storeReference, after, input.limit],
         )
