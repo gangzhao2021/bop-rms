@@ -897,6 +897,33 @@ describe("store sales report (WP-2423 Q14)", () => {
       ],
     };
     const view = computeStoreSalesReport(input);
+    // v15 2026-11-02: points count where the comps line does: a paid round and a round comped in
+    // full, never a round written off unpaid (it sold nothing).
+    expect(
+      computeStoreSalesReport({
+        ...input,
+        priceReductions: [
+          {
+            orderReference: ref(902),
+            orderBatchReference: ref(912),
+            decidedAt: "2026-10-14T19:30:00.000Z",
+            pointsNetMinor: 200n,
+          },
+          {
+            orderReference: ref(902),
+            orderBatchReference: ref(913),
+            decidedAt: "2026-10-14T19:30:00.000Z",
+            pointsNetMinor: 475n,
+          },
+          {
+            orderReference: ref(902),
+            orderBatchReference: ref(999),
+            decidedAt: "2026-10-14T19:30:00.000Z",
+            pointsNetMinor: 500n,
+          },
+        ],
+      }).pointsUsedMinor,
+    ).toBe("675");
     expect(view.summary).toMatchObject({
       grossSalesMinor: "1475",
       compCount: 1,

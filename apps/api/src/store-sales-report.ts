@@ -522,6 +522,9 @@ function computeSales(
     [...input.payments, ...input.refundedPayments].map((payment) => payment.orderBatchReference),
   );
   const compedRounds = new Map<string, { orderReference: string; decidedAt: string }>();
+  // v15 2026-11-02: the rounds whose comps are in the comps line (paid, or comped in full); a round
+  // written off unpaid sold nothing, so points used on it are not "of that".
+  const countedRounds = new Set(paidBatches);
   for (const reduction of input.priceReductions ?? []) {
     const prior = compedRounds.get(reduction.orderBatchReference);
     if (prior === undefined || reduction.decidedAt > prior.decidedAt)
@@ -543,6 +546,7 @@ function computeSales(
       continue;
     const day = dayOf(round.decidedAt);
     if (day === null) continue;
+    countedRounds.add(orderBatchReference);
     const f = facts.get(day.businessDate) ?? fail();
     for (const t of [f.all, f.kinds.get(kindOf(order)) ?? fail()]) {
       t.orders.add(round.orderReference);
@@ -908,6 +912,7 @@ function computeSales(
   return Object.freeze({
     // WP-2423 取舍 18: how much of what came off was guests' points (in the comps line).
     pointsUsedMinor: (input.priceReductions ?? [])
+      .filter((reduction) => countedRounds.has(reduction.orderBatchReference))
       .reduce((sum, reduction) => sum + (reduction.pointsNetMinor ?? 0n), 0n)
       .toString(),
     screenId: "RPT-OPS-DASHBOARD" as const,
