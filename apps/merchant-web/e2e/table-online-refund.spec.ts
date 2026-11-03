@@ -132,6 +132,7 @@ test("@production a manager refunds a table paid on a guest's phone to the card"
   await page.getByRole("button", { name: /10\.00 to the card$/u }).click();
   await expect(page.getByText(/^Refunded to the card/u)).toBeVisible();
   await expect(page.getByText(/few days/u)).toBeVisible();
+  await expect(page.getByText("Left to refund", { exact: true })).toBeVisible();
   expect(bodies).toHaveLength(1);
   expect(bodies[0]).toMatchObject({
     orderReference: id(1),

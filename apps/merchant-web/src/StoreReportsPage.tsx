@@ -136,6 +136,9 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
       lines.push([t("  not split by item"), money(summary.refunds.notItemizedMinor)]);
   }
   lines.push([t("Net collected"), money(summary.netCollectedMinor), true]);
+  // A refund by amount (a table's cash or phone payment) has no dishes to take off net sales.
+  if (BigInt(summary.refunds.notItemizedMinor) > 0n)
+    lines.push([t("  refunds not split by item are not taken off the next line"), ""]);
   lines.push([t("Net sales after refunds"), money(summary.netSalesAfterRefundsMinor)]);
   return (
     <dl className="store-reports__lines">

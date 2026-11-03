@@ -343,6 +343,12 @@ function TablePaymentBlock({
             </dd>
           </div>
         ))}
+        {(payment.method === "Cash" || online) && refundable !== BigInt(payment.totalMinor) ? (
+          <div>
+            <dt>{t("Left to refund")}</dt>
+            <dd>{cad(refundable)}</dd>
+          </div>
+        ) : null}
       </dl>
       {payment.recordedAfterOutage ? <p role="note">{t("Recorded after an outage.")}</p> : null}
       {payment.onlineRefunds.some((refund) => refund.state === "Sending") ? (

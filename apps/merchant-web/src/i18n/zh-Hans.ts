@@ -5865,6 +5865,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recorded after an outage.": "断网后补录。",
   "Give cash back": "退现金",
   "Refund to the card": "退回客人的卡",
+  "Left to refund": "还可退",
+  "  refunds not split by item are not taken off the next line":
+    "  未按商品拆分的退款没有从下一行扣除",
   "Refund {amount} to the card": "退 {amount} 到客人的卡",
   "Refunded to the card · {reason}": "已退到卡上 · {reason}",
   "Going back to the card · {reason}": "正在退回卡上 · {reason}",
