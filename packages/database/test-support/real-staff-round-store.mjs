@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import process from "node:process";
 import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +38,7 @@ import { createInternalPricingPolicy } from "../../../tooling/environment/pilot-
 import { provisionPilotCredentials } from "../../../tooling/environment/pilot-provision-credentials.mjs";
 import { createInternalQrLoaders } from "../../../tooling/environment/pilot-qr.mjs";
 import { createInternalTestResources } from "../../../tooling/environment/pilot-resources.mjs";
+import { alignProcessClockToDatabase } from "../../../tooling/environment/pilot-database-clock.mjs";
 import { prepareCurrentEntryProfile } from "./current-entry-profile.mjs";
 import { prepareEntryDiningTable } from "./entry-dining-table.mjs";
 import { prepareEntryOperatingPublication } from "./entry-operating-publication.mjs";
@@ -135,6 +137,9 @@ export async function prepareRealStaffRoundStore({
     statement_timeout: 8000,
     lock_timeout: 5000,
   });
+  // As the served pilot does (compose.pilot.yaml), when the test asks for it.
+  if (process.env.PILOT_CLOCK_FROM_DATABASE === "1")
+    await alignProcessClockToDatabase((sql) => pool.query(sql));
   const restrictedPool = {
     options: pool.options,
     async connect() {

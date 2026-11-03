@@ -53,6 +53,8 @@ services:
     volumes:
       - ${PILOT_RUNTIME_ROOT:-./.local/pilot-runtime}:/app/.local
     environment:
+      # The database's clock is the one time authority (pilot-database-clock.mjs).
+      PILOT_CLOCK_FROM_DATABASE: "1"
       PILOT_RUNTIME_DIRECTORY: ${PILOT_RUNTIME_DIRECTORY:?Set PILOT_RUNTIME_DIRECTORY, e.g. .local/pilot-v15}
     stop_grace_period: 60s
 

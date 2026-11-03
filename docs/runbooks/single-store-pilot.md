@@ -2805,6 +2805,15 @@ docker compose -f compose.pilot.yaml exec ops node tooling/environment/pilot-ops
 `test-alert` sends one "test alert" message to every configured channel and prints `Delivered` or
 `Failed` with a fixed code per channel. Run it after any channel change and monthly.
 
+### Application and database clocks (2026-11-03)
+
+The database's clock is the one time authority. With `PILOT_CLOCK_FROM_DATABASE=1` (set on `pilot`
+in `compose.pilot.yaml`), each service process follows it and measures the difference every minute;
+`pilot_clock_aligned` in a service log gives the first difference in milliseconds. Keep it set when
+the API moves to another host. `INTERNAL_CLOCK_SKEW_TOO_LARGE` means the difference passed 2 seconds:
+a clock is wrong, the process keeps its own, and orders can be refused. Correct the host's time
+sync; the process recovers at its next measurement.
+
 ### Planned updates (deploys and planned restarts, 2026-10-18)
 
 Recreating the `pilot` container stops the customer page, staff screens and supervisor for a few

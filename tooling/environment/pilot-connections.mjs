@@ -14,6 +14,7 @@ import {
   planPilotConnections,
 } from "./pilot-connection-budget.mjs";
 import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
+import { alignProcessClockToDatabase } from "./pilot-database-clock.mjs";
 const require = createRequire(new URL("../../packages/database/package.json", import.meta.url));
 const { Client, Pool } = require("pg");
 
@@ -121,6 +122,8 @@ export async function createApplicationDatabase(
   const pool = shared?.pool ?? (await openPool(service, config));
   if (shared === undefined) sharedPools.set(service + ":" + database, { pool, users: 1 });
   else shared.users += 1;
+  if (process.env.PILOT_CLOCK_FROM_DATABASE === "1")
+    await alignProcessClockToDatabase((sql) => pool.query(sql));
   let closing;
   return Object.freeze({
     transactions: (scope) => createTenantTransactionRunner(pool, scope),
