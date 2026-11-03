@@ -463,7 +463,10 @@ export class CustomerDiningTablePaymentHandler {
             readClosedRecord(body, ["action"]);
             command = { action: "Read" };
           } else if (body.action === "SettledReceipt") {
-            const raw = readClosedRecord(body, ["action", "locale"]);
+            const raw = readClosedRecord(
+              body,
+              body.locale === undefined ? ["action"] : ["action", "locale"],
+            );
             // Owner 2026-11-03 walkthrough: a receipt in the language the guest chose.
             command = {
               action: "SettledReceipt",
