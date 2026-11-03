@@ -453,11 +453,13 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
         </div>
         <div>
           <dt>
-            {summary.splitParts !== undefined
-              ? t("Still to pay")
-              : payLater
-                ? t("To pay at the end")
-                : t("Waiting for payment")}
+            {summary.closedByStaff === true
+              ? t("Staff have closed this bill")
+              : summary.splitParts !== undefined
+                ? t("Still to pay")
+                : payLater
+                  ? t("To pay at the end")
+                  : t("Waiting for payment")}
           </dt>
           <dd>{nonZero(summary.due) ? money(summary.due) : t("Nothing")}</dd>
         </div>

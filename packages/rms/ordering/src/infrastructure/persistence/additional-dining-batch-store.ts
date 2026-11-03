@@ -25,7 +25,11 @@ import { clearSubmittedDiningCart } from "../../domain/dining-cart-continuation.
 import { assertCartLifecycleActive } from "../../domain/cart-lifecycle.js";
 import { createHash } from "node:crypto";
 import { appendEventInTransaction, type ConsumerTransaction } from "@bop/eventing";
-import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
+import {
+  orderingInstantNotAfterAcrossClocks,
+  parseOrderingReference,
+  parseOrderingInstant,
+} from "../../domain/cart.js";
 import { persistedOrderRevisionKindPolicy } from "../../domain/order-revision-kind.js";
 import {
   parseAdditionalDiningBatchSnapshot,
@@ -258,8 +262,8 @@ export function createPostgresAdditionalDiningBatchStore(options: {
       const recheck = async () => {
         const observedAt = await now();
         if (
-          observedAt < batch.submittedAt ||
-          observedAt < evidence.validatedAt ||
+          !orderingInstantNotAfterAcrossClocks(batch.submittedAt, observedAt) ||
+          !orderingInstantNotAfterAcrossClocks(evidence.validatedAt, observedAt) ||
           observedAt >= evidence.validUntil ||
           (policyWindow.validUntil !== undefined && observedAt >= policyWindow.validUntil)
         )

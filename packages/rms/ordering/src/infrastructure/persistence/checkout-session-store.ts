@@ -213,7 +213,8 @@ export function createPostgresCheckoutSessionStore(
           return fail("INTENT_CONFLICT");
         async function current() {
           const at = await authorize(tx, authority);
-          if (session.createdAt > at || v.validUntil <= at) return fail("INTENT_CONFLICT");
+          if (!orderingInstantNotAfterAcrossClocks(session.createdAt, at) || v.validUntil <= at)
+            return fail("INTENT_CONFLICT");
           const active = rows(
             await tx.query(
               "SELECT cart_id FROM rms_ordering.cart WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 AND updated_at<=$4::timestamptz AND idle_expires_at>$4::timestamptz AND absolute_expires_at>$4::timestamptz",

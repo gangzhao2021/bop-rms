@@ -25,6 +25,9 @@ const rule = {
 };
 const view = (canManage: boolean) => ({
   canManage,
+  dishChoices: canManage
+    ? [{ productReference: "01909968-0000-7000-8000-000000000021", displayName: "Soup 例汤" }]
+    : [],
   offeredHere: true,
   rule,
   members: [
@@ -118,6 +121,33 @@ for (const width of [1440, 1024, 390])
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
   });
+
+test("@production the Owner offers a dish for points and takes it off again", async ({ page }) => {
+  const saved = await workspace(page, true);
+  await page.goto("/app/customers/loyalty-programs");
+  await expect(page.getByRole("button", { name: "Save rules" })).toBeDisabled();
+  await page
+    .getByRole("group", { name: "Add a dish" })
+    .getByRole("combobox")
+    .selectOption({ label: "Soup 例汤" });
+  await page.getByLabel("Points it costs").fill("500");
+  await page.getByRole("button", { name: "Add this dish" }).click();
+  await expect(page.getByText("Soup 例汤 · 500 points")).toBeVisible();
+  await page.getByRole("button", { name: "Save rules" }).click();
+  await expect(page.getByRole("status")).toContainText("Saved.");
+  expect(saved[0]).toMatchObject({
+    change: {
+      rewards: [
+        {
+          productReference: "01909968-0000-7000-8000-000000000021",
+          displayName: "Soup 例汤",
+          pointsCost: 500,
+        },
+      ],
+    },
+  });
+  await expectNoInternalText(page);
+});
 
 test("@production a manager reads but can't change the rules; a failed read can be retried", async ({
   page,

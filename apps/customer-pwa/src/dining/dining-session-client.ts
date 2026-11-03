@@ -138,6 +138,7 @@ export interface DiningSessionView {
     readonly pointsUsed?: DiningMoney;
     /** v15 2026-11-02: what staff took off (comps, discounts), tax included. */
     readonly takenOff?: DiningMoney;
+    readonly closedByStaff?: true;
     /** v15 2026-11-02: the bill's tax rounding, so the lines add up to what is to pay. */
     readonly taxRounding?: DiningMoney;
     /** WP-2423 D5: what the table ordered: items before tax, tax and total including tax. */
@@ -394,10 +395,12 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       typeof session.summary === "object" &&
       Object.hasOwn(session.summary, key);
     const withTakenOff = has("takenOff");
+    const closedByStaff = has("closedByStaff");
     const withTaxRounding = has("taxRounding");
     const raw = record(session.summary, [
       ...(withPoints ? ["pointsUsed"] : []),
       ...(withTakenOff ? ["takenOff"] : []),
+      ...(closedByStaff ? ["closedByStaff"] : []),
       ...(withTaxRounding ? ["taxRounding"] : []),
       ...(withTea ? ["teaCharge"] : []),
       ...(withSettlement ? ["tableTip", "cashRounding"] : []),
@@ -428,6 +431,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       due: money(raw.due),
       ...(ordered === null ? {} : { ordered }),
       ...(withPoints ? { pointsUsed: money(raw.pointsUsed) } : {}),
+      ...(closedByStaff
+        ? { closedByStaff: raw.closedByStaff === true ? (true as const) : invalid() }
+        : {}),
       ...(withTakenOff ? { takenOff: money(raw.takenOff) } : {}),
       ...(withTaxRounding ? { taxRounding: money(raw.taxRounding) } : {}),
       ...(withSettlement

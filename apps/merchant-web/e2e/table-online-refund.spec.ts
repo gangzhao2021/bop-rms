@@ -109,6 +109,21 @@ const fill = async (page: Page, amount: string) => {
   await page.getByRole("combobox", { name: /Reason/u }).selectOption("FOOD_ISSUE");
 };
 
+test("@production who can't refund is told so instead of being offered the form", async ({
+  page,
+}) => {
+  await orderPage(page, () => ({
+    orderReference: id(1),
+    payment: { ...payment, canRefund: false },
+    parts: [],
+  }));
+  await page.goto("/operations/orders");
+  await expect(page.getByText("Refunds are made by a manager.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refund to the card", exact: true })).toHaveCount(
+    0,
+  );
+});
+
 test("@production a manager refunds a table paid on a guest's phone to the card", async ({
   page,
 }) => {

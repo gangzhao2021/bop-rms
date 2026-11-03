@@ -138,6 +138,8 @@ export interface CustomerDiningSessionFacts {
       readonly pointsUsedMinor: bigint;
       readonly takenOffMinor: bigint;
       readonly taxRoundingMinor: bigint;
+      /** Staff recorded the guests left without paying: nothing is waiting to be paid here. */
+      readonly closedByStaff?: boolean;
     };
     /**
      * WP-2423 item 8 ④ (v15 2026-10-28 a): a split bill being paid part by part — how many parts
@@ -268,6 +270,7 @@ export interface CustomerDiningSessionView {
     readonly refunded: CustomerMoney;
     readonly refundPending: CustomerMoney;
     readonly due: CustomerMoney;
+    readonly closedByStaff?: true;
     /** WP-2423 item 8 ④: the table pays in parts (count, how many are paid). */
     readonly splitParts?: { readonly count: number; readonly paid: number };
     /** WP-2423 取舍 18: why what was paid is less than what was ordered. */
@@ -561,6 +564,7 @@ export function composeCustomerDiningSession(
       refunded: money(refunded),
       refundPending: money(refundPending),
       due: money(due + (order.tableBill?.owedMinor ?? 0n)),
+      ...(order.tableBill?.closedByStaff === true ? { closedByStaff: true } : {}),
       ...(order.splitParts == null
         ? {}
         : { splitParts: { count: order.splitParts.count, paid: order.splitParts.paid } }),
@@ -1255,7 +1259,8 @@ export async function readCustomerTableBillFacts(
       .filter((reduction) => (reduction.points === true) === points)
       .reduce((total, reduction) => total + BigInt(reduction.amountMinor), 0n);
   return {
-    owedMinor: BigInt(bill.owed.totalMinor),
+    owedMinor: bill.writeOff !== null ? 0n : BigInt(bill.owed.totalMinor),
+    ...(bill.writeOff !== null ? { closedByStaff: true } : {}),
     pointsUsedMinor: sum(true),
     takenOffMinor: sum(false),
     taxRoundingMinor: BigInt(bill.taxRoundingMinor),

@@ -24,6 +24,11 @@ interface Rule {
   readonly rewards: readonly Reward[];
 }
 interface View {
+  /** Dishes the rule can offer for points (empty for who can't change the rules). */
+  readonly dishChoices?: readonly {
+    readonly productReference: string;
+    readonly displayName: string;
+  }[];
   readonly canManage: boolean;
   readonly offeredHere: boolean;
   readonly rule: Rule;
@@ -103,6 +108,18 @@ export function MemberPointsPage({
     for (const [key] of fields) current[key] = Number(draft[key] ?? view.rule[key]);
     return current;
   }, [draft, view]);
+  const [draftRewards, setDraftRewards] = useState<readonly Reward[] | null>(null);
+  const [newDish, setNewDish] = useState("");
+  const [newCost, setNewCost] = useState("");
+  const rewards = draftRewards ?? view?.rule.rewards ?? [];
+  const addReward = () => {
+    const dish = view?.dishChoices?.find((entry) => entry.productReference === newDish);
+    const pointsCost = Number(newCost);
+    if (dish === undefined || !Number.isInteger(pointsCost) || pointsCost < 1) return;
+    setDraftRewards([...rewards, { ...dish, pointsCost }]);
+    setNewDish("");
+    setNewCost("");
+  };
   const save = async () => {
     if (view === null || values === null) return;
     setBusy(true);
@@ -120,18 +137,20 @@ export function MemberPointsPage({
         body: JSON.stringify({
           operationReference: operation,
           expectedVersion: view.rule.version,
-          change: { ...values, rewards: view.rule.rewards },
+          change: { ...values, rewards },
         }),
       });
       if (response.ok) {
         setMessage(t("Saved. New points and uses follow these rules from now on."));
         setDraft({});
+        setDraftRewards(null);
         setOperation(serviceOperationReference());
         await load();
       } else if (response.status === 409) {
         setMessage(t("Someone else changed the rules just now. Here is what they are now."));
         setOperation(serviceOperationReference());
         setDraft({});
+        setDraftRewards(null);
         await load();
       } else if (response.status === 422) {
         setMessage(t("Those numbers can't be used. Check them and try again."));
@@ -234,8 +253,91 @@ export function MemberPointsPage({
                   />
                 </label>
               ))}
+              <h3>{t("Dishes guests can get with points")}</h3>
+              {rewards.length === 0 ? (
+                <p className="bop-muted">
+                  {t("No dishes yet. Guests can still use points on the bill.")}
+                </p>
+              ) : (
+                <ul>
+                  {rewards.map((reward) => (
+                    <li key={reward.productReference}>
+                      {t("{dish} · {points} points", {
+                        dish: reward.displayName,
+                        points: String(reward.pointsCost),
+                      })}
+                      {view.canManage ? (
+                        <>
+                          {" "}
+                          <button
+                            type="button"
+                            disabled={busy}
+                            aria-label={t("Remove {dish}", { dish: reward.displayName })}
+                            onClick={() =>
+                              setDraftRewards(
+                                rewards.filter(
+                                  (entry) => entry.productReference !== reward.productReference,
+                                ),
+                              )
+                            }
+                          >
+                            {t("Remove")}
+                          </button>
+                        </>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {view.canManage ? (
-                <button type="submit" disabled={busy || Object.keys(draft).length === 0}>
+                <div role="group" aria-label={t("Add a dish")}>
+                  <label>
+                    {t("Dish")}
+                    <select
+                      value={newDish}
+                      disabled={busy}
+                      onChange={(event) => setNewDish(event.target.value)}
+                    >
+                      <option value="">{t("Choose a dish")}</option>
+                      {(view.dishChoices ?? [])
+                        .filter(
+                          (dish) =>
+                            !rewards.some(
+                              (entry) => entry.productReference === dish.productReference,
+                            ),
+                        )
+                        .map((dish) => (
+                          <option key={dish.productReference} value={dish.productReference}>
+                            {dish.displayName}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    {t("Points it costs")}
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      disabled={busy}
+                      value={newCost}
+                      onChange={(event) => setNewCost(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy || newDish === "" || !(Number(newCost) >= 1)}
+                    onClick={addReward}
+                  >
+                    {t("Add this dish")}
+                  </button>
+                </div>
+              ) : null}
+              {view.canManage ? (
+                <button
+                  type="submit"
+                  disabled={busy || (Object.keys(draft).length === 0 && draftRewards === null)}
+                >
                   {t("Save rules")}
                 </button>
               ) : (
@@ -243,21 +345,6 @@ export function MemberPointsPage({
               )}
               {message === null ? null : <p role="status">{message}</p>}
             </form>
-            {view.rule.rewards.length > 0 ? (
-              <>
-                <h3>{t("Dishes guests can get with points")}</h3>
-                <ul>
-                  {view.rule.rewards.map((reward) => (
-                    <li key={reward.productReference}>
-                      {t("{dish} · {points} points", {
-                        dish: reward.displayName,
-                        points: String(reward.pointsCost),
-                      })}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
           </section>
 
           <section aria-labelledby="member-list">

@@ -44,6 +44,7 @@ import { createMerchantDiningTeaCharge } from "../../../apps/api/src/merchant-di
 import {
   createOrderNumberAllocation,
   createPostgresOrderKitchenSourceStore,
+  createPostgresOrderPriceReductionStore,
   createPostgresOrderPayLaterConfirmationStore,
   createPostgresOrderRoundStaffHoldStore,
   parseAdditionalDiningBatchSnapshot,
@@ -519,6 +520,17 @@ async function realTeaRounds() {
       notTea.add(soupRound.orderBatchReference);
       await kitchenTakesRounds();
       await assertBill(450n + 650n);
+
+      // A reward dish is matched on the product a real round's item names (it never matched:
+      // the product is on the item's catalog snapshot, and live items all read as no product).
+      const redeemable = await store.restricted.run((tx) =>
+        createPostgresOrderPriceReductionStore({
+          brandReference: ownerScope.brandReference,
+          storeReference: ownerScope.storeReference,
+          authorize: async () => true,
+        }).listRedeemableDishes(tx, [soupRound.orderReference]),
+      );
+      assert.ok(redeemable.some((dish) => dish.productReference === soup.productReference));
 
       // ── The kitchen took the tea round: it decided the tea is not prepared; no ticket, no work.
       const teaBatch = firstLines[0].batch;

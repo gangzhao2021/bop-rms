@@ -457,7 +457,7 @@ export function TableCheckout({
             <div className="table-checkout__written-off" role="status">
               <p>
                 {t(
-                  "The guests left without paying. A manager wrote off {amount}; it stays in the day's sales.",
+                  "The guests left without paying. A manager wrote off {amount}. The reports list it apart; it isn't counted as sales or as money received.",
                   { amount: cad(bill.writeOff.amountMinor) },
                 )}
               </p>

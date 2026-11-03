@@ -5,6 +5,7 @@ import {
   type MemberPhoneProtector,
 } from "@rms/customer-loyalty";
 import { readClosedRecord } from "@bop/identity";
+import { listBrandSkuChoices } from "@rms/catalog";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { storeOffersPoints } from "./merchant-store-features.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -41,6 +42,25 @@ const noPhones = new Proxy(
     },
   },
 ) as MemberPhoneProtector;
+
+/** Active dishes of the Brand, one per product, named as the guests read them. */
+async function rewardDishChoices(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+) {
+  const skus = await listBrandSkuChoices(tx as never, scope);
+  await tx.query("SELECT set_config('bop.store_id',$1,true)", [scope.storeReference]);
+  const dishes = new Map<string, string>();
+  for (const sku of skus) {
+    if (!sku.active || dishes.has(sku.productReference)) continue;
+    const names = Object.values(sku.productLocalizedNames);
+    const name = [...new Set(names)].join(" ").slice(0, 120);
+    if (name !== "") dishes.set(sku.productReference, name);
+  }
+  return [...dishes].map(([productReference, displayName]) =>
+    Object.freeze({ productReference, displayName }),
+  );
+}
 
 export function createMerchantMemberPoints(options: {
   persistence: PersistentMerchantBffOptions;
@@ -117,12 +137,17 @@ export function createMerchantMemberPoints(options: {
       return translated(() =>
         inScope(input.sessionCookie, memberPointsReadPermission, async (tx, scope) => {
           const points = store(scope);
-          return Object.freeze({
+          const view = {
             canManage: scope.canManage,
             offeredHere: await storeOffersPoints(tx as never, scope),
             rule: await points.currentRule(tx as never),
             members: await points.listMembers(tx as never, 200),
             report: await points.report(tx as never),
+          };
+          return Object.freeze({
+            ...view,
+            // The dishes a Brand's rule can offer for points: only who can change the rules reads them.
+            dishChoices: scope.canManage ? await rewardDishChoices(tx, scope) : [],
           });
         }),
       );

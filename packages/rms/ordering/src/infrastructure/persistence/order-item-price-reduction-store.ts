@@ -376,7 +376,7 @@ export function createPostgresOrderPriceReductionStore(options: {
           if (line === undefined) continue;
           const product = (
             await tx.query(
-              "SELECT COALESCE(transaction_snapshot_json->>'productId',transaction_snapshot_json->>'productReference') AS product FROM rms_ordering.order_item WHERE brand_id=$1 AND store_id=$2 AND order_item_id=$3",
+              "SELECT transaction_snapshot_json->'catalog'->>'productReference' AS product FROM rms_ordering.order_item WHERE brand_id=$1 AND store_id=$2 AND order_item_id=$3",
               [brand, store, item],
             )
           ).rows[0] as Record<string, unknown> | undefined;

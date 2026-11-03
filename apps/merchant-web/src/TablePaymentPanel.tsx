@@ -38,6 +38,8 @@ export interface TablePayment {
     readonly state: "Sending" | "Refunded" | "Refused";
   }[];
   readonly refundableMinor: string;
+  /** Absent from an older answer: offered, and the command still checks. */
+  readonly canRefund: boolean;
 }
 const reasons: readonly CashRefundReason[] = [
   "FOOD_ISSUE",
@@ -118,6 +120,7 @@ const parseOne = (value: unknown): TablePayment => {
       ),
     ),
     refundableMinor: amount(p.refundableMinor),
+    canRefund: p.canRefund !== false,
   });
 };
 
@@ -404,7 +407,9 @@ function TablePaymentBlock({
       {payment.onlineRefunds.some((refund) => refund.state === "Refused") ? (
         <p role="note">{t("A refused refund moved no money. You can refund it again.")}</p>
       ) : null}
-      {canRefund ? (
+      {canRefund && !payment.canRefund ? (
+        <p role="note">{t("Refunds are made by a manager.")}</p>
+      ) : canRefund ? (
         refunding ? (
           <div role="group" aria-label={openLabel} className="table-payment__refund">
             <label className="table-checkout__field">

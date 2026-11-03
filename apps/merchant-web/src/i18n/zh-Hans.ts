@@ -5943,8 +5943,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid at the table · cash": "已在桌上付清 · 现金",
   "Paid at the table · card machine": "已在桌上付清 · 刷卡机",
   "Written off": "已核销",
-  "The guests left without paying. A manager wrote off {amount}; it stays in the day's sales.":
-    "客人未付离开，店长已核销 {amount}，这笔仍计入当天销售。",
+  "Refunds are made by a manager.": "退款由店长操作。",
+  "No dishes yet. Guests can still use points on the bill.":
+    "还没有可换的菜。客人仍可用积分抵账单。",
+  "Remove {dish}": "移除 {dish}",
+  "Add a dish": "添加一道菜",
+  "Choose a dish": "选择一道菜",
+  Dish: "菜品",
+  "Points it costs": "所需积分",
+  "Add this dish": "添加这道菜",
+  "The guests left without paying. A manager wrote off {amount}. The reports list it apart; it isn't counted as sales or as money received.":
+    "客人未付离开，店长已核销 {amount}。报表里单独列出，不计入销售和收款。",
   "Close the table when it has been cleared.": "收拾好以后关台。",
   "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask a manager to record it there.":
     "这桌还没付款。请在上方的结账里收款；如果客人未付离开，请店长在那里登记。",
@@ -6091,7 +6100,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "今天由店长在付款前决定并写明原因。没有收这笔钱，所以不在上面的收款里。",
   "Comps and discounts by a manager · {dishes}": "店长免单/折让 · {dishes}",
   Comps: "免单/折让",
-  Dish: "菜品",
   "Comp or discount dishes before the table pays": "付款前给菜免单或折让",
   "While the connection is down": "断网期间怎么做",
   "Take new rounds on paper slips (table and round) and pass them to the kitchen.":

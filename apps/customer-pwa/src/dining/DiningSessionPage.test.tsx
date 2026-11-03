@@ -241,6 +241,25 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(stale).toContain("Round 1 · Ordered by you");
   });
 
+  it("doesn't ask for payment on a bill staff closed when the guests left", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        summary: {
+          paid: cad("0"),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("0"),
+          closedByStaff: true,
+        },
+      }),
+    });
+    expect(html).toContain("Staff have closed this bill");
+    expect(html).not.toContain("To pay at the end");
+    expect(html).not.toContain("<dt>Waiting for payment</dt>");
+  });
+
   it("thanks a guest whose table was settled and loads the table's receipt", () => {
     const plain = render({ status: "settled", tableLabel: "DEMO-02" });
     expect(plain).toContain("This table is settled. Thank you for dining with us.");

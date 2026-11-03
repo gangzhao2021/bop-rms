@@ -16,6 +16,7 @@ import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts"
 import { createInternalCompensationCandidates } from "./pilot-compensation-candidates.mjs";
 import { createInternalCompensationIdentity } from "./pilot-compensation-identity.mjs";
 import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
+import { reportUnexpected } from "./pilot-unexpected.mjs";
 /** Local OnlineCard worker binding. Named-actor writes belong to the merchant command. */
 export function createInternalCompensationService({
   resources,
@@ -238,6 +239,7 @@ export function createInternalCompensationService({
         if (!reportedFailures.has(code)) {
           reportedFailures.add(code);
           console.error(code);
+          reportUnexpected("INTERNAL_COMPENSATION_EXECUTE_FAILED", error);
         }
         throw error;
       }

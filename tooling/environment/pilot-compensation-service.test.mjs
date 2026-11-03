@@ -210,10 +210,13 @@ it("reports only bounded execution codes once and preserves the original failure
     const untrusted = Object.assign(Error("private-actor-canary"), { code: "private-code-canary" });
     mocks.execute.mockRejectedValue(untrusted);
     await expect(service.execute(d)).rejects.toBe(untrusted);
-    expect(log.mock.calls).toEqual([
+    expect(log.mock.calls.filter(([line]) => !line.startsWith("{"))).toEqual([
       ["PAYMENT_COMPENSATION_SOURCE_UNAVAILABLE"],
       ["PAYMENT_COMPENSATION_UNAVAILABLE"],
     ]);
+    // Where it failed, for the next diagnosis: a code and code locations, never a message.
+    expect(log.mock.calls.filter(([line]) => line.startsWith("{"))).toHaveLength(2);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("canary");
   } finally {
     log.mockRestore();
   }

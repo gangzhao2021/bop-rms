@@ -20,7 +20,12 @@ import {
   canonicalizeRfc8785,
 } from "@bop/audit";
 import { appendEventInTransaction } from "@bop/eventing";
-import { parseOrderingReference, parseOrderingInstant } from "../../domain/cart.js";
+import {
+  ORDERING_CLOCK_SKEW_ALLOWANCE_MS,
+  orderingInstantNotAfterAcrossClocks,
+  parseOrderingReference,
+  parseOrderingInstant,
+} from "../../domain/cart.js";
 import { assertCartLifecycleActive } from "../../domain/cart-lifecycle.js";
 import { createOrderNumberAllocation } from "../../domain/order-number.js";
 import {
@@ -490,7 +495,7 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
             const result = rows(
               await tx.query(
                 `WITH observed AS MATERIALIZED (SELECT clock_timestamp() AS at)
-       SELECT o.at >= $5::timestamptz AND o.at < $6::timestamptz AND c.lifecycle_status='Active'
+       SELECT o.at + make_interval(secs => $7::int / 1000.0) >= $5::timestamptz AND o.at < $6::timestamptz AND c.lifecycle_status='Active'
         AND o.at < c.idle_expires_at AND o.at < c.absolute_expires_at AS valid,
         to_char(o.at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "observedAt"
        FROM rms_ordering.cart c CROSS JOIN observed o
@@ -502,6 +507,7 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
                   expectedCartVersion,
                   request.record.createdAt,
                   request.evidence.validUntil,
+                  ORDERING_CLOCK_SKEW_ALLOWANCE_MS,
                 ],
               ),
             );
@@ -511,13 +517,16 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
             if (typeof row.observedAt !== "string") return fail();
             if (
               capacityLink !== null &&
-              (row.observedAt < capacityLink.preparedAt ||
+              (!orderingInstantNotAfterAcrossClocks(capacityLink.preparedAt, row.observedAt) ||
                 row.observedAt >= capacityLink.validUntil)
             )
               throw expired;
             if (
               checkoutPolicyWindow !== null &&
-              (row.observedAt < checkoutPolicyWindow.checkedAt ||
+              (!orderingInstantNotAfterAcrossClocks(
+                checkoutPolicyWindow.checkedAt,
+                row.observedAt,
+              ) ||
                 row.observedAt >= checkoutPolicyWindow.validUntil)
             )
               throw expired;

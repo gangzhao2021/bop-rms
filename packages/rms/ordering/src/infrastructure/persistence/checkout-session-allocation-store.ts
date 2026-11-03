@@ -116,11 +116,12 @@ export function createPostgresCheckoutSessionAllocationStore(
               "quoteVersion",
             ] as const)
               if (prior[field] !== candidate[field]) return fail("INTENT_CONFLICT");
-            if (prior.allocatedAt > at) return fail();
+            if (!orderingInstantNotAfterAcrossClocks(prior.allocatedAt, at)) return fail();
             await current(tx, authority);
             return prior;
           }
-          if (candidate.allocatedAt > at) return fail();
+          // Application-clock allocation, database-clock check (see ORDERING_CLOCK_SKEW_ALLOWANCE_MS).
+          if (!orderingInstantNotAfterAcrossClocks(candidate.allocatedAt, at)) return fail();
           const cart = rows(
             await tx.query(
               "SELECT cart_id FROM rms_ordering.cart WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 AND aggregate_version=$4 AND lifecycle_status='Active' AND updated_at<=$5::timestamptz AND idle_expires_at>$5::timestamptz AND absolute_expires_at>$5::timestamptz FOR UPDATE",

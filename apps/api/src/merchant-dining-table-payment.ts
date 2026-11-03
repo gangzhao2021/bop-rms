@@ -189,10 +189,20 @@ export function createMerchantDiningTablePaymentRead(options: {
           recheck: async (current) => (await current.allowed()) === true,
           denied: () => fail("TABLE_PAYMENT_PERMISSION_DENIED"),
         },
-        async (authority) =>
-          view(tx as unknown as ConsumerTransaction, scopeOf(authority.scope), orderReference, () =>
-            authority.guard(),
-          ),
+        async (authority) => {
+          const payment = await view(
+            tx as unknown as ConsumerTransaction,
+            scopeOf(authority.scope),
+            orderReference,
+            () => authority.guard(),
+          );
+          const decisions = await authority.scope.authorizeActions([tableCashRefundPermission]);
+          return Object.freeze({
+            ...payment,
+            // Who can't refund is told so before filling in the form; the commands still check.
+            canRefund: decisions.get(tableCashRefundPermission)?.effect === "Allow",
+          });
+        },
       ),
     );
   };
