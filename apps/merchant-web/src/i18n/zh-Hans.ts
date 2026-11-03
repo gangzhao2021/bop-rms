@@ -5770,6 +5770,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " · {count} to accept": " · {count} 单待接",
   " · {count} from earlier days": " · 另有 {count} 单是之前的",
   "Needs attention": "需要处理",
+  "Open work": "进行中",
+  "Show kitchen work": "显示后厨工作",
+  "· {count} more from earlier days": "· 另有 {count} 张是之前的",
+  "{orderLabel} · {day} · not finished": "{orderLabel} · {day} · 还没有做完",
   "Order {orderNumber} is from {date} and still holds its ingredients.":
     "{orderNumber} 号单是{date}的，还没做完，占着它的食材。",
   "an earlier day": "之前营业日",

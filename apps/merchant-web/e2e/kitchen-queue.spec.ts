@@ -284,8 +284,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
 
   const clearFilters = page.getByRole("button", { name: "Clear filters", exact: true });
   await expect(clearFilters).toHaveCount(0);
-  await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Held");
-  await expect(page.getByRole("heading", { name: "No matching work", exact: true })).toBeVisible();
+  await page
+    .getByRole("group", { name: "Show kitchen work" })
+    .getByRole("button", { name: /^Completed/u })
+    .click();
   await expect(clearFilters).toBeEnabled();
   await clearFilters.click();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
@@ -442,8 +444,8 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.locator("#kitchen-reference-search-hint-desktop")).toHaveText(
     "The number on the ticket or receipt, or the table. Shows only that order's work.",
   );
-  // Only Work state is offered: the source carries no station names, cues or exceptions.
-  await expect(page.locator(".kitchen-board-filters--desktop select")).toHaveCount(1);
+  // Work state is the tabs here; no other filter: the source carries no station names or cues.
+  await expect(page.locator(".kitchen-board-filters--desktop select")).toHaveCount(0);
   await page.screenshot({ path: "test-results/kitchen-board-1440.png", fullPage: true });
   // WP-2423: by the order number printed on the ticket; nothing is sent or put in the address.
   await expect(
@@ -469,7 +471,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.getByText("Moved from table T3")).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
   // A match the filters hide is named as such, not reported missing.
-  await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Queued");
+  await page
+    .getByRole("group", { name: "Show kitchen work" })
+    .getByRole("button", { name: /^Queued/u })
+    .click();
   await orderInput.fill("16");
   await orderInput.press("Enter");
   await expect(page.getByRole("heading", { name: "No matching work", exact: true })).toBeVisible();
@@ -492,7 +497,10 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   ).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
   await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
-  await page.getByRole("combobox", { name: "Work state", exact: true }).selectOption("Queued");
+  await page
+    .getByRole("group", { name: "Show kitchen work" })
+    .getByRole("button", { name: /^Queued/u })
+    .click();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
 
   // Work item detail by keyboard.
@@ -553,9 +561,11 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page).toHaveURL(/\/operations\/kitchen$/);
   await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Work state", exact: true })).toHaveValue(
-    "Queued",
-  );
+  await expect(
+    page
+      .getByRole("group", { name: "Show kitchen work" })
+      .getByRole("button", { name: /^Queued/u }),
+  ).toHaveAttribute("aria-pressed", "true");
 
   // Denied reads clear the board and keep the Store frame; nothing is cached.
   denied = true;
@@ -569,9 +579,11 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   denied = false;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Work state", exact: true })).toHaveValue(
-    "Queued",
-  );
+  await expect(
+    page
+      .getByRole("group", { name: "Show kitchen work" })
+      .getByRole("button", { name: /^Queued/u }),
+  ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Clear filters" }).click();
   denied = true;
   const keyboardRefresh = page.getByRole("button", { name: "Refresh", exact: true });
@@ -858,9 +870,9 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
   await page.goto("/operations/kitchen");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(4);
   await page
-    .locator(".kitchen-board-filters--desktop")
-    .getByRole("combobox", { name: "Work state" })
-    .selectOption("All");
+    .getByRole("group", { name: "Show kitchen work" })
+    .getByRole("button", { name: /^All/u })
+    .click();
   await expect(page.locator(".kitchen-work-item")).toHaveCount(5);
   const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
   const expectations = [

@@ -1617,15 +1617,17 @@ export function KitchenBoardScreen({
             a.name === "None" ? 1 : b.name === "None" ? -1 : a.name.localeCompare(b.name),
           );
   const sectionText = (name: string) => (name === "None" ? t("No section") : name);
-  const items = searchMatches.filter(
-    (item) =>
-      (activeSection === "All" || sectionOf(item) === activeSection) &&
-      (activeStation === "All" || item.stationLabel === activeStation) &&
-      (status === "All" ||
-        (status === "Active" ? isActiveKitchenWork(item) : item.status === status)) &&
-      (activeAllergen === "All" || item.allergenCue === activeAllergen) &&
-      (activeException === "All" || item.exceptionStatus === activeException),
-  );
+  const itemsInStatus = (value: string) =>
+    searchMatches.filter(
+      (item) =>
+        (activeSection === "All" || sectionOf(item) === activeSection) &&
+        (activeStation === "All" || item.stationLabel === activeStation) &&
+        (value === "All" ||
+          (value === "Active" ? isActiveKitchenWork(item) : item.status === value)) &&
+        (activeAllergen === "All" || item.allergenCue === activeAllergen) &&
+        (activeException === "All" || item.exceptionStatus === activeException),
+    );
+  const items = itemsInStatus(status);
   const stationLaneMap = new Map<
     string,
     { key: string; stationLabel: string | null; items: KitchenBoardItem[] }
@@ -1662,6 +1664,90 @@ export function KitchenBoardScreen({
         value: items.length === 1 ? t("item") : t("items"),
       })}
     </span>
+  );
+  const boardFreshness = (
+    <p className="kitchen-board-freshness">
+      {workspaceFrame ? null : queueCount}
+      <Freshness
+        status={stale ? "Stale" : view.freshnessStatus}
+        at={view.projectedAt}
+        checkedAt={checkedAt}
+      />
+      <span data-operator={view.operatorStatus}>{kitchenOperatorText(view.operatorStatus)}</span>
+      {autoRefresh && !stale ? (
+        <span className="kitchen-board-autorefresh">{t("Auto-refresh every 10 s")}</span>
+      ) : null}
+    </p>
+  );
+  // Held work is rare: its tab shows only while there is some, or while it is chosen.
+  const statusTabs: readonly (readonly [string, string])[] = [
+    ["Active", t("Open work")],
+    ["Queued", t("Queued")],
+    ...(status === "Held" || itemsInStatus("Held").length > 0
+      ? ([["Held", t("Held")]] as const)
+      : []),
+    ["Completed", t("Completed")],
+    ["All", t("All")],
+  ];
+  const renderEarlierAttention = () =>
+    earlierTickets.length === 0 ? null : (
+      <section className="order-attention" aria-labelledby="kitchen-attention-heading">
+        <h2 id="kitchen-attention-heading">{t("Needs attention")}</h2>
+        <ul>
+          {earlierTickets.map((ticket) => {
+            const waited = Math.max(
+              0,
+              Math.floor((Date.parse(clockAt) - Date.parse(ticket.createdAt)) / 60_000),
+            );
+            const dishes = ticket.items
+              .map((item) => `${item.requiredQuantity}× ${item.displayName}`)
+              .join("、");
+            return (
+              <li key={ticket.ticketReference}>
+                <div>
+                  <p>
+                    {t("{orderLabel} · {day} · not finished", {
+                      orderLabel: ticket.orderLabel,
+                      day: earlierDayText(ticket.businessDate),
+                    })}
+                  </p>
+                  <p className="order-attention__hint">
+                    {dishes} {t("· waiting {waited}", { waited: kitchenWaitText(waited) })}
+                  </p>
+                </div>
+                {canCloseEarlier ? (
+                  <button
+                    type="button"
+                    disabled={
+                      stale !== undefined ||
+                      (earlierDays?.blocked ?? true) ||
+                      ticket.ticketVersion === null
+                    }
+                    onClick={() => setCloseTarget(ticket)}
+                  >
+                    {t("Close ticket")}
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        {canCloseEarlier ? null : (
+          <p className="order-attention__hint">{t("Ask a manager to check and close them.")}</p>
+        )}
+      </section>
+    );
+  const filterToggle = (
+    <button
+      className="kitchen-filter-toggle"
+      type="button"
+      aria-haspopup="dialog"
+      onClick={openFilterSheet}
+    >
+      {t("Filters{value}", {
+        value: hasFilters || searchApplied ? t(" · Applied") : t(" · Active work"),
+      })}
+    </button>
   );
   const renderOrderSearch = (layout: "desktop" | "mobile") => (
     <form
@@ -1778,24 +1864,27 @@ export function KitchenBoardScreen({
           </select>
         </label>
       ) : null}
-      <label>
-        <span
-          className={
-            layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
-          }
-        >
-          {t("Work state")}
-        </span>
-        <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
-          <option value="Active">{t("Active work")}</option>
-          <option value="All">{t("All states")}</option>
-          <option>{t("Queued")}</option>
-          <option>{t("Held")}</option>
-          <option>{t("In Progress")}</option>
-          <option>{t("Completed")}</option>
-          <option>{t("Cancelled")}</option>
-        </select>
-      </label>
+      {/* The back office switches state with the tabs, as on the Orders page. */}
+      {layout === "desktop" && workspaceFrame ? null : (
+        <label>
+          <span
+            className={
+              layout === "mobile" ? "kitchen-board-filter-label" : "kitchen-filter-visually-hidden"
+            }
+          >
+            {t("Work state")}
+          </span>
+          <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
+            <option value="Active">{t("Active work")}</option>
+            <option value="All">{t("All states")}</option>
+            <option value="Queued">{t("Queued")}</option>
+            <option value="Held">{t("Held")}</option>
+            <option value="In Progress">{t("In Progress")}</option>
+            <option value="Completed">{t("Completed")}</option>
+            <option value="Cancelled">{t("Cancelled")}</option>
+          </select>
+        </label>
+      )}
       {allergenFilterAvailable ? (
         <label>
           <span
@@ -1861,6 +1950,19 @@ export function KitchenBoardScreen({
       ) : null}
     </div>
   );
+  const queueBar = (
+    <div className="kitchen-queue-bar">
+      <header className="kitchen-queue-heading">
+        <h2 id="kitchen-queue-heading" tabIndex={-1}>
+          {t("Queue")}
+        </h2>
+      </header>
+      <div className="kitchen-filter-toolbar">
+        {renderOrderSearch("desktop")}
+        {renderFilters("desktop")}
+      </div>
+    </div>
+  );
   return (
     <KitchenFrame
       workspaceFrame={workspaceFrame}
@@ -1869,12 +1971,14 @@ export function KitchenBoardScreen({
       headerStatus={headerStatus}
     >
       <div
-        className="kitchen-board-workspace"
+        className={`kitchen-board-workspace${workspaceFrame ? " orders-page" : ""}`}
         ref={workspaceRef}
         data-view-only={view.operatorStatus === "Unverified" ? "true" : undefined}
       >
-        <header className="screen-heading kitchen-board-heading">
-          <div>
+        <header
+          className={`${workspaceFrame ? "workspace-page__header" : "screen-heading"} kitchen-board-heading`}
+        >
+          <div className={workspaceFrame ? "workspace-page__title" : undefined}>
             {workspaceFrame ? (
               <h1 id="kitchen-board-title" tabIndex={-1}>
                 {t("Kitchen")}
@@ -1884,29 +1988,20 @@ export function KitchenBoardScreen({
                 {t("Kitchen")}
               </h2>
             )}
-            <p className="kitchen-board-freshness">
-              {/* Owner 2026-11-03: the back office says the count on its "Today" heading. */}
-              {workspaceFrame ? null : queueCount}
-              <Freshness
-                status={stale ? "Stale" : view.freshnessStatus}
-                at={view.projectedAt}
-                checkedAt={checkedAt}
-              />
-              <span data-operator={view.operatorStatus}>
-                {kitchenOperatorText(view.operatorStatus)}
-              </span>
-              {autoRefresh && !stale ? (
-                <span className="kitchen-board-autorefresh">{t("Auto-refresh every 10 s")}</span>
-              ) : null}
-            </p>
-            {!stale && readOnly && view.operatorStatus === "Unverified" ? (
-              <KitchenBoardLock
-                operatorStatus={view.operatorStatus}
-                freshnessStatus={view.freshnessStatus}
-              />
-            ) : null}
+            {workspaceFrame ? (
+              // Owner 2026-11-03: built as the Orders page is: one sentence under the title.
+              <p className="workspace-page__meta">
+                {t("Today")} {queueCount}
+                {board.earlier.length > 0
+                  ? ` ${t("· {count} more from earlier days", { count: board.earlier.length })}`
+                  : null}
+              </p>
+            ) : (
+              boardFreshness
+            )}
           </div>
           <div className="kitchen-board-heading__actions">
+            {workspaceFrame ? boardFreshness : null}
             {/* Owner 2026-10-26: recently finished sits in the top bar, so a wrong dish is found
                 and remade at once. */}
             {remakes && onRemake ? (
@@ -1986,35 +2081,39 @@ export function KitchenBoardScreen({
         ) : null}
         <KitchenArrivals view={view} arrivals={arrivals} onSeen={onArrivalsSeen} />
         {notices}
-        <button
-          className="kitchen-filter-toggle"
-          type="button"
-          aria-haspopup="dialog"
-          onClick={openFilterSheet}
-        >
-          {t("Filters{value}", {
-            value: hasFilters || searchApplied ? t(" · Applied") : t(" · Active work"),
-          })}
-        </button>
+        {workspaceFrame ? null : filterToggle}
         {stale ? (
           <StaleReadNotice stale={stale} className="kitchen-board-lock kitchen-board-stale" />
-        ) : readOnly && view.operatorStatus !== "Unverified" ? (
+        ) : readOnly ? (
           <KitchenBoardLock
             operatorStatus={view.operatorStatus}
             freshnessStatus={view.freshnessStatus}
           />
         ) : null}
-        <div className="kitchen-queue-bar">
-          <header className="kitchen-queue-heading">
-            <h2 id="kitchen-queue-heading" tabIndex={-1}>
-              {t("Queue")}
-            </h2>
-          </header>
-          <div className="kitchen-filter-toolbar">
-            {renderOrderSearch("desktop")}
-            {renderFilters("desktop")}
+        {workspaceFrame ? renderEarlierAttention() : null}
+        {workspaceFrame ? (
+          <div className="order-toolbar">
+            <div className="order-status-filters" role="group" aria-label={t("Show kitchen work")}>
+              {statusTabs.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={status === value}
+                  onClick={() => setStatus(value)}
+                >
+                  {label}
+                  <span className="order-status-filters__count">{itemsInStatus(value).length}</span>
+                </button>
+              ))}
+            </div>
+            <div className="order-toolbar__tools">
+              {filterToggle}
+              {queueBar}
+            </div>
           </div>
-        </div>
+        ) : (
+          queueBar
+        )}
         <dialog
           className="kitchen-filter-sheet"
           ref={filterSheetRef}
@@ -2045,7 +2144,7 @@ export function KitchenBoardScreen({
             />
           </div>
         ) : null}
-        {earlierTickets.length > 0 ? (
+        {!workspaceFrame && earlierTickets.length > 0 ? (
           <details className="kitchen-earlier-days">
             <summary>
               {/* One line of attention above the day's work. Only someone who can close them is told to. */}
@@ -2122,13 +2221,6 @@ export function KitchenBoardScreen({
               })}
             </div>
           </details>
-        ) : null}
-        {workspaceFrame ? (
-          // Owner 2026-11-03: everything below is today's work, under a heading that says so.
-          <div className="kitchen-today-heading">
-            <h2>{t("Today")}</h2>
-            {queueCount}
-          </div>
         ) : null}
         {activeSection !== "All" ? (
           // WP-2423 item 8 ⑧: this screen shows one section; the others' orders are counted here.

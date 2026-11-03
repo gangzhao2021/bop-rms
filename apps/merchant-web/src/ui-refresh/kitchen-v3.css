@@ -936,226 +936,161 @@
   font-size: 14px;
 }
 
-/* ---- Owner 2026-11-03 ("不知道是线条太多还是排得太密"): in the back office the top of the board has
-   no rules and room to breathe: the title, one quiet line of facts, then a row of plain filters.
-   Blue is left for the one thing this screen asks of a viewer. */
+/* ---- Owner 2026-11-03 ("按订单页改"): the back office board is built as the Orders page is, and
+   shares its classes (`orders-page`, `order-attention`, `order-toolbar`). Only what the kitchen's
+   own markup needs is here. Type stays 28/20/16/14 at 600 and 400; no rules between areas. */
 .kitchen-shell--workspace .kitchen-board-workspace {
-  gap: 28px;
+  gap: 24px;
 }
-.kitchen-shell--workspace .kitchen-board-heading {
-  align-items: flex-start;
-  gap: 8px 32px;
-  min-height: 0;
-  padding: 0;
-  border-bottom: 0;
-}
-.kitchen-shell--workspace .kitchen-board-heading > div:first-child {
-  display: flex;
-  flex: 1 1 18rem;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 16px;
-  min-width: 0;
-}
-.kitchen-shell--workspace .kitchen-board-heading h1 {
-  flex: 0 0 100%;
-  font-size: 24px;
-  font-weight: 600;
-}
-.kitchen-shell--workspace .kitchen-board-freshness,
-.kitchen-shell--workspace .kitchen-board-freshness > *,
-.kitchen-shell--workspace .kitchen-board-freshness .kitchen-queue-count {
-  margin: 0;
-  color: var(--bop-color-text-muted);
-  font-size: 14px;
-}
-.kitchen-shell--workspace .kitchen-board-freshness {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 16px;
-}
-.kitchen-shell--workspace .kitchen-board-heading .kitchen-board-lock {
-  margin: 0;
-}
-.kitchen-shell--workspace .kitchen-board-heading .staff-session__switch button {
-  margin-block: -14px;
-}
-.kitchen-shell--workspace .kitchen-board-heading__actions {
-  gap: 0 20px;
-}
-.kitchen-shell--workspace .kitchen-board-heading__actions > :is(button, a) {
-  color: var(--bop-color-text-default);
-  font-size: 14px;
-  font-weight: 400;
-}
-.kitchen-shell--workspace .kitchen-board-heading__actions > button.kitchen-sound-toggle,
-.kitchen-shell--workspace .kitchen-board-heading__actions > button.workspace-page__language {
-  color: var(--bop-color-text-muted);
-  font-size: 14px;
-}
-.workspace-layout.workspace-layout .kitchen-shell--workspace .kitchen-filter-toolbar input {
-  padding-inline-start: 24px;
-  background: var(--bop-color-surface-default)
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23767676' stroke-width='1.5'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='m11 11 3.5 3.5'/%3E%3C/svg%3E")
-    no-repeat left center;
-}
-.kitchen-shell--workspace .kitchen-filter-toolbar {
-  gap: 0 24px;
-}
-.kitchen-shell--workspace .kitchen-filter-toolbar .kitchen-board-filters {
-  gap: 0 20px;
-}
-.kitchen-shell--workspace .kitchen-filter-toggle {
-  justify-content: flex-start;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: 14px;
-}
-.kitchen-shell--workspace .kitchen-board-workspace .kitchen-earlier-days summary {
-  min-height: 32px;
-}
-/* An empty remake lane holds no space, so the gaps down the page are even. */
 .kitchen-board-remakes:empty {
   display: none;
 }
-.kitchen-shell--workspace .kitchen-board-heading .staff-session__switch button {
-  padding-inline: 0;
+.kitchen-shell--workspace .kitchen-board-heading.workspace-page__header {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border-bottom: 0;
 }
-@media (max-width: 767px) {
-  .kitchen-shell--workspace .kitchen-board-heading__actions {
-    display: flex;
-    flex: 1 1 100%;
-    justify-content: flex-start;
-    margin-inline-start: 0;
-  }
-  .kitchen-shell--workspace .kitchen-board-heading__actions > :is(button, a) {
-    flex: 0 0 auto;
-    padding-inline: 0;
-  }
-}
-/* Tickets separate by space here; the display keeps its rule between rows read from a distance. */
-.kitchen-shell--workspace .kitchen-order-group.kitchen-ticket.kitchen-ticket {
-  border-top: 0;
-}
-.workspace-content
-  .kitchen-shell--workspace
-  .kitchen-filter-toolbar
-  .kitchen-reference-search
-  button:not([type="submit"]) {
-  border: 0;
-  background: none;
-}
-
-/* ---- Owner 2026-11-03 ("这样好像又没有层次了"): hierarchy comes from size, and one rule. A large
-   title; one dark line that carries the filters and ends the tools; one line of attention; then
-   "Today", the page's real content. Sizes: 30 title, 26 ticket, 20 section, 17 dish, 14 text, 13 aside. */
-.kitchen-shell--workspace .kitchen-board-heading h1 {
-  font-size: 30px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  line-height: 1.15;
-}
-.kitchen-shell--workspace .kitchen-board-freshness,
-.kitchen-shell--workspace .kitchen-board-freshness > *,
-.kitchen-shell--workspace .kitchen-board-heading .bop-state-card h2 {
-  font-size: 13px;
-}
-.kitchen-shell--workspace .kitchen-board-heading .staff-session__switch button {
-  font-size: 13px;
-}
-/* The one rule: every field in the row sits on it, so no field draws its own. */
-.kitchen-shell--workspace .kitchen-queue-bar,
-.kitchen-shell--workspace .kitchen-filter-toggle {
-  border-bottom: 1px solid var(--bop-color-text-default);
-}
-.kitchen-shell--workspace .kitchen-queue-bar:has(input:focus) {
-  box-shadow: 0 1px 0 var(--bop-color-text-default);
-}
-.kitchen-shell--workspace .kitchen-filter-toggle {
-  width: 100%;
-}
-.kitchen-shell--workspace .kitchen-filter-toolbar,
-.kitchen-shell--workspace .kitchen-filter-toolbar .kitchen-reference-search {
-  flex: 1 1 auto;
-  flex-wrap: nowrap;
+.kitchen-shell--workspace .kitchen-board-heading > .workspace-page__title {
+  display: block;
+  flex: 1 1 18rem;
   min-width: 0;
 }
-.kitchen-shell--workspace .kitchen-filter-toolbar .kitchen-reference-search input {
-  flex: 1 1 auto;
-  width: auto;
-}
-.kitchen-shell--workspace .kitchen-filter-toolbar .kitchen-board-filters {
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-}
-.workspace-layout.workspace-layout
-  .kitchen-shell--workspace
-  .kitchen-filter-toolbar
-  :is(input, select):is(:focus, :not(:focus)) {
-  border-bottom: 1px solid transparent;
-}
-.workspace-layout.workspace-layout .kitchen-shell--workspace .kitchen-filter-toolbar input:focus {
-  outline: none;
-}
-/* The attention line under the rule: a dot when there is something to do; the arrow says it opens. */
-.kitchen-shell--workspace .kitchen-board-workspace .kitchen-earlier-days {
-  margin-block-start: -12px;
-}
-.kitchen-shell--workspace .kitchen-board-workspace .kitchen-earlier-days summary {
-  font-size: 14px;
-  font-weight: 400;
-}
-.kitchen-shell--workspace .kitchen-earlier-days summary::before {
-  order: 1;
-  margin-inline: 6px 0;
-}
-.kitchen-shell--workspace .kitchen-earlier-days summary > span[data-action]::before {
-  content: "";
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-inline-end: 8px;
-  border-radius: 50%;
-  background: var(--bop-color-danger-mark);
-  vertical-align: 0.1em;
-}
-/* "Today": the second-largest words on the page, with the count beside them. */
-.kitchen-today-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-block: 8px -12px;
-}
-.kitchen-today-heading h2 {
+.kitchen-shell--workspace .workspace-page__meta .kitchen-queue-count {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  color: inherit;
+  font: inherit;
 }
-.kitchen-shell--workspace .kitchen-today-heading .kitchen-queue-count {
+.kitchen-shell--workspace .kitchen-board-heading__actions {
+  gap: 0 16px;
+}
+.kitchen-shell--workspace .kitchen-board-freshness,
+.kitchen-shell--workspace .kitchen-board-freshness > * {
   margin: 0;
   color: var(--bop-color-text-muted);
   font-size: 14px;
+}
+.kitchen-shell--workspace .workspace-page__header .kitchen-board-heading__actions > :is(button, a) {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
   font-weight: 400;
+}
+.kitchen-shell--workspace
+  .workspace-page__header
+  .kitchen-board-heading__actions
+  > :is(button, a):hover {
+  color: var(--bop-color-accent);
+}
+.kitchen-shell--workspace
+  .workspace-page__header
+  .kitchen-board-heading__actions
+  > a.kitchen-sold-out-link {
+  color: var(--bop-color-accent);
+}
+.kitchen-shell--workspace .kitchen-board-heading .kitchen-board-lock,
+.kitchen-shell--workspace .order-attention,
+.kitchen-shell--workspace .order-toolbar {
+  margin: 0;
+}
+.kitchen-shell--workspace .order-attention > .order-attention__hint {
+  margin-top: 12px;
+}
+.kitchen-shell--workspace .kitchen-queue-bar {
+  flex-wrap: nowrap;
+}
+.kitchen-shell--workspace .kitchen-filter-toolbar {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.kitchen-shell--workspace .kitchen-reference-search {
+  order: 2;
+}
+.kitchen-shell--workspace .kitchen-reference-search input {
+  width: 14rem;
+}
+.kitchen-shell--workspace .kitchen-reference-search__actions button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+.kitchen-shell--workspace .kitchen-filter-toggle {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+/* Tickets here are read at a desk, not across a kitchen. */
+.kitchen-shell--workspace .kitchen-order-group.kitchen-ticket.kitchen-ticket {
+  border-top: 0;
 }
 .kitchen-shell--workspace .kitchen-order-group.kitchen-ticket .kitchen-ticket__number,
 .kitchen-shell--workspace
   .kitchen-order-group.kitchen-ticket
   .kitchen-ticket__header
   .kitchen-order-group__label {
-  font-size: 26px;
+  font-size: 20px;
+  font-weight: 600;
 }
 .kitchen-shell--workspace .kitchen-work-item[data-in-ticket] .kitchen-work-item__summary h3 {
-  font-size: 17px;
-}
-.kitchen-shell--workspace .kitchen-board-empty .bop-state-card h2 {
-  font-size: 15px;
-  font-weight: 400;
-}
-/* Never a rule with rounded ends (Owner: it reads as a curly brace). */
-.kitchen-shell--workspace .kitchen-filter-toggle {
-  border-radius: 0;
+  font-size: 16px;
+  font-weight: 600;
 }
 .kitchen-shell--workspace .kitchen-work-item[data-in-ticket] .kitchen-work-item__count {
   font-size: inherit;
+}
+.kitchen-shell--workspace .kitchen-board-empty .bop-state-card h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-shell--workspace .kitchen-board-empty .bop-state-card p {
+  font-size: 14px;
+}
+@media (max-width: 48rem) {
+  /* The Orders page's phone grid expects its own toolbar; this header stacks instead. */
+  .kitchen-shell--workspace .kitchen-board-heading.workspace-page__header {
+    display: block;
+  }
+  .kitchen-shell--workspace .kitchen-board-heading__actions {
+    justify-content: flex-start;
+    margin: 8px 0 0;
+  }
+  .kitchen-shell--workspace .kitchen-board-freshness {
+    flex: 1 1 100%;
+  }
+}
+.kitchen-shell--workspace .kitchen-board-heading > .workspace-page__title > :is(h1, p) {
+  display: block;
+  margin-inline: 0;
+}
+.kitchen-shell--workspace .kitchen-board-heading > .workspace-page__title > h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+@media (max-width: 48rem) {
+  .kitchen-shell--workspace .workspace-page__header .kitchen-board-heading__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 16px;
+  }
+  .kitchen-shell--workspace
+    .workspace-page__header
+    .kitchen-board-heading__actions
+    > :is(button, a) {
+    flex: 0 0 auto;
+    padding-inline: 0;
+  }
 }

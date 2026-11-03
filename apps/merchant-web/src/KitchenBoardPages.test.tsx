@@ -452,6 +452,15 @@ describe("WP-2423 M3 kitchen display", () => {
     expect(on).toContain(">Sound on</button>");
     expect(on).not.toContain("Auto-refresh");
   });
+  it("filters by the work state itself, not by its words in the staff member's language", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={parseKitchenBoardView(kitchenBoardFixture())} />
+      </MemoryRouter>,
+    );
+    for (const state of ["Queued", "Held", "In Progress", "Completed", "Cancelled"])
+      expect(html).toContain(`<option value="${state}">`);
+  });
   it("Owner 2026-11-03: sound off is an alarm only on a screen working the tickets", () => {
     const render = (operatorStatus: "Named" | "Unverified") =>
       renderToStaticMarkup(
