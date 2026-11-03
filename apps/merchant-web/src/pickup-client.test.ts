@@ -211,3 +211,11 @@ it("WP-2423: keeps each item's name and options for the handoff and refuses unsa
   g.fetcher.mockResolvedValue(response({ ...page(), items: [unsafe] }));
   await expect(g.client.loadQueue()).rejects.toThrow();
 });
+it("v15 2026-11-03: a next page whose reference sorts lower still loads; only a stuck cursor fails", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(response({ ...page(), nextAfterFulfillmentReference: id(1) }));
+  const view = parsePickupQueueView(
+    await f.client.loadQueue({ afterFulfillmentReference: id(9), includeCompleted: true }),
+  );
+  expect(view.nextAfterFulfillmentReference).toBe(id(1));
+});

@@ -136,7 +136,8 @@ export function createPickupClient(options: {
         if (
           typeof view.nextAfterFulfillmentReference === "string" &&
           after !== null &&
-          view.nextAfterFulfillmentReference <= after
+          // A page must move on; references do not follow the list's order.
+          view.nextAfterFulfillmentReference === after
         )
           return fail();
         return result.guestPickupOff === true
