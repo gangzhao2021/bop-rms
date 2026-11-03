@@ -455,6 +455,27 @@ it("WP-2423: shows a pickup the Store closed as not collected", () => {
   expect(filterCurrentOrderItems(view.items, { ...filters, phase: "Accepted" })).toHaveLength(0);
 });
 
+it("WP-2423: an accepted order the kitchen shows nothing for yet counts under In progress", () => {
+  const accepted = currentOrderQueueFixture().items[2];
+  if (accepted === undefined) throw new Error("fixture");
+  const [order] = parseCurrentOrderQueue({
+    items: [accepted],
+    nextAfterOrderReference: null,
+  }).items;
+  if (order === undefined) throw new Error("fixture");
+  const items = [
+    { ...order, orderType: "DineIn", currentPhase: "Accepted", kitchenPhase: null },
+    { ...order, orderType: "Pickup", currentPhase: "Accepted", kitchenPhase: null },
+    { ...order, orderType: "Pickup", currentPhase: "Accepted", kitchenPhase: "Ready" },
+  ] as const;
+  const count = (phase: string) =>
+    filterCurrentOrderItems(items, { orderNumber: "", type: "All", channel: "All", phase }).length;
+  expect(count("InProgress")).toBe(2);
+  expect(count("Ready")).toBe(1);
+  // The "Accepted" status filter still means exactly that.
+  expect(count("Accepted")).toBe(2);
+});
+
 it("WP-2423 Q1: grades the acceptance window and shows it only while the order can be accepted", () => {
   const at = Date.parse("2026-10-10T12:00:00.000Z");
   const by = (minutes: number) => new Date(at + minutes * 60_000).toISOString();
@@ -1768,9 +1789,9 @@ it("Orders v3: a row says what, who and which day, and an accepted pickup's next
   expect(handoverReady({ ...ready, currentPhase: "Submitted" }, now)).toBe(false);
   expect(handoverReady({ ...ready, awaitingPayment: true }, now)).toBe(false);
   expect(handoverReady({ ...ready, orderType: "DineIn" }, now)).toBe(false);
-  // The tabs count it where the kitchen has it.
+  // The tabs count it where the kitchen has it; before the kitchen shows it, under In progress.
   const items = [accepted, ready, { ...accepted, kitchenPhase: "InProgress" as const }];
   const count = (phase: string) =>
     filterCurrentOrderItems(items, { orderNumber: "", type: "All", channel: "All", phase }).length;
-  expect([count("Accepted"), count("InProgress"), count("Ready")]).toEqual([1, 1, 1]);
+  expect([count("Accepted"), count("InProgress"), count("Ready")]).toEqual([1, 2, 1]);
 });

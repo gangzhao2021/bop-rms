@@ -152,9 +152,14 @@ export function filterCurrentOrderItems(
                     !order.awaitingPayment &&
                     // Orders v3: an accepted pickup counts where the kitchen has it (being made,
                     // ready), as its row says.
-                    (order.currentPhase === "Accepted" && order.kitchenPhase !== null
+                    ((order.currentPhase === "Accepted" && order.kitchenPhase !== null
                       ? order.kitchenPhase
-                      : (order.currentPhase ?? "Unavailable")) === filters.phase)),
+                      : (order.currentPhase ?? "Unavailable")) === filters.phase ||
+                      // An accepted order the kitchen shows nothing for yet (every table order, whose
+                      // kitchen state is per round) is still being worked on: no tab may lose it.
+                      (filters.phase === "InProgress" &&
+                        order.currentPhase === "Accepted" &&
+                        order.kitchenPhase === null)))),
   );
 }
 /** WP-2423 Q6 step 2: what "Check refund" on a cancelled item needs (omitted: not offered). */
