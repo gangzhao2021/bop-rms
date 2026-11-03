@@ -54,7 +54,7 @@ export interface StoreSalesRefund {
   /** Ordinary: an item refund (also staff item cancellations); Compensation and CardMachine
    * whole-payment refunds return what remained of the payment; Cash: cash given back from a
    * table's cash payment (an amount, not itemized). */
-  readonly kind: "Ordinary" | "Compensation" | "CardMachine" | "Cash";
+  readonly kind: "Ordinary" | "Compensation" | "CardMachine" | "Cash" | "TableOnline";
   readonly refundReference: string;
   readonly orderReference: string;
   readonly paymentIntentReference: string;
@@ -369,11 +369,46 @@ export function createPostgresStoreSalesPaymentLedger(options: {
         }),
       );
     }
+    // WP-2423 DEC-TABLE-ONLINE-REFUND: money back to a table's phone payment (an amount, like cash),
+    // on the day the Provider created the refund.
+    const tableOnlineRefunded = { count: 0, amountMinor: 0n };
+    for (const refund of table.onlineRefunds) {
+      const settlement = tableSettlements.get(refund.settlementReference) ?? fail();
+      const last =
+        settlement.lines.findLast((line) => line.orderReference === refund.orderReference) ??
+        settlement.lines.at(-1) ??
+        fail();
+      tableOnlineRefunded.count++;
+      tableOnlineRefunded.amountMinor += refund.amountMinor;
+      refunds.push(
+        Object.freeze({
+          channel: "Online" as const,
+          kind: "TableOnline" as const,
+          refundReference: refund.onlineRefundReference,
+          orderReference: last.orderReference,
+          paymentIntentReference: lineKey(settlement.settlementReference, last.lineNumber),
+          amountMinor: refund.amountMinor,
+          refundedAt: refund.outcome?.providerCreatedAt ?? fail(),
+          items: null,
+        }),
+      );
+    }
+    const tableOnlineOpen = await createPostgresDiningTableSettlementStore({
+      scope: {
+        tenantReference: scope.tenantReference,
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+      },
+      authorize: async (t) => (t as unknown) === tx && (await allowed(tx)),
+    }).listOpenOnlineRefunds(tx, 100);
 
-    // Online payments captured in the window, and those any refund above belongs to.
+    // Online payments captured in the window, and those any refund above belongs to (a table's
+    // phone payment is one of the table's own lines, added below).
     const refundedIntents = [
       ...new Set(
-        refunds.filter((r) => r.channel === "Online").map((r) => r.paymentIntentReference),
+        refunds
+          .filter((r) => r.channel === "Online" && r.kind !== "TableOnline")
+          .map((r) => r.paymentIntentReference),
       ),
     ];
     await allowed(tx);
@@ -521,13 +556,16 @@ export function createPostgresStoreSalesPaymentLedger(options: {
       refundedPayments: Object.freeze(refundedPayments),
       refunds: Object.freeze(refunds.sort((a, b) => a.refundedAt.localeCompare(b.refundedAt))),
       /** Online refunds sent but not yet confirmed by the Provider (not counted anywhere yet). */
-      unresolvedOnlineRefundCount: ordinary.unresolvedOperationCount,
+      unresolvedOnlineRefundCount: ordinary.unresolvedOperationCount + tableOnlineOpen.length,
       settlement: Object.freeze({
         // Online captures read by the capture window source include tables paid on a phone.
         onlineCaptured: { count: captured.captureCount, amountMinor: captured.capturedAmountMinor },
         onlineRefunded: {
-          count: ordinary.refundCount + compensationInWindow.count,
-          amountMinor: ordinary.refundedAmountMinor + compensationInWindow.amountMinor,
+          count: ordinary.refundCount + compensationInWindow.count + tableOnlineRefunded.count,
+          amountMinor:
+            ordinary.refundedAmountMinor +
+            compensationInWindow.amountMinor +
+            tableOnlineRefunded.amountMinor,
         },
         // The Store's card machine took both counter/round payments and tables paid at the end.
         cardMachineTaken: {

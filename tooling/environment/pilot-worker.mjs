@@ -39,6 +39,7 @@ export function createPilotDeliveryFailures(limit = 10_000) {
 export async function createInternalWorker(resources, observers = {}, options = {}, dependencies) {
   const {
     createInternalDiningCheckoutExpiryWorkload,
+    createInternalTableOnlineRefundWorkload,
     createInternalCartExpiryWorkload,
     createInternalPaidOutcome,
     createInternalWorkerServices,
@@ -145,6 +146,7 @@ export async function createInternalWorker(resources, observers = {}, options = 
         resources,
         observers.pickupCapacitySchedule,
       ),
+      createInternalTableOnlineRefundWorkload(resources, observers.tableOnlineRefund),
       ...(options.cartExpiry === true ? [createInternalCartExpiryWorkload(resources)] : []),
       ...(options.diningCheckoutExpiry === true
         ? [createInternalDiningCheckoutExpiryWorkload(resources, observers.diningCheckoutExpiry)]

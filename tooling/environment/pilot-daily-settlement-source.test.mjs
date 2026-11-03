@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   ordinary: vi.fn(),
   compensation: vi.fn(),
   unmatched: vi.fn(),
+  tableOnline: vi.fn(),
 }));
 vi.mock("./pilot-settlement-window.mjs", () => ({
   createInternalClosedSettlementWindow: () => mocks.window,
@@ -14,6 +15,7 @@ vi.mock("../../packages/rms/payment/src/index.ts", async (original) => ({
   createPostgresPaymentCaptureWindowSource: () => mocks.capture,
   createPostgresOrdinaryRefundWindowSource: () => mocks.ordinary,
   createPostgresConfirmedCompensationRefundSource: () => mocks.compensation,
+  createPostgresDiningTableSettlementStore: () => ({ onlineRefundWindow: mocks.tableOnline }),
   createPostgresUnmatchedCaptureRefundStore: () => ({
     list: mocks.unmatched,
     providerRequest: (state) => ({ unmatched: state.reconciliationExceptionReference }),
@@ -27,6 +29,12 @@ const id = (n) => "0198a107-0000-7000-8000-" + String(n).padStart(12, "0");
 afterEach(() => vi.unstubAllEnvs());
 function fixture() {
   vi.stubEnv("NODE_ENV", "development");
+  mocks.tableOnline.mockResolvedValue({
+    refunds: [],
+    count: 0,
+    amountMinor: 0n,
+    unresolvedCount: 0,
+  });
   const at = "2026-09-22T01:00:00.000Z",
     window = {
       businessDate: "2026-09-20",
@@ -122,6 +130,24 @@ it("rejects unresolved ordinary work before building a complete candidate", asyn
   mocks.ordinary.mockResolvedValue({ unresolvedOperationCount: 1 });
   await expect(f.run()).rejects.toThrow();
   expect(f.simulator.adapter.lookupRefund).not.toHaveBeenCalled();
+});
+it("counts a refund of a table's phone payment, and waits for one the Provider has not answered", async () => {
+  const f = fixture();
+  mocks.tableOnline.mockResolvedValue({
+    refunds: [],
+    count: 1,
+    amountMinor: 700n,
+    unresolvedCount: 0,
+  });
+  const r = await f.run();
+  expect(r.candidate.internalRefundedAmount.amountMinor).toBe(1350n + 700n);
+  mocks.tableOnline.mockResolvedValue({
+    refunds: [],
+    count: 0,
+    amountMinor: 0n,
+    unresolvedCount: 1,
+  });
+  await expect(f.run()).rejects.toThrow();
 });
 it.each(["unknown", "amount", "created", "duplicate"])(
   "rejects unusable compensation evidence %s",

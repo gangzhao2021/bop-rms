@@ -26,6 +26,7 @@ const COMPONENT_NAMES = Object.freeze({
   inventoryRelease: "stock release",
   pickupPaymentExpiry: "unpaid pickup expiry",
   diningCheckoutExpiry: "table checkout expiry",
+  tableOnlineRefund: "refunds to guests' cards from table payments",
   contactRetention: "customer contact deletion",
   webhookEvidenceRetention: "old card payment message deletion",
   pickupCapacitySchedule: "pickup times",

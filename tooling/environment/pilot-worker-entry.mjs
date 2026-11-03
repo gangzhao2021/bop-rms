@@ -49,6 +49,10 @@ export async function startPilotBusinessWorker({
           directory,
           "business-dining-checkout-expiry",
         ),
+        tableOnlineRefund: createPilotWorkloadHealthObserver(
+          directory,
+          "business-table-online-refund",
+        ),
         contactRetention: createPilotWorkloadHealthObserver(
           directory,
           "business-contact-retention",

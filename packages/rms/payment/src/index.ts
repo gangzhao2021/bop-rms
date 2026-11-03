@@ -281,6 +281,7 @@ export {
   createPostgresPaymentCaptureWindowSource,
 } from "./infrastructure/persistence/payment-reconciliation-candidates.js";
 
+export { bindOrdinaryRefundProviderOutcome } from "./application/ordinary-refund-provider-result.js";
 export { createPostgresOrdinaryRefundWindowSource } from "./infrastructure/ordinary-refund-window-source.js";
 
 export { createPostgresConfirmedCompensationRefundSource } from "./infrastructure/persistence/payment-compensation-refund-source.js";

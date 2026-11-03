@@ -73,6 +73,7 @@ import {
   storeSalesReportCsv,
 } from "../../../apps/api/src/store-sales-report.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
+import { createDiningTableOnlineRefundSender } from "../../../apps/api/src/dining-table-online-refund.ts";
 import { createDiningTableOnlinePayments } from "../../../apps/api/src/dining-table-online-payment.ts";
 import {
   createCustomerDiningTablePayment,
@@ -111,6 +112,7 @@ import {
 import { readStoreTipChoices } from "../../../apps/api/src/merchant-store-features.ts";
 import {
   createMerchantDiningTableCashRefund,
+  createMerchantDiningTableOnlineRefund,
   createMerchantDiningTablePaymentRead,
 } from "../../../apps/api/src/merchant-dining-table-payment.ts";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
@@ -144,6 +146,24 @@ const fresh = () =>
   (references++).toString(16).padStart(12, "0");
 const now = () => new Date().toISOString();
 const sha256 = (value) => "sha256:" + createHash("sha256").update(value).digest("hex");
+/** What the Provider answers a refund, in the shape its adapters give (bound to the request). */
+function refundAnswer(request, status, reference) {
+  const text = (value) =>
+    JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item));
+  const observedAt = new Date().toISOString();
+  const facts = {
+    kind: "RefundObservation",
+    context: request.context,
+    providerRefundReference: reference,
+    providerIntentReference: request.providerIntentReference,
+    amount: request.amount,
+    status,
+    createdAt: new Date(Math.floor(Date.parse(observedAt) / 1000) * 1000).toISOString(),
+    observedAt,
+    providerRequestDigest: sha256(text(request)),
+  };
+  return { ...facts, evidenceDigest: sha256(text(facts)) };
+}
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER. A table opened "pay later" (the Store's setting when it was
@@ -4330,6 +4350,178 @@ async function journey(ending) {
             })(tx, window),
           );
           assert.deepEqual([captures.captureCount, captures.capturedAmountMinor], [1, due]);
+
+          // ── DEC-TABLE-ONLINE-REFUND: a manager refunds the phone payment to the guest's card.
+          const sent = [];
+          let answers = "Down";
+          const refundProvider = {
+            async refundPayment(request) {
+              sent.push(request.idempotencyKey);
+              if (answers === "Down") throw new Error("the Provider is not answering");
+              return refundAnswer(
+                request,
+                answers,
+                "re_TEST" + sha256(request.idempotencyKey).slice(7, 31),
+              );
+            },
+          };
+          const refundWith = (actor) =>
+            createMerchantDiningTableOnlineRefund({
+              persistence: persistenceOf(actor),
+              authentication: actor.authentication,
+              provider: refundProvider,
+              nextReference: fresh,
+            });
+          const refund = (amountMinor, operationReference = fresh(), actor = manager) =>
+            refundWith(actor)({
+              ...as(actor),
+              command: {
+                orderReference,
+                operationReference,
+                amountMinor,
+                reasonCode: "FOOD_ISSUE",
+              },
+            });
+          const dayNow = () =>
+            transactions().run((tx) =>
+              createPostgresStoreSalesPaymentLedger({
+                scope: { ...ownerScope, providerAccountReference: provider, environment: "Test" },
+                authorize: async () => true,
+              })(tx, {
+                startsAt: window.startsAt,
+                endsAt: new Date(Date.now() + 2000).toISOString(),
+                observedAt: new Date(Date.now() + 2000).toISOString(),
+              }),
+            );
+          const positionNow = () =>
+            transactions().run((tx) =>
+              createPostgresOrderFinancialPosition({
+                scope: ownerScope,
+                providerAccountReference: provider,
+                environment: "Test",
+                authorize: async () => true,
+              })(tx, { orderReference, observedAt: new Date().toISOString() }),
+            );
+          // Only a manager, and never more than the payment took; nothing goes to the Provider.
+          await assert.rejects(refund("100", fresh(), server), {
+            code: "TABLE_PAYMENT_PERMISSION_DENIED",
+          });
+          await assert.rejects(refund((due + 1n).toString()), { code: "TABLE_PAYMENT_TOO_MUCH" });
+          assert.deepEqual(sent, []);
+
+          // The Provider is down: the approval stands, on its way, and counts against what is left.
+          const refundOperation = fresh();
+          const waiting = await refund("1000", refundOperation);
+          assert.deepEqual(
+            waiting.payment.onlineRefunds.map((entry) => [entry.amountMinor, entry.state]),
+            [["1000", "Sending"]],
+          );
+          assert.equal(waiting.payment.refundableMinor, (due - 1000n).toString());
+          assert.equal(sent.length, 1);
+          assert.equal((await positionNow()).settlement.pendingRefundMinor, 1000n);
+          assert.equal((await positionNow()).settlement.confirmedRefundMinor, 0n);
+          const duringOutage = await dayNow();
+          assert.equal(duringOutage.unresolvedOnlineRefundCount, 1);
+          assert.deepEqual(duringOutage.settlement.onlineRefunded, { count: 0, amountMinor: 0n });
+          await assert.rejects(refund((due - 999n).toString()), {
+            code: "TABLE_PAYMENT_TOO_MUCH",
+          });
+
+          // The background retry sends the very same refund once the Provider is back.
+          const worker = createDiningTableOnlineRefundSender({
+            scope: ownerScope,
+            provider: refundProvider,
+            transactions: transactions(),
+            authorize: async () => true,
+            now: () => new Date(Date.now() + 120_000).toISOString(),
+            nextReference: fresh,
+          });
+          const tooSoon = createDiningTableOnlineRefundSender({
+            scope: ownerScope,
+            provider: refundProvider,
+            transactions: transactions(),
+            authorize: async () => true,
+            now,
+            nextReference: fresh,
+          });
+          assert.equal(await tooSoon.sendOpen({ limit: 5 }), 0, "a request may still be running");
+          assert.equal(sent.length, 1);
+          answers = "succeeded";
+          assert.equal(await worker.sendOpen({ limit: 5 }), 1);
+          assert.equal(sent[1], sent[0], "the same Provider key: it can never pay twice");
+          assert.equal(await worker.sendOpen({ limit: 5 }), 0, "nothing left to send");
+          // A retry of the staff request returns it, sends nothing and records nothing new.
+          const repeated = await refund("1000", refundOperation);
+          assert.equal(repeated.status, "AlreadyRecorded");
+          assert.equal(repeated.payment.onlineRefunds.length, 1);
+          assert.equal(repeated.payment.onlineRefunds[0].state, "Refunded");
+          assert.equal(sent.length, 2);
+          // The same operation can't become a different refund.
+          await assert.rejects(refund("1001", refundOperation), {
+            code: "TABLE_PAYMENT_IDEMPOTENCY_CONFLICT",
+          });
+
+          // The money follows: the Order's position, the day's ledger and reports.
+          assert.equal((await positionNow()).settlement.pendingRefundMinor, 0n);
+          assert.equal((await positionNow()).settlement.confirmedRefundMinor, 1000n);
+          const refundedDay = await dayNow();
+          assert.equal(refundedDay.unresolvedOnlineRefundCount, 0);
+          assert.deepEqual(refundedDay.settlement.onlineRefunded, { count: 1, amountMinor: 1000n });
+          assert.deepEqual(
+            refundedDay.refunds.map((entry) => [entry.channel, entry.kind, entry.amountMinor]),
+            [["Online", "TableOnline", 1000n]],
+          );
+          await assertSalesCountEveryRoundOnce();
+
+          // The Provider refuses one: nothing moved, so the amount is free again.
+          answers = "failed";
+          const refused = await refund("500");
+          assert.deepEqual(
+            refused.payment.onlineRefunds.map((entry) => entry.state),
+            ["Refunded", "Refused"],
+          );
+          assert.equal(refused.payment.refundableMinor, (due - 1000n).toString());
+          assert.equal((await positionNow()).settlement.confirmedRefundMinor, 1000n);
+          assert.deepEqual((await dayNow()).settlement.onlineRefunded, {
+            count: 1,
+            amountMinor: 1000n,
+          });
+
+          // The rest goes back; then nothing is left.
+          answers = "succeeded";
+          const emptied = await refund((due - 1000n).toString());
+          assert.equal(emptied.payment.refundableMinor, "0");
+          await assert.rejects(refund("1"), { code: "TABLE_PAYMENT_TOO_MUCH" });
+          assert.deepEqual((await dayNow()).settlement.onlineRefunded, {
+            count: 2,
+            amountMinor: due,
+          });
+          await assertSalesCountEveryRoundOnce();
+
+          // On record for good, under the pilot role: no changing, and no going past the payment.
+          await assert.rejects(
+            transactions().run(async (tx) => {
+              await tx.query(
+                "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+                [ownerScope.brandReference, ownerScope.storeReference],
+              );
+              await tx.query(
+                "UPDATE rms_payment.dining_table_online_refund SET amount_minor=1 WHERE order_id=$1",
+                [orderReference],
+              );
+            }),
+          );
+          const audits = await rows(
+            "SELECT action_code,count(*)::int AS n FROM platform_audit.audit_record WHERE action_code LIKE 'PAYMENT_DINING_TABLE_ONLINE_REFUND%' GROUP BY 1 ORDER BY 1",
+          );
+          assert.deepEqual(
+            audits.map((row) => [row.action_code, row.n]),
+            [
+              ["PAYMENT_DINING_TABLE_ONLINE_REFUND_APPROVED", 3],
+              ["PAYMENT_DINING_TABLE_ONLINE_REFUND_CONFIRMED", 2],
+              ["PAYMENT_DINING_TABLE_ONLINE_REFUND_REFUSED", 1],
+            ],
+          );
         }
         if (ending.startsWith("MemberPoints")) {
           const protector = createMemberPhoneProtector(Uint8Array.from({ length: 32 }, () => 9));
@@ -4473,6 +4665,37 @@ async function journey(ending) {
             assert.deepEqual((await port.state(guest(token))).claim.parts, [
               { partNumber: null, points: Number((dishes * 3n) / 100n), certain: true },
             ]);
+            // DEC-TABLE-ONLINE-REFUND: a refund of the phone payment takes back its share of points.
+            const earned = (await port.claim(guest(token), null)).earnedPoints;
+            const before = await pointsOf(token);
+            const [paidOnline] = await rows(
+              "SELECT total_minor::text AS total FROM rms_payment.dining_table_settlement WHERE order_id=$1",
+              [orderReference],
+            );
+            const refunded = await createMerchantDiningTableOnlineRefund({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+              provider: {
+                refundPayment: async (request) =>
+                  refundAnswer(request, "succeeded", "re_TESTMEMBERONLINE0001"),
+              },
+              nextReference: fresh,
+            })({
+              ...as(manager),
+              command: {
+                orderReference,
+                operationReference: fresh(),
+                amountMinor: "1000",
+                reasonCode: "FOOD_ISSUE",
+              },
+            });
+            assert.equal(refunded.payment.onlineRefunds[0].state, "Refunded");
+            assert.ok((await sweep.settlePoints()) > 0);
+            assert.equal(
+              await pointsOf(token),
+              before - Number((BigInt(earned) * 1000n) / BigInt(paidOnline.total)),
+            );
+            assert.equal(await sweep.settlePoints(), 0, "running it again changes nothing");
             return;
           }
 

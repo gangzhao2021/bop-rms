@@ -115,6 +115,7 @@ it("keeps business loop reports separate and refuses arbitrary file targets", ()
       inventoryRelease: "business-inventory-release.health.json",
       pickupPaymentExpiry: "business-pickup-payment-expiry.health.json",
       diningCheckoutExpiry: "business-dining-checkout-expiry.health.json",
+      tableOnlineRefund: "business-table-online-refund.health.json",
       contactRetention: "business-contact-retention.health.json",
       webhookEvidenceRetention: "business-webhook-evidence-retention.health.json",
       pickupCapacitySchedule: "business-pickup-capacity-schedule.health.json",

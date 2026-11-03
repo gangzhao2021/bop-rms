@@ -2418,6 +2418,8 @@ async function scanUnsupported(root, module, diagnostics) {
               "dining_table_settlement_round",
               "order_unpaid_write_off",
               "dining_table_cash_refund",
+              "dining_table_online_refund",
+              "dining_table_online_refund_outcome",
               "dining_table_online_payment",
               "dining_table_online_payment_outcome",
               // WP-2423 item 8 ④: the table's split plan, its parts and their round slices.

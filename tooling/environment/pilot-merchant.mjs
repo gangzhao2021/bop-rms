@@ -80,6 +80,7 @@ import { createMerchantDiningTableOnlinePaymentStop } from "../../apps/api/dist/
 import { createInternalDiningTablePayments } from "./pilot-dining-table-payment.mjs";
 import {
   createMerchantDiningTableCashRefund,
+  createMerchantDiningTableOnlineRefund,
   createMerchantDiningTablePaymentRead,
 } from "../../apps/api/dist/merchant-dining-table-payment.js";
 import { createDiningOrderCloseConfiguration } from "../../apps/api/dist/dining-order-close-configuration.js";
@@ -970,6 +971,16 @@ export async function createInternalMerchant(
     authentication: service,
     nextReference: () => resources.credentials.reference(),
   });
+  // WP-2423 DEC-TABLE-ONLINE-REFUND: back to the card of a table paid on a guest's phone.
+  const tableOnlineRefund =
+    cancellationRefundProvider === undefined
+      ? undefined
+      : createMerchantDiningTableOnlineRefund({
+          persistence,
+          authentication: service,
+          provider: cancellationRefundProvider,
+          nextReference: () => resources.credentials.reference(),
+        });
   const orderAcceptance = await createInternalMerchantAcceptance(resources, persistence, service);
   const diningJoinState = createMerchantDiningJoinState({
     persistence,
@@ -1689,6 +1700,7 @@ export async function createInternalMerchant(
       orderUnpaidDeparture,
       tablePayment,
       tableCashRefund,
+      ...(tableOnlineRefund === undefined ? {} : { tableOnlineRefund }),
       unpaidItemRemoval,
       itemComp,
       diningOrderProgress,

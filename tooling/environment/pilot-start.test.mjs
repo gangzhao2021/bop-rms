@@ -20,6 +20,7 @@ function fixture() {
               inventoryRelease: cycle,
               pickupPaymentExpiry: cycle,
               diningCheckoutExpiry: cycle,
+              tableOnlineRefund: cycle,
               contactRetention: cycle,
               webhookEvidenceRetention: cycle,
               pickupCapacitySchedule: cycle,

@@ -13,6 +13,7 @@ import type { createMerchantDiningUnpaidItemRemoval } from "./merchant-dining-un
 import type { createMerchantDiningItemComp } from "./merchant-dining-item-comp.js";
 import type {
   createMerchantDiningTableCashRefund,
+  createMerchantDiningTableOnlineRefund,
   createMerchantDiningTablePaymentRead,
 } from "./merchant-dining-table-payment.js";
 import type {
@@ -658,6 +659,8 @@ export interface MerchantBffRouterOptions {
   readonly orderUnpaidDeparture?: ReturnType<typeof createMerchantDiningUnpaidDeparture>;
   readonly tablePayment?: ReturnType<typeof createMerchantDiningTablePaymentRead>;
   readonly tableCashRefund?: ReturnType<typeof createMerchantDiningTableCashRefund>;
+  /** WP-2423 DEC-TABLE-ONLINE-REFUND: a manager refunds a table paid on a guest's phone. */
+  readonly tableOnlineRefund?: ReturnType<typeof createMerchantDiningTableOnlineRefund>;
   readonly unpaidItemRemoval?: ReturnType<typeof createMerchantDiningUnpaidItemRemoval>;
   /** WP-2423 item 8 ① segment 2: a manager comps or discounts dishes before the table pays. */
   readonly itemComp?: ReturnType<typeof createMerchantDiningItemComp>;

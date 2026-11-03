@@ -332,6 +332,17 @@ export function createPersistentMerchantSettlement(options: {
             }
             afterRefundReference = page.nextAfterRefundReference;
           } while (afterRefundReference !== null);
+          // WP-2423 DEC-TABLE-ONLINE-REFUND: money back to a table paid on a phone.
+          const tableOnline = await createPostgresDiningTableSettlementStore({
+            scope: {
+              tenantReference: scope.tenantReference,
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+            },
+            authorize: async (t) => t === tx && (await guard(scope)(tx)),
+          }).onlineRefundWindow(tx, { from: window.startsAt, to: window.endsAt });
+          count += tableOnline.count;
+          amountMinor += tableOnline.amountMinor;
           return { count, amountMinor: amountMinor.toString(), currencyCode: "CAD" as const };
         }),
       // WP-2423 Q19: the current business day so far, shown beside a closed day.

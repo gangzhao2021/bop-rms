@@ -228,6 +228,82 @@ function splitPlanFrom(row: Record<string, unknown>): DiningTableSplitPlanRecord
   });
 }
 
+/**
+ * WP-2423 DEC-TABLE-ONLINE-REFUND: money going back to the card of a table paid on a guest's phone.
+ * The approval fixes the amount and the Provider key; `outcome` is null until the Provider answers.
+ */
+export interface DiningTableOnlineRefundRecord {
+  readonly onlineRefundReference: string;
+  readonly operationReference: string;
+  readonly intentDigest: string;
+  readonly settlementReference: string;
+  readonly onlinePaymentReference: string;
+  readonly orderReference: string;
+  readonly amountMinor: bigint;
+  readonly reasonCode: DiningTableCashRefundReason;
+  readonly approvedByActorReference: string;
+  readonly providerIdempotencyKey: string;
+  readonly requestedAt: string;
+  readonly outcome: null | {
+    readonly status: "Succeeded" | "Failed";
+    readonly providerRefundReference: string | null;
+    readonly providerCreatedAt: string | null;
+    readonly recordedAt: string;
+  };
+}
+const onlineRefundSelect = `SELECT r.online_refund_id::text AS refund,r.tenant_id::text AS tenant,r.operation_id::text AS operation,
+ r.intent_digest,r.settlement_id::text AS settlement,r.online_payment_id::text AS payment,r.order_id::text AS "order",
+ r.amount_minor::text AS amount,r.reason_code,r.approved_by_actor_id::text AS approved_by,
+ r.provider_idempotency_key,${instant("r.requested_at")} AS requested_at,o.status,
+ o.provider_refund_reference,${instant("o.provider_created_at")} AS provider_created_at,
+ ${instant("o.recorded_at")} AS outcome_recorded_at
+ FROM rms_payment.dining_table_online_refund r LEFT JOIN rms_payment.dining_table_online_refund_outcome o
+ ON o.online_refund_id=r.online_refund_id AND o.brand_id=r.brand_id AND o.store_id=r.store_id
+ WHERE r.brand_id=$1 AND r.store_id=$2`;
+function onlineRefundFrom(row: Record<string, unknown>): DiningTableOnlineRefundRecord {
+  const reason = diningTableCashRefundReasons.includes(
+    row.reason_code as DiningTableCashRefundReason,
+  )
+    ? (row.reason_code as DiningTableCashRefundReason)
+    : fail();
+  const status =
+    row.status === null
+      ? null
+      : row.status === "Succeeded" || row.status === "Failed"
+        ? row.status
+        : fail();
+  return Object.freeze({
+    onlineRefundReference: ref(row.refund),
+    operationReference: ref(row.operation),
+    intentDigest:
+      typeof row.intent_digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(row.intent_digest)
+        ? row.intent_digest
+        : fail(),
+    settlementReference: ref(row.settlement),
+    onlinePaymentReference: ref(row.payment),
+    orderReference: ref(row.order),
+    amountMinor: minor(row.amount, 1n),
+    reasonCode: reason,
+    approvedByActorReference: ref(row.approved_by),
+    providerIdempotencyKey:
+      typeof row.provider_idempotency_key === "string" ? row.provider_idempotency_key : fail(),
+    requestedAt: String(parsePaymentInstant(row.requested_at)),
+    outcome:
+      status === null
+        ? null
+        : Object.freeze({
+            status,
+            providerRefundReference:
+              row.provider_refund_reference === null ? null : String(row.provider_refund_reference),
+            providerCreatedAt:
+              row.provider_created_at === null
+                ? null
+                : String(parsePaymentInstant(row.provider_created_at)),
+            recordedAt: String(parsePaymentInstant(row.outcome_recorded_at)),
+          }),
+  });
+}
+
 export interface DiningTableOnlinePaymentRecord {
   readonly onlinePaymentReference: string;
   readonly operationReference: string;
@@ -541,7 +617,211 @@ export function createPostgresDiningTableSettlementStore(options: {
       return cashRefundFrom(row);
     });
   };
+  const onlineRefunds = async (tx: AuditTransaction, where: string, values: readonly unknown[]) => {
+    await context(tx);
+    const found = rows(
+      await tx.query(
+        `${onlineRefundSelect} AND ${where} ORDER BY r.requested_at,r.online_refund_id LIMIT 10001`,
+        [brand, store, ...values],
+      ),
+    );
+    if (found.length > 10000) return fail();
+    return found.map((row) => {
+      if (ref(row.tenant) !== tenant) return fail();
+      return onlineRefundFrom(row);
+    });
+  };
   return Object.freeze({
+    /** Refunds to the card from these Orders' phone payments, oldest first. */
+    async listOnlineRefundsByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
+      if (orderReferences.length === 0) return Object.freeze([]);
+      if (orderReferences.length > 200) return fail();
+      const orders = orderReferences.map(ref);
+      for (const order of orders) await allowed(tx, order);
+      return Object.freeze(await onlineRefunds(tx, "r.order_id=ANY($3::uuid[])", [orders]));
+    },
+
+    /**
+     * Records the manager's approved refund before anything is sent; the fixed key means sending
+     * again can never pay twice. A retry with the same operation and intent returns the same one.
+     */
+    async recordOnlineRefund(
+      tx: AuditTransaction,
+      input: Omit<DiningTableOnlineRefundRecord, "outcome" | "providerIdempotencyKey"> & {
+        readonly auditReference: string;
+      },
+    ) {
+      const order = ref(input.orderReference);
+      await allowed(tx, order);
+      if (
+        !diningTableCashRefundReasons.includes(input.reasonCode) ||
+        input.amountMinor <= 0n ||
+        !/^sha256:[0-9a-f]{64}$/u.test(input.intentDigest)
+      )
+        return fail();
+      const operation = ref(input.operationReference);
+      const prior = await onlineRefunds(tx, "r.operation_id=$3", [operation]);
+      if (prior.length > 0) {
+        const same = prior[0] as DiningTableOnlineRefundRecord;
+        if (same.intentDigest !== input.intentDigest || same.orderReference !== order)
+          return fail("DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT");
+        return Object.freeze({ status: "AlreadyRecorded" as const, refund: same });
+      }
+      const requestedAt = String(parsePaymentInstant(input.requestedAt));
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_online_refund (online_refund_id,tenant_id,brand_id,store_id,operation_id,
+ intent_digest,settlement_id,online_payment_id,order_id,amount_minor,currency_code,reason_code,approved_by_actor_id,
+ provider_idempotency_key,requested_at,audit_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'CAD',$11,$12,$13,$14,$15)`,
+        [
+          ref(input.onlineRefundReference),
+          tenant,
+          brand,
+          store,
+          operation,
+          input.intentDigest,
+          ref(input.settlementReference),
+          ref(input.onlinePaymentReference),
+          order,
+          input.amountMinor.toString(),
+          input.reasonCode,
+          ref(input.approvedByActorReference),
+          "table-online-refund:" + operation,
+          requestedAt,
+          ref(input.auditReference),
+        ],
+      );
+      await appendAuditRecordInTransaction(tx, {
+        auditId: ref(input.auditReference),
+        brandId: brand,
+        storeId: store,
+        actor: { type: "User", reference: ref(input.approvedByActorReference) },
+        actionCode: "PAYMENT_DINING_TABLE_ONLINE_REFUND_APPROVED",
+        targetType: "Order",
+        targetId: order,
+        afterSummary: {
+          amountMinor: input.amountMinor.toString(),
+          settlement: ref(input.settlementReference),
+        },
+        reasonCode: input.reasonCode,
+        correlationId: operation,
+        occurredAt: requestedAt,
+        sourceChannel: "MERCHANT_WEB",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const [saved] = await onlineRefunds(tx, "r.online_refund_id=$3", [
+        ref(input.onlineRefundReference),
+      ]);
+      if (saved === undefined) return fail();
+      return Object.freeze({ status: "Recorded" as const, refund: saved });
+    },
+
+    /** The Provider's final answer for a refund; only the first is recorded. */
+    async recordOnlineRefundOutcome(
+      tx: AuditTransaction,
+      input: {
+        readonly onlineRefundReference: string;
+        readonly status: "Succeeded" | "Failed";
+        readonly providerRefundReference: string | null;
+        readonly providerCreatedAt: string | null;
+        readonly providerObservedAt: string;
+        readonly evidenceDigest: string | null;
+        readonly recordedAt: string;
+        readonly auditReference: string;
+      },
+    ) {
+      const reference = ref(input.onlineRefundReference);
+      const [refund] = await onlineRefunds(tx, "r.online_refund_id=$3", [reference]);
+      if (refund === undefined) return fail();
+      await allowed(tx, refund.orderReference);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "DiningTableOnlineRefundOutcome:" + brand + ":" + store + ":" + reference,
+      ]);
+      const [current] = await onlineRefunds(tx, "r.online_refund_id=$3", [reference]);
+      if (current === undefined) return fail();
+      if (current.outcome !== null) return current;
+      const recordedAt = String(parsePaymentInstant(input.recordedAt)),
+        observedAt = String(parsePaymentInstant(input.providerObservedAt));
+      await tx.query(
+        `INSERT INTO rms_payment.dining_table_online_refund_outcome (online_refund_id,brand_id,store_id,status,amount_minor,
+ provider_refund_reference,provider_created_at,provider_observed_at,evidence_digest,recorded_at,audit_id)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          reference,
+          brand,
+          store,
+          input.status,
+          current.amountMinor.toString(),
+          input.providerRefundReference,
+          input.providerCreatedAt === null
+            ? null
+            : String(parsePaymentInstant(input.providerCreatedAt)),
+          observedAt > recordedAt ? recordedAt : observedAt,
+          input.evidenceDigest,
+          recordedAt,
+          ref(input.auditReference),
+        ],
+      );
+      await appendAuditRecordInTransaction(tx, {
+        auditId: ref(input.auditReference),
+        brandId: brand,
+        storeId: store,
+        actor: { type: "System" },
+        actionCode:
+          input.status === "Succeeded"
+            ? "PAYMENT_DINING_TABLE_ONLINE_REFUND_CONFIRMED"
+            : "PAYMENT_DINING_TABLE_ONLINE_REFUND_REFUSED",
+        targetType: "Order",
+        targetId: current.orderReference,
+        afterSummary: { amountMinor: current.amountMinor.toString() },
+        reasonCode: "PROVIDER_REPORTED",
+        correlationId: current.operationReference,
+        occurredAt: recordedAt,
+        sourceChannel: "SYSTEM",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+        retentionPolicyVersion: 1,
+      });
+      const [saved] = await onlineRefunds(tx, "r.online_refund_id=$3", [reference]);
+      return saved ?? fail();
+    },
+
+    /** Refunds the Provider has not answered yet, oldest first: Store-level, for resending. */
+    async listOpenOnlineRefunds(tx: AuditTransaction, limit: number) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) return fail();
+      if ((await options.authorize(tx, { orderReference: "" })) !== true)
+        return fail("DINING_TABLE_SETTLEMENT_PERMISSION_DENIED");
+      const open = await onlineRefunds(tx, "o.online_refund_id IS NULL", []);
+      return Object.freeze(open.slice(0, limit));
+    },
+
+    /**
+     * WP-2423 DEC-TABLE-ONLINE-REFUND: the day's money back to phones, by the Provider's creation
+     * time (the rule the day-end settlement and the Provider statement share), and how many are
+     * still waiting for an answer. Reads only the refund tables, for every settlement source.
+     */
+    async onlineRefundWindow(tx: AuditTransaction, window: { from: string; to: string }) {
+      const from = String(parsePaymentInstant(window.from)),
+        to = String(parsePaymentInstant(window.to));
+      if (from >= to) return fail();
+      if ((await options.authorize(tx, { orderReference: "" })) !== true)
+        return fail("DINING_TABLE_SETTLEMENT_PERMISSION_DENIED");
+      const confirmed = await onlineRefunds(
+        tx,
+        "o.status='Succeeded' AND o.provider_created_at>=$3 AND o.provider_created_at<$4",
+        [from, to],
+      );
+      const open = await onlineRefunds(tx, "o.online_refund_id IS NULL", []);
+      return Object.freeze({
+        refunds: Object.freeze(confirmed),
+        count: confirmed.length,
+        amountMinor: confirmed.reduce((sum, refund) => sum + refund.amountMinor, 0n),
+        unresolvedCount: open.length,
+      });
+    },
+
     /** Cash given back from these Orders' table payments, oldest first. */
     async listCashRefundsByOrders(tx: AuditTransaction, orderReferences: readonly string[]) {
       if (orderReferences.length === 0) return Object.freeze([]);
@@ -638,12 +918,21 @@ export function createPostgresDiningTableSettlementStore(options: {
       if ((await options.authorize(tx, { orderReference: "" })) !== true)
         return fail("DINING_TABLE_SETTLEMENT_PERMISSION_DENIED");
       const refunds = await cashRefunds(tx, "r.refunded_at>=$3 AND r.refunded_at<$4", [from, to]);
+      const onlineInWindow = await onlineRefunds(
+        tx,
+        "o.status='Succeeded' AND o.provider_created_at>=$3 AND o.provider_created_at<$4",
+        [from, to],
+      );
       const taken = await settlements(
         tx,
         // WP-2423: and the other parts of a split bill one of them paid in the window (a round
         // sold in parts adds up only with all of them).
         "((s.taken_at>=$3 AND s.taken_at<$4) OR s.settlement_id=ANY($5::uuid[]) OR s.split_plan_id IN (SELECT w.split_plan_id FROM rms_payment.dining_table_settlement w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.taken_at>=$3 AND w.taken_at<$4 AND w.split_plan_id IS NOT NULL)) ORDER BY s.taken_at,s.settlement_id LIMIT 100001",
-        [from, to, [...new Set(refunds.map((refund) => refund.settlementReference))]],
+        [
+          from,
+          to,
+          [...new Set([...refunds, ...onlineInWindow].map((refund) => refund.settlementReference))],
+        ],
       );
       // DEC-DINE-IN-PAY-LATER (decision 4): bills written off when the guests left, by when the
       // manager decided — never paid, but kept in the day's summary and reconciliation.
@@ -651,6 +940,7 @@ export function createPostgresDiningTableSettlementStore(options: {
       return Object.freeze({
         settlements: Object.freeze(taken),
         cashRefunds: Object.freeze(refunds),
+        onlineRefunds: Object.freeze(onlineInWindow),
         writeOffs: Object.freeze(writtenOff),
       });
     },

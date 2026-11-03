@@ -578,6 +578,22 @@ export function installMerchantOrderRoutes(
         .catch((error: unknown) => tablePaymentFailure(response, error));
     },
   );
+  router.post(
+    "/orders/table-payment/online-refund",
+    sameOriginMutation(options),
+    (request, response) => {
+      const auth = mutation(request, response);
+      if (auth === null) return;
+      if (!options.tableOnlineRefund) {
+        response.status(503).json({ error: "table_online_refund_unavailable" });
+        return;
+      }
+      void options
+        .tableOnlineRefund({ ...auth, command: request.body })
+        .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+        .catch((error: unknown) => tablePaymentFailure(response, error));
+    },
+  );
   // WP-2423 DEC-DINE-IN-PAY-LATER: dishes taken off a pay-later table's bill before it pays.
   router.post("/orders/remove-unpaid-items", sameOriginMutation(options), (request, response) => {
     const auth = mutation(request, response);

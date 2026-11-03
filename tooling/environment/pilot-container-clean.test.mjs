@@ -10,7 +10,9 @@ import { runPilotService } from "./pilot-service.mjs";
  * v15 2026-10-31: after a container restart a served Store's kitchen worker stayed down — its PID
  * file from the old container named a number that, in the new PID namespace, was another live
  * process, which the identity check rightly refused. The container start removes stale PID files
- * of every served Store as it does the installation's, and keeps maintenance and restart locks.
+ * of every served Store as it does the installation's, and keeps the installation's maintenance
+ * and restart locks. v15 2026-11-02: a Store worker's start lock from an earlier container (carried
+ * in a restored copy) kept that worker down with nothing holding it; those are removed too.
  */
 it.skipIf(process.platform !== "linux")(
   "removes a Store's PID file that collides with a live unrelated process, so its worker can start",
@@ -33,7 +35,8 @@ it.skipIf(process.platform !== "linux")(
         runtimeDirectory + "/supervisor.lock",
       ])
         await fs.writeFile(file, process.pid + "\n", { mode: 0o600 });
-      // Kept: the installation's maintenance window and a Store worker's restart lock.
+      // Kept: the installation's maintenance window and restart lock. Removed: a Store worker's.
+      await fs.mkdir(runtimeDirectory + "/business-worker.restart-lock", { mode: 0o700 });
       await fs.mkdir(store + "/business-worker.restart-lock", { mode: 0o700 });
       // Before: the identity check refuses the unrelated process, so the worker is never handled.
       await expect(runPilotService("stop", "kitchen-queue-worker", store)).rejects.toThrow(
@@ -46,6 +49,7 @@ it.skipIf(process.platform !== "linux")(
       expect(cleaned.status).toBe(0);
       expect(cleaned.stdout.trim().split("\n").sort()).toEqual([
         "pilot-container-start: removing stale kitchen-queue-worker.pid",
+        "pilot-container-start: removing stale stores/demo-2/business-worker.restart-lock",
         "pilot-container-start: removing stale stores/demo-2/kitchen-queue-worker.pid",
         "pilot-container-start: removing stale supervisor.lock",
       ]);

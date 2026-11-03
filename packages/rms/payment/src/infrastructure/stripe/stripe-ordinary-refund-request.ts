@@ -7,6 +7,7 @@ const refundKeyPrefixes = [
   "ordinary-refund:",
   "compensation-refund:",
   "unmatched-capture-refund:",
+  "table-online-refund:",
 ] as const;
 const fail = (): never => {
   throw new Error("STRIPE_ORDINARY_REFUND_REQUEST_INVALID");

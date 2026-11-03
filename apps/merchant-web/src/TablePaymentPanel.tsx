@@ -10,6 +10,8 @@ const minor = /^-?(?:0|[1-9][0-9]{0,18})$/u;
 
 export type CashRefundReason = "FOOD_ISSUE" | "CUSTOMER_REQUEST" | "OVERCHARGED" | "STORE_ERROR";
 export interface TablePayment {
+  /** The part of a split bill this payment is for (null: the whole table). */
+  readonly partNumber: number | null;
   readonly method: "CardMachine" | "Cash" | "Online";
   readonly roundsMinor: string;
   readonly tipMinor: string;
@@ -21,6 +23,13 @@ export interface TablePayment {
     readonly amountMinor: string;
     readonly reasonCode: CashRefundReason;
     readonly refundedAt: string;
+  }[];
+  /** WP-2423 DEC-TABLE-ONLINE-REFUND: money going back to the guest's card. */
+  readonly onlineRefunds: readonly {
+    readonly amountMinor: string;
+    readonly reasonCode: CashRefundReason;
+    readonly requestedAt: string;
+    readonly state: "Sending" | "Refunded" | "Refused";
   }[];
   readonly refundableMinor: string;
 }
@@ -37,22 +46,32 @@ const reasonText = (reason: CashRefundReason) =>
     OVERCHARGED: t("Charged too much"),
     STORE_ERROR: t("Store mistake"),
   })[reason];
+const onlineRefundLabel = (refund: TablePayment["onlineRefunds"][number]) => {
+  const reason = reasonText(refund.reasonCode);
+  return refund.state === "Refunded"
+    ? t("Refunded to the card · {reason}", { reason })
+    : refund.state === "Sending"
+      ? t("Going back to the card · {reason}", { reason })
+      : t("Card company refused · {reason}", { reason });
+};
 
-export function parseTablePayment(value: unknown): TablePayment | null {
+const parseOne = (value: unknown): TablePayment => {
   const fail = (): never => {
     throw new Error("TABLE_PAYMENT_INVALID");
   };
-  const raw = (value ?? {}) as { payment?: unknown };
-  if (raw.payment === null) return null;
-  const p = raw.payment as Record<string, unknown>;
+  const p = value as Record<string, unknown>;
   const amount = (v: unknown) => (typeof v === "string" && minor.test(v) ? v : fail());
+  const reason = (v: unknown) =>
+    reasons.includes(v as CashRefundReason) ? (v as CashRefundReason) : fail();
   if (
     (p.method !== "Cash" && p.method !== "CardMachine" && p.method !== "Online") ||
     typeof p.takenAt !== "string" ||
     !Array.isArray(p.cashRefunds)
   )
     return fail();
+  const onlineRefunds = Array.isArray(p.onlineRefunds) ? p.onlineRefunds : [];
   return Object.freeze({
+    partNumber: typeof p.partNumber === "number" ? p.partNumber : null,
     method: p.method,
     roundsMinor: amount(p.roundsMinor),
     tipMinor: amount(p.tipMinor),
@@ -64,15 +83,41 @@ export function parseTablePayment(value: unknown): TablePayment | null {
       p.cashRefunds.map((r: Record<string, unknown>) =>
         Object.freeze({
           amountMinor: amount(r.amountMinor),
-          reasonCode: reasons.includes(r.reasonCode as CashRefundReason)
-            ? (r.reasonCode as CashRefundReason)
-            : fail(),
+          reasonCode: reason(r.reasonCode),
           refundedAt: typeof r.refundedAt === "string" ? r.refundedAt : fail(),
+        }),
+      ),
+    ),
+    onlineRefunds: Object.freeze(
+      onlineRefunds.map((r: Record<string, unknown>) =>
+        Object.freeze({
+          amountMinor: amount(r.amountMinor),
+          reasonCode: reason(r.reasonCode),
+          requestedAt: typeof r.requestedAt === "string" ? r.requestedAt : fail(),
+          state:
+            r.state === "Sending" || r.state === "Refunded" || r.state === "Refused"
+              ? r.state
+              : fail(),
         }),
       ),
     ),
     refundableMinor: amount(p.refundableMinor),
   });
+};
+
+export function parseTablePayment(value: unknown): TablePayment | null {
+  const raw = (value ?? {}) as { payment?: unknown };
+  return raw.payment === null || raw.payment === undefined ? null : parseOne(raw.payment);
+}
+
+/** The whole table's payment, or one per paid part of a split bill. */
+export function parseTablePayments(value: unknown): readonly TablePayment[] {
+  const raw = (value ?? {}) as { parts?: unknown };
+  const whole = parseTablePayment(value);
+  return Object.freeze([
+    ...(whole === null ? [] : [whole]),
+    ...(Array.isArray(raw.parts) ? raw.parts.map(parseOne) : []),
+  ]);
 }
 
 async function post(fetcher: typeof fetch, path: string, csrf: string, body: unknown) {
@@ -89,9 +134,10 @@ async function post(fetcher: typeof fetch, path: string, csrf: string, body: unk
 }
 
 /**
- * WP-2423 DEC-DINE-IN-PAY-LATER (OPS-ORDER-QUEUE): a table's one payment on its Order — how it was
- * paid, the tip, the cash rounding, the total — and the cash given back. A manager gives cash back
- * from a cash payment (PIN-confirmed): amount and reason, recorded beside the payment.
+ * WP-2423 DEC-DINE-IN-PAY-LATER (OPS-ORDER-QUEUE): a table's payment on its Order — how it was paid,
+ * the tip, the cash rounding, the total — and what went back. A manager gives cash back from a cash
+ * payment, or (DEC-TABLE-ONLINE-REFUND) refunds a phone payment to the guest's card: PIN-confirmed,
+ * amount and reason, recorded beside the payment. A split bill shows each paid part.
  */
 export function TablePaymentPanel({
   orderReference,
@@ -102,8 +148,66 @@ export function TablePaymentPanel({
   readonly csrf: string;
   readonly fetcher?: typeof fetch;
 }) {
-  const [payment, setPayment] = useState<TablePayment | null | undefined>(undefined);
+  const [payments, setPayments] = useState<readonly TablePayment[]>([]);
   const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    post(fetcher, "/merchant/orders/table-payment", csrf, { orderReference })
+      .then(({ status, payload }) => {
+        if (!live) return;
+        setPayments(status === 200 ? parseTablePayments(payload) : []);
+      })
+      .catch(() => {
+        if (live) setPayments([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [fetcher, csrf, orderReference, reload]);
+
+  // A refund on its way shows its result without staff having to reopen the order.
+  const sending = payments.some((payment) =>
+    payment.onlineRefunds.some((refund) => refund.state === "Sending"),
+  );
+  useEffect(() => {
+    if (!sending) return;
+    const timer = setInterval(() => setReload((value) => value + 1), 15000);
+    return () => clearInterval(timer);
+  }, [sending]);
+
+  return (
+    <>
+      {payments.map((payment) => (
+        <TablePaymentBlock
+          key={payment.partNumber ?? "whole"}
+          payment={payment}
+          orderReference={orderReference}
+          csrf={csrf}
+          fetcher={fetcher}
+          onChanged={(next) => setPayments(next)}
+          onStale={() => setReload((value) => value + 1)}
+        />
+      ))}
+    </>
+  );
+}
+
+function TablePaymentBlock({
+  payment,
+  orderReference,
+  csrf,
+  fetcher,
+  onChanged,
+  onStale,
+}: {
+  readonly payment: TablePayment;
+  readonly orderReference: string;
+  readonly csrf: string;
+  readonly fetcher: typeof fetch;
+  readonly onChanged: (payments: readonly TablePayment[]) => void;
+  readonly onStale: () => void;
+}) {
   const [refunding, setRefunding] = useState(false);
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState<CashRefundReason | "">("");
@@ -111,23 +215,8 @@ export function TablePaymentPanel({
   const [problem, setProblem] = useState<string | null>(null);
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const amountMinor = useMemo(() => dollarsToMinor(amount), [amount]);
+  const online = payment.method === "Online";
 
-  useEffect(() => {
-    let live = true;
-    post(fetcher, "/merchant/orders/table-payment", csrf, { orderReference })
-      .then(({ status, payload }) => {
-        if (!live) return;
-        setPayment(status === 200 ? parseTablePayment(payload) : null);
-      })
-      .catch(() => {
-        if (live) setPayment(null);
-      });
-    return () => {
-      live = false;
-    };
-  }, [fetcher, csrf, orderReference, reload]);
-
-  if (!payment) return null;
   const refundable = BigInt(payment.refundableMinor);
   const give = async () => {
     if (
@@ -146,18 +235,21 @@ export function TablePaymentPanel({
     try {
       const { status, payload } = await post(
         fetcher,
-        "/merchant/orders/table-payment/cash-refund",
+        online
+          ? "/merchant/orders/table-payment/online-refund"
+          : "/merchant/orders/table-payment/cash-refund",
         csrf,
         {
           orderReference,
           operationReference: operation.current.reference,
           amountMinor: amountMinor.toString(),
           reasonCode: reason,
+          ...(payment.partNumber === null ? {} : { partNumber: payment.partNumber }),
         },
       );
       if (status === 200) {
         operation.current = null;
-        setPayment(parseTablePayment(payload));
+        onChanged(parseTablePayments(payload));
         setRefunding(false);
         setAmount("");
         setReason("");
@@ -166,12 +258,22 @@ export function TablePaymentPanel({
       operation.current = null;
       setProblem(
         status === 401 || status === 403
-          ? t("A manager gives cash back. Ask an Owner or Store Manager to sign in with their PIN.")
+          ? online
+            ? t(
+                "A manager refunds this payment. Ask an Owner or Store Manager to sign in with their PIN.",
+              )
+            : t(
+                "A manager gives cash back. Ask an Owner or Store Manager to sign in with their PIN.",
+              )
           : payload?.error === "too_much"
-            ? t("That is more than is left of this cash payment.")
-            : t("The cash refund wasn't recorded. Try again."),
+            ? online
+              ? t("That is more than is left of this payment.")
+              : t("That is more than is left of this cash payment.")
+            : online
+              ? t("The refund wasn't sent. Try again.")
+              : t("The cash refund wasn't recorded. Try again."),
       );
-      setReload((value) => value + 1);
+      onStale();
     } catch {
       setProblem(
         t(
@@ -182,9 +284,22 @@ export function TablePaymentPanel({
       setBusy(false);
     }
   };
+  const canRefund = (payment.method === "Cash" || online) && refundable > 0n;
+  const openLabel = online ? t("Refund to the card") : t("Give cash back");
   return (
-    <section className="table-payment" aria-label={t("Paid at the table")}>
-      <h3>{t("Paid at the table")}</h3>
+    <section
+      className="table-payment"
+      aria-label={
+        payment.partNumber === null
+          ? t("Paid at the table")
+          : t("Paid at the table · part {number}", { number: String(payment.partNumber) })
+      }
+    >
+      <h3>
+        {payment.partNumber === null
+          ? t("Paid at the table")
+          : t("Paid at the table · part {number}", { number: String(payment.partNumber) })}
+      </h3>
       <dl className="table-checkout__totals">
         <div>
           <dt>{t("Paid by")}</dt>
@@ -220,13 +335,39 @@ export function TablePaymentPanel({
             <dd>−{cad(refund.amountMinor)}</dd>
           </div>
         ))}
+        {payment.onlineRefunds.map((refund, index) => (
+          <div key={index}>
+            <dt>{onlineRefundLabel(refund)}</dt>
+            <dd>
+              {refund.state === "Refused" ? cad(refund.amountMinor) : "−" + cad(refund.amountMinor)}
+            </dd>
+          </div>
+        ))}
       </dl>
       {payment.recordedAfterOutage ? <p role="note">{t("Recorded after an outage.")}</p> : null}
-      {payment.method === "Cash" && refundable > 0n ? (
+      {payment.onlineRefunds.some((refund) => refund.state === "Sending") ? (
+        <p role="status">
+          {t(
+            "On its way to the card company. We keep sending it until they answer; you don't need to press again.",
+          )}
+        </p>
+      ) : null}
+      {payment.onlineRefunds.some((refund) => refund.state === "Refunded") ? (
+        <p role="note">{t("It can take a few days to show on the guest's card.")}</p>
+      ) : null}
+      {payment.onlineRefunds.some((refund) => refund.state === "Refused") ? (
+        <p role="note">{t("A refused refund moved no money. You can refund it again.")}</p>
+      ) : null}
+      {payment.method === "CardMachine" ? (
+        <p role="note">
+          {t("A table paid on the card machine can't be refunded here yet. Ask the Owner.")}
+        </p>
+      ) : null}
+      {canRefund ? (
         refunding ? (
-          <div role="group" aria-label={t("Give cash back")} className="table-payment__refund">
+          <div role="group" aria-label={openLabel} className="table-payment__refund">
             <label className="table-checkout__field">
-              {t("Amount to give back")}
+              {online ? t("Amount to refund") : t("Amount to give back")}
               <input
                 inputMode="decimal"
                 value={amount}
@@ -262,10 +403,14 @@ export function TablePaymentPanel({
               onClick={() => void give()}
             >
               {busy
-                ? t("Recording…")
+                ? online
+                  ? t("Sending…")
+                  : t("Recording…")
                 : amountMinor !== null && amountMinor > 0n
-                  ? t("Give back {amount} in cash", { amount: cad(amountMinor) })
-                  : t("Give cash back")}
+                  ? online
+                    ? t("Refund {amount} to the card", { amount: cad(amountMinor) })
+                    : t("Give back {amount} in cash", { amount: cad(amountMinor) })
+                  : openLabel}
             </button>{" "}
             <button type="button" disabled={busy} onClick={() => setRefunding(false)}>
               {t("Cancel")}
@@ -273,7 +418,7 @@ export function TablePaymentPanel({
           </div>
         ) : (
           <button type="button" onClick={() => setRefunding(true)}>
-            {t("Give cash back")}
+            {openLabel}
           </button>
         )
       ) : null}

@@ -320,8 +320,32 @@ export function createPostgresOrderFinancialPosition(options: {
           );
         }
       }
+      // WP-2423 DEC-TABLE-ONLINE-REFUND: money back to a phone payment counts once the Provider
+      // confirmed it; until it answers it is pending, and a refusal gave nothing back.
+      const tableOnlineRefunds = (
+        tableSettlements.some((settlement) => settlement.method === "Online")
+          ? await tableStore.listOnlineRefundsByOrders(tx, [bill])
+          : []
+      ).filter((refund) => refund.requestedAt <= query.observedAt);
+      const tableConfirmedRefunds = [
+        ...tableCashRefunds.map((refund) => ({
+          reference: refund.cashRefundReference,
+          settlementReference: refund.settlementReference,
+          amountMinor: refund.amountMinor,
+        })),
+        ...tableOnlineRefunds
+          .filter((refund) => refund.outcome?.status === "Succeeded")
+          .map((refund) => ({
+            reference: refund.onlineRefundReference,
+            settlementReference: refund.settlementReference,
+            amountMinor: refund.amountMinor,
+          })),
+      ];
+      const tablePendingRefundMinor = tableOnlineRefunds
+        .filter((refund) => refund.outcome === null)
+        .reduce((sum, refund) => sum + refund.amountMinor, 0n);
       for (const settlement of tableSettlements) {
-        const refunded = tableCashRefunds
+        const refunded = tableConfirmedRefunds
           .filter((refund) => refund.settlementReference === settlement.settlementReference)
           .reduce((sum, refund) => sum + refund.amountMinor, 0n);
         if (refunded > settlement.totalMinor) return fail();
@@ -345,7 +369,7 @@ export function createPostgresOrderFinancialPosition(options: {
         tableRefundedUnallocatedMinor += last ? rest - toTip : 0n;
       }
       if (
-        tableCashRefunds.some(
+        tableConfirmedRefunds.some(
           (refund) =>
             !tableSettlements.some(
               (settlement) => settlement.settlementReference === refund.settlementReference,
@@ -388,7 +412,8 @@ export function createPostgresOrderFinancialPosition(options: {
               c.capturedMinor.toString(),
               c.roundingMinor.toString(),
             ]),
-            tableCashRefunds.map((r) => [r.cashRefundReference, r.amountMinor.toString()]),
+            tableConfirmedRefunds.map((r) => [r.reference, r.amountMinor.toString()]),
+            tablePendingRefundMinor.toString(),
           ]),
         )
         .digest("hex");
@@ -428,7 +453,8 @@ export function createPostgresOrderFinancialPosition(options: {
           capturedTipMinor: capturedTipMinor + machineTipMinor + tableTipMinor,
           confirmedRefundMinor:
             confirmedRefundMinor + machineConfirmedRefundMinor + tableRefundedMinor,
-          pendingRefundMinor: pendingRefundMinor + machinePendingRefundMinor,
+          pendingRefundMinor:
+            pendingRefundMinor + machinePendingRefundMinor + tablePendingRefundMinor,
           refundAllocation: Object.freeze({
             orderMinor: refundedOrderMinor + machineRefundedOrderMinor + tableRefundedOrderMinor,
             tipMinor: refundedTipMinor + machineRefundedTipMinor + tableRefundedTipMinor,

@@ -27,6 +27,7 @@ it("preserves the complete enabled consumer registration set and scoped workflow
       createInternalWorkerServices: services,
       createInternalPaidOutcome: paidFactory,
       createInternalDiningCheckoutExpiryWorkload: vi.fn(),
+      createInternalTableOnlineRefundWorkload: vi.fn(),
       createInternalOrderSubmitted: vi.fn(),
       createInternalPickupFulfillment: vi.fn(),
       createInternalKitchen: vi.fn(),

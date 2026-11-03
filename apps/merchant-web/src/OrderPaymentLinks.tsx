@@ -30,9 +30,12 @@ export function OrderPaymentLinks({
   orderReference,
   csrf,
   fetcher,
+  paidAsTable = false,
 }: {
   readonly orderReference: string;
   readonly csrf: string;
+  /** A table's own payment, shown with its refunds in the panel beside this one. */
+  readonly paidAsTable?: boolean;
   /** WP-2423 P5: an injected transport (the local demo); the shared client otherwise. */
   readonly fetcher?: typeof fetch | undefined;
 }) {
@@ -64,7 +67,12 @@ export function OrderPaymentLinks({
           ),
         ];
         setLinks(ids);
-        if (!ids.length) setMessage(t("This order has no paid payment yet."));
+        if (!ids.length)
+          setMessage(
+            paidAsTable
+              ? t("This table's payment and refunds are shown above.")
+              : t("This order has no paid payment yet."),
+          );
       }
     } catch (error) {
       if (!controller.signal.aborted) {

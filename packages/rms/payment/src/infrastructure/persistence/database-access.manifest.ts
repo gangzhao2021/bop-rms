@@ -60,6 +60,22 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "payment"],
     },
     {
+      table: "dining_table_online_refund",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
+      table: "dining_table_online_refund_outcome",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
       table: "dining_table_settlement",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },
@@ -545,6 +561,46 @@ const databaseAccessManifestInput = {
       readPattern: null,
       mechanism: "repository",
       target: { schema: "rms_payment", table: "dining_table_cash_refund" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.read.dining_table_online_refund",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_refund" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_online_refund",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_refund" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.read.dining_table_online_refund_outcome",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_refund_outcome" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_online_refund_outcome",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_online_refund_outcome" },
       principal: { kind: "module", id: "@rms/payment" },
       source:
         "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",

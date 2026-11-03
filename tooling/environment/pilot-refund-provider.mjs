@@ -21,9 +21,12 @@ export function createInternalSimulatedRefunds(db, { rowFor, atomic }) {
       request.amount.currencyCode !== "CAD" ||
       request.amount.amountMinor <= 0n ||
       request.amount.amountMinor > 99999999n ||
-      !["ordinary-refund:", "compensation-refund:", "unmatched-capture-refund:"].some(
-        (prefix) => request.idempotencyKey === prefix + request.context.operationReference,
-      )
+      ![
+        "ordinary-refund:",
+        "compensation-refund:",
+        "unmatched-capture-refund:",
+        "table-online-refund:",
+      ].some((prefix) => request.idempotencyKey === prefix + request.context.operationReference)
     )
       throw new Error("SIMULATION_REFUND_REQUEST_INVALID");
     rowFor(request);

@@ -859,6 +859,13 @@ Added after the 2026-10-17 store-day rehearsal (WP-2423 `3cd0f8dd` M8). What the
   is back, open the order again: the refund shows "Recorded, not sent yet" or "Not sent yet" with
   the send button; send it then. Nothing sends it automatically, so write the order number on the
   incident sheet ("refund to send") and do it in recovery.
+- **A table paid on a guest's phone** (`Orders` → order → `Refund to the card`, manager PIN;
+  [DEC-TABLE-ONLINE-REFUND](../spec/design/table-online-refund.md)): the approved refund is recorded
+  first, then sent. If the provider or internet is down it shows "Going back to the card": tell the
+  guest it is submitted. It keeps being sent automatically until the provider answers, never twice,
+  so nothing goes on the incident sheet. If it shows "Card company refused", no money moved: refund
+  it again, and if refused again the Owner contacts the provider. The daily settlement waits until
+  every refund has an answer. A table paid on the card machine can't be refunded this way yet.
 - **Online payment, cancelling items** (`Cancel item and refund`): the items are cancelled at once
   (the kitchen stops them) and the refund stays "refund pending". When the provider is back, a
   manager or the owner presses `Check refund` on the cancelled item; it sends the refund then (never

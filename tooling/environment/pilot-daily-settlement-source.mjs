@@ -6,6 +6,7 @@ import {
   createPostgresOrdinaryRefundWindowSource,
   createPostgresConfirmedCompensationRefundSource,
   createPostgresUnmatchedCaptureRefundStore,
+  createPostgresDiningTableSettlementStore,
   parseSettlementReconciliationCandidate,
   parsePaymentInstant,
   parsePaymentReference,
@@ -46,6 +47,15 @@ export function createInternalDailySettlementSource({
     storeReference: r.scope.storeReference,
     authorize: async (_tx, access) => access === "Read" && guard(),
   });
+  // WP-2423 DEC-TABLE-ONLINE-REFUND: money back to a table paid on a phone, on the Provider's day.
+  const tables = createPostgresDiningTableSettlementStore({
+    scope: {
+      tenantReference: r.publicProfile.binding.tenantReference,
+      brandReference: r.scope.brandReference,
+      storeReference: r.scope.storeReference,
+    },
+    authorize: async () => guard(),
+  });
   return async (input = undefined) => {
     await guard();
     const window = await readWindow(input),
@@ -54,8 +64,16 @@ export function createInternalDailySettlementSource({
     const internal = await r.transactions.run(async (tx) => ({
       captures: await capture(tx, sourceWindow),
       ordinary: await ordinary(tx, sourceWindow),
+      tableOnlineRefunds: await tables.onlineRefundWindow(tx, {
+        from: window.startsAt,
+        to: window.endsAt,
+      }),
     }));
-    if (internal.ordinary.unresolvedOperationCount !== 0) return fail();
+    if (
+      internal.ordinary.unresolvedOperationCount !== 0 ||
+      internal.tableOnlineRefunds.unresolvedCount !== 0
+    )
+      return fail();
     let afterRefundReference = null,
       compensationMinor = 0n,
       compensationCount = 0;
@@ -253,6 +271,7 @@ export function createInternalDailySettlementSource({
       providerCapturedAmount: money(provider.capturedAmountMinor),
       internalRefundedAmount: money(
         internal.ordinary.refundedAmountMinor +
+          internal.tableOnlineRefunds.amountMinor +
           compensationMinor +
           unmatchedTotals.refundedAmountMinor,
       ),

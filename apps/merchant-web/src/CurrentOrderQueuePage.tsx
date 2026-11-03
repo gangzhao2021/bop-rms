@@ -2167,7 +2167,12 @@ export function CurrentOrderDetails({
       ) : null}
       {/* WP-2423 (v15 751dd768): offered only to people the server lets read payments. */}
       {order.canViewPayments ? (
-        <OrderPaymentLinks orderReference={order.orderReference} csrf={csrf} fetcher={fetcher} />
+        <OrderPaymentLinks
+          orderReference={order.orderReference}
+          csrf={csrf}
+          fetcher={fetcher}
+          paidAsTable={order.tableBill?.paid != null}
+        />
       ) : null}
     </>
   );

@@ -70,7 +70,7 @@ Shell variables do not persist between Bash calls here, so prefix each command w
      fails as an unknown option (2026-10-30). End the window only when the loop saw all 200s,
      never just because the loop timed out.
    - `docker compose -f compose.pilot.yaml exec -T ops node tooling/environment/pilot-ops.mjs maintenance end "$PILOT_RUNTIME_DIRECTORY"`
-7. **Health:** `.local/pilot-runtime/pilot-v15/*.health.json` — 14 service files whose
+7. **Health:** `.local/pilot-runtime/pilot-v15/*.health.json` — 15 service files whose
    `snapshot.state` is `running`, plus `supervisor.health.json` whose `services` are all running;
    and `docker logs --since <window end> bop-rms-pilot-pilot-1 | grep -c '"level":50'` is 0.
 
