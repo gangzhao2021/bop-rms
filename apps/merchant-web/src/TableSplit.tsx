@@ -241,7 +241,13 @@ export function TableSplitControls({
           >
             {t("Split by rounds")}
           </button>
-          {byRoundsValid ? null : (
+          {owing.length === 1 ? (
+            <p className="table-split__hint">
+              {t(
+                "This table has one round, so it can't be split by rounds. Split it evenly instead.",
+              )}
+            </p>
+          ) : byRoundsValid ? null : (
             <p className="table-split__hint">{t("Use at least two parts, each with a round.")}</p>
           )}
         </div>

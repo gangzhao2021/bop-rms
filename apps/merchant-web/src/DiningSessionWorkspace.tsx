@@ -879,7 +879,17 @@ export function DiningSessionWorkspace({
             type="button"
             className="table-row__step"
             disabled={paused || hostLocked}
-            onClick={() => select(table)}
+            onClick={() => {
+              select(table);
+              // Owner 2026-11-03 walkthrough: the step goes where the payment is taken.
+              window.setTimeout(
+                () =>
+                  document
+                    .querySelector(".table-checkout")
+                    ?.scrollIntoView({ block: "start", behavior: "smooth" }),
+                400,
+              );
+            }}
           >
             {t("Take payment")}
           </button>
@@ -1173,6 +1183,7 @@ export function DiningSessionWorkspace({
                   if (text !== "") setResult({ text });
                 });
               }}
+              onSettled={(message) => setResult({ text: message })}
               onReread={reread}
               onChanged={() => {
                 setCheckoutRevision((value) => value + 1);
@@ -1233,6 +1244,7 @@ function TablePanel({
   onChanged,
   onClosed,
   onReread,
+  onSettled,
   hostTransferDisabled,
   onPartySize,
   tables,
@@ -1248,6 +1260,7 @@ function TablePanel({
   readonly onPartySize?: (diningSessionReference: string, partySize: number) => void;
   /** Read the tables again, keeping this table's open steps (and their messages) as they are. */
   readonly onReread: () => void;
+  readonly onSettled: (message: string) => void;
   readonly table: StaffDiningTable;
   readonly csrf: string;
   readonly timeZone: string | undefined;
@@ -1415,6 +1428,7 @@ function TablePanel({
           timeZone={timeZone}
           locked={locked}
           onChanged={onChanged}
+          onSettled={onSettled}
         />
       ) : null}
       {seated && canCloseSessions && table.session ? (

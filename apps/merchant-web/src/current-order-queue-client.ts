@@ -15,6 +15,11 @@ function parseTableBill(
   orderType: unknown,
 ): {
   readonly totalMinor: string;
+  readonly partlyPaid?: {
+    readonly remainingMinor: string;
+    readonly paidParts: number;
+    readonly partCount: number;
+  };
   readonly paid: {
     readonly amountMinor: string;
     /** WP-2423 item 8 ④: "Split" — paid part by part, every part paid. */
@@ -22,14 +27,35 @@ function parseTableBill(
   } | null;
 } | null {
   if (value === null) return null;
-  const bill = exact(value, ["totalMinor", "paid"]);
+  const withParts =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "partlyPaid");
+  const bill = exact(value, ["totalMinor", "paid", ...(withParts ? ["partlyPaid"] : [])]);
   if (
     orderType !== "DineIn" ||
     typeof bill.totalMinor !== "string" ||
     !minorAmount.test(bill.totalMinor)
   )
     return fail();
-  if (bill.paid === null) return Object.freeze({ totalMinor: bill.totalMinor, paid: null });
+  if (bill.paid === null) {
+    if (!withParts) return Object.freeze({ totalMinor: bill.totalMinor, paid: null });
+    const parts = exact(bill.partlyPaid, ["remainingMinor", "paidParts", "partCount"]);
+    if (
+      typeof parts.remainingMinor !== "string" ||
+      !minorAmount.test(parts.remainingMinor) ||
+      !Number.isSafeInteger(parts.paidParts) ||
+      !Number.isSafeInteger(parts.partCount)
+    )
+      return fail();
+    return Object.freeze({
+      totalMinor: bill.totalMinor,
+      partlyPaid: Object.freeze({
+        remainingMinor: parts.remainingMinor,
+        paidParts: parts.paidParts as number,
+        partCount: parts.partCount as number,
+      }),
+      paid: null,
+    });
+  }
   const paid = exact(bill.paid, ["amountMinor", "method"]);
   if (
     typeof paid.amountMinor !== "string" ||

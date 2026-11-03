@@ -1337,3 +1337,32 @@
   flex-basis: 100%;
   margin: 0;
 }
+
+/* Owner 2026-11-03 walkthrough: the split chosen looks chosen, as the tip and payment method do. */
+.workspace-page.tables-v3 .table-split__modes button[aria-pressed="true"] {
+  border-radius: 999px;
+  background: var(--bop-color-brand-primary);
+  color: var(--bop-color-on-primary);
+}
+.workspace-page.tables-v3 .table-checkout__cash-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 4px 0 8px;
+}
+.workspace-page.tables-v3 .table-checkout__cash-quick button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+/* A field's label, its line and its hint stack, so a narrow panel never squeezes them. */
+.workspace-page.tables-v3 .table-panel .table-checkout__field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}

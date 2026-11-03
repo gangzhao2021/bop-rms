@@ -1,5 +1,6 @@
 import { loadDiningGuestPhones } from "./dining-guest-phones.js";
 import { createHash } from "node:crypto";
+import { staffNameLocales } from "./staff-content-locale.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { canonicalizeRfc8785 } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
@@ -738,6 +739,8 @@ function instant(value: string): string {
 export function createMerchantDiningTableBillRead(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
+  /** The language dish names are shown in (the Orders page's default when not configured). */
+  locale?: string;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; query: unknown }) => {
@@ -778,6 +781,7 @@ export function createMerchantDiningTableBillRead(options: {
                 diningSessionReference: session,
                 observedAt: instant(options.persistence.now()),
                 authorize: () => authority.guard(),
+                displayLocales: staffNameLocales(options.locale ?? "en-CA"),
               },
             ),
           ),

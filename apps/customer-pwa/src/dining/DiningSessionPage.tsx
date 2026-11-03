@@ -1,3 +1,4 @@
+import { createTablePaymentClient } from "./table-payment-client.js";
 import { dateLocale, t, useReloadOnLanguageChange, saidTable } from "../i18n/i18n.js";
 import {
   useCallback,
@@ -665,10 +666,15 @@ export function DiningSessionPage({
     };
   }, [load]);
   const showingTable = keepsReadingTable(state);
+  // Owner 2026-11-03 walkthrough: staff start checkout at any moment; the pay panel reads with it.
+  const [billReadKey, setBillReadKey] = useState(0);
   useEffect(() => {
     if (!showingTable) return;
     const tick = () => {
-      if (typeof document === "undefined" || document.visibilityState === "visible") void load();
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void load();
+        setBillReadKey((value) => value + 1);
+      }
     };
     const timer = window.setInterval(tick, diningSessionPollIntervalMs);
     document.addEventListener("visibilitychange", tick);
@@ -684,6 +690,7 @@ export function DiningSessionPage({
       cartClient={cartClient}
       menu={menu}
       onRefresh={() => void load()}
+      billReadKey={billReadKey}
       invitation={
         // Stays mounted while a table is shown (also during a failed refresh), so a code on
         // screen is not lost; it is never stored.
@@ -735,7 +742,14 @@ export function DiningSessionScreen({
   cartClient,
   menu = null,
   settledReceipt,
+  billReadKey,
+  tablePaymentClient,
 }: {
+  /** A new value reads the table's payment state again. */
+  readonly billReadKey?: number | undefined;
+  /** Asked before "Order again" adds a dish (tests inject). */
+  readonly tablePaymentClient?:
+    Pick<ReturnType<typeof createTablePaymentClient>, "read"> | undefined;
   readonly cartClient?: CustomerCartClient | undefined;
   /** The settled table's receipt reader (tests supply one). */
   readonly settledReceipt?: SettledTableReceiptClient | undefined;
@@ -757,6 +771,7 @@ export function DiningSessionScreen({
     createConfigureController({ client: cartClient ?? createBrowserCustomerCartClient() }),
   );
   const [again, setAgain] = useState<{ key: string; item: DiningItem } | null>(null);
+  const [tablePayment] = useState(() => tablePaymentClient ?? createTablePaymentClient());
   // Dishes can be added while the table orders: not while it checks out, after it paid, or once
   // everything is closed. A table paying at the end can still order after everything is served.
   const paidOff =
@@ -863,6 +878,7 @@ export function DiningSessionScreen({
       {/* DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table here once checkout started. */}
       {view?.paymentTiming === "PayLater" ? (
         <TablePayPanel
+          readKey={billReadKey}
           onStatus={(status) => {
             setTablePay(status);
             // The table's total and rounds are read again (paid in full, or checkout started).
@@ -909,13 +925,26 @@ export function DiningSessionScreen({
                 onOrderAgain={
                   canOrderAgain
                     ? (item, key) => {
-                        if (item.orderAgain === undefined) return;
-                        setAgain({ key, item });
-                        void orderAgain.submit(item.orderAgain.sellableReference, {
-                          quantity: 1,
-                          customerNote: null,
-                          optionSelections: item.orderAgain.optionSelections,
-                        });
+                        const wanted = item.orderAgain;
+                        if (wanted === undefined) return;
+                        void (async () => {
+                          // Owner 2026-11-03 walkthrough: staff may have just started checkout;
+                          // adding a dish then would look as if the guest lost their table.
+                          const payment =
+                            view?.paymentTiming === "PayLater"
+                              ? await tablePayment.read().catch(() => null)
+                              : null;
+                          if (payment?.checkingOut === true) {
+                            setTablePay({ checkingOut: true, paid: payment.state === "Paid" });
+                            return;
+                          }
+                          setAgain({ key, item });
+                          void orderAgain.submit(wanted.sellableReference, {
+                            quantity: 1,
+                            customerNote: null,
+                            optionSelections: wanted.optionSelections,
+                          });
+                        })();
                       }
                     : undefined
                 }

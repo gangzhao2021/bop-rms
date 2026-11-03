@@ -87,11 +87,14 @@ const saveTip = (choice: TipChoice | null) => {
 export function TablePayPanel({
   client: provided,
   onStatus,
+  readKey,
   onBillChanged,
 }: {
   readonly client?: ReturnType<typeof createTablePaymentClient>;
   /** Called when checkout or payment changes, so the table page reads itself again. */
   readonly onStatus?: (status: TablePayStatus) => void;
+  /** A new value reads the table's payment state again. */
+  readonly readKey?: number | undefined;
   /** v15 2026-11-02: the bill changed here (points used): the table's page reads it at once too. */
   readonly onBillChanged?: () => void;
 }) {
@@ -121,7 +124,7 @@ export function TablePayPanel({
   }, [client]);
   useEffect(() => {
     void read();
-  }, [read]);
+  }, [read, readKey]);
   // A reload keeps the tip the guest chose for this bill.
   useEffect(() => {
     if (view === null) return;

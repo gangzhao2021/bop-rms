@@ -185,7 +185,16 @@ export function tableNeed(
       tone: "action",
       rank: 3,
       words: t("Waiting for payment"),
-      detail: order?.bill ? cad(order.bill.totalMinor) : null,
+      // Owner 2026-11-03 walkthrough: part by part, what is still to collect.
+      detail: order?.bill?.partlyPaid
+        ? t("{amount} to go · {paid} of {count} parts paid", {
+            amount: cad(order.bill.partlyPaid.remainingMinor),
+            paid: String(order.bill.partlyPaid.paidParts),
+            count: String(order.bill.partlyPaid.partCount),
+          })
+        : order?.bill
+          ? cad(order.bill.totalMinor)
+          : null,
       step: "TakePayment",
     };
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { t, saidTable } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -92,6 +92,12 @@ function errorText(error: unknown): string {
  * on the card machine after it approved, or in cash (rounded to 5 cents, with the change). A manager
  * can record that the guests left without paying. The table is then closed as usual.
  */
+/** The exact amount, then the next bills a guest is likely to hand over. */
+export function cashQuickAmounts(due: bigint): readonly bigint[] {
+  const bills = [500n, 1000n, 2000n, 5000n, 10000n].filter((bill) => bill > due).slice(0, 3);
+  return [due, ...bills];
+}
+
 export function TableCheckout({
   table,
   session,
@@ -100,6 +106,7 @@ export function TableCheckout({
   canStart,
   canWriteOff = false,
   onChanged,
+  onSettled,
   fetcher,
   timeZone,
 }: {
@@ -114,6 +121,8 @@ export function TableCheckout({
   /** Whether this person may start checkout (stop the table's ordering). */
   readonly canStart: boolean;
   readonly onChanged: () => void;
+  /** What was just taken, said in words on the page. */
+  readonly onSettled?: (message: string) => void;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const client = useMemo(() => createTableCheckoutClient(fetcher), [fetcher]);
@@ -160,22 +169,25 @@ export function TableCheckout({
   }, [client, csrf, sessionReference, session.phase, session.version, reload]);
 
   // S4: while a guest pays on their phone, the bill is read again until it ends.
-  const guestPaying = bill?.onlinePayment?.status === "InProgress";
+  const paidNow =
+    bill?.settlement != null ||
+    (bill?.split != null && bill.split.parts.every((entry) => entry.payment !== null));
+  // Owner 2026-11-03 walkthrough: a guest can start or finish paying (a part too) at any moment,
+  // so an open bill keeps being read while the table checks out.
   useEffect(() => {
-    if (!guestPaying) return;
+    if (session.phase !== "Closing" || paidNow || bill?.writeOff != null) return;
     const timer = window.setInterval(() => setReload((value) => value + 1), 5000);
     return () => window.clearInterval(timer);
-  }, [guestPaying]);
+  }, [session.phase, paidNow, bill?.writeOff]);
   // …and once it is paid, the table's close check reads again.
-  const paidNow = bill?.settlement != null;
   const notified = useRef(false);
   useEffect(() => {
     if (paidNow && guestPaid.current && !notified.current) {
       notified.current = true;
       onChanged();
     }
-    guestPaid.current = guestPaying;
-  }, [paidNow, guestPaying, onChanged]);
+    guestPaid.current = !paidNow && bill !== null;
+  }, [paidNow, bill, onChanged]);
 
   const selected = bill?.split?.parts.find((entry) => entry.partNumber === part) ?? null;
   // A part's own share before tax (its tip) and its amount; otherwise what the table owes.
@@ -325,6 +337,19 @@ export function TableCheckout({
       setTip(null);
       setReceived("");
       setBill(result.bill);
+      // Owner 2026-11-03 walkthrough: said in words, with the change to hand back.
+      onSettled?.(
+        method === "Cash" && change !== null
+          ? t("Table {table}: {amount} cash received. Change {change}.", {
+              table: saidTable(table.stableLabel),
+              amount: cad(cashDue ?? 0n),
+              change: cad(change),
+            })
+          : t("Table {table}: {amount} received on the card machine.", {
+              table: saidTable(table.stableLabel),
+              amount: cad(due ?? 0n),
+            }),
+      );
       onChanged();
     } catch (error) {
       if (!(error instanceof TableCheckoutError) || error.code !== "OutcomeUnknown")
@@ -482,6 +507,7 @@ export function TableCheckout({
                 onBill={setBill}
                 onProblem={setProblem}
               />
+              <TableReceipt bill={bill} tableLabel={table.stableLabel} />
               {bill.split !== null && selected === null ? null : (
                 <>
                   {selected ? (
@@ -495,7 +521,14 @@ export function TableCheckout({
                   <dl className="table-checkout__totals">
                     <div>
                       <dt>{t("Subtotal")}</dt>
-                      <dd>{cad(selected ? selected.subtotalMinor : bill.owed.subtotalMinor)}</dd>
+                      {/* Owner 2026-11-03 walkthrough: a part's lines add up to the part. */}
+                      <dd>
+                        {cad(
+                          selected
+                            ? (BigInt(selected.amountMinor) - BigInt(selected.taxMinor)).toString()
+                            : bill.owed.subtotalMinor,
+                        )}
+                      </dd>
                     </div>
                     <div>
                       <dt>{t("Tax")}</dt>
@@ -618,6 +651,23 @@ export function TableCheckout({
                           onChange={(event) => setReceived(event.currentTarget.value)}
                         />
                       </label>
+                      {/* Owner 2026-11-03 walkthrough: the usual amounts are one tap. */}
+                      {cashDue === null ? null : (
+                        <div className="table-checkout__cash-quick" role="group">
+                          {cashQuickAmounts(cashDue).map((amount, index) => (
+                            <button
+                              key={amount.toString()}
+                              type="button"
+                              disabled={busy || locked}
+                              onClick={() => setReceived((Number(amount) / 100).toFixed(2))}
+                            >
+                              {index === 0
+                                ? t("Exact {amount}", { amount: cad(amount) })
+                                : cad(amount)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {change !== null ? (
                         <p className="table-checkout__change" aria-live="polite">
                           {change >= 0n
@@ -829,8 +879,25 @@ function TableReceipt({
   readonly bill: TableBill;
   readonly tableLabel: string;
 }) {
-  const paid = bill.settlement;
-  if (paid === null) return null;
+  // Owner 2026-11-03 walkthrough: a split bill has its receipt too, once every part is paid.
+  const parts = bill.split?.parts ?? [];
+  const payments: readonly {
+    readonly part: number | null;
+    readonly paid:
+      NonNullable<TableBill["settlement"]> | NonNullable<(typeof parts)[number]["payment"]>;
+  }[] =
+    bill.settlement !== null
+      ? [{ part: null, paid: bill.settlement }]
+      : parts.every((entry) => entry.payment !== null) && parts.length > 0
+        ? parts.map((entry) => ({
+            part: entry.partNumber,
+            paid: entry.payment as NonNullable<typeof entry.payment>,
+          }))
+        : [];
+  if (payments.length === 0) return null;
+  const add = (pick: (paid: (typeof payments)[number]["paid"]) => string) =>
+    payments.reduce((sum, entry) => sum + BigInt(pick(entry.paid)), 0n);
+  const cashRounding = add((paid) => paid.roundingMinor);
   const subtotal = bill.rounds.reduce((sum, round) => sum + BigInt(round.subtotalMinor), 0n);
   const rounding = BigInt(bill.taxRoundingMinor);
   const tax = bill.rounds.reduce((sum, round) => sum + BigInt(round.taxMinor), 0n) - rounding;
@@ -856,40 +923,48 @@ function TableReceipt({
         ) : null}
         <div>
           <dt>{t("Tip")}</dt>
-          <dd>{cad(paid.tipMinor)}</dd>
+          <dd>{cad(add((paid) => paid.tipMinor))}</dd>
         </div>
-        {paid.roundingMinor !== "0" ? (
+        {cashRounding !== 0n ? (
           <div>
             <dt>{t("Cash rounding")}</dt>
-            <dd>{cad(paid.roundingMinor)}</dd>
+            <dd>{cad(cashRounding)}</dd>
           </div>
         ) : null}
         <div className="table-checkout__total">
           <dt>{t("Total paid")}</dt>
-          <dd>{cad(paid.totalMinor)}</dd>
+          <dd>{cad(add((paid) => paid.totalMinor))}</dd>
         </div>
-        <div>
-          <dt>{t("Paid by")}</dt>
-          <dd>
-            {paid.method === "Cash"
-              ? t("Cash")
-              : paid.method === "Online"
-                ? t("Guest's phone")
-                : t("Card machine")}
-          </dd>
-        </div>
-        {paid.tenderedMinor !== null ? (
-          <div>
-            <dt>{t("Cash received")}</dt>
-            <dd>{cad(paid.tenderedMinor)}</dd>
-          </div>
-        ) : null}
-        {paid.changeMinor !== null ? (
-          <div>
-            <dt>{t("Change")}</dt>
-            <dd>{cad(paid.changeMinor)}</dd>
-          </div>
-        ) : null}
+        {payments.map(({ part, paid }) => (
+          <Fragment key={part ?? "whole"}>
+            <div>
+              <dt>
+                {part === null
+                  ? t("Paid by")
+                  : t("Part {number} paid by", { number: String(part) })}
+              </dt>
+              <dd>
+                {paid.method === "Cash"
+                  ? t("Cash")
+                  : paid.method === "Online"
+                    ? t("Guest's phone")
+                    : t("Card machine")}
+              </dd>
+            </div>
+            {paid.tenderedMinor !== null ? (
+              <div>
+                <dt>{t("Cash received")}</dt>
+                <dd>{cad(paid.tenderedMinor)}</dd>
+              </div>
+            ) : null}
+            {paid.changeMinor !== null ? (
+              <div>
+                <dt>{t("Change to give")}</dt>
+                <dd>{cad(paid.changeMinor)}</dd>
+              </div>
+            ) : null}
+          </Fragment>
+        ))}
       </dl>
       <p role="status">{t("Paid in full. Close the table when the guests have left.")}</p>
       <button type="button" onClick={() => window.print()}>

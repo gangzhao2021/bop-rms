@@ -12,6 +12,7 @@ import {
   listStorePaidOrderBatches,
   listStoreOrderAcceptanceHolds,
   listStoreUnfulfillablePaidOrders,
+  computeBillTaxRounding,
   listOrderItemPrices,
   listOrderBillOrders,
   listOrderDiningSessions,
@@ -456,6 +457,12 @@ export function createPersistentMerchantOrderQueue(options: {
             string,
             {
               totalMinor: string;
+              /** Owner 2026-11-03 walkthrough: a split bill with some parts paid: what is left. */
+              partlyPaid?: {
+                remainingMinor: string;
+                paidParts: number;
+                partCount: number;
+              };
               paid: {
                 amountMinor: string;
                 /** WP-2423 item 8 ④: "Split" — paid part by part (any methods), every part paid. */
@@ -872,20 +879,58 @@ export function createPersistentMerchantOrderQueue(options: {
                     .filter((round) => String(round.orderReference) === order)
                     .map((round) => String(round.orderBatchReference)),
                 );
-                const owed = (await listOrderItemPrices(businessTransaction, scoped, order))
-                  .filter(
-                    (price) =>
-                      sent.has(String(price.orderBatchReference)) &&
-                      !removed.has(String(price.orderItemReference)),
-                  )
-                  .reduce(
+                const billed = (
+                  await listOrderItemPrices(businessTransaction, scoped, order)
+                ).filter(
+                  (price) =>
+                    sent.has(String(price.orderBatchReference)) &&
+                    !removed.has(String(price.orderItemReference)),
+                );
+                // Owner 2026-11-03 walkthrough: the same figure as the table's own bill, with its
+                // tax worked out once over the whole bill (DEC-TAX-WHOLE-RECEIPT).
+                const owed =
+                  billed.reduce(
                     (sum, price) =>
                       sum +
                       price.total.amountMinor -
                       (reduced.get(String(price.orderItemReference))?.totalMinor ?? 0n),
                     0n,
-                  );
-                tableBills.set(order, { totalMinor: owed.toString(), paid: null });
+                  ) +
+                  computeBillTaxRounding(
+                    [...sent].map((batch) => ({
+                      orderReference: order,
+                      orderBatchReference: batch,
+                      items: billed
+                        .filter((price) => String(price.orderBatchReference) === batch)
+                        .map((price) => {
+                          const reduction = reduced.get(String(price.orderItemReference));
+                          return {
+                            orderItemReference: String(price.orderItemReference),
+                            netMinor: price.subtotal.amountMinor - price.discountMinor,
+                            taxComponents: price.taxComponents,
+                            reduction:
+                              reduction === undefined
+                                ? null
+                                : { netMinor: reduction.netMinor, taxMinor: reduction.taxMinor },
+                          };
+                        }),
+                    })),
+                  ).lines.reduce((sum, line) => sum + line.amountMinor, 0n);
+                tableBills.set(order, {
+                  totalMinor: owed.toString(),
+                  ...(plan !== undefined && plan.mode !== "Whole" && parts.length > 0
+                    ? {
+                        partlyPaid: {
+                          remainingMinor: (
+                            owed - parts.reduce((sum, entry) => sum + entry.roundsMinor, 0n)
+                          ).toString(),
+                          paidParts: parts.length,
+                          partCount: plan.parts.length,
+                        },
+                      }
+                    : {}),
+                  paid: null,
+                });
               }
               if (!cancelAllowed && !compAllowed) continue;
               for (const round of rounds) {

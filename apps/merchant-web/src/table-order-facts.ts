@@ -23,6 +23,12 @@ export interface TableOrderFacts {
   /** A pay-later table's bill: what it comes to, and what it paid once paid. */
   readonly bill: {
     readonly totalMinor: string;
+    /** A split bill with some parts paid: what is left to collect. */
+    readonly partlyPaid?: {
+      readonly remainingMinor: string;
+      readonly paidParts: number;
+      readonly partCount: number;
+    };
     readonly paid: { readonly amountMinor: string } | null;
   } | null;
 }
@@ -59,6 +65,9 @@ export async function loadTableOrderFacts(
             ? null
             : {
                 totalMinor: order.tableBill.totalMinor,
+                ...(order.tableBill.partlyPaid === undefined
+                  ? {}
+                  : { partlyPaid: order.tableBill.partlyPaid }),
                 paid:
                   order.tableBill.paid === null
                     ? null
