@@ -993,13 +993,6 @@
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }
-/* Filters: words, not fields. The line returns on focus, where it says where typing goes. */
-.workspace-layout.workspace-layout
-  .kitchen-shell--workspace
-  .kitchen-filter-toolbar
-  :is(input, select):not(:focus) {
-  border-bottom-color: transparent;
-}
 .workspace-layout.workspace-layout .kitchen-shell--workspace .kitchen-filter-toolbar input {
   padding-inline-start: 24px;
   background: var(--bop-color-surface-default)
@@ -1045,13 +1038,6 @@
 .kitchen-shell--workspace .kitchen-order-group.kitchen-ticket.kitchen-ticket {
   border-top: 0;
 }
-/* In the search row focus is the 2px line alone (no box around it), and "Clear" is a plain word. */
-.workspace-layout.workspace-layout
-  .kitchen-shell--workspace
-  .kitchen-filter-toolbar
-  :is(input, select):focus-visible {
-  outline: none;
-}
 .workspace-content
   .kitchen-shell--workspace
   .kitchen-filter-toolbar
@@ -1059,4 +1045,117 @@
   button:not([type="submit"]) {
   border: 0;
   background: none;
+}
+
+/* ---- Owner 2026-11-03 ("这样好像又没有层次了"): hierarchy comes from size, and one rule. A large
+   title; one dark line that carries the filters and ends the tools; one line of attention; then
+   "Today", the page's real content. Sizes: 30 title, 26 ticket, 20 section, 17 dish, 14 text, 13 aside. */
+.kitchen-shell--workspace .kitchen-board-heading h1 {
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+.kitchen-shell--workspace .kitchen-board-freshness,
+.kitchen-shell--workspace .kitchen-board-freshness > *,
+.kitchen-shell--workspace .kitchen-board-heading .bop-state-card h2 {
+  font-size: 13px;
+}
+.kitchen-shell--workspace .kitchen-board-heading .staff-session__switch button {
+  font-size: 13px;
+}
+/* The one rule: every field in the row sits on it, so no field draws its own. */
+.kitchen-shell--workspace .kitchen-queue-bar,
+.kitchen-shell--workspace .kitchen-filter-toggle {
+  border-bottom: 1px solid var(--bop-color-text-default);
+}
+.kitchen-shell--workspace .kitchen-queue-bar:has(input:focus) {
+  box-shadow: 0 1px 0 var(--bop-color-text-default);
+}
+.kitchen-shell--workspace .kitchen-filter-toggle {
+  width: 100%;
+}
+.kitchen-shell--workspace .kitchen-filter-toolbar,
+.kitchen-shell--workspace .kitchen-filter-toolbar .kitchen-reference-search {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.kitchen-shell--workspace .kitchen-filter-toolbar .kitchen-reference-search input {
+  flex: 1 1 auto;
+  width: auto;
+}
+.kitchen-shell--workspace .kitchen-filter-toolbar .kitchen-board-filters {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+.workspace-layout.workspace-layout
+  .kitchen-shell--workspace
+  .kitchen-filter-toolbar
+  :is(input, select):is(:focus, :not(:focus)) {
+  border-bottom: 1px solid transparent;
+}
+.workspace-layout.workspace-layout .kitchen-shell--workspace .kitchen-filter-toolbar input:focus {
+  outline: none;
+}
+/* The attention line under the rule: a dot when there is something to do; the arrow says it opens. */
+.kitchen-shell--workspace .kitchen-board-workspace .kitchen-earlier-days {
+  margin-block-start: -12px;
+}
+.kitchen-shell--workspace .kitchen-board-workspace .kitchen-earlier-days summary {
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-shell--workspace .kitchen-earlier-days summary::before {
+  order: 1;
+  margin-inline: 6px 0;
+}
+.kitchen-shell--workspace .kitchen-earlier-days summary > span[data-action]::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+/* "Today": the second-largest words on the page, with the count beside them. */
+.kitchen-today-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-block: 8px -12px;
+}
+.kitchen-today-heading h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.kitchen-shell--workspace .kitchen-today-heading .kitchen-queue-count {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-shell--workspace .kitchen-order-group.kitchen-ticket .kitchen-ticket__number,
+.kitchen-shell--workspace
+  .kitchen-order-group.kitchen-ticket
+  .kitchen-ticket__header
+  .kitchen-order-group__label {
+  font-size: 26px;
+}
+.kitchen-shell--workspace .kitchen-work-item[data-in-ticket] .kitchen-work-item__summary h3 {
+  font-size: 17px;
+}
+.kitchen-shell--workspace .kitchen-board-empty .bop-state-card h2 {
+  font-size: 15px;
+  font-weight: 400;
+}
+/* Never a rule with rounded ends (Owner: it reads as a curly brace). */
+.kitchen-shell--workspace .kitchen-filter-toggle {
+  border-radius: 0;
+}
+.kitchen-shell--workspace .kitchen-work-item[data-in-ticket] .kitchen-work-item__count {
+  font-size: inherit;
 }

@@ -1514,7 +1514,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "From a set date and time": "从指定日期和时间起",
   "From an earlier business day. Check whether it was collected, then close it.":
     "来自较早的营业日。请核对是否已被取走，然后关闭。",
-  "From earlier days": "较早营业日",
+  "1 ticket from earlier days": "1 张较早营业日的票据",
+  "{length} tickets from earlier days": "{length} 张较早营业日的票据",
+  "1 ticket from earlier days to check and close": "1 张较早营业日的票据待核对并关闭",
+  "{length} tickets from earlier days to check and close":
+    "{length} 张较早营业日的票据待核对并关闭",
   "From earlier days — check and close": "较早营业日 — 请核对并关闭",
   "From now on, new orders at this Store are priced from this book{value}. Orders already quoted keep their prices.":
     "从现在起，本店的新订单按此价目表计价{value}。已报价的订单保持原价。",

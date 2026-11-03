@@ -1202,8 +1202,7 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
     const html = render(true);
     expect(html).toContain('<details class="kitchen-earlier-days">');
     expect(html).not.toContain('<details class="kitchen-earlier-days" open');
-    expect(html).toContain("From earlier days — check and close");
-    expect(html).toContain("1 ticket");
+    expect(html).toContain("1 ticket from earlier days to check and close");
     expect(html).toContain("From Fri, Aug 7");
     expect(html).toContain("waiting 4 days");
     expect(html).toContain("Close ticket");
@@ -1219,12 +1218,12 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
   it("offers the close only to a manager, and shows nothing apart while the business day is unknown", () => {
     const cook = render(false);
     // Told only what they can do: no "check and close" on the row of someone who cannot close.
-    expect(cook).toContain("From earlier days");
-    expect(cook).not.toContain("From earlier days — check and close");
+    expect(cook).toContain("1 ticket from earlier days");
+    expect(cook).not.toContain("earlier days to check and close");
     expect(cook).toContain("Ask a manager to check and close them.");
     expect(cook).not.toContain("Close ticket");
     const unknown = render(true, null);
-    expect(unknown).not.toContain("From earlier days");
+    expect(unknown).not.toContain("from earlier days");
     expect(unknown).toContain("Old noodle bowl");
   });
   it("groups earlier tickets with their exact version and words waiting time in hours and days", () => {

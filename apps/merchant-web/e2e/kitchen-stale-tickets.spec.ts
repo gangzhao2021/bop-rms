@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * WP-2423 DEC-KITCHEN-STALE-TICKETS: order numbers restart every business day, so a kitchen ticket
  * left open from an earlier day looks like today's ticket with the same number. The board keeps it
- * in a collapsed "From earlier days — check and close" section with its day and age, asks before
+ * in a collapsed "tickets from earlier days" section with its day and age, asks before
  * any kitchen step on it, and lets a manager close it with a reason (no refund, no Order change).
  */
 const id = (n: number) => "01a0f027-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -151,7 +151,7 @@ async function board(
 async function expectLayout(page: Page, name: string) {
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    await expect(page.getByText("From earlier days — check and close")).toBeVisible();
+    await expect(page.getByText("1 ticket from earlier days to check and close")).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -189,7 +189,7 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   await expect(earlier).not.toHaveAttribute("open", "");
   await expect(earlier.getByText("1 ticket")).toBeVisible();
   await expect(page.getByText("Pork dumplings")).toBeHidden();
-  await earlier.getByText("From earlier days — check and close").click();
+  await earlier.getByText("1 ticket from earlier days to check and close").click();
   const ticket = page.getByRole("region", { name: "Pickup · Order 2, From Fri, Oct 9" });
   await expect(ticket.getByText("From Fri, Oct 9")).toBeVisible();
   await expect(ticket.getByText("waiting 4 days")).toBeVisible();

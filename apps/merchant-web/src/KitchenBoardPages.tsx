@@ -1655,6 +1655,14 @@ export function KitchenBoardScreen({
     dialog.showModal();
     dialog.querySelector<HTMLSelectElement>("select:not(:disabled)")?.focus();
   };
+  const queueCount = (
+    <span className="kitchen-queue-count" aria-live="polite">
+      {t("{length} work {value}", {
+        length: items.length,
+        value: items.length === 1 ? t("item") : t("items"),
+      })}
+    </span>
+  );
   const renderOrderSearch = (layout: "desktop" | "mobile") => (
     <form
       className={`kitchen-reference-search kitchen-reference-search--${layout}`}
@@ -1877,13 +1885,8 @@ export function KitchenBoardScreen({
               </h2>
             )}
             <p className="kitchen-board-freshness">
-              {/* Owner 2026-11-03: how much work first, then how fresh the board is. */}
-              <span className="kitchen-queue-count" aria-live="polite">
-                {t("{length} work {value}", {
-                  length: items.length,
-                  value: items.length === 1 ? t("item") : t("items"),
-                })}
-              </span>
+              {/* Owner 2026-11-03: the back office says the count on its "Today" heading. */}
+              {workspaceFrame ? null : queueCount}
               <Freshness
                 status={stale ? "Stale" : view.freshnessStatus}
                 at={view.projectedAt}
@@ -2045,17 +2048,20 @@ export function KitchenBoardScreen({
         {earlierTickets.length > 0 ? (
           <details className="kitchen-earlier-days">
             <summary>
-              {/* Only someone who can close them is told to. */}
-              <span>
-                {canCloseEarlier
-                  ? t("From earlier days — check and close")
-                  : t("From earlier days")}
-              </span>
-              <span className="kitchen-earlier-days__count">
+              {/* One line of attention above the day's work. Only someone who can close them is told to. */}
+              <span data-action={canCloseEarlier && earlierElsewhere === null ? "true" : undefined}>
                 {earlierElsewhere ??
-                  (earlierTickets.length === 1
-                    ? t("1 ticket")
-                    : t("{length} tickets", { length: earlierTickets.length }))}
+                  (canCloseEarlier
+                    ? earlierTickets.length === 1
+                      ? t("1 ticket from earlier days to check and close")
+                      : t("{length} tickets from earlier days to check and close", {
+                          length: earlierTickets.length,
+                        })
+                    : earlierTickets.length === 1
+                      ? t("1 ticket from earlier days")
+                      : t("{length} tickets from earlier days", {
+                          length: earlierTickets.length,
+                        }))}
               </span>
             </summary>
             <p className="kitchen-earlier-days__intro">
@@ -2116,6 +2122,13 @@ export function KitchenBoardScreen({
               })}
             </div>
           </details>
+        ) : null}
+        {workspaceFrame ? (
+          // Owner 2026-11-03: everything below is today's work, under a heading that says so.
+          <div className="kitchen-today-heading">
+            <h2>{t("Today")}</h2>
+            {queueCount}
+          </div>
         ) : null}
         {activeSection !== "All" ? (
           // WP-2423 item 8 ⑧: this screen shows one section; the others' orders are counted here.
