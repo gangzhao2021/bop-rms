@@ -222,6 +222,7 @@ export function createStaffTableGuestPipeline(options: {
     ...(options.guestsCanSend === undefined ? {} : { guestsCanSend: options.guestsCanSend }),
     openTable: (staff, input) => options.openTable(staff, input),
     abandonTable: (staff, input) => options.abandonTable(staff, input),
+    tableHasQr: async (input) => (await options.tableQrToken(input.tableReference)) !== null,
     async enter(input) {
       const qrToken = await options.tableQrToken(input.tableReference);
       if (qrToken === null) return Object.freeze({ status: "NoTableQr" as const });

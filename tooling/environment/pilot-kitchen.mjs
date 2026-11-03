@@ -180,7 +180,9 @@ export function createInternalKitchen(resources) {
                 sourceEventReference: receipt.sourceEventReference,
                 sourceAggregateVersion: receipt.sourceAggregateVersion,
                 sourceSnapshotDigest: receipt.sourceSnapshotDigest,
-                observedAt: receipt.confirmedAt,
+                // Now, not when it was confirmed: a later round may exist by the time this one is
+                // consumed, and the Order's history is read as of now (v15 2026-11-03).
+                observedAt,
               },
             })
           ).items.map((item) => ({

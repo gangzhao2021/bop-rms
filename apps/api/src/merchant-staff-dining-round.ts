@@ -122,6 +122,8 @@ export interface StaffTableGuestPipeline extends Pick<
   CounterGuestPipeline,
   "addItem" | "quote" | "saveDetails" | "startCheckout"
 > {
+  /** Whether the table has a code to enter with (nothing is opened for one that doesn't). */
+  tableHasQr(input: { readonly tableReference: string }): Promise<boolean>;
   /** Whether the Store takes a dine-in round now (paper rounds after an outage: always). */
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
   /** WP-2423 item 8 ⑦: whether guests can still send a round themselves (not after last orders). */
@@ -593,15 +595,9 @@ export function createMerchantStaffDiningRound(options: {
         !(await options.pipeline.takesOrder({ recordedAfterOutage: command.recordedAfterOutage }))
       )
         return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
-      // DEC-STAFF-DINE-IN-ROUND (2026-10-15): enter with the table's code before the table is
-      // opened, so a table without a code (or a Store not taking orders) is refused with nothing
-      // changed — never an empty dining session left seated on the floor.
-      const entered = await options.pipeline.enter({
-        tableReference: command.tableReference,
-        requestedAt: now(),
-      });
-      if (entered.status === "NoTableQr") return fail("STAFF_ROUND_TABLE_QR_MISSING");
-      if (entered.status !== "Established") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
+      // DEC-STAFF-DINE-IN-ROUND (2026-10-15): a table without a code is refused with nothing changed.
+      if (!(await options.pipeline.tableHasQr({ tableReference: command.tableReference })))
+        return fail("STAFF_ROUND_TABLE_QR_MISSING");
       const table = await options.pipeline.openTable(
         { sessionCookie: input.sessionCookie, csrf: input.csrf },
         { tableReference: command.tableReference },
@@ -612,6 +608,14 @@ export function createMerchantStaffDiningRound(options: {
           diningSessionReference: table.diningSessionReference,
           generation: table.generation,
         };
+      // v15 2026-11-03: entered after opening, since a table no party is seated at takes no entry.
+      // A refusal here closes the table this request started: never an empty session on the floor.
+      const entered = await options.pipeline.enter({
+        tableReference: command.tableReference,
+        requestedAt: now(),
+      });
+      if (entered.status === "NoTableQr") return fail("STAFF_ROUND_TABLE_QR_MISSING");
+      if (entered.status !== "Established") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
       const joined = await options.pipeline.join(entered.credentials, {
         joinCredential: table.joinCredential,
         operationReference: options.nextReference(),

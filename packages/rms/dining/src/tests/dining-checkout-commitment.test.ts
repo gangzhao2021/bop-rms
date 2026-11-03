@@ -119,10 +119,23 @@ describe("Dining checkout commitment", () => {
       sealDiningCheckoutCommitment(prepared, f.context, f.link, requested, requested),
     ).toThrow(expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }));
   });
-  it.each(["version", "tableAssignmentVersion"] as const)("rejects changed Session %s", (key) => {
+  it("rejects a table move after sealing", () => {
     const f = sealed();
-    f.context.session[key]++;
+    f.context.session.tableAssignmentVersion++;
     expect(() => assertDiningCheckoutCommitmentUsable(f.result, f.context, requested)).toThrow(
+      expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }),
+    );
+  });
+  it("stays payable when someone else joins the session after sealing", () => {
+    const f = sealed();
+    f.context.session.version++;
+    expect(assertDiningCheckoutCommitmentUsable(f.result, f.context, requested)).toEqual(f.result);
+  });
+  it("still needs the same Session version before it is sealed", () => {
+    const f = fixture(),
+      prepared = prepareDiningCheckoutCommitment(f.input, f.context);
+    f.context.session.version++;
+    expect(() => assertDiningCheckoutPreparedForOrdering(prepared, f.context, requested)).toThrow(
       expect.objectContaining({ code: "DINING_CHECKOUT_CONTEXT_CHANGED" }),
     );
   });

@@ -710,7 +710,7 @@ async function realTeaRounds() {
         [null, "Charged", 1, 1],
       );
       await assertBill(150n + 650n);
-      await kitchenTakesRounds();
+      // The kitchen consumes these rounds late, after the next one: it must still take them.
       await party(4, 3);
       const backToGuests = await sync(server);
       await kitchenTakesRounds();

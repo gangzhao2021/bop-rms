@@ -183,6 +183,7 @@ function current(
   value: unknown,
   commitment: DiningCheckoutCommitment,
   observedAt: DiningInstant,
+  { sameSessionVersion = true }: { readonly sameSessionVersion?: boolean } = {},
 ): void {
   const raw = closed(value, ["session", "participant"]);
   const session = parseDiningSession(raw.session),
@@ -192,7 +193,7 @@ function current(
     session.brandReference !== commitment.brandReference ||
     session.storeReference !== commitment.storeReference ||
     session.diningSessionReference !== commitment.diningSessionReference ||
-    session.version !== commitment.sessionVersion ||
+    (sameSessionVersion && session.version !== commitment.sessionVersion) ||
     session.tableReference !== commitment.tableReference ||
     session.tableAssignmentVersion !== commitment.tableAssignmentVersion ||
     participant.diningSessionReference !== session.diningSessionReference ||
@@ -305,7 +306,12 @@ export function expireDiningCheckoutCommitment(
   });
 }
 
-/** Current payment eligibility is distinct from immutable seal recovery. */
+/**
+ * Current payment eligibility is distinct from immutable seal recovery. WP-2423 (2026-11-03): a
+ * round already sent stays payable while its session is open at the same table and its participant
+ * is still there. Someone else joining moves the session's version and must not stop it being paid
+ * (a second guest scanning, or staff sending the next round); closing and moving tables still do.
+ */
 export function assertDiningCheckoutCommitmentUsable(
   value: unknown,
   context: unknown,
@@ -314,7 +320,7 @@ export function assertDiningCheckoutCommitmentUsable(
   return protect(() => {
     const commitment = parseDiningCheckoutCommitment(value),
       observedAt = parseDiningInstant(observedAtValue);
-    current(context, commitment, observedAt);
+    current(context, commitment, observedAt, { sameSessionVersion: false });
     if (
       commitment.state !== "PaymentPending" ||
       commitment.capacityExpiresAt === null ||

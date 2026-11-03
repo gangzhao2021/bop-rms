@@ -1408,7 +1408,7 @@ it("the real staff round command takes a round from table entry to the card mach
         )[0];
       const balance = async () =>
         (await rows("SELECT on_hand,reserved,available FROM rms_inventory.stock_balance"))[0];
-      assert.equal((await store.seatTable(server)).status, "Issued");
+      // The table is free: the first round opens it (WP-2423 2026-11-03: this used to always fail).
       const empty = await counts();
 
       // Without the staff ordering permission nothing is touched.
@@ -1478,6 +1478,27 @@ it("the real staff round command takes a round from table entry to the card mach
       });
       assert.deepEqual(await counts(), placed);
 
+      // More than the stock left: the Cart's own stock check names the line, nothing is ordered,
+      // and the next round is not refused for it.
+      await assert.rejects(send(server, { lines: [line(99)] }), {
+        code: "STAFF_ROUND_ITEM_UNAVAILABLE",
+        lineIndex: 0,
+      });
+      assert.deepEqual(await counts(), { ...placed, entries: placed.entries + 1 });
+      assert.deepEqual(await balance(), held);
+
+      // A later round of the table's Order, a paper round taken during an outage.
+      const second = await send(server, { lines: [line(1)], recordedAfterOutage: true });
+      assert.deepEqual(
+        [second.status, second.orderReference, second.recordedAfterOutage, second.totalMinor],
+        ["Placed", first.orderReference, true, "735"],
+      );
+      assert.notEqual(second.orderBatchReference, first.orderBatchReference);
+      assert.equal((await entry()).at(-1).recorded_after_outage, true);
+      assert.deepEqual((await balance()).reserved, "3");
+
+      // The first round stays payable after the refused attempt and the later round moved the
+      // table's session (2026-11-03: they used to make it unpayable).
       // ── The card machine takes the first round through the real payment admission.
       const { cardMachinePayment } = await store.counterFor(server);
       const pay = (overrides = {}) =>
@@ -1501,25 +1522,6 @@ it("the real staff round command takes a round from table entry to the card mach
       const paid = await pay({ operationReference });
       assert.deepEqual([paid.status, paid.amountMinor], ["Recorded", "1664"]);
       assert.equal((await pay({ operationReference })).status, "AlreadyRecorded");
-
-      // More than the stock left: the Cart's own stock check names the line, nothing is ordered,
-      // and the next round is not refused for it.
-      await assert.rejects(send(server, { lines: [line(99)] }), {
-        code: "STAFF_ROUND_ITEM_UNAVAILABLE",
-        lineIndex: 0,
-      });
-      assert.deepEqual(await counts(), { ...placed, entries: placed.entries + 1 });
-      assert.deepEqual(await balance(), held);
-
-      // A later round of the table's Order, a paper round taken during an outage.
-      const second = await send(server, { lines: [line(1)], recordedAfterOutage: true });
-      assert.deepEqual(
-        [second.status, second.orderReference, second.recordedAfterOutage, second.totalMinor],
-        ["Placed", first.orderReference, true, "735"],
-      );
-      assert.notEqual(second.orderBatchReference, first.orderBatchReference);
-      assert.equal((await entry()).at(-1).recorded_after_outage, true);
-      assert.deepEqual((await balance()).reserved, "3");
 
       const paidLater = await pay({
         orderBatchReference: second.orderBatchReference,

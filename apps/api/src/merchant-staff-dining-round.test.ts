@@ -120,6 +120,7 @@ function setup(
       calls.push("abandonTable");
       return "Closed";
     }),
+    tableHasQr: vi.fn(async () => true),
     enter: vi.fn(async () => {
       calls.push("enter");
       return { status: "Established" as const, credentials: guest };
@@ -274,8 +275,8 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     const placed = await send();
     expect(calls).toEqual([
       "takesOrder",
-      "enter",
       "openTable",
+      "enter",
       "join",
       "bind",
       "selectCart",
@@ -494,10 +495,25 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
 
   it("DEC-STAFF-DINE-IN-ROUND: a table without a QR code is refused before the table is opened", async () => {
     const { send, pipeline } = setup();
-    pipeline.enter.mockResolvedValueOnce({ status: "NoTableQr" } as never);
+    pipeline.tableHasQr.mockResolvedValueOnce(false);
     await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_QR_MISSING" });
     // No dining session is started or code issued for a round that can't be entered.
     expect(pipeline.openTable).not.toHaveBeenCalled();
+    expect(pipeline.join).not.toHaveBeenCalled();
+  });
+
+  it("closes the table it started when the entry is then refused: no empty session on the floor", async () => {
+    const { send, pipeline, calls } = setup();
+    pipeline.openTable.mockResolvedValueOnce({
+      status: "Opened",
+      diningSessionReference: id(31),
+      joinCredential: "join",
+      started: true,
+      generation: 1,
+    } as never);
+    pipeline.enter.mockResolvedValueOnce({ status: "NotAccepting" } as never);
+    await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_STORE_NOT_TAKING_ORDERS" });
+    expect(calls).toContain("abandonTable");
     expect(pipeline.join).not.toHaveBeenCalled();
   });
 
