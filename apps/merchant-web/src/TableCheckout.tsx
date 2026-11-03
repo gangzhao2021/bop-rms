@@ -248,7 +248,12 @@ export function TableCheckout({
       beginOperation.current = null;
       onChanged();
     } catch (error) {
+      // As for cancelling: a refused try reads the table again, so the next one can succeed.
+      if (!(error instanceof DiningSessionCloseClientError && error.code === "OutcomeUnknown"))
+        beginOperation.current = null;
       setProblem(errorText(error));
+      if (error instanceof DiningSessionCloseClientError && error.code !== "OutcomeUnknown")
+        onChanged();
     } finally {
       setBusy(false);
     }

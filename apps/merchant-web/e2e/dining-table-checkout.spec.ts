@@ -344,6 +344,56 @@ test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying 
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
 
+// A phone joined after the table was shown: the refused start reads the table again, so the next
+// tap succeeds as a new operation at the new version (live check 2026-11-03: it stayed refused).
+test("@production staff can start checkout after a phone joined the table", async ({ page }) => {
+  const state: { phase: "Active" | "Closing"; version: number } = { phase: "Active", version: 6 };
+  await floor(page, state);
+  const closing: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/closing", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    closing.push(body);
+    if (body.expectedSessionVersion !== state.version)
+      return route.fulfill({ status: 409, headers, json: { error: "version_conflict" } });
+    state.phase = "Closing";
+    state.version += 1;
+    return route.fulfill({
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        status: "Applied",
+        phase: state.phase,
+        sessionVersion: state.version,
+      }),
+    });
+  });
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: unpaidBill(state.phase, state.version) }),
+  );
+
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  const start = checkout.getByRole("button", { name: "Start checkout" });
+  await expect(start).toBeVisible();
+  state.version = 7;
+  await start.click();
+  await expect.poll(() => closing.length).toBe(1);
+  await expect(page.getByText("This table changed since it was shown.")).toBeVisible();
+
+  await expect(start).toBeEnabled();
+  await expect
+    .poll(async () => {
+      await start.click();
+      return closing.length;
+    })
+    .toBeGreaterThan(1);
+  await expect(checkout.getByText("Round 1")).toBeVisible();
+  const last = closing.at(-1) as Record<string, unknown>;
+  expect(last).toMatchObject({ action: "Begin", expectedSessionVersion: 7 });
+  expect(last.operationReference).not.toBe(closing[0]?.operationReference);
+  expect(state.phase).toBe("Closing");
+});
+
 // WP-2423 item 8 ⑦ (Owner decision 11): with tips off, staff are asked no tip and the payment is
 // recorded with none; the Store's own percentages are offered while tips are on.
 test("@production a store with tips off takes the table's payment with no tip", async ({
