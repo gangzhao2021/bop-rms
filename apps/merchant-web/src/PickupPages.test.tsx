@@ -10,6 +10,7 @@ import {
 } from "./PickupPages.js";
 import { pickupQueueFixture } from "./pickup.fixtures.js";
 import { parsePickupQueueView } from "./pickup.js";
+import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 describe("WP-1805 Pickup screens", () => {
   it("renders elapsed wait without inventing an overdue threshold", () => {
     const html = renderToStaticMarkup(
@@ -376,7 +377,6 @@ it("WP-2423 Q26: long waits read in hours or days and earlier days' orders are s
     pickupWaitText(120),
     pickupWaitText(7766),
   ]).toEqual(["20 min", "3 h 5 min", "2 h", "5 days"]);
-  const { StoreBusinessDayContext } = await import("./StoreBusinessDay.js");
   const fixture = pickupQueueFixture();
   const today = { ...fixture.items[0], businessDate: "2026-08-12" };
   const earlier = {
@@ -481,4 +481,27 @@ it("Owner 2026-11-03: a card shows no empty facts and no second status", () => {
   );
   for (const value of ["Not set", "No cue", "pickup-queue__status", "e.g. 16"])
     expect(html).not.toContain(value);
+});
+it("v15 2026-11-03: an earlier day's handed-over order is not one to check and close", () => {
+  const fixture = pickupQueueFixture();
+  const [base] = fixture.items;
+  const html = renderToStaticMarkup(
+    <StoreBusinessDayContext.Provider
+      value={{ businessDate: "2026-08-12", startsAt: null, endsAt: null }}
+    >
+      <MemoryRouter>
+        <PickupQueueScreen
+          includeCompleted
+          view={parsePickupQueueView({
+            ...fixture,
+            items: [{ ...base, phase: "Completed", businessDate: "2026-08-07" }],
+          })}
+        />
+      </MemoryRouter>
+    </StoreBusinessDayContext.Provider>,
+  );
+  expect(html).not.toContain("From earlier days");
+  expect(html).toContain("From Fri, Aug 7");
+  expect(html).toContain("Handed over");
+  expect(html).toContain("No orders waiting today · 1 handed over");
 });

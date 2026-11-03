@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Kitchen v3 (Owner 2026-10-26): one main step per ticket. "Accept all" on a ticket of two dishes
@@ -14,7 +14,7 @@ const scope = {
 };
 const headers = { "cache-control": "no-store" };
 const at = "2026-10-26T22:14:00.000Z";
-const dish = (n: number, name: string) => ({
+const dish = (n: number, name: string, change: Record<string, unknown> = {}) => ({
   workItemReference: id(n),
   ticketReference: id(50),
   orderReference: id(51),
@@ -33,11 +33,10 @@ const dish = (n: number, name: string) => ({
   orderItemReadyAt: null,
   ticketAggregateVersion: "7",
   workItemVersion: "2",
+  ...change,
 });
 
-test("@production a ticket's one main step accepts each of its dishes in turn", async ({
-  page,
-}) => {
+async function mockBoard(page: Page, items: readonly ReturnType<typeof dish>[]) {
   await page.clock.setFixedTime(new Date(at));
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
@@ -65,7 +64,6 @@ test("@production a ticket's one main step accepts each of its dishes in turn", 
       },
     }),
   );
-  const items = [dish(1, "TEST latte"), dish(2, "TEST mocha")];
   await page.route("**/merchant/kitchen/query", (route) =>
     route.fulfill({
       headers,
@@ -109,6 +107,13 @@ test("@production a ticket's one main step accepts each of its dishes in turn", 
       },
     });
   });
+  return commands;
+}
+
+test("@production a ticket's one main step accepts each of its dishes in turn", async ({
+  page,
+}) => {
+  const commands = await mockBoard(page, [dish(1, "TEST latte"), dish(2, "TEST mocha")]);
   await page.goto("/operations/kitchen");
   const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
   await expect(ticket.locator(".kitchen-ticket__state")).toHaveText("To accept");
@@ -129,4 +134,33 @@ test("@production a ticket's one main step accepts each of its dishes in turn", 
   await expect(ticket.locator(".kitchen-ticket__number")).toHaveCSS("font-size", "32px");
   const box = await ticket.getByRole("button", { name: "Start all", exact: true }).boundingBox();
   expect(box?.height).toBeGreaterThanOrEqual(48);
+});
+
+// Owner 2026-11-03: identical dishes read as one line; its step applies to each of them.
+test("@production a merged line's own step records each of its dishes", async ({ page }) => {
+  const started = { status: "In Progress", acceptedAt: "2026-10-26T22:13:00.000Z" };
+  const commands = await mockBoard(page, [
+    dish(1, "TEST noodles", started),
+    dish(2, "TEST noodles", started),
+    dish(3, "TEST rice", started),
+  ]);
+  await page.goto("/operations/kitchen");
+  const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST noodles" });
+  await expect(ticket.locator(".kitchen-work-item h3")).toHaveText([
+    "2×TEST noodles",
+    "1×TEST rice",
+  ]);
+  await ticket.getByRole("button", { name: "Mark TEST noodles finished" }).click();
+  await expect
+    .poll(() =>
+      commands.map((command) => [
+        command.action,
+        command.workItemReference,
+        command.expectedTicketVersion,
+      ]),
+    )
+    .toEqual([
+      ["CompleteKitchenWorkItem", id(1), "7"],
+      ["CompleteKitchenWorkItem", id(2), "8"],
+    ]);
 });

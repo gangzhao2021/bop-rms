@@ -409,8 +409,11 @@ export function PickupQueueScreen({
   // WP-2423 Q26: earlier business days' orders are grouped apart so their repeated numbers are not
   // mistaken for today's orders.
   const today = useStoreBusinessDay()?.businessDate ?? null;
-  const earlierItems = view.items.filter((item) => fromEarlierDay(item, today));
-  const todayItems = view.items.filter((item) => !fromEarlierDay(item, today));
+  // An order already handed over needs no checking, whichever day it was from.
+  const needsChecking = (item: PickupQueueItem) =>
+    fromEarlierDay(item, today) && item.phase !== "Completed";
+  const earlierItems = view.items.filter(needsChecking);
+  const todayItems = view.items.filter((item) => !needsChecking(item));
   const completedCount = view.items.filter((item) => item.phase === "Completed").length;
   const waitingCount = view.items.length - completedCount;
   // The earlier days' orders are counted on their own collapsed row.
@@ -543,9 +546,11 @@ export function PickupQueueScreen({
         </div>
         {view.items.length > 0 ? (
           <p className="pickup-queue__summary">
-            {waitingToday === 1
-              ? t("1 order waiting")
-              : t("{waitingCount} orders waiting", { waitingCount: waitingToday })}
+            {waitingToday === 0
+              ? t("No orders waiting today")
+              : waitingToday === 1
+                ? t("1 order waiting")
+                : t("{waitingCount} orders waiting", { waitingCount: waitingToday })}
             {completedCount > 0
               ? t(" · {completedCount} handed over", { completedCount: completedCount })
               : ""}
@@ -564,6 +569,7 @@ export function PickupQueueScreen({
                 proofContext={proofContext}
                 workstation={view.workstation}
                 hidden={!visibleReferences.has(item.fulfillmentReference)}
+                earlier={fromEarlierDay(item, today)}
                 onHandedOver={onHandedOver}
                 onNotCollected={onNotCollected}
                 onRefresh={onRefresh}

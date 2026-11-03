@@ -2125,6 +2125,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No orders in this period.": "这段时间没有订单。",
   "No orders match these filters": "没有符合这些筛选条件的订单",
   "No orders on this page": "本页没有订单",
+  "No orders waiting today": "今天没有等待中的订单",
   "No orders were returned for this page.": "此页没有返回订单。",
   "No other active participants are available. Ask the guest to join this table first.":
     "没有其他在桌的参与者。请先让顾客加入这张桌台。",
