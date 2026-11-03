@@ -1514,6 +1514,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "From a set date and time": "从指定日期和时间起",
   "From an earlier business day. Check whether it was collected, then close it.":
     "来自较早的营业日。请核对是否已被取走，然后关闭。",
+  "From earlier days": "较早营业日",
   "From earlier days — check and close": "较早营业日 — 请核对并关闭",
   "From now on, new orders at this Store are priced from this book{value}. Orders already quoted keep their prices.":
     "从现在起，本店的新订单按此价目表计价{value}。已报价的订单保持原价。",
@@ -4479,8 +4480,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "These settings do not change the live Store.": "这些设置不会更改当前门店。",
   "These settings still need validation. This draft is not approved, published, or live.":
     "这些设置仍需校验。此草稿尚未批准、发布或生效。",
-  "These tickets are from an earlier business day. Order numbers restart every day, so they are not today's orders with the same number. {value}":
-    "这些票据来自较早的营业日。单号每天重新开始，因此它们不是今天同号的订单。{value}",
+  "Order numbers restart every day, so these are not today's orders. {value}":
+    "单号每天重新开始，这些不是今天的单。{value}",
   "These totals differ from the day-end settlement ({reportCollectedMinor} vs {settlementCollectedMinor} collected, {reportRefundedMinor} vs {settlementRefundedMinor} refunded). Refresh; if it stays, use the":
     "这些合计与日结不一致（已收 {reportCollectedMinor} 对 {settlementCollectedMinor}，已退 {reportRefundedMinor} 对 {settlementRefundedMinor}）。请刷新；如果仍不一致，请使用",
   "They get an email with a temporary password and sign in with their work email, a password they choose and an authenticator app.":
@@ -5012,8 +5013,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你和{who}都需要再次用验证器验证码确认，然后批准。",
   "You are editing your own change (version {configurationVersion}, {value}). Saving again replaces it; it then needs to be sent and approved again.":
     "你正在编辑你自己的更改（版本 {configurationVersion}，{value}）。再次保存会替换它；之后需要重新提交并批准。",
-  "You are signed in for the counter or office, so this screen cannot change tickets. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.":
-    '你是以柜台或办公室身份登录的，因此此屏幕不能更改票据。要在本设备上处理票据，请启动后厨屏：这会让你在此退出，然后为自己选择"启动后厨屏"。',
+  "You are signed in for the counter or office, so this screen cannot work kitchen steps. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.":
+    '你是以柜台或办公室身份登录的，因此此屏幕不能操作后厨步骤。要在本设备上处理票据，请启动后厨屏：这会让你在此退出，然后为自己选择"启动后厨屏"。',
   "You asked for this refund and you are the only person who can approve refunds at this store (sole operator). Check it before approving it yourself: order {orderNumber}, {amountMinor}, {reasonCode}. It will be recorded as approved by you alone and shown at day-end settlement.":
     "这笔退款由你申请，而你是本店唯一可以批准退款的人（独立经营者）。自行批准前请先核对：订单 {orderNumber}，{amountMinor}，{reasonCode}。它会被记录为由你单独批准，并在日结中显示。",
   "You asked for this refund. Another owner or finance member must approve it.":
@@ -5745,7 +5746,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   // Owner 2026-10-25: one-line page intros; the detail behind "More about this".
   "More about this": "了解更多",
   "Shared by every Store of the Brand.": "品牌下所有门店共用。",
-  "This sign-in cannot change tickets.": "当前登录身份不能更改票据。",
+  "This sign-in cannot work kitchen steps.": "当前登录身份不能操作后厨步骤。",
   "To change prices, start a new price book and publish it.": "要改价，请新建一个价目表并发布。",
   "Mark a size sold out when it runs out.": "某个规格卖完时，把它标为售罄。",
   "What customers can order at this Store right now.": "顾客此刻在本店可以点什么。",

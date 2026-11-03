@@ -452,6 +452,24 @@ describe("WP-2423 M3 kitchen display", () => {
     expect(on).toContain(">Sound on</button>");
     expect(on).not.toContain("Auto-refresh");
   });
+  it("Owner 2026-11-03: sound off is an alarm only on a screen working the tickets", () => {
+    const render = (operatorStatus: "Named" | "Unverified") =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <KitchenBoardScreen
+            view={{
+              ...parseKitchenBoardView(kitchenBoardFixture()),
+              operatorStatus,
+              freshnessStatus: "Fresh",
+            }}
+            soundOn={false}
+            onSoundToggle={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+    expect(render("Named")).toContain('data-alert="true"');
+    expect(render("Unverified")).not.toContain("data-alert");
+  });
   it("WP-2423 Q33: keeps new work announced until it is seen or no longer waiting", () => {
     const first = kitchenItemFixture();
     const second = {
@@ -1201,7 +1219,9 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
   });
   it("offers the close only to a manager, and shows nothing apart while the business day is unknown", () => {
     const cook = render(false);
-    expect(cook).toContain("From earlier days — check and close");
+    // Told only what they can do: no "check and close" on the row of someone who cannot close.
+    expect(cook).toContain("From earlier days");
+    expect(cook).not.toContain("From earlier days — check and close");
     expect(cook).toContain("Ask a manager to check and close them.");
     expect(cook).not.toContain("Close ticket");
     const unknown = render(true, null);

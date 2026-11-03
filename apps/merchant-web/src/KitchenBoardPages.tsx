@@ -591,10 +591,10 @@ function KitchenBoardLock({
     return (
       <div className="kitchen-board-lock">
         <StatePanel heading={t("View only on this screen")} tone="neutral" status>
-          <PageIntro summary={t("This sign-in cannot change tickets.")}>
+          <PageIntro summary={t("This sign-in cannot work kitchen steps.")}>
             <p>
               {t(
-                "You are signed in for the counter or office, so this screen cannot change tickets. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.",
+                "You are signed in for the counter or office, so this screen cannot work kitchen steps. To work tickets on this device, start the kitchen display: this signs you out here, then choose “Start kitchen display” for yourself.",
               )}
             </p>
           </PageIntro>
@@ -1694,9 +1694,10 @@ export function KitchenBoardScreen({
         autoComplete="off"
         spellCheck={false}
       />
-      <div className="kitchen-reference-search__actions">
-        <button type="submit">{t("Find")}</button>
-        {layout === "mobile" || searchApplied ? (
+      {/* Owner 2026-11-03: the row searches on Enter; the phone's sheet keeps its own button. */}
+      {layout === "mobile" || searchApplied ? (
+        <div className="kitchen-reference-search__actions">
+          {layout === "mobile" ? <button type="submit">{t("Find")}</button> : null}
           <button
             type="button"
             aria-label={t("Clear search")}
@@ -1711,8 +1712,8 @@ export function KitchenBoardScreen({
           >
             {t("Clear")}
           </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <span
         className={`kitchen-reference-search__hint${layout === "desktop" ? " kitchen-filter-visually-hidden" : ""}`}
         id={`kitchen-reference-search-hint-${layout}`}
@@ -1860,7 +1861,11 @@ export function KitchenBoardScreen({
       navigation={navigation}
       headerStatus={headerStatus}
     >
-      <div className="kitchen-board-workspace" ref={workspaceRef}>
+      <div
+        className="kitchen-board-workspace"
+        ref={workspaceRef}
+        data-view-only={view.operatorStatus === "Unverified" ? "true" : undefined}
+      >
         <header className="screen-heading kitchen-board-heading">
           <div>
             {workspaceFrame ? (
@@ -1873,6 +1878,13 @@ export function KitchenBoardScreen({
               </h2>
             )}
             <p className="kitchen-board-freshness">
+              {/* Owner 2026-11-03: how much work first, then how fresh the board is. */}
+              <span className="kitchen-queue-count" aria-live="polite">
+                {t("{length} work {value}", {
+                  length: items.length,
+                  value: items.length === 1 ? t("item") : t("items"),
+                })}
+              </span>
               <Freshness
                 status={stale ? "Stale" : view.freshnessStatus}
                 at={view.projectedAt}
@@ -1884,12 +1896,6 @@ export function KitchenBoardScreen({
               {autoRefresh && !stale ? (
                 <span className="kitchen-board-autorefresh">{t("Auto-refresh every 10 s")}</span>
               ) : null}
-              <span className="kitchen-queue-count" aria-live="polite">
-                {t("{length} work {value}", {
-                  length: items.length,
-                  value: items.length === 1 ? t("item") : t("items"),
-                })}
-              </span>
             </p>
           </div>
           <div className="kitchen-board-heading__actions">
@@ -1939,19 +1945,21 @@ export function KitchenBoardScreen({
                 {t("Mark an item sold out")}
               </Link>
             ) : null}
+            <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
+              {t("Refresh")}
+            </button>
+            {/* Owner 2026-11-03: a setting, not an alarm; red only where new orders would go unheard. */}
             {onSoundToggle ? (
               <button
                 type="button"
                 aria-pressed={soundOn === true}
                 onClick={onSoundToggle}
                 className="kitchen-sound-toggle"
+                data-alert={!soundOn && !readOnly ? "true" : undefined}
               >
                 {soundOn ? t("Sound on") : t("Sound off")}
               </button>
             ) : null}
-            <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
-              {t("Refresh")}
-            </button>
             {/* Owner 2026-10-26: the language switch ends the title row, as on every workspace page. */}
             {workspaceFrame ? <LanguageSwitch className="workspace-page__language" /> : null}
           </div>
@@ -1982,22 +1990,31 @@ export function KitchenBoardScreen({
         </button>
         {stale ? (
           <StaleReadNotice stale={stale} className="kitchen-board-lock kitchen-board-stale" />
-        ) : readOnly ? (
+        ) : readOnly && view.operatorStatus !== "Unverified" ? (
           <KitchenBoardLock
             operatorStatus={view.operatorStatus}
             freshnessStatus={view.freshnessStatus}
           />
         ) : null}
-        <div className="kitchen-queue-bar">
-          <header className="kitchen-queue-heading">
-            <h2 id="kitchen-queue-heading" tabIndex={-1}>
-              {t("Queue")}
-            </h2>
-          </header>
-          <div className="kitchen-filter-toolbar">
-            {renderOrderSearch("desktop")}
-            {renderFilters("desktop")}
+        {/* Owner 2026-11-03: "view only" is a quiet fact at the end of the filter row, not a row. */}
+        <div className="kitchen-toolbar-row">
+          <div className="kitchen-queue-bar">
+            <header className="kitchen-queue-heading">
+              <h2 id="kitchen-queue-heading" tabIndex={-1}>
+                {t("Queue")}
+              </h2>
+            </header>
+            <div className="kitchen-filter-toolbar">
+              {renderOrderSearch("desktop")}
+              {renderFilters("desktop")}
+            </div>
           </div>
+          {!stale && readOnly && view.operatorStatus === "Unverified" ? (
+            <KitchenBoardLock
+              operatorStatus={view.operatorStatus}
+              freshnessStatus={view.freshnessStatus}
+            />
+          ) : null}
         </div>
         <dialog
           className="kitchen-filter-sheet"
@@ -2032,7 +2049,12 @@ export function KitchenBoardScreen({
         {earlierTickets.length > 0 ? (
           <details className="kitchen-earlier-days">
             <summary>
-              <span>{t("From earlier days — check and close")}</span>
+              {/* Only someone who can close them is told to. */}
+              <span>
+                {canCloseEarlier
+                  ? t("From earlier days — check and close")
+                  : t("From earlier days")}
+              </span>
               <span className="kitchen-earlier-days__count">
                 {earlierElsewhere ??
                   (earlierTickets.length === 1
@@ -2041,14 +2063,11 @@ export function KitchenBoardScreen({
               </span>
             </summary>
             <p className="kitchen-earlier-days__intro">
-              {t(
-                "These tickets are from an earlier business day. Order numbers restart every day, so they are not today's orders with the same number. {value}",
-                {
-                  value: canCloseEarlier
-                    ? t("Check what happened to each one, then close it.")
-                    : t("Ask a manager to check and close them."),
-                },
-              )}
+              {t("Order numbers restart every day, so these are not today's orders. {value}", {
+                value: canCloseEarlier
+                  ? t("Check what happened to each one, then close it.")
+                  : t("Ask a manager to check and close them."),
+              })}
             </p>
             <div className="kitchen-earlier-days__tickets">
               {earlierTickets.map((ticket) => {

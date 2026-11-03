@@ -234,10 +234,18 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   // WP-2423: no internal codes, identifiers or technical words anywhere a staff member reads.
   await expectNoInternalText(page);
   // Kitchen v3: each ticket's one main step, disabled for a view-only sign-in.
-  await expect(page.getByRole("button", { name: "Accept order", exact: true })).toBeDisabled();
+  // A view-only screen shows no dead steps; the step stays disabled underneath.
+  await expect(
+    page.getByRole("button", { name: "Accept order", exact: true, includeHidden: true }),
+  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Accept order", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Start cooking", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Finished", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Finished", exact: true, includeHidden: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Mark ready", exact: true, includeHidden: true }),
+  ).toBeDisabled();
   // WP-2423: filters the source cannot answer are not offered (no "Unavailable" stubs).
   for (const label of ["Station", "Allergen", "Exception"])
     await expect(page.getByRole("combobox", { name: label, exact: true })).toHaveCount(0);
@@ -289,12 +297,11 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(page.locator("body")).not.toContainText(stationReference);
   }
   await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
-  const accept = page.getByRole("button", { name: "Accept order", exact: true });
-  const refresh = page.getByRole("button", { name: "Refresh", exact: true });
-  await expect(accept).toBeDisabled();
-  expect(await accept.evaluate((button) => getComputedStyle(button).backgroundColor)).not.toBe(
-    await refresh.evaluate((button) => getComputedStyle(button).backgroundColor),
-  );
+  // No dead step on a view-only screen; it stays disabled underneath.
+  await expect(
+    page.getByRole("button", { name: "Accept order", exact: true, includeHidden: true }),
+  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Accept order", exact: true })).toHaveCount(0);
 
   await page.setViewportSize({ width: 1024, height: 900 });
   await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeVisible();
@@ -312,13 +319,16 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await expect(filterToggle).toBeVisible();
     await expect(filterToggle).toHaveText("Filters · Active work");
     const mobileQueueCard = page.locator(".kitchen-work-item").first();
-    await expectTouchTarget(refresh, "Queue refresh");
+    await expectTouchTarget(
+      page.getByRole("button", { name: "Refresh", exact: true }),
+      "Queue refresh",
+    );
     await expectTouchTarget(filterToggle, "Queue filters");
     await expectTouchTarget(
       mobileQueueCard.locator(".kitchen-work-item__detail-link"),
       "Queue item detail",
     );
-    await expectTouchTarget(page.locator(".kitchen-ticket__next").first(), "Queue action");
+    await expect(page.locator(".kitchen-ticket__next").first()).toBeHidden();
     const laneItems = page.locator(".kitchen-station-lane__items").first();
     const mobileColumns = await laneItems.evaluate(
       (element) =>
@@ -440,8 +450,11 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.locator(".kitchen-board-filters--desktop select")).toHaveCount(1);
   await page.screenshot({ path: "test-results/kitchen-board-1440.png", fullPage: true });
   // WP-2423: by the order number printed on the ticket; nothing is sent or put in the address.
+  await expect(
+    page.locator(".kitchen-reference-search--desktop").getByRole("button", { name: "Find" }),
+  ).toHaveCount(0);
   await orderInput.fill("Order 14");
-  await page.getByRole("button", { name: "Find", exact: true }).click();
+  await orderInput.press("Enter");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
   await expect(orderInput).toHaveValue("Order 14");
@@ -475,7 +488,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
   await page.getByRole("button", { name: "Clear search" }).click();
   await orderInput.fill("99");
-  await page.getByRole("button", { name: "Find", exact: true }).click();
+  await orderInput.press("Enter");
   await expect(page.locator(".kitchen-work-item")).toHaveCount(0);
   await expect(
     page.getByText(
@@ -1438,7 +1451,7 @@ for (const supported of [true, false]) {
         headers,
         json: {
           storeReference: scope.storeReference,
-          operatorStatus: "Unverified",
+          operatorStatus: "Named",
           projectionName: "kitchen_work_queue_v1",
           projectionVersion: 1,
           projectionGenerationReference: id(9),

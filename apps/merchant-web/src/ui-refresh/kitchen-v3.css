@@ -144,8 +144,15 @@
 .kitchen-board-heading__actions > button:disabled {
   color: var(--bop-color-text-muted);
 }
-.kitchen-board-heading__actions .kitchen-sound-toggle[aria-pressed="false"] {
+/* Owner 2026-11-03: quiet like the language switch; red only on a screen working the tickets,
+   where new orders would go unheard. */
+.kitchen-board-heading__actions > button.kitchen-sound-toggle {
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.kitchen-board-heading__actions > button.kitchen-sound-toggle[data-alert] {
   color: var(--bop-color-danger);
+  font-weight: 600;
 }
 .kitchen-sound-reminder {
   margin: 0;
@@ -642,12 +649,13 @@
 .kitchen-filter-toolbar {
   flex: 1 1 auto;
 }
-/* A counter or office sign-in: what it cannot do and the way to the display, on one line. */
+/* A counter or office sign-in: what it cannot do and the way to the display, side by side in one
+   quiet line (Owner 2026-11-03); the sentence is still read out, the detail stays behind "more". */
 .kitchen-shell--workspace .kitchen-board-lock .bop-state-card:has(.staff-session__switch) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0 12px;
+  gap: 0 16px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -655,8 +663,20 @@
 }
 .kitchen-shell--workspace .kitchen-board-lock .bop-state-card:has(.staff-session__switch) h2 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-shell--workspace .kitchen-board-lock .page-intro__summary {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.kitchen-shell--workspace .kitchen-board-lock .page-intro__more summary {
+  font-size: 14px;
 }
 .kitchen-shell--workspace .kitchen-board-lock .page-intro {
   display: flex;
@@ -673,7 +693,11 @@
   flex-basis: 100%;
 }
 .kitchen-shell--workspace .kitchen-board-lock .staff-session__switch {
+  order: -1;
   margin: 0;
+}
+.kitchen-shell--workspace .kitchen-board-lock .bop-state-card:has(.staff-session__switch) h2 {
+  order: -2;
 }
 .kitchen-shell--workspace .kitchen-board-lock .staff-session__switch button {
   width: auto;
@@ -682,8 +706,25 @@
   border: 0;
   background: none;
   color: var(--bop-color-accent);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
+}
+/* Owner 2026-11-03: search and filters are one row of the same field: same line, height and type. */
+.workspace-layout.workspace-layout .kitchen-filter-toolbar :is(input, select) {
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 400;
+}
+.kitchen-filter-toolbar .kitchen-reference-search__actions button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.kitchen-filter-toolbar .kitchen-board-filters {
+  gap: 8px 12px;
 }
 /* Earlier days: one plain collapsed row, no box. */
 .kitchen-board-workspace .kitchen-earlier-days {
@@ -696,6 +737,24 @@
   justify-content: flex-start;
   min-height: 44px;
   padding: 0;
+}
+/* The same arrow as "More about this", so the row says it opens. */
+.kitchen-board-workspace .kitchen-earlier-days summary::-webkit-details-marker {
+  display: none;
+}
+.kitchen-board-workspace .kitchen-earlier-days summary::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 4px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--bop-motion-fast);
+}
+.kitchen-board-workspace .kitchen-earlier-days[open] summary::before {
+  transform: rotate(45deg);
 }
 .kitchen-board-workspace .kitchen-earlier-days__count {
   padding: 0;
@@ -737,4 +796,152 @@
 /* One line on the ticket: its one main step already is that dish's step. */
 .kitchen-ticket:has(> .kitchen-work-item:only-of-type) .kitchen-work-item__done {
   display: none;
+}
+/* The count leads; the time it was checked is the quiet fact after it. */
+.kitchen-shell--workspace .kitchen-board-freshness .kitchen-queue-count {
+  color: var(--bop-color-text-default);
+}
+.kitchen-shell--workspace .kitchen-board-freshness > :not(.kitchen-queue-count) {
+  font-size: 14px;
+}
+
+/* ---- Owner 2026-11-03 ("还没做好我都已经觉得不好看了"), after a design critique: title, one filter
+   row, then the work. Everything on the page lines up on the left edge; nothing here has a box. */
+.kitchen-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 24px;
+}
+.kitchen-toolbar-row:empty {
+  display: none;
+}
+.kitchen-shell--workspace .kitchen-board-heading__actions > button.workspace-page__language {
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+/* A screen that cannot work steps doesn't show dead buttons; the fact is said once in the row. */
+.kitchen-board-workspace[data-view-only]
+  :is(.kitchen-ticket, .kitchen-earlier-ticket)
+  button:disabled:not(.kitchen-earlier-ticket__close) {
+  display: none;
+}
+.kitchen-board-workspace[data-view-only]
+  .kitchen-work-item__actions:not(:has(button:not(:disabled))) {
+  display: none;
+}
+
+/* Earlier days: a checking list. Which day, what it was, and the way to close it. */
+.kitchen-board-workspace .kitchen-earlier-days__intro {
+  margin: 0 0 16px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-board-workspace .kitchen-earlier-days__tickets {
+  gap: 32px 40px;
+  padding: 0 0 24px;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket {
+  gap: 8px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket__heading {
+  align-items: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket__heading h4 {
+  font-size: 17px;
+  font-weight: 600;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket__day,
+.kitchen-board-workspace .kitchen-earlier-ticket__day strong {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket__close {
+  flex: 0 0 auto;
+  min-height: 44px;
+  margin-block-start: -10px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket__close:disabled {
+  background: none;
+  color: var(--bop-color-text-muted);
+}
+.kitchen-board-workspace .kitchen-earlier-ticket > .kitchen-work-item {
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket .kitchen-work-item__summary h3 {
+  font-size: 17px;
+  font-weight: 500;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket .kitchen-work-item__state {
+  font-size: 14px;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket .kitchen-work-item__state strong {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket .kitchen-work-item__count {
+  font-size: inherit;
+  font-weight: 600;
+}
+/* The wait is on the ticket's own line; the quantity leads the dish's name, unless part is done. */
+.kitchen-board-workspace .kitchen-earlier-ticket .kitchen-work-item__state > span,
+.kitchen-board-workspace
+  .kitchen-earlier-ticket
+  .kitchen-work-item:not([data-partial])
+  .kitchen-work-item__quantity {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.kitchen-board-workspace .kitchen-earlier-ticket .kitchen-work-item__allergens,
+.kitchen-board-workspace
+  .kitchen-earlier-ticket
+  .kitchen-work-item__allergens[data-kind="declared"] {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 14px;
+}
+
+/* Nothing to make is a calm line on the same left edge, not a poster, in the back office. The
+   kitchen display keeps its large message, read from across the kitchen. */
+.kitchen-shell--workspace .kitchen-board-empty .bop-state-card {
+  justify-items: start;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 8px 0;
+  border: 0;
+  text-align: start;
+}
+.kitchen-shell--workspace .kitchen-board-empty .bop-state-card h2 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.kitchen-shell--workspace .kitchen-board-empty .bop-state-card p {
+  font-size: 14px;
 }
