@@ -2,8 +2,9 @@
  * Kitchen v3 (Owner 2026-10-26 "好，按这个思路往下推"; Figma "Counter order + Kitchen · v3" 42:2 /
  * 42:111 / 42:267). The v3 system on the kitchen display: white, one accent, one main step per
  * ticket, three status meanings. Read from 1-2 m away, so the ticket number and dishes use the
- * kitchen type tokens; every control is at least 48px. Lateness is the timer in red and a red top
- * edge, nothing else; a new ticket has an accent top edge; allergens sit in an outlined label.
+ * kitchen type tokens; every control is at least 48px. Lateness is the timer in larger red words,
+ * nothing else (Owner 2026-11-03: no red edge); a new ticket has an accent top edge; allergens sit
+ * in an outlined label.
  */
 
 /* ------------------------------------------------------------ One bar of display chrome */
@@ -292,11 +293,10 @@
 .kitchen-ticket[data-fresh="true"] {
   border-top: 4px solid var(--bop-color-accent);
 }
-.kitchen-ticket[data-age="late"] {
-  border-top: 4px solid var(--bop-color-danger);
-}
 .kitchen-order-group.kitchen-ticket > .kitchen-ticket__header {
+  flex-wrap: wrap;
   align-items: baseline;
+  gap: 2px 12px;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -343,7 +343,8 @@
 .kitchen-order-group.kitchen-ticket[data-age="late"]
   :is(.kitchen-ticket__timer, .kitchen-ticket__tier) {
   color: var(--bop-color-danger);
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
 }
 .kitchen-order-group.kitchen-ticket .kitchen-ticket__tier::before {
   content: "· ";
@@ -604,13 +605,136 @@
   margin-left: auto;
 }
 
-/* WP-2423 item 8 ⑦ DEC-STORE-FEATURES: a ticket with a dish a server chased (still being made). */
-.kitchen-ticket[data-chased="true"] {
-  border-color: var(--bop-color-danger);
-  box-shadow: inset 4px 0 0 var(--bop-color-danger);
+/* WP-2423 item 8 ⑦ DEC-STORE-FEATURES: a ticket with a dish a server chased (still being made)
+   turns red in its number and the chase line, not in a bar (Owner 2026-11-03: no red lines). */
+.kitchen-ticket[data-chased="true"] .kitchen-ticket__number {
+  color: var(--bop-color-danger);
 }
 .kitchen-work-item[data-chased="true"] .kitchen-work-item__chased {
   margin: 4px 0 0;
   color: var(--bop-color-danger);
   font-weight: 600;
+}
+
+/* Owner 2026-11-03 ("是不是有点乱"): the tickets start near the top of the screen. */
+.kitchen-order-group.kitchen-ticket .kitchen-ticket__header .kitchen-order-group__label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.kitchen-ticket__origin {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+/* Said once by the view-only line or the sound toggle; still read out. */
+.kitchen-board-workspace .kitchen-board-freshness [data-operator="Unverified"],
+.kitchen-board-workspace .kitchen-board-autorefresh,
+.kitchen-sound-reminder:not([data-resumes]),
+.kitchen-queue-heading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.kitchen-filter-toolbar {
+  flex: 1 1 auto;
+}
+/* A counter or office sign-in: what it cannot do and the way to the display, on one line. */
+.kitchen-shell--workspace .kitchen-board-lock .bop-state-card:has(.staff-session__switch) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.kitchen-shell--workspace .kitchen-board-lock .bop-state-card:has(.staff-session__switch) h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-shell--workspace .kitchen-board-lock .page-intro {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+  min-width: 0;
+}
+.kitchen-shell--workspace .kitchen-board-lock .page-intro :is(p, details) {
+  margin: 0;
+}
+.kitchen-shell--workspace .kitchen-board-lock .page-intro details[open] {
+  flex-basis: 100%;
+}
+.kitchen-shell--workspace .kitchen-board-lock .staff-session__switch {
+  margin: 0;
+}
+.kitchen-shell--workspace .kitchen-board-lock .staff-session__switch button {
+  width: auto;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+/* Earlier days: one plain collapsed row, no box. */
+.kitchen-board-workspace .kitchen-earlier-days {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.kitchen-board-workspace .kitchen-earlier-days summary {
+  justify-content: flex-start;
+  min-height: 44px;
+  padding: 0;
+}
+.kitchen-board-workspace .kitchen-earlier-days__count {
+  padding: 0;
+  border: 0;
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.kitchen-board-workspace .kitchen-earlier-days__intro,
+.kitchen-board-workspace .kitchen-earlier-days__tickets {
+  padding-inline: 0;
+}
+/* The title row carries the language switch, so the workspace's floating one stays out of it. */
+.workspace-content:has(.kitchen-board-workspace) .workspace-topbar {
+  display: none;
+}
+.kitchen-board-heading__actions > button.workspace-page__language {
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.kitchen-ticket__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+.kitchen-ticket .kitchen-ticket__status .kitchen-ticket__wait {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+}
+.kitchen-order-group.kitchen-ticket[data-age="late"]
+  .kitchen-ticket__status
+  :is(.kitchen-ticket__timer, .kitchen-ticket__tier) {
+  font-size: 18px;
+}
+/* One line on the ticket: its one main step already is that dish's step. */
+.kitchen-ticket:has(> .kitchen-work-item:only-of-type) .kitchen-work-item__done {
+  display: none;
 }

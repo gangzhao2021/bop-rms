@@ -107,7 +107,6 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(heading("Order " + first)).toBeVisible();
   await expect(page.locator("option").filter({ hasText: "Overdue" })).toHaveCount(0);
   await expect(page.locator("article").first()).toContainText("Ready for 20 min");
-  await expect(page.locator("article").first()).toContainText("Waiting");
   await expect(page.locator("article").first()).not.toContainText("Overdue");
   // Dead placeholder actions are gone from the pilot queue.
   await expect(page.getByRole("button", { name: "Claim", exact: true })).toHaveCount(0);
@@ -306,7 +305,7 @@ test("@production Pickup paging, current scope and permission recovery", async (
   const includeCompleted = page.getByRole("checkbox", { name: "Include completed pickups" });
   await includeCompleted.focus();
   await page.keyboard.press("Space");
-  await expect(page.locator("article").getByText("Completed", { exact: false })).toBeVisible();
+  await expect(page.locator("article").getByText("Handed over", { exact: false })).toBeVisible();
   await expect(refresh).toBeFocused();
   expect(queries.at(-1)).toMatchObject({
     afterFulfillmentReference: null,

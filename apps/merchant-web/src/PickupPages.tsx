@@ -101,6 +101,25 @@ export function fromEarlierDay(item: PickupQueueItem, today: string | null | und
   return Boolean(item.businessDate && today && item.businessDate < today);
 }
 
+/** Owner 2026-11-03: the same dish made the same way reads as one line of the bag ("8 × 担担面"). */
+export function mergedPickupLines(
+  lines: readonly NonNullable<PickupQueueItem["execution"]>["items"][number][],
+) {
+  const merged = new Map<string, { key: string; quantity: number; label: string }>();
+  lines.forEach((line, index) => {
+    const label = pickupItemLabel(line, index);
+    const same = merged.get(label);
+    if (same) same.quantity += line.orderedQuantity;
+    else
+      merged.set(label, {
+        key: line.fulfillmentItemReference,
+        quantity: line.orderedQuantity,
+        label,
+      });
+  });
+  return [...merged.values()];
+}
+
 function PickupCard({
   item,
   observedAt,
@@ -162,9 +181,11 @@ function PickupCard({
     >
       <header>
         <div>
-          <p className="bop-eyebrow pickup-queue__phase" data-wait={tier}>
-            {completed ? t("Completed") : t("Ready for {wait}", { wait: pickupWaitText(wait) })}
-          </p>
+          {completed ? null : (
+            <p className="bop-eyebrow pickup-queue__phase" data-wait={tier}>
+              {t("Ready for {wait}", { wait: pickupWaitText(wait) })}
+            </p>
+          )}
           <h3 className="pickup-queue__number">
             {t("Order")} <span className="pickup-queue__number-value">{orderLabel}</span>
           </h3>
@@ -174,15 +195,12 @@ function PickupCard({
             </p>
           ) : null}
         </div>
-        <strong className="pickup-queue__status" data-completed={completed}>
-          {completed ? t("Handed over") : t("Waiting")}
-        </strong>
+        {completed ? (
+          <strong className="pickup-queue__status" data-completed={completed}>
+            {t("Handed over")}
+          </strong>
+        ) : null}
       </header>
-      {earlier && !completed ? (
-        <p className="pickup-queue__earlier" role="note">
-          {t("From an earlier business day. Check whether it was collected, then close it.")}
-        </p>
-      ) : null}
       {!completed && item.remakeQuantity ? (
         <p className="pickup-queue__remake" role="status">
           {t("Kitchen is remaking {value} — wait for it before handing this order over.", {
@@ -198,10 +216,9 @@ function PickupCard({
           className="pickup-queue__items"
           aria-label={t("Items in order {orderLabel}", { orderLabel: orderLabel })}
         >
-          {contents.map((line, index) => (
-            <li key={line.fulfillmentItemReference}>
-              <span className="pickup-queue__item-quantity">{line.orderedQuantity} ×</span>{" "}
-              {pickupItemLabel(line, index)}
+          {mergedPickupLines(contents).map((line) => (
+            <li key={line.key}>
+              <span className="pickup-queue__item-quantity">{line.quantity} ×</span> {line.label}
             </li>
           ))}
         </ul>
@@ -223,18 +240,23 @@ function PickupCard({
                       : t("Not known yet · check in person")}
           </dd>
         </div>
-        <div>
-          <dt>{t("Shelf")}</dt>
-          <dd>{item.stagingLocation ?? t("Not set")}</dd>
-        </div>
-        <div>
-          <dt>{t("Packages")}</dt>
-          <dd>{item.packageCount ?? t("Not set")}</dd>
-        </div>
-        {item.allergenCue !== "Unavailable" ? (
+        {/* Owner 2026-11-03: a fact shows when there is one; no "Not set" rows on every card. */}
+        {item.stagingLocation ? (
+          <div>
+            <dt>{t("Shelf")}</dt>
+            <dd>{item.stagingLocation}</dd>
+          </div>
+        ) : null}
+        {item.packageCount ? (
+          <div>
+            <dt>{t("Packages")}</dt>
+            <dd>{item.packageCount}</dd>
+          </div>
+        ) : null}
+        {item.allergenCue === "Present" ? (
           <div>
             <dt>{t("Allergen")}</dt>
-            <dd>{item.allergenCue === "Present" ? t("Allergen present") : t("No cue")}</dd>
+            <dd>{t("Allergen present")}</dd>
           </div>
         ) : null}
         {item.exceptionStatus === "Reported" ? (
@@ -391,6 +413,12 @@ export function PickupQueueScreen({
   const todayItems = view.items.filter((item) => !fromEarlierDay(item, today));
   const completedCount = view.items.filter((item) => item.phase === "Completed").length;
   const waitingCount = view.items.length - completedCount;
+  // The earlier days' orders are counted on their own collapsed row.
+  const waitingToday = todayItems.filter((item) => item.phase !== "Completed").length;
+  const earlierShown = earlierItems.filter((item) =>
+    visibleReferences.has(item.fulfillmentReference),
+  ).length;
+  const orderSearchRef = useRef<HTMLInputElement>(null);
   return (
     <WorkspacePage
       className="pickup-queue"
@@ -442,12 +470,13 @@ export function PickupQueueScreen({
         ) : null}
         <div className="list-filters pickup-queue__filters">
           <label>
-            {t("Order number")}
+            <span className="pickup-queue__filter-label">{t("Order number")}</span>
             <input
+              ref={orderSearchRef}
               type="search"
               value={orderQuery}
               onChange={(event) => setOrderQuery(event.currentTarget.value)}
-              placeholder="e.g. 16"
+              placeholder={t("Order number")}
             />
           </label>
           <label className="pickup-completed-filter">
@@ -461,9 +490,9 @@ export function PickupQueueScreen({
             {t("Include completed pickups")}
           </label>
           <label>
-            {t("Status")}
+            <span className="pickup-queue__filter-label">{t("Status")}</span>
             <select value={filter} onChange={(event) => setFilter(event.currentTarget.value)}>
-              <option value="All">{t("All")}</option>
+              <option value="All">{t("All states")}</option>
               <option value="Ready">{t("Ready")}</option>
               <option value="Waiting">{t("Waiting")}</option>
               <option value="InProgress">{t("In progress")}</option>
@@ -497,24 +526,26 @@ export function PickupQueueScreen({
               </select>
             </label>
           ) : null}
-          <button
-            type="button"
-            disabled={!hasLocalFilters}
-            onClick={() => {
-              setOrderQuery("");
-              setFilter("All");
-              setClaimFilter("All");
-              setExceptionFilter("All");
-            }}
-          >
-            {t("Clear filters")}
-          </button>
+          {hasLocalFilters ? (
+            <button
+              type="button"
+              onClick={() => {
+                setOrderQuery("");
+                setFilter("All");
+                setClaimFilter("All");
+                setExceptionFilter("All");
+                orderSearchRef.current?.focus();
+              }}
+            >
+              {t("Clear filters")}
+            </button>
+          ) : null}
         </div>
         {view.items.length > 0 ? (
           <p className="pickup-queue__summary">
-            {waitingCount === 1
+            {waitingToday === 1
               ? t("1 order waiting")
-              : t("{waitingCount} orders waiting", { waitingCount: waitingCount })}
+              : t("{waitingCount} orders waiting", { waitingCount: waitingToday })}
             {completedCount > 0
               ? t(" · {completedCount} handed over", { completedCount: completedCount })
               : ""}
@@ -540,12 +571,15 @@ export function PickupQueueScreen({
             ))}
           </div>
         ) : null}
-        {earlierItems.some((item) => visibleReferences.has(item.fulfillmentReference)) ? (
-          <section
-            className="pickup-queue__earlier-section"
-            aria-labelledby="pickup-earlier-heading"
-          >
-            <h2 id="pickup-earlier-heading">{t("From earlier days — check and close")}</h2>
+        {earlierShown > 0 ? (
+          // Collapsed like the Kitchen's; a search for an order number opens it.
+          <details className="pickup-queue__earlier-section" open={query ? true : undefined}>
+            <summary>
+              <h2 id="pickup-earlier-heading">{t("From earlier days — check and close")}</h2>
+              <span className="pickup-queue__earlier-count">
+                {earlierShown === 1 ? t("1 order") : t("{count} orders", { count: earlierShown })}
+              </span>
+            </summary>
             <p>
               {t(
                 "These orders are from an earlier business day. Their numbers may repeat today's. If the customer collected the order, hand it over with the code or in person; if not, a manager closes it as not collected.",
@@ -569,7 +603,7 @@ export function PickupQueueScreen({
                 />
               ))}
             </div>
-          </section>
+          </details>
         ) : null}
         {items.length === 0 ? (
           <div className="pickup-queue__empty" data-filtered={view.items.length > 0}>

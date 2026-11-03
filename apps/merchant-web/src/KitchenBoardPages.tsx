@@ -1,4 +1,5 @@
 import { PageIntro } from "./PageIntro.js";
+import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { listSeparator, t, saidTable } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
@@ -141,6 +142,71 @@ export { playKitchenChime };
 export function kitchenOrderLabel(item: KitchenBoardItem): string {
   return kitchenOrderText(item.orderLabel);
 }
+/**
+ * Owner 2026-11-03: dishes on a ticket that a cook makes the same way read as one line ("3× 担担面").
+ * Anything that changes what to make or what to watch for keeps its own line (options, note,
+ * allergens, a chase, a combo, part of a quantity done); a step on the line applies to all of them.
+ * Finished dishes stay apart: each is remade on its own.
+ */
+export function mergeIdenticalKitchenItems(items: readonly KitchenBoardItem[]) {
+  const lines = new Map<string, KitchenBoardItem[]>();
+  for (const item of items) {
+    const mergeable =
+      (item.status === "Queued" || item.status === "Held" || item.status === "In Progress") &&
+      item.completedQuantity === 0 &&
+      item.comboParts === undefined &&
+      item.chase === undefined;
+    const key = mergeable
+      ? JSON.stringify([
+          item.displayName,
+          item.otherName ?? null,
+          item.status,
+          Boolean(item.execution?.acceptedAt),
+          item.selectedOptions,
+          item.customerNote ?? null,
+          item.allergens ?? null,
+          item.allergenCue,
+          item.exceptionStatus,
+          item.kitchenSection ?? null,
+          item.stationLabel,
+        ])
+      : item.workItemReference;
+    const line = lines.get(key);
+    if (line) line.push(item);
+    else lines.set(key, [item]);
+  }
+  return [...lines.values()].map((same) => {
+    const first = same[0] as KitchenBoardItem;
+    return {
+      items: same,
+      item:
+        same.length === 1
+          ? first
+          : {
+              ...first,
+              requiredQuantity: same.reduce((sum, item) => sum + item.requiredQuantity, 0),
+            },
+    };
+  });
+}
+
+/** Facts about the whole order, said once on its ticket rather than under every dish. */
+function KitchenOrderOrigin({ label }: { readonly label: KitchenOrderLabel | null | undefined }) {
+  if (!label) return null;
+  const facts = [
+    label.enteredByStaff ? t("Entered by staff") : null,
+    // WP-2423 item 8 ⑧: the party moved; the ticket goes to the table it sits at now.
+    label.movedFromTableLabel
+      ? t("Moved from table {table}", { table: saidTable(label.movedFromTableLabel) })
+      : null,
+    // WP-2423 item 8 ⑨: the party was merged into this table; its dishes go here now.
+    label.mergedFromTableLabel
+      ? t("Merged from table {table}", { table: saidTable(label.mergedFromTableLabel) })
+      : null,
+  ].filter((fact) => fact !== null);
+  return facts.length === 0 ? null : <p className="kitchen-ticket__origin">{facts.join(" · ")}</p>;
+}
+
 /** WP-2423 Q2: a lane's items with each Order's work together, oldest Order first. */
 export function groupKitchenItemsByOrder(items: readonly KitchenBoardItem[]) {
   const groups = new Map<string, KitchenBoardItem[]>();
@@ -400,10 +466,9 @@ function KitchenFrame({
       <>
         {workspaceFrame(
           <div className="kitchen-shell kitchen-shell--workspace">
+            {/* Owner 2026-11-03: no display controls here. This sign-in only reads the board, and the
+                keep-awake line sat over the language switch. */}
             <main className="bop-shell__main" id="main-content" tabIndex={-1}>
-              {headerStatus === undefined ? null : (
-                <div className="kitchen-workspace-status">{headerStatus}</div>
-              )}
               {children}
             </main>
           </div>,
@@ -1101,10 +1166,10 @@ function WorkCard({
             ))}
           </ul>
         ) : null}
-        {item.orderLabel?.enteredByStaff ? (
+        {!inTicket && item.orderLabel?.enteredByStaff ? (
           <p className="kitchen-work-item__staff">{t("Entered by staff")}</p>
         ) : null}
-        {item.orderLabel?.movedFromTableLabel ? (
+        {!inTicket && item.orderLabel?.movedFromTableLabel ? (
           // WP-2423 item 8 ⑧: the party moved; the ticket goes to the table it sits at now.
           <p className="kitchen-work-item__staff">
             {t("Moved from table {table}", {
@@ -1112,7 +1177,7 @@ function WorkCard({
             })}
           </p>
         ) : null}
-        {item.orderLabel?.mergedFromTableLabel ? (
+        {!inTicket && item.orderLabel?.mergedFromTableLabel ? (
           // WP-2423 item 8 ⑨: the party was merged into this table; its dishes go here now.
           <p className="kitchen-work-item__staff">
             {t("Merged from table {table}", {
@@ -1887,10 +1952,17 @@ export function KitchenBoardScreen({
             <button ref={refreshButtonRef} disabled={!onRefresh} onClick={onRefresh}>
               {t("Refresh")}
             </button>
+            {/* Owner 2026-10-26: the language switch ends the title row, as on every workspace page. */}
+            {workspaceFrame ? <LanguageSwitch className="workspace-page__language" /> : null}
           </div>
         </header>
         {onSoundToggle && !soundOn ? (
-          <p className="kitchen-sound-reminder" role="status">
+          // The toggle already says the sound is off; the line shows only when it is about to return.
+          <p
+            className="kitchen-sound-reminder"
+            role="status"
+            data-resumes={soundResumes ? "true" : undefined}
+          >
             {soundResumes
               ? t("Sound turns back on at your next tap on this screen.")
               : t("Sound is off. New orders will not ring on this screen.")}
@@ -2184,6 +2256,16 @@ export function KitchenBoardScreen({
                                 </span>
                               ) : null}
                             </h4>
+                          </header>
+                          {/* The ticket's state and its wait share one row, on every ticket. */}
+                          <div className="kitchen-ticket__status">
+                            <p className="kitchen-ticket__state" data-state={state}>
+                              {state === "ToAccept"
+                                ? t("To accept")
+                                : state === "InProgress"
+                                  ? t("In progress")
+                                  : t("Done")}
+                            </p>
                             <p className="kitchen-ticket__wait">
                               {ticket.minutes === null ? (
                                 <span className="kitchen-ticket__timer">{t("Done")}</span>
@@ -2196,21 +2278,23 @@ export function KitchenBoardScreen({
                                 <span className="kitchen-ticket__tier">{tierText}</span>
                               ) : null}
                             </p>
-                          </header>
-                          <p className="kitchen-ticket__state" data-state={state}>
-                            {state === "ToAccept"
-                              ? t("To accept")
-                              : state === "InProgress"
-                                ? t("In progress")
-                                : t("Done")}
-                          </p>
-                          {group.items.map((item) => (
+                          </div>
+                          <KitchenOrderOrigin label={label} />
+                          {mergeIdenticalKitchenItems(group.items).map((line) => (
                             <WorkCard
-                              key={item.workItemReference}
-                              item={item}
+                              key={line.item.workItemReference}
+                              item={line.item}
                               inTicket
                               readOnly={ticketReadOnly}
-                              {...(guardedAction ? { onAction: guardedAction } : {})}
+                              {...(guardedAction
+                                ? {
+                                    onAction:
+                                      line.items.length > 1 && guardedActionAll
+                                        ? (_item: KitchenBoardItem, action: KitchenAction) =>
+                                            guardedActionAll(line.items, action)
+                                        : guardedAction,
+                                  }
+                                : {})}
                               onRemake={onRemake}
                               observedAt={view.projectedAt}
                               ageAt={clockAt}

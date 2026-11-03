@@ -551,11 +551,6 @@
 .kitchen-shell--workspace .kitchen-workspace-title {
   margin-bottom: 12px;
 }
-.kitchen-workspace-status {
-  display: flex;
-  justify-content: flex-end;
-}
-
 /*
  * Figma v1 (2026-10-25) kitchen display: a black ticket header with the order and its minutes; a
  * ticket running long or late keeps a white header with the minutes and words in the state colour

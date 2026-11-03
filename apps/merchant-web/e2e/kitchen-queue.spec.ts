@@ -875,11 +875,12 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
       await expect(current.locator(".kitchen-work-item__state span")).toHaveText(waited);
       await expect(current).toHaveAttribute("data-age", tier);
     }
-    // Kitchen v3: a dish draws no edge; a late ticket (its longest wait) has a red top edge.
+    // Kitchen v3: a dish draws no edge; a late ticket (its longest wait) has red words, no red edge
+    // (Owner 2026-11-03).
     await expect(card("Synthetic held")).toHaveCSS("border-left-width", "0px");
     const late = page.locator('.kitchen-ticket[data-age="late"]').first();
-    await expect(late).toHaveCSS("border-top-color", "rgb(191, 85, 82)");
-    await expect(late).toHaveCSS("border-top-width", "4px");
+    await expect(late).toHaveCSS("border-top-width", "1px");
+    await expect(late.locator(".kitchen-ticket__timer")).toHaveCSS("color", "rgb(191, 85, 82)");
     // The active state is the one coloured tag (no box, Owner 2026-10-25); every tag carries its
     // label.
     const active = card("Synthetic in progress").locator(".kitchen-work-item__state strong");

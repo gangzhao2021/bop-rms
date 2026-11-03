@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
+  mergedPickupLines,
   pickupOfflineState,
   pickupRefreshIntervalMs,
   PickupQueueScreen,
@@ -16,7 +17,7 @@ describe("WP-1805 Pickup screens", () => {
         <PickupQueueScreen view={parsePickupQueueView(pickupQueueFixture())} />
       </MemoryRouter>,
     );
-    for (const value of ["ORD-1001", "Ready for 20 min", "Waiting", "Shelf A", "Updated"])
+    for (const value of ["ORD-1001", "Ready for 20 min", "Shelf A", "Updated"])
       expect(html).toContain(value);
     for (const value of [
       "FUL-PICKUP-QUEUE",
@@ -74,7 +75,6 @@ describe("WP-1805 Pickup screens", () => {
     );
     const card = html.slice(html.indexOf("<article"), html.indexOf("</article>"));
     expect(card).toContain("Handed over");
-    expect(card).toContain("Completed");
     expect(card).not.toContain("Ready for 20 min");
     expect(card).not.toContain("Overdue");
     expect(card).not.toContain("Waiting");
@@ -447,4 +447,38 @@ it("WP-2423 UI refresh: an empty queue and a filtered-out page read differently"
   expect(empty).toContain("No pickups waiting");
   expect(empty).not.toContain("No matching pickups");
   expect(empty).not.toContain("order waiting");
+});
+it("Owner 2026-11-03: the same dish made the same way is one line; a different one stays apart", () => {
+  const line = (reference: string, name: string, option?: string) => ({
+    fulfillmentItemReference: reference,
+    orderedQuantity: 1,
+    readyQuantity: 1,
+    handedOverQuantity: 0,
+    name,
+    ...(option ? { options: [{ name: option, quantity: 1 }] } : {}),
+  });
+  expect(
+    mergedPickupLines([line("a", "Noodles"), line("b", "Noodles"), line("c", "Noodles", "Spicy")]),
+  ).toEqual([
+    { key: "a", quantity: 2, label: "Noodles" },
+    { key: "c", quantity: 1, label: "Noodles (Spicy)" },
+  ]);
+});
+it("Owner 2026-11-03: a card shows no empty facts and no second status", () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <PickupQueueScreen
+        view={parsePickupQueueView({
+          ...pickupQueueFixture(),
+          items: pickupQueueFixture().items.map((item) => ({
+            ...item,
+            stagingLocation: null,
+            packageCount: null,
+          })),
+        })}
+      />
+    </MemoryRouter>,
+  );
+  for (const value of ["Not set", "No cue", "pickup-queue__status", "e.g. 16"])
+    expect(html).not.toContain(value);
 });

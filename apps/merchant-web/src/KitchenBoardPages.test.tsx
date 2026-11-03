@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  mergeIdenticalKitchenItems,
   KitchenBoardPage,
   KitchenBoardScreen,
   kitchenHandoverOffered,
@@ -35,6 +36,7 @@ import {
 import { staleRetryDelayMs } from "./stale-read.js";
 import { kitchenClockAt, kitchenClockTickMs, subscribeKitchenClock } from "./kitchen-clock.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
+import type { KitchenBoardItem, KitchenItemAllergens } from "./kitchen-board.js";
 import {
   kitchenOrderText,
   parseKitchenBoardView,
@@ -629,7 +631,8 @@ describe("WP-2423 kitchen display search and chrome", () => {
     expect(html.startsWith('<div data-frame="workspace">')).toBe(true);
     expect(html).toContain('<main class="bop-shell__main" id="main-content" tabindex="-1">');
     expect(html).toContain('<h1 id="kitchen-board-title" tabindex="-1">Kitchen</h1>');
-    expect(html).toContain("Screen kept on");
+    // Owner 2026-11-03: this sign-in only reads the board; no keep-awake line over the language switch.
+    expect(html).not.toContain("Screen kept on");
     // No kitchen display header or its own list of links inside the workspace page.
     expect(html).not.toContain("bop-shell__header");
     expect(html).not.toContain("bop-shell__nav");
@@ -1513,4 +1516,49 @@ it("times a ticket by its longest-waiting unfinished dish and says its tier in w
   );
   expect(html).toContain('class="kitchen-ticket__timer" data-age="warning">12 min</span>');
   expect(html).toContain('<span class="kitchen-ticket__tier">Running long</span>');
+});
+
+describe("Owner 2026-11-03: identical dishes read as one line on a ticket", () => {
+  const dish = (reference: string, change: Partial<KitchenBoardItem> = {}): KitchenBoardItem => ({
+    ...(parseKitchenBoardView(kitchenBoardFixture()).items[0] as KitchenBoardItem),
+    workItemReference: reference,
+    status: "Queued",
+    requiredQuantity: 1,
+    completedQuantity: 0,
+    ...change,
+  });
+  it("adds up dishes made the same way and keeps every work item for the step", () => {
+    const lines = mergeIdenticalKitchenItems([
+      dish("a"),
+      dish("b"),
+      dish("c", { requiredQuantity: 2 }),
+    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.item.requiredQuantity).toBe(4);
+    expect(lines[0]?.items.map((item) => item.workItemReference)).toEqual(["a", "b", "c"]);
+  });
+  it.each<[string, Partial<KitchenBoardItem>]>([
+    ["a note", { customerNote: "no peanuts" }],
+    ["other options", { selectedOptions: [{ displayName: "Extra spicy", quantity: 1 }] }],
+    [
+      "other allergens",
+      {
+        allergens: {
+          status: "Declared",
+          contains: ["Peanuts"],
+          mayContain: [],
+          forChoices: true,
+        } as KitchenItemAllergens,
+      },
+    ],
+    ["a chase", { chase: { count: 1, lastChasedAt: "2026-10-29T00:13:00.000Z" } }],
+    ["a combo", { comboParts: [] }],
+    [
+      "part of its quantity done",
+      { status: "In Progress", requiredQuantity: 2, completedQuantity: 1 },
+    ],
+    ["a finished dish", { status: "Completed", completedQuantity: 1 }],
+  ])("keeps a dish with %s on its own line", (_name, change) => {
+    expect(mergeIdenticalKitchenItems([dish("a"), dish("b", change)])).toHaveLength(2);
+  });
 });
