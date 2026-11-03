@@ -60,6 +60,9 @@ Shell variables do not persist between Bash calls here, so prefix each command w
      standing approval of 2026-10-14 and the WP item; read the grants back after applying.
 5. **Recreate:** `docker compose -f compose.pilot.yaml up -d pilot ops` (leaves `front` up, so
    guests see the "We're updating" page rather than a reset).
+   If the change touches the `postgres` service in `compose.pilot.yaml`, compose recreates it too.
+   `proxy` and `front` share its network namespace, so they stay "Up" with dead ports (curl `000`,
+   2026-11-03): also run `up -d --force-recreate --no-deps proxy front`.
 6. **Wait until it serves**, then end the window — ending early raises the urgent alert. If
    `/ready` has not answered, do not end the window: read `.local/pilot-runtime/pilot-v15/api.log`
    and `customer.log`, and roll back inside the window if the cause is not a quick restart.
