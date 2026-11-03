@@ -1,6 +1,7 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import { parseDiningReference } from "@rms/dining";
+import { staffContentLocale } from "./staff-content-locale.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -60,6 +61,7 @@ export function createMerchantDiningTableOnlinePaymentStop(options: {
         {
           diningSessionReference: session,
           guestSessionReference: null,
+          displayLocale: staffContentLocale(),
           allowed: async (tx) => {
             const current = await staffIn(tx).catch(() => null);
             return (

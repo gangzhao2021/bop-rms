@@ -310,13 +310,22 @@ export function TablePayPanel({
         <>
           <p>
             {view.attempt.partNumber === null
-              ? t("Paying {amount} for the whole table, tip included.", {
-                  amount: money(view.attempt.totalMinor),
-                })
-              : t("Paying {amount} for part {number}, tip included.", {
-                  amount: money(view.attempt.totalMinor),
-                  number: String(view.attempt.partNumber),
-                })}
+              ? view.attempt.tipMinor === "0"
+                ? t("Paying {amount} for the whole table.", {
+                    amount: money(view.attempt.totalMinor),
+                  })
+                : t("Paying {amount} for the whole table, tip included.", {
+                    amount: money(view.attempt.totalMinor),
+                  })
+              : view.attempt.tipMinor === "0"
+                ? t("Paying {amount} for part {number}.", {
+                    amount: money(view.attempt.totalMinor),
+                    number: String(view.attempt.partNumber),
+                  })
+                : t("Paying {amount} for part {number}, tip included.", {
+                    amount: money(view.attempt.totalMinor),
+                    number: String(view.attempt.partNumber),
+                  })}
           </p>
           {configuration?.mode === "simulation" ? (
             <div className="payment-retry__simulated">

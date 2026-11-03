@@ -879,6 +879,8 @@ export function createMerchantDiningTableSettle(options: {
   authentication: Pick<MerchantBffService, "authorize">;
   environment: "Test" | "Live";
   nextReference(): string;
+  /** The language dish names are shown in, as for the bill read. */
+  locale?: string;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
@@ -940,6 +942,7 @@ export function createMerchantDiningTableSettle(options: {
                 diningSessionReference: command.diningSessionReference,
                 observedAt,
                 authorize: guard,
+                displayLocales: staffNameLocales(options.locale ?? "en-CA"),
               });
               return Object.freeze({ status: "AlreadyRecorded" as const, bill: publicBill(bill) });
             }
@@ -1051,6 +1054,7 @@ export function createMerchantDiningTableSettle(options: {
               diningSessionReference: command.diningSessionReference,
               observedAt,
               authorize: guard,
+              displayLocales: staffNameLocales(options.locale ?? "en-CA"),
             });
             return Object.freeze({ status: "Recorded" as const, bill: publicBill(after) });
           },
@@ -1142,6 +1146,8 @@ export function createMerchantDiningTableSplit(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   nextReference(): string;
+  /** The language dish names are shown in, as for the bill read. */
+  locale?: string;
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
@@ -1196,6 +1202,7 @@ export function createMerchantDiningTableSplit(options: {
                 diningSessionReference: command.diningSessionReference,
                 observedAt,
                 authorize: guard,
+                displayLocales: staffNameLocales(options.locale ?? "en-CA"),
                 // A split plans what each part pays: the bill's tax rounding is recorded first.
                 ...(record
                   ? { recordTaxRounding: { nextReference: () => options.nextReference() } }

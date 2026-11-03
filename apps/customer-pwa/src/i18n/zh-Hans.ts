@@ -1168,6 +1168,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Thank you! Your table is paid in full.": "谢谢！本桌已全部付清。",
   "Pay the bill": "结账付款",
   "Paying {amount} for the whole table, tip included.": "正在为整桌支付 {amount}（含小费）。",
+  "Paying {amount} for the whole table.": "正在为整桌支付 {amount}。",
+  "Paying {amount} for part {number}.": "正在为第 {number} 份付 {amount}。",
   "Decline simulated payment": "拒绝模拟付款",
   "Confirming your payment…": "正在确认付款…",
   "Preparing the secure card form…": "正在准备安全付款表单…",
