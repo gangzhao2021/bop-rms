@@ -930,6 +930,22 @@ export function orderAmountTaken(order: QueuedOrder) {
   };
 }
 /**
+ * WP-2423 (2026-11-03): what has gone back to the guest of what was taken: the online payment's
+ * refunds and those recorded on the card machine. Money still on its way back is not counted.
+ * Zero when nothing went back or when `orderAmountTaken` is unknown.
+ */
+export function orderAmountRefunded(
+  order: QueuedOrder,
+  position?: CurrentOrderDetail["paymentPosition"],
+): bigint {
+  let refunded = position == null ? 0n : BigInt(position.refundedMinor);
+  refunded += BigInt(order.counter?.paidOnCardMachine?.refundedMinor ?? "0");
+  for (const batch of order.batches)
+    refunded += BigInt(batch.staffRound?.paidOnCardMachine?.refundedMinor ?? "0");
+  const taken = orderAmountTaken(order);
+  return taken === null || refunded > BigInt(taken.amountMinor) ? 0n : refunded;
+}
+/**
  * WP-2423 (v15 751dd768): an order cancelled with no payment recorded (for example a table whose
  * rounds were never paid, or a counter order released unpaid); its row says so instead of a dash.
  */
@@ -1415,6 +1431,9 @@ export function orderAmountNote(
   order: QueuedOrder,
   position?: CurrentOrderDetail["paymentPosition"],
 ): string | null {
+  // WP-2423 (2026-11-03): an amount already refunded is said on its own line, so only a refund
+  // still in progress is left for these words.
+  const said = orderAmountRefunded(order, position) > 0n;
   // DEC-DINE-IN-PAY-LATER: a pay-later table's dishes are on its bill until it pays once.
   if (order.tableBill !== null)
     return order.tableBill.paid === null
@@ -1435,7 +1454,11 @@ export function orderAmountNote(
   const online = onlinePaymentText(order, position);
   const plain = order.paidOnline === null ? "" : t("Paid online ") + orderMoney(order.paidOnline);
   const refund =
-    online === null || online === plain ? null : online.slice(plain.length).replace(/^ · /u, "");
+    online === null || online === plain
+      ? null
+      : said && (position == null || position.refundPendingMinor === "0")
+        ? null
+        : online.slice(plain.length).replace(/^ · /u, "");
   const machine =
     order.counter?.paidOnCardMachine != null ||
     order.batches.some((batch) => batch.staffRound?.paidOnCardMachine != null);
@@ -2022,11 +2045,14 @@ export function CurrentOrderQueueRows({
               const isOpen = order.orderReference === selected?.orderReference;
               const note = orderAmountNote(order, positionOf(order));
               // DEC-DINE-IN-PAY-LATER: an unpaid pay-later table shows what is on its bill.
+              const taken = orderAmountTaken(order);
+              const refunded = orderAmountRefunded(order, positionOf(order));
               const amount =
-                orderAmountTaken(order) ??
-                (order.tableBill !== null && order.tableBill.paid === null
-                  ? { amountMinor: order.tableBill.totalMinor, currencyCode: "CAD" }
-                  : null);
+                taken !== null
+                  ? { ...taken, amountMinor: (BigInt(taken.amountMinor) - refunded).toString() }
+                  : order.tableBill !== null && order.tableBill.paid === null
+                    ? { amountMinor: order.tableBill.totalMinor, currencyCode: "CAD" }
+                    : null;
               const age = now === undefined ? null : orderAgeText(order, now);
               const earlier =
                 order.businessDate !== null && today !== null && order.businessDate !== today;
@@ -2122,6 +2148,16 @@ export function CurrentOrderQueueRows({
                         ) : (
                           <span className="order-row__money">{orderMoney(amount)}</span>
                         )}
+                        {taken !== null && refunded > 0n ? (
+                          <span className="order-row__refunded">
+                            {t("{refunded} refunded", {
+                              refunded: orderMoney({
+                                amountMinor: refunded.toString(),
+                                currencyCode: taken.currencyCode,
+                              }),
+                            })}
+                          </span>
+                        ) : null}
                         {note === null ? null : <span className="order-row__paid">{note}</span>}
                         {amount === null && note === null ? (
                           <span className="visually-hidden">{t("No payment recorded")}</span>

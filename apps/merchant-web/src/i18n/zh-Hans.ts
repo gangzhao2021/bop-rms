@@ -5695,6 +5695,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '"使用当前门店的设置"也会用当前门店的营业时间替换此设置中的营业时间。',
   // Figma v1 (2026-10-25): Home's "Needs attention now".
   "To accept": "待接单",
+  "Kitchen to accept": "待后厨接单",
+  "{refunded} refunded": "已退 {refunded}",
   "Earlier orders not finished": "较早营业日未完成的订单",
   "From an earlier day · not finished": "较早营业日 · 未完成",
   "Make it if the guest comes back; otherwise cancel it and refund them":

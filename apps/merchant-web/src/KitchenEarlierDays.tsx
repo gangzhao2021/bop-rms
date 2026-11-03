@@ -38,7 +38,7 @@ export function kitchenWaitText(minutes: number): string {
 
 /** "From Fri, Oct 9" for an earlier business day's ticket. */
 export function earlierDayText(businessDate: string): string {
-  return "From " + businessDateText(businessDate);
+  return t("From {businessDate}", { businessDate: businessDateText(businessDate) });
 }
 
 export interface EarlierDayTicket {

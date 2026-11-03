@@ -1,6 +1,6 @@
 import { PageIntro } from "./PageIntro.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
-import { listSeparator, t, saidTable } from "./i18n/i18n.js";
+import { listSeparator, t, saidTable, systemText } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
 import { useKitchenClock } from "./kitchen-clock.js";
@@ -1137,7 +1137,7 @@ function WorkCard({
             ? t("In progress")
             : item.status === "Queued" && item.execution?.acceptedAt
               ? t("Accepted")
-              : item.status}
+              : systemText(item.status)}
         </strong>
         {!isActiveKitchenWork(item) ? (
           <span data-age="done">{t("Done")}</span>
@@ -2261,7 +2261,7 @@ export function KitchenBoardScreen({
                           <div className="kitchen-ticket__status">
                             <p className="kitchen-ticket__state" data-state={state}>
                               {state === "ToAccept"
-                                ? t("To accept")
+                                ? t("Kitchen to accept")
                                 : state === "InProgress"
                                   ? t("In progress")
                                   : t("Done")}

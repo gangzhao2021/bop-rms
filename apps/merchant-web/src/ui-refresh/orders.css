@@ -444,6 +444,12 @@
 .orders-page .order-row__paid {
   font-size: 13px;
 }
+/* Unlike the note below it, shown at every width: the amount above it depends on it. */
+.orders-page .order-row__refunded {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
 .orders-page .order-workbench-next {
   display: flex;
   justify-content: flex-end;

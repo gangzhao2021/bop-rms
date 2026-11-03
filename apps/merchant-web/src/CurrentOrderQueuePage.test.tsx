@@ -504,6 +504,38 @@ it("WP-2423: the list's filters survive in its address, and only what the page o
   );
 });
 
+it("WP-2423: a row's amount is what the Store kept, and says what went back at any width", () => {
+  const accepted = currentOrderQueueFixture().items[2];
+  if (accepted === undefined) throw new Error("fixture");
+  const row = (paymentPosition: { refundedMinor: string; refundPendingMinor: string } | null) =>
+    renderToStaticMarkup(
+      <CurrentOrderQueueRows
+        view={parseCurrentOrderQueue({
+          items: [
+            {
+              ...accepted,
+              paidOnline: { amountMinor: "3137", currencyCode: "CAD" },
+              paymentPosition,
+            },
+          ],
+          nextAfterOrderReference: null,
+        })}
+      />,
+    );
+  const partly = row({ refundedMinor: "1569", refundPendingMinor: "0" });
+  expect(partly).toContain('<span class="order-row__money">$15.68</span>');
+  expect(partly).toContain('<span class="order-row__refunded">$15.69 refunded</span>');
+  expect(partly).not.toContain('<span class="order-row__paid">partly refunded');
+  const full = row({ refundedMinor: "3137", refundPendingMinor: "0" });
+  expect(full).toContain('<span class="order-row__money">$0.00</span>');
+  expect(full).toContain('<span class="order-row__refunded">$31.37 refunded</span>');
+  // Money still on its way back was not returned yet: the amount stands and the row says so.
+  const pending = row({ refundedMinor: "0", refundPendingMinor: "1569" });
+  expect(pending).toContain('<span class="order-row__money">$31.37</span>');
+  expect(pending).toContain("refund in progress");
+  expect(row(null)).toContain('<span class="order-row__money">$31.37</span>');
+});
+
 it("WP-2423 Q1: grades the acceptance window and shows it only while the order can be accepted", () => {
   const at = Date.parse("2026-10-10T12:00:00.000Z");
   const by = (minutes: number) => new Date(at + minutes * 60_000).toISOString();
@@ -1475,15 +1507,15 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
   expect(html).toContain('<span class="order-row__money">$11.30</span>');
   expect(html).not.toContain('class="order-row__paid"');
   expect(html).toContain('<ul class="order-panel__payment"><li>Paid online $11.30</li></ul>');
-  // A refund is an exception, so the row says it under the amount.
-  expect(
-    renderToStaticMarkup(
-      <CurrentOrderQueueRows
-        view={parse(order())}
-        paymentPositions={new Map([[order().orderReference as string, position("1130")]])}
-      />,
-    ),
-  ).toContain('<span class="order-row__paid">refunded in full</span>');
+  // A refund is an exception, so the row says it under what the Store kept.
+  const refundedRow = renderToStaticMarkup(
+    <CurrentOrderQueueRows
+      view={parse(order())}
+      paymentPositions={new Map([[order().orderReference as string, position("1130")]])}
+    />,
+  );
+  expect(refundedRow).toContain('<span class="order-row__money">$0.00</span>');
+  expect(refundedRow).toContain('<span class="order-row__refunded">$11.30 refunded</span>');
   // Orders v3: one date style — weekday and date, the year when not this year, then the time.
   expect(html).toContain("Wed, Oct 14, 2026 22:08");
   expect(html).not.toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u);

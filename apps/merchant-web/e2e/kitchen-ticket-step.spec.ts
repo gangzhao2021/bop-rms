@@ -116,7 +116,7 @@ test("@production a ticket's one main step accepts each of its dishes in turn", 
   const commands = await mockBoard(page, [dish(1, "TEST latte"), dish(2, "TEST mocha")]);
   await page.goto("/operations/kitchen");
   const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
-  await expect(ticket.locator(".kitchen-ticket__state")).toHaveText("To accept");
+  await expect(ticket.locator(".kitchen-ticket__state")).toHaveText("Kitchen to accept");
   // Each dish offers no step of its own while it waits; the ticket has the one.
   await expect(ticket.getByRole("button")).toHaveText(["Accept all"]);
   await ticket.getByRole("button", { name: "Accept all", exact: true }).click();
