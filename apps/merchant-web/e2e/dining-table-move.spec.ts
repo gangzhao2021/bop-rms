@@ -137,6 +137,9 @@ test("@production staff move a table's party to a free table with a code", async
   const panel = page.getByRole("region", { name: "Move this party to another table" });
   const target = panel.getByRole("combobox", { name: "Move to…" });
   // Only a free table with a code can be chosen; every other table says why.
+  await page.locator("details.table-panel__manage").evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
   await expect(target.getByRole("option")).toHaveText([
     "Choose a table",
     "T7 · seats 4",
@@ -174,6 +177,9 @@ test("@production staff move a table's party to a free table with a code", async
     },
   ]);
   // The party's table (T7) is shown now; T6 waits for cleaning.
+  await page.locator("details.table-panel__manage").evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
   await expect(
     page.getByRole("region", { name: "Move this party to another table" }).getByRole("option", {
       name: /^T6 — being cleaned$/u,

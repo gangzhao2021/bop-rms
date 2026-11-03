@@ -253,6 +253,8 @@ export async function readDiningTableBill(
      * tax rounding first (a new version when the bill changed; never once anything is paid).
      */
     readonly recordTaxRounding?: { readonly nextReference: () => string } | undefined;
+    /** The guest's languages for dish names, most preferred first (absent: as stored). */
+    readonly displayLocales?: readonly string[] | undefined;
   },
 ): Promise<
   DiningTableBill & {
@@ -328,7 +330,8 @@ export async function readDiningTableBill(
   );
   // One query at a time on the transaction (the pilot's runner refuses overlapping queries).
   const billPrices = [];
-  for (const order of billOrders) billPrices.push(...(await listOrderItemPrices(tx, owner, order)));
+  for (const order of billOrders)
+    billPrices.push(...(await listOrderItemPrices(tx, owner, order, input.displayLocales ?? "")));
   const prices = billPrices.filter((item) => !removed.has(String(item.orderItemReference)));
   // Comps and discounts a manager decided (append-only): the dish stays on the bill at its price,
   // with what came off it.

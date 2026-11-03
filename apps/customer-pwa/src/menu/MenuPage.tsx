@@ -8,9 +8,9 @@ import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
 import { formatDecimalMoney, formatMoney } from "../journey/format.js";
 import { cartIssueMessage } from "../journey/messages.js";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
 import {
   checkoutInProgressMessage,
@@ -387,6 +387,7 @@ export function MenuScreen({
   const title = mode === "search" ? t("Search menu") : t("Menu");
   const browseFound = mode === "browse" && state.kind === "Found";
   const withCart = context !== undefined && mode !== "detail";
+  const justAdded = useBackOnMenu(browseFound);
   return (
     // WP-2423 item 8 ③ (decision 13): at a table, a dish the table already ordered says so.
     <TableOrderedProvider enabled={context?.channel === "DineIn"} client={tableOrderedClient}>
@@ -443,10 +444,15 @@ export function MenuScreen({
               </div>
             )}
             {/* Above the menu from the start (also while it loads), so it never pushes the menu down. */}
-            {mode !== "detail" &&
+            {mode === "search" &&
             state.kind !== "PermissionDenied" &&
             state.kind !== "MissingContext" ? (
               <AllergenHelp />
+            ) : null}
+            {mode === "browse" &&
+            state.kind !== "PermissionDenied" &&
+            state.kind !== "MissingContext" ? (
+              <AllergenHelpLine />
             ) : null}
             {state.kind === "MissingContext" ? null : search}
             {state.kind === "Found" && mode === "search" ? (
@@ -488,6 +494,11 @@ export function MenuScreen({
               />
             ) : null}
           </div>
+          {justAdded ? (
+            <p className="menu-added-toast" role="status">
+              {t("Added to your cart.")}
+            </p>
+          ) : null}
           {withCart ? (
             <MenuCart
               load={cartSummary ?? browserCartSummary}
@@ -836,6 +847,30 @@ function MenuContents({
   );
 }
 
+/** Where the guest was on the menu when they opened a dish, for coming back to the same place. */
+let menuScrollWhenLeft: number | null = null;
+
+/** Owner 2026-11-03 walkthrough: back on the menu after adding a dish, where the guest left it. */
+function useBackOnMenu(found: boolean): boolean {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const added = (location.state as { readonly added?: unknown } | null)?.added === true;
+  useLayoutEffect(() => {
+    if (!found || menuScrollWhenLeft === null) return;
+    window.scrollTo(0, menuScrollWhenLeft);
+    menuScrollWhenLeft = null;
+  }, [found]);
+  useEffect(() => {
+    if (!added) return;
+    const timer = window.setTimeout(
+      () => void navigate(location.pathname, { replace: true, state: null }),
+      3000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [added, location.pathname, navigate]);
+  return added;
+}
+
 function MenuItemCard({
   family,
   sectionName,
@@ -861,6 +896,9 @@ function MenuItemCard({
         aria-label={t("View {name}", { name: family.name })}
         className="menu-card__link"
         to={`/menu/items/${opens.sellableReference}`}
+        onClick={() => {
+          menuScrollWhenLeft = window.scrollY;
+        }}
       >
         <span className="menu-card__body">
           <span className="menu-card__title">
@@ -1322,6 +1360,12 @@ export function SellableConfigurator({
     });
     void controller.submit(sellable.sellableReference, draft);
   };
+  // Owner 2026-11-03 walkthrough: added, the guest goes on choosing. A cart that was cleared has
+  // something to say, so that one stays.
+  useEffect(() => {
+    if (state.status === "added" && state.earlierCartCleared !== true)
+      void navigate("/menu", { state: { added: true } });
+  }, [state, navigate]);
   const sizes = variants !== undefined && variants.length > 1 ? variants : null;
   return (
     <form className="sellable-configurator" aria-labelledby="configure-heading" onSubmit={submit}>
@@ -1609,6 +1653,15 @@ function AllergenSummary({ sellable }: { readonly sellable: MenuSellable }) {
         </dl>
       )}
     </div>
+  );
+}
+
+/** Owner 2026-11-03 walkthrough: one line above the list; the full words are on each dish. */
+function AllergenHelpLine() {
+  return (
+    <p className="menu-help-line" role="note">
+      {t("Allergies? Ask a staff member before you order.")}
+    </p>
   );
 }
 

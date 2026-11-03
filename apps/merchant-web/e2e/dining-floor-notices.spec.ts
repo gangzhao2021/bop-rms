@@ -197,7 +197,9 @@ test("@production Tables keeps the last tables read-only after a failed refresh 
   await context.setOffline(true);
   await expect(notice).toBeVisible({ timeout: 2_000 });
   await expect(select).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Open table", exact: true })).toBeDisabled();
+  await expect(
+    page.getByLabel("Free tables").getByRole("button", { name: "Open table" }),
+  ).toBeDisabled();
   await context.setOffline(false);
   await expect(notice).toHaveCount(0, { timeout: 5_000 });
   await expect(select).toBeEnabled();

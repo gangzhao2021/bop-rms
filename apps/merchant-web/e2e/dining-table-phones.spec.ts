@@ -117,6 +117,9 @@ test("@production staff see the phones at a table, pause joining by scan and rem
   await page.goto("/operations/dining");
   await page.getByRole("button", { name: "Select T6", exact: true }).click();
   const phones = page.getByRole("region", { name: "Phones at this table" });
+  await page.locator("details.table-panel__manage").evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
   await expect(phones).toContainText("Phone 2 just joined.");
   await expect(phones.getByRole("heading", { name: "2 phones at this table" })).toBeVisible();
   await expect(phones).toContainText("Guests join by scanning the table's QR code.");

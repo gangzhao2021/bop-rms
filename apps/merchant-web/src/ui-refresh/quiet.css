@@ -573,3 +573,16 @@
     font-weight: 600;
   }
 }
+
+/* Owner 2026-11-03 walkthrough: what a server rarely needs waits behind one line. */
+.table-panel__manage {
+  margin-top: var(--bop-space-6);
+}
+.table-panel__manage > summary {
+  min-height: 44px;
+  padding: 10px 0;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}

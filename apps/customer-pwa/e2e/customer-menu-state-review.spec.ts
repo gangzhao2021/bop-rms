@@ -109,7 +109,7 @@ test("CUST-MENU Empty and Unavailable match the Figma Review at 1440, 390, and 3
     .getByRole("heading", { name: "No items available" })
     .evaluate((node) => (node as HTMLElement).blur());
   // Owner 2026-10-25 "只要白底": the help note has no box, so its words start at the page edge.
-  await expect(page.locator(".menu-help")).toHaveCSS("padding-left", "0px");
+  await expect(page.locator(".menu-help-line")).toHaveCSS("padding-left", "0px");
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     await expectNoHorizontalOverflow(page);

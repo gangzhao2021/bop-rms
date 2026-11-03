@@ -102,6 +102,9 @@ test("@production staff confirms Host transfer and retains unknown operation acr
   await page.getByRole("button", { name: "Refresh tables", exact: true }).click();
   await page.getByRole("button", { name: "Select T1", exact: true }).click();
   const transfer = page.getByRole("button", { name: "Transfer order host", exact: true });
+  await page.locator("details.table-panel__manage").evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
   await expect(transfer).toBeDisabled();
   await page.getByRole("button", { name: "Refresh participants", exact: true }).click();
   await page.getByRole("combobox", { name: "New order host", exact: true }).selectOption(id(5));

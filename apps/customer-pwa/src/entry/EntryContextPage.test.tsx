@@ -64,8 +64,7 @@ describe("CUST-ENTRY-CONTEXT", () => {
     const html = render({ kind: "Established", context });
     expect(html).toContain("BOP Test Kitchen");
     expect(html).toContain("Harbour Test Store");
-    expect(html).toContain("Ready to order");
-    expect(html).toContain("Your table at Harbour Test Store is confirmed for dine-in");
+    expect(html).toContain("Welcome to");
     // The service is in the sentence above; open status and hours are said once, in the store card.
     expect(html).not.toContain("Available service");
     expect(html).not.toContain("Open for ordering");

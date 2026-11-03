@@ -300,9 +300,7 @@ test.describe("@production guests invite each other at the table", () => {
     ).toBeVisible();
     await field.fill(issuedCode);
     await guest.page.getByRole("button", { name: "Join with this code", exact: true }).click();
-    await expect(
-      guest.page.getByRole("heading", { name: "You’ve joined this table" }),
-    ).toBeVisible();
+    await expect(guest.page).toHaveURL(/\/menu$/u);
     expect(table.joined).toBe(1);
 
     // ── The code works once: a third phone using it is told it was already used.

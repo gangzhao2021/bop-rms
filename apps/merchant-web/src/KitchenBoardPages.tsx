@@ -1145,7 +1145,7 @@ function WorkCard({
             {item.completedQuantity} / {item.requiredQuantity}
           </dd>
         </dl>
-        <KitchenAllergenLine item={item} />
+        {/* Owner 2026-11-03 walkthrough: what to make comes first, then what it contains. */}
         {item.comboParts !== undefined ? (
           <KitchenComboParts item={item} actionable={showActions === true && inTicket === true} />
         ) : !showModifiers && item.selectedOptions.length > 0 ? (
@@ -1159,6 +1159,7 @@ function WorkCard({
             ))}
           </ul>
         ) : null}
+        <KitchenAllergenLine item={item} />
         {!inTicket && item.orderLabel?.enteredByStaff ? (
           <p className="kitchen-work-item__staff">{t("Entered by staff")}</p>
         ) : null}

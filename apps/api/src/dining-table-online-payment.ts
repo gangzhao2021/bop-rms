@@ -61,6 +61,8 @@ export interface TableOnlinePaymentAuthority {
   readonly guestSessionReference: string | null;
   /** Rechecks the caller in this transaction (guest or staff). */
   allowed(tx: ConsumerTransaction): Promise<boolean>;
+  /** The guest's chosen language for dish names on what they read (absent: as stored). */
+  readonly displayLocale?: string | null | undefined;
 }
 interface Scope {
   readonly tenantReference: string;
@@ -147,6 +149,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
       diningSessionReference: authority.diningSessionReference,
       observedAt: milliseconds(options.now()),
       authorize: () => authority.allowed(tx),
+      ...(authority.displayLocale ? { displayLocales: [authority.displayLocale] } : {}),
       // WP-2423 DEC-TAX-WHOLE-RECEIPT: before a payment is started, the bill's tax rounding is
       // recorded (system rule).
       ...(record ? { recordTaxRounding: { nextReference: () => options.nextReference() } } : {}),

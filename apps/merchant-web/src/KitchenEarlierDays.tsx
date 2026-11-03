@@ -274,11 +274,13 @@ export function KitchenCloseTicketDialog({
             </p>
           ) : null}
           <p className="kitchen-close-dialog__money" role="note">
-            {t(
-              "Closing the ticket does not refund or cancel the order. If the guest paid and did not get their food, cancel or refund",
-            )}{" "}
-            {ticket.orderLabel.split(" · ")[0]} {t("from")} {day} {t("in")}{" "}
-            <Link to="/operations/orders">{t("Orders")}</Link>.
+            {t("Closing the ticket does not refund or cancel the order.")}{" "}
+            {t("If the guest paid and did not get their food, go to")}{" "}
+            <Link to="/operations/orders">{t("Orders")}</Link>{" "}
+            {t("to cancel or refund {order} from {day}.", {
+              order: ticket.orderLabel,
+              day,
+            })}
           </p>
           <div className="kitchen-remake-dialog__actions">
             <button type="button" onClick={() => dialog.current?.close()}>

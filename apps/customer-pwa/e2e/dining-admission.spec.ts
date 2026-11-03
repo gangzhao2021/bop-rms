@@ -52,16 +52,6 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Recover this attempt" })).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeFocused();
-  await expect(page.getByText("No order has been placed.", { exact: false })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true,
-  );
-  await page.screenshot({
-    path: info.outputPath("dining-bound.png"),
-    fullPage: true,
-  });
-  await page.getByRole("button", { name: "Continue to menu" }).click();
   await expect(page).toHaveURL(/\/menu$/u);
   await expect(
     page.getByRole("main").getByRole("heading", { name: "Menu", level: 2, exact: true }),
@@ -105,7 +95,8 @@ test("@demo Dining admission pauses offline and never resumes on reconnect", asy
     true,
   );
   await recover.click();
-  await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+  // Owner 2026-11-03: joined, the menu opens.
+  await expect(page).toHaveURL(/\/menu$/u);
 });
 
 test("@demo Dining admission joins the scanned table with one tap", async ({ page }, info) => {
@@ -122,7 +113,8 @@ test("@demo Dining admission joins the scanned table with one tap", async ({ pag
   await page.getByRole("button", { name: "Join this table", exact: true }).click();
   // The training store never confirms the first answer: the guest recovers it.
   await page.getByRole("button", { name: "Recover this attempt" }).click();
-  await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+  // Owner 2026-11-03: joined, the menu opens.
+  await expect(page).toHaveURL(/\/menu$/u);
 });
 
 test("@production Dining training query cannot activate the production entry", async ({ page }) => {

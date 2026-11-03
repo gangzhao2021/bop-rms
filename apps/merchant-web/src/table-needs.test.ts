@@ -43,6 +43,14 @@ it("WP-2423 item 8 ①: names what each table needs, with its one next step", ()
   );
   // A guest waiting at the table comes before dishes at the pass.
   expect(call).toMatchObject({ tone: "action", step: "Handled", detail: "2 min ago · A question" });
+  // Owner 2026-11-03: a phone joining never hides a dish waiting to be served.
+  expect(
+    tableNeed(
+      { ...table(12), newPhones: [{ phoneNumber: 1, joinedAt: "2026-10-28T18:58:00.000Z" }] },
+      facts({ readyToServe: 2 }),
+      now,
+    ).words,
+  ).toBe("2 dishes ready to serve");
   expect(tableNeed(table(12), facts({ readyToServe: 2 }), now)).toMatchObject({
     tone: "action",
     words: "2 dishes ready to serve",

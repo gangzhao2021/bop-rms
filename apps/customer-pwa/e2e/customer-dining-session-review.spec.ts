@@ -530,7 +530,8 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await page.goto("about:blank");
     await page.goto("/#qr=ddd.eee.fff");
     await page.getByRole("button", { name: "Join this table", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+    // Owner 2026-11-03: joined, the menu opens.
+    await expect(page).toHaveURL(/\/menu$/u);
     expect(qrJoins).toEqual(["{}"]);
     await page.evaluate(() => {
       history.pushState(null, "", "/dine-in/session");

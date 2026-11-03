@@ -1,4 +1,5 @@
 import type { ConsumerTransaction } from "@bop/eventing";
+import { customerDisplayLocale } from "./customer-display-locale.js";
 import {
   GuestSessionError,
   GuestSessionService,
@@ -118,11 +119,12 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
       return options.payments.refresh(await authority(credentials));
     },
     /** The settled table's bill and how it was paid, for a guest whose visit ended with it. */
-    async settledReceipt(credentials: Credentials) {
+    async settledReceipt(credentials: Credentials, displayLocale?: string | null) {
       const first = await options.access.transactions.run((tx) => settledIn(tx, credentials));
       const view = await options.payments.read(
         Object.freeze({
           ...first,
+          displayLocale,
           allowed: async (tx: ConsumerTransaction) => {
             try {
               const again = await settledIn(tx, credentials);
@@ -522,7 +524,14 @@ export class CustomerDiningTablePaymentHandler {
           if (command.action === "SettledReceipt") {
             response
               .status(200)
-              .json(customerSettledTableReceiptBody(await this.#port.settledReceipt(credentials)));
+              .json(
+                customerSettledTableReceiptBody(
+                  await this.#port.settledReceipt(
+                    credentials,
+                    customerDisplayLocale(request.query),
+                  ),
+                ),
+              );
             return;
           }
           const view =

@@ -5,6 +5,7 @@ import {
   DiningSessionPage,
   DiningSessionScreen,
   isDiningSessionActive,
+  keepsReadingTable,
   type DiningSessionState,
   roundTime,
 } from "./DiningSessionPage.js";
@@ -378,6 +379,28 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(() => parseSettledTableReceipt({ receipt: { tableLabel: "<b>" } })).toThrow();
   });
 
+  it("Owner 2026-11-03: keeps reading a served table until it is settled, so paying shows", () => {
+    const served = {
+      ...view(),
+      rounds: view().rounds.map((round) => ({ ...round, status: "Served" as const })),
+    };
+    expect(isDiningSessionActive(served)).toBe(false);
+    expect(keepsReadingTable({ status: "ready", view: served, refreshing: false })).toBe(true);
+    expect(keepsReadingTable({ status: "settled", tableLabel: "T1" })).toBe(false);
+  });
+  it("Owner 2026-11-03: what the guest ordered comes before the table total", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <DiningSessionScreen
+          state={{ status: "ready", view: view(), refreshing: false }}
+          onRefresh={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    expect(html.indexOf("dining-rounds-heading")).toBeLessThan(
+      html.indexOf("dining-summary-heading"),
+    );
+  });
   it("shows an empty table plainly and only keeps polling while something is in progress", () => {
     const empty = view({ rounds: [], summary: null, orderNumber: null });
     const html = render({ status: "ready", view: empty, refreshing: false });

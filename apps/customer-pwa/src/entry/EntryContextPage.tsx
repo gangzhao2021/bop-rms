@@ -282,13 +282,21 @@ function EntryNextSteps({
   const [joined, setJoined] = useState(false);
   // Joining is the next step only where it can happen here.
   const first = joining && diningAdmission !== undefined && !joined;
+  const opened = useRef(false);
   return (
     <>
       {joining ? (
         <DiningAdmissionPanel
           contextEpoch={context}
           service={diningAdmission}
-          onStateChange={(state) => setJoined(state === "Bound" || state === "Unavailable")}
+          onStateChange={(state) => {
+            setJoined(state === "Bound" || state === "Unavailable");
+            // Owner 2026-11-03 walkthrough: the guest came to order; joined, the menu opens.
+            if (state === "Bound" && !opened.current) {
+              opened.current = true;
+              onContinue();
+            }
+          }}
         />
       ) : null}
       <button
@@ -546,16 +554,18 @@ function EntryState({
   const locationOpen = context.operatingState === "Open";
   return (
     <div>
-      <StateHeading headingRef={headingRef}>{t("Ready to order")}</StateHeading>
-      <p className="entry-context">
+      <StateHeading headingRef={headingRef}>
         {context.channel === "DineIn"
-          ? t("Your table at {storeDisplayName} is confirmed for dine-in.", {
-              storeDisplayName: context.storeDisplayName,
-            })
-          : t("Pickup from {storeDisplayName} is selected.", {
-              storeDisplayName: context.storeDisplayName,
-            })}
-      </p>
+          ? t("Welcome to {storeDisplayName}", { storeDisplayName: context.storeDisplayName })
+          : t("Ready to order")}
+      </StateHeading>
+      {context.channel === "DineIn" ? null : (
+        <p className="entry-context">
+          {t("Pickup from {storeDisplayName} is selected.", {
+            storeDisplayName: context.storeDisplayName,
+          })}
+        </p>
+      )}
       {/* Open now, today's hours and the address are stated once, in the store card below. */}
       {locationOpen ? (
         onContinue ? (

@@ -3086,3 +3086,48 @@
 .order-status__batch li > .configure-status {
   grid-column: 1 / -1;
 }
+
+/* Owner 2026-11-03 walkthrough: the menu starts near the top of the phone; one line on allergies. */
+.customer-page .menu-layout__main > .menu-help-line {
+  margin: 8px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.menu-added-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 96px;
+  left: 16px;
+  z-index: 30;
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 6px;
+  background: var(--bop-color-text-default);
+  color: var(--bop-color-surface-default);
+  font-size: 16px;
+  text-align: center;
+}
+/* One tap asks staff over; the words are the buttons. */
+.dining-staff-call .dining-staff-call__reasons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+  padding: 0;
+  border: 0;
+}
+.dining-staff-call .dining-staff-call__reasons button {
+  min-height: 44px;
+  padding: 4px 8px;
+  border: 1px solid var(--bop-color-border-default);
+  border-radius: 6px;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dining-session__receipt dd {
+  flex: none;
+  white-space: nowrap;
+}

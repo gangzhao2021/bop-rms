@@ -87,10 +87,14 @@ const statusText: Readonly<Record<DiningRoundStatus, string>> = {
   get Serving() {
     return t("Being served");
   },
-  Served: "Served",
+  get Served() {
+    return t("Served");
+  },
 };
 const paymentText: Readonly<Record<DiningRoundPayment, string>> = {
-  Paid: "Paid",
+  get Paid() {
+    return t("Paid");
+  },
   get Awaiting() {
     return t("Not paid yet");
   },
@@ -100,7 +104,9 @@ const paymentText: Readonly<Record<DiningRoundPayment, string>> = {
   get NotCharged() {
     return t("Not charged");
   },
-  Refunded: "Refunded",
+  get Refunded() {
+    return t("Refunded");
+  },
   get RefundPending() {
     return t("Refund on its way");
   },
@@ -534,6 +540,14 @@ export function isDiningSessionActive(view: DiningSessionView | null): boolean {
   );
 }
 
+/**
+ * Owner 2026-11-03 walkthrough: a table whose dishes are all served is still eating and paying, so
+ * it keeps being read until it is settled; otherwise a guest who paid still sees the amount due.
+ */
+export function keepsReadingTable(state: DiningSessionState): boolean {
+  return (state.status === "ready" || state.status === "unavailable") && state.view !== null;
+}
+
 export function DiningSessionPage({
   store,
   client: provided,
@@ -650,11 +664,9 @@ export function DiningSessionPage({
       pending.current = null;
     };
   }, [load]);
-  const active = isDiningSessionActive(
-    state.status === "ready" || state.status === "unavailable" ? state.view : null,
-  );
+  const showingTable = keepsReadingTable(state);
   useEffect(() => {
-    if (!active) return;
+    if (!showingTable) return;
     const tick = () => {
       if (typeof document === "undefined" || document.visibilityState === "visible") void load();
     };
@@ -664,7 +676,7 @@ export function DiningSessionPage({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [active, load]);
+  }, [showingTable, load]);
   return (
     <DiningSessionScreen
       state={state}
@@ -746,9 +758,12 @@ export function DiningSessionScreen({
   );
   const [again, setAgain] = useState<{ key: string; item: DiningItem } | null>(null);
   // Dishes can be added while the table orders: not while it checks out, after it paid, or once
-  // everything is closed.
+  // everything is closed. A table paying at the end can still order after everything is served.
   const canOrderAgain =
-    state.status === "ready" && active && tablePay?.paid !== true && tablePay?.checkingOut !== true;
+    state.status === "ready" &&
+    (active || view?.paymentTiming === "PayLater") &&
+    tablePay?.paid !== true &&
+    tablePay?.checkingOut !== true;
   return (
     <CustomerPage step="table" store={store} className="order-status dining-session">
       <PageHeading
@@ -838,15 +853,7 @@ export function DiningSessionScreen({
           </button>
         </section>
       ) : null}
-      {staffCall}
-      {invitation}
-      {view && view.rounds.length === 0 ? (
-        <section className="order-status__card">
-          <h2>{t("No one at this table has ordered yet")}</h2>
-          <p>{t("Rounds appear here as soon as someone at your table places an order.")}</p>
-        </section>
-      ) : null}
-      {view ? <TableSummary view={view} /> : null}
+      {/* Owner 2026-11-03 walkthrough: first what needs doing, then what the guest ordered. */}
       {/* DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table here once checkout started. */}
       {view?.paymentTiming === "PayLater" ? (
         <TablePayPanel
@@ -857,6 +864,13 @@ export function DiningSessionScreen({
           }}
           onBillChanged={onRefresh}
         />
+      ) : null}
+      {staffCall}
+      {view && view.rounds.length === 0 ? (
+        <section className="order-status__card">
+          <h2>{t("No one at this table has ordered yet")}</h2>
+          <p>{t("Rounds appear here as soon as someone at your table places an order.")}</p>
+        </section>
       ) : null}
       {view && view.rounds.length > 0 ? (
         <section className="order-status__batches" aria-labelledby="dining-rounds-heading">
@@ -903,24 +917,6 @@ export function DiningSessionScreen({
             ))}
         </section>
       ) : null}
-      {state.status === "ready" ? (
-        <section className="order-status__actions" aria-label={t("Updates")}>
-          <p>
-            {active
-              ? t("This page checks for updates every few seconds.")
-              : t("Everything at this table is served or closed.")}
-          </p>
-          <button type="button" disabled={state.refreshing} onClick={onRefresh}>
-            {state.refreshing ? "Refreshing…" : t("Refresh now")}
-          </button>
-        </section>
-      ) : null}
-      {view ? (
-        <aside className="menu-help" aria-labelledby="dining-help-heading">
-          <h2 id="dining-help-heading">{t("Allergies or a problem with your food?")}</h2>
-          <p>{t("Tell a staff member before you eat. They can check any dish for you.")}</p>
-        </aside>
-      ) : null}
       {/* DEC-DINE-IN-PAY-LATER: during checkout no more rounds are sent; paid, nothing to add. */}
       {/* A settled table's visit has ended: nothing more to order here. */}
       {state.status === "settled" || tablePay?.paid ? null : tablePay?.checkingOut ? (
@@ -932,6 +928,26 @@ export function DiningSessionScreen({
           {t("Order more from the menu")}
         </Link>
       )}
+      {view ? <TableSummary view={view} /> : null}
+      {invitation}
+      {state.status === "ready" ? (
+        <section className="order-status__actions" aria-label={t("Updates")}>
+          <p>
+            {active
+              ? t("This page checks for updates every few seconds.")
+              : t("Everything at this table is served or closed.")}
+          </p>
+          <button type="button" disabled={state.refreshing} onClick={onRefresh}>
+            {state.refreshing ? t("Refreshing…") : t("Refresh now")}
+          </button>
+        </section>
+      ) : null}
+      {view ? (
+        <aside className="menu-help" aria-labelledby="dining-help-heading">
+          <h2 id="dining-help-heading">{t("Allergies or a problem with your food?")}</h2>
+          <p>{t("Tell a staff member before you eat. They can check any dish for you.")}</p>
+        </aside>
+      ) : null}
     </CustomerPage>
   );
 }

@@ -229,7 +229,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "1 day": "1 天",
   "1 item": "1 项",
   "1 item hasn't been served yet. Mark it served or cancel it on the Orders page.":
-    "1 项尚未上桌。请在订单页将它标记为已上桌或取消。",
+    "1 项尚未上桌。在上面点“已上”，或到订单页取消。",
   "1 item is waiting for payment or for the kitchen to accept it. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.":
     "1 项在等待付款或等待后厨接单。请顾客在手机上完成付款，或在下方（如果顾客已离开）或在订单页取消未付款的轮次。",
   "1 line": "1 行",
@@ -5215,7 +5215,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "descriptions changed": "描述已更改",
   "different from the live Store": "与当前门店不同",
   "different from the live Store (see below)": "与当前门店不同（见下方）",
-  "done and ready": "已完成并可取",
+  "done and ready": "已做好",
   "due ": "截止 ",
   "e.g. Front counter": "例如 前台柜台",
   "each (portions sold as a size)": "个（按规格售卖的份数）",
@@ -5389,7 +5389,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} items are waiting for payment or for the kitchen to accept them. Ask the guest to finish paying on their phone, or cancel the unpaid round below (if the guests left) or on the Orders page.":
     "{count} 项在等待付款或等待后厨接单。请顾客在手机上完成付款，或在下方（如果顾客已离开）或在订单页取消未付款的轮次。",
   "{count} items haven't been served yet. Mark them served or cancel them on the Orders page.":
-    "{count} 项尚未上桌。请在订单页将它们标记为已上桌或取消。",
+    "{count} 项尚未上桌。在上面点“已上”，或到订单页取消。",
   "{count} item{value}": "{count} 项",
   "{count} online refunds are still waiting for the card company to confirm and are not counted yet.":
     "{count} 笔线上退款仍在等待发卡公司确认，尚未计入。",
@@ -5570,7 +5570,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{overdue} overdue": "逾期 {overdue}",
   "{partlyRefund} refunded": "已退款 {partlyRefund}",
   "{paymentCount} checked in {runCount} · last {completedAt} · {outcomes}":
-    "{paymentCount} 笔在 {runCount} 次中核对 · 最近 {completedAt} · {outcomes}",
+    "已核对 {paymentCount}（共 {runCount}） · 最近 {completedAt} · {outcomes}",
   "{pinLength} of {value} digits entered": "已输入 {pinLength} / {value} 位",
   "{productName} · {setName} · {optionName}: the {value} review is still needed.":
     "{productName} · {setName} · {optionName}：仍需要{value}审核。",
@@ -5770,6 +5770,30 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " · {count} to accept": " · {count} 单待接",
   " · {count} from earlier days": " · 另有 {count} 单是之前的",
   "Needs attention": "需要处理",
+  "Store system is not responding": "门店系统没有响应",
+  "Customer ordering page is not loading": "客人点单页打不开",
+  "Staff screens are not loading": "员工页面打不开",
+  "Background services are not being watched": "后台服务无人监控",
+  "A background service needs a person": "有后台服务需要人工处理",
+  "Order or payment updates are stuck": "订单或付款更新卡住了",
+  "Some order updates are being retried": "部分订单更新正在重试",
+  "Orders from earlier days are still holding stock": "较早营业日的订单仍占用库存",
+  "Receipts are not being issued": "收据没有开出",
+  "Orders cannot be priced": "订单无法计价",
+  "Payment differences need checking": "付款差异需要核对",
+  "Day-end settlement has open problems": "日结还有未解决的问题",
+  "Last night's backup failed": "昨晚备份失败",
+  "No recent backup": "最近没有备份",
+  "The newest backup could not be restored": "最新备份无法恢复",
+  "Off-site backup copy failed": "异地备份失败",
+  "Disk space is running low": "磁盘空间不足",
+  "Some checks could not run": "部分检查没能运行",
+  "Alert messages are not being delivered": "提醒消息没有送达",
+  Reserved: "已预订",
+  "Manage this table": "管理这张桌",
+  "Closing the ticket does not refund or cancel the order.": "关闭票据不会退款或取消订单。",
+  "If the guest paid and did not get their food, go to": "如果顾客已付款却没拿到餐，请到",
+  "to cancel or refund {order} from {day}.": "页取消或退款：{day} 的 {order}。",
   "Open work": "进行中",
   "Show kitchen work": "显示后厨工作",
   "· {count} more from earlier days": "· 另有 {count} 张是之前的",
@@ -6192,7 +6216,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Business day from {startsAt}": "营业日从 {startsAt} 开始",
   "Paid, guests still seated": "已付清，客人还在座",
   "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't started can come off the bill before the table pays.":
-    "{name}：还有 {openItemCount}没上桌。做好后上桌（桌台上点“全部上桌”）。后厨还没开始做的菜，可以在付款前从账单删掉。",
+    "{name}：还有 {openItemCount}没上桌。做好后上桌（在上面点“全部上了”）。后厨还没开始做的菜，可以在付款前从账单删掉。",
   "{name}: paid with the table, {openItemCount} not served yet. Serve them when they're ready, then close the table. If the guests left without them, a manager gives the money back from the table's payment.":
     "{name}：已随整桌付清，还有 {openItemCount}没上桌。做好后上桌，再关台。如果客人没等到就走了，由店长从这桌的付款里退钱。",
   "Dishes still to serve": "还没上的菜",

@@ -34,6 +34,34 @@ export interface OperationsAlertView {
   /** WP-2423 (2026-10-18): a planned update in progress; store-down alerts wait during it. */
   readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
 }
+/** Owner 2026-11-03 walkthrough: the watcher writes English titles; staff read their language. */
+function alertTitle(title: string): string {
+  const words: Readonly<Record<string, string>> = {
+    "Store system is not responding": t("Store system is not responding"),
+    "Customer ordering page is not loading": t("Customer ordering page is not loading"),
+    "Staff screens are not loading": t("Staff screens are not loading"),
+    "Background services are not being watched": t("Background services are not being watched"),
+    "A background service needs a person": t("A background service needs a person"),
+    "Order or payment updates are stuck": t("Order or payment updates are stuck"),
+    "Some order updates are being retried": t("Some order updates are being retried"),
+    "Orders from earlier days are still holding stock": t(
+      "Orders from earlier days are still holding stock",
+    ),
+    "Receipts are not being issued": t("Receipts are not being issued"),
+    "Orders cannot be priced": t("Orders cannot be priced"),
+    "Payment differences need checking": t("Payment differences need checking"),
+    "Day-end settlement has open problems": t("Day-end settlement has open problems"),
+    "Last night's backup failed": t("Last night's backup failed"),
+    "No recent backup": t("No recent backup"),
+    "The newest backup could not be restored": t("The newest backup could not be restored"),
+    "Off-site backup copy failed": t("Off-site backup copy failed"),
+    "Disk space is running low": t("Disk space is running low"),
+    "Some checks could not run": t("Some checks could not run"),
+    "Alert messages are not being delivered": t("Alert messages are not being delivered"),
+  };
+  return words[title] ?? title;
+}
+
 export const OPERATIONS_ALERTS_REFRESH_MS = 60_000;
 
 const invalid = (): never => {
@@ -299,7 +327,7 @@ export function OperationsAlertsCard({
                       <span className="system-alert__badge">
                         {item.severity === "critical" ? t("Urgent") : t("Today")}
                       </span>
-                      <strong>{item.title}</strong>
+                      <strong>{alertTitle(item.title)}</strong>
                     </p>
                     {/* Owner 2026-10-25: what to do stays in view; the background is on request. */}
                     <p>
@@ -328,7 +356,7 @@ export function OperationsAlertsCard({
                 value: view.recentlyCleared
                   .slice(-3)
                   .reverse()
-                  .map((item) => `${item.title} (${at(item.clearedAt)})`)
+                  .map((item) => `${alertTitle(item.title)} (${at(item.clearedAt)})`)
                   .join("; "),
               })}
             </p>

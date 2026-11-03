@@ -378,7 +378,7 @@ for (const viewport of [
     for (const name of ["Synthetic mushroom rice bowl", "Synthetic green tea"]) {
       const card = page.locator("article.menu-card").filter({ hasText: name });
       await expect(card.getByRole("link", { name: `View ${name}` })).toBeVisible();
-      await expect(page.locator(".menu-help")).toBeVisible();
+      await expect(page.locator(".menu-help-line")).toBeVisible();
       await settledShift(page);
       await resetShift(page);
       await card.getByRole("link", { name: `View ${name}` }).click();

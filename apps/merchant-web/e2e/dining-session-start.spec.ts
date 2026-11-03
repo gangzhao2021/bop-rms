@@ -285,7 +285,7 @@ test("@production staff starts a table and recovers a lost join code without dup
   expect(tableReads).toBe(readsBefore + 2);
   // Opening a free table is one tap (no checkbox); a lost answer is tried again as the same start.
   const freeT1 = free.getByRole("listitem").filter({ hasText: "Table T1" });
-  await freeT1.getByRole("button", { name: "Open", exact: true }).click();
+  await freeT1.getByRole("button", { name: "Open table", exact: true }).click();
   await expect(page.getByRole("button", { name: "Refresh tables", exact: true })).toBeDisabled();
   await freeT1.getByRole("button", { name: "Try opening again", exact: true }).click();
   await expect(
@@ -294,6 +294,9 @@ test("@production staff starts a table and recovers a lost join code without dup
       { exact: true },
     ),
   ).toBeVisible();
+  await page.locator("details.table-panel__manage").evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
   await details.getByRole("button", { name: "New join code", exact: true }).click();
   await expect(page.getByText("123456", { exact: true })).toBeVisible();
   await expect(page.locator(".table-result")).toContainText(

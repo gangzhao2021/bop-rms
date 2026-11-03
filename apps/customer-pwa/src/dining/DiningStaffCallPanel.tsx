@@ -30,7 +30,7 @@ export const diningStaffCallCheckIntervalMs = 10_000;
 
 const reasonText = (): Record<DiningStaffCallReason, string> => ({
   Question: t("A question"),
-  TableNeeds: t("Something for the table (water, cutlery, napkins)"),
+  TableNeeds: t("Water, cutlery, napkins"),
   OrderProblem: t("A problem with my order"),
   ReadyToPay: t("We're ready to pay"),
 });
@@ -42,7 +42,6 @@ export function DiningStaffCallPanel({
 }) {
   const [client] = useState(() => provided ?? createHttpDiningStaffCallClient());
   const [state, setState] = useState<DiningStaffCallState>({ status: "hidden" });
-  const [reason, setReason] = useState<DiningStaffCallReason>("Question");
   // The request key of an attempt whose result is not known yet; a retry repeats it.
   const pending = useRef<{ readonly kind: "call" | "withdraw"; readonly key: string } | null>(null);
   const busy = useRef(false);
@@ -93,7 +92,7 @@ export function DiningStaffCallPanel({
   if (state.status === "hidden") return null;
   const view = state.view;
   const sending = state.status === "sending";
-  const send = async (kind: "call" | "withdraw") => {
+  const send = async (kind: "call" | "withdraw", reason: DiningStaffCallReason = "Question") => {
     if (busy.current || view === null) return;
     busy.current = true;
     const key =
@@ -189,32 +188,26 @@ export function DiningStaffCallPanel({
             </p>
           ) : (
             <>
-              <fieldset className="dining-staff-call__reasons" disabled={sending || view === null}>
-                <legend>{t("What do you need?")}</legend>
+              {/* Owner 2026-11-03 walkthrough: one tap, and the guest can take it back. */}
+              <div
+                className="dining-staff-call__reasons"
+                role="group"
+                aria-label={t("What do you need?")}
+              >
                 {diningStaffCallReasons.map((code) => (
-                  <label key={code}>
-                    <input
-                      type="radio"
-                      name="dining-staff-call-reason"
-                      value={code}
-                      checked={reason === code}
-                      onChange={() => setReason(code)}
-                    />
+                  <button
+                    key={code}
+                    type="button"
+                    disabled={sending || view === null}
+                    onClick={() => void send("call", code)}
+                  >
                     {reasons[code]}
-                  </label>
+                  </button>
                 ))}
-              </fieldset>
+              </div>
               <p className="dining-invitation__note">
                 {t("Please don’t share allergies here; tell the staff member when they arrive.")}
               </p>
-              <button
-                className="dining-invitation__action"
-                type="button"
-                disabled={sending || view === null}
-                onClick={() => void send("call")}
-              >
-                {sending ? t("Sending…") : t("Ask staff to come to the table")}
-              </button>
             </>
           )}
         </>

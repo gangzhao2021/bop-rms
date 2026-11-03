@@ -173,10 +173,9 @@ test("@production a guest joins the scanned open table with one tap, or with a c
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Join this table", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+  // Owner 2026-11-03: joined, the menu opens.
+  await expect(page).toHaveURL(/\/menu$/u);
   expect(table).toMatchObject({ qrJoins: 1, codeJoins: 0 });
-  // Joined: going to the menu is now the one primary action.
-  await expect(page.getByRole("button", { name: "Continue to menu" })).toHaveClass(/entry-action/u);
 
   // WP-2423 item 8 ⑤ decisions 5–6: a round waiting for staff says so, and why, on the table page.
   await page.evaluate(() => {

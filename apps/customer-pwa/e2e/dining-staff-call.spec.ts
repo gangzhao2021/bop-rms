@@ -120,18 +120,15 @@ test.describe("@production a guest at the table asks staff to come over", () => 
     await enterTable(page);
     const panel = page.getByRole("region", { name: "Need a staff member?" });
     await expect(panel).toBeVisible();
-    await expect(panel.getByRole("radio", { name: "A question" })).toBeChecked();
     // DEC-DINING-STAFF-CALL (2026-10-30): a table can say it is ready to pay.
-    await expect(panel.getByRole("radio", { name: "We're ready to pay" })).toBeVisible();
-    await panel
-      .getByRole("radio", { name: "Something for the table (water, cutlery, napkins)" })
-      .check();
+    await expect(panel.getByRole("button", { name: "We're ready to pay" })).toBeVisible();
     // Nothing to type: no allergy or personal detail goes through this.
     await expect(panel.getByRole("textbox")).toHaveCount(0);
-    await panel.getByRole("button", { name: "Ask staff to come to the table" }).click();
+    // Owner 2026-11-03: one tap asks; the guest can take it back.
+    await panel.getByRole("button", { name: "Water, cutlery, napkins" }).click();
     const asked = page.getByRole("region", { name: "Staff have been asked to come to your table" });
     await expect(asked).toBeVisible();
-    await expect(asked.getByText(/Asked at .+ · Something for the table/u)).toBeVisible();
+    await expect(asked.getByText(/Asked at .+ · Water, cutlery, napkins/u)).toBeVisible();
     expect(calls).toHaveLength(1);
     expect(calls[0]?.body).toEqual({ reason: "TableNeeds" });
     expect(calls[0]?.key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/u);
@@ -182,7 +179,7 @@ test.describe("@production a guest at the table asks staff to come over", () => 
     await enterTable(page);
     const panel = page.getByRole("region", { name: "Need a staff member?" });
     await expect(panel.getByText(/A staff member saw your request at/u)).toBeVisible();
-    await panel.getByRole("button", { name: "Ask staff to come to the table" }).click();
+    await panel.getByRole("button", { name: "A question" }).click();
     await expect(
       panel.getByText("We couldn’t reach the staff. Try again, or wave to a staff member."),
     ).toBeVisible();

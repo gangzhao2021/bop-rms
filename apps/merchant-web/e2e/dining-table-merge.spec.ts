@@ -198,6 +198,9 @@ test("@production staff merge a table's party into another seated table", async 
   const target = panel.getByRole("combobox", { name: "Merge into…" });
   // Only a seated table that pays at the end, still ordering, with nothing paid or split, and that
   // has ordered; every other table says why.
+  await page.locator("details.table-panel__manage").evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
   await expect(target.getByRole("option")).toHaveText([
     "Choose a table",
     "T7",

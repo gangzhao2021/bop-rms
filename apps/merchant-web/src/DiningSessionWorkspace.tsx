@@ -55,7 +55,7 @@ type AvailabilityOperation = ReturnType<
 /** WP-2423 Q8: staff pick a plain reason; the stored reason stays a stable code. */
 const tableBlockReasons = [
   ["CLEANING", t("Being cleaned")],
-  ["RESERVED", "Reserved"],
+  ["RESERVED", t("Reserved")],
   ["OUT_OF_SERVICE", t("Out of service")],
   ["AREA_CLOSED", t("Section closed")],
 ] as const;
@@ -1004,7 +1004,7 @@ export function DiningSessionWorkspace({
                         unknownAction === "Session" &&
                         operation.current?.table === table.tableReference
                       ? t("Try opening again")
-                      : t("Open")}
+                      : t("Open table")}
                 </button>
               ) : (
                 <span className="table-free__why">
@@ -1281,6 +1281,7 @@ function TablePanel({
   const unpaidHint = guestRoundCancelHint(table, now, canCancelUnpaidRounds);
   const eligible = table.lifecycle === "Published" && table.operationalState === "Available";
   const noCode = table.qrCodeValidUntil === null;
+  const hasOrder = Boolean(table.session?.orderReference);
   // WP-2423 item 8 ⑤ decision 4: which phone sent each round, from the table's phone list.
   const [roundPhones, setRoundPhones] = useState<ReadonlyMap<string, number | null>>(new Map());
   return (
@@ -1331,7 +1332,7 @@ function TablePanel({
         </section>
       ) : null}
       {code ? <DiningEntryCode code={code} onHide={onHideCode} /> : null}
-      {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+      {seated && !hasOrder && canOperateTables && table.currentDiningSessionReference !== null ? (
         // WP-2423 item 8 ⑦ (decision 2): how many guests, when the Store asks for it.
         <TablePartySize
           key={"party:" + table.currentDiningSessionReference}
@@ -1345,28 +1346,6 @@ function TablePanel({
           }}
         />
       ) : null}
-      {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
-        // WP-2423 item 8 ⑧ (Owner decision 3): move the party to another free table.
-        <TableMove
-          key={"move:" + table.currentDiningSessionReference}
-          table={table}
-          tables={tables}
-          csrf={csrf}
-          locked={locked}
-          onMoved={onMoved}
-        />
-      ) : null}
-      {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
-        // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): merge this party into another seated table.
-        <TableMerge
-          key={"merge:" + table.currentDiningSessionReference}
-          table={table}
-          tables={tables}
-          csrf={csrf}
-          locked={locked}
-          onMerged={onMoved}
-        />
-      ) : null}
       {seated ? (
         <TableHeldRounds
           rounds={table.heldRounds ?? []}
@@ -1374,18 +1353,6 @@ function TablePanel({
           timeZone={timeZone}
           locked={locked}
           onChanged={onChanged}
-        />
-      ) : null}
-      {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
-        <TablePanelPhones
-          key={table.currentDiningSessionReference}
-          diningSessionReference={table.currentDiningSessionReference}
-          csrf={csrf}
-          timeZone={timeZone}
-          now={now}
-          locked={locked}
-          refreshKey={refreshKey + ":" + String(checkoutRevision)}
-          onRounds={setRoundPhones}
         />
       ) : null}
       {seated && table.session?.orderReference ? (
@@ -1513,81 +1480,135 @@ function TablePanel({
           )}
         </section>
       ) : null}
-      <section className="table-panel__more" aria-label={t("More for this table")}>
-        {canTakeOrders && eligible && !noCode ? (
-          // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone (or a
-          // paper order entered after an outage); it joins the table's order, or opens the table.
-          <Link
-            className="table-panel__text-step"
-            to={`/operations/order-entry?table=${encodeURIComponent(table.tableReference)}`}
-          >
-            {t("Take order for table {stableLabel}", { stableLabel: saidTable(table.stableLabel) })}
-          </Link>
+      {canTakeOrders && eligible && !noCode ? (
+        // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone (or a
+        // paper order entered after an outage); it joins the table's order, or opens the table.
+        <Link
+          className="table-panel__text-step"
+          to={`/operations/order-entry?table=${encodeURIComponent(table.tableReference)}`}
+        >
+          {t("Take order for table {stableLabel}", {
+            stableLabel: saidTable(table.stableLabel),
+          })}
+        </Link>
+      ) : null}
+      {/* Owner 2026-11-03 walkthrough: dishes, payment and closing come first; the rest is here. */}
+      <details className="table-panel__manage" open={!seated}>
+        <summary>{t("Manage this table")}</summary>
+        {seated && hasOrder && canOperateTables && table.currentDiningSessionReference !== null ? (
+          // WP-2423 item 8 ⑦ (decision 2): how many guests, when the Store asks for it.
+          <TablePartySize
+            key={"party:" + table.currentDiningSessionReference}
+            diningSessionReference={table.currentDiningSessionReference}
+            tableLabel={table.stableLabel}
+            csrf={csrf}
+            locked={locked}
+            onRecorded={(size) => {
+              if (table.currentDiningSessionReference !== null)
+                onPartySize?.(table.currentDiningSessionReference, size);
+            }}
+          />
         ) : null}
-        {seated && !noCode ? (
-          <button
-            type="button"
-            className="table-panel__text-step"
-            disabled={busy || (state === "Unknown" && unknownAction !== "Session")}
-            onClick={onStart}
-          >
-            {state === "Unknown" && unknownAction === "Session"
-              ? t("Try the new join code again")
-              : t("New join code")}
-          </button>
+        {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+          // WP-2423 item 8 ⑧ (Owner decision 3): move the party to another free table.
+          <TableMove
+            key={"move:" + table.currentDiningSessionReference}
+            table={table}
+            tables={tables}
+            csrf={csrf}
+            locked={locked}
+            onMoved={onMoved}
+          />
         ) : null}
-        {seated && canTransferHost && table.currentDiningSessionReference ? (
-          <DiningHostTransferAction
+        {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+          // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): merge this party into another seated table.
+          <TableMerge
+            key={"merge:" + table.currentDiningSessionReference}
+            table={table}
+            tables={tables}
+            csrf={csrf}
+            locked={locked}
+            onMerged={onMoved}
+          />
+        ) : null}
+        {seated && canOperateTables && table.currentDiningSessionReference !== null ? (
+          <TablePanelPhones
             key={table.currentDiningSessionReference}
             diningSessionReference={table.currentDiningSessionReference}
             csrf={csrf}
-            disabled={hostTransferDisabled}
-            onLocked={onHostLocked}
+            timeZone={timeZone}
+            now={now}
+            locked={locked}
+            refreshKey={refreshKey + ":" + String(checkoutRevision)}
+            onRounds={setRoundPhones}
           />
         ) : null}
-        {canOperateTables ? (
-          table.operationalState === "Available" ? (
-            <div className="table-panel__block">
-              <label className="dining-table-reason">
-                {t("Mark unavailable")}
-                <select
-                  value={blockReasonCode}
-                  disabled={busy}
-                  onChange={(event) => onBlockReason(event.target.value)}
-                >
-                  <option value="">{t("Choose a reason")}</option>
-                  {tableBlockReasons.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="table-panel__text-step"
-                disabled={
-                  busy ||
-                  (state === "Unknown" && unknownAction !== "Availability") ||
-                  !/^[A-Z][A-Z0-9_-]{0,63}$/.test(blockReasonCode)
-                }
-                onClick={() => onAvailability("SetBlock")}
-              >
-                {t("Mark unavailable")}
-              </button>
-            </div>
-          ) : (
+        <section className="table-panel__more" aria-label={t("More for this table")}>
+          {seated && !noCode ? (
             <button
               type="button"
               className="table-panel__text-step"
-              disabled={busy || (state === "Unknown" && unknownAction !== "Availability")}
-              onClick={() => onAvailability("ClearBlock")}
+              disabled={busy || (state === "Unknown" && unknownAction !== "Session")}
+              onClick={onStart}
             >
-              {table.blockReasonCode === "CLEANING" ? t("Cleaned") : t("Mark available")}
+              {state === "Unknown" && unknownAction === "Session"
+                ? t("Try the new join code again")
+                : t("New join code")}
             </button>
-          )
-        ) : null}
-      </section>
+          ) : null}
+          {seated && canTransferHost && table.currentDiningSessionReference ? (
+            <DiningHostTransferAction
+              key={table.currentDiningSessionReference}
+              diningSessionReference={table.currentDiningSessionReference}
+              csrf={csrf}
+              disabled={hostTransferDisabled}
+              onLocked={onHostLocked}
+            />
+          ) : null}
+          {canOperateTables ? (
+            table.operationalState === "Available" ? (
+              <div className="table-panel__block">
+                <label className="dining-table-reason">
+                  {t("Mark unavailable")}
+                  <select
+                    value={blockReasonCode}
+                    disabled={busy}
+                    onChange={(event) => onBlockReason(event.target.value)}
+                  >
+                    <option value="">{t("Choose a reason")}</option>
+                    {tableBlockReasons.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="table-panel__text-step"
+                  disabled={
+                    busy ||
+                    (state === "Unknown" && unknownAction !== "Availability") ||
+                    !/^[A-Z][A-Z0-9_-]{0,63}$/.test(blockReasonCode)
+                  }
+                  onClick={() => onAvailability("SetBlock")}
+                >
+                  {t("Mark unavailable")}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="table-panel__text-step"
+                disabled={busy || (state === "Unknown" && unknownAction !== "Availability")}
+                onClick={() => onAvailability("ClearBlock")}
+              >
+                {table.blockReasonCode === "CLEANING" ? t("Cleaned") : t("Mark available")}
+              </button>
+            )
+          ) : null}
+        </section>
+      </details>
     </>
   );
 }

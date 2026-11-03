@@ -103,19 +103,6 @@ export function tableNeed(
       step: null,
     };
   }
-  // WP-2423 item 8 ⑤ decision 3: a phone joined the table in the last 3 minutes.
-  const joined = [...(table.newPhones ?? [])].sort((a, b) =>
-    b.joinedAt.localeCompare(a.joinedAt),
-  )[0];
-  if (joined !== undefined)
-    return {
-      tone: "action",
-      rank: 2,
-      since: joined.joinedAt,
-      words: t("Phone {number} just joined", { number: String(joined.phoneNumber) }),
-      detail: t("check it belongs to this table"),
-      step: null,
-    };
   // Warn before timeouts: the list says how long a paid round has waited, and how long is left
   // before an unpaid round is cancelled on its own (the panel says what to do).
   const oldestPaid = [...table.roundsAwaitingAcceptance].sort((a, b) =>
@@ -193,6 +180,21 @@ export function tableNeed(
       step: "TakePayment",
     };
   }
+  // Owner 2026-11-03 walkthrough: never over a dish to serve or a table to take payment from. A
+  // phone joining is what every normal guest does.
+  // WP-2423 item 8 ⑤ decision 3: a phone joined the table in the last 3 minutes.
+  const joined = [...(table.newPhones ?? [])].sort((a, b) =>
+    b.joinedAt.localeCompare(a.joinedAt),
+  )[0];
+  if (joined !== undefined)
+    return {
+      tone: "action",
+      rank: 4,
+      since: joined.joinedAt,
+      words: t("Phone {number} just joined", { number: String(joined.phoneNumber) }),
+      detail: t("check it belongs to this table"),
+      step: null,
+    };
   if (table.elapsedMinutes !== null && table.elapsedMinutes > longOpenSessionMinutes)
     return { tone: "action", rank: 5, words: t("Open a long time"), detail: null, step: null };
   if (order?.inKitchen)
