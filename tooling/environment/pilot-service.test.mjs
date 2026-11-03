@@ -233,3 +233,10 @@ it("launches daily settlement independently and rejects another installation", (
     isPilotWorkerCandidate(root, "daily-settlement-worker", root, args.join("\0"), ".local/other"),
   ).toBe(false);
 });
+
+test("every service follows the database's clock when the pilot asks for it", () => {
+  for (const service of ["api", "customer", "business-worker", "daily-settlement-worker"])
+    expect(
+      pilotLaunchEnvironment(service, { PILOT_CLOCK_FROM_DATABASE: "1" }).PILOT_CLOCK_FROM_DATABASE,
+    ).toBe("1");
+});

@@ -175,7 +175,7 @@ export function pilotLaunchEnvironment(service, environment) {
     ...pilotChildEnvironment(currentPilotEnvironment({ test: true })),
     ...(service === "api" ? { PORT: "4300" } : {}),
   };
-  for (const key of ["PATH", "HOME", "TMPDIR"])
+  for (const key of ["PATH", "HOME", "TMPDIR", "PILOT_CLOCK_FROM_DATABASE"])
     if (typeof environment[key] === "string") result[key] = environment[key];
   return result;
 }
