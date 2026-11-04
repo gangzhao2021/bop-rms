@@ -1,12 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import {
   OPERATIONS_ALERTS_NOT_PERMITTED,
-  OperationsAlertsCard,
+  StoreSystemLine,
   createOperationsAlertsClient,
   parseOperationsAlertView,
+  type OperationsAlertsRead,
   type OperationsAlertView,
 } from "./OperationsAlerts.js";
+import { NeedsAttention, initialOverviewState } from "./StoreOverview.js";
 
 const view = (change: Partial<OperationsAlertView> = {}): OperationsAlertView => ({
   monitor: "Reporting",
@@ -26,47 +29,74 @@ const critical = {
   action: "Pause online ordering if staff screens still work.",
   raisedAt: "2026-10-15T11:56:00.000Z",
 };
-const render = (read: Parameters<typeof OperationsAlertsCard>[0]["read"]) =>
-  renderToStaticMarkup(<OperationsAlertsCard read={read} timeZone="America/Toronto" />);
+/** Home's two places for the board: the rows in "Needs attention" and the line at the bottom. */
+const rows = (read: OperationsAlertsRead) =>
+  renderToStaticMarkup(
+    <MemoryRouter>
+      <NeedsAttention
+        state={initialOverviewState}
+        system={read}
+        timeZone="America/Toronto"
+        onCheckSystem={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+const line = (read: OperationsAlertsRead) =>
+  renderToStaticMarkup(<StoreSystemLine read={read} timeZone="America/Toronto" />);
 
 describe("WP-2423 Q13 store system alerts on the Home", () => {
-  it("says everything is working, when the last backup ran and that no outbound alerts exist", () => {
-    const html = render({ kind: "Ready", value: view() });
-    expect(html).toContain("Everything is working.");
+  it("says all is good in one line, when the last backup ran and that no outbound alerts exist", () => {
+    const read = { kind: "Ready", value: view() } as const;
+    const html = line(read);
+    expect(html).toContain("Store system: all good");
     expect(html).toContain("Last backup Oct 15, 2026, 4:30 AM");
     expect(html).toContain("no email or phone alerts are set up yet");
-    expect(html).not.toContain("overview-card--alerts-critical");
+    expect(rows(read)).not.toContain("overview-attention__state");
   });
-  it("lists each problem with urgency, what to do and when it started in Store time", () => {
-    const html = render({
+  it("lists each problem in Needs attention with urgency, what to do and when it started in Store time", () => {
+    const read = {
       kind: "Ready",
       value: view({
         active: [
-          critical,
           { ...critical, key: "disk.low", severity: "warning", title: "Disk space is running low" },
+          critical,
         ],
         outbound: { email: true, webhooks: 1, heartbeat: true },
       }),
-    });
-    expect(html).toContain("overview-card--alerts-critical");
+    } as const;
+    const html = rows(read);
+    expect(html).toContain("overview-attention__state--danger");
     expect(html).toContain("Urgent");
     expect(html).toContain("Today");
     expect(html).toContain("What to do: </span>Pause online ordering");
     expect(html).toContain("Since Oct 15, 2026, 7:56 AM");
-    expect(html).toContain("alerted by email and phone or message alerts");
+    expect(html).toContain("The secure customer ordering page has not loaded for 4 minutes.");
+    // The urgent one leads the list, whatever order the monitor sent them in.
+    expect(html.indexOf("Customer ordering page")).toBeLessThan(html.indexOf("Disk space"));
+    // The line never says all is good while a problem is listed, and the rest stays reachable.
+    const quiet = line(read);
+    expect(quiet).toContain("Store system: needs attention");
+    expect(quiet).not.toContain("all good");
+    expect(quiet).toContain("alerted by email and phone or message alerts");
   });
-  it("warns that nothing is being checked when the monitor is silent or not running", () => {
-    expect(render({ kind: "Ready", value: view({ monitor: "Silent" }) })).toContain(
-      "The alert monitor stopped reporting at Oct 15, 2026, 8:00 AM",
-    );
-    expect(
-      render({ kind: "Ready", value: view({ monitor: "NotRunning", observedAt: null }) }),
-    ).toContain("The alert monitor is not running");
-    expect(render({ kind: "Unavailable" })).toContain("System alerts could not be read");
-    expect(render({ kind: "Loading" })).toContain("Checking the store system");
+  it("warns in Needs attention that nothing is being checked when the monitor is silent or not running", () => {
+    const silent = { kind: "Ready", value: view({ monitor: "Silent" }) } as const;
+    expect(rows(silent)).toContain("The alert monitor stopped reporting at Oct 15, 2026, 8:00 AM");
+    expect(rows(silent)).toContain(">Urgent<");
+    expect(line(silent)).toContain("Store system: problems are not being checked");
+    expect(line(silent)).not.toContain("all good");
+    const stopped = {
+      kind: "Ready",
+      value: view({ monitor: "NotRunning", observedAt: null }),
+    } as const;
+    expect(rows(stopped)).toContain("The alert monitor is not running");
+    expect(rows({ kind: "Unavailable" })).toContain("System alerts could not be read");
+    expect(line({ kind: "Unavailable" })).toContain("Store system: could not be checked");
+    expect(line({ kind: "Unavailable" })).not.toContain("all good");
+    expect(line({ kind: "Loading" })).toContain("Checking the store system");
   });
   it("shows recently resolved problems, newest first", () => {
-    const html = render({
+    const html = line({
       kind: "Ready",
       value: view({
         recentlyCleared: [
@@ -86,18 +116,21 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
       startedAt: "2026-10-15T11:58:00.000Z",
       expiresAt: "2026-10-15T12:13:00.000Z",
     };
-    const html = render({ kind: "Ready", value: view({ plannedUpdate }) });
+    const read = { kind: "Ready", value: view({ plannedUpdate }) } as const;
+    const html = rows(read);
     expect(html).toContain("System update in progress — ordering may pause for a few minutes.");
     expect(html).toContain("Started Oct 15, 2026, 7:58 AM.");
-    expect(html).toContain("after Oct 15, 2026, 8:13 AM, this card shows an urgent alert");
-    expect(html).not.toContain("Everything is working.");
-    expect(html).not.toContain("overview-card--alerts-critical");
-    expect(html).not.toContain("overview-card--alerts-warning");
+    expect(html).toContain("after Oct 15, 2026, 8:13 AM, this page shows an urgent alert");
+    expect(html).toContain("overview-attention__state--progress");
+    expect(html).not.toContain("overview-attention__state--danger");
+    expect(html).not.toContain("overview-attention__state--warning");
     expect(html).not.toContain("Urgent");
+    expect(line(read)).toContain("Store system: update in progress");
+    expect(line(read)).not.toContain("all good");
     // A real problem raised meanwhile (or before the update) still shows with its urgency.
-    const both = render({ kind: "Ready", value: view({ plannedUpdate, active: [critical] }) });
+    const both = rows({ kind: "Ready", value: view({ plannedUpdate, active: [critical] }) });
     expect(both).toContain("System update in progress");
-    expect(both).toContain("overview-card--alerts-critical");
+    expect(both).toContain("overview-attention__state--danger");
     expect(both).toContain("Customer ordering page is not loading");
     // Older servers send no planned-update entry; a malformed one is refused.
     const older: Record<string, unknown> = { ...view() };
@@ -146,6 +179,7 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     }
   });
   it("renders nothing at all for a role the server does not permit", () => {
-    expect(render({ kind: "NotPermitted" })).toBe("");
+    expect(line({ kind: "NotPermitted" })).toBe("");
+    expect(rows({ kind: "NotPermitted" })).not.toContain("Store system");
   });
 });

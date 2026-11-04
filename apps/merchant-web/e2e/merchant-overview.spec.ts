@@ -286,20 +286,37 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   await expect(page.getByRole("combobox", { name: "Authorized Store" })).toHaveValue(id(99));
   await expect(page.getByText("WP-1905")).toHaveCount(0);
   await expect(page.getByText("not available in this release", { exact: false })).toHaveCount(0);
-  // WP-2423 P2: the "right now" card reads the pilot projections and links to each page.
+  // WP-2423 P2: Home reads the pilot projections: what to act on is a row in "Needs attention"
+  // with the way there, the rest a few numbers that link to each page.
+  const needs = page.getByRole("region", { name: "Needs attention" });
   const now = page.getByRole("region", { name: "Right now" });
-  await expect(now.getByText("1 awaiting acceptance · 1 ready to serve")).toBeVisible();
-  await expect(now.getByText("Ready for collection")).toBeVisible();
+  await expect(needs.getByText("1 awaiting acceptance")).toBeVisible();
+  await expect(needs.getByText("1 ready to serve")).toBeVisible();
+  await expect(now.getByRole("link", { name: "Waiting for pickup" })).toHaveAttribute(
+    "href",
+    "/operations/pickup",
+  );
+  // Owner 2026-11-03: Today's summary only for those with the reports screen (not this one).
+  await expect(now.getByRole("link", { name: "Today's summary" })).toHaveCount(0);
   // L7: today's pickups apart from an earlier day's, with the way to check and close it.
-  await expect(now.getByText("Pickups from earlier days")).toBeVisible();
-  await expect(now.getByRole("link", { name: "Check and close" })).toHaveAttribute(
+  await expect(needs.getByText("Pickups from earlier days")).toBeVisible();
+  await expect(needs.getByRole("link", { name: "Check and close" })).toHaveAttribute(
     "href",
     "/operations/pickup",
   );
   // M7: the served table shows as waiting to be closed.
-  await expect(now.getByText("1 table served — close when the guests have left")).toBeVisible();
-  // M6: the opening and closing checklist from the same reads and the last closed day's settlement.
+  await expect(needs.getByText("1 table served — close when the guests have left")).toBeVisible();
+  // Owner 2026-11-03: payments to look at from the last closed day are a row, not only a checklist line.
+  await expect(needs.getByText("1 payment to look at")).toBeVisible();
+  await expect(needs.getByRole("link", { name: "Go to Settlement" })).toHaveAttribute(
+    "href",
+    "/app/operations/payment-reconciliation",
+  );
+  // M6: the opening and closing checklist, closed until asked for, from the same reads and the
+  // last closed day's settlement.
   const checklist = page.getByRole("region", { name: "Opening and closing" });
+  await expect(checklist.getByText("Settlement for Mon, Sep 21")).toBeHidden();
+  await checklist.getByText("Opening and closing").click();
   await expect(checklist.getByText("Settlement for Mon, Sep 21")).toBeVisible();
   await expect(checklist.getByText("1 payment to look at")).toBeVisible();
   await expect(checklist.getByRole("link", { name: "Go to Settlement" })).toHaveAttribute(
@@ -307,12 +324,12 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
     "/app/operations/payment-reconciliation",
   );
   await expectNoInternalText(page);
-  await expect(now.getByText("1 overdue")).toBeVisible();
+  await expect(needs.getByText("1 overdue")).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Store system" }).getByText("Everything is working."),
+    page.getByRole("region", { name: "Store system" }).getByText("Store system: all good"),
   ).toBeVisible();
   await expect(now.getByText(/^Last checked \d\d:\d\d/u)).toBeVisible();
-  await expect(now.getByRole("link", { name: "View exceptions" })).toHaveAttribute(
+  await expect(needs.getByRole("link", { name: "View exceptions" })).toHaveAttribute(
     "href",
     "/operations/order-exceptions",
   );
@@ -458,8 +475,9 @@ test("@production Home reads only the summaries the staff member's screens permi
   await page.reload();
   await expect(page.getByRole("region", { name: "Right now" })).toBeVisible();
   await expect(page.getByText("Open orders")).toBeVisible();
-  await expect(page.getByText("Pickups waiting")).toHaveCount(0);
+  await expect(page.getByText("Waiting for pickup")).toHaveCount(0);
   await expect(page.getByText("Open exceptions")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Today's summary" })).toHaveCount(0);
   expect(new Set(requested)).toEqual(new Set(["/merchant/orders", "/merchant/operations-alerts"]));
   await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
 

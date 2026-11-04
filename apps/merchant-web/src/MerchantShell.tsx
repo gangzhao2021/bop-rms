@@ -36,7 +36,7 @@ export interface MerchantShellProps {
   readonly state: MerchantShellState;
   readonly onSwitchStore: (targetStoreReference: string) => void | Promise<void>;
   readonly overview?: ReactNode;
-  /** WP-2423 P2: the live "right now" card; the release note is shown while it is absent. */
+  /** WP-2423 P2: the live Home sections; the release note is shown while they are absent. */
   readonly today?: ReactNode;
   /** WP-2423: a request to the signed-in person shown above the overview (add your name). */
   readonly prompt?: ReactNode;
@@ -90,10 +90,17 @@ export function MerchantShell({
     <WorkspacePage
       className="workspace-page--overview"
       title={scope.storeLabel}
-      meta={t("{label} · Business date {businessDate}", {
-        label: scope.brandLabel,
-        businessDate: businessDateText(businessDate),
-      })}
+      meta={
+        <>
+          {t("Business date {businessDate}", { businessDate: businessDateText(businessDate) })}
+          {" · "}
+          <span>
+            {currentLanguage() === "zh-Hans"
+              ? STORE_STATUS_CHINESE[ready.workspace.storeStatus]
+              : ready.workspace.storeStatus}
+          </span>
+        </>
+      }
       status={<Freshness status={ready.workspace.freshness} />}
       actions={
         multiStore ? (
@@ -106,7 +113,9 @@ export function MerchantShell({
               if (typeof target === "string") void onSwitchStore(target);
             }}
           >
-            <label htmlFor="store-scope">{t("Authorized Store")}</label>
+            <label className="scope-switcher__label" htmlFor="store-scope">
+              {t("Authorized Store")}
+            </label>
             <select
               key={scope.storeReference}
               id="store-scope"
@@ -148,27 +157,9 @@ export function MerchantShell({
         {prompt}
         {overview ?? (
           <div className="overview-grid">
-            <section
-              className="overview-card overview-card--status"
-              aria-labelledby="live-store-status-heading"
-            >
-              <h3 id="live-store-status-heading">{t("Store status")}</h3>
-              <p className="overview-status-value">
-                <span>
-                  {currentLanguage() === "zh-Hans"
-                    ? STORE_STATUS_CHINESE[ready.workspace.storeStatus]
-                    : ready.workspace.storeStatus}
-                </span>
-              </p>
-              <p className="overview-status-date">
-                {t("Business date {businessDate}", {
-                  businessDate: businessDateText(businessDate),
-                })}
-              </p>
-            </section>
             {today ?? (
-              <section className="overview-card" aria-labelledby="today-summary-heading">
-                <h3 id="today-summary-heading">{t("Today")}</h3>
+              <section className="overview-note" aria-labelledby="today-summary-heading">
+                <h2 id="today-summary-heading">{t("Today")}</h2>
                 <p>
                   {t(
                     "Sales, open orders and exceptions for the day are not available in this release. Use Orders, Kitchen, Pickup and Exceptions from the menu.",

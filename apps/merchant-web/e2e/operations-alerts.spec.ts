@@ -303,23 +303,43 @@ test("@production Home shows store system alerts with what to do, and their reso
   const errors = home.errors;
 
   await page.goto("/app");
+  // Owner 2026-11-03: a real problem is a row in "Needs attention", the store system a quiet line.
+  const needs = page.getByRole("region", { name: "Needs attention" });
   const card = page.getByRole("region", { name: "Store system" });
-  await expect(card.getByText("Customer ordering page is not loading")).toBeVisible();
-  await expect(card.getByText("Urgent")).toBeVisible();
-  await expect(card.getByText("Today", { exact: true })).toBeVisible();
+  await expect(needs.getByText("Customer ordering page is not loading")).toBeVisible();
+  await expect(needs.getByText("Urgent")).toBeVisible();
+  await expect(needs.getByText("Today", { exact: true })).toBeVisible();
   await expect(
-    card.getByText(/What to do: Pause online ordering if staff screens still work/u),
+    needs.getByText(/What to do: Pause online ordering if staff screens still work/u),
   ).toBeVisible();
-  await expect(card.getByText("Since Oct 15, 2026, 11:56 AM")).toBeVisible();
+  await expect(needs.getByText("Since Oct 15, 2026, 11:56 AM")).toBeVisible();
+  await expect(
+    needs.getByText("Guests cannot scan, order or pay online.", { exact: false }),
+  ).toBeHidden();
+  await needs.getByText("More about this").first().click();
+  await expect(
+    needs.getByText("Guests cannot scan, order or pay online.", { exact: false }),
+  ).toBeVisible();
+  await expect(card.getByText("Store system: needs attention")).toBeVisible();
+  await expect(card.getByText("all good")).toHaveCount(0);
   await expect(card.getByText("Last backup Oct 15, 2026, 4:30 AM", { exact: false })).toBeVisible();
+  await card.getByText("System details").click();
   await expect(card.getByText("The Owner is also alerted by email.")).toBeVisible();
   await expectNoInternalText(page);
-  // The most urgent card comes first on the Home, above "Right now".
-  const cardBox = await card.boundingBox();
+  // The most urgent problem comes first on the Home, above "Right now"; the line comes last.
+  const needsBox = await needs.boundingBox();
   const nowBox = await page.getByRole("region", { name: "Right now" }).boundingBox();
-  expect(cardBox && nowBox && cardBox.y < nowBox.y).toBe(true);
+  const lineBox = await card.boundingBox();
+  expect(needsBox && nowBox && lineBox && needsBox.y < nowBox.y && nowBox.y < lineBox.y).toBe(true);
+  await expect(needs.locator("li").first()).toContainText("Customer ordering page is not loading");
+  // Owner 2026-11-03: the way into Today's summary, for those with the reports screen.
+  await expect(page.getByRole("link", { name: "Today's summary" })).toHaveAttribute(
+    "href",
+    "/app/reports/operations",
+  );
   for (const width of [1440, 1024, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
+    await expect(needs).toBeVisible();
     await expect(card).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -327,7 +347,7 @@ test("@production Home shows store system alerts with what to do, and their reso
     await page.screenshot({ path: `test-results/home-system-alerts-${width}.png`, fullPage: true });
   }
 
-  // Resolved: "Check again" re-reads, the card says so and lists what was resolved.
+  // Resolved: "Check again" re-reads, the line says so and lists what was resolved.
   board = {
     ...problem,
     observedAt: "2026-10-15T16:05:00.000Z",
@@ -341,7 +361,8 @@ test("@production Home shows store system alerts with what to do, and their reso
     ],
   };
   await card.getByRole("button", { name: "Check again" }).click();
-  await expect(card.getByText("Everything is working.")).toBeVisible();
+  await expect(card.getByText("Store system: all good")).toBeVisible();
+  await expect(needs.getByText("Customer ordering page is not loading")).toHaveCount(0);
   await expect(
     card.getByText(/Resolved recently: Customer ordering page is not loading/u),
   ).toBeVisible();
@@ -355,20 +376,21 @@ test("@production Home shows store system alerts with what to do, and their reso
   };
   await card.getByRole("button", { name: "Check again" }).click();
   await expect(
-    card.getByText("System update in progress — ordering may pause for a few minutes."),
+    needs.getByText("System update in progress — ordering may pause for a few minutes."),
   ).toBeVisible();
-  await expect(card.getByText(/this card shows an urgent alert/u)).toBeVisible();
-  await expect(card.getByText("Urgent", { exact: true })).toHaveCount(0);
-  await expect(card.getByText("Everything is working.")).toHaveCount(0);
-  await expect(card).not.toHaveClass(/overview-card--alerts-critical/u);
+  await expect(needs.getByText(/this page shows an urgent alert/u)).toBeVisible();
+  await expect(needs.getByText("Urgent", { exact: true })).toHaveCount(0);
+  await expect(card.getByText("all good")).toHaveCount(0);
+  await expect(needs.locator(".overview-attention__state--danger")).toHaveCount(0);
   await expectNoInternalText(page);
 
   // The monitor stopped: nothing is being checked, said plainly.
   board = { ...problem, monitor: "Silent", active: [] };
   await card.getByRole("button", { name: "Check again" }).click();
   await expect(
-    card.getByText(/The alert monitor stopped reporting at Oct 15, 2026/u),
+    needs.getByText(/The alert monitor stopped reporting at Oct 15, 2026/u),
   ).toBeVisible();
+  await expect(card.getByText("Store system: problems are not being checked")).toBeVisible();
   expect(requested.every((method) => method === "GET")).toBe(true);
   expect(errors).toEqual([]);
   expect(home.unexpected).toEqual([]);
@@ -382,8 +404,12 @@ for (const role of ["owner", "store-manager"] as const)
   }) => {
     const home = await pilotHome(page, role, () => problem);
     await page.goto("/app");
-    const card = page.getByRole("region", { name: "Store system" });
-    await expect(card.getByText("Customer ordering page is not loading")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Store system" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Needs attention" })
+        .getByText("Customer ordering page is not loading"),
+    ).toBeVisible();
     await expect(
       page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Exceptions" }),
     ).toHaveAttribute("href", "/operations/order-exceptions");
@@ -402,6 +428,8 @@ test("@production Home shows front of house no store system card and does not ke
   await expect.poll(() => home.alertReads.length).toBe(1);
   await expect(page.getByRole("region", { name: "Store system" })).toHaveCount(0);
   await expect(page.getByText("System alerts could not be read")).toHaveCount(0);
+  await expect(page.getByText("Customer ordering page is not loading")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Today's summary" })).toHaveCount(0);
   await expect(
     page.getByRole("navigation", { name: "Workspace" }).getByRole("link", { name: "Exceptions" }),
   ).toHaveCount(0);

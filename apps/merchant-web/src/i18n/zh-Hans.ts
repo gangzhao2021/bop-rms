@@ -3793,8 +3793,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start, progress and completion times are not recorded on this screen yet.":
     "此屏幕尚未记录开始、进度和完成时间。",
   Started: "已开始",
-  "Started {startedAt}. If guests or staff screens still can’t order after {expiresAt}, this card shows an urgent alert.":
-    "开始于 {startedAt}。如果 {expiresAt} 后顾客或员工屏幕仍无法点单，此卡片会显示紧急提醒。",
+  "Started {startedAt}. If guests or staff screens still can’t order after {expiresAt}, this page shows an urgent alert.":
+    "开始于 {startedAt}。如果 {expiresAt} 后顾客或员工屏幕仍无法点单，这个页面会显示紧急提醒。",
   "Starts after {label} accepts the invitation and another manager approves it.":
     "在{label}接受邀请并由另一位店长批准后开始。",
   "Starts at (Store time)": "开始时间（门店时间）",
@@ -6975,4 +6975,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人付款后可以用手机号加入，菜品可以积分，也可以在账单上使用积分，只限扫码点的单。关闭后不会请这里的客人加入，会员的积分保留。",
   "Comps, discounts and points used": "免单、折扣和积分抵扣",
   "Of that, points guests used": "其中客人用积分抵扣",
+  // Home, rebuilt after the Owner's 2026-11-03 walkthrough.
+  "Waiting for pickup": "等待取餐",
+  "This list may be missing something": "这个列表可能不全",
+  "Could not read: {value}": "没能读取：{value}",
+  "Not read": "没读到",
+  "Food ready to serve": "有菜可以上桌",
+  "To serve": "待上桌",
+  "Pickups waiting on a remake": "取餐单在等重做",
+  "Don't hand over yet": "先别交给客人",
+  "Not sent yet": "还没发出",
+  "{open} open": "{open} 个未解决",
+  "The store system could not be checked": "没能检查门店系统",
+  "Not checked": "没检查到",
+  "Store system problems are not being checked": "门店系统的问题现在没人在查",
+  "Store system: could not be checked": "门店系统：没能检查",
+  "Store system: problems are not being checked": "门店系统：问题现在没人在查",
+  "Store system: needs attention, see the list above": "门店系统：有问题，请看上面的列表",
+  "Store system: update in progress": "门店系统：正在更新",
+  "Store system: all good": "门店系统：一切正常",
+  "System details": "系统详情",
 });

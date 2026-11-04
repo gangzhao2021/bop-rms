@@ -2,6 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { storeTime } from "./StoreTime.js";
+import type { AttentionItem } from "./StoreOverview.js";
 
 /**
  * WP-2423 Q13 (DEC-PILOT-ALERTS-BACKUP): store system alerts on the Home for the Owner and Store
@@ -213,6 +214,9 @@ export type OperationsAlertsRead =
   /** The role does not handle store system alerts (403): the card is not shown at all. */
   | { readonly kind: "NotPermitted" };
 
+/** The two honest notes about where alerts reach; the first is a warning, so it stays in view. */
+const alertsOnlyHere = (outbound: OperationsAlertView["outbound"]) =>
+  !outbound.email && outbound.webhooks === 0;
 function outboundNote(outbound: OperationsAlertView["outbound"]): string {
   const channels = [
     ...(outbound.email ? ["email"] : []),
@@ -223,8 +227,123 @@ function outboundNote(outbound: OperationsAlertView["outbound"]): string {
     : t("The Owner is also alerted by {value}.", { value: channels.join(" and ") });
 }
 
-/** The pure card, so every state can be rendered and checked without a network. */
-export function OperationsAlertsCard({
+/**
+ * Owner 2026-11-03 walkthrough: a real problem with the store system is a row in "Needs attention",
+ * never tucked into the status line. Urgent ones (and a planned update, which can pause ordering)
+ * lead the list; those to deal with today follow the live service work. Pure, so every state can
+ * be checked without a network.
+ */
+export function systemAttentionItems(
+  read: OperationsAlertsRead,
+  timeZone?: string,
+): { readonly urgent: readonly AttentionItem[]; readonly later: readonly AttentionItem[] } {
+  const at = (iso: string) => storeTime(iso, timeZone, true);
+  if (read.kind === "Loading" || read.kind === "NotPermitted") return { urgent: [], later: [] };
+  if (read.kind === "Unavailable")
+    return {
+      urgent: [],
+      later: [
+        {
+          key: "system-unread",
+          title: t("The store system could not be checked"),
+          detail: t(
+            "System alerts could not be read. Check again in a moment; if this stays, ask the pilot operator to check the store system.",
+          ),
+          state: t("Not checked"),
+          tone: "warning",
+          href: null,
+          action: t("Check again"),
+          retry: "system",
+        },
+      ],
+    };
+  const view = read.value;
+  if (view.monitor !== "Reporting")
+    return {
+      urgent: [
+        {
+          key: "system-monitor",
+          title: t("Store system problems are not being checked"),
+          detail:
+            view.monitor === "NotRunning"
+              ? t(
+                  "The alert monitor is not running, so problems with the store system, backups and certificate are not being checked. Ask the pilot operator to start it.",
+                )
+              : t(
+                  "The alert monitor stopped reporting{value}. Problems are not being checked. Ask the pilot operator to restart it.",
+                  {
+                    value:
+                      view.observedAt === null
+                        ? ""
+                        : t(" at {observedAt}", { observedAt: at(view.observedAt) }),
+                  },
+                ),
+          state: t("Urgent"),
+          tone: "danger",
+          href: null,
+          action: t("Check again"),
+          retry: "system",
+        },
+      ],
+      later: [],
+    };
+  const row = (item: OperationsAlert): AttentionItem => ({
+    key: `system-${item.key}`,
+    title: alertTitle(item.title),
+    // Owner 2026-10-25: what to do stays in view; the background is on request.
+    detailLabel: t("What to do:"),
+    detail: item.action,
+    more: item.summary,
+    since: t("Since {raisedAt}", { raisedAt: at(item.raisedAt) }),
+    state: item.severity === "critical" ? t("Urgent") : t("Today"),
+    tone: item.severity === "critical" ? "danger" : "warning",
+    href: null,
+    action: null,
+  });
+  return {
+    urgent: [
+      // WP-2423 (2026-10-18): a planned update is not an outage; if the store is still down when
+      // its window ends, the usual urgent alert follows at once.
+      ...(view.plannedUpdate === null
+        ? []
+        : [
+            {
+              key: "system-update",
+              title: t("System update in progress — ordering may pause for a few minutes."),
+              detail: t(
+                "Started {startedAt}. If guests or staff screens still can’t order after {expiresAt}, this page shows an urgent alert.",
+                {
+                  startedAt: at(view.plannedUpdate.startedAt),
+                  expiresAt: at(view.plannedUpdate.expiresAt),
+                },
+              ),
+              state: t("In progress"),
+              tone: "progress",
+              href: null,
+              action: null,
+            } satisfies AttentionItem,
+          ]),
+      ...view.active.filter((item) => item.severity === "critical").map(row),
+    ],
+    later: view.active.filter((item) => item.severity !== "critical").map(row),
+  };
+}
+
+function systemStatusWords(read: OperationsAlertsRead): string {
+  if (read.kind === "Unavailable") return t("Store system: could not be checked");
+  if (read.kind !== "Ready") return t("Checking the store system…");
+  const view = read.value;
+  if (view.monitor !== "Reporting") return t("Store system: problems are not being checked");
+  if (view.active.length > 0) return t("Store system: needs attention, see the list above");
+  if (view.plannedUpdate !== null) return t("Store system: update in progress");
+  return t("Store system: all good");
+}
+
+/**
+ * The store system in one quiet line at the bottom of Home: its state, the last backup and a way to
+ * check again. The rarer truths stay below it at lower weight. The server decides who sees it.
+ */
+export function StoreSystemLine({
   read,
   timeZone,
   busy = false,
@@ -237,123 +356,52 @@ export function OperationsAlertsCard({
 }) {
   if (read.kind === "NotPermitted") return null;
   const at = (iso: string) => storeTime(iso, timeZone, true);
-  const view = read.kind === "Ready" ? read.value : null;
-  const critical =
-    view !== null &&
-    (view.monitor !== "Reporting" || view.active.some((item) => item.severity === "critical"));
-  const warning = view !== null && !critical && view.active.length > 0;
-  // Everything working and no update running: a calm one-line status, not a full card.
-  const clear =
-    view !== null &&
-    view.monitor === "Reporting" &&
-    view.active.length === 0 &&
-    view.plannedUpdate === null;
+  // Only a monitor that reports can vouch for the backup and alert facts.
+  const view = read.kind === "Ready" && read.value.monitor === "Reporting" ? read.value : null;
+  const resolved = view?.recentlyCleared ?? [];
+  const moreToTell = view !== null && (resolved.length > 0 || !alertsOnlyHere(view.outbound));
   return (
-    <section
-      className={
-        "overview-card overview-card--alerts" +
-        (critical
-          ? " overview-card--alerts-critical"
-          : warning
-            ? " overview-card--alerts-warning"
-            : clear
-              ? " overview-card--alerts-clear"
-              : "")
-      }
-      aria-labelledby="system-alerts-heading"
-    >
-      <header>
-        <h3 id="system-alerts-heading">{t("Store system")}</h3>
+    <section className="overview-system" aria-label={t("Store system")}>
+      <div className="overview-system__line">
+        <p aria-live="polite">
+          <span>{systemStatusWords(read)}</span>
+          {view === null ? null : (
+            <span>
+              {" · "}
+              {view.lastSuccessfulBackupAt === null
+                ? t("No backup recorded yet")
+                : t("Last backup {lastSuccessfulBackupAt}", {
+                    lastSuccessfulBackupAt: at(view.lastSuccessfulBackupAt),
+                  })}
+              {view.observedAt === null
+                ? ""
+                : t(" · Last checked {observedAt}", {
+                    observedAt: storeTime(view.observedAt, timeZone),
+                  })}
+            </span>
+          )}
+        </p>
         {onRefresh ? (
-          <button type="button" onClick={onRefresh} disabled={busy}>
+          <button
+            type="button"
+            className="overview-text-action"
+            onClick={onRefresh}
+            disabled={busy}
+          >
             {t("Check again")}
           </button>
         ) : null}
-      </header>
-      <div aria-live="polite">
-        {read.kind === "Loading" ? (
-          <p role="status">{t("Checking the store system…")}</p>
-        ) : read.kind === "Unavailable" ? (
-          <p role="status">
-            {t(
-              "System alerts could not be read. Check again in a moment; if this stays, ask the pilot operator to check the store system.",
-            )}
-          </p>
-        ) : read.value.monitor === "NotRunning" ? (
-          <p className="system-alert__headline">
-            {t(
-              "The alert monitor is not running, so problems with the store system, backups and certificate are not being checked. Ask the pilot operator to start it.",
-            )}
-          </p>
-        ) : read.value.monitor === "Silent" ? (
-          <p className="system-alert__headline">
-            {t(
-              "The alert monitor stopped reporting{value}. Problems are not being checked. Ask the pilot operator to restart it.",
-              {
-                value:
-                  read.value.observedAt === null
-                    ? ""
-                    : t(" at {observedAt}", { observedAt: at(read.value.observedAt) }),
-              },
-            )}
-          </p>
-        ) : (
-          <>
-            {read.value.plannedUpdate !== null ? (
-              // WP-2423 (2026-10-18): a planned update is not an outage; if the store is still
-              // down when its window ends, the usual urgent alert follows at once.
-              <div className="system-alert system-alert--update">
-                <p className="system-alert__headline">
-                  {t("System update in progress — ordering may pause for a few minutes.")}
-                </p>
-                <p>
-                  {t(
-                    "Started {startedAt}. If guests or staff screens still can’t order after {expiresAt}, this card shows an urgent alert.",
-                    {
-                      startedAt: at(read.value.plannedUpdate.startedAt),
-                      expiresAt: at(read.value.plannedUpdate.expiresAt),
-                    },
-                  )}
-                </p>
-              </div>
-            ) : read.value.active.length === 0 ? (
-              <p className="system-alert__headline">{t("Everything is working.")}</p>
-            ) : null}
-            {read.value.active.length === 0 ? null : (
-              <ul className="system-alerts">
-                {read.value.active.map((item) => (
-                  <li key={item.key} className={"system-alert system-alert--" + item.severity}>
-                    <p className="system-alert__title">
-                      <span className="system-alert__badge">
-                        {item.severity === "critical" ? t("Urgent") : t("Today")}
-                      </span>
-                      <strong>{alertTitle(item.title)}</strong>
-                    </p>
-                    {/* Owner 2026-10-25: what to do stays in view; the background is on request. */}
-                    <p>
-                      <span className="system-alert__label">{t("What to do:")} </span>
-                      {item.action}
-                    </p>
-                    <details className="system-alert__more">
-                      <summary>{t("More about this")}</summary>
-                      <p>{item.summary}</p>
-                    </details>
-                    <p className="system-alert__since">
-                      {t("Since {raisedAt}", { raisedAt: at(item.raisedAt) })}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
       </div>
-      {view !== null && view.monitor === "Reporting" ? (
-        <div className="system-alert__footer">
-          {view.recentlyCleared.length > 0 ? (
-            <p className="system-alert__resolved">
+      {view !== null && alertsOnlyHere(view.outbound) ? (
+        <p className="overview-system__note">{outboundNote(view.outbound)}</p>
+      ) : null}
+      {moreToTell ? (
+        <details className="overview-more">
+          <summary>{t("System details")}</summary>
+          {resolved.length > 0 ? (
+            <p>
               {t("Resolved recently: {value}", {
-                value: view.recentlyCleared
+                value: resolved
                   .slice(-3)
                   .reverse()
                   .map((item) => `${alertTitle(item.title)} (${at(item.clearedAt)})`)
@@ -361,20 +409,8 @@ export function OperationsAlertsCard({
               })}
             </p>
           ) : null}
-          <p className="overview-updated">
-            {view.lastSuccessfulBackupAt === null
-              ? t("No backup recorded yet")
-              : t("Last backup {lastSuccessfulBackupAt}", {
-                  lastSuccessfulBackupAt: at(view.lastSuccessfulBackupAt),
-                })}
-            {view.observedAt === null
-              ? ""
-              : t(" · Last checked {observedAt}", {
-                  observedAt: storeTime(view.observedAt, timeZone),
-                })}
-          </p>
-          <p className="overview-updated">{outboundNote(view.outbound)}</p>
-        </div>
+          {alertsOnlyHere(view.outbound) ? null : <p>{outboundNote(view.outbound)}</p>}
+        </details>
       ) : null}
     </section>
   );
@@ -383,16 +419,10 @@ export function OperationsAlertsCard({
 /**
  * Reads the alert board while the Home is open and visible. The server decides who sees it
  * (operations.order-exception.manage): its "not permitted" answer (WP-2423; a 403 from an older
- * server) hides the card and stops reading, so front-of-house staff never poll it again and no
- * refusal shows in their browser.
+ * server) hides it and stops reading, so front-of-house staff never poll it again and no refusal
+ * shows in their browser.
  */
-export function OperationsAlerts({
-  timeZone,
-  fetcher,
-}: {
-  readonly timeZone?: string | undefined;
-  readonly fetcher?: typeof fetch | undefined;
-}) {
+export function useOperationsAlerts(fetcher?: typeof fetch) {
   const [client] = useState(() => createOperationsAlertsClient(fetcher));
   const [read, setRead] = useState<OperationsAlertsRead>({ kind: "Loading" });
   const [busy, setBusy] = useState(false);
@@ -434,12 +464,5 @@ export function OperationsAlerts({
       active.current?.abort();
     };
   }, [live, load]);
-  return (
-    <OperationsAlertsCard
-      read={read}
-      timeZone={timeZone}
-      busy={busy}
-      onRefresh={() => void load()}
-    />
-  );
+  return { read, busy, refresh: load };
 }

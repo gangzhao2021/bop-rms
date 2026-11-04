@@ -268,11 +268,9 @@ describe("WP-2423 P2 store overview", () => {
       '<span class="overview-count__note">Counted from the most recent orders only</span>',
     );
     expect(html).not.toContain("50+");
-    expect(html).toContain("4 awaiting acceptance · 2 ready to serve");
     expect(html).toContain("Could not be read");
-    expect(html).toContain("None overdue");
     expect(html).toContain("Last checked 12:30");
-    expect(html).toContain('href="/operations/order-exceptions"');
+    expect(html).toContain('href="/operations/orders"');
     const loading = renderToStaticMarkup(
       <MemoryRouter>
         <OverviewToday state={initialOverviewState} />
@@ -331,12 +329,10 @@ describe("WP-2423 P2 store overview", () => {
   it('WP-2423: counts overdue exceptions in plain words (v15 showed "15 overdues")', () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
-        <OverviewToday
-          timeZone="America/Toronto"
-          onRefresh={() => undefined}
+        <NeedsAttention
           state={{
-            orders: { kind: "Unavailable" },
-            pickups: { kind: "Unavailable" },
+            orders: { kind: "Hidden" },
+            pickups: { kind: "Hidden" },
             exceptions: { kind: "Ready", value: { open: 15, overdue: 15 } },
             tables: { kind: "Hidden" },
             updatedAt: "2026-08-12T16:30:00.000Z",
@@ -346,11 +342,68 @@ describe("WP-2423 P2 store overview", () => {
     );
     expect(html).toContain("15 overdue");
     expect(html).not.toContain("overdues");
+    expect(html).toContain('href="/operations/order-exceptions"');
+  });
+  it("Owner 2026-11-03: open exceptions not yet overdue still have a row; numbers drop them", () => {
+    const items = attentionItems(
+      {
+        ...initialOverviewState,
+        exceptions: { kind: "Ready", value: { open: 3, overdue: 0 } },
+      },
+      null,
+    );
+    expect(items.map((item) => [item.title, item.detail])).toEqual([
+      ["Open exceptions", "3 open · None overdue"],
+    ]);
+  });
+  it("Owner 2026-11-03: a failed read says so; the list never calmly claims nothing is wrong", () => {
+    const unread = {
+      ...initialOverviewState,
+      orders: { kind: "Unavailable" },
+      pickups: { kind: "Ready", value: { waiting: 0, earlierDays: 0, remaking: 0, more: false } },
+      exceptions: { kind: "Unavailable" },
+      tables: { kind: "Ready", value: { tables: [], canClose: true, more: false } },
+    } as const;
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <NeedsAttention
+          state={unread}
+          settlement={{ kind: "Unavailable" }}
+          onRefresh={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Could not read: Orders · Exceptions · Settlement");
+    expect(html).toContain("Refresh");
+    expect(html).not.toContain("Nothing needs attention");
+  });
+  it("Owner 2026-11-03: payments that differ on the last closed day move up from the checklist", () => {
+    const row = (needsLook: boolean) =>
+      attentionItems(initialOverviewState, null, null, null, {
+        kind: "Ready",
+        value: { businessDate: "2026-10-16", text: "1 payment to look at", needsLook },
+      }).find((item) => item.key === "settlement");
+    expect(row(true)).toMatchObject({
+      detail: "1 payment to look at",
+      href: "/app/operations/payment-reconciliation",
+    });
+    expect(row(false)).toBeUndefined();
+  });
+  it("Owner 2026-11-03: Today's summary is one link, only for those with the reports screen", () => {
+    const html = (reportsHref: string | null) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <OverviewToday state={initialOverviewState} reportsHref={reportsHref} />
+        </MemoryRouter>,
+      );
+    expect(html("/app/reports/operations")).toContain('href="/app/reports/operations"');
+    expect(html("/app/reports/operations")).toContain("Today&#x27;s summary");
+    expect(html(null)).not.toContain("Today&#x27;s summary");
   });
   it("never shows a pickup-only Store an orders 'ready' count that contradicts its pickups", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
-        <OverviewToday
+        <NeedsAttention
           state={{
             orders: {
               kind: "Ready",
@@ -377,10 +430,8 @@ describe("WP-2423 P2 store overview", () => {
         />
       </MemoryRouter>,
     );
-    expect(html).toContain("0 awaiting acceptance<");
     expect(html).not.toContain("ready to serve");
     expect(html).not.toMatch(/\b0 ready\b/u);
-    expect(html).toContain('<strong class="overview-count__value">4</strong>');
     expect(html).toContain("1 order waiting on a remake");
   });
 });
@@ -401,8 +452,8 @@ describe("WP-2423 Q11 follow-up: Home reads only what the role's screens permit"
       tables: hidden,
     });
     expect(ordersOnly).toContain("Open orders");
-    expect(ordersOnly).not.toContain("Pickups waiting");
-    expect(ordersOnly).not.toContain("Open exceptions");
+    expect(ordersOnly).not.toContain("Waiting for pickup");
+    expect(ordersOnly).not.toContain("Open tables");
     expect(
       render({
         ...initialOverviewState,
@@ -519,8 +570,28 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
           />
         </MemoryRouter>,
       );
-    expect(html(true)).toContain("1 table served — close when the guests have left");
+    const toClose = (canClose: boolean) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <NeedsAttention
+            state={{
+              ...initialOverviewState,
+              orders: { kind: "Hidden" },
+              pickups: { kind: "Hidden" },
+              exceptions: { kind: "Hidden" },
+              tables: {
+                kind: "Ready",
+                value: read([table({ elapsedMinutes: 13 * 60 })], canClose),
+              },
+            }}
+          />
+        </MemoryRouter>,
+      );
+    expect(toClose(true)).toContain("1 table served — close when the guests have left");
+    expect(toClose(true)).toContain('href="/operations/dining"');
+    expect(toClose(false)).not.toContain("close when the guests have left");
     expect(html(true)).toContain('href="/operations/dining"');
+    expect(html(true)).not.toContain("A manager or the owner closes tables");
     expect(html(false)).toContain("A manager or the owner closes tables when the guests have left");
   });
   it("L7: counts today's pickups apart from earlier days' and points to check and close", () => {
@@ -549,10 +620,17 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
         />
       </MemoryRouter>,
     );
-    expect(html).toContain("Pickups from earlier days");
-    expect(html).toContain("Check and close");
+    // Today's waiting pickup is the number; the two from earlier days are a row to check.
     expect(html).toContain('<strong class="overview-count__value">1</strong>');
-    expect(html).toContain('<strong class="overview-count__value">2</strong>');
+    const earlier = attentionItems(
+      { ...initialOverviewState, pickups: { kind: "Ready", value: summary } },
+      null,
+    );
+    expect(earlier[0]).toMatchObject({
+      title: "Pickups from earlier days",
+      action: "Check and close",
+    });
+    expect(earlier[0]?.detail).toMatch(/^2 · /u);
     // Without the business day every waiting pickup counts as today's (no false split).
     expect(summarizePickups({ items: [{ phase: "Ready", businessDate: "2026-10-15" }] })).toEqual({
       waiting: 1,
@@ -749,14 +827,14 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     expect(items[0]).toMatchObject({ key: "kitchen-setup", href, action: "Set up the kitchen" });
     expect(attentionItems(state, null).some((item) => item.key === "kitchen-setup")).toBe(false);
   });
-  it("puts staff calls first, then orders to accept, overdue exceptions, approvals and checks", () => {
+  it("puts the guests in front of you first: staff calls, orders to accept, then the backlog", () => {
     const items = attentionItems(state, { awaiting: 2, approvedNotSent: 0 });
     expect(items.map((item) => [item.title, item.state, item.href])).toEqual([
       ["1 table asking for staff", "Waiting", "/operations/dining"],
       ["Orders waiting to be accepted", "To accept", "/operations/orders"],
-      ["Exceptions overdue", "Overdue", "/operations/order-exceptions"],
       ["Refunds waiting for approval", "To approve", "/app/approvals"],
       ["Pickups from earlier days", "To check", "/operations/pickup"],
+      ["Exceptions overdue", "Overdue", "/operations/order-exceptions"],
     ]);
     expect(items[1]?.detail).toBe(
       awaitingAcceptanceText({ orders: 1, rounds: 0, urgentRounds: 0 }),
@@ -775,7 +853,7 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
         <NeedsAttention state={quiet} />
       </MemoryRouter>,
     );
-    expect(html).toContain("Needs attention now");
+    expect(html).toContain("Needs attention");
     expect(html).toContain("Nothing needs attention right now.");
     const hidden = { kind: "Hidden" } as const;
     expect(
@@ -804,7 +882,7 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
       '<span class="overview-attention__state overview-attention__state--danger">Overdue</span>',
     );
     expect(html).toContain(
-      '<a class="overview-attention__action" href="/operations/orders" data-discover="true">Open orders</a>',
+      '<a class="overview-attention__action" href="/operations/orders" data-discover="true">View orders</a>',
     );
   });
 });
