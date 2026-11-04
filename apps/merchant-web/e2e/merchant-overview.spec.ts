@@ -310,7 +310,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   await expect(needs.getByText("1 payment to look at")).toBeVisible();
   await expect(needs.getByRole("link", { name: "Go to Settlement" })).toHaveAttribute(
     "href",
-    "/app/operations/payment-reconciliation",
+    "/app/operations/payment-reconciliation?businessDate=2026-09-21",
   );
   // M6: the opening and closing checklist, closed until asked for, from the same reads and the
   // last closed day's settlement.
@@ -321,7 +321,7 @@ test("@production Merchant Overview uses the authorized workspace snapshot at de
   await expect(checklist.getByText("1 payment to look at")).toBeVisible();
   await expect(checklist.getByRole("link", { name: "Go to Settlement" })).toHaveAttribute(
     "href",
-    "/app/operations/payment-reconciliation",
+    "/app/operations/payment-reconciliation?businessDate=2026-09-21",
   );
   await expectNoInternalText(page);
   await expect(needs.getByText("1 overdue")).toBeVisible();

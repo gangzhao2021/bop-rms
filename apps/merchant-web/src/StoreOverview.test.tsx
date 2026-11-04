@@ -385,7 +385,7 @@ describe("WP-2423 P2 store overview", () => {
       }).find((item) => item.key === "settlement");
     expect(row(true)).toMatchObject({
       detail: "1 payment to look at",
-      href: "/app/operations/payment-reconciliation",
+      href: "/app/operations/payment-reconciliation?businessDate=2026-10-16",
     });
     expect(row(false)).toBeUndefined();
   });

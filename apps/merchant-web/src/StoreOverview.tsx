@@ -537,7 +537,7 @@ export function attentionItems(
       detail: settlement.value.text,
       state: t("To check"),
       tone: "warning",
-      href: "/app/operations/payment-reconciliation",
+      href: `/app/operations/payment-reconciliation?businessDate=${settlement.value.businessDate}`,
       action: t("Go to {value}", { value: t("Settlement") }),
       backlog: true,
     });
@@ -830,7 +830,9 @@ export function dayChecklist(
         status: v.text,
         done: v.text === "Matches the payment provider",
       })),
-      "/app/operations/payment-reconciliation",
+      settlement.kind === "Ready"
+        ? `/app/operations/payment-reconciliation?businessDate=${settlement.value.businessDate}`
+        : "/app/operations/payment-reconciliation",
       t("Settlement"),
     ),
     ...item(
