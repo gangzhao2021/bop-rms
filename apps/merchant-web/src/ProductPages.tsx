@@ -25,7 +25,6 @@ import {
   parseProductListView,
   parseProductRouteReference,
   productCodeValid,
-  productTypeText,
   suggestProductCode,
   taxClassText,
   unavailableProductClient,
@@ -156,7 +155,6 @@ export function ProductListPage({
             <tr>
               <th>{t("Product")}</th>
               <th>{t("Code")}</th>
-              <th>{t("Type")}</th>
               <th>{t("Status")}</th>
               <th>{t("Sizes selling")}</th>
               <th>{t("Tax")}</th>
@@ -171,7 +169,6 @@ export function ProductListPage({
                   </Link>
                 </td>
                 <td className="product-code">{product.internalCode}</td>
-                <td>{productTypeText[product.productType] ?? product.productType}</td>
                 <td>{lifecycleText[product.lifecycle] ?? product.lifecycle}</td>
                 <td>
                   {t("{activeSizes} of {sizes}", {
@@ -242,7 +239,6 @@ function ProductEditor({
   const [nameZh, setNameZh] = useState("");
   const [code, setCode] = useState("");
   const [codeTouched, setCodeTouched] = useState(false);
-  const [productType, setProductType] = useState("NonAlcoholicBeverage");
   const [taxClass, setTaxClass] = useState("");
   const [sizes, setSizes] = useState<EditableSize[]>([
     {
@@ -282,7 +278,6 @@ function ProductEditor({
       setName(current.name);
       setNameZh(current.nameZh ?? "");
       setCode(current.internalCode);
-      setProductType(current.productType);
       setTaxClass(current.taxClassificationReference ?? "");
       setSizes(
         current.sizes.map((size) => ({
@@ -365,7 +360,8 @@ function ProductEditor({
               action: "Create",
               operationReference: newOperationReference(),
               internalCode: (code || suggestProductCode(name)).trim().toUpperCase(),
-              productType,
+              // Owner 2026-11-04: the type changes nothing a store sees, so staff are not asked for it.
+              productType: "PreparedFood",
               name: name.trim(),
               nameZh: nameZh.trim(),
               taxClassificationReference: taxClass,
@@ -525,20 +521,6 @@ function ProductEditor({
               "Capital letters, digits and hyphens; it cannot be changed after the product is created.",
             )}
           </p>
-          <label>
-            {t("Type")}
-            <select
-              value={productType}
-              disabled={product !== null}
-              onChange={(event) => setProductType(event.target.value)}
-            >
-              {view.productTypes.map((type) => (
-                <option key={type} value={type}>
-                  {productTypeText[type] ?? type}
-                </option>
-              ))}
-            </select>
-          </label>
           <label>
             {t("Tax class")}
             <select value={taxClass} required onChange={(event) => setTaxClass(event.target.value)}>

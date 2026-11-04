@@ -160,6 +160,8 @@ test("@production staff add a description and a described photo to a product and
   const save = page.getByRole("button", { name: "Save changes" });
   await expect(save).toBeDisabled();
 
+  // Owner 2026-11-04: the type changes nothing a store sees, so it is not on this page.
+  await expect(page.getByRole("combobox", { name: "Type" })).toHaveCount(0);
   await menu
     .getByLabel("Description", { exact: true })
     .fill("Double ristretto with steamed whole milk.");

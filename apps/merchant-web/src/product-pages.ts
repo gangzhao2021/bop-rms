@@ -408,10 +408,6 @@ export function taxClassText(choice: ProductTaxClass): string {
     )
     .join(" · ");
 }
-export const productTypeText: Record<string, string> = {
-  PreparedFood: t("Prepared food"),
-  NonAlcoholicBeverage: t("Non-alcoholic beverage"),
-};
 export const unavailableProductClient: ProductClient = {
   load: async () => {
     throw new ProductPageError("Unavailable");
