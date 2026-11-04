@@ -36,6 +36,13 @@ const fixture = () => ({
     },
   ],
 });
+/** The commands inside a case's panel (opening, closing and filtering change nothing). */
+const caseButtons = (html: string) =>
+  html
+    .split("<article")
+    .slice(1)
+    .flatMap((part) => [...(part.split("</article>")[0] ?? "").matchAll(/<button([^>]*)>/gu)])
+    .map((button) => button[1] ?? "");
 describe("WP-1809 Order Exception Workbench", () => {
   it("renders bounded source facts and owning-domain actions", () => {
     const html = renderToStaticMarkup(
@@ -46,7 +53,7 @@ describe("WP-1809 Order Exception Workbench", () => {
       "Critical",
       "Paid without a fulfillable order",
       "Unknown",
-      "Clear filters",
+      "Filter",
     ])
       expect(html).toContain(value);
     for (const value of [
@@ -101,11 +108,7 @@ describe("WP-2402 workbench recovery states", () => {
     expect(html).toContain("2026-08-12T16:15:00.000Z");
     expect(html).toContain("Paid without a fulfillable order");
     expect(html).not.toContain("PaidWithoutFulfillableOrder</h3>");
-    const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)].filter(
-      // The shell's language switch (Owner 2026-10-26) is not one of the page's commands.
-      (button) => !button[1]?.includes("language-switch"),
-    );
-    expect(buttons[0]?.[1]).not.toContain("disabled");
+    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Refresh</u);
     // Dead placeholder actions are gone; only real source actions remain.
     for (const label of [
       ">Acknowledge<",
@@ -114,7 +117,7 @@ describe("WP-2402 workbench recovery states", () => {
       "Resolve from final",
     ])
       expect(html).not.toContain(label);
-    for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
+    for (const button of caseButtons(html)) expect(button).toContain("disabled");
   });
   it("distinguishes an empty read from unavailable data without implying freshness", () => {
     const html = renderToStaticMarkup(
@@ -222,12 +225,8 @@ it("does not advertise executable generic commands for a fresh unlinked payment 
     />,
   );
   expect(html).toContain("No order is linked to this payment difference");
-  const buttons = [...html.matchAll(/<button([^>]*)>(.*?)<\/button>/gu)].filter(
-    // The shell's language switch (Owner 2026-10-26) is not one of the page's commands.
-    (button) => !button[1]?.includes("language-switch"),
-  );
-  expect(buttons[0]?.[1]).not.toContain("disabled");
-  for (const button of buttons.slice(1)) expect(button[1]).toContain("disabled");
+  expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>Refresh</u);
+  for (const button of caseButtons(html)) expect(button).toContain("disabled");
 });
 
 describe("WP-2423 reconciliation cards say what the difference is about", () => {
@@ -521,4 +520,42 @@ it("WP-2423 UI refresh: an open case says how long it has been open and marks ov
   );
   expect(overdue).toContain('data-overdue="true"');
   expect(overdue).toContain("overdue since");
+});
+
+it("Owner 2026-11-03: a case is one row with its next step; its details wait in a closed panel", () => {
+  const input = fixture();
+  const view = parseOrderExceptionView({
+    ...input,
+    projectedAt: "2026-08-12T16:30:00.000Z",
+    items: [
+      { ...input.items[0], orderNumber: "13", providerState: "Confirmed" },
+      {
+        ...input.items[0],
+        exceptionReference: "018f0f58-767a-7f3b-a1d0-000000000903",
+        orderNumber: "14",
+        status: "Resolved",
+        sourceFinal: true,
+      },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    <StoreTimeZoneContext.Provider value="America/Toronto">
+      <OrderExceptionScreen view={view} />
+    </StoreTimeZoneContext.Provider>,
+  );
+  const [list, panels] = html.split("<aside");
+  expect(list).toContain("Refunded, check needed");
+  expect(list).toContain("Check the refund");
+  expect(list).toContain("overdue since ");
+  // Resolved cases wait behind their tab; the tabs count what is there.
+  expect(list).toMatch(/Not resolved yet<span[^>]*>1</u);
+  expect(list).toMatch(/Overdue<span[^>]*>1</u);
+  expect(list).toMatch(/Resolved<span[^>]*>1</u);
+  expect(list).toMatch(/All<span[^>]*>2</u);
+  expect(list).toMatch(/<li[^>]*data-status="Resolved"[^>]*hidden=""/u);
+  // No panel shows until staff open a case, and the facts live there, not on the row.
+  expect(list).not.toContain("Payment provider status");
+  expect(panels).toContain("hidden");
+  expect(html).not.toContain('data-panel="open"');
+  expect(findInternalText([html.replace(/<[^>]+>/gu, " ")])).toEqual([]);
 });

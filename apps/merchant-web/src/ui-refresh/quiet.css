@@ -309,7 +309,6 @@
   .overview-attention__state,
   .system-alert__badge,
   .pickup-queue__phase,
-  .order-exception__severity,
   .staff-pin__result[data-tone="done"],
   .order-queue-released
 ) {
@@ -339,8 +338,6 @@
   .system-alert--critical .system-alert__badge,
   .workspace-page .overview-card--alerts-critical header h3,
   .pickup-queue__phase[data-wait="late"],
-  .order-exception__severity[data-severity="Critical"],
-  .order-exception-page .order-exception__card[data-overdue="true"] .order-exception__open-for,
   .orders-page .order-workbench-age[data-tone="danger"],
   .order-accept-by:is([data-tier="urgent"], [data-tier="lapsed"]),
   .workspace-page.dining-floor .dining-table-tile__notice.order-accept-by[data-tier="urgent"],
@@ -355,7 +352,6 @@
   .system-alert--critical .system-alert__badge,
   .workspace-page .overview-card--alerts-critical header h3,
   .pickup-queue__phase[data-wait="late"],
-  .order-exception__severity[data-severity="Critical"],
   .orders-page .order-workbench-age[data-tone="danger"],
   .order-accept-by:is([data-tier="urgent"], [data-tier="lapsed"]),
   .workspace-page.dining-floor .dining-table-tile__notice.order-accept-by[data-tier="urgent"],

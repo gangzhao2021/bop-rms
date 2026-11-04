@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
 const stores = [1, 2].map((n) => ({
@@ -49,6 +49,14 @@ const view = (index: number) => ({
   ],
 });
 const headers = { "cache-control": "no-store" };
+/** A case's title on its row in the list. */
+const caseRow = (page: Page, title: string) =>
+  page.locator(".order-row:visible").getByText(title, { exact: true });
+/** Opens the case at this place in the list; its panel then stays open until another is opened. */
+const openCase = (page: Page, place = 0) =>
+  page.locator(".order-row:visible .order-exception__next").nth(place).click();
+const showTab = (page: Page, name: RegExp) =>
+  page.getByRole("group", { name: "Show exceptions" }).getByRole("button", { name }).click();
 
 test("@production exception read recovers and clears old data on refresh denial", async ({
   page,
@@ -79,9 +87,7 @@ test("@production exception read recovers and clears old data on refresh denial"
   await page.getByRole("button", { name: "Retry loading exceptions" }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Data may be out of date" })).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
-  ).toBeVisible();
+  await expect(caseRow(page, "Paid without a fulfillable order")).toBeVisible();
   for (const name of [
     "Acknowledge",
     "Assign",
@@ -93,9 +99,7 @@ test("@production exception read recovers and clears old data on refresh denial"
   response = "denied";
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
-  ).toHaveCount(0);
+  await expect(caseRow(page, "Paid without a fulfillable order")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toBeFocused();
   response = "empty";
   await page.getByRole("button", { name: "Retry loading exceptions" }).focus();
@@ -170,76 +174,46 @@ test("@production exception filters and clear remain keyboard operable", async (
   );
   await page.goto("/operations/order-exceptions");
 
-  const type = page.getByRole("combobox", { name: "Type", exact: true });
-  await type.focus();
-  // Options carry staff wording; "U" jumps to "Unpaid dine-in round".
-  await type.press("U");
-  await expect(type).toHaveValue("DiningUnpaidBatch");
+  const filter = page.locator(".order-filter__toggle");
+  const dialog = page.getByRole("dialog", { name: "Filter exceptions on this page" });
+  await filter.focus();
+  await page.keyboard.press("Enter");
+  const unpaid = dialog.getByRole("button", { name: "Unpaid dine-in round" });
+  await unpaid.focus();
+  await page.keyboard.press("Enter");
+  await expect(unpaid).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("heading", { name: "No exceptions match these filters", exact: true }),
   ).toBeVisible();
-  const severity = page.getByRole("combobox", { name: "Severity", exact: true });
-  await page.keyboard.press("Tab");
-  await expect(severity).toBeFocused();
-  await severity.press("H");
-  await expect(severity).toHaveValue("High");
-  const status = page.getByRole("combobox", { name: "Status", exact: true });
-  await page.keyboard.press("Tab");
-  await expect(status).toBeFocused();
-  await status.press("A");
-  await expect(status).toHaveValue("Acknowledged");
-  const owner = page.getByRole("combobox", { name: "Owner", exact: true });
-  await page.keyboard.press("Tab");
-  await expect(owner).toBeFocused();
-  await owner.press("A");
-  await expect(owner).toHaveValue("Assigned");
-  const provider = page.getByRole("combobox", { name: "Payment provider status", exact: true });
-  await page.keyboard.press("Tab");
-  await expect(provider).toBeFocused();
-  await provider.press("U");
-  await expect(provider).toHaveValue("Unknown");
-  const overdue = page.getByRole("checkbox", { name: "Overdue only", exact: true });
-  await page.keyboard.press("Tab");
-  await expect(overdue).toBeFocused();
-  await page.keyboard.press("Space");
-  await expect(overdue).toBeChecked();
-  await page.keyboard.press("Tab");
-  const clear = page.getByRole("button", { name: "Clear filters", exact: true });
-  await expect(clear).toBeFocused();
+  await expect(filter).toContainText("1");
+  const clear = dialog.getByRole("button", { name: "Clear filters", exact: true });
+  await clear.focus();
   await page.keyboard.press("Enter");
-  await expect(type).toHaveValue("All");
-  await expect(severity).toHaveValue("All");
+  await expect(unpaid).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(filter).toBeFocused();
   // Owner 2026-10-25: the list opens (and clears back) on what is not resolved yet.
-  await expect(status).toHaveValue("NotResolved");
-  await expect(owner).toHaveValue("All");
-  await expect(provider).toHaveValue("All");
-  await expect(overdue).not.toBeChecked();
-  await expect(
-    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Capture deadline exceeded", exact: true }),
-  ).toBeVisible();
+  await expect(caseRow(page, "Paid without a fulfillable order")).toBeVisible();
+  await expect(caseRow(page, "Capture deadline exceeded")).toBeVisible();
 
-  // Type and all remaining filters have been reset through keyboard interaction above.
-  await overdue.press("Space");
-  await expect(overdue).toBeChecked();
-  await expect(
-    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Capture deadline exceeded", exact: true }),
-  ).toHaveCount(0);
-  await page.keyboard.press("Tab");
-  await expect(clear).toBeFocused();
+  const overdue = page
+    .getByRole("group", { name: "Show exceptions" })
+    .getByRole("button", { name: /^Overdue/u });
+  await overdue.focus();
   await page.keyboard.press("Enter");
-  await expect(overdue).not.toBeChecked();
-  await expect(
-    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Capture deadline exceeded", exact: true }),
-  ).toBeVisible();
+  await expect(overdue).toHaveAttribute("aria-pressed", "true");
+  await expect(caseRow(page, "Paid without a fulfillable order")).toBeVisible();
+  await expect(caseRow(page, "Capture deadline exceeded")).toHaveCount(0);
+  // A row opens from the keyboard and Escape returns to it.
+  const row = page.locator(".order-row:visible .order-row__open").first();
+  await row.focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "Close details" }).first().waitFor();
+  await page.locator(".order-panel:visible").getByRole("button", { name: "Close details" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".order-panel:visible")).toHaveCount(0);
+  await expect(row).toBeFocused();
 });
 
 test("@production workbench displays the full 500-row backlog", async ({ page }) => {
@@ -261,22 +235,22 @@ test("@production workbench displays the full 500-row backlog", async ({ page })
     }),
   );
   await page.goto("/operations/order-exceptions");
-  await expect(
-    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
-  ).toHaveCount(500);
+  await expect(caseRow(page, "Paid without a fulfillable order")).toHaveCount(500);
   // WP-2423: times in words, never the machine instant (no Store zone here, so labelled UTC).
   await expect(page.getByText(/^Aug 12, 2026, 4:00\sPM UTC$/u).first()).toBeVisible();
   // Projected at 4:30 PM, so each open case says it is overdue.
   await expect(page.getByText(/overdue since Aug 12, 2026, 4:15\sPM UTC/u).first()).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }).last(),
-  ).toBeAttached();
+  await expect(caseRow(page, "Paid without a fulfillable order").last()).toBeAttached();
+  await openCase(page);
   await expect(page.getByText("Linked order · order number not shown").first()).toBeVisible();
+  await page.locator(".order-panel:visible").getByRole("button", { name: "Close details" }).click();
   await expect(page.getByText("018f0f58-767a-7f3b-a1d0-000000000902", { exact: true })).toHaveCount(
     0,
   );
   await expect(page.getByRole("button", { name: "Retry loading exceptions" })).toHaveCount(0);
-  await page.getByRole("combobox").nth(1).selectOption("High");
+  await page.getByRole("button", { name: "Filter", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "High", exact: true }).click();
+  await page.getByRole("button", { name: "Close filters" }).click();
   await expect(
     page.getByRole("heading", { name: "No exceptions match these filters" }),
   ).toBeVisible();
@@ -290,9 +264,7 @@ test("@production workbench displays the full 500-row backlog", async ({ page })
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Clear filters", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
-  ).toHaveCount(500);
+  await expect(caseRow(page, "Paid without a fulfillable order")).toHaveCount(500);
 });
 
 test("@production compensation acknowledgment remains keyboard operable and retries identical intent", async ({
@@ -341,9 +313,10 @@ test("@production compensation acknowledgment remains keyboard operable and retr
     );
   });
   await page.goto("/operations/order-exceptions");
-  const review = page.getByRole("button", { name: "Review confirmed refund" });
-  await review.focus();
+  const open = page.locator(".order-exception__next").first();
+  await open.focus();
   await page.keyboard.press("Enter");
+  // Opening the case reads its refund: no second step to see it.
   await expect(page.getByText(/Confirmed refund: \$11.30/)).toBeVisible();
   const submit = page.getByRole("button", { name: "Record operations reconciliation" });
   await expect(submit).toBeDisabled();
@@ -360,7 +333,6 @@ test("@production compensation acknowledgment remains keyboard operable and retr
   await submit.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByText(/Result unknown/)).toBeVisible();
-  await expect(review).toBeDisabled();
   const retry = page.getByRole("button", { name: "Retry same acknowledgment" });
   await expect(retry).toBeFocused();
   await page.keyboard.press("Enter");
@@ -437,9 +409,7 @@ test("@production compensation unknown preserves focus moved during the request"
   });
 
   await page.goto("/operations/order-exceptions");
-  const review = page.getByRole("button", { name: "Review confirmed refund" });
-  await review.focus();
-  await page.keyboard.press("Enter");
+  await openCase(page);
   const confirmation = page.getByRole("checkbox", {
     name: "I have reviewed this confirmed refund and reconciled this case",
   });
@@ -517,19 +487,20 @@ test("@production unassociated reconciliation stays visible alongside a linked c
     });
   });
   await page.goto("/operations/order-exceptions");
-  const reconciliation = page.locator("article").filter({
-    has: page.getByRole("heading", { name: "Payment reconciliation difference", exact: true }),
-  });
-  const compensation = page.locator("article").filter({
-    has: page.getByRole("heading", { name: "Paid without a fulfillable order", exact: true }),
-  });
+  const reconciliation = page
+    .locator("article")
+    .filter({ hasText: "Payment reconciliation difference" });
+  const compensation = page
+    .locator("article")
+    .filter({ hasText: "Paid without a fulfillable order" });
+  await openCase(page, 0);
   await expect(reconciliation.getByText("No matching order", { exact: true })).toBeVisible();
   await expect(reconciliation.getByRole("button", { name: "Review confirmed refund" })).toHaveCount(
     0,
   );
-  await expect(compensation.getByRole("button", { name: "Review confirmed refund" })).toBeEnabled();
+  // Nothing is read for a case until it is opened.
   expect(queries).toHaveLength(0);
-  await compensation.getByRole("button", { name: "Review confirmed refund" }).click();
+  await openCase(page, 1);
   await expect(compensation.getByText(/Confirmed refund: \$11.30/)).toBeVisible();
   expect(queries).toEqual([
     {
@@ -539,6 +510,7 @@ test("@production unassociated reconciliation stays visible alongside a linked c
   ]);
   linked = true;
   await page.getByRole("button", { name: "Refresh" }).click();
+  await openCase(page, 0);
   await expect(
     reconciliation.getByText("Linked order · order number not shown", { exact: true }),
   ).toBeVisible();
@@ -623,6 +595,7 @@ for (const failure of ["unknown", "conflict", "self", "denied"] as const) {
       });
     });
     await page.goto("/operations/order-exceptions");
+    await openCase(page);
     const region = page.locator('section[aria-label="Payment reconciliation follow-up"]');
     const review = region.getByRole("button", { name: "Review current follow-up" });
     const acknowledge = region.getByRole("button", {
@@ -645,7 +618,12 @@ for (const failure of ["unknown", "conflict", "self", "denied"] as const) {
       await expect(acknowledge).toBeDisabled();
       expect(queries).toBe(1);
       if (failure === "unknown") {
-        await page.getByRole("combobox").nth(0).selectOption("DiningUnpaidBatch");
+        await page.getByRole("button", { name: "Filter", exact: true }).click();
+        await page
+          .getByRole("dialog")
+          .getByRole("button", { name: "Unpaid dine-in round" })
+          .click();
+        await page.getByRole("button", { name: "Close filters" }).click();
         await expect(
           page.getByRole("heading", { name: "No exceptions match these filters" }),
         ).toBeVisible();
@@ -752,6 +730,7 @@ test("@production employee directory pagination clears stale choices on failure"
     return route.abort();
   });
   await page.goto("/operations/order-exceptions");
+  await openCase(page);
   const region = page.getByRole("region", { name: "Payment reconciliation follow-up" });
   await region.getByRole("button", { name: "Review current follow-up" }).click();
   await region.getByRole("button", { name: "Load eligible employees" }).click();
@@ -855,11 +834,10 @@ test("@production WP-2423 a business day's totals difference resolved on re-chec
     });
   });
   await page.goto("/operations/order-exceptions");
-  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("All"); // resolved cases are one choice away
+  await showTab(page, /^All/u); // resolved cases are one choice away
+  await openCase(page, 0);
   const card = page.locator("article").filter({
-    has: page.getByRole("heading", {
-      name: "Business day totals differ from the payment provider",
-    }),
+    hasText: "Business day totals differ from the payment provider",
   });
   await expect(card.getByText("Resolved", { exact: true })).toBeVisible();
   await expect(card.getByText("Mon, Aug 10", { exact: true })).toBeVisible();
@@ -882,15 +860,15 @@ test("@production WP-2423 a business day's totals difference resolved on re-chec
   await expect(card.getByText(/^Last follow-up before it closed: acknowledged/)).toBeVisible();
   expect(followUpQueries).toBe(1);
   // The resolved unmatched charge keeps its charge and refund review, without live follow-up.
-  const charge = page.locator("article").filter({
-    has: page.getByRole("heading", { name: "Charge that matches no order" }),
-  });
+  await openCase(page, 1);
+  const charge = page.locator("article").filter({ hasText: "Charge that matches no order" });
   await expect(charge.getByRole("button", { name: "View charge details" })).toBeVisible();
   await expect(charge.getByRole("button", { name: "Review unmatched charge" })).toBeVisible();
   await expect(charge.getByRole("button", { name: "Acknowledge payment difference" })).toHaveCount(
     0,
   );
   await expectNoInternalText(page);
+  await openCase(page, 0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     expect(
@@ -968,17 +946,20 @@ test("@production WP-2423 a single payment's difference resolved by its re-check
     }),
   );
   await page.goto("/operations/order-exceptions");
-  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("All"); // resolved cases are one choice away
+  await showTab(page, /^All/u); // resolved cases are one choice away
   const resolved = page.locator("article").filter({ hasText: "Order 41" });
   const open = page.locator("article").filter({ hasText: "Order 42" });
+  await openCase(page, 0);
   await expect(resolved.getByText(/^Resolved: this payment was checked again/)).toBeVisible();
   await expect(resolved.getByText(/now matches the payment provider/)).toBeVisible();
   await expect(resolved.getByText("Follow-up closed: this difference is resolved.")).toBeVisible();
   for (const name of ["Review current follow-up", "Acknowledge payment difference", "Assign to me"])
     await expect(resolved.getByRole("button", { name })).toHaveCount(0);
+  await openCase(page, 1);
   await expect(open.getByText(/^Resolved: this payment was checked again/)).toHaveCount(0);
   await expect(open.getByText("Open", { exact: true })).toBeVisible();
   await expectNoInternalText(page);
+  await openCase(page, 0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     expect(
@@ -994,7 +975,12 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
 }) => {
   const writes: string[] = [];
   page.on("request", (request) => {
-    if (request.method() !== "GET" && !request.url().endsWith("/merchant/session/activity"))
+    // Reads that travel as POST (the refund opened with its case) are not changes.
+    if (
+      request.method() !== "GET" &&
+      !request.url().endsWith("/merchant/session/activity") &&
+      !request.url().endsWith("/compensations/query")
+    )
       writes.push(request.url());
   });
   await page.route("**/merchant/session", (route) =>
@@ -1070,16 +1056,24 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
   await page.goto("/operations/order-exceptions");
   const card = (number: string) =>
     page.locator("article").filter({ has: page.getByText(`Order ${number}`, { exact: true }) });
+  const row = (number: string) =>
+    page.locator(".order-row").filter({
+      has: page.getByRole("button", { name: `Order ${number}`, exact: true }),
+    });
+  const open = (number: string) => row(number).locator(".order-exception__next").click();
+  await open("41");
   await expect(card("41").getByText(/^Refunded · check by Aug 13, 2026, 4:00\sAM$/u)).toBeVisible();
   await expect(
     card("41").getByText("Refunded — check by end of day", { exact: true }),
   ).toBeVisible();
   await expect(card("41").getByText("Critical", { exact: false })).toHaveCount(0);
+  await open("42");
   await expect(
     card("42").getByText(/^Critical · overdue since Aug 12, 2026, 12:15\sPM$/u),
   ).toBeVisible();
   await expect(card("42").getByText("Pending", { exact: true })).toBeVisible();
-  // The card itself says the store's check is overdue, by the same rule as the filter.
+  // The panel itself says the store's check is overdue, by the same rule as the tab.
+  await open("43");
   await expect(
     card("43").getByText(/^Refunded · check overdue since Aug 12, 2026, 12:20\sPM$/u),
   ).toBeVisible();
@@ -1087,17 +1081,19 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
     card("43").getByText("Refunded — store check overdue", { exact: true }),
   ).toBeVisible();
   await expect(card("43").getByText(/check by/u)).toHaveCount(0);
+  await page.locator(".order-panel:visible").getByRole("button", { name: "Close details" }).click();
   // At 12:30 local the unconfirmed case and the overdue refund check are overdue.
-  await page.getByRole("checkbox", { name: "Overdue only" }).check();
-  await expect(card("42")).toBeVisible();
-  await expect(card("43")).toBeVisible();
-  await expect(card("41")).toBeHidden();
-  await page.getByRole("checkbox", { name: "Overdue only" }).uncheck();
+  await showTab(page, /^Overdue/u);
+  await expect(row("42")).toBeVisible();
+  await expect(row("43")).toBeVisible();
+  await expect(row("41")).toBeHidden();
+  await showTab(page, /^Not resolved yet/u);
 
-  // Resolved cases are history behind the status filter (Owner 2026-10-25).
-  await expect(card("39")).toBeHidden();
-  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("All"); // resolved cases are one choice away
-  await expect(card("39")).toBeVisible();
+  // Resolved cases are history behind their tab (Owner 2026-10-25).
+  await expect(row("39")).toBeHidden();
+  await showTab(page, /^All/u);
+  await expect(row("39")).toBeVisible();
+  await open("39");
   // A resolved case is history: no review action, no overdue wording.
   await expect(card("39").getByRole("button")).toHaveCount(0);
   await expect(card("39").getByText(/overdue|check by/u)).toHaveCount(0);
@@ -1106,15 +1102,16 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
       exact: true,
     }),
   ).toBeVisible();
+  await page.locator(".order-panel:visible").getByRole("button", { name: "Close details" }).click();
   await expect(card("38")).toHaveCount(0);
   await page.getByRole("button", { name: "Show older resolved exceptions" }).click();
   await expect(
     page.getByText("Older resolved exceptions could not be loaded. Try again."),
   ).toBeVisible();
-  await expect(card("39")).toBeVisible();
+  await expect(row("39")).toBeVisible();
   await page.getByRole("button", { name: "Show older resolved exceptions" }).click();
-  await expect(card("38")).toBeVisible();
-  await expect(page.locator("article:visible")).toHaveCount(5);
+  await expect(row("38")).toBeVisible();
+  await expect(page.locator(".order-row:visible")).toHaveCount(5);
   await expect(page.getByRole("button", { name: "Show older resolved exceptions" })).toHaveCount(0);
   await expectNoInternalText(page);
   for (const width of [1440, 1024, 390]) {
@@ -1122,11 +1119,21 @@ test("@production WP-2423 every open case first, resolved history a page at a ti
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    await card("41").screenshot({ path: `test-results/exceptions-refund-check-${width}.png` });
-    await card("43").screenshot({
-      path: `test-results/exceptions-refund-check-overdue-${width}.png`,
-    });
-    await card("39").screenshot({ path: `test-results/exceptions-resolved-${width}.png` });
+    // The number stays on one line at every width.
+    expect((await row("41").locator(".order-row__number").boundingBox())?.height).toBeLessThan(60);
+    await page.screenshot({ path: `test-results/exceptions-list-${width}.png` });
+    await open("41");
+    await page.screenshot({ path: `test-results/exceptions-refund-check-${width}.png` });
+    await page
+      .locator(".order-panel:visible")
+      .getByRole("button", { name: "Close details" })
+      .click();
+    await open("39");
+    await page.screenshot({ path: `test-results/exceptions-resolved-${width}.png` });
+    await page
+      .locator(".order-panel:visible")
+      .getByRole("button", { name: "Close details" })
+      .click();
   }
   // Refresh starts over from the newest resolved page.
   await page.setViewportSize({ width: 1440, height: 900 });

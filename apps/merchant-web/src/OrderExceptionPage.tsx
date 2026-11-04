@@ -29,7 +29,7 @@ const compensationLabel: Record<OrderExceptionItem["compensationStatus"], string
   Pending: t("Pending"),
   Completed: t("Completed"),
 };
-import { useEffect, useRef, useState, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type Ref } from "react";
 
 export {
   parseOrderExceptionView,
@@ -47,6 +47,33 @@ import {
   type OrderExceptionItem,
   type OrderExceptionView,
 } from "./order-exception-view.js";
+type ExceptionTab = "NotResolved" | "Overdue" | "Resolved" | "All";
+/** The case in staff words: its order, its business day, or that it has no order. */
+function exceptionLabel(item: OrderExceptionItem): string {
+  const detail = item.reconciliation;
+  if (detail?.type === "BusinessDayTotals" && detail.businessDate !== null)
+    return businessDateText(detail.businessDate);
+  if (item.orderReference === null) return t("No order");
+  return item.orderNumber === null
+    ? t("Order")
+    : t("Order {orderNumber}", { orderNumber: item.orderNumber });
+}
+function exceptionTitle(item: OrderExceptionItem): string {
+  const detail = item.reconciliation;
+  if (item.kind === "PaymentReconciliationDifference" && item.sourceOwner === "Payment") {
+    if (detail?.type === "BusinessDayTotals")
+      return t("Business day totals differ from the payment provider");
+    if (item.orderReference === null && detail?.type === "UnmatchedCharge")
+      return t("Charge that matches no order");
+  }
+  return exceptionKindLabel[item.kind];
+}
+const exceptionTone = (item: OrderExceptionItem) =>
+  item.status === "Resolved"
+    ? "done"
+    : item.status === "Open" || isRefundedAwaitingCheck(item)
+      ? "danger"
+      : "neutral";
 export function OrderExceptionScreen({
   view,
   onRefresh,
@@ -54,6 +81,7 @@ export function OrderExceptionScreen({
   csrf,
   onShowOlder,
   older = "Idle",
+  onRecorded,
 }: {
   readonly view: OrderExceptionView;
   readonly onRefresh?: () => void;
@@ -62,38 +90,105 @@ export function OrderExceptionScreen({
   /** WP-2423: reads the next older page of resolved cases (view.olderResolvedBefore). */
   readonly onShowOlder?: () => void;
   readonly older?: "Idle" | "Loading" | "Failed";
+  /** A check was recorded: read the list again so the case's row follows it. */
+  readonly onRecorded?: () => void;
 }) {
+  // Owner 2026-10-25: open work first; resolved exceptions are one choice away.
+  const [tab, setTab] = useState<ExceptionTab>("NotResolved");
   const [kindFilter, setKindFilter] = useState("All");
   const [severityFilter, setSeverityFilter] = useState("All");
-  // Owner 2026-10-25: open work first; resolved exceptions are one choice away.
-  const [statusFilter, setStatusFilter] = useState("NotResolved");
+  const [progressFilter, setProgressFilter] = useState("All");
   const [ownerFilter, setOwnerFilter] = useState("All");
   const [providerFilter, setProviderFilter] = useState("All");
-  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [opened, setOpened] = useState<string | null>(null);
+  const panelId = useId();
+  const filterButton = useRef<HTMLButtonElement>(null);
+  const showButton = useRef<HTMLButtonElement>(null);
+  const rowButtons = useRef(new Map<string, HTMLButtonElement>());
+  const listScroll = useRef(0);
   const readOnly = view.freshnessStatus !== "Fresh";
-  const items = view.items.filter(
-    (item) =>
-      (kindFilter === "All" || item.kind === kindFilter) &&
-      (severityFilter === "All" || item.severity === severityFilter) &&
-      (statusFilter === "All" ||
-        (statusFilter === "NotResolved"
-          ? item.status !== "Resolved"
-          : item.status === statusFilter)) &&
-      (ownerFilter === "All" || item.ownerStatus === ownerFilter) &&
-      (providerFilter === "All" || item.providerState === providerFilter) &&
-      (!overdueOnly || isExceptionOverdue(item, view.projectedAt)),
-  );
-  const hasFilters =
-    kindFilter !== "All" ||
-    severityFilter !== "All" ||
-    statusFilter !== "NotResolved" ||
-    ownerFilter !== "All" ||
-    providerFilter !== "All" ||
-    overdueOnly;
+  const matches = (item: OrderExceptionItem, shown: ExceptionTab) =>
+    (kindFilter === "All" || item.kind === kindFilter) &&
+    (severityFilter === "All" || item.severity === severityFilter) &&
+    (progressFilter === "All" || item.status === progressFilter) &&
+    (ownerFilter === "All" || item.ownerStatus === ownerFilter) &&
+    (providerFilter === "All" || item.providerState === providerFilter) &&
+    (shown === "All" ||
+      (shown === "Resolved"
+        ? item.status === "Resolved"
+        : shown === "Overdue"
+          ? isExceptionOverdue(item, view.projectedAt)
+          : item.status !== "Resolved"));
+  const items = view.items.filter((item) => matches(item, tab));
+  const filtersApplied = [
+    kindFilter,
+    severityFilter,
+    progressFilter,
+    ownerFilter,
+    providerFilter,
+  ].filter((value) => value !== "All").length;
+  const hasFilters = tab !== "NotResolved" || filtersApplied > 0;
   const visibleReferences = new Set(items.map((item) => item.exceptionReference));
+  // A case the filters hide keeps its panel mounted, so a retry in progress is not lost.
+  const selected = opened !== null && visibleReferences.has(opened) ? opened : null;
+  const open = (reference: string) => {
+    listScroll.current = typeof window === "undefined" ? 0 : window.scrollY;
+    setOpened(reference);
+  };
+  const close = () => {
+    if (selected === null) return;
+    const reference = selected;
+    setOpened(null);
+    // On a phone the case replaced the list: back where staff left it, on the case's row.
+    requestAnimationFrame(() => {
+      if (window.matchMedia?.("(max-width: 48rem)").matches) window.scrollTo(0, listScroll.current);
+      rowButtons.current.get(reference)?.focus({ preventScroll: true });
+    });
+  };
+  const clearFilters = () => {
+    setTab("NotResolved");
+    setKindFilter("All");
+    setSeverityFilter("All");
+    setProgressFilter("All");
+    setOwnerFilter("All");
+    setProviderFilter("All");
+  };
+  const closeFilters = () => {
+    setFiltersOpen(false);
+    filterButton.current?.focus();
+  };
+  const chips = (
+    legend: string,
+    value: string,
+    choose: (value: string) => void,
+    options: readonly (readonly [string, string])[],
+  ) => (
+    <fieldset className="order-filter__group">
+      <legend>{legend}</legend>
+      <div className="order-filter__chips">
+        {options.map(([option, label]) => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={value === option}
+            onClick={() => choose(option)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  );
+  const tabs: readonly (readonly [ExceptionTab, string])[] = [
+    ["NotResolved", t("Not resolved yet")],
+    ["Overdue", t("Overdue")],
+    ["Resolved", t("Resolved")],
+    ["All", t("All")],
+  ];
   return (
     <WorkspacePage
-      className="order-exception-page"
+      className="orders-page order-exception-page"
       title={t("Exceptions")}
       meta={t("{label} · Business date {businessDate}", {
         label: view.storeLabel,
@@ -106,148 +201,277 @@ export function OrderExceptionScreen({
         </button>
       }
     >
-      <>
-        {readOnly ? (
-          <StatePanel heading={t("Data may be out of date")} tone="offline" status>
-            <p>{t("Refresh before taking an action.")}</p>
-          </StatePanel>
-        ) : null}
-        <div className="list-filters order-exception-filters">
-          <label>
-            {t("Type")}
-            <select
-              value={kindFilter}
-              onChange={(event) => setKindFilter(event.currentTarget.value)}
-            >
-              <option value="All">{t("All")}</option>
-              {(Object.keys(exceptionKindLabel) as OrderExceptionItem["kind"][]).map((kind) => (
-                <option key={kind} value={kind}>
-                  {exceptionKindLabel[kind]}
-                </option>
+      <div className="order-workbench" data-panel={selected === null ? undefined : "open"}>
+        <div className="order-workbench-main">
+          {readOnly ? (
+            <StatePanel heading={t("Data may be out of date")} tone="offline" status>
+              <p>{t("Refresh before taking an action.")}</p>
+            </StatePanel>
+          ) : null}
+          <div className="order-toolbar">
+            <div className="order-status-filters" role="group" aria-label={t("Show exceptions")}>
+              {tabs.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={tab === value}
+                  onClick={() => setTab(value)}
+                >
+                  {label}
+                  <span className="order-status-filters__count">
+                    {view.items.filter((item) => matches(item, value)).length}
+                  </span>
+                </button>
               ))}
-            </select>
-          </label>
-          <label>
-            {t("Severity")}
-            <select
-              value={severityFilter}
-              onChange={(event) => setSeverityFilter(event.currentTarget.value)}
+            </div>
+            <div className="order-toolbar__tools">
+              <div className="order-filter">
+                <button
+                  ref={filterButton}
+                  type="button"
+                  className="order-filter__toggle"
+                  aria-expanded={filtersOpen}
+                  aria-controls={panelId + "-filters"}
+                  onClick={() => setFiltersOpen((value) => !value)}
+                >
+                  {t("Filter")}
+                  {filtersApplied === 0 ? null : (
+                    <span className="order-filter__applied">{filtersApplied}</span>
+                  )}
+                </button>
+                {filtersOpen ? (
+                  <div
+                    id={panelId + "-filters"}
+                    className="order-filter__panel"
+                    role="dialog"
+                    aria-label={t("Filter exceptions on this page")}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Escape") return;
+                      event.stopPropagation();
+                      closeFilters();
+                    }}
+                  >
+                    <div className="order-filter__head">
+                      <h2>{t("Filter")}</h2>
+                      <button type="button" className="order-panel__close" onClick={closeFilters}>
+                        <span aria-hidden="true">×</span>
+                        <span className="visually-hidden">{t("Close filters")}</span>
+                      </button>
+                    </div>
+                    {chips(t("Type"), kindFilter, setKindFilter, [
+                      ["All", t("All")],
+                      ...(Object.keys(exceptionKindLabel) as OrderExceptionItem["kind"][]).map(
+                        (kind) => [kind, exceptionKindLabel[kind]] as const,
+                      ),
+                    ])}
+                    {chips(t("Severity"), severityFilter, setSeverityFilter, [
+                      ["All", t("All")],
+                      ["High", t("High")],
+                      ["Critical", t("Critical")],
+                    ])}
+                    {chips(t("Progress"), progressFilter, setProgressFilter, [
+                      ["All", t("All")],
+                      ["Open", t("Not acknowledged")],
+                      ["Acknowledged", t("Acknowledged")],
+                      ["Assigned", t("Assigned")],
+                    ])}
+                    {chips(t("Handled by"), ownerFilter, setOwnerFilter, [
+                      ["All", t("All")],
+                      ["Unassigned", t("Unassigned")],
+                      ["Assigned", t("Assigned")],
+                    ])}
+                    {chips(t("Payment provider status"), providerFilter, setProviderFilter, [
+                      ["All", t("All")],
+                      ["NotApplicable", t("Not applicable")],
+                      ["Pending", t("Pending")],
+                      ["Unknown", t("Unknown")],
+                      ["Confirmed", t("Confirmed")],
+                    ])}
+                    <div className="order-filter__actions">
+                      <button
+                        type="button"
+                        disabled={!hasFilters}
+                        onClick={() => {
+                          clearFilters();
+                          // This button is now disabled: keep the keyboard inside the sheet.
+                          showButton.current?.focus();
+                        }}
+                      >
+                        {t("Clear filters")}
+                      </button>
+                      <button
+                        ref={showButton}
+                        type="button"
+                        className="order-filter__show"
+                        onClick={closeFilters}
+                      >
+                        {items.length === 1
+                          ? t("Show 1 exception")
+                          : t("Show {count} exceptions", { count: items.length })}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          {items.length === 0 ? (
+            <StatePanel
+              heading={
+                view.items.length === 0
+                  ? t("No exceptions in this view")
+                  : t("No exceptions match these filters")
+              }
+              tone="neutral"
+              status
             >
-              <option>{t("All")}</option>
-              <option>{t("High")}</option>
-              <option>{t("Critical")}</option>
-            </select>
-          </label>
-          <label>
-            {t("Status")}
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.currentTarget.value)}
-            >
-              <option value="NotResolved">{t("Not resolved yet")}</option>
-              <option value="Open">{t("Open")}</option>
-              <option value="Acknowledged">{t("Acknowledged")}</option>
-              <option value="Assigned">{t("Assigned")}</option>
-              <option value="Resolved">{t("Resolved")}</option>
-              <option value="All">{t("All")}</option>
-            </select>
-          </label>
-          <label>
-            {t("Owner")}
-            <select
-              value={ownerFilter}
-              onChange={(event) => setOwnerFilter(event.currentTarget.value)}
-            >
-              <option>{t("All")}</option>
-              <option>{t("Unassigned")}</option>
-              <option>{t("Assigned")}</option>
-            </select>
-          </label>
-          <label>
-            {t("Payment provider status")}
-            <select
-              value={providerFilter}
-              onChange={(event) => setProviderFilter(event.currentTarget.value)}
-            >
-              <option value="All">{t("All")}</option>
-              <option value="NotApplicable">{t("Not applicable")}</option>
-              <option value="Pending">{t("Pending")}</option>
-              <option value="Unknown">{t("Unknown")}</option>
-              <option value="Confirmed">{t("Confirmed")}</option>
-            </select>
-          </label>
-          <label className="order-exception-overdue-filter">
-            <input
-              type="checkbox"
-              checked={overdueOnly}
-              onChange={(event) => setOverdueOnly(event.currentTarget.checked)}
-            />
-            {t("Overdue only")}
-          </label>
-          <button
-            type="button"
-            disabled={!hasFilters}
-            onClick={() => {
-              setKindFilter("All");
-              setSeverityFilter("All");
-              setStatusFilter("NotResolved");
-              setOwnerFilter("All");
-              setProviderFilter("All");
-              setOverdueOnly(false);
+              <p>
+                {view.items.length === 0
+                  ? t("There are no open exceptions for this Store.")
+                  : t("No exception on this page matches the filters.")}
+              </p>
+              {view.items.length === 0 || !hasFilters ? null : (
+                <button type="button" onClick={clearFilters}>
+                  {t("Clear filters")}
+                </button>
+              )}
+            </StatePanel>
+          ) : null}
+          <ol className="order-list" aria-label={t("Exceptions")}>
+            {view.items.map((item) => {
+              const reference = item.exceptionReference;
+              const isOpen = reference === selected;
+              const overdue = isExceptionOverdue(item, view.projectedAt);
+              const openFor = exceptionOpenForText(item, view.projectedAt);
+              const resolved = item.status === "Resolved";
+              const refundCheck = isRefundedAwaitingCheck(item);
+              return (
+                <li
+                  className="order-row"
+                  data-status={item.status}
+                  data-overdue={overdue ? "true" : undefined}
+                  data-open={isOpen ? "true" : undefined}
+                  hidden={!visibleReferences.has(reference)}
+                  key={reference}
+                >
+                  <div className="order-row__summary">
+                    <h3 className="order-row__number">
+                      <button
+                        type="button"
+                        className="order-row__open"
+                        aria-expanded={isOpen}
+                        aria-controls={panelId + reference}
+                        ref={(node) => {
+                          if (node) rowButtons.current.set(reference, node);
+                          else rowButtons.current.delete(reference);
+                        }}
+                        onClick={() => (isOpen ? close() : open(reference))}
+                      >
+                        {exceptionLabel(item)}
+                      </button>
+                    </h3>
+                    <span className="order-row__what">
+                      <span className="order-workbench-type">{exceptionTitle(item)}</span>
+                      <span className="order-row__when">
+                        <SourceTime instant={item.createdAt} />
+                        {openFor === null ? null : (
+                          <>
+                            {" · "}
+                            <span className="order-exception__open-for">{openFor}</span>
+                          </>
+                        )}
+                      </span>
+                    </span>
+                    <span className="order-row__status">
+                      <span className="order-workbench-phase" data-tone={exceptionTone(item)}>
+                        {refundCheck ? t("Refunded, check needed") : systemText(item.status)}
+                      </span>
+                      {resolved ? null : (
+                        <span
+                          className="order-exception__due"
+                          data-overdue={overdue ? "true" : undefined}
+                        >
+                          {item.severity === "Critical" && !refundCheck
+                            ? systemText("Critical") + " · "
+                            : ""}
+                          {overdue ? t("overdue since ") : t("due ")}
+                          <SourceTime instant={item.dueAt} />
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="order-workbench-next">
+                    <button
+                      type="button"
+                      className="order-exception__next"
+                      onClick={() => open(reference)}
+                    >
+                      {resolved ? t("View") : refundCheck ? t("Check the refund") : t("Handle")}
+                      <span className="visually-hidden"> {exceptionLabel(item)}</span>
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+          {view.olderResolvedBefore !== null && onShowOlder ? (
+            <div className="order-exception__older">
+              <button
+                type="button"
+                disabled={older === "Loading"}
+                onClick={() => {
+                  // The older cases are resolved ones: show them where they will appear.
+                  if (tab !== "All") setTab("Resolved");
+                  onShowOlder();
+                }}
+              >
+                {older === "Loading"
+                  ? t("Loading older resolved exceptions…")
+                  : t("Show older resolved exceptions")}
+              </button>
+              {older === "Failed" ? (
+                <p role="status">
+                  {t("Older resolved exceptions could not be loaded. Try again.")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        {view.items.map((item) => (
+          // Every case keeps its panel mounted: a "result unknown" retry survives opening another.
+          <aside
+            className="order-panel"
+            id={panelId + item.exceptionReference}
+            aria-label={exceptionTitle(item)}
+            hidden={item.exceptionReference !== selected}
+            key={item.exceptionReference}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.stopPropagation();
+              close();
             }}
           >
-            {t("Clear filters")}
-          </button>
-        </div>
-        {items.length === 0 ? (
-          <StatePanel
-            heading={
-              view.items.length === 0
-                ? t("No exceptions in this view")
-                : t("No exceptions match these filters")
-            }
-            tone="neutral"
-            status
-          >
-            <p>
-              {view.items.length === 0
-                ? t("There are no open exceptions for this Store.")
-                : t("No exception on this page matches the filters.")}
-            </p>
-          </StatePanel>
-        ) : null}
-        <div className="store-card-grid">
-          {view.items.map((item) => (
+            <button type="button" className="order-panel__close" onClick={close}>
+              <span aria-hidden="true">×</span>
+              <span className="visually-hidden">{t("Close details")}</span>
+            </button>
             <article
-              className="store-card order-exception__card"
+              className="order-workbench-detail order-exception__detail"
               data-status={item.status}
-              data-overdue={isExceptionOverdue(item, view.projectedAt) ? "true" : undefined}
-              hidden={!visibleReferences.has(item.exceptionReference)}
-              key={item.exceptionReference}
             >
               <OrderExceptionCard
                 item={item}
+                active={item.exceptionReference === selected}
                 openFor={exceptionOpenForText(item, view.projectedAt)}
                 overdue={isExceptionOverdue(item, view.projectedAt)}
                 csrf={csrf}
                 readOnly={readOnly}
+                onRecorded={onRecorded}
               />
             </article>
-          ))}
-        </div>
-        {view.olderResolvedBefore !== null && onShowOlder ? (
-          <div className="order-exception__older">
-            <button type="button" disabled={older === "Loading"} onClick={onShowOlder}>
-              {older === "Loading"
-                ? t("Loading older resolved exceptions…")
-                : t("Show older resolved exceptions")}
-            </button>
-            {older === "Failed" ? (
-              <p role="status">{t("Older resolved exceptions could not be loaded. Try again.")}</p>
-            ) : null}
-          </div>
-        ) : null}
-      </>
+          </aside>
+        ))}
+      </div>
     </WorkspacePage>
   );
 }
@@ -271,21 +495,26 @@ const settlementLink = (businessDate: string | null) =>
     ? "/app/operations/payment-reconciliation"
     : `/app/operations/payment-reconciliation?businessDate=${businessDate}`;
 
-/** WP-2423: one exception card, worded for what the exception is about. */
+/** WP-2423: one case's panel, worded for what the exception is about. */
 function OrderExceptionCard({
   item,
+  active,
   openFor,
   overdue,
   csrf,
   readOnly,
+  onRecorded,
 }: {
   readonly item: OrderExceptionItem;
+  /** This case's panel is the one showing. */
+  readonly active: boolean;
   /** WP-2423 UI refresh: how long an unresolved case has been open (null once resolved). */
   readonly openFor: string | null;
   /** WP-2423: past its due time and still open (same rule as the filter and Home). */
   readonly overdue: boolean;
   readonly csrf: string | undefined;
   readonly readOnly: boolean;
+  readonly onRecorded: (() => void) | undefined;
 }) {
   const detail = item.reconciliation;
   const payment = item.kind === "PaymentReconciliationDifference" && item.sourceOwner === "Payment";
@@ -293,26 +522,24 @@ function OrderExceptionCard({
   // WP-2423: a resolved case is history; its actions are not offered again.
   const resolved = item.status === "Resolved";
   const header = (title: string) => (
-    <header>
-      <div>
-        {refundedAwaitingCheck ? (
-          <p className="bop-eyebrow order-exception__severity" data-severity="High">
-            {overdue ? t("Refunded · check overdue since ") : t("Refunded · check by ")}
-            <SourceTime instant={item.dueAt} />
-          </p>
-        ) : (
-          <p className="bop-eyebrow order-exception__severity" data-severity={item.severity}>
-            {systemText(item.severity)} ·{" "}
-            {resolved ? t("was due ") : overdue ? t("overdue since ") : t("due ")}
-            <SourceTime instant={item.dueAt} />
-          </p>
-        )}
-        <h3>{title}</h3>
-      </div>
-      <div className="order-exception__state">
-        <strong className="order-exception__status" data-status={item.status}>
-          {systemText(item.status)}
-        </strong>
+    <header className="order-exception__head">
+      <h2>{title}</h2>
+      {refundedAwaitingCheck ? (
+        <p className="order-panel__meta" data-overdue={overdue ? "true" : undefined}>
+          {overdue ? t("Refunded · check overdue since ") : t("Refunded · check by ")}
+          <SourceTime instant={item.dueAt} />
+        </p>
+      ) : (
+        <p className="order-panel__meta" data-overdue={overdue ? "true" : undefined}>
+          {systemText(item.severity)} ·{" "}
+          {resolved ? t("was due ") : overdue ? t("overdue since ") : t("due ")}
+          <SourceTime instant={item.dueAt} />
+        </p>
+      )}
+      <div className="order-panel__status">
+        <span className="order-panel__phase" data-tone={exceptionTone(item)}>
+          {refundedAwaitingCheck ? t("Refunded, check needed") : systemText(item.status)}
+        </span>
         {openFor === null ? null : <span className="order-exception__open-for">{openFor}</span>}
       </div>
     </header>
@@ -322,7 +549,7 @@ function OrderExceptionCard({
     return (
       <>
         {header(exceptionKindLabel[item.kind])}
-        <dl>
+        <dl className="order-panel__facts">
           <div>
             <dt>{t("Created")}</dt>
             <dd>
@@ -330,7 +557,7 @@ function OrderExceptionCard({
             </dd>
           </div>
           <div>
-            <dt>{t("Owner")}</dt>
+            <dt>{t("Handled by")}</dt>
             <dd>{systemText(item.ownerStatus)}</dd>
           </div>
         </dl>
@@ -351,7 +578,7 @@ function OrderExceptionCard({
     return (
       <>
         {header(t("Business day totals differ from the payment provider"))}
-        <dl>
+        <dl className="order-panel__facts">
           <div>
             <dt>{t("Business day")}</dt>
             <dd>{day ?? t("Shown in Settlement")}</dd>
@@ -381,7 +608,7 @@ function OrderExceptionCard({
             </dd>
           </div>
           <div>
-            <dt>{t("Owner")}</dt>
+            <dt>{t("Handled by")}</dt>
             <dd>{systemText(item.ownerStatus)}</dd>
           </div>
         </dl>
@@ -433,7 +660,7 @@ function OrderExceptionCard({
           ? t("Charge that matches no order")
           : exceptionKindLabel[item.kind],
       )}
-      <dl>
+      <dl className="order-panel__facts">
         <div>
           <dt>{t("Created")}</dt>
           <dd>
@@ -455,7 +682,7 @@ function OrderExceptionCard({
           <dd>{providerStateLabel[item.providerState]}</dd>
         </div>
         <div>
-          <dt>{t("Compensation")}</dt>
+          <dt>{t("Refund")}</dt>
           <dd>
             {refundedAwaitingCheck
               ? overdue
@@ -465,7 +692,7 @@ function OrderExceptionCard({
           </dd>
         </div>
         <div>
-          <dt>{t("Owner")}</dt>
+          <dt>{t("Handled by")}</dt>
           <dd>{systemText(item.ownerStatus)}</dd>
         </div>
       </dl>
@@ -488,6 +715,8 @@ function OrderExceptionCard({
           caseReference={item.exceptionReference}
           csrf={csrf}
           readOnly={readOnly}
+          active={active}
+          onRecorded={onRecorded}
         />
       ) : null}
       {csrf && payment ? (
@@ -540,6 +769,14 @@ export function OrderExceptionPage({
   const recoveryButton = useRef<HTMLButtonElement>(null);
   const [generation, setGeneration] = useState(0);
   const refresh = () => setGeneration((current) => current + 1);
+  // Keeps the page and open panels in place; a failed read leaves the list as it was.
+  const reloadQuietly = () => {
+    void client
+      .load()
+      .then(parseOrderExceptionView)
+      .then((view) => setState({ client, generation, view }))
+      .catch(() => undefined);
+  };
   const [state, setState] = useState<{
     client: OrderExceptionClient;
     generation: number;
@@ -619,7 +856,7 @@ export function OrderExceptionPage({
   }, [client, generation, state]);
   if (state?.client !== client || state.generation !== generation)
     return (
-      <WorkspacePage className="order-exception-page" title={t("Exceptions")}>
+      <WorkspacePage className="orders-page order-exception-page" title={t("Exceptions")}>
         <StatePanel heading={t("Loading exceptions")} tone="neutral" status>
           <p>{t("Reading the Store's exceptions…")}</p>
         </StatePanel>
@@ -647,9 +884,10 @@ export function OrderExceptionPage({
       csrf={csrf}
       onShowOlder={showOlder}
       older={olderPage?.status ?? "Idle"}
+      onRecorded={reloadQuietly}
     />
   ) : (
-    <WorkspacePage className="order-exception-page" title={t("Exceptions")}>
+    <WorkspacePage className="orders-page order-exception-page" title={t("Exceptions")}>
       <StatePanel heading={t("Exceptions unavailable")} tone="error" status>
         <p>{t("Exceptions could not be loaded. No action was sent.")}</p>
         <button ref={recoveryButton} onClick={refresh}>

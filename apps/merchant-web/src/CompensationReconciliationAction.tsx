@@ -13,11 +13,16 @@ export function CompensationReconciliationAction({
   caseReference,
   csrf,
   readOnly,
+  active = true,
+  onRecorded,
 }: {
   orderReference: string;
   caseReference: string;
   csrf: string;
   readOnly: boolean;
+  /** Reads the refund as soon as its case is opened, so checking it takes no extra step. */
+  active?: boolean;
+  onRecorded?: (() => void) | undefined;
 }) {
   const [view, setView] = useState<CompensationView | null>(null),
     [busy, setBusy] = useState(false),
@@ -51,6 +56,12 @@ export function CompensationReconciliationAction({
     restoreRetryFocus.current = false;
     if (document.activeElement === document.body) completionAnnouncement.current?.focus();
   }, [busy, recorded]);
+  const firstRead = useRef(false);
+  useEffect(() => {
+    if (!active || firstRead.current) return;
+    firstRead.current = true;
+    void load();
+  });
   async function load() {
     if (pending.current || unknown || !online) return;
     const controller = new AbortController();
@@ -101,6 +112,7 @@ export function CompensationReconciliationAction({
             "Your check of the refund is recorded. Refresh the page to see whether the case is closed.",
           ),
         );
+        onRecorded?.();
       }
     } catch {
       if (!controller.signal.aborted) {
@@ -121,9 +133,11 @@ export function CompensationReconciliationAction({
     : "";
   return (
     <section aria-label={t("Compensation reconciliation")}>
-      <button disabled={busy || unknown || !online} onClick={() => void load()}>
-        {t("Review confirmed refund")}
-      </button>
+      {view ? null : (
+        <button disabled={busy || unknown || !online} onClick={() => void load()}>
+          {t("Review confirmed refund")}
+        </button>
+      )}
       {!online ? <p role="status">{t("Offline — reconciliation is read-only.")}</p> : null}
       {view ? (
         <>
@@ -149,6 +163,7 @@ export function CompensationReconciliationAction({
               </label>
               <button
                 ref={actionButton}
+                className="order-exception__primary"
                 disabled={busy || !confirmed || readOnly || !online}
                 onClick={() => void submit()}
               >

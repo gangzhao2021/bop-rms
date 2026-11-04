@@ -185,7 +185,11 @@ export function UnmatchedCaptureRefundAction({
             />
             {t("I checked that no order of this store was paid by this charge")}
           </label>
-          <button disabled={readOnly || busy || !confirmed} onClick={() => void post("request")}>
+          <button
+            className="order-exception__refund"
+            disabled={readOnly || busy || !confirmed}
+            onClick={() => void post("request")}
+          >
             {failure === "Unknown"
               ? t("Retry same request")
               : t("Request refund of {amount}", { amount: amount })}
@@ -209,6 +213,7 @@ export function UnmatchedCaptureRefundAction({
             </label>
           ) : null}
           <button
+            className="order-exception__refund"
             disabled={readOnly || busy || (next === "Approve" && !confirmed)}
             onClick={() => void post("approve")}
           >
