@@ -1614,7 +1614,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "I have identified the selected guest and confirm the host transfer":
     "我已确认所选顾客身份，并确认转让主持人",
   "I have reviewed this confirmed refund and reconciled this case":
-    "我已核对这笔已确认的退款，并完成本案件对账",
+    "我已核对这笔退款",
   "I matched this order, the person collecting it and every item shown":
     "我已核对这笔订单、取餐人以及显示的每一件商品",
   "I run this business on my own": "我独自经营这家店",
@@ -2989,7 +2989,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Record deliveries and store purchases here as they arrive.": "在送货和门店采购到达时在此记录。",
   "Record ingredient allergen declarations": "记录配料过敏原申报",
   "Record items served": "记录已上桌的商品",
-  "Record operations reconciliation": "记录运营对账",
+  "Record operations reconciliation": "记录已核对",
   "Record the card machine refund": "记录刷卡机退款",
   "Record the payment by {at}. If it isn't paid by then the order is released and its items go back to stock.":
     "请在 {at} 前记录付款。未付款的订单将被释放，商品退回库存。",

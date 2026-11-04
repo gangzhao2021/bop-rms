@@ -145,7 +145,6 @@ export function CompensationReconciliationAction({
             {t("Confirmed refund: {amount} ·", { amount: amount })}{" "}
             <SourceTime instant={view.refund.confirmedAt} />
           </p>
-          <p>{t("Case: {caseState}", { caseState: view.caseState })}</p>
           {recorded ? (
             <p role="status">
               {t("Operator acknowledgment recorded. Case closure is checked separately.")}

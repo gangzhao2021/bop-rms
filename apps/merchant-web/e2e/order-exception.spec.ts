@@ -345,7 +345,8 @@ test("@production compensation acknowledgment remains keyboard operable and retr
   expect(bodies).toHaveLength(2);
   expect(bodies[0]).toBe(bodies[1]);
   expect(JSON.parse(bodies[0] ?? "{}").expectedCaseVersion).toBe(2);
-  await expect(page.getByText("Case: Open", { exact: true })).toBeVisible();
+  // The panel speaks the staff's words: never the record's raw state.
+  await expect(page.getByText(/^Case:/u)).toHaveCount(0);
 });
 
 test("@production compensation unknown preserves focus moved during the request", async ({
