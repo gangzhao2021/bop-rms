@@ -6028,6 +6028,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table changed since it was shown. It has been read again: try again.":
     "这桌在显示后有变动，已重新读取，请再试一次。",
   "On the table's bill": "记入本桌账单",
+  "Guests left without paying · {amount} written off": "客人未付离开 · 已核销 {amount}",
   "Paid at the table · cash": "已在桌上付清 · 现金",
   "Paid at the table · card machine": "已在桌上付清 · 刷卡机",
   "Written off": "已核销",

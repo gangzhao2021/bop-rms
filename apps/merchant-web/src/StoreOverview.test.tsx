@@ -35,6 +35,22 @@ import {
 } from "./paid-round-wait.js";
 
 describe("WP-2423 P2 store overview", () => {
+  it("Owner 2026-11-04: a pickup closed as not collected is not an open order", () => {
+    const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
+    const notCollected = {
+      ...queue,
+      items: queue.items.map((order, index) =>
+        index === 0 ? { ...order, currentPhase: "Accepted", pickupNotCollected: true } : order,
+      ),
+    };
+    const before = summarizeOrders({
+      ...queue,
+      items: queue.items.map((order, index) =>
+        index === 0 ? { ...order, currentPhase: "Accepted" } : order,
+      ),
+    }).open;
+    expect(summarizeOrders(notCollected).open).toBe(before - 1);
+  });
   it("counts open and awaiting orders from the current queue", () => {
     const queue = parseCurrentOrderQueue(currentOrderQueueFixture(), null);
     expect(summarizeOrders(queue)).toEqual({

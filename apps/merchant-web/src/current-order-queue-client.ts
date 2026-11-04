@@ -15,6 +15,8 @@ function parseTableBill(
   orderType: unknown,
 ): {
   readonly totalMinor: string;
+  /** Owner 2026-11-04 walkthrough: the guests left without paying; the amount written off. */
+  readonly writtenOffMinor?: string;
   readonly partlyPaid?: {
     readonly remainingMinor: string;
     readonly paidParts: number;
@@ -31,7 +33,14 @@ function parseTableBill(
   if (value === null) return null;
   const withParts =
     value !== null && typeof value === "object" && Object.hasOwn(value, "partlyPaid");
-  const bill = exact(value, ["totalMinor", "paid", ...(withParts ? ["partlyPaid"] : [])]);
+  const withWriteOff =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "writtenOffMinor");
+  const bill = exact(value, [
+    "totalMinor",
+    "paid",
+    ...(withParts ? ["partlyPaid"] : []),
+    ...(withWriteOff ? ["writtenOffMinor"] : []),
+  ]);
   if (
     orderType !== "DineIn" ||
     typeof bill.totalMinor !== "string" ||
@@ -39,6 +48,15 @@ function parseTableBill(
   )
     return fail();
   if (bill.paid === null) {
+    if (withWriteOff) {
+      if (typeof bill.writtenOffMinor !== "string" || !minorAmount.test(bill.writtenOffMinor))
+        return fail();
+      return Object.freeze({
+        totalMinor: bill.totalMinor,
+        paid: null,
+        writtenOffMinor: bill.writtenOffMinor,
+      });
+    }
     if (!withParts) return Object.freeze({ totalMinor: bill.totalMinor, paid: null });
     const parts = exact(bill.partlyPaid, ["remainingMinor", "paidParts", "partCount"]);
     if (

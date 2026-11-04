@@ -145,7 +145,10 @@ export interface ExceptionsSummary {
 export const OVERVIEW_REFRESH_MS = 30_000;
 const openPhases = new Set(["Submitted", "Accepted", "InProgress", "Ready"]);
 export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): OrdersSummary {
-  const open = queue.items.filter((order) => openPhases.has(order.currentPhase ?? ""));
+  // Owner 2026-11-04 walkthrough: a pickup closed as not collected keeps its phase but is finished.
+  const open = queue.items.filter(
+    (order) => openPhases.has(order.currentPhase ?? "") && !order.pickupNotCollected,
+  );
   const dineIn = open.filter((order) => order.orderType === "DineIn");
   const rounds = roundsAwaitingAcceptance(queue, now, paidRoundUrgentMinutes);
   return {

@@ -1437,6 +1437,10 @@ export function orderAmountNote(
   // DEC-DINE-IN-PAY-LATER: a pay-later table's dishes are on its bill until it pays once.
   if (order.tableBill !== null) {
     const paid = order.tableBill.paid;
+    if (order.tableBill.writtenOffMinor !== undefined)
+      return t("Guests left without paying · {amount} written off", {
+        amount: orderMoney({ amountMinor: order.tableBill.writtenOffMinor, currencyCode: "CAD" }),
+      });
     if (paid === null) return t("On the table's bill");
     const how =
       paid.method === "Cash"

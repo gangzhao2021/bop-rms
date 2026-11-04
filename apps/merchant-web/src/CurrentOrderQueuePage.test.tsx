@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { setLanguageForTest } from "./i18n/i18n.js";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   readCurrentOrders,
   refreshedOrderState,
@@ -36,6 +36,7 @@ import {
   orderWho,
   orderWhen,
   handoverReady,
+  orderAmountNote,
 } from "./CurrentOrderQueuePage.js";
 import {
   ordersAwaitingAcceptance,
@@ -1854,4 +1855,16 @@ it("Orders v3: a row says what, who and which day, and an accepted pickup's next
   const count = (phase: string) =>
     filterCurrentOrderItems(items, { orderNumber: "", type: "All", channel: "All", phase }).length;
   expect([count("Accepted"), count("InProgress"), count("Ready")]).toEqual([1, 2, 1]);
+});
+
+describe("Owner 2026-11-04: a written-off table on the Orders list", () => {
+  it("says the guests left and how much was written off, not that it is on the bill", () => {
+    expect(
+      orderAmountNote({
+        tableBill: { totalMinor: "0", paid: null, writtenOffMinor: "2077" },
+        paymentPosition: null,
+        batches: [],
+      } as never),
+    ).toBe("Guests left without paying · $20.77 written off");
+  });
 });

@@ -457,6 +457,8 @@ export function createPersistentMerchantOrderQueue(options: {
             string,
             {
               totalMinor: string;
+              /** Owner 2026-11-04 walkthrough: the guests left; the amount written off. */
+              writtenOffMinor?: string;
               /** Owner 2026-11-03 walkthrough: a split bill with some parts paid: what is left. */
               partlyPaid?: {
                 remainingMinor: string;
@@ -761,9 +763,10 @@ export function createPersistentMerchantOrderQueue(options: {
                 businessTransaction,
                 payLaterOrders,
               );
-              const writtenOff = new Set(
+              const writtenOff = new Map(
                 (await tableStore.listWriteOffsByOrders(businessTransaction, payLaterOrders)).map(
-                  (entry) => String(entry.orderReference),
+                  (entry) =>
+                    [String(entry.orderReference), entry.writtenOffMinor.toString()] as const,
                 ),
               );
               // WP-2423 item 8 ④: a split bill counts as paid once every part of its split is.
@@ -804,9 +807,10 @@ export function createPersistentMerchantOrderQueue(options: {
                 ]);
               // The table's bill on the Orders list: what it paid, else what its rounds come to.
               for (const order of payLaterOrders) {
-                // The guests left and a manager wrote it off: nothing is waiting to be paid.
-                if (writtenOff.has(order)) {
-                  tableBills.set(order, { totalMinor: "0", paid: null });
+                // The guests left and it was written off: nothing is waiting to be paid.
+                const writtenOffMinor = writtenOff.get(order);
+                if (writtenOffMinor !== undefined) {
+                  tableBills.set(order, { totalMinor: "0", paid: null, writtenOffMinor });
                   continue;
                 }
                 const settlement = settlements.find(
