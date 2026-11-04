@@ -314,7 +314,7 @@ test.describe("@production a moved party's phone", () => {
     // Joins at T6 and sends a round.
     await page.goto("/#qr=aaa.bbb.ccc");
     await page.getByRole("button", { name: "Join this table", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+    await expect(page).toHaveURL(/\/menu$/u);
     await page.evaluate(() => {
       history.pushState(null, "", "/checkout");
       window.dispatchEvent(new PopStateEvent("popstate"));
@@ -335,7 +335,7 @@ test.describe("@production a moved party's phone", () => {
     // Scans T7's code and joins again: the round is on the table page.
     await page.goto("/#qr=ddd.eee.fff");
     await page.getByRole("button", { name: "Join this table", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+    await expect(page).toHaveURL(/\/menu$/u);
     expect(table.rejoined).toBe(true);
     await page.evaluate(() => {
       history.pushState(null, "", "/dine-in/session");
@@ -400,7 +400,7 @@ test.describe("@production a merged party's phone", () => {
     // Joins at T6 and sends a round.
     await page.goto("/#qr=aaa.bbb.ccc");
     await page.getByRole("button", { name: "Join this table", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+    await expect(page).toHaveURL(/\/menu$/u);
     await page.evaluate(() => {
       history.pushState(null, "", "/checkout");
       window.dispatchEvent(new PopStateEvent("popstate"));
@@ -424,7 +424,7 @@ test.describe("@production a merged party's phone", () => {
     // Scans T7's code and joins again: the round is on the table page.
     await page.goto("/#qr=ddd.eee.fff");
     await page.getByRole("button", { name: "Join this table", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "You’ve joined this table" })).toBeVisible();
+    await expect(page).toHaveURL(/\/menu$/u);
     expect(table.rejoined).toBe(true);
     await page.evaluate(() => {
       history.pushState(null, "", "/dine-in/session");
