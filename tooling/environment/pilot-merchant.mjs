@@ -1,5 +1,5 @@
 import { createMerchantStoreOpening } from "../../apps/api/dist/merchant-store-opening.js";
-import { servedStoresOf } from "./pilot-served-stores.mjs";
+import { createServedStoreTarget, servedStoresOf } from "./pilot-served-stores.mjs";
 import console from "node:console";
 import { URL } from "node:url";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
@@ -209,16 +209,11 @@ export async function createInternalMerchant(
   // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a staff member may select any Store this installation
   // serves where they are associated; this composition's own Store comes first.
   const served = servedStoresOf(resources);
-  const targetScope = async (_tx, authenticated, reference) => {
-    const candidates =
-      reference === undefined
-        ? served
-        : served.filter((store) => store.storeReference === reference);
-    for (const store of candidates)
-      if (await session.validateAssociation(_tx, authenticated, store, resources.now()))
-        return store;
-    throw new Error("INTERNAL_MERCHANT_SCOPE_DENIED");
-  };
+  const targetScope = createServedStoreTarget({
+    served,
+    validateAssociation: session.validateAssociation,
+    now: () => resources.now(),
+  });
   // Set once the pickup composition exists (the workspace is read per request).
   let waitingPickups = null;
   const workspace = createPilotWorkspaceListing({

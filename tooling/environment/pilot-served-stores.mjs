@@ -50,6 +50,22 @@ export function servedStoreFor(resources, selected) {
 }
 
 /**
+ * The Store a staff member works in: the one named, or without a name the first served Store where
+ * they are associated, so a person of another merchant signs in to their own merchant's Store.
+ */
+export function createServedStoreTarget({ served, validateAssociation, now }) {
+  return async (tx, authenticated, reference) => {
+    const candidates =
+      reference === undefined
+        ? served
+        : served.filter((store) => store.storeReference === reference);
+    for (const store of candidates)
+      if (await validateAssociation(tx, authenticated, store, now())) return store;
+    throw new Error("INTERNAL_MERCHANT_SCOPE_DENIED");
+  };
+}
+
+/**
  * `stores.json` in the installation directory: {"schemaVersion":1,"stores":["stores/<name>",…]},
  * each a Store runtime directory below this one. Absent: this installation serves one Store.
  */
