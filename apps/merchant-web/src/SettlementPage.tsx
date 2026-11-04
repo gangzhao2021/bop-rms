@@ -14,7 +14,7 @@ import {
 export { unfinishedGuestPayment };
 import { orderMoney } from "./order-money.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
-import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { businessDateLabel, businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 
@@ -764,6 +764,48 @@ export function SettlementNotCovered({
   );
 }
 
+/** The business day before `businessDate` (a date label: no time zone is involved). */
+export function previousBusinessDate(businessDate: string): string {
+  return new Date(Date.parse(`${businessDate}T00:00:00.000Z`) - 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+/**
+ * Owner 2026-11-03: the page opens on today, so what is left to finish on the last closed day is
+ * said on today's page. The same reading as Home's opening checklist; nothing is calculated here.
+ */
+export function closedDayStillOpenText(view: SettlementView, today: string): string | null {
+  const day = businessDateLabel(view.businessDate, today);
+  const reconciliation = view.reconciliation;
+  if (reconciliation === null)
+    return t("{day} still needs closing: its checks could not be read.", { day: day });
+  const attention = reconciliation.differences.filter((check) => !unfinishedGuestPayment(check));
+  const settlement = reconciliation.settlement;
+  if (settlement === null)
+    return t("{day} still needs closing: not yet checked against the payment provider.", {
+      day: day,
+    });
+  if (!settled(settlement))
+    return t("{day} still needs closing: its totals differ from the provider statement.", {
+      day: day,
+    });
+  if (attention.length > 0)
+    return attention.length === 1
+      ? t("{day} still needs closing: 1 payment to look at.", { day: day })
+      : t("{day} still needs closing: {count} payments to look at.", {
+          day: day,
+          count: attention.length,
+        });
+  return null;
+}
+
+/** On today's page: is the last closed day finished? Silent when it is, or when there is none. */
+type ClosedDay =
+  | { readonly kind: "Quiet" }
+  | { readonly kind: "Unread" }
+  | { readonly kind: "Open"; readonly businessDate: string; readonly text: string };
+
 type State =
   | { readonly kind: "Loading" | "PermissionDenied" | "Busy" | "Unavailable" }
   | { readonly kind: "NotCovered"; readonly firstBusinessDate: string }
@@ -788,8 +830,17 @@ export function SettlementPage({
   const linkedDay = search.get("businessDate");
   const initialDay =
     linkedDay !== null && /^\d{4}-\d{2}-\d{2}$/u.test(linkedDay) ? linkedDay : null;
+  // Owner 2026-11-03: nothing asked for means today, the day a manager comes here to see; it follows
+  // the Store's day as it turns over. Without a known Store day the server answers its last closed.
   const [requested, setRequested] = useState<string | null>(initialDay);
-  const [draft, setDraft] = useState(initialDay ?? "");
+  const selected = requested ?? latestDay ?? null;
+  const [draft, setDraft] = useState<string | null>(null);
+  const showDay = (businessDate: string | null) => {
+    setDraft(null);
+    setRequested(businessDate);
+  };
+  const previousDay = latestDay ? previousBusinessDate(latestDay) : null;
+  const [closedDay, setClosedDay] = useState<ClosedDay>({ kind: "Quiet" });
   const [state, setState] = useState<State>({ kind: "Loading" });
   const [revision, setRevision] = useState(0);
   const [busyRetries, setBusyRetries] = useState(0);
@@ -824,9 +875,40 @@ export function SettlementPage({
     [client],
   );
   useEffect(() => {
-    load(requested);
+    load(selected);
     return () => active.current?.abort();
-  }, [load, requested, revision]);
+  }, [load, selected, revision]);
+  // Viewing today: read the last closed day beside it, to say plainly if it is not finished.
+  const today = selected !== null && selected === latestDay ? latestDay : null;
+  useEffect(() => {
+    if (today === null) {
+      setClosedDay({ kind: "Quiet" });
+      return;
+    }
+    const controller = new AbortController();
+    void client
+      .load(null, controller.signal)
+      .then((closed) => {
+        if (controller.signal.aborted) return;
+        const text = closed.businessDate < today ? closedDayStillOpenText(closed, today) : null;
+        setClosedDay(
+          text === null
+            ? { kind: "Quiet" }
+            : { kind: "Open", businessDate: closed.businessDate, text },
+        );
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        // No earlier day to close, or no access (the page itself says so): nothing to add.
+        const code = error instanceof SettlementClientError ? error.code : "Unavailable";
+        setClosedDay(
+          code === "NotCovered" || code === "PermissionDenied"
+            ? { kind: "Quiet" }
+            : { kind: "Unread" },
+        );
+      });
+    return () => controller.abort();
+  }, [client, today, revision]);
   // Records busy with live ordering and payment work: try again on our own a few times.
   useEffect(() => {
     if (state.kind !== "Busy") {
@@ -844,6 +926,7 @@ export function SettlementPage({
   const view = state.kind === "Ready" ? state.view : null;
   return (
     <WorkspacePage
+      className="settlement-page"
       title={t("Settlement")}
       meta={storeLabel}
       status={view ? <Freshness status="Fresh" at={view.projectedAt} /> : null}
@@ -857,30 +940,57 @@ export function SettlementPage({
         className="list-filters settlement__picker"
         onSubmit={(event) => {
           event.preventDefault();
-          setRequested(draft === "" ? null : draft);
+          showDay(draft === null ? requested : draft === "" ? null : draft);
         }}
       >
-        <label>
-          {t("Business day")}
-          <input
-            type="date"
-            name="businessDate"
-            value={draft}
-            max={latestDay}
-            onChange={(event) => setDraft(event.currentTarget.value)}
-          />
-        </label>
-        <button type="submit">{t("Show")}</button>
-        <button
-          type="button"
-          onClick={() => {
-            setDraft("");
-            setRequested(null);
-          }}
-        >
-          {t("Latest closed day")}
-        </button>
+        {latestDay && previousDay ? (
+          <div className="settlement__days">
+            <button
+              type="button"
+              aria-pressed={selected === latestDay}
+              onClick={() => showDay(null)}
+            >
+              {businessDateLabel(latestDay, latestDay)}
+            </button>
+            <button
+              type="button"
+              aria-pressed={selected === previousDay}
+              onClick={() => showDay(previousDay)}
+            >
+              {businessDateLabel(previousDay, latestDay)}
+            </button>
+          </div>
+        ) : null}
+        <div className="settlement__other-day">
+          <label>
+            {t("Business day")}
+            <input
+              type="date"
+              name="businessDate"
+              value={draft ?? selected ?? ""}
+              max={latestDay}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+            />
+          </label>
+          <button type="submit">{t("Show")}</button>
+        </div>
       </form>
+      {closedDay.kind === "Open" ? (
+        <p className="settlement__closed-day" role="status" data-tone="action">
+          <span>{closedDay.text}</span>{" "}
+          <button type="button" onClick={() => showDay(closedDay.businessDate)}>
+            {t("Show {firstBusinessDate}", {
+              firstBusinessDate: businessDateText(closedDay.businessDate),
+            })}
+          </button>
+        </p>
+      ) : closedDay.kind === "Unread" ? (
+        <p className="settlement__closed-day" role="status">
+          <span>
+            {t("The last closed day could not be checked just now. Refresh to try again.")}
+          </span>
+        </p>
+      ) : null}
       {state.kind === "Loading" ? (
         <StatePanel heading={t("Loading")} tone="neutral" status>
           <p>{t("Reading the day…")}</p>
@@ -903,17 +1013,14 @@ export function SettlementPage({
         </StatePanel>
       ) : state.kind === "NotCovered" ? (
         <SettlementNotCovered
-          requestedDate={requested}
+          requestedDate={selected}
           firstBusinessDate={state.firstBusinessDate}
-          onShowDay={(businessDate) => {
-            setDraft(businessDate);
-            setRequested(businessDate);
-          }}
+          onShowDay={showDay}
         />
       ) : state.kind === "Unavailable" ? (
         <StatePanel heading={t("Settlement unavailable")} tone="error" status>
           <p>
-            {requested === null
+            {selected === null || selected === latestDay
               ? t("The day could not be read. Check your connection and refresh.")
               : t(
                   "That day could not be read. It may be in the future or before the Store's configuration took effect.",
@@ -921,14 +1028,7 @@ export function SettlementPage({
           </p>
         </StatePanel>
       ) : view ? (
-        <SettlementReport
-          view={view}
-          timeZone={timeZone}
-          onShowDay={(businessDate) => {
-            setDraft(businessDate);
-            setRequested(businessDate);
-          }}
-        />
+        <SettlementReport view={view} timeZone={timeZone} onShowDay={showDay} />
       ) : null}
     </WorkspacePage>
   );

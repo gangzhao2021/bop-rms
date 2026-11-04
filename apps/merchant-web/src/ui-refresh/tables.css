@@ -1403,3 +1403,284 @@
   color: var(--bop-color-accent);
   cursor: pointer;
 }
+
+/*
+ * Table QR codes in the v3 rules (2026-11-03). White, no boxes, a hairline between rows; a state is
+ * a dot and words; accent words for actions, red words for the two that take a code or table out of
+ * service; the accent button only for the step a table is waiting on.
+ */
+.workspace-page.table-qr-page .workspace-page__header {
+  align-items: center;
+}
+.workspace-page.table-qr-page .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.workspace-page.table-qr-page .workspace-page__meta,
+.workspace-page.table-qr-page .table-qr__intro {
+  font-size: 14px;
+}
+.workspace-page.table-qr-page .workspace-page__actions {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-4);
+}
+.workspace-page.table-qr-page button:not(.language-switch),
+.workspace-page.table-qr-page .workspace-page__header button:not(.language-switch) {
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+/* As on Orders, Refresh is quiet at the end of the header. */
+.workspace-page.table-qr-page .workspace-page__actions button:last-child {
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
+}
+.workspace-page.table-qr-page .workspace-page__actions button:last-child:hover {
+  color: var(--bop-color-accent);
+}
+.workspace-page.table-qr-page button[data-variant="primary"]:not(:disabled),
+.workspace-page.table-qr-page
+  .workspace-page__header
+  button[data-variant="primary"]:not(:disabled) {
+  padding: 0 16px;
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+}
+.workspace-page.table-qr-page button[data-variant="destructive"]:not(:disabled) {
+  color: var(--bop-color-danger);
+}
+.workspace-page.table-qr-page button:not(.language-switch):disabled,
+.workspace-page.table-qr-page .workspace-page__header button:not(.language-switch):disabled {
+  background: none;
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.workspace-page.table-qr-page .table-qr__intro {
+  margin: 0 0 var(--bop-space-5);
+}
+
+/* Notices and the open form: words on the page, ahead of the list. */
+.workspace-page.table-qr-page .table-qr__notices {
+  display: grid;
+  gap: var(--bop-space-4);
+  margin-bottom: var(--bop-space-5);
+  scroll-margin-top: calc(var(--bop-pinned-top, 0px) + 16px);
+}
+.workspace-page.table-qr-page .table-qr__notices:empty {
+  display: none;
+}
+.workspace-page.table-qr-page .bop-state-card {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.workspace-page.table-qr-page .bop-state-card h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.table-qr-page .bop-state-card p {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+/* "Stops working soon" needs action: the same mark, no fourth colour. */
+.workspace-page.table-qr-page .bop-state-card[data-tone="offline"] h2 {
+  color: var(--bop-color-text-default);
+}
+.workspace-page.table-qr-page .bop-state-card[data-tone="offline"] h2::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+.workspace-page.table-qr-page .table-qr__confirm {
+  display: grid;
+  gap: var(--bop-space-3);
+  max-width: 40rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 14px;
+}
+.workspace-page.table-qr-page .table-qr__confirm h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.workspace-page.table-qr-page .table-qr__confirm p {
+  margin: 0;
+}
+.workspace-page.table-qr-page .table-qr__warning {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.workspace-page.table-qr-page .table-qr__warning::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+.workspace-page.table-qr-page .table-qr__confirm label {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.table-qr-page .table-qr__confirm label:has(> input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.workspace-page.table-qr-page .table-qr__confirm input[type="checkbox"] {
+  accent-color: var(--bop-color-accent);
+}
+.workspace-page.table-qr-page .table-qr__confirm-actions {
+  align-items: center;
+  gap: 0 var(--bop-space-5);
+}
+
+/* The list: a line between rows; headings in grey words; every state a dot and words. */
+.workspace-page.table-qr-page .table-qr__list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.workspace-page.table-qr-page .table-qr__list thead th {
+  padding: 0 var(--bop-space-4) var(--bop-space-2) 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-align: start;
+  text-transform: none;
+  white-space: nowrap;
+}
+.workspace-page.table-qr-page .table-qr__list :is(td, th[scope="row"]) {
+  padding: var(--bop-space-2) var(--bop-space-4) var(--bop-space-2) 0;
+  border: 0;
+  background: none;
+  font-size: 14px;
+  font-weight: 400;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page.table-qr-page .table-qr__list th[scope="row"] {
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-transform: none;
+}
+.workspace-page.table-qr-page .table-qr__list tbody tr + tr {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page.table-qr-page .table-qr__state::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-border-control);
+  vertical-align: 0.1em;
+}
+.workspace-page.table-qr-page .table-qr__state[data-tone="action"]::before {
+  background: var(--bop-color-danger-mark);
+}
+.workspace-page.table-qr-page .table-qr__state[data-tone="done"]::before {
+  background: var(--bop-color-success-mark);
+}
+.table-qr__seated {
+  color: var(--bop-color-text-muted);
+}
+.workspace-page.table-qr-page .table-qr__list td.table-qr__actions {
+  padding-inline-end: 0;
+  text-align: end;
+  white-space: normal;
+}
+.workspace-page.table-qr-page .table-qr__actions button:not(:first-child) {
+  margin-inline-start: var(--bop-space-4);
+}
+
+/* Pickup ordering: its own group under the list. */
+.workspace-page.table-qr-page .table-qr__pickup {
+  margin-top: var(--bop-space-8);
+}
+.workspace-page.table-qr-page .table-qr__pickup h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.table-qr-page .table-qr__pickup p {
+  max-width: 48rem;
+  margin: 4px 0 var(--bop-space-1);
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.table-qr-page .table-qr__pickup button + button {
+  margin-inline-start: var(--bop-space-4);
+}
+@media (max-width: 767px) {
+  .workspace-page.table-qr-page .workspace-page__toolbar {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+  .workspace-page.table-qr-page .workspace-page__actions {
+    justify-content: flex-start;
+  }
+  .workspace-page.table-qr-page
+    .table-qr__list
+    td.table-qr__actions:has(button[data-variant="primary"]) {
+    margin-top: var(--bop-space-2);
+  }
+  .workspace-page.table-qr-page .table-qr__list tr {
+    display: grid;
+    gap: 2px;
+    padding: var(--bop-space-3) 0;
+    border-top: 0;
+  }
+  .workspace-page.table-qr-page .table-qr__list tbody tr + tr {
+    border-top: 1px solid var(--bop-color-row-divider);
+  }
+  .workspace-page.table-qr-page .table-qr__list :is(td, th[scope="row"]) {
+    display: block;
+    padding: 0;
+  }
+  .workspace-page.table-qr-page .table-qr__list td[data-label="Code"]::before,
+  .workspace-page.table-qr-page .table-qr__list td[data-label]::before {
+    font-size: 14px;
+  }
+  .workspace-page.table-qr-page .table-qr__list td.table-qr__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--bop-space-4);
+    text-align: start;
+  }
+  .workspace-page.table-qr-page .table-qr__actions button:not(:first-child) {
+    margin-inline-start: 0;
+  }
+}

@@ -172,6 +172,19 @@ function PickupCard({
   const tier = waitTier(wait, completed);
   // What is in the bag, as ordered, for a quick match at the counter.
   const contents = item.execution?.items ?? [];
+  const facts = [
+    ...(earlier && item.businessDate
+      ? [t("From {businessDate}", { businessDate: businessDateText(item.businessDate) })]
+      : []),
+    ...(item.stagingLocation ? [t("Shelf: {shelf}", { shelf: item.stagingLocation })] : []),
+    ...(item.packageCount
+      ? [
+          item.packageCount === 1
+            ? t("1 package")
+            : t("{packageCount} packages", { packageCount: item.packageCount }),
+        ]
+      : []),
+  ];
   return (
     <article
       className="store-card pickup-queue__card"
@@ -179,28 +192,59 @@ function PickupCard({
       data-wait={tier}
       data-completed={completed}
     >
-      <header>
-        <div>
-          {completed ? null : (
-            <p className="bop-eyebrow pickup-queue__phase" data-wait={tier}>
-              {t("Ready for {wait}", { wait: pickupWaitText(wait) })}
-            </p>
-          )}
-          <h3 className="pickup-queue__number">
-            {t("Order")} <span className="pickup-queue__number-value">{orderLabel}</span>
-          </h3>
-          {earlier && item.businessDate ? (
-            <p className="pickup-queue__day">
-              {t("From {businessDate}", { businessDate: businessDateText(item.businessDate) })}
-            </p>
-          ) : null}
-        </div>
+      <h3 className="pickup-queue__number">
+        <span className="pickup-queue__number-word">{t("Order")} </span>
+        <span className="pickup-queue__number-value">{orderLabel}</span>
+      </h3>
+      <div className="pickup-queue__what">
+        {contents.length > 0 ? (
+          <ul
+            className="pickup-queue__items"
+            aria-label={t("Items in order {orderLabel}", { orderLabel: orderLabel })}
+          >
+            {mergedPickupLines(contents).map((line) => (
+              <li key={line.key}>
+                {line.quantity} × {line.label}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {/* Owner 2026-11-03: a fact shows when there is one; no "Not set" rows on every order. */}
+        {facts.length > 0 ? <p className="pickup-queue__facts">{facts.join(" · ")}</p> : null}
+        {item.allergenCue === "Present" ? (
+          <p className="pickup-queue__alert">{t("Allergen present")}</p>
+        ) : null}
+        {item.exceptionStatus === "Reported" ? (
+          <p className="pickup-queue__alert">{t("Exception reported")}</p>
+        ) : null}
+      </div>
+      <div className="pickup-queue__state">
         {completed ? (
           <strong className="pickup-queue__status" data-completed={completed}>
             {t("Handed over")}
           </strong>
-        ) : null}
-      </header>
+        ) : (
+          <p className="pickup-queue__phase" data-wait={tier}>
+            {t("Ready for {wait}", { wait: pickupWaitText(wait) })}
+          </p>
+        )}
+        {/* Owner 2026-11-03: once handed over there is no code to check. */}
+        {completed ? null : (
+          <p className="pickup-queue__code">
+            {counter
+              ? t("Counter order")
+              : item.proofReadiness === "Expired"
+                ? t("Code expired · check in person")
+                : item.proofReadiness === "Locked"
+                  ? t("Too many wrong codes · check in person")
+                  : item.proofReadiness === "NotIssued"
+                    ? t("No code sent · check in person")
+                    : item.proofReadiness === "Ready"
+                      ? t("Code sent to customer")
+                      : t("Code not known yet · check in person")}
+          </p>
+        )}
+      </div>
       {!completed && item.remakeQuantity ? (
         <p className="pickup-queue__remake" role="status">
           {t("Kitchen is remaking {value} — wait for it before handing this order over.", {
@@ -209,69 +253,6 @@ function PickupCard({
                 ? t("1 item")
                 : t("{remakeQuantity} items", { remakeQuantity: item.remakeQuantity }),
           })}
-        </p>
-      ) : null}
-      {contents.length > 0 ? (
-        <ul
-          className="pickup-queue__items"
-          aria-label={t("Items in order {orderLabel}", { orderLabel: orderLabel })}
-        >
-          {mergedPickupLines(contents).map((line) => (
-            <li key={line.key}>
-              <span className="pickup-queue__item-quantity">{line.quantity} ×</span> {line.label}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <dl>
-        {/* Owner 2026-11-03: once handed over there is no code to check. */}
-        {completed ? null : (
-          <div>
-            <dt>{t("Pickup code")}</dt>
-            <dd>
-              {counter
-                ? t("Not needed · taken at the counter")
-                : item.proofReadiness === "Expired"
-                  ? t("Code expired · check in person")
-                  : item.proofReadiness === "Locked"
-                    ? t("Too many wrong codes · check in person")
-                    : item.proofReadiness === "NotIssued"
-                      ? t("No code sent · check in person")
-                      : item.proofReadiness === "Ready"
-                        ? t("Sent to customer")
-                        : t("Not known yet · check in person")}
-            </dd>
-          </div>
-        )}
-        {/* Owner 2026-11-03: a fact shows when there is one; no "Not set" rows on every card. */}
-        {item.stagingLocation ? (
-          <div>
-            <dt>{t("Shelf")}</dt>
-            <dd>{item.stagingLocation}</dd>
-          </div>
-        ) : null}
-        {item.packageCount ? (
-          <div>
-            <dt>{t("Packages")}</dt>
-            <dd>{item.packageCount}</dd>
-          </div>
-        ) : null}
-        {item.allergenCue === "Present" ? (
-          <div>
-            <dt>{t("Allergen")}</dt>
-            <dd>{t("Allergen present")}</dd>
-          </div>
-        ) : null}
-        {item.exceptionStatus === "Reported" ? (
-          <div>
-            <dt>{t("Exception")}</dt>
-            <dd>{t("Reported")}</dd>
-          </div>
-        ) : null}
-      </dl>
-      {!completed && counter ? (
-        <p className="pickup-queue__counter" role="note">
-          {t("Taken at the counter — call the order number and hand it over.")}
         </p>
       ) : null}
       {!completed && item.proofReadiness === "Locked" ? (
@@ -340,7 +321,9 @@ function PickupCard({
         </div>
       ) : null}
       {canComplete && !workstation ? (
-        <p role="status">{t("Handoff is not available on this device. Ask a manager.")}</p>
+        <p className="pickup-queue__note" role="status">
+          {t("Handoff is not available on this device. Ask a manager.")}
+        </p>
       ) : null}
     </article>
   );
@@ -424,6 +407,12 @@ export function PickupQueueScreen({
   const earlierShown = earlierItems.filter((item) =>
     visibleReferences.has(item.fulfillmentReference),
   ).length;
+  const counterWaiting = view.items.some(
+    (item) =>
+      item.phase !== "Completed" &&
+      item.takenAtCounter === true &&
+      item.proofReadiness === "NotIssued",
+  );
   const orderSearchRef = useRef<HTMLInputElement>(null);
   return (
     <WorkspacePage
@@ -558,6 +547,12 @@ export function PickupQueueScreen({
               ? t(" · {completedCount} handed over", { completedCount: completedCount })
               : ""}
             {onNext || onPrevious ? t(" on this page") : ""}
+          </p>
+        ) : null}
+        {/* Said once for the page, not on every counter order's row. */}
+        {counterWaiting ? (
+          <p className="pickup-queue__summary">
+            {t("Counter orders have no pickup code: call the number and hand it over.")}
           </p>
         ) : null}
         {todayItems.length ? (

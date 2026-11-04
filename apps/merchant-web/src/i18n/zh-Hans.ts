@@ -1330,7 +1330,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Download CSV": "下载 CSV",
   "Download the Store's sales reports as CSV files": "下载门店销售报表 CSV 文件",
   "Download {value} as CSV": "下载{value} CSV",
-  "Downloaded {fileName} with {value}. ": "已下载 {fileName}，包含{value}。",
+  "Downloaded {fileName} with the code for table {stableLabel}.":
+    "已下载 {fileName}，里面是 {stableLabel} 桌的二维码。",
+  "Downloaded {fileName} with {count} table QR codes.":
+    "已下载 {fileName}，里面有 {count} 张桌台二维码。",
   "Downloading reports needs the export permission.": "下载报表需要导出权限。",
   Draft: "草稿",
   "Draft discarded.": "草稿已放弃。",
@@ -1853,7 +1856,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Last saved": "最近保存",
   "Last used": "最近使用",
   "Latest change: ": "最近更改：",
-  "Latest closed day": "最近已关闭的营业日",
   "Latest recorded configuration": "最近记录的配置",
   "Least in total": "最少总数",
   "Leave a price empty to leave that size out of this book.": "价格留空则此价目表不包括该规格。",
@@ -2228,11 +2230,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '不包括在上面的"在线付款"和"已退款"合计中（那些是门店自己的订单）。支付方对账单核对会在门店一侧计入它们。',
   "Not included in the online totals above or in the payment provider reconciliation.":
     "不包括在上面的线上合计中，也不包括在支付方对账中。",
-  "Not known yet · check in person": "暂不知道 · 请当面核对",
+  "Code not known yet · check in person": "还不知道取餐码情况 · 请当面核对",
   "Not made — order abandoned": "未制作 — 订单已放弃",
   "Not making changes after all? Go back to the published menu.":
     "不打算修改了？返回已发布的菜单。",
-  "Not needed · taken at the counter": "不需要 · 柜台下单",
   "Not offered at this Store": "本门店不提供",
   "Not offered at this Store yet — customers here don't see it":
     "本门店尚未提供 — 这里的顾客看不到",
@@ -3498,7 +3499,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '已提交审批。需由另一位有审批权限的人批准。如果你独自经营门店，请在门店设置中开启"独立经营者"以自行批准。',
   "Sent for approval. You are the sole operator: you can approve it yourself below, then publish it.":
     "已提交审批。你是独立经营者：可以在下方自行批准，然后发布。",
-  "Sent to customer": "已发送给顾客",
+  "Code sent to customer": "取餐码已发给顾客",
   "Sent to the kitchen": "已发送到后厨",
   "Sent — the card provider has not answered yet. The amount stays set aside until it answers; open the payment to check its answer.":
     "已发送 — 发卡方尚未回复。回复前这笔金额会一直保留；打开付款查看其回复。",
@@ -3963,7 +3964,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请在队列中操作。返回时会保留你的筛选。",
   "Take an order for this table": "为这张桌台点单",
   "Take order for table {stableLabel}": "为桌台 {stableLabel} 点单",
-  "Taken at the counter — call the order number and hand it over.": "柜台下单 — 请叫单号后交付。",
+  "Counter orders have no pickup code: call the number and hand it over.":
+    "柜台点单没有取餐码：叫号后交给顾客。",
+  "Shelf: {shelf}": "取餐架：{shelf}",
+  "1 package": "1 件",
+  "{packageCount} packages": "{packageCount} 件",
+  "{day} still needs closing: its checks could not be read.": "{day}还没结完：核对记录读取不到。",
+  "{day} still needs closing: not yet checked against the payment provider.":
+    "{day}还没结完：还没和支付平台对账。",
+  "{day} still needs closing: its totals differ from the provider statement.":
+    "{day}还没结完：总数和支付平台账单对不上。",
+  "{day} still needs closing: 1 payment to look at.": "{day}还没结完：有 1 笔付款要看一下。",
+  "{day} still needs closing: {count} payments to look at.":
+    "{day}还没结完：有 {count} 笔付款要看一下。",
+  "The last closed day could not be checked just now. Refresh to try again.":
+    "上一个营业日暂时查不到，请刷新再试。",
   "Taken at the counter. {value}{value2}": "柜台下单。{value}{value2}",
   "Taken by staff": "员工录入",
   "Taken on card machine": "刷卡机收款",

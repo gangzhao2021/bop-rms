@@ -679,3 +679,340 @@
 .store-reports-page .tonight__checks {
   padding-left: 20px;
 }
+
+/*
+ * Settlement in the v3 rules (2026-11-03). Opens on today, yesterday one tap away. White, no boxes:
+ * the day's figures in plain words, sections parted by space, hairlines only between table rows;
+ * one accent, 28/20/16/14 at 600/400; every status a dot and words.
+ */
+.workspace-page.settlement-page .workspace-page__header {
+  align-items: center;
+}
+.workspace-page.settlement-page .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.workspace-page.settlement-page .workspace-page__meta {
+  font-size: 14px;
+}
+.workspace-page.settlement-page .workspace-page__header button:not(.language-switch) {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.settlement-page .workspace-page__header button:not(.language-switch):hover {
+  color: var(--bop-color-accent);
+}
+
+/* Which day: today and yesterday as tabs (like Orders' status tabs), any other day at the end. */
+.workspace-page.settlement-page .list-filters.settlement__picker {
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--bop-space-2) var(--bop-space-6);
+  margin: 0 0 var(--bop-space-4);
+  padding: 0;
+  border: 0;
+}
+.workspace-page.settlement-page .settlement__days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 28px;
+}
+.workspace-page.settlement-page .list-filters.settlement__picker .settlement__days button {
+  min-height: 44px;
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.workspace-page.settlement-page
+  .list-filters.settlement__picker
+  .settlement__days
+  button[aria-pressed="true"] {
+  border-bottom-color: var(--bop-color-accent);
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.workspace-page.settlement-page .settlement__other-day {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--bop-space-3);
+}
+.workspace-page.settlement-page .list-filters.settlement__picker label {
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.settlement-page
+  .list-filters.settlement__picker
+  .settlement__other-day
+  button[type="submit"],
+.workspace-page.settlement-page .settlement__closed-day button,
+.workspace-page.settlement-page .settlement button,
+.workspace-page.settlement-page .bop-state-card button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.settlement-page .settlement a {
+  color: var(--bop-color-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* Yesterday not finished: said plainly on today's page, with the way to it. */
+.workspace-page.settlement-page .settlement__closed-day {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-3);
+  margin: 0 0 var(--bop-space-4);
+  font-size: 14px;
+}
+.workspace-page.settlement-page .settlement__closed-day > span::before,
+.workspace-page.settlement-page .settlement__day .status-chip::before,
+.workspace-page.settlement-page .settlement__reconciliation > p[data-reconciled]::before,
+.workspace-page.settlement-page .settlement__difference-help h4::before,
+.workspace-page.settlement-page .settlement__unmatched h4::before,
+.workspace-page.settlement-page .settlement__reconciliation h4#settlement-attention::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: 0 8px 0 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  transform: none;
+  vertical-align: 0.1em;
+}
+.workspace-page.settlement-page .settlement__closed-day:not([data-tone]) > span::before {
+  background: var(--bop-color-text-muted);
+}
+
+/* The day: its name and state, its hours in grey. */
+.workspace-page.settlement-page .store-card {
+  gap: var(--bop-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.workspace-page.settlement-page .settlement {
+  display: grid;
+  gap: var(--bop-space-8);
+}
+.workspace-page.settlement-page .settlement__day {
+  margin-bottom: calc(var(--bop-space-4) - var(--bop-space-8));
+}
+.workspace-page.settlement-page .store-card header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.workspace-page.settlement-page .settlement__day header h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.workspace-page.settlement-page .store-card:not(.settlement__day) header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.settlement-page .settlement__day .status-chip {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.settlement-page .settlement__day .status-chip[data-state="open"]::before {
+  background: var(--bop-color-accent);
+}
+.workspace-page.settlement-page .settlement__day .status-chip[data-state="closed"]::before {
+  background: var(--bop-color-success-mark);
+}
+.workspace-page.settlement-page .store-card.settlement__day dl {
+  gap: 0 var(--bop-space-6);
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.settlement-page .store-card.settlement__day dl div {
+  display: flex;
+  gap: 6px;
+}
+.workspace-page.settlement-page .store-card.settlement__day :is(dt, dd) {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.settlement-page .settlement p {
+  max-width: 60rem;
+  font-size: 14px;
+}
+.workspace-page.settlement-page .settlement__day > p {
+  margin: 0;
+}
+
+/* The figures: words and numbers, no tiles. The day's own totals at 28; each section's at 20. */
+.workspace-page.settlement-page .settlement__totals {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 16rem));
+  gap: var(--bop-space-3) var(--bop-space-6);
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.workspace-page.settlement-page .settlement__totals li,
+.workspace-page.settlement-page .settlement__card-machine .settlement__totals li,
+.workspace-page.settlement-page .settlement__card-machine .settlement__totals li:first-child {
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.workspace-page.settlement-page .settlement__totals .overview-count__label {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.settlement-page .settlement__totals .overview-count__value {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page.settlement-page .store-card .settlement__totals .overview-count__value {
+  font-size: 20px;
+}
+.workspace-page.settlement-page .settlement__totals .overview-count__detail {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.settlement-page .store-card .settlement__totals {
+  margin: var(--bop-space-2) 0;
+}
+
+/* Reconciliation: the result says itself; a dot for its meaning, then dark words. */
+.workspace-page.settlement-page .settlement__reconciliation > p {
+  margin: var(--bop-space-2) 0 0;
+  font-size: 14px;
+}
+.workspace-page.settlement-page .settlement__reconciliation > p[role="status"] {
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+.workspace-page.settlement-page .settlement__reconciliation > p[data-reconciled="true"]::before {
+  background: var(--bop-color-success-mark);
+}
+.workspace-page.settlement-page .settlement__reconciliation > p[data-reconciled="pending"]::before {
+  background: var(--bop-color-accent);
+}
+.workspace-page.settlement-page .settlement__reconciliation h4 {
+  margin: var(--bop-space-6) 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-page.settlement-page .settlement__difference-help,
+.workspace-page.settlement-page .settlement__unmatched {
+  margin-top: var(--bop-space-5);
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 14px;
+}
+.workspace-page.settlement-page .settlement__difference-help h4,
+.workspace-page.settlement-page .settlement__unmatched h4 {
+  margin: 0 0 4px;
+}
+.workspace-page.settlement-page .settlement__difference-help p,
+.workspace-page.settlement-page .settlement__unmatched p {
+  margin: 4px 0 0;
+}
+.workspace-page.settlement-page .settlement__unmatched ul {
+  margin: 0;
+  padding-inline-start: 20px;
+}
+.workspace-page.settlement-page .system-alert__label {
+  font-weight: 600;
+}
+
+/* Tables: a line between rows only; headings in grey words; money at the right. */
+.workspace-page.settlement-page :is(.settlement__statement, .settlement__differences) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.workspace-page.settlement-page :is(.settlement__statement, .settlement__differences) thead th {
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+}
+.workspace-page.settlement-page :is(.settlement__statement, .settlement__differences) td {
+  border: 0;
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page.settlement-page
+  :is(.settlement__statement, .settlement__differences)
+  tbody
+  tr
+  + tr {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+@media (max-width: 767px) {
+  .workspace-page.settlement-page .list-filters.settlement__picker {
+    display: grid;
+    justify-content: stretch;
+  }
+  .workspace-page.settlement-page .settlement__other-day label {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .workspace-page.settlement-page .settlement__totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .workspace-page.settlement-page .settlement__totals .overview-count__value {
+    font-size: 20px;
+  }
+  .workspace-page.settlement-page
+    :is(.settlement__statement, .settlement__differences)
+    tbody
+    tr:first-child {
+    border-top: 0;
+  }
+  .workspace-page.settlement-page :is(.settlement__statement, .settlement__differences) tr {
+    border-bottom: 0;
+  }
+  .workspace-page.settlement-page
+    :is(.settlement__statement, .settlement__differences)
+    :is(td, tbody th)::before {
+    font-size: 14px;
+  }
+}

@@ -6,7 +6,9 @@ import {
   SettlementNotCovered,
   SettlementPage,
   SettlementReport,
+  closedDayStillOpenText,
   formatSettlementMoney,
+  previousBusinessDate,
   summarizeOutcomes,
 } from "./SettlementPage.js";
 import { parseSettlementView } from "./settlement-client.js";
@@ -330,6 +332,83 @@ describe("WP-2423 settlement history and coverage", () => {
     expect(html).toContain("begin on Sun, Sep 20");
     expect(html).toContain("Show Sun, Sep 20");
     expect(html).not.toContain("Permission");
+  });
+});
+
+describe("Owner 2026-11-03: the page opens on today and says what is left of the last closed day", () => {
+  it("counts back one business day across a month end", () => {
+    expect(previousBusinessDate("2026-10-01")).toBe("2026-09-30");
+  });
+  it("opens on the Store's current business day, with yesterday one tap away", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <StoreBusinessDayContext.Provider
+          value={{ businessDate: "2026-09-22", startsAt: null, endsAt: null }}
+        >
+          <SettlementPage storeLabel="Synthetic Store" timeZone="America/Toronto" />
+        </StoreBusinessDayContext.Provider>
+      </MemoryRouter>,
+    );
+    expect(markup).toContain('value="2026-09-22"');
+    expect(markup).toContain('aria-pressed="true">Today · Tue, Sep 22');
+    expect(markup).toContain('aria-pressed="false">Yesterday · Mon, Sep 21');
+  });
+  const said = (view: unknown) => closedDayStillOpenText(parseSettlementView(view), "2026-09-22");
+  it("is silent when the last closed day matches the provider and nothing is left to look at", () => {
+    const view = settlementViewFixture();
+    expect(
+      said({
+        ...view,
+        reconciliation: {
+          ...view.reconciliation,
+          operational: {
+            ...view.reconciliation.operational,
+            outcomes: {
+              Matched: view.reconciliation.operational.paymentCount,
+              Healed: 0,
+              Unresolved: 0,
+              Unavailable: 0,
+              Difference: 0,
+            },
+          },
+          differences: [],
+          differenceCount: 0,
+        },
+      }),
+    ).toBeNull();
+  });
+  it("says plainly when the last closed day still needs closing, and why", () => {
+    const view = settlementViewFixture();
+    expect(said({ ...view, reconciliation: openSettlementReconciliationFixture() })).toBe(
+      "Yesterday · Mon, Sep 21 still needs closing: not yet checked against the payment provider.",
+    );
+    expect(said({ ...view, reconciliation: null })).toBe(
+      "Yesterday · Mon, Sep 21 still needs closing: its checks could not be read.",
+    );
+    expect(said(view)).toMatch(
+      /^Yesterday · Mon, Sep 21 still needs closing: \d+ payments? to look/u,
+    );
+    const statement = view.reconciliation.settlement;
+    const check = statement.checks[0];
+    if (!check) throw Error("fixture");
+    expect(
+      said({
+        ...view,
+        reconciliation: {
+          ...view.reconciliation,
+          settlement: {
+            ...statement,
+            run: {
+              ...statement.run,
+              counts: { ...statement.run.counts, Matched: 0, Difference: 1 },
+            },
+            checks: [{ ...check, outcome: "Difference", differenceReason: "AmountMismatch" }],
+          },
+        },
+      }),
+    ).toBe(
+      "Yesterday · Mon, Sep 21 still needs closing: its totals differ from the provider statement.",
+    );
   });
 });
 
