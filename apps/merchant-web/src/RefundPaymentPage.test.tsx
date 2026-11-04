@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { cardMachineRefundRecordedText } from "./CardMachineRequestRefund.js";
 import {
   CardMachineRefundDone,
@@ -9,10 +9,15 @@ import {
   PaymentFinancialSummary,
   paymentRefundStateLabel,
   paymentStateLabel,
+  refundEverythingQuantities,
   refundWizardSections,
+  requestFinished,
   requestProgressLabel,
 } from "./RefundPaymentPage.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
+
+afterEach(() => setLanguageForTest("en"));
 
 const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const context = {
@@ -40,11 +45,98 @@ it("WP-2423: the payment summary says Paid, never the internal Captured state", 
     />,
   );
   expect(html).toContain("<dt>Paid</dt>");
-  expect(html).toContain("Payment state: Paid, refund pending");
+  expect(html).toContain("<dt>Refunded</dt>");
+  expect(html).toContain("<dt>Being refunded</dt>");
+  expect(html).toContain("<dd>Paid, refund pending</dd>");
   expect(html).not.toMatch(/Captured/u);
   expect(
     paymentStateLabel({ ...context, confirmedRefundMinor: "593", pendingRefundMinor: "0" }),
   ).toBe("Refunded");
+});
+
+const line = (n: number, change: Record<string, unknown> = {}) => ({
+  orderBatchReference: id(90),
+  orderItemReference: id(100 + n),
+  label: "Mapo tofu",
+  quantity: 1,
+  unclaimedQuantity: 1,
+  paymentCaptured: true,
+  refundedByCancellation: false,
+  paymentIntentReference: id(1),
+  paymentMethod: "CardMachine" as const,
+  ...change,
+});
+type Lines = Parameters<typeof refundEverythingQuantities>[0];
+
+it("Refund everything fills each identical line, and skips what cannot be refunded", () => {
+  const lines = [
+    line(1),
+    line(2),
+    line(3, { quantity: 3, unclaimedQuantity: 2 }),
+    line(4, { unclaimedQuantity: 0 }),
+    line(5, { paymentCaptured: false, unclaimedQuantity: 0, paymentMethod: null }),
+    line(6, { refundedByCancellation: true, unclaimedQuantity: 0 }),
+  ] as unknown as Lines;
+  expect(refundEverythingQuantities(lines, id(1))).toEqual({
+    quantities: { [id(101)]: 1, [id(102)]: 1, [id(103)]: 2 },
+    limited: false,
+  });
+});
+
+it("Refund everything stays on this payment when a card-machine refund cannot cover the order", () => {
+  const lines = [
+    line(1),
+    line(2, { paymentIntentReference: id(9), paymentMethod: "Online" }),
+  ] as unknown as Lines;
+  expect(refundEverythingQuantities(lines, id(1))).toEqual({
+    quantities: { [id(101)]: 1 },
+    limited: true,
+  });
+  // Online payments of one order can go on one refund, so all of them are filled.
+  const online = [
+    line(1, { paymentMethod: "Online" }),
+    line(2, { paymentIntentReference: id(9), paymentMethod: "Online" }),
+  ] as unknown as Lines;
+  expect(refundEverythingQuantities(online, id(1))).toEqual({
+    quantities: { [id(101)]: 1, [id(102)]: 1 },
+    limited: false,
+  });
+});
+
+it("a request reads its status by itself until it is refunded", () => {
+  expect(requestFinished({ progress: "Recorded" })).toBe(false);
+  expect(requestFinished({ progress: "ReadyToSend" })).toBe(false);
+  expect(requestFinished({ progress: "Sending" })).toBe(false);
+  expect(requestFinished({ progress: "Refunded" })).toBe(true);
+});
+
+it("the payment summary and request states read in Chinese, with no English left", () => {
+  setLanguageForTest("zh-Hans");
+  const html = renderToStaticMarkup(
+    <PaymentFinancialSummary
+      initial={context}
+      csrf={"a".repeat(43)}
+      revision={0}
+      onContext={vi.fn()}
+    />,
+  );
+  for (const words of ["<dt>状态</dt>", "<dt>已付款</dt>", "<dt>已退款</dt>", "<dt>退款中</dt>"])
+    expect(html).toContain(words);
+  expect(html).toContain("已付款，退款处理中");
+  expect(html).not.toMatch(/Paid|Refund|Last checked|card machine/u);
+  expect(requestProgressLabel("Recorded", "CardMachine", "Approved")).toBe(
+    "已批准 — 请在刷卡机上退款并记录",
+  );
+  expect(requestProgressLabel("Sending", "Online", null)).toBe("已发送 — 等待发卡方回复");
+  expect(paymentRefundStateLabel("NotDispatched")).toBe("还没发出");
+  expect(
+    cardMachineRefundRecordedText(
+      { amountMinor: "593", refundedAt: "2026-10-15T17:52:00.000Z", receipt: "NoDigitalReceipt" },
+      "$5.93",
+      "593",
+      "America/Toronto",
+    ),
+  ).toMatch(/^刷卡机退款已记录：.*\$5\.93。刷卡机打印的退款签购单就是顾客的收据。$/u);
 });
 
 it("WP-2423 item 4: a recorded card-machine refund shows its slip reference in staff language", () => {

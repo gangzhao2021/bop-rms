@@ -7177,4 +7177,206 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "系统读取不到{sources}。这些地方出问题也不会有提醒。",
   "{channels} alerts have failed for {duration}. The Owner may not be told about problems.":
     "{channels}提醒已失败{duration}。店主可能收不到问题通知。",
+  // Payment and refund pages (2026-11-04).
+  "({position} of {count})": "（第 {position} 份，共 {count} 份）",
+  "A refund can be requested once this payment is paid.": "这笔付款完成后才能申请退款。",
+  "A refund of {amount} is being made; nothing more can be refunded until it finishes.":
+    "有一笔 {amount} 的退款正在处理，处理完之前不能再退款。",
+  "Already in a refund": "已在退款中",
+  "Already refunded in full when the round was cancelled: {items}.":
+    "取消这一轮时已全额退款：{items}。",
+  "An owner or finance member who is not you must approve this refund in person. First confirm it is you; your verification lasts 15 minutes.":
+    "这笔退款必须由你以外的店主或财务人员当面批准。请先确认是你本人，验证有效期 15 分钟。",
+  "Answer checked. The customer's receipt stays as it was; no new one was needed.":
+    "已查看回复。顾客的收据不变，不需要新收据。",
+  "Answer checked. The refund receipt is ready for the customer.":
+    "已查看回复。顾客的退款收据已生成。",
+  "Answer checked.": "已查看回复。",
+  "Approved — refund it on the card machine and record it": "已批准 — 请在刷卡机上退款并记录",
+  "Approved, not sent yet": "已批准，尚未发送",
+  "Approved, not sent yet. The approver sends it from Approvals; it is never sent twice.":
+    "已批准，尚未发送。由批准人在“审批”页发送，不会重复发送。",
+  "Back to order": "返回订单",
+  "Being refunded": "退款中",
+  "Card-machine refund recorded: {amount} refunded on the card machine at {time}.":
+    "刷卡机退款已记录：{time} 在刷卡机上退款 {amount}。",
+  "Check refund result and receipt": "查看退款结果和收据",
+  "Check the card provider's answer again": "再次查看发卡方回复",
+  "Check whether it was recorded": "查看是否已记录",
+  "Checking refunds is not set up for this store. Contact BOP support.":
+    "本店尚未开通退款查询。请联系 BOP 支持。",
+  "Checking the card provider's answer…": "正在查看发卡方回复…",
+  "Choose at least one item to refund.": "请至少选择一项要退的菜品。",
+  "Choose the reason for this refund.": "请选择退款原因。",
+  "Confirm your sign-in, then continue sending this refund. Nothing was sent twice.":
+    "请先确认登录，再继续发送这笔退款。不会重复发送。",
+  "Continue sending this refund with the button further down the page.":
+    "请用本页下方的按钮继续发送这笔退款。",
+  "Continue sending this refund": "继续发送这笔退款",
+  "Declined by an owner": "已被店主拒绝",
+  "Declined by you": "已被你拒绝",
+  "Declined by {name}": "已被 {name} 拒绝",
+  "Describe what happened. Do not include card numbers or health details.":
+    "请说明发生了什么。不要填写卡号或健康信息。",
+  "Details of request {value}": "申请 {value} 的详情",
+  "Explain the reason in a short note (up to 200 characters).":
+    "请用简短备注说明原因（不超过 200 字）。",
+  Failed: "失败",
+  "I confirm sending this {amount} refund to the customer's original payment method":
+    "我确认把这笔 {amount} 退款发送到顾客原付款方式",
+  "I confirm the selected quantities, reason and {amount} refund.":
+    "我已核对所选数量、原因和退款金额 {amount}。",
+  "I confirm the selected quantities, reason and {amount} request.":
+    "我已核对所选数量、原因和申请金额 {amount}。",
+  "It is not confirmed that the card provider received this refund. Continue sending this refund: the same refund is reused and the customer is never refunded twice. If the card provider or the internet is down, the refund stays recorded here as not sent: open this order again once it is back and send it then.":
+    "尚未确认发卡方是否收到这笔退款。请继续发送：系统会沿用同一笔退款，顾客不会被退两次。如果发卡方或网络中断，这笔退款会在这里保留为“尚未发送”，恢复后再打开这笔订单发送。",
+  "Loading payment…": "正在加载付款…",
+  "Needs owner approval": "需要店主批准",
+  "No refund requests on this order yet.": "这笔订单还没有退款申请。",
+  "No slip reference was entered.": "未填写签购单参考号。",
+  "Not charged, so not refundable: {items}.": "未收款，无法退款：{items}。",
+  "Not confirmed yet": "尚未确认",
+  "Not known": "未知",
+  "Not recorded: this refund needs an owner's approval first, or it was already recorded. Refresh the requests to see where it stands.":
+    "未记录：这笔退款需要先经店主批准，或已经记录过。请刷新申请查看进度。",
+  "Note for the approver (required, up to 200 characters)": "给批准人的备注（必填，不超过 200 字）",
+  "Nothing is left to refund on this payment.": "这笔付款已没有可退的金额。",
+  "One less of {item}": "{item} 减一份",
+  "One more of {item}": "{item} 加一份",
+  "Only a store manager or an owner can record this refund. Ask them to record it after the refund on the card machine.":
+    "只有店长或店主可以记录这笔退款。请在刷卡机上退款后，让他们来记录。",
+  "Only a store manager records refund requests. To approve or decline a refund:":
+    "只有店长可以记录退款申请。要批准或拒绝退款，请：",
+  "Only a store manager records refund requests. You can follow these refunds here. To approve or decline one:":
+    "只有店长可以记录退款申请。你可以在这里查看这些退款。要批准或拒绝，请：",
+  "Open Approvals": "打开“审批”页",
+  "Owner approval needed": "需要店主批准",
+  "Paid on the store's card machine. After the request is recorded and approved, refund this amount on that machine and record it under the request.":
+    "这笔款是在门店刷卡机上付的。申请记录并批准后，请在那台刷卡机上退这笔金额，再到申请下记录。",
+  "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.":
+    "这笔款是在门店刷卡机上付的。申请记录后，请在那台刷卡机上退这笔金额，再到申请下记录。",
+  "Paid on the store's card machine. Its refunds are made on that machine and recorded here; they count on the day they are made.":
+    "这笔款是在门店刷卡机上付的。退款要在那台刷卡机上办理，再到这里记录，并计入办理当天。",
+  "Paid, refund pending": "已付款，退款处理中",
+  "Partly refunded": "部分退款",
+  "Partly refunded, refund pending": "部分退款，退款处理中",
+  "Payment amounts could not be shown. Refresh to try again.": "无法显示付款金额。请刷新重试。",
+  "Payment summary": "付款概况",
+  "Payment {value}:": "付款 {value}：",
+  "Record refund request": "记录退款申请",
+  "Record request for owner approval": "记录申请，等待店主批准",
+  "Record the {amount} card-machine refund": "记录 {amount} 刷卡机退款",
+  "Recorded, not sent yet": "已记录，尚未发送",
+  "Recording refund…": "正在记录退款…",
+  "Recording this request does not refund anything yet: it is sent once approved.":
+    "记录这笔申请还不会退款：批准后才会发送。",
+  "Refresh payment amounts": "刷新付款金额",
+  "Refresh payment": "刷新付款",
+  "Refresh refund requests and items": "刷新退款申请和菜品",
+  "Refresh request {value}": "刷新申请 {value}",
+  "Refund everything fills this payment's items only. Items paid another way are refunded from their own payment page.":
+    "“全部退款”只填入这笔付款的菜品。其他方式付的菜品请到各自的付款页退款。",
+  "Refund everything": "全部退款",
+  "Refund items paid on the card machine separately: choose only items from that one payment.":
+    "刷卡机付的菜品要单独退款：请只选择同一笔付款的菜品。",
+  "Refund requests": "退款申请",
+  "Refund result": "退款结果",
+  "Refund {amount} on the store's card machine to the card the customer paid with, then record it here.":
+    "请在门店刷卡机上向顾客付款所用的卡退款 {amount}，然后在此记录。",
+  "Refunded at (store time, from the slip)": "退款时间（门店时间，以签购单为准）",
+  "Refunded earlier, while the system was unreachable": "之前系统连不上时已退款",
+  "Refunded on the card machine": "已在刷卡机上退款",
+  "Refunded to the customer's original payment method as soon as you confirm. The card provider's answer is shown here.":
+    "确认后马上退回顾客原付款方式，发卡方的回复会显示在这里。",
+  "Refunded {amount} on the store's card machine": "已在门店刷卡机上退款 {amount}",
+  "Refunded {total} to the customer's original payment method.":
+    "已将 {total} 退回顾客原付款方式。",
+  "Refunds on this order": "这笔订单的退款",
+  "Refunds to make on the card machine": "需要在刷卡机上办理的退款",
+  "Request a refund": "申请退款",
+  "Request recorded for {total}. Nothing is refunded yet. You run this business alone: open Approvals and approve it yourself after confirming it is you; it is sent once approved.":
+    "已记录 {total} 的申请，还没有退款。这家店由你一人经营：请打开“审批”页，确认是你本人后自行批准，批准后才会发送。",
+  "Request recorded for {total}. Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.":
+    "已记录 {total} 的申请，还没有退款：店主批准后才会发送。请店主在这台或自己的设备上打开“审批”页。如果验证后超过 15 分钟，需要在这里重新验证。",
+  "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.":
+    "已记录 {total} 的申请。请现在到门店刷卡机上退款，再到上方的申请下记录。",
+  "Request result unknown. Keep this page open and retry the same request; do not start another refund.":
+    "申请结果未知。请不要关闭本页，重试同一笔申请，不要另外发起退款。",
+  "Request {value}": "申请 {value}",
+  "Requested {requested}; refunded {refunded}; being refunded {pending}.":
+    "申请 {requested}；已退 {refunded}；退款中 {pending}。",
+  "Retry same refund request": "重试同一笔退款申请",
+  "Retry the same check": "重试同一次查询",
+  "Review refund": "核对退款",
+  "Review this refund": "核对这笔退款",
+  "Send refund": "发送退款",
+  "Send {amount} refund": "发送 {amount} 退款",
+  "Sending to the card provider…": "正在发送给发卡方…",
+  "Sent — waiting for the card provider's answer": "已发送 — 等待发卡方回复",
+  "Sent — waiting for the card provider's answer. The {amount} stays set aside until it answers; check again later.":
+    "已发送 — 等待发卡方回复。回复前 {amount} 会保留不动，请稍后再查看。",
+  "Sent — waiting for the card provider's answer. {total} stays set aside until it answers; the request above shows the result.":
+    "已发送 — 等待发卡方回复。回复前 {total} 会保留不动，结果会显示在上方的申请里。",
+  "Service charge tax": "服务费税",
+  "Show details of request {value}": "查看申请 {value} 的详情",
+  "Showing the latest {shown} of {total}.": "显示最近 {shown} 笔，共 {total} 笔。",
+  "Slip reference: {slipReference}.": "签购单参考号：{slipReference}。",
+  "Start a refund": "发起退款",
+  "Start another refund request": "再发起一笔退款",
+  State: "状态",
+  "The amount being refunded stays set aside until the refund finishes, so it cannot be refunded twice. The refund receipt is ready once it is refunded.":
+    "退款中的金额会保留到退款完成，不会被退两次。退款完成后才有退款收据。",
+  "The card machine's refund slip is the customer's receipt.":
+    "刷卡机打印的退款签购单就是顾客的收据。",
+  "The check did not finish. Keep this page open and retry the same check.":
+    "查询没有完成。请不要关闭本页，重试同一次查询。",
+  "The customer's digital receipt now shows the refund.": "顾客的电子收据现已显示这笔退款。",
+  "The digital receipt could not be updated yet; record it again later to retry (the refund is not counted twice).":
+    "电子收据暂时无法更新；请稍后再记录一次重试（退款不会重复计算）。",
+  "The refund request is recorded but was not sent: it changed on another screen. Check where the request stands before sending.":
+    "退款申请已记录，但没有发送：它在其他页面上有变动。请先查看申请进度再发送。",
+  "The refund request is recorded but was not sent: sending refunds is not set up for this store. Contact BOP support.":
+    "退款申请已记录，但没有发送：本店尚未开通发送退款。请联系 BOP 支持。",
+  "The refund request is recorded but was not sent: your permissions do not allow sending refunds, or this refund needs an owner's approval. Ask a manager to check it.":
+    "退款申请已记录，但没有发送：你没有发送退款的权限，或这笔退款需要店主批准。请让店长查看。",
+  "The refund request is recorded, but getting it ready to send was not confirmed. Nothing has been sent to the card provider. Continue sending this refund: it is never sent twice.":
+    "退款申请已记录，但尚未确认是否准备好发送。还没有发送给发卡方。请继续发送这笔退款，不会重复发送。",
+  "The refund request result is unknown. Retry the same request; do not start another refund.":
+    "退款申请结果未知。请重试同一笔申请，不要另外发起退款。",
+  "The refund request was not recorded.": "退款申请没有记录。",
+  "The refund was not sent: sending refunds is not set up for this store. Contact BOP support.":
+    "退款没有发送：本店尚未开通发送退款。请联系 BOP 支持。",
+  "The refund was not sent: your session or permissions no longer allow sending refunds. Sign in again, then continue.":
+    "退款没有发送：你的登录或权限已不允许发送退款。请重新登录后继续。",
+  "The refund was recorded, but this list could not be updated. Select Refresh.":
+    "退款已记录，但这个列表没能更新。请点“刷新”。",
+  "The refund was sent to the card provider, but its answer could not be checked yet. The amount stays set aside until it answers. Check again.":
+    "退款已发送给发卡方，但暂时查不到回复。回复前这笔金额会保留不动。请再查看一次。",
+  "The refund was sent. Confirm your sign-in, then check the card provider's answer again.":
+    "退款已发送。请先确认登录，再查看发卡方回复。",
+  "The request stays recorded. See above where it stands.": "申请仍然有效。进度见上方。",
+  "The request was recorded. See above where it stands and what to do next.":
+    "申请已记录。进度和下一步见上方。",
+  "This order has no items to refund.": "这笔订单没有可退的菜品。",
+  "This refund covers {payments} of this order.": "这笔退款涉及这笔订单的 {payments}。",
+  "This request does not show in the records, so its result is still unknown. Retry the same request.":
+    "记录里还没有这笔申请，结果仍然未知。请重试同一笔申请。",
+  "This request was already recorded; nothing repeated. ": "这笔申请之前已记录，没有重复。",
+  "To refund on the card machine": "待在刷卡机上退款",
+  "Updating payment amounts…": "正在更新付款金额…",
+  "Verify with your authenticator": "用验证器确认",
+  "Waiting for an owner or finance member to approve this refund in person. It is sent once approved.":
+    "等待店主或财务人员当面批准这笔退款，批准后才会发送。",
+  "Waiting for owner approval": "等待店主批准",
+  "What to refund": "要退的菜品",
+  "Within the last 3 days, after the refund was requested. It counts on the day it was made.":
+    "须在最近 3 天内、且在申请退款之后。计入实际退款当天。",
+  "You run this business alone, so you can approve this refund yourself on the Approvals page after confirming it is you. First confirm it is you; your verification lasts 15 minutes.":
+    "这家店由你一人经营，确认是你本人后可以在“审批”页自行批准这笔退款。请先确认是你本人，验证有效期 15 分钟。",
+  "Your session or permissions do not allow this check. Sign in again, then retry.":
+    "你的登录或权限不允许这次查询。请重新登录后重试。",
+  "{amount} to refund on the card machine once an owner approves it.":
+    "店主批准后，需在刷卡机上退款 {amount}。",
+  "{left} of {total} left to refund": "可退 {left} 份，共 {total} 份",
+  "{reason}. Nothing was refunded; you can request again.": "{reason}。没有退款，可以重新申请。",
 });

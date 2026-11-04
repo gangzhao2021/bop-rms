@@ -322,11 +322,10 @@ for (const recovery of ["retry", "history"] as const)
     await page.getByRole("button", { name: "Payments and refunds" }).click();
     await page.getByRole("link", { name: "Payment 1 · refunds and details" }).click();
     await expect(page).toHaveURL(new RegExp("/app/operations/payments/" + id(31) + "$"));
-    await expect(page.getByRole("region", { name: "Payment financial summary" })).toContainText(
-      "$22.60",
-    );
-    await page.getByRole("link", { name: "Start refund request" }).click();
-    await page.getByRole("button", { name: "Load refundable items" }).click();
+    await expect(page.getByRole("region", { name: "Payment summary" })).toContainText("$22.60");
+    await page.getByRole("link", { name: "Start a refund" }).click();
+    // The refundable items are there as soon as the refund page opens.
+    await expect(page.getByRole("spinbutton", { name: /Latte/ })).toBeVisible();
     await expect(page.getByRole("spinbutton", { name: /Tea/ })).toHaveCount(0);
     await expect(page.getByText("Not charged, so not refundable: Tea.")).toBeVisible();
     await expect(page.getByRole("spinbutton", { name: /Soup/ })).toHaveCount(0);
@@ -335,16 +334,16 @@ for (const recovery of ["retry", "history"] as const)
     ).toBeVisible();
     await page.getByRole("spinbutton", { name: /Latte/ }).fill("1");
     await page.getByRole("combobox", { name: "Reason" }).selectOption("CUSTOMER_REQUEST");
-    await page.getByRole("button", { name: "Calculate refund" }).click();
-    await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText("$11.30");
+    await page.getByRole("button", { name: "Review refund" }).click();
+    await expect(page.getByRole("region", { name: "Review this refund" })).toContainText("$11.30");
     // WP-2423 Q5: calculating again with an unchanged selection reuses the same request identity.
-    await page.getByRole("button", { name: "Calculate refund" }).click();
-    await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText("$11.30");
+    await page.getByRole("button", { name: "Review refund" }).click();
+    await expect(page.getByRole("region", { name: "Review this refund" })).toContainText("$11.30");
     expect(previews).toHaveLength(2);
     expect(previews[1]).toBe(previews[0]);
     // WP-2423 item 6: a refund needing no approval is sent on this one confirmation.
     const sendNow = page.getByRole("button", { name: "Send $11.30 refund", exact: true });
-    await expect(page.getByRole("region", { name: "Refund calculation" })).toContainText(
+    await expect(page.getByRole("region", { name: "Review this refund" })).toContainText(
       "as soon as you confirm",
     );
     await expect(page.getByRole("button", { name: "Record refund request" })).toHaveCount(0);
@@ -366,20 +365,22 @@ for (const recovery of ["retry", "history"] as const)
       { times: 1 },
     );
     await page.getByRole("button", { name: "Refresh payment amounts", exact: true }).click();
-    await expect(page.getByRole("region", { name: "Payment financial summary" })).toHaveCount(0);
-    await expect(page.getByText("Payment amounts are unavailable until refreshed.")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Payment summary" })).toHaveCount(0);
+    await expect(
+      page.getByText("Payment amounts could not be shown. Refresh to try again."),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Retry same refund request", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Refresh payment amounts", exact: true }).click();
-    await expect(page.getByRole("region", { name: "Payment financial summary" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Payment summary" })).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Retry same refund request", exact: true }),
     ).toBeVisible();
 
     await expect(page.getByRole("spinbutton", { name: /Latte/ })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Calculate refund" })).toBeDisabled();
-    const list = page.getByRole("region", { name: "Recorded refund requests" });
+    await expect(page.getByRole("button", { name: "Review refund" })).toBeDisabled();
+    const list = page.getByRole("region", { name: "Refunds on this order" });
     if (recovery === "retry") {
       // The same request is retried, then the refund continues on its own: getting it ready to
       // send is lost once, so it stops there and says nothing was sent.
@@ -395,18 +396,18 @@ for (const recovery of ["retry", "history"] as const)
       expect(preparations).toHaveLength(1);
       expect(sends).toHaveLength(0);
       // The recorded request is listed straight away and never called sent.
-      await expect(list).toContainText("Request 1: $11.30");
+      await expect(list).toContainText("$11.30");
+      await expect(list).toContainText("Request 1");
       await expect(list).toContainText("Not sent yet");
       await expect(list).not.toContainText("Sent");
       // Its own controls point back to the refund form, which resumes the same refund.
-      await page.getByRole("button", { name: "Check execution status for request 1" }).click();
-      await expect(
-        page.getByRole("region", { name: "Execution status for request 1" }),
-      ).toContainText("Continue sending this refund with the button under the refund form.");
+      await expect(page.getByRole("region", { name: "Details of request 1" })).toContainText(
+        "Continue sending this refund with the button further down the page.",
+      );
       await expect(page.getByRole("button", { name: "Send refund", exact: true })).toHaveCount(0);
-      // The form is cleared and locked behind the recorded request.
+      // The form is gone behind the recorded request.
       await expect(page.getByRole("checkbox", { name: /I confirm the selected/ })).toHaveCount(0);
-      await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveValue("0");
+      await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveCount(0);
       await page.getByRole("button", { name: "Continue sending this refund" }).click();
       // The send's result is lost: staff are told it is not confirmed, never that it was sent.
       await expect(
@@ -449,31 +450,30 @@ for (const recovery of ["retry", "history"] as const)
       await expect(
         page.getByRole("button", { name: "Start another refund request" }),
       ).toBeVisible();
-      const summary = page.getByRole("region", { name: "Payment financial summary" });
+      const summary = page.getByRole("region", { name: "Payment summary" });
       await expect(
-        summary
-          .locator("div")
-          .filter({ has: page.getByText("Confirmed refunds", { exact: true }) }),
+        summary.locator("div").filter({ has: page.getByText("Refunded", { exact: true }) }),
       ).toContainText("$11.30");
       // After a reload, a sent refund only offers checking its answer and receipt.
       for (const phase of ["NeedsReconciliation", "Confirmed"] as const) {
         recoveredPhase = phase;
         const lookupsBefore = reconciliations.length;
         await page.reload();
-        await page.getByRole("button", { name: "Load refundable items" }).click();
         await expect(list).toContainText(
           phase === "Confirmed" ? "Refunded" : "Sent — waiting for the card provider's answer",
         );
-        await page.getByRole("button", { name: "Check execution status for request 1" }).click();
-        const execution = page.getByRole("region", { name: "Execution status for request 1" });
+        // A request still waiting shows where it stands by itself; a finished one on request.
+        if (phase === "Confirmed")
+          await page.getByRole("button", { name: "Show details of request 1" }).click();
+        const execution = page.getByRole("region", { name: "Details of request 1" });
         await expect(execution).toContainText(
           phase === "Confirmed"
-            ? "Refunded. Requested $11.30; confirmed $11.30; pending $0.00."
-            : "Sent — waiting for the card provider's answer. Requested $11.30; confirmed $0.00; pending $11.30.",
+            ? "Refunded · Requested $11.30; refunded $11.30; being refunded $0.00."
+            : "Sent — waiting for the card provider's answer · Requested $11.30; refunded $0.00; being refunded $11.30.",
         );
         // WP-2423 Q5: the set-aside note appears only while an amount is still pending.
         await expect(
-          execution.getByText("A pending amount stays set aside", { exact: false }),
+          execution.getByText("The amount being refunded stays set aside", { exact: false }),
         ).toHaveCount(phase === "Confirmed" ? 0 : 1);
         await expect(page.getByRole("button", { name: "Send refund", exact: true })).toHaveCount(0);
         await page
@@ -483,8 +483,8 @@ for (const recovery of ["retry", "history"] as const)
         await expect(
           page.getByText(
             phase === "Confirmed"
-              ? "Refund receipt version 2 created."
-              : "The receipt on file stays version 1 (Original); no new receipt was created.",
+              ? "The refund receipt is ready for the customer."
+              : "The customer's receipt stays as it was; no new one was needed.",
             { exact: false },
           ),
         ).toBeVisible();
@@ -496,31 +496,32 @@ for (const recovery of ["retry", "history"] as const)
         expect(sends).toHaveLength(2);
       }
     } else {
-      await page.getByRole("button", { name: "Check recorded requests" }).click();
-      await expect(page.getByText("Original request recovered.", { exact: false })).toBeVisible();
+      await page.getByRole("button", { name: "Check whether it was recorded" }).click();
+      await expect(page.getByText("The request was recorded.", { exact: false })).toBeVisible();
       // The recorded request is listed straight away, without a manual refresh.
-      await expect(list).toContainText("Request 1: $11.30");
+      await expect(list).toContainText("$11.30");
+      await expect(list).toContainText("Request 1");
       expect(previews).toHaveLength(2);
       expect(requests).toHaveLength(1);
       expect(requests[0]).toBe(previews[0]);
       // WP-2423: the recorded request's confirmation is gone; another request is started on purpose.
       await expect(sendNow).toHaveCount(0);
       await expect(page.getByRole("checkbox", { name: /I confirm the selected/ })).toHaveCount(0);
-      await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveValue("0");
+      await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveCount(0);
       await expect(
         page.getByRole("button", { name: "Start another refund request" }),
       ).toBeVisible();
       await page.route("**/merchant/payments/refunds/items", (route) => route.abort("failed"), {
         times: 1,
       });
-      await page.getByRole("button", { name: "Refresh recorded requests" }).click();
+      await page.getByRole("button", { name: "Refresh refund requests and items" }).click();
       await expect(
         page.getByText("Unable to refresh this information.", { exact: false }),
       ).toBeVisible();
-      await expect(page.getByRole("button", { name: "Calculate refund" })).toBeDisabled();
-      await page.getByRole("button", { name: "Refresh recorded requests" }).click();
-      await expect(page.getByText("Request remains recorded.", { exact: false })).toBeVisible();
-      await expect(list).toContainText("Request 1: $11.30");
+      await expect(page.getByRole("button", { name: "Review refund" })).toHaveCount(0);
+      await page.getByRole("button", { name: "Refresh refund requests and items" }).click();
+      await expect(page.getByText("The request stays recorded.", { exact: false })).toBeVisible();
+      await expect(list).toContainText("Request 1");
       // v15 2026-10-18 (dd750045): a refund recorded for this order while the list was loading
       // answers "changed while loading"; the page reads it once more by itself and shows the
       // latest, never "your permissions do not allow this refund workflow".
@@ -535,19 +536,17 @@ for (const recovery of ["retry", "history"] as const)
           route.fulfill({ status: 409, headers, json: { error: "changed_while_loading" } }),
         { times: 1 },
       );
-      await page.getByRole("button", { name: "Refresh recorded requests" }).click();
+      await page.getByRole("button", { name: "Refresh refund requests and items" }).click();
       await expect.poll(() => itemStatuses).toEqual([409, 200]);
-      await expect(page.getByText("Request remains recorded.", { exact: false })).toBeVisible();
-      await expect(list).toContainText("Request 1: $11.30");
+      await expect(page.getByText("The request stays recorded.", { exact: false })).toBeVisible();
+      await expect(list).toContainText("Request 1");
       await expect(page.getByText(/permissions do not allow/u)).toHaveCount(0);
       await expect(page.getByText(/changed while it was loading/u)).toHaveCount(0);
       // WP-2423 Q5: each recorded request shows where it stands without a separate check.
       await expect(list).toContainText("Recorded, not sent yet");
-      await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveAttribute("max", "1");
-      await page.getByRole("button", { name: "Check execution status for request 1" }).click();
-      await expect(
-        page.getByRole("region", { name: "Execution status for request 1" }),
-      ).toContainText("Not sent yet. Requested $11.30; confirmed $0.00; pending $11.30.");
+      await expect(page.getByRole("region", { name: "Details of request 1" })).toContainText(
+        "Not sent yet · Requested $11.30; refunded $0.00; being refunded $11.30.",
+      );
       // A recorded request not sent yet is sent from here with one confirmation.
       const send = page.getByRole("button", { name: "Send refund", exact: true });
       await expect(send).toBeDisabled();
@@ -564,9 +563,11 @@ for (const recovery of ["retry", "history"] as const)
       await expect(
         page.getByRole("button", { name: "Continue sending this refund" }),
       ).toBeVisible();
-      await expect(page.getByRole("button", { name: "Refresh recorded requests" })).toBeEnabled();
       expect(preparations).toHaveLength(1);
       expect(sends).toHaveLength(0);
+      // Starting another request offers only what is left of each line.
+      await page.getByRole("button", { name: "Start another refund request" }).click();
+      await expect(page.getByRole("spinbutton", { name: /Latte/ })).toHaveAttribute("max", "1");
     }
     expect(requests).toHaveLength(recovery === "retry" ? 2 : 1);
   });
