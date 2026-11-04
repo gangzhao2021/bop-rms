@@ -168,8 +168,36 @@ export interface CheckoutClient {
   quote(cart: CartView, operationReference: string): Promise<CheckoutQuote>;
 }
 
-/** Checkout writes remain uncertain when the complete response cannot be confirmed. */
+const BUSY_WAIT_MS = 3_000;
+const BUSY_ATTEMPTS = 11;
+
+/**
+ * Owner 2026-11-04: while a menu is being listed the Store answers 503 and "try again later" for
+ * about half a minute. A write carrying its idempotency key is asked again with the same key, so it
+ * can't happen twice, and the guest keeps waiting instead of being told it failed.
+ */
 export async function requestCheckoutMutation(
+  url: string,
+  init: RequestInit,
+  contextCurrent: () => boolean,
+) {
+  const keyed = new Headers(init.headers).has("idempotency-key");
+  for (let attempt = 1; ; attempt += 1) {
+    const result = await requestCheckoutMutationOnce(url, init, contextCurrent);
+    if (
+      !keyed ||
+      attempt >= BUSY_ATTEMPTS ||
+      result.response.status !== 503 ||
+      !result.response.headers.has("retry-after")
+    )
+      return result;
+    await new Promise((resolve) => setTimeout(resolve, BUSY_WAIT_MS));
+    if (!contextCurrent()) throw new CartClientError("network_unknown");
+  }
+}
+
+/** Checkout writes remain uncertain when the complete response cannot be confirmed. */
+async function requestCheckoutMutationOnce(
   url: string,
   init: RequestInit,
   contextCurrent: () => boolean,

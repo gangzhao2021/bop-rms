@@ -9,6 +9,7 @@ import {
   createCheckoutClient,
   createCheckoutController,
   type CheckoutClient,
+  requestCheckoutMutation,
 } from "./checkout-client.js";
 import type { CheckoutQuote } from "./types.js";
 
@@ -971,5 +972,63 @@ describe("durable original Quote expiry receipt", () => {
       canRetry: false,
     });
     expect(quoteCall).toHaveBeenCalledOnce();
+  });
+});
+
+describe("a busy store while a guest sends an order", () => {
+  const busy = () =>
+    new Response('{"error":"busy"}', { status: 503, headers: { "retry-after": "5" } });
+  const keyed = { method: "POST", headers: { "idempotency-key": "k" }, body: "{}" };
+  const send = async (
+    init: RequestInit,
+    fetcher: typeof globalThis.fetch,
+    current = () => true,
+  ) => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const sent = requestCheckoutMutation("/x", init, current).then(
+        (result) => result.response.status,
+        () => "failed",
+      );
+      await vi.runAllTimersAsync();
+      return await sent;
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  };
+
+  it("asks again with the same key until the store answers", async () => {
+    const fetcher = vi
+      .fn<typeof globalThis.fetch>()
+      .mockImplementationOnce(async () => busy())
+      .mockImplementationOnce(async () => busy())
+      .mockImplementation(async () => new Response("{}", { status: 201 }));
+    await expect(send(keyed, fetcher)).resolves.toBe(201);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    for (const [, init] of fetcher.mock.calls)
+      expect(new Headers(init?.headers).get("idempotency-key")).toBe("k");
+  });
+
+  it("gives up after about half a minute, and never repeats anything else", async () => {
+    const always = vi.fn<typeof globalThis.fetch>(async () => busy());
+    await expect(send(keyed, always)).resolves.toBe(503);
+    expect(always).toHaveBeenCalledTimes(11);
+    const noKey = vi.fn<typeof globalThis.fetch>(async () => busy());
+    await expect(send({ method: "POST", body: "{}" }, noKey)).resolves.toBe(503);
+    expect(noKey).toHaveBeenCalledTimes(1);
+    const noHint = vi.fn<typeof globalThis.fetch>(async () => new Response("{}", { status: 503 }));
+    await expect(send(keyed, noHint)).resolves.toBe(503);
+    expect(noHint).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops when the guest has left", async () => {
+    let here = true;
+    const fetcher = vi.fn<typeof globalThis.fetch>(async () => {
+      here = false;
+      return busy();
+    });
+    await expect(send(keyed, fetcher, () => here)).resolves.toBe("failed");
   });
 });
