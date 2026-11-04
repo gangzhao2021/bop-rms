@@ -14,7 +14,12 @@ import {
 } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router";
 import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
-import { StaffSessionGuard, StaffSignedOutPanel, StaffSwitchButton } from "./StaffSession.js";
+import {
+  StaffSessionGuard,
+  StaffSignedOutPage,
+  StaffSignedOutPanel,
+  StaffSwitchButton,
+} from "./StaffSession.js";
 import { OwnNamePrompt } from "./OwnNamePrompt.js";
 import { StaffPinControls } from "./StaffPinControls.js";
 import { StaffSwitchPage } from "./StaffSwitchPage.js";
@@ -2236,9 +2241,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
           workspaceFrame(routes)
         ) : state.kind === "SignedOut" && demo === null && staffPage ? (
-          <AppFrame title={t("Operations")} description={t("Store workspace")}>
-            <StaffSignedOutPanel />
-          </AppFrame>
+          <StaffSignedOutPage />
         ) : (
           routes
         )}

@@ -236,6 +236,9 @@ function TablePaymentBlock({
   const [reason, setReason] = useState<CashRefundReason | "">("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Owner 2026-11-03: money is confirmed before it is recorded, and said once it is.
+  const [reviewing, setReviewing] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const amountMinor = useMemo(() => dollarsToMinor(amount), [amount]);
   const online = payment.method === "Online";
@@ -280,13 +283,24 @@ function TablePaymentBlock({
       if (status === 200) {
         operation.current = null;
         onChanged(parseTablePayments(payload));
+        setDone(
+          online
+            ? t("{amount} is going back to the guest's card.", { amount: cad(amountMinor) })
+            : onMachine
+              ? t("Recorded {amount} refunded on the card machine.", { amount: cad(amountMinor) })
+              : t("Recorded {amount} given back in cash. Give it to the guest now.", {
+                  amount: cad(amountMinor),
+                }),
+        );
         setRefunding(false);
+        setReviewing(false);
         setAmount("");
         setReason("");
         setSlip("");
         return;
       }
       operation.current = null;
+      setReviewing(false);
       setProblem(
         status === 401 || status === 403
           ? online || onMachine
@@ -457,44 +471,100 @@ function TablePaymentBlock({
                 </label>
               </>
             ) : null}
-            <button
-              type="button"
-              className="table-checkout__primary"
-              disabled={
-                busy ||
-                !slipValid ||
-                reason === "" ||
-                amountMinor === null ||
-                amountMinor <= 0n ||
-                amountMinor > refundable
-              }
-              onClick={() => void give()}
-            >
-              {busy
-                ? online
-                  ? t("Sending…")
-                  : t("Recording…")
-                : amountMinor !== null && amountMinor > 0n
-                  ? online
-                    ? t("Refund {amount} to the card", { amount: cad(amountMinor) })
-                    : onMachine
-                      ? t("Record {amount} refunded on the card machine", {
-                          amount: cad(amountMinor),
-                        })
-                      : t("Give back {amount} in cash", { amount: cad(amountMinor) })
-                  : openLabel}
-            </button>{" "}
-            <button type="button" disabled={busy} onClick={() => setRefunding(false)}>
-              {t("Cancel")}
-            </button>
+            {reviewing && amountMinor !== null && reason !== "" ? (
+              <div
+                role="alertdialog"
+                aria-labelledby="table-refund-confirm"
+                className="table-checkout__confirm"
+              >
+                <h4 id="table-refund-confirm">{t("Confirm the refund")}</h4>
+                <dl className="table-checkout__totals">
+                  <div>
+                    <dt>
+                      {online || onMachine ? t("Amount to refund") : t("Amount to give back")}
+                    </dt>
+                    <dd>{cad(amountMinor)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("Reason")}</dt>
+                    <dd>{reasonText(reason)}</dd>
+                  </div>
+                </dl>
+                <p>{t("Once recorded, it can't be changed.")}</p>
+                <div className="table-checkout__confirm-actions">
+                  <button type="button" disabled={busy} onClick={() => setReviewing(false)}>
+                    {t("Back")}
+                  </button>
+                  <button
+                    type="button"
+                    className="table-checkout__primary"
+                    disabled={busy}
+                    onClick={() => void give()}
+                  >
+                    {busy
+                      ? online
+                        ? t("Sending…")
+                        : t("Recording…")
+                      : online
+                        ? t("Confirm: refund {amount} to the card", { amount: cad(amountMinor) })
+                        : onMachine
+                          ? t("Confirm: record {amount} refunded", { amount: cad(amountMinor) })
+                          : t("Confirm: give back {amount} in cash", { amount: cad(amountMinor) })}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="table-checkout__primary"
+                  disabled={
+                    busy ||
+                    !slipValid ||
+                    reason === "" ||
+                    amountMinor === null ||
+                    amountMinor <= 0n ||
+                    amountMinor > refundable
+                  }
+                  onClick={() => setReviewing(true)}
+                >
+                  {amountMinor !== null && amountMinor > 0n
+                    ? online
+                      ? t("Refund {amount} to the card", { amount: cad(amountMinor) })
+                      : onMachine
+                        ? t("Record {amount} refunded on the card machine", {
+                            amount: cad(amountMinor),
+                          })
+                        : t("Give back {amount} in cash", { amount: cad(amountMinor) })
+                    : openLabel}
+                </button>{" "}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setRefunding(false);
+                    setReviewing(false);
+                  }}
+                >
+                  {t("Cancel")}
+                </button>
+              </>
+            )}
           </div>
         ) : (
-          <button type="button" onClick={() => setRefunding(true)}>
+          <button
+            type="button"
+            onClick={() => {
+              setDone(null);
+              setRefunding(true);
+            }}
+          >
             {openLabel}
           </button>
         )
       ) : null}
       {problem ? <p role="alert">{problem}</p> : null}
+      {done ? <p role="status">{done}</p> : null}
     </section>
   );
 }

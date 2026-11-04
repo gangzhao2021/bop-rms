@@ -70,6 +70,12 @@ export function DiningStaffCallPanel({
     },
     [client],
   );
+  // Owner 2026-11-03: back online, "staff weren't told" no longer holds: read again at once.
+  useEffect(() => {
+    const again = () => void refresh();
+    globalThis.addEventListener?.("online", again);
+    return () => globalThis.removeEventListener?.("online", again);
+  }, [refresh]);
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);

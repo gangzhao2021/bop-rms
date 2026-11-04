@@ -551,6 +551,7 @@ export function keepsReadingTable(state: DiningSessionState): boolean {
 
 export function DiningSessionPage({
   store,
+  visitEnded = () => globalThis.location.reload(),
   client: provided,
   invitationClient,
   staffCallClient,
@@ -559,6 +560,8 @@ export function DiningSessionPage({
   menuClient,
 }: {
   readonly store?: CustomerStoreContext | undefined;
+  /** The table ended while this page was open: open the visit again (tests supply one). */
+  readonly visitEnded?: () => void;
   readonly client?: DiningSessionClient | undefined;
   /** WP-2423 item 8 ⑥ part 4: the published menu, for a combo's chosen dishes and allergens. */
   readonly menuContext?: MenuJourneyContext | undefined;
@@ -586,6 +589,7 @@ export function DiningSessionPage({
   // v15 2026-10-27: right after the first round the order is prepared within seconds; the page
   // waits and reads again (a bounded number of times) instead of saying "join your table".
   const processingRetries = useRef(0);
+  const lastView = useRef(false);
   const [retryTick, setRetryTick] = useState(0);
   const load = useCallback(async () => {
     if (pending.current) {
@@ -604,6 +608,7 @@ export function DiningSessionPage({
     try {
       const view = await client.load(controller.signal);
       processingRetries.current = 0;
+      lastView.current = true;
       if (!controller.signal.aborted) setState({ status: "ready", view, refreshing: false });
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -616,9 +621,16 @@ export function DiningSessionPage({
         setRetryTick((value) => value + 1);
         return;
       }
-      if (error instanceof DiningSessionClientError && error.code === "not-joined")
+      if (error instanceof DiningSessionClientError && error.code === "not-joined") {
+        // Owner 2026-11-03: staff closed the table while this page was open. Opening the visit
+        // again says how it ended (the receipt and thanks), which only that reading knows.
+        if (lastView.current) {
+          lastView.current = false;
+          visitEnded();
+          return;
+        }
         setState({ status: "not-joined" });
-      else if (
+      } else if (
         error instanceof DiningSessionClientError &&
         error.code === "moved" &&
         error.tableLabel !== null

@@ -149,6 +149,11 @@ export interface KitchenPreparation {
   readonly customerNote: string | null;
   /** WP-2423 item 8 ⑧ (decision 5): the dish's kitchen section (档口); null: no section. */
   readonly kitchenSection: string | null;
+  /**
+   * Owner 2026-11-03: entered after an outage from a paper slip, so the kitchen may already have
+   * made it. It still goes through the board so its records close.
+   */
+  readonly takenOnPaper?: boolean;
 }
 const unavailableAllergens: KitchenItemAllergens = Object.freeze({ status: "Unavailable" });
 const noPreparation: KitchenPreparation = Object.freeze({
@@ -180,6 +185,7 @@ const itemView = (
   businessDate: preparation.businessDate,
   customerNote: preparation.customerNote,
   kitchenSection: preparation.kitchenSection,
+  ...(preparation.takenOnPaper === true ? { takenOnPaper: true as const } : {}),
 });
 /**
  * WP-2423 Q3: Kitchen gives each work item's menu keys, Catalog the disclosure published for them.
@@ -276,9 +282,14 @@ export async function kitchenPreparation(
         counterOrders.has(item.orderReference) ||
         (item.orderBatchReference !== undefined && staffRounds.has(item.orderBatchReference));
       const facts = allergens.get(item.workItemReference);
+      const takenOnPaper =
+        counterOrders.get(item.orderReference)?.recordedAfterOutage === true ||
+        (item.orderBatchReference !== undefined &&
+          staffRounds.get(item.orderBatchReference)?.entry.recordedAfterOutage === true);
       return [
         item.workItemReference,
         Object.freeze({
+          ...(takenOnPaper ? { takenOnPaper: true } : {}),
           allergens: facts?.allergens ?? unavailableAllergens,
           customerNote: facts?.customerNote ?? null,
           kitchenSection: sections.get(item.workItemReference) ?? null,

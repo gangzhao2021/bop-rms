@@ -115,6 +115,7 @@ function item(value: unknown) {
     ...(otherName === null ? {} : { otherName }),
     ...("comboParts" in raw ? { comboParts: raw.comboParts } : {}),
     ...("chase" in raw ? { chase: raw.chase } : {}),
+    ...("takenOnPaper" in raw ? { takenOnPaper: raw.takenOnPaper } : {}),
     // WP-2423 item 8 ⑧: the dish's kitchen section, when this source gives it.
     ...("kitchenSection" in raw ? { kitchenSection: raw.kitchenSection } : {}),
     status: raw.status,

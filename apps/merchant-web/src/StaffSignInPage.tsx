@@ -1,6 +1,8 @@
 import { t } from "./i18n/i18n.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
+import { createStaffSessionClient, type SignInEntry } from "./staff-session.js";
 
 /**
  * WP-2423 DEC-COGNITO-STORE-STAFF: "Staff sign-in". Each staff member signs in with their own
@@ -29,9 +31,12 @@ export const SIGN_IN_UNAVAILABLE_TEXT = t(
 export function StaffSignInView({
   failed = false,
   unavailable = false,
+  testEntry,
 }: {
   readonly failed?: boolean;
   readonly unavailable?: boolean;
+  /** The labelled test sign-in, on a pilot without the managed sign-in service. */
+  readonly testEntry?: string;
 }) {
   return (
     <main id="main-content" tabIndex={-1} className="bop-shell__main staff-switch staff-sign-in">
@@ -47,39 +52,44 @@ export function StaffSignInView({
           {unavailable ? SIGN_IN_UNAVAILABLE_TEXT : SIGN_IN_FAILED_TEXT}
         </p>
       ) : null}
-      <section className="staff-switch__panel" aria-labelledby="staff-sign-in-own">
-        <h2 id="staff-sign-in-own">{t("Sign in with your account")}</h2>
+      <section className="staff-switch__panel">
         <p>{t("Use your work email, your password and the code from your authenticator app.")}</p>
-        <a
-          className="staff-switch__action staff-sign-in__primary"
-          href="/merchant/login?returnTo=/app"
-        >
+        <a className="staff-switch__action staff-sign-in__primary" href={testEntry ?? SIGN_IN_HREF}>
           {t("Sign in")}
         </a>
+        {testEntry ? (
+          <p className="staff-session__test-only">
+            <strong>{t("TEST-ONLY")}</strong>{" "}
+            {t(
+              "internal pilot sign-in. A live store signs in with each staff member’s own account.",
+            )}
+          </p>
+        ) : null}
       </section>
-      <section className="staff-switch__panel" aria-labelledby="staff-sign-in-kitchen">
-        <h2 id="staff-sign-in-kitchen">{t("Kitchen screen")}</h2>
-        <p>
-          {t(
-            "On the kitchen screen, start the kitchen display. A kitchen display sign-in only opens the kitchen, not orders, refunds or settings.",
-          )}
-        </p>
-        <a
-          className="staff-sign-in__link"
-          href="/merchant/login?returnTo=/operations/kitchen/start"
-        >
-          {t("Start kitchen display")}
-        </a>
-      </section>
-      <section className="staff-switch__panel" aria-labelledby="staff-sign-in-tablet">
-        <h2 id="staff-sign-in-tablet">{t("Shared store tablet")}</h2>
-        <p>
-          {t("On a shared store tablet a manager has set up, switch to yourself with your PIN.")}
-        </p>
-        <Link className="staff-sign-in__link" to="/operations/switch-staff">
-          {t("Switch staff with a PIN")}
-        </Link>
-      </section>
+      <div className="staff-sign-in__others">
+        <section className="staff-sign-in__other" aria-labelledby="staff-sign-in-kitchen">
+          <div>
+            <h2 id="staff-sign-in-kitchen">{t("Kitchen screen")}</h2>
+            <p>{t("Only opens the kitchen, not orders, refunds or settings.")}</p>
+          </div>
+          <a className="staff-sign-in__link" href={testEntry ?? KITCHEN_SIGN_IN_HREF}>
+            {t("Start kitchen display")}
+          </a>
+        </section>
+        <section className="staff-sign-in__other" aria-labelledby="staff-sign-in-tablet">
+          <div>
+            <h2 id="staff-sign-in-tablet">{t("Shared store tablet")}</h2>
+            <p>
+              {t(
+                "On a shared store tablet a manager has set up, switch to yourself with your PIN.",
+              )}
+            </p>
+          </div>
+          <Link className="staff-sign-in__link" to="/operations/switch-staff">
+            {t("Switch staff with a PIN")}
+          </Link>
+        </section>
+      </div>
       <footer className="staff-switch__footer">
         <p>
           {t(
@@ -94,5 +104,18 @@ export function StaffSignInView({
 export function StaffSignInPage() {
   const { search } = useLocation();
   const signIn = new URLSearchParams(search).get("signIn");
-  return <StaffSignInView failed={signIn === "failed"} unavailable={signIn === "unavailable"} />;
+  // The pilot has no managed sign-in yet: its buttons lead to the labelled test sign-in instead.
+  const [entry, setEntry] = useState<SignInEntry | null>(null);
+  useEffect(() => {
+    createStaffSessionClient()
+      .signInEntry()
+      .then(setEntry, () => undefined);
+  }, []);
+  return (
+    <StaffSignInView
+      failed={signIn === "failed"}
+      unavailable={signIn === "unavailable"}
+      {...(entry?.testOnly ? { testEntry: entry.path } : {})}
+    />
+  );
 }

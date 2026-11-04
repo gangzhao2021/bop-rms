@@ -1,4 +1,11 @@
 import { t, saidTable } from "./i18n/i18n.js";
+import { createTableCheckoutClient } from "./table-checkout-client.js";
+import {
+  clearLastBills,
+  lastTableBill,
+  saveLastBills,
+  type LastTableBill,
+} from "./table-last-bills.js";
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
@@ -474,6 +481,36 @@ export function DiningSessionWorkspace({
     }
   };
   /** The open tables' dishes and bills, from the order queue (kept on a failed read). */
+  // Owner 2026-11-03 (operating continuity): each open table's bill stays on this device, so staff
+  // can still see what a table owes when the connection drops. Read again only when it changed.
+  const lastBills = useRef(new Map<string, { key: string; bill: LastTableBill }>());
+  const keepLastBills = async (
+    items: readonly StaffDiningTable[],
+    facts: ReadonlyMap<string, TableOrderFacts>,
+  ) => {
+    const kept = new Map<string, { key: string; bill: LastTableBill }>();
+    const client = createTableCheckoutClient();
+    try {
+      for (const table of items) {
+        const session = table.currentDiningSessionReference;
+        const order = table.session?.orderReference;
+        if (session === null || !order) continue;
+        const key = JSON.stringify([table.session?.phase, facts.get(order) ?? null]);
+        const prior = lastBills.current.get(session);
+        if (prior?.key === key) {
+          kept.set(session, prior);
+          continue;
+        }
+        const bill = await client.bill(csrf, session);
+        if (bill.paymentTiming === "PayLater")
+          kept.set(session, { key, bill: lastTableBill(table.stableLabel, bill) });
+      }
+    } catch {
+      return; // Not read this time (or not allowed): what was kept stays until the next read.
+    }
+    lastBills.current = kept;
+    saveLastBills([...kept.values()].map((entry) => entry.bill));
+  };
   const loadFacts = async (items: readonly StaffDiningTable[], signal: AbortSignal) => {
     const orders = items.flatMap((table) =>
       table.session?.orderReference ? [table.session.orderReference] : [],
@@ -481,6 +518,7 @@ export function DiningSessionWorkspace({
     try {
       const facts = await loadTableOrderFacts(orders, signal);
       if (!signal.aborted) setOrderFacts(facts);
+      if (!signal.aborted) void keepLastBills(items, facts);
     } catch {
       /* The list still shows each table's own state; the dishes are read again with it. */
     }
@@ -555,6 +593,10 @@ export function DiningSessionWorkspace({
   useStaleRetry(stale?.attempts ?? null, reread);
   // v15 cbff9d6f: no reads once this screen's sign-in has ended.
   const live = useStaffSessionLive();
+  useEffect(() => {
+    // Signed out: the bills don't stay on a shared device for the next person.
+    if (!live) clearLastBills();
+  }, [live]);
   useEffect(() => {
     if (!anySeated || !live) return;
     setNow(Date.now());

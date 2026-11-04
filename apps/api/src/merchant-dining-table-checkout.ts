@@ -105,6 +105,8 @@ export function tableTipMinor(tip: DiningTableTip, subtotalMinor: bigint): bigin
 }
 
 export interface DiningTableBill {
+  /** Owner 2026-11-03: what went back from this table's payments (absent while nothing has). */
+  readonly refundedMinor?: string;
   readonly diningSessionReference: string;
   readonly sessionPhase: "Active" | "Closing" | "Closed" | "Cancelled";
   readonly sessionVersion: number;
@@ -348,6 +350,8 @@ export async function readDiningTableBill(
   });
   const settlements = await payments.listByOrders(tx, [orderReference]);
   const [writeOff] = await payments.listWriteOffsByOrders(tx, [orderReference]);
+  const refundedMinor =
+    settlements.length === 0 ? 0n : await tableRefundedMinor(tx, payments, orderReference);
   const onlinePayments = await payments.listOnlinePaymentsByOrders(tx, [orderReference]);
   const onlinePayment = onlinePayments.filter((entry) => entry.part === null).at(-1);
   // The whole-table payment, if the table paid at once.
@@ -667,6 +671,7 @@ export async function readDiningTableBill(
     split?.stale !== true;
   return Object.freeze({
     ...base,
+    ...(refundedMinor > 0n ? { refundedMinor: refundedMinor.toString() } : {}),
     rounds: Object.freeze(rounds),
     taxRoundingMinor: taxRoundingMinor.toString(),
     owed: Object.freeze({
@@ -709,6 +714,26 @@ export async function readDiningTableBill(
     settlementRecord: settlement,
     splitPlanRecord: plan,
   });
+}
+
+/**
+ * Cash given back, refunds on the card machine and refunds to a guest's card; one on its way
+ * counts, a refused one moved nothing.
+ */
+export async function tableRefundedMinor(
+  tx: ConsumerTransaction,
+  store: ReturnType<typeof createPostgresDiningTableSettlementStore>,
+  orderReference: string,
+): Promise<bigint> {
+  const orders = [orderReference];
+  const cash = await store.listCashRefundsByOrders(tx as never, orders);
+  const card = await store.listCardRefundsByOrders(tx as never, orders);
+  const online = await store.listOnlineRefundsByOrders(tx as never, orders);
+  return [
+    ...cash,
+    ...card,
+    ...online.filter((refund) => refund.outcome?.status !== "Failed"),
+  ].reduce((sum, refund) => sum + refund.amountMinor, 0n);
 }
 
 export const publicBill = (

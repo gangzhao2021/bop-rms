@@ -389,11 +389,13 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(keepsReadingTable({ status: "settled", tableLabel: "T1" })).toBe(false);
   });
   it("Owner 2026-11-03: a table that paid offers no more ordering", () => {
+    const summary = view().summary;
+    if (!summary) throw new Error("the sample view has a summary");
     const paid = view({
       paymentTiming: "PayLater",
       rounds: [round({ status: "Served" })],
       summary: {
-        ...view().summary!,
+        ...summary,
         due: { amountMinor: "0", currencyCode: "CAD" },
         paid: { amountMinor: "3041", currencyCode: "CAD" },
       },
@@ -602,4 +604,28 @@ describe("WP-2423 item 8 ④ v15 a: a table paying its split bill in parts", () 
     expect(html).not.toContain("To pay at the end");
     expect(html).not.toContain("The table paid once at the end");
   });
+});
+
+it("Owner 2026-11-03: a receipt shows what went back", () => {
+  const html = renderToStaticMarkup(
+    <SettledTableReceiptView
+      receipt={parseSettledTableReceipt({
+        receipt: {
+          tableLabel: "T1",
+          rounds: [],
+          subtotalMinor: "1588",
+          taxMinor: "206",
+          ordersTotalMinor: "1794",
+          tipMinor: "0",
+          roundingMinor: "1",
+          paidMinor: "1795",
+          refundedMinor: "300",
+          split: false,
+          payments: [{ partNumber: null, method: "Cash", totalMinor: "1795" }],
+        },
+      })}
+    />,
+  );
+  expect(html).toContain("Refunded");
+  expect(html).toContain("$3.00");
 });

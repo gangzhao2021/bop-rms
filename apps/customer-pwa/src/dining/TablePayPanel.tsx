@@ -268,6 +268,12 @@ export function TablePayPanel({
             <dt>{t("Total paid")}</dt>
             <dd>{money(receipt.totalMinor)}</dd>
           </div>
+          {view.refundedMinor !== "0" ? (
+            <div>
+              <dt>{t("Refunded")}</dt>
+              <dd>−{money(view.refundedMinor)}</dd>
+            </div>
+          ) : null}
           <div>
             <dt>{t("Paid by")}</dt>
             <dd>

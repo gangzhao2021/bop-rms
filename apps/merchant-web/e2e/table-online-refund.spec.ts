@@ -147,6 +147,7 @@ test("@production a manager refunds a table paid on a guest's phone to the card"
   await expect(page.getByRole("button", { name: /to the card$/u })).toBeDisabled();
   await page.getByLabel("Amount to refund").fill("10");
   await page.getByRole("button", { name: /10\.00 to the card$/u }).click();
+  await page.getByRole("button", { name: /^Confirm: refund/u }).click();
   await expect(page.getByText(/^Refunded to the card/u)).toBeVisible();
   await expect(page.getByText(/few days/u)).toBeVisible();
   await expect(page.getByText("Left to refund", { exact: true })).toBeVisible();
@@ -191,6 +192,7 @@ test("@production staff without authority are told who refunds; a refusal can be
   await expect(page.getByText(/refused refund moved no money/u)).toBeVisible();
   await fill(page, "10");
   await page.getByRole("button", { name: /10\.00 to the card$/u }).click();
+  await page.getByRole("button", { name: /^Confirm: refund/u }).click();
   await expect(page.getByRole("alert").filter({ hasText: "A manager refunds" })).toBeVisible();
 });
 
@@ -217,6 +219,7 @@ test("@production a split bill shows each paid part with its own refund", async 
   );
   await fill(page, "10");
   await page.getByRole("button", { name: /10\.00 to the card$/u }).click();
+  await page.getByRole("button", { name: /^Confirm: refund/u }).click();
   await expect.poll(() => bodies[0]?.partNumber).toBe(1);
 });
 
@@ -267,6 +270,7 @@ test("@production a manager records a refund made on the card machine of a table
   await page.getByLabel("Slip reference (optional)").fill("4242424242424242 4242");
   await page.getByLabel("Slip reference (optional)").fill("AUTH 771");
   await page.getByRole("button", { name: /10\.00 refunded on the card machine$/u }).click();
+  await page.getByRole("button", { name: /^Confirm: record/u }).click();
   await expect(page.getByText(/^Refunded on the card machine/u)).toBeVisible();
   await expect(page.getByText("Left to refund", { exact: true })).toBeVisible();
   expect(bodies[0]).toMatchObject({

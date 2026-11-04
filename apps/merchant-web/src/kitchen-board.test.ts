@@ -37,3 +37,10 @@ describe("WP-1804 Kitchen Board contract", () => {
     ).toThrow("KITCHEN_BOARD_INVALID");
   });
 });
+
+it("Owner 2026-11-03: a round from a paper slip stays marked on the board", () => {
+  expect(
+    parseKitchenWorkItemView({ ...kitchenItemFixture(), takenOnPaper: true }).takenOnPaper,
+  ).toBe(true);
+  expect(parseKitchenWorkItemView(kitchenItemFixture()).takenOnPaper).toBeUndefined();
+});

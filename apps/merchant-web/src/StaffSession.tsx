@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storeTime } from "./StoreTime.js";
@@ -78,6 +79,25 @@ export function StaffSignedOutPanel({
       <p>{message}</p>
       <StaffSignInLink {...(client ? { client } : {})} />
     </StatePanel>
+  );
+}
+
+/** A staff page opened without a Session: the same page as Staff sign-in, not an empty workspace. */
+export function StaffSignedOutPage() {
+  return (
+    <main id="main-content" tabIndex={-1} className="bop-shell__main staff-switch staff-sign-in">
+      <header className="staff-switch__header">
+        <p className="staff-switch__brand">
+          <strong aria-label="BOP">BOP</strong>
+        </p>
+        <h1>{t("Sign in required")}</h1>
+        <LanguageSwitch className="staff-switch__language" />
+      </header>
+      <section className="staff-switch__panel" role="status">
+        <p>{t("Sign in to open your Store workspace.")}</p>
+        <StaffSignInLink />
+      </section>
+    </main>
   );
 }
 

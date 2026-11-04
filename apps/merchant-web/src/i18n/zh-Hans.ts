@@ -718,7 +718,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Before you close": "打烊前",
   "Begin closing this dining session to stop further ordering.":
     "开始关闭此堂食会话，停止继续点单。",
-  "Begin session closing": "开始关闭会话",
+  "Begin session closing": "开始关台",
   "Being cleaned": "清洁中",
   "Being made": "制作中",
   "Being remade": "重做中",
@@ -1473,7 +1473,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Filter Kitchen work items": "筛选后厨工作项",
   "Filter orders on this page": "筛选本页订单",
   "Filters{value}": "筛选{value}",
-  "Finalize session closing": "完成关闭会话",
+  "Finalize session closing": "完成关台",
   "Finalize uploaded media": "完成媒体上传",
   Find: "查找",
   "Find a table": "查找桌台",
@@ -1481,7 +1481,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Find an order": "查找订单",
   "Finding the sign-in page…": "正在查找登录页面…",
   "Finish closing this dining session. All orders, payments and unresolved exceptions will be checked before releasing its table.":
-    "完成关闭此堂食会话。释放桌台前会检查所有订单、付款和未解决的异常。",
+    "这桌关台：关台前会检查所有订单、付款和未解决的异常。",
   "Finish signing in in the new window. This page continues when you are done.":
     "请在新窗口中完成登录。完成后此页面会继续。",
   "Finished good": "成品",
@@ -1607,8 +1607,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "I checked this refund and approve it on my own": "我已核对此退款，并自行批准",
   "I checked {what} and approve on my own": "我已核对{what}，并自行批准",
   "I confirm the selected table and session action": "我确认所选桌台和会话操作",
-  "I confirm this dining session is ready for the next closing step":
-    "我确认此堂食会话可以进入下一步关闭",
+  "I confirm this dining session is ready for the next closing step": "我确认这桌可以关台",
   "I confirm this order is complete": "我确认这笔订单已完成",
   "I confirm {quantity} × {displayName} delivered to table {tableLabel}":
     "我确认已将 {quantity} × {displayName} 送到桌台 {tableLabel}",
@@ -2356,13 +2355,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Older resolved exceptions could not be loaded. Try again.": "无法加载较早的已解决异常。请重试。",
   On: "开",
   "On a shared store tablet a manager has set up, switch to yourself with your PIN.":
-    "在店长设置好的门店共享平板上，用你的 PIN 换成自己。",
+    "在设置好的平板上，用 PIN 换人。",
   "On a shared tablet, staff switch to themselves with their own 6-digit PIN instead of signing in each time. Refunds, price and staff changes still need a full sign-in or the authenticator code.":
     "在共享平板上，员工用自己的 6 位 PIN 换成自己，不必每次都登录。退款、价格和员工更改仍需要完整登录或验证器验证码。",
   "On and in effect: you are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.":
     "已开启并生效：你是本店唯一可以批准退款的人，确认身份后可以批准自己的退款。",
-  "On the kitchen screen, start the kitchen display. A kitchen display sign-in only opens the kitchen, not orders, refunds or settings.":
-    "在后厨屏上启动后厨屏。后厨屏登录只能打开后厨，不能打开订单、退款或设置。",
+  "Only opens the kitchen, not orders, refunds or settings.": "只开后厨，不含订单、退款和设置。",
   "On this Store's menu": "在本店菜单上",
   "On {value}.": "用于{value}。",
   "On, but not in effect: {named} also {value} refund approval at this store, so a second person is required.":
@@ -3482,7 +3480,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Send order": "发送订单",
   "Send remake": "发送重做",
   "Sending gives this order its own join code, so a join code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.":
-    "发送后此订单会获得自己的入桌码，因此你已发出但尚未使用的入桌码会失效。已在桌的顾客保持加入。",
+    "发送后这桌会换一个新的入桌码：之前发出还没用的码会失效，已在桌的客人不受影响。",
   "Sending remake": "正在发送重做",
   "Sending…": "正在发送…",
   Sent: "已发送",
@@ -4824,7 +4822,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "用于码丢失、被盗或被复制时。旧码会立即失效；只有这张桌台会变化。如果只是贴纸损坏，请改为重新打印。",
   "Use up to 80 letters, spaces and punctuation.": "最多 80 个字母、空格和标点。",
   "Use your work email, your password and the code from your authenticator app.":
-    "使用你的工作邮箱、密码以及验证器应用中的验证码。",
+    "使用工作邮箱、密码和验证器应用中的验证码。",
   "Use “Record waste” to log what was thrown away.": '使用"记录报损"登记丢弃的东西。',
   "Used by": "使用者",
   "Used by SKUs": "使用此配方的 SKU",
@@ -5234,7 +5232,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "in less than a minute": "不到一分钟后",
   "in {value} min": "{value} 分钟后",
   "internal pilot sign-in. A live store signs in with each staff member’s own account.":
-    "内部试点登录。正式门店使用每位员工自己的账号登录。",
+    "正式门店每位员工用自己的账号登录。",
   interval: "时段",
   "invalid item cancellation answer": "商品取消的回应无效",
   "is not today's order with the same number. Check it is the right ticket before you":
@@ -5914,6 +5912,25 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid at the table": "在桌上付款",
   Rounds: "各轮合计",
   "Cash given back · {reason}": "已退现金 · {reason}",
+  "From a paper slip during the outage. Already made? Don't make it again, just mark it done.":
+    "断网时的纸单。已经做过就不要再做，直接点做好。",
+  "It also shows in the kitchen, marked as from a paper slip. If it was already made, the kitchen marks it done and you mark it served.":
+    "后厨屏也会显示这一轮，并标明来自纸单。已经做过的，请后厨直接点做好，你再点已上。",
+  "Refunded {amount}": "已退 {amount}",
+  "Last bills seen before the connection dropped": "断网前最后看到的账单",
+  "As of": "更新于",
+  "Rounds taken since then aren't here: add the paper slips.":
+    "断网后新点的菜不在这里，要加上纸单。",
+  "To pay {amount}": "待收 {amount}",
+  "Confirm the refund": "确认退款",
+  "Once recorded, it can't be changed.": "记下以后不能修改。",
+  "Confirm: refund {amount} to the card": "确认退回卡上 {amount}",
+  "Confirm: record {amount} refunded": "确认登记退款 {amount}",
+  "Confirm: give back {amount} in cash": "确认退还现金 {amount}",
+  "{amount} is going back to the guest's card.": "{amount} 正在退回客人的卡。",
+  "Recorded {amount} refunded on the card machine.": "已登记刷卡机退款 {amount}。",
+  "Recorded {amount} given back in cash. Give it to the guest now.":
+    "已记下退还现金 {amount}。请把钱交给客人。",
   "Recorded after an outage.": "断网后补录。",
   "Give cash back": "退现金",
   "Refund to the card": "退回客人的卡",

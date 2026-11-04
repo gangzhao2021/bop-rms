@@ -5509,6 +5509,13 @@ async function journey(ending) {
               },
             });
             assert.equal(refund.status, "Recorded");
+            // Owner 2026-11-03: the bill says what went back, under the same restricted role the
+            // guest's receipt and the Orders list read it with.
+            const refundedBill = await createMerchantDiningTableBillRead({
+              persistence: persistenceOf(manager),
+              authentication: manager.authentication,
+            })({ ...as(manager), query: { diningSessionReference: sessionReference } });
+            assert.equal(refundedBill.refundedMinor, "500");
             // The guests leave: what is written off is exactly the parts not paid.
             const served = await cookAndServeRound1();
             const left = await departure(manager, served.currentOrderVersion);

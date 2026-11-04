@@ -35,6 +35,7 @@ const notInApp = [
   // Sign-in pages are served by the server, outside this app.
   /href="\/(merchant|platform)\/[^"]*"/u,
   /href=\{entry\.path\}/u,
+  /href=\{testEntry \?\? [A-Z_]+\}/u,
 ];
 
 describe("v15 run: in-app navigation stays inside the loaded app", () => {

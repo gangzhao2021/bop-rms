@@ -14,6 +14,8 @@ export type TableTip =
   | { readonly kind: "Percent"; readonly percent: number }
   | { readonly kind: "Amount"; readonly amountMinor: string };
 export interface TablePaymentView {
+  /** Owner 2026-11-03: what went back from this table's payments ("0" while nothing has). */
+  readonly refundedMinor: string;
   readonly tableLabel: string | null;
   readonly checkingOut: boolean;
   readonly rounds: readonly {
@@ -117,6 +119,7 @@ export function parseTablePaymentView(value: unknown): TablePaymentView {
   )
     return fail();
   return Object.freeze({
+    refundedMinor: p.refundedMinor === undefined ? "0" : amount(p.refundedMinor),
     tableLabel: typeof p.tableLabel === "string" ? p.tableLabel : null,
     checkingOut: p.checkingOut,
     rounds: Object.freeze(

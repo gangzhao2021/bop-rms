@@ -1114,6 +1114,14 @@ function WorkCard({
             {item.otherName}
           </p>
         )}
+        {item.takenOnPaper !== true || !isActiveKitchenWork(item) ? null : (
+          // Owner 2026-11-03: it came from a paper slip, so the kitchen may have made it already.
+          <p className="kitchen-work-item__paper" role="note">
+            {t(
+              "From a paper slip during the outage. Already made? Don't make it again, just mark it done.",
+            )}
+          </p>
+        )}
         {item.chase === undefined || !isActiveKitchenWork(item) ? null : (
           // WP-2423 item 8 ⑦: the table is waiting; how often a server chased it.
           <p className="kitchen-work-item__chased" role="note">

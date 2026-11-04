@@ -59,7 +59,7 @@ import {
 } from "./merchant-order-staff-cancellation.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
-import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
+import { readDiningTableBill, tableRefundedMinor } from "./merchant-dining-table-checkout.js";
 import { readItemCancellationRefund } from "./merchant-order-item-staff-cancellation.js";
 import { readCustomerReceiptFinancial } from "./customer-receipt-financial.js";
 import {
@@ -467,6 +467,8 @@ export function createPersistentMerchantOrderQueue(options: {
                 amountMinor: string;
                 /** WP-2423 item 8 ④: "Split" — paid part by part (any methods), every part paid. */
                 method: "CardMachine" | "Cash" | "Online" | "Split";
+                /** Owner 2026-11-03: what went back (absent while nothing has). */
+                refundedMinor?: string;
               } | null;
             }
           >();
@@ -823,6 +825,11 @@ export function createPersistentMerchantOrderQueue(options: {
                     parts.some((entry) => entry.part?.partNumber === part.partNumber),
                   )
                 ) {
+                  const refunded = await tableRefundedMinor(
+                    businessTransaction as never,
+                    tableStore,
+                    order,
+                  );
                   tableBills.set(order, {
                     totalMinor: parts
                       .reduce((sum, entry) => sum + entry.roundsMinor, 0n)
@@ -832,16 +839,23 @@ export function createPersistentMerchantOrderQueue(options: {
                         .reduce((sum, entry) => sum + entry.totalMinor, 0n)
                         .toString(),
                       method: "Split",
+                      ...(refunded > 0n ? { refundedMinor: refunded.toString() } : {}),
                     },
                   });
                   continue;
                 }
                 if (settlement !== undefined) {
+                  const refunded = await tableRefundedMinor(
+                    businessTransaction as never,
+                    tableStore,
+                    order,
+                  );
                   tableBills.set(order, {
                     totalMinor: settlement.roundsMinor.toString(),
                     paid: {
                       amountMinor: settlement.totalMinor.toString(),
                       method: settlement.method,
+                      ...(refunded > 0n ? { refundedMinor: refunded.toString() } : {}),
                     },
                   });
                   continue;

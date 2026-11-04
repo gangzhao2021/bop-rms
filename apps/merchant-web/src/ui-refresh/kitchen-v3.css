@@ -1094,3 +1094,10 @@
     padding-inline: 0;
   }
 }
+
+/* Owner 2026-11-03: a round entered from a paper slip may already have been made. */
+.kitchen-work-item .kitchen-work-item__paper {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}

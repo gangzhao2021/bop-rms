@@ -28,13 +28,14 @@ const root = document.getElementById("root");
 if (!root) throw new Error("Application root is missing");
 const recoveryStatus = document.createElement("p");
 recoveryStatus.setAttribute("role", "status");
-recoveryStatus.textContent = t("Checking your session. Please wait.");
 recoveryStatus.hidden = true;
 root.before(recoveryStatus);
 protectCustomerHistoryRestore({
   events: window,
   cover: () => {
     root.hidden = true;
+    // Owner 2026-11-03: in the language chosen by now, and no status text until it is needed.
+    recoveryStatus.textContent = t("Checking your session. Please wait.");
     recoveryStatus.hidden = false;
   },
   reload: () => window.location.reload(),

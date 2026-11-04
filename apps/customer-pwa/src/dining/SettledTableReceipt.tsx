@@ -33,6 +33,8 @@ export interface SettledTableReceipt {
   readonly tipMinor: string;
   readonly roundingMinor: string;
   readonly paidMinor: string;
+  /** Owner 2026-11-03: what went back from these payments (older server: 0). */
+  readonly refundedMinor: string;
   readonly split: boolean;
   readonly payments: readonly {
     readonly partNumber: number | null;
@@ -104,6 +106,7 @@ export function parseSettledTableReceipt(payload: unknown): SettledTableReceipt 
     tipMinor: minor(receipt.tipMinor),
     roundingMinor: minor(receipt.roundingMinor),
     paidMinor: minor(receipt.paidMinor),
+    refundedMinor: receipt.refundedMinor === undefined ? "0" : minor(receipt.refundedMinor),
     split: typeof receipt.split === "boolean" ? receipt.split : fail(),
     payments: list(receipt.payments, 20).map((value) => {
       const payment = record(value);
@@ -241,6 +244,12 @@ export function SettledTableReceiptView({ receipt }: { readonly receipt: Settled
           <dt>{t("Total paid")}</dt>
           <dd>{money(receipt.paidMinor)}</dd>
         </div>
+        {receipt.refundedMinor !== "0" ? (
+          <div>
+            <dt>{t("Refunded")}</dt>
+            <dd>−{money(receipt.refundedMinor)}</dd>
+          </div>
+        ) : null}
         {receipt.payments.map((payment) => (
           <div key={payment.partNumber ?? 0}>
             <dt>

@@ -1435,16 +1435,26 @@ export function orderAmountNote(
   // still in progress is left for these words.
   const said = orderAmountRefunded(order, position) > 0n;
   // DEC-DINE-IN-PAY-LATER: a pay-later table's dishes are on its bill until it pays once.
-  if (order.tableBill !== null)
-    return order.tableBill.paid === null
-      ? t("On the table's bill")
-      : order.tableBill.paid.method === "Cash"
+  if (order.tableBill !== null) {
+    const paid = order.tableBill.paid;
+    if (paid === null) return t("On the table's bill");
+    const how =
+      paid.method === "Cash"
         ? t("Paid at the table · cash")
-        : order.tableBill.paid.method === "Online"
+        : paid.method === "Online"
           ? t("Paid at the table · guest's phone")
-          : order.tableBill.paid.method === "Split"
+          : paid.method === "Split"
             ? t("Paid at the table · split bill")
             : t("Paid at the table · card machine");
+    // Owner 2026-11-03: a refund shows on the list, not only inside the order.
+    return paid.refundedMinor === undefined
+      ? how
+      : how +
+          " · " +
+          t("Refunded {amount}", {
+            amount: orderMoney({ amountMinor: paid.refundedMinor, currencyCode: "CAD" }),
+          });
+  }
   // Only an order known to be waiting for its payment says "Not paid"; no payment on the list is
   // otherwise just not known here.
   if (orderAmountTaken(order) === null)

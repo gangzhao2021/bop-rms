@@ -1366,3 +1366,27 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 4px;
 }
+
+/* Owner 2026-11-03: the last bills while the connection is down, one row per table. */
+.workspace-page.tables-v3 .tables-offline__bills h3 {
+  margin: 24px 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .tables-offline__bills > p {
+  margin: 0 0 8px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page.tables-v3 .tables-offline__bills details {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.workspace-page.tables-v3 .tables-offline__bills summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  align-items: center;
+  color: inherit;
+}

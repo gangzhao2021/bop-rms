@@ -1496,6 +1496,23 @@ it("the real staff round command takes a round from table entry to the card mach
       );
       assert.notEqual(second.orderBatchReference, first.orderBatchReference);
       assert.equal((await entry()).at(-1).recorded_after_outage, true);
+      // Owner 2026-11-03: the kitchen sees it came from a paper slip, so nothing is made twice.
+      const paperKitchen = await store.asApi((tx) =>
+        kitchenPreparation(tx, store.scope, [
+          {
+            workItemReference: id(0x2601),
+            orderReference: first.orderReference,
+            orderBatchReference: second.orderBatchReference,
+          },
+          {
+            workItemReference: id(0x2602),
+            orderReference: first.orderReference,
+            orderBatchReference: first.orderBatchReference,
+          },
+        ]),
+      );
+      assert.equal(paperKitchen.get(id(0x2601)).takenOnPaper, true);
+      assert.equal(paperKitchen.get(id(0x2602)).takenOnPaper, undefined);
       assert.deepEqual((await balance()).reserved, "3");
 
       // The first round stays payable after the refused attempt and the later round moved the

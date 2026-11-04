@@ -42,6 +42,56 @@ function record(value, keys) {
   }
   return result;
 }
+const STAFF_PAGE_WORDS = Object.freeze({
+  en: {
+    title: "Staff sign-in",
+    note: "Test environment. Choose a test identity. A live store signs in with each staff member’s own account.",
+    enter: "Enter",
+    kitchen: "Kitchen display",
+    tablet: "On a shared tablet:",
+    pin: "Switch staff with a PIN",
+    enterAs: (name) => `Enter as ${name}`,
+    kitchenAs: (name) => `Start kitchen display as ${name}`,
+    kitchenAt: (store, name) => `Start kitchen display at ${store} as ${name}`,
+  },
+  zh: {
+    title: "员工登录",
+    note: "测试环境。选一个测试身份进入。正式门店每位员工用自己的账号登录。",
+    enter: "进入",
+    kitchen: "后厨屏",
+    tablet: "共享平板：",
+    pin: "用 PIN 换人",
+    enterAs: (name) => `进入，身份 ${name}`,
+    kitchenAs: (name) => `启动后厨屏，身份 ${name}`,
+    kitchenAt: (store, name) => `启动后厨屏 ${store}，身份 ${name}`,
+  },
+});
+// The same look as the staff sign-in page (design brief §2); this page is outside the web app.
+const STAFF_PAGE_STYLE = `
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:#171717;font:16px/1.5 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{width:min(28rem,100%);margin:0 auto;padding:clamp(24px,10vh,96px) 16px 40px}
+.brand{margin:0 0 24px;font-weight:600}
+h1{margin:0 0 8px;font-size:28px;font-weight:600;line-height:1.25}
+.note,.tablet,.kitchen{color:#666;font-size:14px}
+.note{margin:0 0 24px}
+ul{margin:0;padding:0;list-style:none}
+li{padding:12px 0}
+li+li{border-top:1px solid #e5e5e5}
+.person{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.person strong{font-weight:600;overflow-wrap:anywhere}
+.kitchen{display:grid;grid-template-columns:auto 1fr;column-gap:16px}
+.kitchen span{grid-row:1/9;line-height:44px}
+.kitchen form{grid-column:2}
+button{min-height:44px;padding:0;border:0;background:none;color:#1f63e0;font:inherit;font-weight:600;text-align:start;cursor:pointer}
+.kitchen button{font-weight:400}
+.person button{padding:0 20px;border-radius:6px;background:#1f63e0;color:#fff;white-space:nowrap}
+a{color:#1f63e0;text-decoration:none}
+button:hover,a:hover{text-decoration:underline}
+button:focus-visible,a:focus-visible{outline:2px solid #1f63e0;outline-offset:2px}
+.tablet{margin:24px 0 0}
+`;
+
 /** Development-only identity selector. Membership and business grants are
  * evaluated by the actual Merchant owners; neither this page nor its aliases
  * confer permission. The roster is freshly acquired for every GET and POST. */
@@ -122,31 +172,39 @@ export function installInternalStaffLogin(app, merchant) {
     )
       return res.status(400).json({ code: "INTERNAL_STAFF_LOGIN_DENIED" });
     try {
-      const entries = await currentChoices(),
+      const zh = /\bzh\b/i.test(String(req.headers["accept-language"] ?? "")),
+        words = zh ? STAFF_PAGE_WORDS.zh : STAFF_PAGE_WORDS.en,
+        entries = await currentChoices(),
         kitchen = await currentKitchenChoices(entries),
+        hidden = `<input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN">`,
         kitchenForm = (entry, store) =>
-          `<form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><input type="hidden" name="purpose" value="KitchenDisplay">` +
+          `<form method="post" action="/merchant/internal-test/login">${hidden}<input type="hidden" name="purpose" value="KitchenDisplay">` +
           (store === undefined
-            ? `<button name="staffSelector" value="${escape(entry.selector)}" type="submit">Start kitchen display as ${escape(entry.label)}</button></form>`
-            : `<input type="hidden" name="store" value="${escape(store.store)}"><button name="staffSelector" value="${escape(entry.selector)}" type="submit">Start kitchen display at ${escape(store.storeLabel)} as ${escape(entry.label)}</button></form>`),
+            ? `<button name="staffSelector" value="${escape(entry.selector)}" type="submit" aria-label="${words.kitchenAs(escape(entry.label))}">${words.kitchen}</button></form>`
+            : `<input type="hidden" name="store" value="${escape(store.store)}"><button name="staffSelector" value="${escape(entry.selector)}" type="submit" aria-label="${words.kitchenAt(escape(store.storeLabel), escape(entry.label))}">${escape(store.storeLabel)}</button></form>`),
         forms = entries
-          .map(
-            (entry) =>
-              `<form method="post" action="/merchant/internal-test/login"><input type="hidden" name="confirmation" value="DEMO_STAFF_LOGIN"><button name="staffSelector" value="${escape(entry.selector)}" type="submit">Enter as ${escape(entry.label)}</button></form>` +
-              // One Store: one start, as before. Several: one per Store this person works at; a
-              // kitchen display then belongs to that Store.
-              (kitchen.length === 0
-                ? kitchenForm(entry)
+          .map((entry) => {
+            // One Store: one start, as before. Several: one per Store this person works at; a
+            // kitchen display then belongs to that Store.
+            const starts =
+              kitchen.length === 0
+                ? [kitchenForm(entry)]
                 : kitchen
                     .filter((store) => store.selector === entry.selector)
-                    .map((store) => kitchenForm(entry, store))
-                    .join("")),
-          )
+                    .map((store) => kitchenForm(entry, store));
+            return (
+              `<li><div class="person"><strong>${escape(entry.label)}</strong><form method="post" action="/merchant/internal-test/login">${hidden}<button name="staffSelector" value="${escape(entry.selector)}" type="submit" aria-label="${words.enterAs(escape(entry.label))}">${words.enter}</button></form></div>` +
+              (starts.length === 0
+                ? ""
+                : `<div class="kitchen"><span>${words.kitchen}</span>${starts.join("")}</div>`) +
+              `</li>`
+            );
+          })
           .join("");
       return res
         .type("html")
         .send(
-          `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DEMO Staff</title><main><h1>DEMO Store staff</h1><p>Local internal testing only. Choose a configured test identity. Access still depends on current permissions.</p>${forms}<h2>Shared tablet</h2><p>On a tablet a manager has set up for staff PINs, staff switch with their own 6-digit PIN.</p><p><a href="/operations/switch-staff">Switch staff with a PIN</a></p></main></html>`,
+          `<!doctype html><html lang="${zh ? "zh-Hans" : "en"}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${words.title}</title><style>${STAFF_PAGE_STYLE}</style><main><p class="brand">BOP</p><h1>${words.title}</h1><p class="note">${words.note}</p><ul>${forms}</ul><p class="tablet">${words.tablet} <a href="/operations/switch-staff">${words.pin}</a></p></main></html>`,
         );
     } catch {
       return res.status(503).json({ code: "INTERNAL_STAFF_LOGIN_UNAVAILABLE" });

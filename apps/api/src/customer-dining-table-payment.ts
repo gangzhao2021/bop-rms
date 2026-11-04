@@ -196,6 +196,8 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
     schemaVersion: 1,
     payment: {
       tableLabel: bill.tableLabel,
+      // Owner 2026-11-03: the guest's receipt says what went back to them.
+      ...(bill.refundedMinor === undefined ? {} : { refundedMinor: bill.refundedMinor }),
       checkingOut: bill.sessionPhase === "Closing",
       rounds: bill.rounds.map((round) => ({
         roundNumber: round.roundNumber,
@@ -361,6 +363,7 @@ export function customerSettledTableReceiptBody(view: DiningTableOnlinePaymentVi
       tipMinor: sum(payments.map((entry) => entry.tipMinor)),
       roundingMinor: sum(payments.map((entry) => entry.roundingMinor)),
       paidMinor: sum(payments.map((entry) => entry.totalMinor)),
+      ...(bill.refundedMinor === undefined ? {} : { refundedMinor: bill.refundedMinor }),
       split: bill.settlement === null,
       payments,
     },

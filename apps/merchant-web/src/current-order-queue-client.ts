@@ -24,6 +24,8 @@ function parseTableBill(
     readonly amountMinor: string;
     /** WP-2423 item 8 ④: "Split" — paid part by part, every part paid. */
     readonly method: "CardMachine" | "Cash" | "Online" | "Split";
+    /** Owner 2026-11-03: what went back (absent while nothing has). */
+    readonly refundedMinor?: string;
   } | null;
 } | null {
   if (value === null) return null;
@@ -56,10 +58,20 @@ function parseTableBill(
       paid: null,
     });
   }
-  const paid = exact(bill.paid, ["amountMinor", "method"]);
+  const withRefund =
+    bill.paid !== null &&
+    typeof bill.paid === "object" &&
+    Object.hasOwn(bill.paid, "refundedMinor");
+  const paid = exact(bill.paid, [
+    "amountMinor",
+    "method",
+    ...(withRefund ? ["refundedMinor"] : []),
+  ]);
   if (
     typeof paid.amountMinor !== "string" ||
     !minorAmount.test(paid.amountMinor) ||
+    (withRefund &&
+      (typeof paid.refundedMinor !== "string" || !minorAmount.test(paid.refundedMinor))) ||
     (paid.method !== "CardMachine" &&
       paid.method !== "Cash" &&
       paid.method !== "Online" &&
@@ -68,7 +80,11 @@ function parseTableBill(
     return fail();
   return Object.freeze({
     totalMinor: bill.totalMinor,
-    paid: Object.freeze({ amountMinor: paid.amountMinor, method: paid.method }),
+    paid: Object.freeze({
+      amountMinor: paid.amountMinor,
+      method: paid.method,
+      ...(withRefund ? { refundedMinor: paid.refundedMinor as string } : {}),
+    }),
   });
 }
 function reference(value: unknown): string {

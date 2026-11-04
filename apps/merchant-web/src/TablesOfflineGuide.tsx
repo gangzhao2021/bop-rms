@@ -1,4 +1,9 @@
-import { t } from "./i18n/i18n.js";
+import { t, saidTable } from "./i18n/i18n.js";
+import { orderMoney } from "./order-money.js";
+import { SourceTime } from "./StoreTime.js";
+import { loadLastBills } from "./table-last-bills.js";
+
+const cad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "CAD" });
 
 /**
  * WP-2423 item 8 ① segment 3 (operating continuity; DEC-TABLES-SERVER-MAIN): while the Tables page
@@ -7,6 +12,7 @@ import { t } from "./i18n/i18n.js";
  * outage procedure" (Tables that pay at the end). Nothing is queued in the browser (IDR-0039).
  */
 export function TablesOfflineGuide() {
+  const last = loadLastBills();
   return (
     <section className="tables-offline" aria-labelledby="tables-offline-title" role="note">
       <h2 id="tables-offline-title">{t("While the connection is down")}</h2>
@@ -46,6 +52,42 @@ export function TablesOfflineGuide() {
           <li>{t("Close the table, then mark it cleaned.")}</li>
         </ol>
       </details>
+      {/* Owner 2026-11-03: what each table owed, so a table can pay while the list can't be read. */}
+      {last === null ? null : (
+        <div className="tables-offline__bills">
+          <h3>{t("Last bills seen before the connection dropped")}</h3>
+          <p>
+            {t("As of")} <SourceTime instant={last.savedAt} withDate={false} /> ·{" "}
+            {t("Rounds taken since then aren't here: add the paper slips.")}
+          </p>
+          {last.tables.map((table) => (
+            <details key={table.label}>
+              <summary>
+                <span>{t("Table {table}", { table: saidTable(table.label) })}</span>
+                <strong>
+                  {table.settled
+                    ? t("Paid")
+                    : t("To pay {amount}", { amount: cad(table.owedMinor) })}
+                </strong>
+              </summary>
+              {table.rounds.map((round) => (
+                <dl key={round.number} className="table-checkout__totals">
+                  <div>
+                    <dt>{t("Round {number}", { number: String(round.number) })}</dt>
+                    <dd>{cad(round.totalMinor)}</dd>
+                  </div>
+                  {round.items.map((item, index) => (
+                    <div key={index}>
+                      <dt>{item.name}</dt>
+                      <dd>{cad(item.subtotalMinor)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ))}
+            </details>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

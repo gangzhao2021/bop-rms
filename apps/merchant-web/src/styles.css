@@ -8993,26 +8993,19 @@ body:has(.product-complete-draft) .bop-shell__header,
 }
 .staff-switch__header {
   display: grid;
-  gap: 12px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--bop-color-border-default);
+  gap: 24px;
 }
 .staff-switch__brand {
   margin: 0;
 }
 .staff-switch__brand strong {
-  padding: 2px 6px;
-  border-radius: var(--bop-radius-control);
-  color: var(--bop-color-on-primary);
-  background: var(--bop-color-brand-primary);
-  font-size: 12px;
-  letter-spacing: 0.06em;
+  font-size: 16px;
+  font-weight: 600;
 }
 .staff-switch__header h1 {
   margin: 0;
-  font-size: clamp(22px, 3vw, 28px);
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-size: 28px;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .staff-switch__panel {
@@ -9066,8 +9059,10 @@ body:has(.product-complete-draft) .bop-shell__header,
   justify-self: start;
   min-height: 48px;
   padding: 0 20px;
+  border: 0;
   color: var(--bop-color-on-primary);
-  background: var(--bop-color-brand-primary);
+  background: var(--bop-color-accent);
+  font-weight: 600;
 }
 .staff-switch__dots {
   display: flex;
@@ -9133,8 +9128,6 @@ body:has(.product-complete-draft) .bop-shell__header,
 .staff-switch__footer {
   display: grid;
   gap: 12px;
-  padding-top: 16px;
-  border-top: 1px solid var(--bop-color-border-default);
   color: var(--bop-color-text-muted);
   font-size: 14px;
 }
@@ -9143,19 +9136,71 @@ body:has(.product-complete-draft) .bop-shell__header,
   color: var(--bop-color-text-muted);
 }
 /* WP-2423 DEC-COGNITO-STORE-STAFF: Staff sign-in (each person's own account). */
-.staff-sign-in__primary {
-  display: inline-flex;
+.staff-switch.staff-sign-in.bop-shell__main {
+  width: min(28rem, 100%);
+  padding-block-start: clamp(24px, 10vh, 96px);
+}
+.staff-sign-in .staff-switch__panel {
+  gap: 12px;
+}
+.staff-sign-in__primary,
+.staff-sign-in .shell-action {
+  display: flex;
   align-items: center;
+  justify-content: center;
+  justify-self: stretch;
+  width: 100%;
+  min-height: 48px;
+  border-radius: var(--bop-radius-control);
+  color: var(--bop-color-on-primary);
+  background: var(--bop-color-accent);
   font-weight: 600;
   text-decoration: none;
 }
+.staff-sign-in .staff-session__sign-in {
+  justify-items: stretch;
+  margin: 0;
+}
+.staff-sign-in .staff-session__test-only {
+  font-size: 14px;
+}
+.staff-sign-in .staff-session__test-only strong {
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.staff-sign-in__other {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+}
+.staff-sign-in__other + .staff-sign-in__other {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.staff-sign-in__other h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.staff-sign-in__other p {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
 .staff-sign-in__link {
   display: inline-flex;
+  flex: none;
   align-items: center;
-  justify-self: start;
   min-height: 44px;
+  color: var(--bop-color-accent);
+  font-size: 14px;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.staff-sign-in__link:hover {
+  text-decoration: underline;
 }
 /* Invitations on the Staff pages (IAM-USER-LIST / IAM-USER-DETAIL). */
 .staff-invite {
@@ -9525,7 +9570,9 @@ body:has(.product-complete-draft) .bop-shell__header,
   align-self: center;
 }
 .staff-switch__language {
-  justify-self: start;
+  position: absolute;
+  top: clamp(16px, 4vw, 24px);
+  right: clamp(16px, 4vw, 32px);
 }
 /* WP-2423 Q32: drag a menu section or item by its handle; the Move buttons stay for keyboards. */
 .drag-handle {

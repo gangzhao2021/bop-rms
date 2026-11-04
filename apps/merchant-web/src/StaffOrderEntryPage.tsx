@@ -1195,6 +1195,13 @@ export function StaffOrderEntryPage({
                 "Nothing to charge now. The round is on the table's bill; the table pays once at the end, tip included.",
               )}
             </p>
+            {paper ? (
+              <p role="note">
+                {t(
+                  "It also shows in the kitchen, marked as from a paper slip. If it was already made, the kitchen marks it done and you mark it served.",
+                )}
+              </p>
+            ) : null}
             <div className="card-actions">
               <button type="button" onClick={startOver}>
                 {t("Another order for this table")}

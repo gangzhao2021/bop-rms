@@ -27,6 +27,12 @@ const uiText: UiText = Object.freeze({
   reload: t("Reload"),
   headerExtra: <LanguageSwitch />,
 });
+// Owner 2026-11-03 (operating continuity): a staff page opened while the connection is down shows
+// what to do and the last bills, not the browser's error page.
+if (import.meta.env.PROD && "serviceWorker" in navigator)
+  void navigator.serviceWorker
+    .register("/operations/sw.js", { scope: "/operations/" })
+    .catch(() => undefined);
 const root = document.getElementById("root");
 if (!root) throw new Error("Application root is missing");
 createRoot(root).render(

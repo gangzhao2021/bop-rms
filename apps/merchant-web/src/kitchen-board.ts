@@ -49,6 +49,8 @@ export interface KitchenBoardItem {
   readonly comboParts?: readonly ComboPartView[];
   /** WP-2423 item 8 ⑦: a server chased this dish (how often, and when last). */
   readonly chase?: { readonly count: number; readonly lastChasedAt: string };
+  /** Owner 2026-11-03: entered after an outage from a paper slip: it may already be made. */
+  readonly takenOnPaper?: boolean;
   /**
    * WP-2423 item 8 ⑧ (decision 5): the dish's kitchen section (档口); null: no section. Absent from
    * older servers (no section filter then).
@@ -316,6 +318,8 @@ function item(value: unknown): KitchenBoardItem {
   const hasComboParts =
     value !== null && typeof value === "object" && Object.hasOwn(value, "comboParts");
   const hasChase = value !== null && typeof value === "object" && Object.hasOwn(value, "chase");
+  const hasPaper =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "takenOnPaper");
   const hasSection =
     value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSection");
   const input = closed(value, [
@@ -339,6 +343,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasOtherName ? ["otherName"] : []),
     ...(hasComboParts ? ["comboParts"] : []),
     ...(hasChase ? ["chase"] : []),
+    ...(hasPaper ? ["takenOnPaper"] : []),
     ...(hasSection ? ["kitchenSection"] : []),
   ]);
   if (
@@ -377,6 +382,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasOtherName ? { otherName: input.otherName as string } : {}),
     ...(hasComboParts ? { comboParts: parseComboParts(input.comboParts) } : {}),
     ...(hasSection ? { kitchenSection: input.kitchenSection as string | null } : {}),
+    ...(input.takenOnPaper === true ? { takenOnPaper: true } : {}),
     ...(chase === null
       ? {}
       : {

@@ -263,3 +263,27 @@ it("a settled receipt says what points took off, apart from a manager's comp", (
     null,
   ]);
 });
+
+it("Owner 2026-11-03: a settled receipt says what went back, and says nothing while nothing has", () => {
+  const view = (refundedMinor?: string) =>
+    ({
+      bill: {
+        tableLabel: "T1",
+        taxRoundingMinor: "0",
+        ...(refundedMinor === undefined ? {} : { refundedMinor }),
+        settlement: {
+          method: "Cash",
+          tipMinor: "0",
+          roundingMinor: "0",
+          totalMinor: "1795",
+          recordedAt: "2026-11-03T18:00:00.000Z",
+        },
+        split: null,
+        rounds: [],
+      },
+    }) as never;
+  expect(customerSettledTableReceiptBody(view("300")).receipt).toMatchObject({
+    refundedMinor: "300",
+  });
+  expect(customerSettledTableReceiptBody(view()).receipt).not.toHaveProperty("refundedMinor");
+});
