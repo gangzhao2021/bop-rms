@@ -67,6 +67,46 @@ export async function listBrandProducts(
   );
 }
 
+/**
+ * Owner 2026-11-04: the menu sections each Product sits in on the Brand's current menus, in menu
+ * order (absent: on no menu). The owner names these sections, so they are how a list groups dishes.
+ */
+export async function listBrandProductSections(
+  tx: Tx,
+  scope: { readonly brandReference: string },
+): Promise<
+  ReadonlyMap<
+    string,
+    readonly { readonly names: Readonly<Record<string, string>>; readonly order: number }[]
+  >
+> {
+  const brand = parseCatalogReference(scope.brandReference);
+  await brandScope(tx, brand);
+  const { rows } = await tx.query(
+    `SELECT sk.product_id::text product,s.menu_section_id::text section,s.localized_names_json names,
+       s.sort_order section_order,min(p.sort_order) placement_order
+      FROM rms_catalog.menu m
+      JOIN rms_catalog.menu_section s ON s.menu_version_id=m.current_version_id AND s.menu_id=m.menu_id AND s.brand_id=m.brand_id
+      JOIN rms_catalog.sellable_placement p ON p.menu_section_id=s.menu_section_id AND p.menu_id=s.menu_id AND p.brand_id=s.brand_id
+      JOIN rms_catalog.sku sk ON sk.sku_id=p.sku_id AND sk.brand_id=p.brand_id
+      WHERE m.brand_id=$1
+      GROUP BY sk.product_id,s.menu_section_id,s.localized_names_json,s.sort_order
+      ORDER BY s.sort_order,placement_order`,
+    [brand],
+  );
+  const found = new Map<string, { names: Readonly<Record<string, string>>; order: number }[]>();
+  for (const row of rows) {
+    const entries = found.get(String(row.product)) ?? [];
+    entries.push({
+      names: (row.names ?? {}) as Readonly<Record<string, string>>,
+      // Sections first, then the dish's place within its section.
+      order: Number(row.section_order) * 100_000 + Number(row.placement_order),
+    });
+    found.set(String(row.product), entries);
+  }
+  return found;
+}
+
 /** The Product with its current version; null when it does not belong to the Brand. */
 export async function loadBrandProduct(
   tx: Tx,

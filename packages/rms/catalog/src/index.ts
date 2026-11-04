@@ -423,6 +423,7 @@ export * from "./infrastructure/persistence/brand-catalog-source-store.js";
 
 export {
   listBrandProducts,
+  listBrandProductSections,
   listProductVersionTaxClassifications,
   listStoreMenuSellables,
   loadBrandProduct,

@@ -248,6 +248,42 @@ test("@production staff add a description and a described photo to a product and
   });
 });
 
+test("@production the product list says which menu section each dish is in", async ({ page }) => {
+  await session(page);
+  const { product, ...base } = productView(4, { description: "", photo: null });
+  void product;
+  const summary = {
+    internalCode: "DISH-A",
+    productType: "PreparedFood",
+    lifecycle: "Active",
+    aggregateVersion: 1,
+    taxClassificationReference: id(70),
+    sizes: 1,
+    activeSizes: 1,
+    updatedAt: "2026-11-04T12:00:00.000Z",
+  };
+  await page.route("**/merchant/commerce/products/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        ...base,
+        screenId: "CAT-PRODUCT-LIST",
+        optionSetChoices: null,
+        products: [
+          { ...summary, productReference: id(71), name: "Mapo tofu", sections: ["Sichuan"] },
+          { ...summary, productReference: id(72), name: "New dish", sections: [] },
+        ],
+      },
+    }),
+  );
+  await page.goto("/app/commerce/products");
+  const rows = page.getByRole("row");
+  await expect(page.getByRole("columnheader", { name: "Section" })).toBeVisible();
+  await expect(rows.filter({ hasText: "Mapo tofu" })).toContainText("Sichuan");
+  await expect(rows.filter({ hasText: "New dish" })).toContainText("Not on a menu");
+  await expect(page.getByRole("columnheader", { name: "Type" })).toHaveCount(0);
+});
+
 test("@production staff who may only read a product see its description and photo without controls", async ({
   page,
 }) => {

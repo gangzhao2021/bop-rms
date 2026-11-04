@@ -7394,4 +7394,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sold only at tables, from 9 am to 2 am, and only while Alcohol at tables is on in Store features. Guests see that they must be 19 or older, and staff see a reminder to check ID.":
     "只能堂食，9:00 至次日 2:00 供应，且门店功能里“堂食售酒”已开启。顾客会看到须年满 19 岁，员工会看到查验证件的提醒。",
   "Alcohol: check ID if the guest looks under 19": "酒水：顾客看起来未满 19 岁请查验证件",
+  "A size's code can't be changed once it is saved. Its name can.":
+    "规格保存后代码不能修改，名称可以随时改。",
+  "Not on a menu": "不在菜单上",
 });

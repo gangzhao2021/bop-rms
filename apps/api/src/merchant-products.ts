@@ -7,6 +7,7 @@ import {
   createPostgresProductLifecycleStore,
   listBrandOptionSets,
   listBrandProducts,
+  listBrandProductSections,
   loadBrandProduct,
   parseCatalogHash,
   parseCatalogReference,
@@ -557,6 +558,10 @@ export function createMerchantProducts(options: {
             };
           }
           const products = await listBrandProducts(reads(tx), { brandReference: s.brand });
+          // Owner 2026-11-04: each dish says which menu section it is in; the list follows the menu.
+          const sections = await listBrandProductSections(reads(tx), { brandReference: s.brand });
+          const placed = (product: { readonly productReference: string }) =>
+            sections.get(product.productReference)?.[0]?.order ?? Number.MAX_SAFE_INTEGER;
           // WP-2423 item 8 ⑥: a new dish on the one-page menu chooses its choice groups too.
           const mayReadOptions = (await s.decision("catalog.option_set.read"))?.effect === "Allow";
           return {
@@ -568,10 +573,19 @@ export function createMerchantProducts(options: {
                   options.locale,
                 )
               : null,
-            products: products.map((product) => ({
-              ...product,
-              name: staffContentName(product.localizedNames, options.locale),
-            })),
+            products: [...products]
+              .sort(
+                (a, b) =>
+                  Number(a.lifecycle === "Archived") - Number(b.lifecycle === "Archived") ||
+                  placed(a) - placed(b),
+              )
+              .map((product) => ({
+                ...product,
+                name: staffContentName(product.localizedNames, options.locale),
+                sections: (sections.get(product.productReference) ?? []).map((section) =>
+                  staffContentName(section.names, options.locale),
+                ),
+              })),
           };
         }),
       ),

@@ -386,13 +386,15 @@ it("a menu served at two Stores is listed only when each Store has the dish's re
           references: { next: op },
         };
         const menus = createMerchantMenus({ ...common, currencyMetadata });
+        const products = createMerchantProducts(common);
         const optionSets = createMerchantOptionSets(common);
         const availability = createMerchantAvailability(common);
         grants.as(owner);
         return {
           optionSets,
+          products,
           dishes: createMerchantOneStoreDishes({
-            products: createMerchantProducts(common),
+            products,
             prices: createMerchantPrices({ ...common, currencyMetadata }),
             optionPrices: createMerchantOptionPrices({ ...common, currencyMetadata }),
             menus,
@@ -464,6 +466,14 @@ it("a menu served at two Stores is listed only when each Store has the dish's re
         },
       });
       const sku = dish.skuReference;
+      // Owner 2026-11-04: the product list says which menu section each dish is in, read here with
+      // the restricted role and a Store selected, as a live request does.
+      const productList = await one.products.query({ ...session, productReference: null });
+      const listedDish = productList.products.find(
+        (product) => product.productReference === dish.productReference,
+      );
+      assert.equal(listedDish.sections.length, 1);
+      assert.match(listedDish.sections[0], /\S/u);
       const bindings = () =>
         admin.query(
           "SELECT recipe_scope_binding_id::text id,recipe_id::text recipe,recipe_version_id::text version,store_id::text store FROM rms_recipe.recipe_scope_binding b WHERE sku_id=$1 AND option_binding_id IS NULL AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding_end e WHERE e.recipe_scope_binding_id=b.recipe_scope_binding_id)",

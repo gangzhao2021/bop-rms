@@ -52,6 +52,8 @@ export interface ProductSummary {
   readonly sizes: number;
   readonly activeSizes: number;
   readonly updatedAt: string;
+  /** The menu sections it is in, in menu order (empty: on no menu). */
+  readonly sections?: readonly string[];
 }
 export interface ProductDetail {
   readonly productReference: string;

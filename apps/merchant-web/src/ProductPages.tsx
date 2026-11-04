@@ -1,5 +1,5 @@
 import { PageIntro } from "./PageIntro.js";
-import { currentLanguage, t } from "./i18n/i18n.js";
+import { currentLanguage, listSeparator, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -154,6 +154,7 @@ export function ProductListPage({
           <thead>
             <tr>
               <th>{t("Product")}</th>
+              <th>{t("Section")}</th>
               <th>{t("Code")}</th>
               <th>{t("Status")}</th>
               <th>{t("Sizes selling")}</th>
@@ -167,6 +168,11 @@ export function ProductListPage({
                   <Link to={`/app/commerce/products/${product.productReference}/edit`}>
                     {product.name}
                   </Link>
+                </td>
+                <td>
+                  {(product.sections ?? []).length === 0
+                    ? t("Not on a menu")
+                    : (product.sections ?? []).join(listSeparator())}
                 </td>
                 <td className="product-code">{product.internalCode}</td>
                 <td>{lifecycleText[product.lifecycle] ?? product.lifecycle}</td>
@@ -645,6 +651,9 @@ function ProductEditor({
             >
               {t("Add size")}
             </button>
+          ) : null}
+          {product !== null ? (
+            <p>{t("A size's code can't be changed once it is saved. Its name can.")}</p>
           ) : null}
         </fieldset>
         {product !== null && optionChoices !== null ? (
