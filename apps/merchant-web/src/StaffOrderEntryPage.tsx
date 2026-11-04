@@ -11,6 +11,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
+import { loadOftenOrdered, recordOrdered } from "./counter-often-ordered.js";
 import {
   paidAtInstant,
   payErrorText,
@@ -21,6 +22,7 @@ import {
 import {
   CounterOrderClientError,
   counterMenuFamilies,
+  counterMenuSearch,
   createCounterOrderClient,
   type CounterMenu,
   type CounterMenuItem,
@@ -254,12 +256,15 @@ export const MENU_REFRESH_MS = 30_000;
  */
 export function StaffOrderEntryPage({
   storeLabel,
+  storeReference = storeLabel,
   csrf,
   timeZone,
   tableQrHref,
   fetcher,
 }: {
   readonly storeLabel: string;
+  /** Which Store this tablet's often-ordered dishes belong to. */
+  readonly storeReference?: string;
   readonly csrf: string;
   readonly timeZone?: string | undefined;
   /** Where staff who can create table QR codes do so (same rule as the Tables page), if allowed. */
@@ -289,7 +294,13 @@ export function StaffOrderEntryPage({
     choices: Record<string, string[]>;
     quantity: number;
     note: string;
+    /** The order line being changed; null for a new line. */
+    editing: string | null;
   } | null>(null);
+  const [search, setSearch] = useState("");
+  // Read once per visit, so the dishes staff reach for stay where they are while they work.
+  const [oftenOrdered] = useState(() => loadOftenOrdered(storeReference));
+  const [activeSection, setActiveSection] = useState<string | null>(null);
   // "0": no tip; a percentage the Store offers, as text; or an amount typed in.
   const [tip, setTip] = useState<string>("0");
   const [customTip, setCustomTip] = useState("");
@@ -312,6 +323,7 @@ export function StaffOrderEntryPage({
   const chargeHeading = useRef<HTMLHeadingElement>(null);
   const ticketHeading = useRef<HTMLHeadingElement>(null);
   const chooseHeading = useRef<HTMLHeadingElement>(null);
+  const chooseDialog = useRef<HTMLDialogElement>(null);
   // WP-2423 item 5: the clock behind the payment-time warning, ticking while payment is due.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -371,11 +383,34 @@ export function StaffOrderEntryPage({
   useEffect(() => {
     if (phase === "Charge" || phase === "Sent") chargeHeading.current?.focus();
   }, [phase]);
-  // The item's options open beside the menu (a sheet on a phone); move focus there.
+  // The item's options open over the menu (a sheet on a phone), so the order stays where it is.
   const choosingItem = choosing?.item.sellableReference ?? null;
   useEffect(() => {
-    if (choosingItem !== null) chooseHeading.current?.focus();
+    if (choosingItem === null) return;
+    const dialog = chooseDialog.current;
+    if (dialog !== null && !dialog.open) dialog.showModal();
+    chooseHeading.current?.focus();
   }, [choosingItem]);
+  // The category bar follows the menu as it scrolls.
+  const sectionKeys =
+    menu.kind === "Ready"
+      ? menu.menu.sections.map((section) => section.sectionReference).join()
+      : "";
+  useEffect(() => {
+    if (sectionKeys === "" || search !== "" || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const seen = entries.find((entry) => entry.isIntersecting);
+        if (seen) setActiveSection(seen.target.id);
+      },
+      { rootMargin: "-20% 0px -70% 0px" },
+    );
+    for (const key of sectionKeys.split(",")) {
+      const section = document.getElementById("counter-section-" + key);
+      if (section !== null) observer.observe(section);
+    }
+    return () => observer.disconnect();
+  }, [sectionKeys, search]);
 
   // v15 run: what the store can sell changes with every order (stock used, items sold out), so
   // the menu is re-read quietly after each send or payment, every 30 s while staff build an
@@ -429,12 +464,12 @@ export function StaffOrderEntryPage({
         : cad(item.priceMinor)
       : t("Sold out");
   const canAdd = (item: CounterMenuItem) => item.available && ordering && item.priceMinor !== null;
-  // At the counter an item with nothing to choose goes straight onto the order (one more of the
-  // same line); one with options, or any item for a table (its line can carry a note for the
-  // kitchen), opens its choices first, as before.
+  // An item with nothing to choose goes straight onto the order (one more of the same line); one
+  // with options opens its choices first, the usual ones already picked. For a table, a kitchen
+  // note is added with Change on the order line.
   const add = (item: CounterMenuItem) => {
-    if (item.rules.length > 0 || tableMode) {
-      setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "" });
+    if (item.rules.length > 0) {
+      setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "", editing: null });
       return;
     }
     const same = lines.find(
@@ -518,6 +553,10 @@ export function StaffOrderEntryPage({
               recordedAfterOutage: paper,
             });
       setPlaced(order);
+      recordOrdered(
+        storeReference,
+        lines.map((line) => [line.item.sellableReference, line.quantity]),
+      );
       payOperation.current = null;
       setPhase(order.payLater ? "Sent" : "Charge");
       setAwaitingKey((value) => value + 1);
@@ -661,6 +700,62 @@ export function StaffOrderEntryPage({
   }
 
   const ordering = phase === "Building" || phase === "Sending";
+  const found = counterMenuSearch(menu.menu.sections, search);
+  const often = oftenOrdered.flatMap((reference) =>
+    menu.menu.sections
+      .flatMap((section) => section.items)
+      .filter((item) => item.sellableReference === reference)
+      .slice(0, 1),
+  );
+  const inOrder = (item: CounterMenuItem) =>
+    lines
+      .filter((line) => line.item.sellableReference === item.sellableReference)
+      .reduce((sum, line) => sum + line.quantity, 0);
+  const jumpTo = (id: string) => {
+    setActiveSection(id);
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  };
+  const itemRow = (item: CounterMenuItem) => (
+    <li key={item.sellableReference} data-available={item.available}>
+      <button
+        type="button"
+        className="counter-order__item"
+        disabled={!canAdd(item)}
+        aria-label={t("Add {name}", { name: item.name })}
+        onClick={() => add(item)}
+      >
+        <span className="counter-order__item-name">
+          {inOrder(item) > 0 ? (
+            <span className="counter-order__in-order">{inOrder(item)} × </span>
+          ) : null}
+          {item.name}
+        </span>
+        <span className="counter-order__item-price">{itemPrice(item)}</span>
+      </button>
+    </li>
+  );
+  const choosingLine: Line | null =
+    choosing === null
+      ? null
+      : {
+          key: choosing.editing ?? serviceOperationReference(),
+          item: choosing.item,
+          quantity: choosing.quantity,
+          options: choosing.item.rules.flatMap((rule) =>
+            (choosing.choices[rule.bindingReference] ?? []).map((reference) => {
+              const option = rule.options.find(
+                (candidate) => candidate.optionReference === reference,
+              );
+              return {
+                optionReference: reference,
+                name: option?.name ?? "",
+                quantity: option?.defaultQuantity ?? 1,
+              };
+            }),
+          ),
+          note: tableMode && choosing.note.trim() !== "" ? choosing.note.trim() : null,
+        };
+  const choosingMinor = choosingLine === null ? null : estimatedLineMinor(choosingLine);
   return (
     <WorkspacePage
       title={pageTitle}
@@ -696,29 +791,59 @@ export function StaffOrderEntryPage({
       )}
       <div className="counter-order__layout">
         <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
-          <h2 id="counter-menu-heading">{t("Menu")}</h2>
-          {menu.menu.sections.length > 1 ? (
-            // Square/Toast-style category jump bar: stays at the top while the menu scrolls.
-            <nav className="counter-order__categories" aria-label={t("Menu categories")}>
-              {menu.menu.sections.map((section) => (
-                <button
-                  key={section.sectionReference}
-                  type="button"
-                  onClick={() =>
-                    document
-                      .getElementById(
-                        t("counter-section-{sectionReference}", {
-                          sectionReference: section.sectionReference,
-                        }),
-                      )
-                      ?.scrollIntoView({ block: "start" })
+          <h2 id="counter-menu-heading" className="counter-order__hidden-heading">
+            {t("Menu")}
+          </h2>
+          <div className="counter-order__menu-bar">
+            <label className="counter-order__search">
+              <span className="counter-order__hidden-heading">
+                {t("Search dishes (Chinese or English)")}
+              </span>
+              <input
+                type="search"
+                value={search}
+                placeholder={t("Search dishes (Chinese or English)")}
+                autoComplete="off"
+                onChange={(event) => setSearch(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  // A keyboard at the counter: Enter adds the one dish left on the list.
+                  if (event.key !== "Enter") return;
+                  const only = found.flatMap((section) => section.items);
+                  if (only.length === 1 && only[0] && canAdd(only[0])) {
+                    add(only[0]);
+                    setSearch("");
                   }
-                >
-                  {section.name}
-                </button>
-              ))}
-            </nav>
-          ) : null}
+                }}
+              />
+            </label>
+            {search === "" && menu.menu.sections.length + (often.length > 0 ? 1 : 0) > 1 ? (
+              <nav className="counter-order__categories" aria-label={t("Menu categories")}>
+                {often.length > 0 ? (
+                  <button
+                    type="button"
+                    aria-current={activeSection === "counter-section-often" ? "true" : undefined}
+                    onClick={() => jumpTo("counter-section-often")}
+                  >
+                    {t("Often ordered")}
+                  </button>
+                ) : null}
+                {menu.menu.sections.map((section) => (
+                  <button
+                    key={section.sectionReference}
+                    type="button"
+                    aria-current={
+                      activeSection === "counter-section-" + section.sectionReference
+                        ? "true"
+                        : undefined
+                    }
+                    onClick={() => jumpTo("counter-section-" + section.sectionReference)}
+                  >
+                    {section.name}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+          </div>
           {menu.menu.sections.length === 0 ? (
             <p className="counter-order__menu-empty">
               {t(
@@ -726,7 +851,22 @@ export function StaffOrderEntryPage({
               )}
             </p>
           ) : null}
-          {menu.menu.sections.map((section) => (
+          {search !== "" && found.length === 0 ? (
+            <p className="counter-order__menu-empty" role="status">
+              {t("No dish matches “{query}”.", { query: search.trim() })}
+            </p>
+          ) : null}
+          {search === "" && often.length > 0 ? (
+            <section
+              id="counter-section-often"
+              className="counter-order__section"
+              aria-label={t("Often ordered")}
+            >
+              <h3>{t("Often ordered")}</h3>
+              <ul className="counter-order__items">{often.map((item) => itemRow(item))}</ul>
+            </section>
+          ) : null}
+          {found.map((section) => (
             <section
               key={section.sectionReference}
               id={`counter-section-${section.sectionReference}`}
@@ -737,23 +877,8 @@ export function StaffOrderEntryPage({
               <ul className="counter-order__items">
                 {counterMenuFamilies(section.items).map((family) => {
                   const single = family.sizes.length === 1 ? family.sizes[0]?.item : undefined;
-                  if (single !== undefined)
-                    return (
-                      <li key={family.key} data-available={single.available}>
-                        <span className="counter-order__item-name">{single.name}</span>
-                        <span className="counter-order__item-price">{itemPrice(single)}</span>
-                        {/* The Add button covers the whole tile (CSS), so the tile is the tap target. */}
-                        <button
-                          type="button"
-                          disabled={!canAdd(single)}
-                          aria-label={t("Add {name}", { name: single.name })}
-                          onClick={() => add(single)}
-                        >
-                          {t("Add")}
-                        </button>
-                      </li>
-                    );
-                  // Owner 2026-10-26: one tile per drink; a tap on a size adds that size.
+                  if (single !== undefined) return itemRow(single);
+                  // Owner 2026-10-26: one row per drink; a tap on a size adds that size.
                   return (
                     <li
                       key={family.key}
@@ -771,7 +896,14 @@ export function StaffOrderEntryPage({
                             data-available={size.item.available}
                             onClick={() => add(size.item)}
                           >
-                            <span>{size.label}</span>
+                            <span>
+                              {inOrder(size.item) > 0 ? (
+                                <span className="counter-order__in-order">
+                                  {inOrder(size.item)} ×{" "}
+                                </span>
+                              ) : null}
+                              {size.label}
+                            </span>
                             <span className="counter-order__item-price">
                               {itemPrice(size.item)}
                             </span>
@@ -801,124 +933,6 @@ export function StaffOrderEntryPage({
               </span>
             ) : null}
           </header>
-          {choosing !== null ? (
-            <form
-              className="counter-order__choose"
-              aria-label={t("Choose {name}", { name: choosing.item.name })}
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!choicesComplete(choosing.item, choosing.choices)) return;
-                const options = choosing.item.rules.flatMap((rule) =>
-                  (choosing.choices[rule.bindingReference] ?? []).map((reference) => {
-                    const option = rule.options.find(
-                      (candidate) => candidate.optionReference === reference,
-                    );
-                    return {
-                      optionReference: reference,
-                      name: option?.name ?? "",
-                      quantity: option?.defaultQuantity ?? 1,
-                    };
-                  }),
-                );
-                changeLines([
-                  ...lines,
-                  {
-                    key: serviceOperationReference(),
-                    item: choosing.item,
-                    quantity: choosing.quantity,
-                    options,
-                    note: tableMode && choosing.note.trim() !== "" ? choosing.note.trim() : null,
-                  },
-                ]);
-                setChoosing(null);
-              }}
-            >
-              <h3 ref={chooseHeading} tabIndex={-1}>
-                {choosing.item.name}
-              </h3>
-              {choosing.item.rules.map((rule) => {
-                const single = rule.maximumSelections === 1;
-                const picked = choosing.choices[rule.bindingReference] ?? [];
-                return (
-                  <fieldset key={rule.bindingReference}>
-                    <legend>
-                      {rule.name}
-                      {rule.minimumSelections > 0 ? t(" (required)") : ""}
-                    </legend>
-                    {rule.options.map((option) => (
-                      <label key={option.optionReference}>
-                        <input
-                          type={single ? "radio" : "checkbox"}
-                          name={rule.bindingReference}
-                          checked={picked.includes(option.optionReference)}
-                          disabled={
-                            !single &&
-                            !picked.includes(option.optionReference) &&
-                            picked.length >= rule.maximumSelections
-                          }
-                          onChange={(event) => {
-                            const checked = event.currentTarget.checked;
-                            setChoosing({
-                              ...choosing,
-                              choices: {
-                                ...choosing.choices,
-                                [rule.bindingReference]: single
-                                  ? [option.optionReference]
-                                  : checked
-                                    ? [...picked, option.optionReference]
-                                    : picked.filter((value) => value !== option.optionReference),
-                              },
-                            });
-                          }}
-                        />
-                        {option.name}
-                        {option.priceMinor !== null && option.priceMinor !== "0"
-                          ? ` +${cad(option.priceMinor)}`
-                          : ""}
-                      </label>
-                    ))}
-                  </fieldset>
-                );
-              })}
-              <label className="counter-order__quantity">
-                {t("Quantity")}
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={99}
-                  value={choosing.quantity}
-                  onChange={(event) =>
-                    setChoosing({
-                      ...choosing,
-                      quantity: Math.min(99, Math.max(1, Number(event.currentTarget.value) || 1)),
-                    })
-                  }
-                />
-              </label>
-              {tableMode ? (
-                <label className="counter-order__note">
-                  {t("Note for the kitchen (optional)")}
-                  <input
-                    value={choosing.note}
-                    maxLength={140}
-                    autoComplete="off"
-                    onChange={(event) =>
-                      setChoosing({ ...choosing, note: event.currentTarget.value })
-                    }
-                  />
-                </label>
-              ) : null}
-              <div className="card-actions">
-                <button type="submit" disabled={!choicesComplete(choosing.item, choosing.choices)}>
-                  {t("Add to order")}
-                </button>
-                <button type="button" onClick={() => setChoosing(null)}>
-                  {t("Cancel")}
-                </button>
-              </div>
-            </form>
-          ) : null}
           {lines.length === 0 ? (
             <div className="counter-order__empty">
               <p className="counter-order__empty-title">{t("No items yet")}</p>
@@ -973,6 +987,36 @@ export function StaffOrderEntryPage({
                         >
                           +
                         </button>
+                        {line.item.rules.length > 0 || tableMode ? (
+                          <button
+                            type="button"
+                            className="counter-order__change"
+                            disabled={phase !== "Building"}
+                            aria-label={t("Change {name}", { name: line.item.name })}
+                            onClick={() =>
+                              setChoosing({
+                                item: line.item,
+                                choices: Object.fromEntries(
+                                  line.item.rules.map((rule) => [
+                                    rule.bindingReference,
+                                    line.options
+                                      .map((option) => option.optionReference)
+                                      .filter((reference) =>
+                                        rule.options.some(
+                                          (option) => option.optionReference === reference,
+                                        ),
+                                      ),
+                                  ]),
+                                ),
+                                quantity: line.quantity,
+                                note: line.note ?? "",
+                                editing: line.key,
+                              })
+                            }
+                          >
+                            {t("Change")}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="counter-order__remove"
@@ -991,155 +1035,157 @@ export function StaffOrderEntryPage({
               })}
             </ul>
           )}
-          {estimate !== null && lines.length > 0 ? (
-            <div className="counter-order__totals">
-              <p className="counter-order__subtotal">
-                <span>{t("Subtotal")}</span>
-                <span>{cad(estimate.toString())}</span>
-              </p>
-              <p className="counter-order__estimate">
-                {placed !== null && !ordering
-                  ? placed.payLater
-                    ? t("Sent to the kitchen. {totalMinor} with tax goes on the table's bill.", {
-                        totalMinor: cad(placed.totalMinor),
-                      })
-                    : phase === "Paid" || phase === "Accepted"
-                      ? t("Sent and paid: {totalMinor} with tax and tip.", {
+          <div className="counter-order__ticket-foot">
+            {estimate !== null && lines.length > 0 ? (
+              <div className="counter-order__totals">
+                <p className="counter-order__subtotal">
+                  <span>{t("Subtotal")}</span>
+                  <span>{cad(estimate.toString())}</span>
+                </p>
+                <p className="counter-order__estimate">
+                  {placed !== null && !ordering
+                    ? placed.payLater
+                      ? t("Sent to the kitchen. {totalMinor} with tax goes on the table's bill.", {
                           totalMinor: cad(placed.totalMinor),
                         })
-                      : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
-                          totalMinor: cad(placed.totalMinor),
-                        })
-                  : tablePaysLater
-                    ? t(
-                        "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
-                        { value: cad(estimate.toString()) },
-                      )
-                    : t(
-                        "About {value} before tax and tip. The final total comes when you send the order.",
-                        { value: cad(estimate.toString()) },
-                      )}
-              </p>
-            </div>
-          ) : null}
-          {tablePaysLater || tipOptions.length === 0 ? null : (
-            <fieldset className="counter-order__tip" disabled={!ordering}>
-              <legend>{t("Tip")}</legend>
-              {tipOptions.map((value) => (
-                <label key={value}>
+                      : phase === "Paid" || phase === "Accepted"
+                        ? t("Sent and paid: {totalMinor} with tax and tip.", {
+                            totalMinor: cad(placed.totalMinor),
+                          })
+                        : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
+                            totalMinor: cad(placed.totalMinor),
+                          })
+                    : tablePaysLater
+                      ? t(
+                          "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                          { value: cad(estimate.toString()) },
+                        )
+                      : t(
+                          "About {value} before tax and tip. The final total comes when you send the order.",
+                          { value: cad(estimate.toString()) },
+                        )}
+                </p>
+              </div>
+            ) : null}
+            {tablePaysLater || tipOptions.length === 0 ? null : (
+              <fieldset className="counter-order__tip" disabled={!ordering}>
+                <legend>{t("Tip")}</legend>
+                {tipOptions.map((value) => (
+                  <label key={value}>
+                    <input
+                      type="radio"
+                      name="counter-tip"
+                      checked={tip === value}
+                      onChange={() => {
+                        placeOperation.current = null;
+                        setTip(value);
+                      }}
+                    />
+                    {value === "0" ? t("No tip") : `${value}%`}
+                  </label>
+                ))}
+                <label>
                   <input
                     type="radio"
                     name="counter-tip"
-                    checked={tip === value}
+                    checked={tip === "Custom"}
                     onChange={() => {
                       placeOperation.current = null;
-                      setTip(value);
+                      setTip("Custom");
                     }}
                   />
-                  {value === "0" ? t("No tip") : `${value}%`}
+                  {t("Other amount")}
                 </label>
-              ))}
+                {tip === "Custom" ? (
+                  <label className="counter-order__custom-tip">
+                    {t("Tip amount ($)")}
+                    <input
+                      inputMode="decimal"
+                      value={customTip}
+                      aria-invalid={tipChoice() === null}
+                      onChange={(event) => {
+                        placeOperation.current = null;
+                        setCustomTip(event.currentTarget.value);
+                      }}
+                    />
+                  </label>
+                ) : null}
+              </fieldset>
+            )}
+            <fieldset className="counter-order__paper" disabled={!ordering}>
+              <legend className="counter-order__hidden-heading">{t("Paper order")}</legend>
               <label>
                 <input
-                  type="radio"
-                  name="counter-tip"
-                  checked={tip === "Custom"}
-                  onChange={() => {
+                  type="checkbox"
+                  checked={paper}
+                  onChange={(event) => {
                     placeOperation.current = null;
-                    setTip("Custom");
+                    setPaper(event.currentTarget.checked);
                   }}
                 />
-                {t("Other amount")}
+                {t("Recorded after an outage (taken on paper)")}
               </label>
-              {tip === "Custom" ? (
-                <label className="counter-order__custom-tip">
-                  {t("Tip amount ($)")}
+              {paper && !tablePaysLater ? (
+                <label>
+                  {t("Paid at (store time, from the paper order)")}
                   <input
-                    inputMode="decimal"
-                    value={customTip}
-                    aria-invalid={tipChoice() === null}
+                    type="datetime-local"
+                    value={paidAt}
+                    aria-invalid={paperInstant === null}
+                    aria-describedby="counter-paper-hint"
                     onChange={(event) => {
                       placeOperation.current = null;
-                      setCustomTip(event.currentTarget.value);
+                      setPaidAt(event.currentTarget.value);
                     }}
                   />
                 </label>
               ) : null}
+              {paper && !tablePaysLater ? (
+                <p id="counter-paper-hint" className="field-hint">
+                  {t(
+                    "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.",
+                  )}
+                </p>
+              ) : null}
             </fieldset>
-          )}
-          <fieldset className="counter-order__paper" disabled={!ordering}>
-            <legend>{t("Paper order")}</legend>
-            <label>
-              <input
-                type="checkbox"
-                checked={paper}
-                onChange={(event) => {
-                  placeOperation.current = null;
-                  setPaper(event.currentTarget.checked);
-                }}
-              />
-              {t("Recorded after an outage (taken on paper)")}
-            </label>
-            {paper && !tablePaysLater ? (
-              <label>
-                {t("Paid at (store time, from the paper order)")}
-                <input
-                  type="datetime-local"
-                  value={paidAt}
-                  aria-invalid={paperInstant === null}
-                  aria-describedby="counter-paper-hint"
-                  onChange={(event) => {
-                    placeOperation.current = null;
-                    setPaidAt(event.currentTarget.value);
-                  }}
-                />
-              </label>
-            ) : null}
-            {paper && !tablePaysLater ? (
-              <p id="counter-paper-hint" className="field-hint">
+            {tableMode && ordering ? (
+              <p className="field-hint">
                 {t(
-                  "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.",
+                  "Sending gives this order its own join code, so a join code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.",
                 )}
               </p>
             ) : null}
-          </fieldset>
-          {tableMode && ordering ? (
-            <p className="field-hint">
-              {t(
-                "Sending gives this order its own join code, so a join code you handed out that hasn't been used yet stops working. Guests already at the table stay joined.",
-              )}
-            </p>
-          ) : null}
-          {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
-          {problem !== null && ordering && tableCartOffer !== null ? (
-            <p>
-              <button
-                type="button"
-                className="counter-order__primary"
-                disabled={!canSend}
-                onClick={() => void send(tableCartOffer)}
-              >
-                {t("Add them to this round")}
-              </button>
-            </p>
-          ) : null}
-          {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
-            <p>
-              <Link to={tableQrHref}>{t("Table QR codes")}</Link>
-            </p>
-          ) : null}
-          {ordering ? (
-            <div className="card-actions counter-order__send">
-              <button
-                type="button"
-                className="counter-order__primary"
-                disabled={!canSend}
-                onClick={() => void send()}
-              >
-                {phase === "Sending" ? t("Sending…") : t("Send order")}
-              </button>
-            </div>
-          ) : null}
+            {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
+            {problem !== null && ordering && tableCartOffer !== null ? (
+              <p>
+                <button
+                  type="button"
+                  className="counter-order__primary"
+                  disabled={!canSend}
+                  onClick={() => void send(tableCartOffer)}
+                >
+                  {t("Add them to this round")}
+                </button>
+              </p>
+            ) : null}
+            {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
+              <p>
+                <Link to={tableQrHref}>{t("Table QR codes")}</Link>
+              </p>
+            ) : null}
+            {ordering ? (
+              <div className="card-actions counter-order__send">
+                <button
+                  type="button"
+                  className="counter-order__primary"
+                  disabled={!canSend}
+                  onClick={() => void send()}
+                >
+                  {phase === "Sending" ? t("Sending…") : t("Send order")}
+                </button>
+              </div>
+            ) : null}
+          </div>
         </section>
 
         {ordering && lines.length > 0 ? (
@@ -1344,6 +1390,122 @@ export function StaffOrderEntryPage({
           </section>
         ) : null}
       </div>
+      {choosing !== null && choosingLine !== null ? (
+        <dialog
+          ref={chooseDialog}
+          className="counter-order__choose"
+          onCancel={() => setChoosing(null)}
+          onClick={(event) => {
+            if (event.target === chooseDialog.current) setChoosing(null);
+          }}
+        >
+          <form
+            aria-label={t("Choose {name}", { name: choosing.item.name })}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!choicesComplete(choosing.item, choosing.choices)) return;
+              changeLines(
+                choosing.editing === null
+                  ? [...lines, choosingLine]
+                  : lines.map((line) => (line.key === choosing.editing ? choosingLine : line)),
+              );
+              setChoosing(null);
+            }}
+          >
+            <h3 ref={chooseHeading} tabIndex={-1}>
+              {choosing.item.name}
+            </h3>
+            {choosing.item.rules.map((rule) => {
+              const single = rule.maximumSelections === 1;
+              const picked = choosing.choices[rule.bindingReference] ?? [];
+              return (
+                <fieldset key={rule.bindingReference}>
+                  <legend>
+                    {rule.name}
+                    {rule.minimumSelections > 0 ? t(" (required)") : ""}
+                  </legend>
+                  {rule.options.map((option) => (
+                    <label key={option.optionReference}>
+                      <input
+                        type={single ? "radio" : "checkbox"}
+                        name={rule.bindingReference}
+                        checked={picked.includes(option.optionReference)}
+                        disabled={
+                          !single &&
+                          !picked.includes(option.optionReference) &&
+                          picked.length >= rule.maximumSelections
+                        }
+                        onChange={(event) => {
+                          const checked = event.currentTarget.checked;
+                          setChoosing({
+                            ...choosing,
+                            choices: {
+                              ...choosing.choices,
+                              [rule.bindingReference]: single
+                                ? [option.optionReference]
+                                : checked
+                                  ? [...picked, option.optionReference]
+                                  : picked.filter((value) => value !== option.optionReference),
+                            },
+                          });
+                        }}
+                      />
+                      <span>{option.name}</span>
+                      {option.priceMinor !== null && option.priceMinor !== "0" ? (
+                        <span className="counter-order__option-price">
+                          +{cad(option.priceMinor)}
+                        </span>
+                      ) : null}
+                    </label>
+                  ))}
+                </fieldset>
+              );
+            })}
+            <label className="counter-order__quantity">
+              {t("Quantity")}
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={99}
+                value={choosing.quantity}
+                onChange={(event) =>
+                  setChoosing({
+                    ...choosing,
+                    quantity: Math.min(99, Math.max(1, Number(event.currentTarget.value) || 1)),
+                  })
+                }
+              />
+            </label>
+            {tableMode ? (
+              <label className="counter-order__note">
+                {t("Note for the kitchen (optional)")}
+                <input
+                  value={choosing.note}
+                  maxLength={140}
+                  autoComplete="off"
+                  onChange={(event) =>
+                    setChoosing({ ...choosing, note: event.currentTarget.value })
+                  }
+                />
+              </label>
+            ) : null}
+            <div className="counter-order__choose-actions">
+              <button
+                type="submit"
+                className="counter-order__primary"
+                disabled={!choicesComplete(choosing.item, choosing.choices)}
+              >
+                {choosing.editing === null ? t("Add to order") : t("Save change")}
+                {choosingMinor === null ? "" : ` · ${cad(choosingMinor.toString())}`}
+              </button>
+              <button type="button" onClick={() => setChoosing(null)}>
+                {t("Cancel")}
+              </button>
+            </div>
+          </form>
+        </dialog>
+      ) : null}
     </WorkspacePage>
   );
 }

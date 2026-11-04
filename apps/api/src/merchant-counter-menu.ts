@@ -15,6 +15,15 @@ export class CounterMenuError extends Error {
   }
 }
 
+/** Each sellable's name, keyed by reference, from a read of the menu in another language. */
+export function menuNames(found: CustomerMenuFound): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    found.menu.sections.flatMap((section) =>
+      section.sellables.map((item) => [String(item.sellableReference), String(item.name)]),
+    ),
+  );
+}
+
 /**
  * WP-2423 Q7: the counter item picker shows exactly the menu a customer sees right now (pickup at
  * the counter; dine-in for a staff-entered table round): items, options, prices and sold-out state
@@ -37,6 +46,8 @@ export function createMerchantCounterMenu(options: {
     readonly menu: CustomerMenuFound;
     /** WP-2423 item 8 ⑦: the tips the Store offers now (its percentages, or tips off). */
     readonly tips: StoreTipChoices;
+    /** The dishes' names in the staff's other language, so a search finds either. */
+    readonly otherNames?: Readonly<Record<string, string>>;
   }> => {
     const scope = await options.persistence.transactions
       .run(async (transaction) => {
@@ -60,23 +71,32 @@ export function createMerchantCounterMenu(options: {
         if (error instanceof CounterMenuError) throw error;
         throw new CounterMenuError("COUNTER_MENU_PERMISSION_DENIED");
       });
-    let result;
-    try {
-      result = await options.menu.getPublishedMenu({
+    const read = (locale: string) =>
+      options.menu.getPublishedMenu({
         publicStoreReference: options.publicStoreReference(scope),
         channelCode: "CUSTOMER_PWA",
         orderTypeCode: input.orderType === "DineIn" ? "DINE_IN" : "PICKUP",
-        // Owner 2026-10-24: the menu in the staff member's chosen language (missing names fall
-        // back to the menu language); what is ordered is the same either way.
-        locale: staffContentLocale() ?? options.locale,
+        locale,
         requestedAt: options.persistence.now(),
         searchTerm: null,
         sectionReference: null,
       } as unknown as CustomerMenuQueryInput);
+    // Owner 2026-10-24: the menu in the staff member's chosen language (missing names fall
+    // back to the menu language); what is ordered is the same either way.
+    const locale = staffContentLocale() ?? options.locale;
+    let result;
+    try {
+      result = await read(locale);
     } catch {
       throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
     }
     if (result.status !== "Found") throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
-    return Object.freeze({ menu: publicFound(result), tips: scope.tips });
+    // Only helps search: without it staff still find a dish by the name they see.
+    const other = await read(locale.startsWith("zh") ? "en" : "zh-Hans").catch(() => null);
+    return Object.freeze({
+      menu: publicFound(result),
+      tips: scope.tips,
+      ...(other?.status === "Found" ? { otherNames: menuNames(other) } : {}),
+    });
   };
 }

@@ -339,7 +339,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A size's recipe does not use the ingredient to replace or remove.":
     "某个规格的配方没有使用要替换或移除的配料。",
   "About {value} before tax and tip. The final total comes when you send the order.":
-    "税前、不含小费约 {value}。发送订单时才会得到最终合计。",
+    "约 {value}，未含税和小费。发送后显示最终合计。",
   "Accept order": "接单",
   "Accept all": "全部接单",
   "Start cooking": "开始做",
@@ -2360,6 +2360,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "在共享平板上，员工用自己的 6 位 PIN 换成自己，不必每次都登录。退款、价格和员工更改仍需要完整登录或验证器验证码。",
   "On and in effect: you are the only person who can approve refunds at this store, so you may approve your own after confirming it is you.":
     "已开启并生效：你是本店唯一可以批准退款的人，确认身份后可以批准自己的退款。",
+  "Search dishes (Chinese or English)": "搜索菜品（中文或英文）",
+  "Often ordered": "常点",
+  "No dish matches “{query}”.": "没有找到“{query}”。",
+  "Change {name}": "修改 {name}",
   "Only opens the kitchen, not orders, refunds or settings.": "只开后厨，不含订单、退款和设置。",
   "On this Store's menu": "在本店菜单上",
   "On {value}.": "用于{value}。",

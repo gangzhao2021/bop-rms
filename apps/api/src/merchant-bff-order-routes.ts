@@ -265,9 +265,14 @@ export function installMerchantOrderRoutes(
         sessionCookie,
         orderType: request.query.orderType === "DineIn" ? "DineIn" : "Pickup",
       })
-      .then(({ menu, tips }) => {
+      .then(({ menu, tips, otherNames }) => {
         response.set("Cache-Control", NO_STORE);
-        response.json({ screenId: "OPS-ORDER-ENTRY", menu, tips });
+        response.json({
+          screenId: "OPS-ORDER-ENTRY",
+          menu,
+          tips,
+          ...(otherNames ? { otherNames } : {}),
+        });
       })
       .catch((error: unknown) => {
         if (error instanceof CounterMenuError && error.code === "COUNTER_MENU_UNAVAILABLE") {

@@ -1,7 +1,7 @@
 body {
   margin: 0;
   background: #fff;
-  color: #1d1d1f;
+  color: #171717;
   font:
     16px/1.5 Inter,
     -apple-system,
@@ -29,21 +29,21 @@ li {
   font-size: 16px;
 }
 .quiet {
-  color: #6e6e73;
+  color: #666;
   font-size: 14px;
 }
 button {
   min-height: 44px;
   padding: 0 20px;
   border: 0;
-  border-radius: 8px;
-  background: #0066cc;
+  border-radius: 6px;
+  background: #1f63e0;
   color: #fff;
   font: inherit;
 }
 details {
   padding: 12px 0;
-  border-bottom: 1px solid #e5e5ea;
+  border-bottom: 1px solid #e5e5e5;
 }
 summary {
   display: flex;

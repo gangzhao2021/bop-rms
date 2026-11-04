@@ -1428,6 +1428,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 <StaffOrderEntryPage
                   key={state.workspace.selectedScope.storeReference + state.csrf}
                   storeLabel={state.workspace.selectedScope.storeLabel}
+                  storeReference={state.workspace.selectedScope.storeReference}
                   csrf={state.csrf}
                   timeZone={state.workspace.selectedScope.timeZone}
                   tableQrHref={

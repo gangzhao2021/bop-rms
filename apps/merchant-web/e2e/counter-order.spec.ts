@@ -940,3 +940,64 @@ test("@production a drink's sizes share one tile and a tap adds that size", asyn
   await expect(ticket).toContainText("2 × Latte — Small (8 oz)");
   await expect(ticket).toContainText("$9.00");
 });
+
+// Owner 2026-11-03: the page works like a counter POS. Search finds a dish in either language,
+// Enter adds the one left; choices open over the menu and the order keeps its place; what is sent
+// often comes to the top on this tablet's next visit, and an order line can be changed.
+test("@production staff search the menu, change a line and see what they order often", async ({
+  page,
+}) => {
+  await signIn(page);
+  const sellables = (
+    menu.menu.menu.sections as { sellables: { sellableReference: string; name: string }[] }[]
+  ).flatMap((section) => section.sellables);
+  const bread = sellables.find((item) => item.name === "Banana Bread");
+  const otherNames = { [String(bread?.sellableReference)]: "香蕉面包" };
+  await page.route("**/merchant/counter/menu", (route) =>
+    route.fulfill({ headers, json: { ...menu, otherNames } }),
+  );
+  await page.goto("/operations/order-entry");
+  const search = page.getByRole("searchbox", { name: "Search dishes (Chinese or English)" });
+  await search.fill("香蕉");
+  await expect(page.getByRole("button", { name: "Add Flat White" })).toHaveCount(0);
+  await search.press("Enter");
+  await expect(search).toHaveValue("");
+  const ticket = page.getByRole("list", { name: "Items in this order" });
+  await expect(ticket).toContainText("1 × Banana Bread");
+  await expect(page.getByRole("button", { name: "Add Banana Bread" })).toContainText("1 ×");
+  await search.fill("no such dish");
+  await expect(page.getByRole("status").filter({ hasText: "No dish matches" })).toBeVisible();
+  await search.clear();
+
+  // Choices open as a dialog; the order behind it does not move, and a line can be changed.
+  await page.getByRole("button", { name: "Add Flat White" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: /^Add to order/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(ticket.getByRole("listitem")).toHaveCount(1);
+  await page.getByRole("button", { name: "Add Flat White" }).click();
+  await dialog.getByRole("button", { name: /^Add to order/ }).click();
+  await page.getByRole("button", { name: "Change Flat White" }).click();
+  await dialog.getByRole("radio", { name: /Oat milk/ }).check();
+  await dialog.getByRole("button", { name: /^Save change/ }).click();
+  await expect(ticket.getByRole("listitem")).toHaveCount(2);
+  await expect(ticket).toContainText("Flat White · Oat milk");
+
+  // Often ordered: nothing yet; after enough sends it leads the menu on the next visit.
+  await expect(page.getByRole("region", { name: "Often ordered" })).toHaveCount(0);
+  await page.evaluate(
+    ([store, reference]) =>
+      localStorage.setItem(
+        "bop.counter.oftenOrdered.v1." + String(store),
+        JSON.stringify({ [String(reference)]: 3 }),
+      ),
+    [scope.storeReference, bread?.sellableReference],
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("region", { name: "Often ordered" }).getByRole("button", {
+      name: "Add Banana Bread",
+    }),
+  ).toBeVisible();
+});

@@ -273,7 +273,6 @@ test("@production staff take an order for a table from the Tables page, charge i
     .fill("No green onion");
   await page.getByRole("button", { name: "Add to order" }).click();
   await page.getByRole("button", { name: "Add Gyoza" }).click();
-  await page.getByRole("button", { name: "Add to order" }).click();
   const ticket = page.getByRole("list", { name: "Items in this order" });
   await expect(ticket).toContainText("1 × Shoyu Ramen · Extra noodles · Note: No green onion");
   await page.getByRole("radio", { name: "15%" }).check();
@@ -734,8 +733,7 @@ test("@production a table round short on stock names the item and how many are l
   await page.getByRole("button", { name: "Add Shoyu Ramen" }).click();
   await page.getByRole("button", { name: "Add to order" }).click();
   await page.getByRole("button", { name: "Add Gyoza" }).click();
-  await page.getByRole("spinbutton", { name: "Quantity" }).fill("2");
-  await page.getByRole("button", { name: "Add to order" }).click();
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
   await page.getByRole("button", { name: "Send order" }).click();
   const alert = page.getByRole("alert");
   await expect(alert).toHaveText(
@@ -763,7 +761,6 @@ test("@production a table round short on stock names the item and how many are l
   // Staff lower Gyoza to 1 and send again: the round goes through.
   await page.getByRole("button", { name: "Remove Gyoza" }).click();
   await page.getByRole("button", { name: "Add Gyoza" }).click();
-  await page.getByRole("button", { name: "Add to order" }).click();
   await page.getByRole("button", { name: "Send order" }).click();
   await expect(
     page.getByRole("heading", { name: "Charge $25.99 on the card machine" }),
@@ -873,7 +870,6 @@ test("@production DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the k
   // The table chooses its tip once, when it pays at the end.
   await expect(page.getByRole("group", { name: "Tip" })).toHaveCount(0);
   await page.getByRole("button", { name: "Add Gyoza" }).click();
-  await page.getByRole("button", { name: "Add to order" }).click();
   await expect(
     page.getByText(/goes on the table's bill; the table pays once at the end/u),
   ).toBeVisible();

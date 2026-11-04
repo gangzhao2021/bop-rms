@@ -131,6 +131,8 @@ export interface CounterMenuItem {
    */
   readonly productVersionReference: string | null;
   readonly name: string;
+  /** The dish's name in the staff's other language, so a search finds it in either. */
+  readonly otherName?: string;
   readonly available: boolean;
   readonly priceMinor: string | null;
   readonly rules: readonly CounterMenuRule[];
@@ -164,8 +166,15 @@ function counterTips(value: unknown): CounterMenu["tips"] {
 
 /** The pickup menu customers see now: items, options, prices and sold-out state. */
 export function parseCounterMenu(value: unknown): CounterMenu {
-  const raw = record(value, ["screenId", "menu"], ["tips"]);
+  const raw = record(value, ["screenId", "menu"], ["tips", "otherNames"]);
   if (raw.screenId !== "OPS-ORDER-ENTRY") return invalid();
+  const otherNames = new Map<string, string>(
+    raw.otherNames !== null && typeof raw.otherNames === "object"
+      ? Object.entries(raw.otherNames).flatMap(([reference, name]) =>
+          typeof name === "string" ? [[reference, name] as const] : [],
+        )
+      : [],
+  );
   const found = record(raw.menu, ["status", "schemaVersion", "projection", "scope", "menu"]);
   if (found.status !== "Found") return invalid();
   const menu = record(found.menu, [
@@ -192,7 +201,9 @@ export function parseCounterMenu(value: unknown): CounterMenu {
           items: Object.freeze(
             section.sellables.flatMap((value: unknown) => {
               try {
-                return [counterItem(value)];
+                const item = counterItem(value);
+                const otherName = otherNames.get(item.sellableReference);
+                return [otherName === undefined ? item : Object.freeze({ ...item, otherName })];
               } catch {
                 return [];
               }
@@ -653,6 +664,18 @@ function splitSizeName(name: string): readonly [string, string] | null {
   const product = name.slice(0, index).trim();
   const size = name.slice(index + sizeSeparator.length).trim();
   return product === "" || size === "" ? null : [product, size];
+}
+
+/** The menu's dishes matching what staff typed, in either language; the whole menu when empty. */
+export function counterMenuSearch(sections: CounterMenu["sections"], query: string) {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") return sections;
+  return sections.flatMap((section) => {
+    const items = section.items.filter((item) =>
+      [item.name, item.otherName ?? ""].some((name) => name.toLowerCase().includes(wanted)),
+    );
+    return items.length > 0 ? [{ ...section, items }] : [];
+  });
 }
 
 export function counterMenuFamilies(
