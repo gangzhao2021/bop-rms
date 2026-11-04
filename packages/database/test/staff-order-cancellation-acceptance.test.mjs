@@ -2632,6 +2632,36 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
       await scoped(async (tx) => {
         await assert.rejects(tx.query("DELETE FROM rms_kitchen.kitchen_work_cancellation", []));
       });
+
+      // WP-2423 item 12 (v15 2026-11-03): a staff cancellation and a disposition can name the same
+      // payment moments apart. One payment is one refund candidate, the first that named it; a
+      // second one was refused at every compensation cycle for not matching the first's case.
+      const lateDisposition = "ffffffff-0000-7000-8000-000000000001";
+      const paid = waitingPickup.batches[0];
+      await admin.query(
+        "INSERT INTO rms_ordering.order_payment_disposition_record (disposition_id,brand_id,store_id,order_id,order_batch_id,submission_id,payment_transaction_id,payment_intent_id,payment_attempt_id,payment_event_id,source_checkpoint,correlation_id,source_version,source_digest,evaluated_at,disposition,reason,kitchen_release_disposition) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1,$13,now()::timestamptz(3),'PaidWithoutFulfillableOrder','OrderNoLongerFulfillable','Blocked')",
+        [
+          lateDisposition,
+          brand,
+          store,
+          waitingPickup.order,
+          paid.batch,
+          paid.submission,
+          paid.transaction,
+          paid.intent,
+          paid.attempt,
+          paid.event,
+          paid.submission,
+          paid.correlation,
+          hash(["late-disposition"]),
+        ],
+      );
+      const named = (await discover(true)).candidates.filter(
+        (candidate) => candidate.paymentEventReference === paid.event,
+      );
+      assert.equal(named.length, 1);
+      assert.equal(named[0].reason, "CancelledByStaff");
+      assert.notEqual(named[0].dispositionReference, lateDisposition);
     } finally {
       for (const name of [role, other]) {
         await admin.query("DROP OWNED BY " + name);
