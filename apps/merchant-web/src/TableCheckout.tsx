@@ -843,7 +843,7 @@ export function TableCheckout({
                     <p>
                       {bill.split !== null && bill.split.paidParts > 0
                         ? t(
-                            "Record that the guests at table {table} left without paying the {count} parts still unpaid ({amount})? The parts already paid stay paid. A manager decides this. It stays in the reports as written off.",
+                            "Record that the guests at table {table} left without paying the {count} parts still unpaid ({amount})? The parts already paid stay paid. It is recorded under your name and stays in the reports as written off.",
                             {
                               table: saidTable(table.stableLabel),
                               count: String(bill.split.parts.length - bill.split.paidParts),
