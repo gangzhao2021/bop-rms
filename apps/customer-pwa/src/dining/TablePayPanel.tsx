@@ -102,6 +102,19 @@ export function TablePayPanel({
   const [view, setView] = useState<TablePaymentView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Owner 2026-11-03: the page says payment is paused while offline, so the button agrees.
+  const [online, setOnline] = useState(
+    () => typeof navigator === "undefined" || navigator.onLine !== false,
+  );
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine !== false);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
   // AGENTS.md (customer respect): no tip is chosen for the guest; every option, "No tip"
   // included, is offered alike and the guest chooses before paying.
   const [tip, setTip] = useState<TipChoice | null>(null);
@@ -503,6 +516,7 @@ export function TablePayPanel({
             className="dining-session__pay-button"
             disabled={
               busy ||
+              !online ||
               chosenTipMinor === null ||
               !view.consistent ||
               view.owed.totalMinor === "0" ||

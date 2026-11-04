@@ -660,6 +660,12 @@ export function DiningSessionPage({
   useEffect(() => {
     if (readAgainTick > 0) void load();
   }, [readAgainTick, load]);
+  // Owner 2026-11-03: back online, read at once, so "You're offline" doesn't linger on the page.
+  useEffect(() => {
+    const backOnline = () => void load();
+    window.addEventListener("online", backOnline);
+    return () => window.removeEventListener("online", backOnline);
+  }, [load]);
   useEffect(() => {
     if (retryTick === 0) return;
     const timer = window.setTimeout(() => void load(), 2000);

@@ -271,7 +271,9 @@ export function StoreDevicesView({
                           {device.label}
                           {read.thisDevice?.device === device.device ? t(" (this tablet)") : ""}
                         </td>
-                        <td data-label={t("Set up by")}>{device.registeredBy ?? "—"}</td>
+                        <td data-label={t("Set up by")}>
+                          {device.registeredBy === "You" ? t("You") : (device.registeredBy ?? "—")}
+                        </td>
                         <td data-label={t("Set up on")}>
                           {friendlyStoreTime(device.registeredAt, timeZone)}
                         </td>

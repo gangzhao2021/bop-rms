@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
+import { isFullSignInRequired } from "./full-sign-in.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { dollarsToMinor } from "./TableCheckout.js";
@@ -239,6 +241,8 @@ function TablePaymentBlock({
   // Owner 2026-11-03: money is confirmed before it is recorded, and said once it is.
   const [reviewing, setReviewing] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  // On a PIN sign-in the server asks who it is first; their role is fine.
+  const [confirmIdentity, setConfirmIdentity] = useState(false);
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const amountMinor = useMemo(() => dollarsToMinor(amount), [amount]);
   const online = payment.method === "Online";
@@ -282,6 +286,7 @@ function TablePaymentBlock({
       );
       if (status === 200) {
         operation.current = null;
+        setConfirmIdentity(false);
         onChanged(parseTablePayments(payload));
         setDone(
           online
@@ -301,6 +306,10 @@ function TablePaymentBlock({
       }
       operation.current = null;
       setReviewing(false);
+      if (isFullSignInRequired(status, payload)) {
+        setConfirmIdentity(true);
+        return;
+      }
       setProblem(
         status === 401 || status === 403
           ? online || onMachine
@@ -563,6 +572,7 @@ function TablePaymentBlock({
           </button>
         )
       ) : null}
+      {confirmIdentity ? <FullSignInPrompt csrf={csrf} fetcher={fetcher} /> : null}
       {problem ? <p role="alert">{problem}</p> : null}
       {done ? <p role="status">{done}</p> : null}
     </section>

@@ -280,3 +280,23 @@ test("@production a manager records a refund made on the card machine of a table
     slipReference: "AUTH 771",
   });
 });
+
+// Live check 2026-11-03: an Owner on a PIN sign-in was told "ask a manager". The server only wants
+// to know who it is, so they are asked to confirm that, and nothing was recorded.
+test("@production a refund on a PIN sign-in asks to confirm it's you, not for a manager", async ({
+  page,
+}) => {
+  const machine = { ...payment, method: "CardMachine" };
+  await orderPage(page, () => ({ orderReference: id(1), payment: machine, parts: [] }));
+  await page.route("**/merchant/orders/table-payment/card-refund", (route) =>
+    route.fulfill({ status: 403, headers, json: { error: "full_sign_in_required" } }),
+  );
+  await page.goto("/operations/orders");
+  await page.getByRole("button", { name: "Record a card machine refund", exact: true }).click();
+  await page.getByLabel("Amount to refund").fill("10");
+  await page.getByRole("combobox", { name: /Reason/u }).selectOption("FOOD_ISSUE");
+  await page.getByRole("button", { name: /10\.00 refunded on the card machine$/u }).click();
+  await page.getByRole("button", { name: /^Confirm: record/u }).click();
+  await expect(page.getByRole("region", { name: "Confirm it's you" })).toBeVisible();
+  await expect(page.getByText("A manager refunds this payment", { exact: false })).toHaveCount(0);
+});

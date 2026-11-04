@@ -395,6 +395,21 @@ export function TableSessionClose({
     }
   };
 
+  // Owner 2026-11-03: while Checkout above is taking the money, "the table hasn't paid" says nothing
+  // new; closing comes up once it's paid. What to do if the guests left stays here.
+  const onlyAwaitingCheckout =
+    session.phase === "Closing" &&
+    check.kind === "Ready" &&
+    blockers.length === 1 &&
+    plan?.open === 0 &&
+    plan.blockers.length === 1 &&
+    plan.blockers[0] === "ORDER_BALANCE_UNPAID";
+  if (onlyAwaitingCheckout)
+    return (
+      <section aria-label={t("Close this table")} className="dining-table-close">
+        {guestsLeft}
+      </section>
+    );
   return (
     <section aria-label={t("Close this table")} className="dining-table-close">
       <h3>{t("Close the table")}</h3>
