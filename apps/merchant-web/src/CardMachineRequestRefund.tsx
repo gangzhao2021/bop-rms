@@ -2,6 +2,7 @@ import { useContext, useRef, useState } from "react";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { needsFullSignIn } from "./full-sign-in.js";
+import { currentLanguage, t } from "./i18n/i18n.js";
 import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -27,12 +28,19 @@ export function cardMachineRefundRecordedText(
       ? amountLabel
       : orderMoney({ amountMinor: result.amountMinor, currencyCode: "CAD" });
   return (
-    `Card-machine refund recorded: ${amount} refunded on the card machine at ${storeTime(result.refundedAt, timeZone, true)}.` +
+    t("Card-machine refund recorded: {amount} refunded on the card machine at {time}.", {
+      amount,
+      time: storeTime(result.refundedAt, timeZone, true),
+    }) +
+    // Chinese sentences follow each other with no space.
+    (currentLanguage() === "zh-Hans" ? "" : " ") +
     (result.receipt === "Issued"
-      ? " The customer's digital receipt now shows the refund."
+      ? t("The customer's digital receipt now shows the refund.")
       : result.receipt === "NotIssued"
-        ? " The digital receipt could not be updated yet; record it again later to retry (the refund is not counted twice)."
-        : " The card machine's refund slip is the customer's receipt.")
+        ? t(
+            "The digital receipt could not be updated yet; record it again later to retry (the refund is not counted twice).",
+          )
+        : t("The card machine's refund slip is the customer's receipt."))
   );
 }
 
@@ -118,11 +126,13 @@ export function CardMachineRequestRefund({
         }}
       >
         <p id={id + "-title"}>
-          Refund {amount} on the store&apos;s card machine to the card the customer paid with, then
-          record it here.
+          {t(
+            "Refund {amount} on the store's card machine to the card the customer paid with, then record it here.",
+            { amount },
+          )}
         </p>
         <label>
-          Slip reference (optional)
+          {t("Slip reference (optional)")}
           <input
             value={slip}
             maxLength={40}
@@ -133,7 +143,7 @@ export function CardMachineRequestRefund({
           />
         </label>
         <p id={id + "-hint"} className="field-hint">
-          The approval or reference code printed on the refund slip. Never the card number.
+          {t("The approval or reference code printed on the refund slip. Never the card number.")}
         </p>
         <label>
           <input
@@ -144,11 +154,11 @@ export function CardMachineRequestRefund({
               setEarlier(event.currentTarget.checked);
             }}
           />
-          Refunded earlier, while the system was unreachable
+          {t("Refunded earlier, while the system was unreachable")}
         </label>
         {earlier ? (
           <label>
-            Refunded at (store time, from the slip)
+            {t("Refunded at (store time, from the slip)")}
             <input
               type="datetime-local"
               value={madeAt}
@@ -162,30 +172,35 @@ export function CardMachineRequestRefund({
         ) : null}
         {earlier ? (
           <p className="field-hint">
-            Within the last 3 days, after the refund was requested. It counts on the day it was
-            made.
+            {t(
+              "Within the last 3 days, after the refund was requested. It counts on the day it was made.",
+            )}
           </p>
         ) : null}
-        {outcome === "Pending" ? <p role="status">Recording…</p> : null}
+        {outcome === "Pending" ? <p role="status">{t("Recording…")}</p> : null}
         {outcome === "Conflict" ? (
           <p role="alert">
-            Not recorded: this refund needs an owner&apos;s approval first, or it was already
-            recorded. Refresh the requests to see where it stands.
+            {t(
+              "Not recorded: this refund needs an owner's approval first, or it was already recorded. Refresh the requests to see where it stands.",
+            )}
           </p>
         ) : null}
         {outcome === "Denied" ? (
           <p role="alert">
-            Only a store manager or an owner can record this refund. Ask them to record it after the
-            refund on the card machine.
+            {t(
+              "Only a store manager or an owner can record this refund. Ask them to record it after the refund on the card machine.",
+            )}
           </p>
         ) : null}
         {outcome === "Unknown" ? (
           <p role="alert">
-            Result unknown. Record it again; the same refund is never counted twice.
+            {t("Result unknown. Record it again; the same refund is never counted twice.")}
           </p>
         ) : null}
-        <button type="submit" disabled={!ready}>
-          {outcome === "Pending" ? "Recording…" : `Refunded ${amount} on card machine`}
+        <button type="submit" className="refund-primary" disabled={!ready}>
+          {outcome === "Pending"
+            ? t("Recording…")
+            : t("Refunded {amount} on card machine", { amount })}
         </button>
       </form>
       {/* Outside the form: the verification step has its own form. */}

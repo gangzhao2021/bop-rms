@@ -19,6 +19,7 @@ import {
 import { serviceOperationReference } from "./service-control-client.js";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { needsFullSignIn } from "./full-sign-in.js";
+import { t } from "./i18n/i18n.js";
 const client = createOrdinaryRefundExecutionClient();
 const preparation = createOrdinaryRefundPreparationClient();
 const requests = createOrdinaryRefundClient();
@@ -111,8 +112,13 @@ export function RefundSendAction({
         onPending(false);
         onDone(
           outcome.kind === "Refunded"
-            ? `Refunded ${amountLabel} to the customer's original payment method.`
-            : `Sent — waiting for the card provider's answer. The ${amountLabel} stays set aside until it answers; check again later.`,
+            ? t("Refunded {total} to the customer's original payment method.", {
+                total: amountLabel,
+              })
+            : t(
+                "Sent — waiting for the card provider's answer. The {amount} stays set aside until it answers; check again later.",
+                { amount: amountLabel },
+              ),
         );
       }
     } catch (error) {
@@ -129,21 +135,27 @@ export function RefundSendAction({
     }
   };
   return (
-    <section aria-label="Send refund">
-      <label>
+    <section aria-label={t("Send refund")} className="refund-send">
+      <label className="refund-confirm">
         <input
           type="checkbox"
           checked={confirmed}
           disabled={active !== null || failure !== null}
           onChange={(e) => setConfirmed(e.currentTarget.checked)}
         />
-        I confirm sending this {amountLabel} refund to the customer&apos;s original payment method
+        <span>
+          {t("I confirm sending this {amount} refund to the customer's original payment method", {
+            amount: amountLabel,
+          })}
+        </span>
       </label>
       <button
+        type="button"
+        className="refund-primary"
         disabled={active !== null || (!confirmed && failure === null)}
         onClick={() => void execute()}
       >
-        {failure !== null ? refundRunRetryLabel(failure.step) : "Send refund"}
+        {failure !== null ? refundRunRetryLabel(failure.step) : t("Send refund")}
       </button>
       {active ? <p role="status">{refundRunProgressText(active)}</p> : null}
       {failure !== null ? <p role="status">{refundRunFailureText(failure)}</p> : null}
@@ -161,13 +173,14 @@ export function RefundExecutionAction({
   operationReference,
   csrf,
   onPending,
-  onFinancialChange,
+  onDone,
 }: {
   orderReference: string;
   operationReference: string;
   csrf: string;
   onPending: (pending: boolean) => void;
-  onFinancialChange: () => void;
+  /** The answer was checked: show this and reread where the request and the amounts stand. */
+  onDone: (confirmation: string) => void;
 }) {
   const [message, setMessage] = useState(""),
     // WP-2423: refused on an unconfirmed PIN sign-in; the same check is retried after.
@@ -200,15 +213,14 @@ export function RefundExecutionAction({
       const outcome = await reconcile.current.execute(csrf, controller.signal);
       if (!controller.signal.aborted) {
         setUnknown(false);
-        onFinancialChange();
         onPending(false);
         reconcile.current = null;
-        setMessage(
-          outcome.receipt
-            ? outcome.receipt.status === "Created"
-              ? `Answer checked. Refund receipt version ${outcome.receipt.version} created. Check execution status to see the refunded amount.`
-              : `Answer checked. The receipt on file stays version ${outcome.receipt.version} (${outcome.receipt.kind}); no new receipt was created. Check execution status to see the refunded amount.`
-            : "Answer checked. Check execution status to see the refunded amount.",
+        onDone(
+          outcome.receipt?.status === "Created"
+            ? t("Answer checked. The refund receipt is ready for the customer.")
+            : outcome.receipt
+              ? t("Answer checked. The customer's receipt stays as it was; no new one was needed.")
+              : t("Answer checked."),
         );
       }
     } catch (error) {
@@ -222,10 +234,12 @@ export function RefundExecutionAction({
           needsFullSignIn(error)
             ? ""
             : uncertain
-              ? "The check did not finish. Keep this page open and retry the same check."
+              ? t("The check did not finish. Keep this page open and retry the same check.")
               : error instanceof OrdinaryRefundExecutionError && error.code === "PermissionDenied"
-                ? "Your session or permissions do not allow this check. Sign in again, then retry."
-                : "Checking refunds is not set up for this store. Contact BOP support.",
+                ? t(
+                    "Your session or permissions do not allow this check. Sign in again, then retry.",
+                  )
+                : t("Checking refunds is not set up for this store. Contact BOP support."),
         );
       }
     } finally {
@@ -234,11 +248,16 @@ export function RefundExecutionAction({
     }
   }
   return (
-    <section aria-label="Refund result">
-      <button disabled={active} onClick={() => void execute()}>
-        {unknown ? "Retry the same check" : "Check refund result and receipt"}
+    <section aria-label={t("Refund result")} className="refund-send">
+      <button
+        type="button"
+        className="refund-text"
+        disabled={active}
+        onClick={() => void execute()}
+      >
+        {unknown ? t("Retry the same check") : t("Check refund result and receipt")}
       </button>
-      {active ? <p role="status">Checking the card provider&apos;s answer…</p> : null}
+      {active ? <p role="status">{t("Checking the card provider's answer…")}</p> : null}
       {message ? <p role="status">{message}</p> : null}
       {signIn ? <FullSignInPrompt csrf={csrf} /> : null}
     </section>

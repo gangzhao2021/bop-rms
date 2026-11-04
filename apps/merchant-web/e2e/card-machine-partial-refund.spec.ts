@@ -227,19 +227,25 @@ test("@production a manager refunds an item of a card-machine payment and record
     });
 
   await page.goto("/app/operations/payments/" + id(31) + "/refund");
-  const summary = page.getByRole("region", { name: "Payment financial summary" });
+  const summary = page.getByRole("region", { name: "Payment summary" });
   await expect(summary).toContainText("Paid on the store's card machine");
   await expect(summary).toContainText("$24.86");
-  await page.getByRole("button", { name: "Load refundable items" }).click();
+  // One tap fills everything this payment can refund. Items paid another way stay out of it,
+  // because a card-machine refund covers one payment at a time.
+  await page.getByRole("button", { name: "Refund everything" }).click();
+  await expect(page.getByRole("spinbutton", { name: /Pad thai/ })).toHaveValue("2");
+  await expect(page.getByRole("spinbutton", { name: /Green tea/ })).toHaveValue("0");
+  await page.getByRole("button", { name: "Clear" }).click();
+  await expect(page.getByRole("spinbutton", { name: /Pad thai/ })).toHaveValue("0");
   // Items paid on the card machine are never mixed with items paid online.
   await page.getByRole("spinbutton", { name: /Pad thai/ }).fill("1");
   await page.getByRole("spinbutton", { name: /Green tea/ }).fill("1");
   await page.getByRole("combobox", { name: "Reason" }).selectOption("QUALITY_ISSUE");
-  await page.getByRole("button", { name: "Calculate refund" }).click();
+  await page.getByRole("button", { name: "Review refund" }).click();
   await expect(page.getByText(/Refund items paid on the card machine separately/u)).toBeVisible();
   await page.getByRole("spinbutton", { name: /Green tea/ }).fill("0");
-  await page.getByRole("button", { name: "Calculate refund" }).click();
-  const calculation = page.getByRole("region", { name: "Refund calculation" });
+  await page.getByRole("button", { name: "Review refund" }).click();
+  const calculation = page.getByRole("region", { name: "Review this refund" });
   await expect(calculation).toContainText("$6.21");
   await expect(calculation).toContainText("Tax");
   await expect(calculation).toContainText("$0.64");
@@ -250,10 +256,10 @@ test("@production a manager refunds an item of a card-machine payment and record
   // WP-2423: once recorded, the confirmation and its button are gone (no second request by mistake).
   await expect(page.getByRole("button", { name: "Record refund request" })).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: /I confirm/ })).toHaveCount(0);
-  await page.getByRole("button", { name: "Refresh recorded requests" }).click();
-  const requests = page.getByRole("region", { name: "Recorded refund requests" });
+  // The recorded request shows where it stands and its record control with no extra tap.
+  const requests = page.getByRole("region", { name: "Refunds on this order" });
   await expect(requests).toContainText("To refund on the card machine");
-  await page.getByRole("button", { name: "Check execution status for request 1" }).click();
+  await expect(page.getByRole("button", { name: "Refunded $6.21 on card machine" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Send refund", exact: true })).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -279,10 +285,12 @@ test("@production a manager refunds an item of a card-machine payment and record
   ).toBeVisible();
   // Without a reload: the request, its status and the payment amounts are reread from the server,
   // and the last amounts stay shown while they update (never "unavailable" unless a read failed).
-  await expect(page.getByText("Payment amounts are unavailable until refreshed.")).toHaveCount(0);
+  await expect(
+    page.getByText("Payment amounts could not be shown. Refresh to try again."),
+  ).toHaveCount(0);
   await expect(requests).toContainText("Refunded on the card machine");
   await expect(page.getByText(/Slip reference: REF 5521\./u)).toBeVisible();
-  await expect(summary).toContainText("Payment state: Partly refunded");
+  await expect(summary).toContainText("Partly refunded");
   await expect(summary).not.toContainText("Captured");
   // The retry reused the same operation: the refund is counted once.
   expect(records).toHaveLength(2);
@@ -584,17 +592,17 @@ test("@production the payment page offers recording a pending card-machine refun
     });
 
   await page.goto("/app/operations/payments/" + id(31));
-  const summary = page.getByRole("region", { name: "Payment financial summary" });
+  const summary = page.getByRole("region", { name: "Payment summary" });
   await expect(summary).toContainText("$4.80");
   const pending = page.getByRole("region", { name: "Refunds to make on the card machine" });
   const action = pending.getByRole("button", {
-    name: "Record the card-machine refund for request 1 ($4.80)",
+    name: "Record the $4.80 card-machine refund",
   });
   await expect(action).toBeVisible();
   // The order's other card-machine payment is not offered on this payment's page.
   await expect(pending).not.toContainText("Request 2");
   await expect(pending.getByRole("button")).toHaveCount(1);
-  await expect(page.getByRole("link", { name: "Start refund request" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Start a refund" })).toBeVisible();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     expect(
@@ -619,10 +627,8 @@ test("@production the payment page offers recording a pending card-machine refun
     pending.getByText(/^Card-machine refund recorded: \$4\.80 refunded on the card machine/u),
   ).toBeVisible();
   // The amounts are reread from the server; nothing is left to record on this payment.
-  await expect(summary).toContainText("Payment state: Partly refunded");
-  await expect(
-    pending.getByRole("button", { name: /Record the card-machine refund/u }),
-  ).toHaveCount(0);
+  await expect(summary).toContainText("Partly refunded");
+  await expect(pending.getByRole("button", { name: /card-machine refund/u })).toHaveCount(0);
   expect(records).toHaveLength(1);
   expect(JSON.parse(records[0] ?? "{}")).toMatchObject({
     orderReference: id(1),

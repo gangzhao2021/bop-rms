@@ -431,12 +431,15 @@ for (const pending of [false, true])
       );
       await page.goto("/app/operations/payments/" + id(31));
       await expect(
-        page.getByText(pending ? "Payment state: Paid, refund pending" : "Payment state: Refunded"),
+        page
+          .getByRole("region", { name: "Payment summary" })
+          .getByText(pending ? "Paid, refund pending" : "Refunded", { exact: true })
+          .first(),
       ).toBeVisible();
       await expect(
         page.getByText(
           pending
-            ? "A refund of $11.30 is pending; nothing more can be requested until it finishes."
+            ? "A refund of $11.30 is being made; nothing more can be refunded until it finishes."
             : "Nothing is left to refund on this payment.",
         ),
       ).toBeVisible();
@@ -444,27 +447,23 @@ for (const pending of [false, true])
         "href",
         "/app/approvals",
       );
-      await expect(page.getByRole("link", { name: "Start refund request" })).toHaveCount(0);
-      await expect(page.getByRole("region", { name: "Recorded refund requests" })).toContainText(
+      await expect(page.getByRole("link", { name: "Start a refund" })).toHaveCount(0);
+      await expect(page.getByRole("region", { name: "Refunds on this order" })).toContainText(
         pending ? "Sent — waiting for the card provider's answer" : "Refunded",
       );
-      await expect(page.getByRole("group", { name: "Refund selection" })).toHaveCount(0);
+      await expect(page.getByRole("group", { name: "What to refund" })).toHaveCount(0);
       // Someone who cannot record a request follows refunds without request wording.
       await expect(
         page.getByRole("heading", { name: "Refund requests", exact: true }),
       ).toBeVisible();
       await expect(page.getByRole("heading", { name: "Request a refund" })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "Load refundable items" })).toHaveCount(0);
-      await expect(
-        page.getByText("Select items from the paid rounds", { exact: false }),
-      ).toHaveCount(0);
       // The /refund route shows the same state, never the item and reason form.
       await page.goto("/app/operations/payments/" + id(31) + "/refund");
       await expect(
-        page.getByText(pending ? "is pending; nothing more" : "Nothing is left to refund", {
+        page.getByText(pending ? "is being made; nothing more" : "Nothing is left to refund", {
           exact: false,
         }),
       ).toBeVisible();
-      await expect(page.getByRole("group", { name: "Refund selection" })).toHaveCount(0);
+      await expect(page.getByRole("group", { name: "What to refund" })).toHaveCount(0);
     },
   );

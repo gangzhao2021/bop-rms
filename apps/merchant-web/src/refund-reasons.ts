@@ -25,7 +25,7 @@ export const refundReasonLabel: Readonly<Record<RefundReasonCode, string>> = {
 };
 /** A recorded reason in staff language; an unknown older code reads as a generic reason. */
 export function describeRefundReason(code: string): string {
-  if (code === "OTHER") return "Other";
+  if (code === "OTHER") return t("Other");
   return (refundReasonLabel as Readonly<Record<string, string>>)[code] ?? t("Other reason");
 }
 /** Why an owner declined a refund. */

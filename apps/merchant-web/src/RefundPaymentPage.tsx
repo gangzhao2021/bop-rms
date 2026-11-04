@@ -1,3 +1,4 @@
+import { countOf, t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { refundErrorText as errorMessage } from "./OrderPaymentLinks.js";
 import {
@@ -45,7 +46,7 @@ type Intent = ReturnType<typeof client.prepareRequest>;
 type Preview = Awaited<ReturnType<Intent["preview"]>>;
 type Submitted = Awaited<ReturnType<Intent["submit"]>>;
 const amount = (value: string | null) =>
-  value === null ? "Unavailable" : orderMoney({ amountMinor: value, currencyCode: "CAD" });
+  value === null ? t("Not known") : orderMoney({ amountMinor: value, currencyCode: "CAD" });
 /** WP-2423 Q5: what is left of the captured amount after confirmed and pending refunds. */
 function refundableMinor(context: Context): bigint {
   if (
@@ -67,12 +68,17 @@ function requestBlockedMessage(context: Context): ReactNode {
     return (
       <p>
         {pending > 0n
-          ? `A refund of ${amount(String(pending))} is pending; nothing more can be requested until it finishes.`
-          : "Nothing is left to refund on this payment."}
+          ? t(
+              "A refund of {amount} is being made; nothing more can be refunded until it finishes.",
+              {
+                amount: amount(String(pending)),
+              },
+            )
+          : t("Nothing is left to refund on this payment.")}
         {context.canRequest ? null : (
           <>
             {" "}
-            <Link to="/app/approvals">Open Approvals</Link>
+            <Link to="/app/approvals">{t("Open Approvals")}</Link>
           </>
         )}
       </p>
@@ -81,8 +87,8 @@ function requestBlockedMessage(context: Context): ReactNode {
   if (!context.canRequest)
     return (
       <p>
-        Only a store manager records refund requests. Refunds that need your approval or decline are
-        on the <Link to="/app/approvals">Approvals</Link> page.
+        {t("Only a store manager records refund requests. To approve or decline a refund:")}{" "}
+        <Link to="/app/approvals">{t("Open Approvals")}</Link>
       </p>
     );
   return null;
@@ -90,14 +96,15 @@ function requestBlockedMessage(context: Context): ReactNode {
 /** Payment state in staff language, including refunds already made. */
 export function paymentStateLabel(context: Context): string {
   if (context.paymentState !== "Captured")
-    return context.paymentState === "Failed" ? "Failed" : "Not confirmed yet";
+    return context.paymentState === "Failed" ? t("Failed") : t("Not confirmed yet");
   const captured = BigInt(context.capturedAmountMinor ?? "0"),
     confirmed = BigInt(context.confirmedRefundMinor ?? "0"),
     pending = BigInt(context.pendingRefundMinor ?? "0");
-  if (confirmed >= captured && captured > 0n) return "Refunded";
-  if (confirmed > 0n) return pending > 0n ? "Partly refunded, refund pending" : "Partly refunded";
-  if (pending > 0n) return "Paid, refund pending";
-  return "Paid";
+  if (confirmed >= captured && captured > 0n) return t("Refunded");
+  if (confirmed > 0n)
+    return pending > 0n ? t("Partly refunded, refund pending") : t("Partly refunded");
+  if (pending > 0n) return t("Paid, refund pending");
+  return t("Paid");
 }
 /**
  * WP-2423 item 6: where one recorded request stands, in staff language. A refund is called sent
@@ -108,27 +115,27 @@ export function requestProgressLabel(
   paymentMethod: "Online" | "CardMachine",
   approvalState: RefundApprovalEntry["state"] | null,
 ): string {
-  if (approvalState === "AwaitingApproval") return "Waiting for owner approval";
+  if (approvalState === "AwaitingApproval") return t("Waiting for owner approval");
   if (paymentMethod === "CardMachine")
     return approvalState === "Approved"
-      ? "Approved — refund it on the card machine and record it"
+      ? t("Approved — refund it on the card machine and record it")
       : progress === "Refunded"
-        ? "Refunded on the card machine"
-        : "To refund on the card machine";
-  if (progress === "Refunded") return "Refunded";
-  if (progress === "Sending") return "Sent — waiting for the card provider's answer";
-  if (approvalState === "Approved") return "Approved, not sent yet";
-  return progress === "Recorded" ? "Recorded, not sent yet" : "Not sent yet";
+        ? t("Refunded on the card machine")
+        : t("To refund on the card machine");
+  if (progress === "Refunded") return t("Refunded");
+  if (progress === "Sending") return t("Sent — waiting for the card provider's answer");
+  if (approvalState === "Approved") return t("Approved, not sent yet");
+  return progress === "Recorded" ? t("Recorded, not sent yet") : t("Not sent yet");
 }
 /** WP-2423 item 6: one online payment's refund state within a request, in staff language. */
 export function paymentRefundStateLabel(
   state: "NotDispatched" | "Prepared" | "NeedsReconciliation" | "Confirmed",
 ): string {
   return state === "Confirmed"
-    ? "Refunded"
+    ? t("Refunded")
     : state === "NeedsReconciliation"
-      ? "Sent — waiting for the card provider's answer"
-      : "Not sent yet";
+      ? t("Sent — waiting for the card provider's answer")
+      : t("Not sent yet");
 }
 /** WP-2423 item 4: a request's refund as recorded from the store's card machine. */
 export function CardMachineRefundDone({
@@ -143,11 +150,59 @@ export function CardMachineRefundDone({
 }) {
   return (
     <>
-      Refunded {amount(amountMinor)} on the store&apos;s card machine{" "}
-      <SourceTime instant={refundedAt} />.
+      {t("Refunded {amount} on the store's card machine", { amount: amount(amountMinor) })}{" "}
+      <SourceTime instant={refundedAt} /> ·{" "}
       {slipReference !== null
-        ? ` Slip reference: ${slipReference}.`
-        : " No slip reference was entered."}
+        ? t("Slip reference: {slipReference}.", { slipReference })
+        : t("No slip reference was entered.")}
+    </>
+  );
+}
+/** A request with nothing left to follow up: its details open on request, not by themselves. */
+export function requestFinished(entry: Pick<Items["recentRequests"][number], "progress">): boolean {
+  return entry.progress === "Refunded";
+}
+type RequestTone = "attention" | "progress" | "done" | "quiet";
+/** The dot beside a request's state: needs someone now, on its way, or done. */
+function requestTone(
+  entry: Items["recentRequests"][number],
+  approvalState: RefundApprovalEntry["state"] | null,
+): RequestTone {
+  if (requestFinished(entry)) return "done";
+  return entry.paymentMethod === "CardMachine" && approvalState !== "AwaitingApproval"
+    ? "attention"
+    : "progress";
+}
+/** One recorded request: its amount and where it stands, then why and when under them. */
+function RequestRow({
+  entry,
+  amountMinor = entry.amountMinor,
+  tone,
+  state,
+  action,
+  children,
+}: {
+  readonly entry: Items["recentRequests"][number];
+  readonly amountMinor?: string;
+  readonly tone: RequestTone;
+  readonly state: string;
+  readonly action?: ReactNode;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <>
+      <div className="refund-request__head">
+        <strong className="refund-request__amount">{amount(amountMinor)}</strong>
+        <span className="refund-request__state" data-tone={tone}>
+          {state}
+        </span>
+        {action}
+      </div>
+      <p className="refund-request__meta">
+        {t("Request {value}", { value: entry.claimVersion })} ·{" "}
+        {describeRefundReason(entry.reasonCode)} · <SourceTime instant={entry.requestedAt} />
+      </p>
+      {children}
     </>
   );
 }
@@ -160,10 +215,11 @@ function RecordedRequestStatus({
   onRequestsChange,
   onPending,
   held = false,
+  refreshSignal,
 }: {
   orderReference: string;
   entry: Items["recentRequests"][number];
-  /** WP-2423 item 6: the refund form above is still sending this request (resume it there). */
+  /** WP-2423 item 6: the refund form below is still sending this request (resume it there). */
   held?: boolean;
   /** WP-2423 Q5: this request's place in the Store's approval list (null: none needed/known). */
   approval: RefundApprovalEntry | null;
@@ -172,16 +228,34 @@ function RecordedRequestStatus({
   /** Reread the order's recorded requests after a write on this one. */
   onRequestsChange: () => void;
   onPending: (paymentReference: string, active: boolean) => void;
+  /** Changes when staff refresh the whole list: this request's status is read again then. */
+  refreshSignal: number;
 }) {
   const [result, setResult] = useState<Awaited<ReturnType<typeof client.status>> | null>(null);
   const [message, setMessage] = useState("");
   // The confirmation of a write on this request; kept while its status is reread.
   const [notice, setNotice] = useState<string | null>(null);
+  // The machine refund was just recorded here: its form is gone until the status is reread.
+  const [recordedHere, setRecordedHere] = useState(false);
   const [busy, setBusy] = useState(false);
   const [preparing, setPreparing] = useState<ReadonlySet<string>>(new Set());
   const pending = useRef<AbortController | null>(null);
-  useEffect(() => () => pending.current?.abort(), []);
-  const load = async (afterWrite = false) => {
+  const everRead = useRef(false);
+  useEffect(
+    () => () => {
+      pending.current?.abort();
+      pending.current = null;
+    },
+    [],
+  );
+  /**
+   * "auto" follows the list and writes nothing, so it leaves the payment amounts alone (several
+   * requests would otherwise reread them over each other). "tap" is staff asking; "write" comes
+   * after a change on this request and supersedes any read started before it. The last status
+   * stays on screen during a reread: its record and send controls hold the references of a retry.
+   */
+  const load = async (mode: "auto" | "tap" | "write") => {
+    const afterWrite = mode === "write";
     if (pending.current) {
       if (!afterWrite) return;
       // A write supersedes a read that started before it.
@@ -189,10 +263,10 @@ function RecordedRequestStatus({
     }
     const controller = new AbortController();
     pending.current = controller;
+    everRead.current = true;
     setBusy(true);
     setMessage("");
-    if (!afterWrite) setNotice(null);
-    setResult(null);
+    if (mode === "tap") setNotice(null);
     try {
       const value = await client.status(
         orderReference,
@@ -207,11 +281,13 @@ function RecordedRequestStatus({
         throw new OrdinaryRefundClientError("Unavailable");
       if (!controller.signal.aborted) {
         setResult(value);
-        onFinancialChange();
+        setRecordedHere(false);
+        if (mode !== "auto") onFinancialChange();
       }
     } catch (error) {
       if (!controller.signal.aborted) {
         setMessage(errorMessage(error));
+        setRecordedHere(false);
         // The write happened: the payment amounts are reread even when this status is not.
         if (afterWrite) onFinancialChange();
       }
@@ -220,12 +296,21 @@ function RecordedRequestStatus({
       if (!controller.signal.aborted) setBusy(false);
     }
   };
+  // A request not finished shows where it stands straight away, and follows the list when its
+  // progress changes or staff refresh. A finished one is read only once staff open its details.
+  const finished = requestFinished(entry);
+  useEffect(() => {
+    if (finished && !everRead.current) return;
+    void load("auto");
+    // Only these inputs start a read; load itself changes on every render.
+  }, [entry.operationReference, entry.progress, refreshSignal]);
   // WP-2423 item 4: after the machine refund is recorded, show where the request now stands from
   // the server (this status, the payment amounts and the order's request list), not a local guess.
   const recorded = (confirmation: string) => {
     setNotice(confirmation);
+    setRecordedHere(true);
     onRequestsChange();
-    void load(true);
+    void load("write");
   };
   const paymentPending = (paymentReference: string) => (active: boolean) => {
     onPending(paymentReference, active);
@@ -236,65 +321,105 @@ function RecordedRequestStatus({
       return next;
     });
   };
+  const opened = result !== null || !finished;
   return (
-    <div>
-      <button disabled={busy || preparing.size > 0} onClick={() => void load()}>
-        Check execution status for request {entry.claimVersion}
-      </button>
-      {notice ? <p role="status">{notice}</p> : null}
-      {message ? <p role="status">{message}</p> : null}
+    <RequestRow
+      entry={entry}
+      tone={requestTone(entry, approval?.state ?? null)}
+      state={requestProgressLabel(entry.progress, entry.paymentMethod, approval?.state ?? null)}
+      action={
+        <button
+          type="button"
+          className="refund-text refund-request__refresh"
+          disabled={busy || preparing.size > 0}
+          aria-label={
+            opened
+              ? t("Refresh request {value}", { value: entry.claimVersion })
+              : t("Show details of request {value}", { value: entry.claimVersion })
+          }
+          onClick={() => void load("tap")}
+        >
+          {opened ? t("Refresh") : t("Details")}
+        </button>
+      }
+    >
+      {notice ? (
+        <p role="status" className="refund-request__note">
+          {notice}
+        </p>
+      ) : null}
+      {message ? (
+        <p role="status" className="refund-request__note">
+          {message}
+        </p>
+      ) : null}
+      {busy && result === null ? (
+        <p role="status" className="refund-request__muted">
+          {t("Loading…")}
+        </p>
+      ) : null}
       {result ? (
-        <section aria-label={"Execution status for request " + entry.claimVersion}>
-          <p>
-            Last checked <SourceTime instant={result.observedAt} />
-          </p>
+        <section
+          aria-label={t("Details of request {value}", { value: entry.claimVersion })}
+          className="refund-request__details"
+        >
           <ul>
             {result.payments.map((payment, index) => (
               <li key={payment.paymentAttemptReference}>
-                Payment {index + 1}:{" "}
                 {payment.method === "CardMachine" ? (
                   // WP-2423 item 4: refunded on the store's card machine, then recorded here.
-                  <>
-                    {payment.state === "Confirmed" && payment.refundedOnCardMachineAt !== null ? (
+                  payment.state === "Confirmed" && payment.refundedOnCardMachineAt !== null ? (
+                    <p>
                       <CardMachineRefundDone
                         amountMinor={payment.amountMinor}
                         refundedAt={payment.refundedOnCardMachineAt}
                         slipReference={payment.cardMachineSlipReference}
                       />
-                    ) : approval?.state === "AwaitingApproval" ? (
-                      <>
-                        {amount(payment.amountMinor)} to refund on the card machine once an owner
-                        approves it. <Link to="/app/approvals">Open approvals</Link>
-                      </>
-                    ) : (
-                      <CardMachineRequestRefund
-                        orderReference={orderReference}
-                        requestReference={entry.requestReference}
-                        amountMinor={payment.amountMinor}
-                        amountLabel={amount(payment.amountMinor)}
-                        csrf={csrf}
-                        onRecorded={recorded}
-                      />
-                    )}
-                  </>
-                ) : null}
-                {payment.method === "CardMachine" ? null : (
-                  <>
-                    {paymentRefundStateLabel(payment.state)}. Requested{" "}
-                    {amount(payment.amountMinor)}; confirmed {amount(payment.confirmedMinor)};
-                    pending {amount(payment.pendingMinor)}.
-                  </>
+                    </p>
+                  ) : approval?.state === "AwaitingApproval" ? (
+                    <p>
+                      {t("{amount} to refund on the card machine once an owner approves it.", {
+                        amount: amount(payment.amountMinor),
+                      })}{" "}
+                      <Link to="/app/approvals">{t("Open Approvals")}</Link>
+                    </p>
+                  ) : recordedHere ? null : (
+                    <CardMachineRequestRefund
+                      orderReference={orderReference}
+                      requestReference={entry.requestReference}
+                      amountMinor={payment.amountMinor}
+                      amountLabel={amount(payment.amountMinor)}
+                      csrf={csrf}
+                      onRecorded={recorded}
+                    />
+                  )
+                ) : (
+                  <p>
+                    {result.payments.length > 1
+                      ? t("Payment {value}:", { value: index + 1 }) + " "
+                      : ""}
+                    {paymentRefundStateLabel(payment.state)} ·{" "}
+                    {t("Requested {requested}; refunded {refunded}; being refunded {pending}.", {
+                      requested: amount(payment.amountMinor),
+                      refunded: amount(payment.confirmedMinor),
+                      pending: amount(payment.pendingMinor),
+                    })}
+                  </p>
                 )}
                 {payment.method === "Online" &&
                 (payment.state === "NeedsReconciliation" || payment.state === "Confirmed") &&
                 payment.executionOperationReference ? (
                   <RefundExecutionAction
-                    onFinancialChange={onFinancialChange}
                     key={payment.executionOperationReference + ":" + payment.state}
                     orderReference={orderReference}
                     operationReference={payment.executionOperationReference}
                     csrf={csrf}
                     onPending={paymentPending(payment.paymentAttemptReference)}
+                    onDone={(confirmation) => {
+                      setNotice(confirmation);
+                      onRequestsChange();
+                      void load("write");
+                    }}
                   />
                 ) : null}
                 {payment.method === "Online" &&
@@ -302,16 +427,22 @@ function RecordedRequestStatus({
                 approval !== null ? (
                   <p>
                     {approval.state === "AwaitingApproval"
-                      ? "Waiting for an owner or finance member to approve this refund in person. It is sent once approved."
-                      : "Approved, not sent yet. The approver sends it with Send approved refund in Store setup; it is never sent twice."}{" "}
-                    <Link to="/app/approvals">Open approvals</Link>
+                      ? t(
+                          "Waiting for an owner or finance member to approve this refund in person. It is sent once approved.",
+                        )
+                      : t(
+                          "Approved, not sent yet. The approver sends it from Approvals; it is never sent twice.",
+                        )}{" "}
+                    <Link to="/app/approvals">{t("Open Approvals")}</Link>
                   </p>
                 ) : null}
                 {payment.method === "Online" &&
                 ((payment.state === "NotDispatched" && approval === null) ||
                   (payment.state === "Prepared" && payment.executionOperationReference)) ? (
                   held ? (
-                    <p>Continue sending this refund with the button under the refund form.</p>
+                    <p>
+                      {t("Continue sending this refund with the button further down the page.")}
+                    </p>
                   ) : (
                     <RefundSendAction
                       // A Manager sends a refund that needs no approval with one confirmation; an
@@ -333,15 +464,24 @@ function RecordedRequestStatus({
               </li>
             ))}
           </ul>
-          {result.payments.some((payment) => BigInt(payment.pendingMinor) > 0n) ? (
-            <p>
-              A pending amount stays set aside until its refund finishes, so it cannot be requested
-              again. The refund receipt is ready once the refund is confirmed.
+          {/* What the card provider has not answered yet; a machine refund is staff's own step. */}
+          {result.payments.some(
+            (payment) => payment.method === "Online" && BigInt(payment.pendingMinor) > 0n,
+          ) ? (
+            <p className="refund-request__muted">
+              {t(
+                "The amount being refunded stays set aside until the refund finishes, so it cannot be refunded twice. The refund receipt is ready once it is refunded.",
+              )}
+            </p>
+          ) : null}
+          {result.payments.some((payment) => payment.method === "Online") ? (
+            <p className="refund-request__muted">
+              {t("Last checked")} <SourceTime instant={result.observedAt} />
             </p>
           ) : null}
         </section>
       ) : null}
-    </div>
+    </RequestRow>
   );
 }
 /**
@@ -361,13 +501,90 @@ export function refundWizardSections(
     startAnother: requestable && state === "Recorded" && !sendUnconfirmed,
   };
 }
+/**
+ * What "Refund everything" fills: every refundable quantity. A card-machine payment is refunded on
+ * its machine, one payment at a time, so when the order's items cannot go on one refund it fills
+ * this payment's items only (`limited`) instead of a selection the review would refuse.
+ */
+export function refundEverythingQuantities(
+  items: Items["items"],
+  paymentIntentReference: string,
+): { readonly quantities: Readonly<Record<string, number>>; readonly limited: boolean } {
+  const refundable = items.filter(
+    (item) => item.paymentCaptured && !item.refundedByCancellation && item.unclaimedQuantity > 0,
+  );
+  const limited =
+    refundable.some((item) => item.paymentMethod === "CardMachine") &&
+    new Set(refundable.map((item) => item.paymentIntentReference)).size > 1;
+  const chosen = limited
+    ? refundable.filter((item) => item.paymentIntentReference === paymentIntentReference)
+    : refundable;
+  return {
+    quantities: Object.fromEntries(
+      chosen.map((item) => [item.orderItemReference, item.unclaimedQuantity]),
+    ),
+    limited,
+  };
+}
+/** A quantity with − and + big enough for a finger, around a real input that can be typed in. */
+function QuantityStepper({
+  id,
+  itemLabel,
+  value,
+  max,
+  onChange,
+}: {
+  readonly id: string;
+  readonly itemLabel: string;
+  readonly value: number;
+  readonly max: number;
+  readonly onChange: (quantity: number) => void;
+}) {
+  return (
+    <div className="refund-stepper">
+      <button
+        type="button"
+        aria-label={t("One less of {item}", { item: itemLabel })}
+        disabled={value <= 0}
+        onClick={() => onChange(value - 1)}
+      >
+        −
+      </button>
+      <input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={0}
+        max={max}
+        step={1}
+        value={value}
+        onChange={(event) => {
+          const quantity = Number(event.target.value);
+          if (Number.isSafeInteger(quantity) && quantity >= 0 && quantity <= max)
+            onChange(quantity);
+        }}
+      />
+      <button
+        type="button"
+        aria-label={t("One more of {item}", { item: itemLabel })}
+        disabled={value >= max}
+        onClick={() => onChange(value + 1)}
+      >
+        +
+      </button>
+    </div>
+  );
+}
 function RefundWizard({
   orderReference,
+  paymentIntentReference,
   csrf,
   onFinancialChange,
   blockedMessage = null,
 }: {
   readonly orderReference: string;
+  /** The payment this page is for: what "Refund everything" means when items can't be mixed. */
+  readonly paymentIntentReference: string;
   readonly csrf: string;
   readonly onFinancialChange: () => void;
   /** WP-2423 Q5: why no new request can be recorded here (history stays visible). */
@@ -386,6 +603,8 @@ function RefundWizard({
     [signIn, setSignIn] = useState(false),
     [state, setState] = useState<"Idle" | "Busy" | "Unknown" | "Recorded">("Idle");
   const [preparing, setPreparing] = useState<ReadonlySet<string>>(new Set());
+  // Staff refreshed the whole list: every open request rereads its status too.
+  const [refreshSignal, setRefreshSignal] = useState(0);
   // WP-2423 item 6: one confirmation records, prepares and sends a refund needing no approval.
   // The run keeps every step's references, so a retry resumes where it stopped.
   const run = useRef<RefundRun<Submitted> | null>(null),
@@ -403,7 +622,13 @@ function RefundWizard({
   const operation = useRef<Intent | null>(null),
     pending = useRef<AbortController | null>(null),
     status = useRef<HTMLParagraphElement>(null);
-  useEffect(() => () => pending.current?.abort(), []);
+  useEffect(
+    () => () => {
+      pending.current?.abort();
+      pending.current = null;
+    },
+    [],
+  );
   useEffect(() => {
     if (message) status.current?.focus();
   }, [message]);
@@ -483,6 +708,7 @@ function RefundWizard({
       if (!controller.signal.aborted) {
         setApprovals(pendingApprovals);
         setItems(result);
+        setRefreshSignal((value) => value + 1);
         if (wasUnknown) {
           const recovered = result.recentRequests.find(
             (entry) => entry.operationReference === operationReference.current,
@@ -495,8 +721,10 @@ function RefundWizard({
           setState(recovered ? "Recorded" : "Unknown");
           setMessage(
             recovered
-              ? "Original request recovered. See below where it stands and what to do next."
-              : "The original request is not confirmed by this history. Its result remains unknown; retry the same request.",
+              ? t("The request was recorded. See above where it stands and what to do next.")
+              : t(
+                  "This request does not show in the records, so its result is still unknown. Retry the same request.",
+                ),
           );
         } else if (wasRecorded) {
           setState("Recorded");
@@ -504,7 +732,7 @@ function RefundWizard({
           setMessage(
             runFailure !== null
               ? refundRunFailureText(runFailure)
-              : "Request remains recorded. Updated records are shown below.",
+              : t("The request stays recorded. See above where it stands."),
           );
         } else {
           setQuantities({});
@@ -517,7 +745,8 @@ function RefundWizard({
         setState(wasUnknown ? "Unknown" : wasRecorded ? "Recorded" : "Idle");
       }
     } finally {
-      pending.current = null;
+      // An aborted read may finish after the next one has started: only clear our own.
+      if (pending.current === controller) pending.current = null;
     }
   };
   // WP-2423 item 4: after a write on a recorded request, reread the order's requests (and their
@@ -548,19 +777,18 @@ function RefundWizard({
     } catch {
       if (!controller.signal.aborted)
         setMessage(
-          "The refund was recorded, but this list could not be updated. Select Refresh recorded requests.",
+          t("The refund was recorded, but this list could not be updated. Select Refresh."),
         );
     } finally {
       if (requestsRefresh.current === controller) requestsRefresh.current = null;
     }
   };
-  // WP-2423 Q5: show this order's refund requests and their progress straight away.
-  const loadedOnce = useRef(false);
+  // The refundable items and this order's requests are there as soon as the page opens. Under
+  // React's development double run the abort above clears the first read, so the second starts.
   useEffect(() => {
-    if (loadedOnce.current) return;
-    loadedOnce.current = true;
     void load();
-  });
+    // Once on open; refreshing later is staff's choice.
+  }, []);
   const calculate = async () => {
     if (!items || locked || pending.current) return;
     const selection = items.items
@@ -571,7 +799,7 @@ function RefundWizard({
         quantity: quantities[item.orderItemReference] ?? 0,
       }));
     if (!selection.length) {
-      setMessage("Select at least one item quantity.");
+      setMessage(t("Choose at least one item to refund."));
       return;
     }
     // WP-2423 item 4: items paid on the store's card machine are refunded on that machine, one
@@ -582,16 +810,18 @@ function RefundWizard({
       new Set(chosen.map((item) => item.paymentIntentReference)).size > 1
     ) {
       setMessage(
-        "Refund items paid on the card machine separately: select only items from that one payment.",
+        t(
+          "Refund items paid on the card machine separately: choose only items from that one payment.",
+        ),
       );
       return;
     }
     if (!refundReasonCodes.includes(reason as (typeof refundReasonCodes)[number])) {
-      setMessage("Select the reason for this refund.");
+      setMessage(t("Choose the reason for this refund."));
       return;
     }
     if (reason === "OTHER" && (note.trim() === "" || [...note.trim()].length > 200)) {
-      setMessage("Explain the reason in a short note (up to 200 characters).");
+      setMessage(t("Explain the reason in a short note (up to 200 characters)."));
       return;
     }
     const controller = new AbortController();
@@ -672,19 +902,34 @@ function RefundWizard({
         clearRequestForm();
         setState("Recorded");
         onFinancialChange();
-        const recovered = result?.replayed === true ? "Original request recovered. " : "";
+        const recovered =
+          result?.replayed === true
+            ? t("This request was already recorded; nothing repeated. ")
+            : "";
         const total = amount(result?.amountMinor ?? null);
         setMessage(
-          outcome.kind === "Refunded"
-            ? `${recovered}Refunded ${total} to the customer's original payment method.`
-            : outcome.kind === "WaitingForAnswer"
-              ? `${recovered}Sent — waiting for the card provider's answer. ${total} stays set aside until it answers; the request below shows the result.`
-              : `${recovered || "Request recorded. "}Refund amount: ${total}` +
-                (outcome.kind === "AwaitingApproval" && result?.approveAlone
-                  ? ". Nothing is refunded yet. You run this business alone (sole operator): open Approvals and approve it yourself after confirming it is you; it is sent once approved."
+          recovered +
+            (outcome.kind === "Refunded"
+              ? t("Refunded {total} to the customer's original payment method.", { total })
+              : outcome.kind === "WaitingForAnswer"
+                ? t(
+                    "Sent — waiting for the card provider's answer. {total} stays set aside until it answers; the request above shows the result.",
+                    { total },
+                  )
+                : outcome.kind === "AwaitingApproval" && result?.approveAlone
+                  ? t(
+                      "Request recorded for {total}. Nothing is refunded yet. You run this business alone: open Approvals and approve it yourself after confirming it is you; it is sent once approved.",
+                      { total },
+                    )
                   : outcome.kind === "AwaitingApproval"
-                    ? ". Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here."
-                    : ". Now refund it on the store's card machine and record it under the request below."),
+                    ? t(
+                        "Request recorded for {total}. Nothing is refunded yet: it is sent once the owner approves it. Ask the owner to open Approvals on this device or theirs. If more than 15 minutes pass after your verification, you'll be asked to verify again here.",
+                        { total },
+                      )
+                    : t(
+                        "Request recorded for {total}. Now refund it on the store's card machine and record it under the request above.",
+                        { total },
+                      )),
         );
         // The request appears in the list (and its units leave the selection) straight away.
         void reloadRequests();
@@ -710,7 +955,9 @@ function RefundWizard({
         } else if (cause instanceof OrdinaryRefundClientError && cause.code === "OutcomeUnknown") {
           setState("Unknown");
           setMessage(
-            "Request result unknown. Keep this page open and retry the same request; do not start another refund.",
+            t(
+              "Request result unknown. Keep this page open and retry the same request; do not start another refund.",
+            ),
           );
         } else if (needsFullSignIn(cause)) {
           // Keep the confirmed request: once verified, the same request is recorded once.
@@ -728,173 +975,260 @@ function RefundWizard({
       if (!controller.signal.aborted) setRunStep(null);
     }
   };
-  return (
-    <section aria-labelledby="refund-heading" data-screen-id="PAY-REFUND-WIZARD">
-      <h2 id="refund-heading">{requestable ? "Request a refund" : "Refund requests"}</h2>
-      {requestable ? (
-        <p>
-          Select items from the paid rounds of this order. The server checks remaining quantity and
-          balance when calculating and submitting.
-        </p>
-      ) : null}
-      <button disabled={state === "Busy" || preparing.size > 0} onClick={() => void load()}>
+  const lines = items?.items ?? [];
+  const offered = lines.filter((item) => item.paymentCaptured && !item.refundedByCancellation);
+  const everything = refundEverythingQuantities(lines, paymentIntentReference);
+  const anyChosen = Object.values(quantities).some((quantity) => quantity > 0);
+  // Which way each dish was paid matters only when the order's items were paid differently.
+  const mixedPayment = new Set(offered.map((item) => item.paymentMethod)).size > 1;
+  const setQuantity = (reference: string, quantity: number) => {
+    setQuantities((prior) => ({ ...prior, [reference]: quantity }));
+    clearPreview();
+  };
+  // The items and requests load by themselves; rereading them is offered when it has a purpose:
+  // a failed read, an unknown result, a recorded request, or a follower watching the list.
+  const refresh =
+    (items === null && state === "Busy") ||
+    (state === "Idle" && items !== null && requestable && message === "") ? null : (
+      <button
+        type="button"
+        className="refund-text"
+        disabled={state === "Busy" || preparing.size > 0}
+        aria-label={
+          state === "Unknown" || items === null ? undefined : t("Refresh refund requests and items")
+        }
+        onClick={() => void load()}
+      >
         {state === "Unknown"
-          ? "Check recorded requests"
-          : state === "Recorded" || (!requestable && items !== null)
-            ? "Refresh recorded requests"
-            : requestable
-              ? "Load refundable items"
-              : "Show refund requests"}
+          ? t("Check whether it was recorded")
+          : items === null
+            ? t("Try again")
+            : t("Refresh")}
       </button>
-      {items ? (
-        <section aria-label="Recorded refund requests">
-          <h3>Recorded refund requests</h3>
-          <p>
-            Latest {items.recentRequests.length} of {items.claimVersion} refund requests for this
-            order, with where each one stands.
-          </p>
+    );
+  const showRequests = items !== null && (items.recentRequests.length > 0 || !requestable);
+  return (
+    <section aria-label={t("Refund")} data-screen-id="PAY-REFUND-WIZARD" className="refund-wizard">
+      {items !== null && showRequests ? (
+        <section
+          aria-label={t("Refunds on this order")}
+          aria-busy={state === "Busy"}
+          className="refund-requests"
+        >
+          <div className="refund-section-head">
+            <h2>{requestable ? t("Refunds on this order") : t("Refund requests")}</h2>
+            {refresh}
+          </div>
           {items.recentRequests.length === 0 ? (
-            <p>No recorded requests in this snapshot.</p>
-          ) : (
-            <ol>
-              {items.recentRequests.map((entry) => (
-                <li key={entry.requestReference}>
-                  Request {entry.claimVersion}: {amount(entry.amountMinor)} ·{" "}
-                  {describeRefundReason(entry.reasonCode)} ·{" "}
-                  <SourceTime instant={entry.requestedAt} />
-                  {entry.decline !== null ? (
-                    <>
-                      {" · Declined by "}
-                      {entry.decline.declinedByYou
-                        ? "you"
-                        : (entry.decline.declinerName ?? "an owner")}{" "}
+            <p>{t("No refund requests on this order yet.")}</p>
+          ) : null}
+          {items.claimVersion > items.recentRequests.length ? (
+            <p className="refund-request__muted">
+              {t("Showing the latest {shown} of {total}.", {
+                shown: items.recentRequests.length,
+                total: items.claimVersion,
+              })}
+            </p>
+          ) : null}
+          <ol>
+            {items.recentRequests.map((entry) => (
+              <li key={entry.requestReference} className="refund-request">
+                {entry.decline !== null ? (
+                  <RequestRow
+                    entry={entry}
+                    tone="quiet"
+                    state={
+                      entry.decline.declinedByYou
+                        ? t("Declined by you")
+                        : entry.decline.declinerName !== null
+                          ? t("Declined by {name}", { name: entry.decline.declinerName })
+                          : t("Declined by an owner")
+                    }
+                  >
+                    <p className="refund-request__note">
+                      {t("{reason}. Nothing was refunded; you can request again.", {
+                        reason: declineReasonLabel[entry.decline.reasonCode] ?? t("Other reason"),
+                      })}{" "}
                       <SourceTime instant={entry.decline.declinedAt} />
-                      {": " +
-                        (declineReasonLabel[entry.decline.reasonCode] ?? "Other reason") +
-                        ". Nothing was refunded; you can request again."}
-                    </>
-                  ) : (
-                    " · " +
-                    requestProgressLabel(
-                      entry.progress,
-                      entry.paymentMethod,
-                      approvals.get(entry.requestReference)?.state ?? null,
-                    )
-                  )}
-                  {entry.decline !== null ? null : (
-                    <RecordedRequestStatus
-                      held={heldRequest === entry.requestReference}
-                      approval={approvals.get(entry.requestReference) ?? null}
-                      onFinancialChange={onFinancialChange}
-                      onRequestsChange={() => void reloadRequests()}
-                      orderReference={orderReference}
-                      entry={entry}
-                      csrf={csrf}
-                      onPending={(paymentReference, active) =>
-                        setPreparing((prior) => {
-                          const next = new Set(prior);
-                          const key = entry.requestReference + ":" + paymentReference;
-                          if (active) next.add(key);
-                          else next.delete(key);
-                          return next;
-                        })
-                      }
-                    />
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
+                    </p>
+                  </RequestRow>
+                ) : (
+                  <RecordedRequestStatus
+                    held={heldRequest === entry.requestReference}
+                    approval={approvals.get(entry.requestReference) ?? null}
+                    onFinancialChange={onFinancialChange}
+                    onRequestsChange={() => void reloadRequests()}
+                    orderReference={orderReference}
+                    entry={entry}
+                    csrf={csrf}
+                    refreshSignal={refreshSignal}
+                    onPending={(paymentReference, active) =>
+                      setPreparing((prior) => {
+                        const next = new Set(prior);
+                        const key = entry.requestReference + ":" + paymentReference;
+                        if (active) next.add(key);
+                        else next.delete(key);
+                        return next;
+                      })
+                    }
+                  />
+                )}
+              </li>
+            ))}
+          </ol>
         </section>
       ) : null}
+      {requestable && state !== "Recorded" ? (
+        <div className="refund-section-head">
+          <h2>{t("Request a refund")}</h2>
+          {showRequests ? null : refresh}
+        </div>
+      ) : null}
       {!requestable ? (
-        <div role="status">
+        <div role="status" className="refund-blocked">
           {blockedMessage ?? (
             <p>
-              Only a store manager records refund requests. You can follow these refunds here and
-              approve or decline them on the <Link to="/app/approvals">Approvals</Link> page.
+              {t(
+                "Only a store manager records refund requests. You can follow these refunds here. To approve or decline one:",
+              )}{" "}
+              <Link to="/app/approvals">{t("Open Approvals")}</Link>
             </p>
           )}
         </div>
-      ) : (
-        <fieldset disabled={locked}>
-          <legend>Refund selection</legend>
-          {items?.items.map((item, index) =>
-            // WP-2423 Q5: a line that was never charged (e.g. a round cancelled before payment)
-            // cannot be refunded; it is summarized below instead of offered as a quantity.
-            // A round the store cancelled was refunded whole by that cancellation; listed below.
-            !item.paymentCaptured || item.refundedByCancellation ? null : (
-              <div className="form-field" key={item.orderItemReference}>
-                <label htmlFor={"refund-quantity-" + index}>
-                  {item.label} · line {index + 1} ({item.unclaimedQuantity} unclaimed of{" "}
-                  {item.quantity})
-                  {item.paymentMethod === "CardMachine" ? " · paid on card machine" : ""}
-                </label>
-                <input
-                  id={"refund-quantity-" + index}
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  max={item.unclaimedQuantity}
-                  step={1}
-                  value={quantities[item.orderItemReference] ?? 0}
-                  disabled={!item.paymentCaptured || item.unclaimedQuantity === 0}
-                  onChange={(event) => {
-                    const quantity = Number(event.target.value);
-                    if (
-                      Number.isSafeInteger(quantity) &&
-                      quantity >= 0 &&
-                      quantity <= item.unclaimedQuantity
-                    ) {
-                      setQuantities((prior) => ({ ...prior, [item.orderItemReference]: quantity }));
-                      clearPreview();
-                    }
+      ) : items !== null && state !== "Recorded" ? (
+        <fieldset disabled={locked} className="refund-form">
+          <legend>{t("What to refund")}</legend>
+          {offered.some((item) => item.unclaimedQuantity > 0) ? (
+            <div className="refund-form__quick">
+              {anyChosen ? (
+                <button
+                  type="button"
+                  className="refund-text"
+                  onClick={() => {
+                    setQuantities({});
+                    clearPreview();
                   }}
-                />
-              </div>
-            ),
-          )}
-          {items && items.items.some((item) => !item.paymentCaptured) ? (
-            <p>
-              Not charged, so not refundable:{" "}
-              {items.items
-                .filter((item) => !item.paymentCaptured)
-                .map((item) => item.label)
-                .join(", ")}
-              .
+                >
+                  {t("Clear")}
+                </button>
+              ) : null}
+              {Object.keys(everything.quantities).length > 0 ? (
+                <button
+                  type="button"
+                  className="refund-text"
+                  onClick={() => {
+                    setQuantities({ ...everything.quantities });
+                    clearPreview();
+                  }}
+                >
+                  {t("Refund everything")}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {everything.limited ? (
+            <p className="refund-form__hint">
+              {t(
+                "Refund everything fills this payment's items only. Items paid another way are refunded from their own payment page.",
+              )}
             </p>
           ) : null}
-          {items && items.items.some((item) => item.refundedByCancellation) ? (
-            <p>
-              Already refunded in full when the round was cancelled:{" "}
-              {items.items
-                .filter((item) => item.refundedByCancellation)
-                .map((item) => item.label)
-                .join(", ")}
-              .
+          {lines.length === 0 ? <p>{t("This order has no items to refund.")}</p> : null}
+          {offered.length > 0 ? (
+            <ul className="refund-lines">
+              {lines.map((item, index) => {
+                // WP-2423 Q5: a line that was never charged (e.g. a round cancelled before
+                // payment) cannot be refunded; it is summarized below instead of offered. A round
+                // the store cancelled was refunded whole by that cancellation; listed below too.
+                if (!item.paymentCaptured || item.refundedByCancellation) return null;
+                const same = offered.filter((other) => other.label === item.label);
+                const inputId = "refund-quantity-" + index;
+                return (
+                  <li key={item.orderItemReference} className="refund-line">
+                    <label htmlFor={inputId} className="refund-line__label">
+                      <span className="refund-line__name">
+                        {item.label}
+                        {same.length > 1 ? (
+                          // Identical lines stay separate; only a screen reader needs them told apart.
+                          <span className="visually-hidden">
+                            {" "}
+                            {t("({position} of {count})", {
+                              position: same.indexOf(item) + 1,
+                              count: same.length,
+                            })}
+                          </span>
+                        ) : null}
+                      </span>
+                      {item.unclaimedQuantity > 0 && item.quantity > 1 ? (
+                        <span className="refund-line__meta">
+                          {t("{left} of {total} left to refund", {
+                            left: item.unclaimedQuantity,
+                            total: item.quantity,
+                          })}
+                        </span>
+                      ) : null}
+                      {mixedPayment && item.paymentMethod === "CardMachine" ? (
+                        <span className="refund-line__meta">{t("Paid on card machine")}</span>
+                      ) : null}
+                    </label>
+                    {item.unclaimedQuantity === 0 ? (
+                      <span className="refund-line__meta">{t("Already in a refund")}</span>
+                    ) : (
+                      <QuantityStepper
+                        id={inputId}
+                        itemLabel={item.label}
+                        value={quantities[item.orderItemReference] ?? 0}
+                        max={item.unclaimedQuantity}
+                        onChange={(quantity) => setQuantity(item.orderItemReference, quantity)}
+                      />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {lines.some((item) => !item.paymentCaptured) ? (
+            <p className="refund-form__hint">
+              {t("Not charged, so not refundable: {items}.", {
+                items: lines
+                  .filter((item) => !item.paymentCaptured)
+                  .map((item) => item.label)
+                  .join(", "),
+              })}
             </p>
           ) : null}
-          {items?.items.length === 0 ? <p>No items are available.</p> : null}
-          <label htmlFor="refund-reason">Reason</label>
-          <select
-            id="refund-reason"
-            value={reason}
-            onChange={(event) => {
-              setReason(event.target.value);
-              clearPreview();
-            }}
-          >
-            <option value="">Select a reason</option>
-            {refundReasonCodes.map((code) => (
-              <option key={code} value={code}>
-                {refundReasonLabel[code]}
-              </option>
-            ))}
-          </select>
+          {lines.some((item) => item.refundedByCancellation) ? (
+            <p className="refund-form__hint">
+              {t("Already refunded in full when the round was cancelled: {items}.", {
+                items: lines
+                  .filter((item) => item.refundedByCancellation)
+                  .map((item) => item.label)
+                  .join(", "),
+              })}
+            </p>
+          ) : null}
+          <div className="refund-form__field">
+            <label htmlFor="refund-reason">{t("Reason")}</label>
+            <select
+              id="refund-reason"
+              value={reason}
+              onChange={(event) => {
+                setReason(event.target.value);
+                clearPreview();
+              }}
+            >
+              <option value="">{t("Select a reason")}</option>
+              {refundReasonCodes.map((code) => (
+                <option key={code} value={code}>
+                  {refundReasonLabel[code]}
+                </option>
+              ))}
+            </select>
+          </div>
           {reason === "OTHER" ? (
-            <>
+            <div className="refund-form__field">
               <label htmlFor="refund-note">
-                Note for the approver (required, up to 200 characters)
+                {t("Note for the approver (required, up to 200 characters)")}
               </label>
               <textarea
                 id="refund-note"
@@ -906,62 +1240,83 @@ function RefundWizard({
                   clearPreview();
                 }}
               />
-              <p>Describe what happened. Do not include card numbers or health details.</p>
-            </>
+              <p className="refund-form__hint">
+                {t("Describe what happened. Do not include card numbers or health details.")}
+              </p>
+            </div>
           ) : null}
-          <button disabled={!items} onClick={() => void calculate()}>
-            Calculate refund
+          <button
+            type="button"
+            className={
+              preview && sections.confirmation
+                ? "refund-text refund-review"
+                : "refund-primary refund-review"
+            }
+            disabled={!items}
+            onClick={() => void calculate()}
+          >
+            {t("Review refund")}
           </button>
         </fieldset>
-      )}
-      {sections.startAnother ? (
-        <button type="button" disabled={preparing.size > 0} onClick={startAnother}>
-          Start another refund request
-        </button>
       ) : null}
       {preview && sections.confirmation ? (
-        <section aria-label="Refund calculation">
-          <h3>Confirm refund amount</h3>
-          <dl>
-            {[
-              ["Items", "netAmountMinor"],
-              ["Tax", "taxAmountMinor"],
-              ["Tip", "tipAmountMinor"],
-              ["Service charge", "serviceChargeAmountMinor"],
-              ["Service charge tax", "serviceChargeTaxAmountMinor"],
-            ].map(([label, key]) => (
-              <div key={key}>
-                <dt>{label}</dt>
-                <dd>{amount(preview.components[key ?? ""] ?? null)}</dd>
-              </div>
-            ))}
-            <div>
-              <dt>Total</dt>
+        <section aria-labelledby="refund-review-heading" className="refund-review-panel">
+          <h3 id="refund-review-heading">{t("Review this refund")}</h3>
+          <dl className="refund-amounts">
+            {(
+              [
+                [t("Items"), "netAmountMinor"],
+                [t("Tax"), "taxAmountMinor"],
+                [t("Tip"), "tipAmountMinor"],
+                [t("Service charge"), "serviceChargeAmountMinor"],
+                [t("Service charge tax"), "serviceChargeTaxAmountMinor"],
+              ] as const
+            )
+              // Only what this refund includes; the total is always the server's.
+              .filter(
+                ([, key]) => key === "netAmountMinor" || (preview.components[key] ?? "0") !== "0",
+              )
+              .map(([label, key]) => (
+                <div key={key}>
+                  <dt>{label}</dt>
+                  <dd>{amount(preview.components[key] ?? null)}</dd>
+                </div>
+              ))}
+            <div className="refund-amounts__total">
+              <dt>{t("Total")}</dt>
               <dd>{amount(preview.amountMinor)}</dd>
             </div>
           </dl>
           {previewOnMachine ? (
             <p>
-              Paid on the store&apos;s card machine. After the request is recorded
-              {preview.approvalRequired === true ? " and approved" : ""}, refund this amount on that
-              machine and record it under the request.
+              {preview.approvalRequired === true
+                ? t(
+                    "Paid on the store's card machine. After the request is recorded and approved, refund this amount on that machine and record it under the request.",
+                  )
+                : t(
+                    "Paid on the store's card machine. After the request is recorded, refund this amount on that machine and record it under the request.",
+                  )}
             </p>
           ) : sendsNow ? (
             <p>
-              Refunded to the customer&apos;s original payment method (
-              {preview.paymentAttemptReferences.length} payment(s)) as soon as you confirm: the
-              request is recorded and sent to the card provider in one step, and its answer is shown
-              here.
+              {t(
+                "Refunded to the customer's original payment method as soon as you confirm. The card provider's answer is shown here.",
+              )}
+              {preview.paymentAttemptReferences.length > 1
+                ? " " +
+                  t("This refund covers {payments} of this order.", {
+                    payments: countOf(preview.paymentAttemptReferences.length, "payment"),
+                  })
+                : ""}
             </p>
           ) : (
             <p>
-              {preview.paymentAttemptReferences.length} original payment(s). Recording this request
-              does not refund anything yet: it is sent once approved.
+              {t("Recording this request does not refund anything yet: it is sent once approved.")}
             </p>
           )}
           {preview.approvalRequired === true ? (
-            <section aria-label="Owner approval needed" className="refund-escalation">
-              <h4>Needs owner approval</h4>
+            <section aria-label={t("Owner approval needed")} className="refund-escalation">
+              <h4>{t("Needs owner approval")}</h4>
               <ul>
                 {preview.escalationReasons.map((code) => (
                   <li key={code}>{escalationReasonLabel[code]}</li>
@@ -969,52 +1324,86 @@ function RefundWizard({
               </ul>
               <p>
                 {preview.approveAlone
-                  ? "You run this business alone (sole operator), so you can approve this refund yourself in Store setup after confirming it is you. First confirm it is you; your verification lasts 15 minutes."
-                  : "An owner or finance member who is not you must approve this refund in person. First confirm it is you; your verification lasts 15 minutes."}
+                  ? t(
+                      "You run this business alone, so you can approve this refund yourself on the Approvals page after confirming it is you. First confirm it is you; your verification lasts 15 minutes.",
+                    )
+                  : t(
+                      "An owner or finance member who is not you must approve this refund in person. First confirm it is you; your verification lasts 15 minutes.",
+                    )}
               </p>
               <StepUpVerification
                 purpose="RefundRequest"
                 csrf={csrf}
                 verifiedUntil={verifiedUntil}
                 onVerified={setVerifiedUntil}
-                label="Verify with your authenticator"
+                label={t("Verify with your authenticator")}
               />
             </section>
           ) : null}
-          <label>
+          <label className="refund-confirm">
             <input
               type="checkbox"
               checked={confirmed}
               disabled={locked}
               onChange={(event) => setConfirmed(event.target.checked)}
             />
-            I confirm the selected quantities, reason and {amount(preview.amountMinor)}{" "}
-            {sendsNow ? "refund" : "request"}.
+            <span>
+              {sendsNow
+                ? t("I confirm the selected quantities, reason and {amount} refund.", {
+                    amount: amount(preview.amountMinor),
+                  })
+                : t("I confirm the selected quantities, reason and {amount} request.", {
+                    amount: amount(preview.amountMinor),
+                  })}
+            </span>
           </label>
           <button
+            type="button"
+            className="refund-primary"
             disabled={
               !confirmed || locked || (preview.approvalRequired === true && !verificationCurrent())
             }
             onClick={() => void submit()}
           >
             {preview.approvalRequired === true
-              ? "Record request for owner approval"
+              ? t("Record request for owner approval")
               : sendsNow
-                ? `Send ${amount(preview.amountMinor)} refund`
-                : "Record refund request"}
+                ? t("Send {amount} refund", { amount: amount(preview.amountMinor) })
+                : t("Record refund request")}
           </button>
         </section>
       ) : null}
+      <p ref={status} tabIndex={-1} role="status" className="refund-status">
+        {state === "Busy"
+          ? runStep
+            ? refundRunProgressText(runStep)
+            : items === null
+              ? t("Loading…")
+              : t("Working…")
+          : message}
+      </p>
       {state === "Unknown" ? (
-        <button onClick={() => void submit()}>{refundRunRetryLabel("Request")}</button>
+        <button type="button" className="refund-primary" onClick={() => void submit()}>
+          {refundRunRetryLabel("Request")}
+        </button>
       ) : null}
       {runFailure !== null && state === "Recorded" ? (
-        <button onClick={() => void submit()}>{refundRunRetryLabel(runFailure.step)}</button>
+        <button type="button" className="refund-primary" onClick={() => void submit()}>
+          {refundRunRetryLabel(runFailure.step)}
+        </button>
       ) : null}
       {signIn && state !== "Busy" ? <FullSignInPrompt csrf={csrf} /> : null}
-      <p ref={status} tabIndex={-1} role="status">
-        {state === "Busy" ? (runStep ? refundRunProgressText(runStep) : "Working…") : message}
-      </p>
+      {requestable && state === "Recorded" && !showRequests ? refresh : null}
+      {sections.startAnother ? (
+        <button
+          type="button"
+          className="refund-text refund-another"
+          disabled={preparing.size > 0}
+          onClick={startAnother}
+        >
+          {t("Start another refund request")}
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -1037,7 +1426,7 @@ export function nextFinancialSummary(
     | { readonly kind: "Failed"; readonly message: string },
 ): FinancialSummaryState {
   if (event.kind === "Rereading")
-    return { context: state.context, busy: true, message: "Updating payment amounts…" };
+    return { context: state.context, busy: true, message: t("Updating payment amounts…") };
   if (event.kind === "Read") return { context: event.context, busy: false, message: "" };
   return { context: null, busy: false, message: event.message };
 }
@@ -1082,45 +1471,64 @@ export function PaymentFinancialSummary({
   }, [initial.paymentIntentReference, csrf, revision, refresh]);
   return (
     <>
-      <button disabled={busy} onClick={() => setRefresh((value) => value + 1)}>
-        Refresh payment amounts
-      </button>
-      <p role="status">{message}</p>
       {context ? (
         <section
-          aria-label="Payment financial summary"
+          aria-labelledby="payment-summary-heading"
           aria-busy={busy}
           data-screen-id="PAY-PAYMENT-DETAIL"
+          className="refund-summary"
         >
-          <h2>Payment financial summary</h2>
-          <p>Payment state: {paymentStateLabel(context)}</p>
-          {context.paymentMethod === "CardMachine" ? (
-            <p>
-              Paid on the store&apos;s card machine. Its refunds are made on that machine and
-              recorded here; they count on the day they are made.
-            </p>
-          ) : null}
+          <h2 id="payment-summary-heading" className="visually-hidden">
+            {t("Payment summary")}
+          </h2>
           <dl>
             <div>
-              <dt>Paid</dt>
+              <dt>{t("State")}</dt>
+              <dd>{paymentStateLabel(context)}</dd>
+            </div>
+            <div>
+              <dt>{t("Paid")}</dt>
               <dd>{amount(context.capturedAmountMinor)}</dd>
             </div>
             <div>
-              <dt>Confirmed refunds</dt>
+              <dt>{t("Refunded")}</dt>
               <dd>{amount(context.confirmedRefundMinor)}</dd>
             </div>
             <div>
-              <dt>Pending refunds</dt>
+              <dt>{t("Being refunded")}</dt>
               <dd>{amount(context.pendingRefundMinor)}</dd>
             </div>
           </dl>
-          <p>
-            Last checked <SourceTime instant={context.observedAt} />
-          </p>
+          {context.paymentMethod === "CardMachine" ? (
+            <p className="refund-summary__note">
+              {t(
+                "Paid on the store's card machine. Its refunds are made on that machine and recorded here; they count on the day they are made.",
+              )}
+            </p>
+          ) : null}
         </section>
       ) : (
-        <p>Payment amounts are unavailable until refreshed.</p>
+        <p>{t("Payment amounts could not be shown. Refresh to try again.")}</p>
       )}
+      <div className="refund-summary__foot">
+        <p role="status">
+          {message ||
+            (context ? (
+              <>
+                {t("Last checked")} <SourceTime instant={context.observedAt} />
+              </>
+            ) : null)}
+        </p>
+        <button
+          type="button"
+          className="refund-text"
+          disabled={busy}
+          aria-label={t("Refresh payment amounts")}
+          onClick={() => setRefresh((value) => value + 1)}
+        >
+          {t("Refresh")}
+        </button>
+      </div>
     </>
   );
 }
@@ -1243,33 +1651,39 @@ export function PendingCardMachineRefunds({
   return (
     <section
       aria-labelledby="card-machine-refunds-heading"
-      className="card-machine-refunds-to-record"
+      className="card-machine-refunds-to-record refund-requests"
     >
-      <h2 id="card-machine-refunds-heading">Refunds to make on the card machine</h2>
+      <h2 id="card-machine-refunds-heading">{t("Refunds to make on the card machine")}</h2>
       {notice !== null ? <p role="status">{notice}</p> : null}
       {message !== "" ? (
         <div role="status">
           <p>{message}</p>
-          <button onClick={() => setReload((value) => value + 1)}>
-            Check refunds to record again
+          <button
+            type="button"
+            className="refund-text"
+            onClick={() => setReload((value) => value + 1)}
+          >
+            {t("Try again")}
           </button>
         </div>
       ) : null}
       {refunds !== null && refunds.length > 0 ? (
         <ul>
-          {refunds.map(({ entry, amountMinor, approval }) => {
-            const label = `Record the card-machine refund for request ${entry.claimVersion} (${amount(amountMinor)})`;
-            return (
-              <li key={entry.requestReference}>
-                <p>
-                  Request {entry.claimVersion}: {amount(amountMinor)} ·{" "}
-                  {describeRefundReason(entry.reasonCode)} · requested{" "}
-                  <SourceTime instant={entry.requestedAt} />
-                </p>
+          {refunds.map(({ entry, amountMinor, approval }) => (
+            <li key={entry.requestReference} className="refund-request">
+              <RequestRow
+                entry={entry}
+                amountMinor={amountMinor}
+                tone={requestTone(entry, approval?.state ?? null)}
+                state={requestProgressLabel(
+                  entry.progress,
+                  entry.paymentMethod,
+                  approval?.state ?? null,
+                )}
+              >
                 {approval?.state === "AwaitingApproval" ? (
                   <p>
-                    Waiting for an owner&apos;s approval before it is refunded on the card machine.{" "}
-                    <Link to="/app/approvals">Open approvals</Link>
+                    <Link to="/app/approvals">{t("Open Approvals")}</Link>
                   </p>
                 ) : open === entry.requestReference ? (
                   <CardMachineRequestRefund
@@ -1288,17 +1702,19 @@ export function PendingCardMachineRefunds({
                   />
                 ) : (
                   <button
+                    type="button"
+                    className="refund-text"
                     onClick={() => {
                       setNotice(null);
                       setOpen(entry.requestReference);
                     }}
                   >
-                    {label}
+                    {t("Record the {amount} card-machine refund", { amount: amount(amountMinor) })}
                   </button>
                 )}
-              </li>
-            );
-          })}
+              </RequestRow>
+            </li>
+          ))}
         </ul>
       ) : null}
     </section>
@@ -1318,30 +1734,58 @@ function PaymentContent({
   const [financialRevision, setFinancialRevision] = useState(0);
   const refreshFinancial = useCallback(() => setFinancialRevision((value) => value + 1), []);
   const [context, setContext] = useState<Context | null>(null),
-    [message, setMessage] = useState("Loading payment…"),
+    [loading, setLoading] = useState(true),
+    [message, setMessage] = useState(""),
     [refresh, setRefresh] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setContext(null);
-    setMessage("Loading payment…");
+    setLoading(true);
+    setMessage("");
     void client
       .context(paymentIntentReference, csrf, controller.signal)
       .then((result) => {
         if (!controller.signal.aborted) {
           setContext(result);
-          setMessage("");
+          setLoading(false);
         }
       })
       .catch((error) => {
-        if (!controller.signal.aborted) setMessage(errorMessage(error));
+        if (!controller.signal.aborted) {
+          setMessage(errorMessage(error));
+          setLoading(false);
+        }
       });
     return () => controller.abort();
   }, [paymentIntentReference, csrf, refresh]);
   return (
-    <WorkspacePage title="Payment" meta={storeLabel}>
-      <p role="status">{message}</p>
+    <WorkspacePage
+      className="refund-page"
+      title={wizard ? t("Refund") : t("Payment")}
+      meta={storeLabel}
+      back={
+        context ? (
+          <Link to={"/operations/orders/" + context.orderReference}>
+            <span aria-hidden="true">←</span> {t("Back to order")}
+          </Link>
+        ) : null
+      }
+    >
       {!context ? (
-        <button onClick={() => setRefresh((value) => value + 1)}>Refresh payment</button>
+        <>
+          <p role="status" className="refund-status">
+            {loading ? t("Loading payment…") : message}
+          </p>
+          {loading ? null : (
+            <button
+              type="button"
+              className="refund-text"
+              onClick={() => setRefresh((value) => value + 1)}
+            >
+              {t("Refresh payment")}
+            </button>
+          )}
+        </>
       ) : (
         <>
           <PaymentFinancialSummary
@@ -1358,16 +1802,24 @@ function PaymentContent({
             />
           ) : null}
           {context.paymentState !== "Captured" ? (
-            <p>A refund can be requested once this payment is paid.</p>
+            <p>{t("A refund can be requested once this payment is paid.")}</p>
           ) : !wizard && context.canRequest && refundableMinor(context) > 0n ? (
-            <Link to={"/app/operations/payments/" + paymentIntentReference + "/refund"}>
-              Start refund request
-            </Link>
+            <p className="refund-start">
+              <Link
+                className={
+                  BigInt(context.pendingRefundMinor ?? "0") > 0n ? "refund-text" : "refund-primary"
+                }
+                to={"/app/operations/payments/" + paymentIntentReference + "/refund"}
+              >
+                {t("Start a refund")}
+              </Link>
+            </p>
           ) : (
             <RefundWizard
               onFinancialChange={refreshFinancial}
               key={context.orderReference}
               orderReference={context.orderReference}
+              paymentIntentReference={paymentIntentReference}
               csrf={csrf}
               blockedMessage={requestBlockedMessage(context)}
             />

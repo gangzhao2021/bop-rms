@@ -1,4 +1,5 @@
 import { needsFullSignIn } from "./full-sign-in.js";
+import { t } from "./i18n/i18n.js";
 import { OrdinaryRefundClientError } from "./ordinary-refund-client.js";
 import {
   OrdinaryRefundExecutionError,
@@ -252,19 +253,19 @@ export type RefundRun<R extends RefundRunRequest> = ReturnType<typeof createRefu
 /** What staff see while a step runs. */
 export function refundRunProgressText(step: RefundRunStep): string {
   return step === "Request" || step === "Prepare"
-    ? "Recording refund…"
+    ? t("Recording refund…")
     : step === "Send"
-      ? "Sending to the card provider…"
-      : "Checking the card provider's answer…";
+      ? t("Sending to the card provider…")
+      : t("Checking the card provider's answer…");
 }
 
 /** The retry button for a run that stopped at this step. */
 export function refundRunRetryLabel(step: RefundRunStep): string {
   return step === "Request"
-    ? "Retry same refund request"
+    ? t("Retry same refund request")
     : step === "Check"
-      ? "Check the card provider's answer again"
-      : "Continue sending this refund";
+      ? t("Check the card provider's answer again")
+      : t("Continue sending this refund");
 }
 
 /** Whether the failed step may have had an effect the server has not confirmed. */
@@ -285,8 +286,8 @@ export function refundRunFailureText(error: RefundRunError): string {
   const cause = error.cause;
   if (needsFullSignIn(cause))
     return error.step === "Check"
-      ? "The refund was sent. Confirm your sign-in, then check the card provider's answer again."
-      : "Confirm your sign-in, then continue sending this refund. Nothing was sent twice.";
+      ? t("The refund was sent. Confirm your sign-in, then check the card provider's answer again.")
+      : t("Confirm your sign-in, then continue sending this refund. Nothing was sent twice.");
   const uncertain = refundRunUncertain(error);
   const code =
     cause instanceof OrdinaryRefundPreparationClientError ||
@@ -295,22 +296,40 @@ export function refundRunFailureText(error: RefundRunError): string {
       ? cause.code
       : "OutcomeUnknown";
   if (error.step === "Check")
-    return "The refund was sent to the card provider, but its answer could not be checked yet. The amount stays set aside until it answers. Check again.";
+    return t(
+      "The refund was sent to the card provider, but its answer could not be checked yet. The amount stays set aside until it answers. Check again.",
+    );
   if (error.step === "Prepare")
     return uncertain
-      ? "The refund request is recorded, but getting it ready to send was not confirmed. Nothing has been sent to the card provider. Continue sending this refund: it is never sent twice."
+      ? t(
+          "The refund request is recorded, but getting it ready to send was not confirmed. Nothing has been sent to the card provider. Continue sending this refund: it is never sent twice.",
+        )
       : code === "PermissionDenied" || code === "Denied"
-        ? "The refund request is recorded but was not sent: your permissions do not allow sending refunds, or this refund needs an owner's approval. Ask a manager to check it."
+        ? t(
+            "The refund request is recorded but was not sent: your permissions do not allow sending refunds, or this refund needs an owner's approval. Ask a manager to check it.",
+          )
         : code === "Conflict"
-          ? "The refund request is recorded but was not sent: it changed on another screen. Check the request's status below before sending."
-          : "The refund request is recorded but was not sent: sending refunds is not set up for this store. Contact BOP support.";
+          ? t(
+              "The refund request is recorded but was not sent: it changed on another screen. Check where the request stands before sending.",
+            )
+          : t(
+              "The refund request is recorded but was not sent: sending refunds is not set up for this store. Contact BOP support.",
+            );
   if (error.step === "Send")
     return uncertain
-      ? "It is not confirmed that the card provider received this refund. Continue sending this refund: the same refund is reused and the customer is never refunded twice. If the card provider or the internet is down, the refund stays recorded here as not sent: open this order again once it is back and send it then."
+      ? t(
+          "It is not confirmed that the card provider received this refund. Continue sending this refund: the same refund is reused and the customer is never refunded twice. If the card provider or the internet is down, the refund stays recorded here as not sent: open this order again once it is back and send it then.",
+        )
       : code === "PermissionDenied" || code === "Denied"
-        ? "The refund was not sent: your session or permissions no longer allow sending refunds. Sign in again, then continue."
-        : "The refund was not sent: sending refunds is not set up for this store. Contact BOP support.";
+        ? t(
+            "The refund was not sent: your session or permissions no longer allow sending refunds. Sign in again, then continue.",
+          )
+        : t(
+            "The refund was not sent: sending refunds is not set up for this store. Contact BOP support.",
+          );
   return uncertain
-    ? "The refund request result is unknown. Retry the same request; do not start another refund."
-    : "The refund request was not recorded.";
+    ? t(
+        "The refund request result is unknown. Retry the same request; do not start another refund.",
+      )
+    : t("The refund request was not recorded.");
 }
