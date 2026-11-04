@@ -634,8 +634,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Some payment attempts still need a final result.": "有些付款尝试仍在等待最终结果。",
   "Someone joined with this code. For someone else, make another code.":
     "已有人用这个代码加入。如还有其他人，请再生成一个代码。",
-  "Someone joining you? Make a code on this phone. They scan the QR code on the table, then enter the code to order with you.":
-    "有人要和你一起点单？在这部手机上生成邀请码，对方扫描桌上的二维码后输入邀请码，就能和你一起点单。",
+  "People at your table just scan the QR code on the table. If that is paused, make a code here for them to enter.":
+    "同桌的人扫桌上的二维码就能加入。如果扫码被暂停，可以在这里生成邀请码给他们。",
   "Something in your cart can’t be ordered as selected. Review your cart, then refresh.":
     "你购物车里有东西不能按所选方式下单。请检查购物车后刷新。",
   Sponsored: "赞助",

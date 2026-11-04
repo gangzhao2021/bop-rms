@@ -686,7 +686,9 @@ export function DiningSessionWorkspace({
               : row,
           ),
         );
-        if (done.joinCredential)
+        // Owner decision 1: after opening, guests just scan the table's QR code. A code is only
+        // needed while joining by scan is paused, and staff make one then with New join code.
+        if (done.joinCredential && !opened)
           setCode({ table: table.tableReference, value: done.joinCredential });
         operation.current = null;
         setUnknownAction(null);
@@ -694,7 +696,7 @@ export function DiningSessionWorkspace({
         setResult({
           text: done.joinCredential
             ? opened
-              ? t("Table {table} is open. Give the guests the join code below.", {
+              ? t("Table {table} is open. Guests scan the QR code on the table to join.", {
                   table: saidTable(table.stableLabel),
                 })
               : t("Table {table} has a new join code; the old one no longer works.", {
@@ -1106,8 +1108,6 @@ export function DiningSessionWorkspace({
     >
       {/* WP-2423 item 8 ③ follow-up: guests' last orders coming, or passed (staff still can). */}
       <LastOrdersNotice timeZone={timeZone} />
-      {/* WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff". */}
-      {csrf ? <RoundHoldSettingControl csrf={csrf} locked={locked} /> : null}
       {stale ? <StaleReadNotice stale={stale} /> : null}
       {/* Operating continuity: what servers do while the page can't reach the store system. */}
       {stale ? <TablesOfflineGuide /> : null}
@@ -1256,6 +1256,14 @@ export function DiningSessionWorkspace({
         <p role="status" className="dining-floor-message">
           {message}
         </p>
+      ) : null}
+      {/* WP-2423 item 8 ⑤ decision 5: the Store's "a new phone's first round waits for staff". A
+          setting, so it sits below the tables staff work with. */}
+      {csrf ? (
+        <details className="table-settings">
+          <summary>{t("Table settings")}</summary>
+          <RoundHoldSettingControl csrf={csrf} locked={locked} />
+        </details>
       ) : null}
     </WorkspacePage>
   );

@@ -127,7 +127,7 @@ describe("WP-2423 DEC-DINING-GUEST-INVITATION panel", () => {
   it("offers the host a code in plain words", () => {
     const html = render({ status: "ready" });
     expect(html).toContain("Invite someone at your table");
-    expect(html).toContain("They scan the QR code on the table, then enter the code");
+    expect(html).toContain("just scan the QR code on the table");
     expect(html).toContain(">Make a code</button>");
   });
 

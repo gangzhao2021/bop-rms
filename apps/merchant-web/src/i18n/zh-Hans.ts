@@ -1613,8 +1613,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "我确认已将 {quantity} × {displayName} 送到桌台 {tableLabel}",
   "I have identified the selected guest and confirm the host transfer":
     "我已确认所选顾客身份，并确认转让主持人",
-  "I have reviewed this confirmed refund and reconciled this case":
-    "我已核对这笔退款",
+  "I have reviewed this confirmed refund and reconciled this case": "我已核对这笔退款",
   "I matched this order, the person collecting it and every item shown":
     "我已核对这笔订单、取餐人以及显示的每一件商品",
   "I run this business on my own": "我独自经营这家店",
@@ -2364,6 +2363,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Often ordered": "常点",
   "No dish matches “{query}”.": "没有找到“{query}”。",
   "Change {name}": "修改 {name}",
+  "Table settings": "桌台设置",
   "Only opens the kitchen, not orders, refunds or settings.": "只开后厨，不含订单、退款和设置。",
   "On this Store's menu": "在本店菜单上",
   "On {value}.": "用于{value}。",
@@ -3778,7 +3778,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start a new dining session for this party.": "为这桌客人开始新的堂食会话。",
   "Start a revision": "开始修订",
   "Start a session when a party sits down and give them the join code. Their orders and payments are on the Orders page.":
-    "客人入座时开始会话，并把入桌码给他们。他们的订单和付款在订单页。",
+    "客人入座时开台，客人扫桌上的二维码加入。他们的订单和付款在订单页。",
   "Start count": "开始盘点",
   "Start counting": "开始清点",
   "Start dining session": "开始堂食会话",
@@ -6047,8 +6047,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Stop the phone payment": "停止手机付款",
   "Guest's phone": "客人手机",
   "Paid at the table · guest's phone": "已在桌上付清 · 客人手机",
-  "Table {table} is open. Give the guests the join code below.":
-    "{table} 号桌已开台。把下面的入桌码给客人。",
+  "Table {table} is open. Guests scan the QR code on the table to join.":
+    "{table} 号桌已开台。客人扫桌上的二维码就能加入。",
   "Table {table} has a new join code; the old one no longer works.":
     "{table} 号桌已换新入桌码，旧码不能再用。",
   "The request already completed. Its code cannot be displayed again. Replace the join code to get a new one.":

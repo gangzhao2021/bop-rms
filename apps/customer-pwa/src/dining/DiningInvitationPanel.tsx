@@ -206,10 +206,10 @@ export function DiningInvitationView({
         <>
           <p>
             {t(
-              "Someone joining you? Make a code on this phone. They scan the QR code on the table, then enter the code to order with you.",
+              "People at your table just scan the QR code on the table. If that is paused, make a code here for them to enter.",
             )}
           </p>
-          {makeButton(state.status === "issuing" ? t("Making a code…") : t("Make a code"))}
+          {makeButton(state.status === "issuing" ? t("Making a code…") : t("Make a code"), true)}
         </>
       ) : null}
       {state.status === "issued" ? (

@@ -261,7 +261,7 @@ test.describe("@production guests invite each other at the table", () => {
     await goTo(host.page, "/dine-in/session");
     const invite = host.page.getByRole("region", { name: "Invite someone at your table" });
     await expect(invite).toBeVisible();
-    await expect(invite.getByText("They scan the QR code on the table")).toBeVisible();
+    await expect(invite.getByText("scan the QR code on the table")).toBeVisible();
     const make = invite.getByRole("button", { name: "Make a code" });
     expect((await make.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await make.click();

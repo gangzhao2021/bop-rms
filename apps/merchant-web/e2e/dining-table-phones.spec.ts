@@ -297,6 +297,7 @@ test("@production a round waiting for staff needs action; staff send it or cance
   await expect(
     page.getByText("first round from a new phone", { exact: false }).first(),
   ).toBeVisible();
+  await page.getByText("Table settings", { exact: true }).click();
   const settingBox = page.getByRole("checkbox", {
     name: "A new phone's first round waits for staff OK before the kitchen",
   });

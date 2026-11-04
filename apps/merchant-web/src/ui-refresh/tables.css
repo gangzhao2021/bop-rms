@@ -1390,3 +1390,16 @@
   align-items: center;
   color: inherit;
 }
+
+/* A setting, not daily work: closed, below the tables. */
+.table-settings {
+  margin-top: 32px;
+  font-size: 14px;
+}
+.table-settings > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--bop-color-accent);
+  cursor: pointer;
+}
