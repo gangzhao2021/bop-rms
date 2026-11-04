@@ -7,7 +7,14 @@
 
 .counter-order .counter-order__layout {
   grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
+  /* The menu spans both rows: its extra height goes under the charge, not between the two. */
+  grid-template-rows: auto 1fr;
   gap: 32px;
+}
+/* Once sent, the order is settled: what is left to do is the charge. */
+.counter-order__layout:has(.counter-order__charge) .counter-order__tip,
+.counter-order__layout:has(.counter-order__charge) .counter-order__paper {
+  display: none;
 }
 .counter-order__hidden-heading {
   position: absolute;
@@ -526,6 +533,15 @@
 .counter-order .counter-order__charge .card-actions {
   display: flex;
 }
+.workspace-page .store-card.counter-order__charge dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.workspace-page .store-card.counter-order__charge dl dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
 .workspace-page .store-card.counter-order__charge dl div:last-child {
   font-size: 16px;
 }
@@ -566,6 +582,7 @@
 @media (max-width: 900px) {
   .counter-order .counter-order__layout {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
   }
   .counter-order__layout:not(:has(.counter-order__charge)) .counter-order__ticket {
     position: static;
