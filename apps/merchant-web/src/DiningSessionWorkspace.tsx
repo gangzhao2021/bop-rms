@@ -1225,7 +1225,11 @@ export function DiningSessionWorkspace({
                   if (text !== "") setResult({ text });
                 });
               }}
-              onSettled={(message) => setResult({ text: message })}
+              onSettled={(message) => {
+                setResult({ text: message });
+                // The table's row says paid right away, not at the next read.
+                void loadRef.current(false, true);
+              }}
               onReread={reread}
               onChanged={() => {
                 setCheckoutRevision((value) => value + 1);

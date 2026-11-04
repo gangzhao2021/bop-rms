@@ -344,8 +344,8 @@ test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying 
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
 
-// A phone joined after the table was shown: the refused start reads the table again, so the next
-// tap succeeds as a new operation at the new version (live check 2026-11-03: it stayed refused).
+// A phone joined after the table was shown: the refused start reads the table again and tries once
+// more as a new operation at the new version (live check 2026-11-03: it took a second tap).
 test("@production staff can start checkout after a phone joined the table", async ({ page }) => {
   const state: { phase: "Active" | "Closing"; version: number } = { phase: "Active", version: 6 };
   await floor(page, state);
@@ -377,16 +377,9 @@ test("@production staff can start checkout after a phone joined the table", asyn
   await expect(start).toBeVisible();
   state.version = 7;
   await start.click();
-  await expect.poll(() => closing.length).toBe(1);
-  await expect(page.getByText("This table changed since it was shown.")).toBeVisible();
-
-  await expect(start).toBeEnabled();
-  await expect
-    .poll(async () => {
-      await start.click();
-      return closing.length;
-    })
-    .toBeGreaterThan(1);
+  // No second tap and no message: the refusal was only about the phone that joined.
+  await expect.poll(() => closing.length).toBe(2);
+  await expect(page.getByText("This table changed since it was shown.")).toHaveCount(0);
   await expect(checkout.getByText("Round 1")).toBeVisible();
   const last = closing.at(-1) as Record<string, unknown>;
   expect(last).toMatchObject({ action: "Begin", expectedSessionVersion: 7 });

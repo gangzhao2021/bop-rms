@@ -231,8 +231,15 @@ export function TableCheckout({
     (method === "CardMachine" ? slipValid : change !== null && change >= 0n) &&
     (!paper || paperInstant !== null);
 
-  const start = async () => {
-    if (busy || locked) return;
+  // A phone joining changes the table's version without changing the bill, so a refusal for that
+  // alone is not staff's to deal with: read the table and try once more with its new version. The
+  // server still checks the table on that try. If nothing newer arrives, staff are told.
+  const [beginRetry, setBeginRetry] = useState<{
+    readonly from: number;
+    readonly problem: string;
+  } | null>(null);
+  const start = async (retrying = false) => {
+    if ((busy || locked) && !retrying) return;
     setBusy(true);
     setProblem(null);
     beginOperation.current ??= serviceOperationReference();
@@ -247,17 +254,37 @@ export function TableCheckout({
         .execute(csrf);
       beginOperation.current = null;
       onChanged();
+      setBusy(false);
     } catch (error) {
       // As for cancelling: a refused try reads the table again, so the next one can succeed.
       if (!(error instanceof DiningSessionCloseClientError && error.code === "OutcomeUnknown"))
         beginOperation.current = null;
-      setProblem(errorText(error));
       if (error instanceof DiningSessionCloseClientError && error.code !== "OutcomeUnknown")
         onChanged();
-    } finally {
+      if (error instanceof DiningSessionCloseClientError && error.code === "Conflict" && !retrying) {
+        setBeginRetry({ from: session.version, problem: errorText(error) });
+        return;
+      }
+      setProblem(errorText(error));
       setBusy(false);
     }
   };
+  const startRef = useRef(start);
+  startRef.current = start;
+  useEffect(() => {
+    if (beginRetry === null) return;
+    if (session.version !== beginRetry.from) {
+      setBeginRetry(null);
+      void startRef.current(true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setBeginRetry(null);
+      setProblem(beginRetry.problem);
+      setBusy(false);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [beginRetry, session.version]);
 
   // DEC-DINE-IN-PAY-LATER (rule 3): the guests want more after asking for the bill — back to
   // ordering, recorded with who did it. Only while nothing is paid.
