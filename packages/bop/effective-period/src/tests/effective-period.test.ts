@@ -289,6 +289,36 @@ describe("effective period time contract", () => {
     expect(winter.effectiveFrom.utcOffsetMinutes).toBe(-300);
   });
 
+  it("builds one formatter per time zone; a bad zone is still refused every time", () => {
+    const Real = Intl.DateTimeFormat;
+    let built = 0;
+    Intl.DateTimeFormat = function (...args: ConstructorParameters<typeof Real>) {
+      built += 1;
+      return new Real(...args);
+    } as typeof Real;
+    const inZone = (timeZone: string) =>
+      createEffectivePeriod({
+        timeZone,
+        effectiveFrom: {
+          instant: parseEffectivePeriodInstant("2026-01-15T03:00:00.000Z"),
+          localDateTime: "2026-01-15T12:00:00.000",
+          utcOffsetMinutes: 540,
+        },
+        effectiveUntil: null,
+      });
+    try {
+      inZone("Asia/Tokyo");
+      const first = built;
+      inZone("Asia/Tokyo");
+      inZone("Asia/Tokyo");
+      expect(built).toBe(first);
+      expect(() => inZone("Not/AZone")).toThrow(EffectivePeriodContractError);
+      expect(() => inZone("Not/AZone")).toThrow(EffectivePeriodContractError);
+    } finally {
+      Intl.DateTimeFormat = Real;
+    }
+  });
+
   it("rejects invalid zones, offset mismatch, and DST gaps", () => {
     for (const input of [
       {

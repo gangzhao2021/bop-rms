@@ -12,6 +12,10 @@ import {
   setUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 
+const scanRetryWaitsMs = Object.freeze([
+  ...guestReadRetryWaitsMs,
+  ...Array<number>(10).fill(3_000),
+]);
 const compactTokenPattern = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
 const uuidV7Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const localePattern = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
@@ -482,7 +486,8 @@ export function createCustomerEntryClient(
     try {
       let answer = await receive(current);
       // WP-2423: a 503 issued nothing, so a scan in a burst is tried again before the guest sees it.
-      for (const ms of guestReadRetryWaitsMs) {
+      // Owner 2026-11-04: nor is a Store busy for half a minute (a menu being listed) an error yet.
+      for (const ms of scanRetryWaitsMs) {
         if (answer.status !== 503) break;
         await new Promise((resolve) => setTimeout(resolve, ms));
         if (!online() || !current()) throw new Error("entry unavailable");

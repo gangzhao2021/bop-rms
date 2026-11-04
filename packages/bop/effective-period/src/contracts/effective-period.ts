@@ -200,6 +200,33 @@ export function sameEffectiveScope(left: EffectiveScope, right: EffectiveScope):
   );
 }
 
+/**
+ * Owner 2026-11-04: building a formatter is slow (about 40% of the time spent listing a menu, which
+ * makes one per recipe rule). A formatter never changes, so each valid time zone keeps its own.
+ */
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+function zoneFormatter(timeZone: string): Intl.DateTimeFormat {
+  const known = zoneFormatters.get(timeZone);
+  if (known !== undefined) return known;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+      hourCycle: "h23",
+    });
+    zoneFormatters.set(timeZone, formatter);
+    return formatter;
+  } catch {
+    return fail("EFFECTIVE_PERIOD_TIME_INVALID");
+  }
+}
+
 function createBoundary(input: ZonedBoundary, timeZone: string): ZonedBoundary {
   exact(input, ["instant", "localDateTime", "utcOffsetMinutes"], "EFFECTIVE_PERIOD_TIME_INVALID");
   const instantValue = canonical(input.instant, "EFFECTIVE_PERIOD_TIME_INVALID");
@@ -211,22 +238,7 @@ function createBoundary(input: ZonedBoundary, timeZone: string): ZonedBoundary {
     input.utcOffsetMinutes > 840
   )
     fail("EFFECTIVE_PERIOD_TIME_INVALID");
-  let formatter: Intl.DateTimeFormat;
-  try {
-    formatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      fractionalSecondDigits: 3,
-      hourCycle: "h23",
-    });
-  } catch {
-    return fail("EFFECTIVE_PERIOD_TIME_INVALID");
-  }
+  const formatter = zoneFormatter(timeZone);
   const parts = Object.fromEntries(
     formatter
       .formatToParts(new Date(instantValue))

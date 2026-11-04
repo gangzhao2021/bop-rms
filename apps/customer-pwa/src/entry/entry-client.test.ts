@@ -542,7 +542,14 @@ describe("entry response ownership and bounded delivery", () => {
         messageKey,
         recovery: { action, storeSelection: "Hidden" },
       };
-      await expect(client(async () => response(status, error)).start()).resolves.toEqual({ kind });
+      // A 503 is asked again for about half a minute before the guest is told.
+      vi.useFakeTimers();
+      const fetcher = vi.fn(async () => response(status, error));
+      const answer = client(fetcher).start();
+      await vi.runAllTimersAsync();
+      await expect(answer).resolves.toEqual({ kind });
+      expect(fetcher).toHaveBeenCalledTimes(status === 503 ? 13 : 1);
+      vi.useRealTimers();
       await expect(client(async () => response(200, error)).start()).resolves.toEqual({
         kind: "ServiceUnavailable",
       });
