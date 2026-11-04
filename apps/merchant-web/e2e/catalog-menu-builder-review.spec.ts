@@ -7,8 +7,8 @@ test("@production CAT-MENU-BUILDER fails closed without a session at 1440/390/32
   page,
 }) => {
   await page.goto(`/app/commerce/menus/${MENU_REFERENCE}`);
-  await expect(page.getByRole("heading", { name: "Menus" })).toBeVisible();
-  await expect(page.getByText("Menus are unavailable.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in required" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Menus" })).toHaveCount(0);
   await expect(page.getByText("Synthetic mains")).toHaveCount(0);
   await expect(page.getByText("menuReference")).toHaveCount(0);
   for (const width of [1440, 390, 320]) {

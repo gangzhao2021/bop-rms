@@ -648,3 +648,23 @@ test("@production DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: a manager adds someone
   await expect(card(page, "People from your other stores")).toHaveCount(0);
   await expect(page.getByText("Kai Cook", { exact: true }).first()).toBeVisible();
 });
+
+test("@production every staff page opened without a Session offers the sign-in", async ({
+  page,
+}) => {
+  await session(page, { value: false });
+  for (const path of [
+    "/operations/order-exceptions",
+    "/operations/order-entry",
+    "/app/approvals",
+    "/app/reports/operations",
+    "/app/commerce/availability",
+    "/app/organization/stores/018f7f9a-ad3e-7a11-8d01-000000000003/service",
+    "/operations/kitchen",
+  ]) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { name: "Sign in required" }), path).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in" }), path).toBeVisible();
+    await expect(page.getByText("A current merchant session"), path).toHaveCount(0);
+  }
+});

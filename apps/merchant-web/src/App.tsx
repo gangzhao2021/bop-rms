@@ -26,7 +26,6 @@ import { StaffSwitchPage } from "./StaffSwitchPage.js";
 import { StaffSignInPage } from "./StaffSignInPage.js";
 import { StepUpCompletePage } from "./StepUpCompletePage.js";
 import { pilotHiddenRedirect } from "./pilot-routes.js";
-import { isOperationalScreen } from "./staff-session.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { StoreBusinessDayProvider } from "./StoreBusinessDay.js";
 import { MerchantShell } from "./MerchantShell.js";
@@ -2196,11 +2195,14 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       <PageChunkBoundary resetKey={pathname}>{routeTree}</PageChunkBoundary>
     );
   // WP-2423 Q18: a staff page opened without a Session offers the sign-in that works here.
-  const staffPage =
-    pathname !== "/operations/kitchen/start" &&
-    (isOperationalScreen(pathname) || pathname.startsWith("/app/operations/"));
   // Pages shown without a sign-in, or in the sign-in window: no session watch, no store warnings.
   const sessionless = sessionlessPaths.has(pathname);
+  const staffPage =
+    !sessionless &&
+    pathname !== "/operations/kitchen/start" &&
+    // Brand administration holds a Session of its own, with or without a Store.
+    !pathname.startsWith("/app/organization/brands") &&
+    (pathname.startsWith("/operations/") || /^\/app\/./u.test(pathname));
   return (
     <StoreTimeZoneContext.Provider
       value={state.kind === "Ready" ? state.workspace.selectedScope.timeZone : undefined}
