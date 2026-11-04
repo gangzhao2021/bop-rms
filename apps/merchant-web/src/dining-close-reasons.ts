@@ -55,7 +55,7 @@ const fallback = t(
 /** DEC-DINE-IN-PAY-LATER: a table that pays once at the end pays here, with staff. */
 const payLaterTexts: Readonly<Record<string, string>> = {
   ORDER_BALANCE_UNPAID: t(
-    "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask a manager to record it there.",
+    "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask an owner or finance member to record it there.",
   ),
 };
 

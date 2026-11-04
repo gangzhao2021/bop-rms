@@ -102,7 +102,7 @@ function useOrderFacts(orderReference: string, fetcher?: typeof fetch): OrderFac
           paidMinor,
           refundableMinor:
             paidMinor === null || refundedMinor === null ? null : paidMinor - refundedMinor,
-          items: detail.lines.items.map((item) => `${item.quantity} × ${item.name}`),
+          items: sameDishesTogether(detail.lines.items),
         });
       })
       .catch(() => undefined);
@@ -112,6 +112,15 @@ function useOrderFacts(orderReference: string, fetcher?: typeof fetch): OrderFac
 }
 
 /** How long a request has waited, in the largest whole unit that reads naturally. */
+/** Owner 2026-11-04 walkthrough: eight of one dish read "8 × dish", not eight lines. */
+function sameDishesTogether(
+  items: readonly { readonly quantity: number | string; readonly name: string }[],
+): readonly string[] {
+  const quantities = new Map<string, number>();
+  for (const item of items)
+    quantities.set(item.name, (quantities.get(item.name) ?? 0) + Number(item.quantity));
+  return [...quantities].map(([name, quantity]) => `${quantity} × ${name}`);
+}
 export function waitingText(requestedAt: string, now: number): string {
   const minutes = Math.max(0, Math.floor((now - Date.parse(requestedAt)) / 60_000));
   if (minutes < 60) return t("Waiting {count} min", { count: minutes });
@@ -344,6 +353,8 @@ function ApprovalCard({
   // WP-2423 item 4: a card-machine refund is made on the store's machine once approved.
   const onMachine = entry.paymentMethod === "CardMachine";
   const machineApproved = onMachine && (entry.state === "Approved" || outcome.kind === "OnMachine");
+  // Owner 2026-11-04 walkthrough: once decided, "waiting" and "approve before" are no longer true.
+  const decided = outcome.kind === "Sent" || outcome.kind === "Declined" || machineApproved;
   const paymentDetail = "/app/operations/payments/" + (entry.paymentIntentReferences[0] ?? "");
   const paymentPage = paymentDetail + "/refund";
   return (
@@ -355,9 +366,11 @@ function ApprovalCard({
             {t("Order {orderNumber}", { orderNumber: entry.orderNumber })}
           </Link>
         </h3>
-        <p className="refund-approval-card__waiting">
-          {waitingText(entry.requestedAt, Date.now())}
-        </p>
+        {decided ? null : (
+          <p className="refund-approval-card__waiting">
+            {waitingText(entry.requestedAt, Date.now())}
+          </p>
+        )}
       </header>
       <dl>
         <div>
@@ -380,7 +393,7 @@ function ApprovalCard({
             <dd>{formatCad(facts.paidMinor.toString())}</dd>
           </div>
         )}
-        {facts?.refundableMinor == null ? null : (
+        {decided || facts?.refundableMinor == null ? null : (
           <div>
             <dt>{t("Still refundable")}</dt>
             <dd>{formatCad(facts.refundableMinor.toString())}</dd>
@@ -429,7 +442,11 @@ function ApprovalCard({
           </dd>
         </div>
       </dl>
-      {entry.canApprove && !entry.requestedByYou && !sole && entry.state === "AwaitingApproval" ? (
+      {entry.canApprove &&
+      !entry.requestedByYou &&
+      !sole &&
+      !decided &&
+      entry.state === "AwaitingApproval" ? (
         // Owner 2026-10-25: the requester's check in plain words.
         <p className="refund-approval-card__requester">
           {requesterCurrent && requesterVerifiedUntil !== null ? (
@@ -467,26 +484,6 @@ function ApprovalCard({
             {t("I checked this refund and approve it on my own")}
           </label>
         </div>
-      ) : null}
-      {entry.requestedByYou && !sole && entry.state === "AwaitingApproval" ? (
-        <p>
-          {soleOperator === "OtherApprovers"
-            ? t(
-                "Someone else holds refund approval at this store, so they must approve your request.",
-              )
-            : t("An owner or finance member who did not ask for this refund must approve it.")}
-        </p>
-      ) : null}
-      {entry.requestedByYou && !sole && outcome.kind !== "Sent" ? (
-        <StepUpVerification
-          purpose="RefundRequest"
-          csrf={csrf}
-          verifiedUntil={viewerVerifiedUntil}
-          onVerified={onViewerVerified}
-          loadServerStatus={false}
-          label={t("Verify for the owner's approval")}
-          fetcher={fetcher}
-        />
       ) : null}
       {entry.requestedByYou && !sole && entry.state === "AwaitingApproval" ? (
         <p>

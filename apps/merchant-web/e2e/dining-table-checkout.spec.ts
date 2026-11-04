@@ -336,7 +336,7 @@ test("@production DEC-DINE-IN-PAY-LATER: a table the guests left without paying 
   await page.getByRole("button", { name: "Select T2", exact: true }).click();
   const checkout = page.getByRole("region", { name: "Checkout" });
   await expect(checkout.getByRole("heading", { name: "Written off" })).toBeVisible();
-  await expect(checkout).toContainText("A manager wrote off $33.93");
+  await expect(checkout).toContainText("$33.93 was written off");
   // Nothing to take, no second decision and no way back to ordering.
   await expect(checkout.getByRole("radio", { name: "Cash" })).toHaveCount(0);
   await expect(checkout.getByRole("button", { name: "Guests left without paying" })).toHaveCount(0);

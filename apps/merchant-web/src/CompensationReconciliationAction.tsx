@@ -147,7 +147,7 @@ export function CompensationReconciliationAction({
           </p>
           {recorded ? (
             <p role="status">
-              {t("Operator acknowledgment recorded. Case closure is checked separately.")}
+              {t("Checked. This case closes on its own within a few minutes.")}
             </p>
           ) : (
             <>

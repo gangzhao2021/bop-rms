@@ -325,7 +325,7 @@ export function StoreDevicesView({
                             <button
                               type="button"
                               disabled={locked}
-                              aria-label={t("Reset {name}'s PIN", { name: row.name })}
+                              aria-label={t("Reset {name}'s PIN", { name: systemText(row.name) })}
                               onClick={() => onAsk({ kind: "Reset", person: row })}
                             >
                               {t("Reset PIN")}
@@ -520,7 +520,7 @@ export function StoreDevicesPage({
               <h2 id="store-devices-confirm-title">
                 {pending.kind === "Remove"
                   ? t("Remove {label}?", { label: pending.device.label })
-                  : t("Reset {name}'s PIN?", { name: pending.person.name })}
+                  : t("Reset {name}'s PIN?", { name: systemText(pending.person.name) })}
               </h2>
               <p>
                 {pending.kind === "Remove"

@@ -317,6 +317,12 @@
   background: var(--bop-color-surface-raised, #f2f2f2);
   color: var(--bop-color-text-muted);
 }
+.table-checkout__hint {
+  margin: 8px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
 .table-checkout__secondary {
   justify-self: start;
   min-height: 44px;

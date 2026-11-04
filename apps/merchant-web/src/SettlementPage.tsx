@@ -417,7 +417,7 @@ export function SettlementReport({
           </ul>
           <p className="bop-muted">
             {t(
-              "A manager recorded that these guests left without paying. Not collected, so not in the takings above.",
+              "These guests were recorded as leaving without paying. Not collected, so not in the takings above.",
             )}
           </p>
         </section>

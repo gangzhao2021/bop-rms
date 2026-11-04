@@ -2487,8 +2487,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Operational reporting is unavailable for this Store.": "此门店暂不提供运营报表。",
   "Operational reporting is unavailable for this scope.": "此范围暂不提供运营报表。",
   Operations: "运营",
-  "Operator acknowledgment recorded. Case closure is checked separately.":
-    "已记录操作员确认。案件是否关闭另行核查。",
+  "Checked. This case closes on its own within a few minutes.":
+    "已记下核对结果。这条会在几分钟内自动关闭。",
   Option: "选项",
   "Option names must differ.": "选项名称不能重复。",
   "Option prices": "选项价格",
@@ -5914,8 +5914,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Record payment": "记录付款",
   "Cash received · {amount}": "已收现金 · {amount}",
   "Guests left without paying": "客人未付离开",
-  "Record that the guests at table {table} left without paying {amount}? A manager decides this. It stays in the reports as written off.":
-    "确认 {table} 桌客人未付 {amount} 就离开？此项由店长决定，会作为核销留在报表中。",
+  "Record that the guests at table {table} left without paying {amount}? It is recorded under your name and stays in the reports as written off.":
+    "确认 {table} 桌客人未付 {amount} 就离开？会记在你名下，作为核销留在报表中。",
+  "Guests left without paying? An owner or finance member records it here.":
+    "客人没付钱就走了？请店主或财务人员在这里登记。",
   "Yes, they left without paying": "确认，客人未付离开",
   "Receipt for table {table}": "{table} 桌收据",
   "Cash rounding": "现金取整",
@@ -6040,11 +6042,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Dish: "菜品",
   "Points it costs": "所需积分",
   "Add this dish": "添加这道菜",
-  "The guests left without paying. A manager wrote off {amount}. The reports list it apart; it isn't counted as sales or as money received.":
-    "客人未付离开，店长已核销 {amount}。报表里单独列出，不计入销售和收款。",
+  "The guests left without paying. {amount} was written off. The reports list it apart; it isn\'t counted as sales or as money received.":
+    "客人未付离开，已核销 {amount}。报表里单独列出，不计入销售和收款。",
   "Close the table when it has been cleared.": "收拾好以后关台。",
-  "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask a manager to record it there.":
-    "这桌还没付款。请在上方的结账里收款；如果客人未付离开，请店长在那里登记。",
+  "The table hasn\'t paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask an owner or finance member to record it there.":
+    "这桌还没付款。请在上方的结账里收款；如果客人未付离开，请店主或财务人员在那里登记。",
   "1 item is still being sent to the kitchen. Check again in a moment.":
     "有 1 道菜还在送往后厨，请稍后再查看。",
   "{count} items are still being sent to the kitchen. Check again in a moment.":
@@ -6052,8 +6054,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests left without paying (written off) · {tables}": "客人未付离开（核销）· {tables}",
   "Tables written off could not be read.": "无法读取核销的桌。",
   "Guests left without paying (written off)": "客人未付离开（核销）",
-  "A manager recorded that these guests left without paying. Not collected, so not in the takings above.":
-    "店长登记了这些客人未付离开。这笔钱没有收到，所以不计入上面的收款。",
+  "These guests were recorded as leaving without paying. Not collected, so not in the takings above.":
+    "这些客人已登记为未付离开。这笔钱没有收到，所以不计入上面的收款。",
   "A guest is paying the whole table on their phone right now. Wait for it, or stop the phone payment if they gave up.":
     "有客人正在用手机为整桌付款。请等一等；如果客人放弃了，可以停止手机付款。",
   "A guest is paying the whole table on their phone: {amount}.":
@@ -6247,8 +6249,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{tables} · {amount} to take before closing": "{tables} · 打烊前要收 {amount}",
   "Checking out": "结账中",
   "open {minutes} min": "已开 {minutes} 分钟",
-  "Take each table's payment before closing. If guests left without paying, a manager records it on the table.":
-    "打烊前请收款；客人已离开没付的，由店长在桌台登记“客人未付离开”。",
+  "Take each table\'s payment before closing. If guests left without paying, an owner or finance member records it on the table.":
+    "打烊前请收款；客人已离开没付的，由店主或财务人员在桌台登记“客人未付离开”。",
   "not taken": "不是实收",
   "Refunds and cancellations": "退款和取消",
   "Listed only, not sales": "只列出来，不算销售",

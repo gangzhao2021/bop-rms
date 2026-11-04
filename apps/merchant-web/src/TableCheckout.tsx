@@ -261,7 +261,11 @@ export function TableCheckout({
         beginOperation.current = null;
       if (error instanceof DiningSessionCloseClientError && error.code !== "OutcomeUnknown")
         onChanged();
-      if (error instanceof DiningSessionCloseClientError && error.code === "Conflict" && !retrying) {
+      if (
+        error instanceof DiningSessionCloseClientError &&
+        error.code === "Conflict" &&
+        !retrying
+      ) {
         setBeginRetry({ from: session.version, problem: errorText(error) });
         return;
       }
@@ -516,7 +520,7 @@ export function TableCheckout({
             <div className="table-checkout__written-off" role="status">
               <p>
                 {t(
-                  "The guests left without paying. A manager wrote off {amount}. The reports list it apart; it isn't counted as sales or as money received.",
+                  "The guests left without paying. {amount} was written off. The reports list it apart; it isn't counted as sales or as money received.",
                   { amount: cad(bill.writeOff.amountMinor) },
                 )}
               </p>
@@ -822,6 +826,12 @@ export function TableCheckout({
               )}
               {/* v15 2026-10-28 b: only while something is unpaid — for a split bill, the parts
                   still unpaid, and it says so. */}
+              {/* Owner 2026-11-04 walkthrough: staff who can't record it are told who can. */}
+              {!canWriteOff ? (
+                <p className="table-checkout__hint">
+                  {t("Guests left without paying? An owner or finance member records it here.")}
+                </p>
+              ) : null}
               {canWriteOff &&
               (bill.split === null || bill.split.paidParts < bill.split.parts.length) ? (
                 leaving ? (
@@ -841,7 +851,7 @@ export function TableCheckout({
                             },
                           )
                         : t(
-                            "Record that the guests at table {table} left without paying {amount}? A manager decides this. It stays in the reports as written off.",
+                            "Record that the guests at table {table} left without paying {amount}? It is recorded under your name and stays in the reports as written off.",
                             {
                               table: saidTable(table.stableLabel),
                               amount: cad(bill.owed.totalMinor),
