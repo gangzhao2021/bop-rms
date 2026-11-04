@@ -433,9 +433,9 @@ it("WP-2423 abandoned payment: lists each party's unpaid guest rounds and who ma
     effect: action === "ordering.order.cancel" ? "Deny" : "Allow",
   }));
   expect((await f.read(f.input)).canCancelUnpaidRounds).toBe(false);
-  // WP-2423 item 8 ①: only a manager who may approve refunds is offered a write-off.
+  // WP-2423 item 8 ①: only a manager who may record it is offered a write-off.
   f.authorizeAction.mockImplementation(async (action?: string) => ({
-    effect: action === "payment.refund.approve" ? "Deny" : "Allow",
+    effect: action === "ordering.order.write_off" ? "Deny" : "Allow",
   }));
   expect((await f.read(f.input)).canWriteOff).toBe(false);
   f.authorizeAction.mockImplementation(async () => ({ effect: "Allow" }));

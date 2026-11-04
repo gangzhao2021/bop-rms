@@ -21,13 +21,13 @@ import type { MerchantBffService } from "./merchant-bff.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a table left without paying what it still owed. A manager
- * (`payment.refund.approve`, who may also close Orders) records it with its reason; Payment keeps
+ * (`ordering.order.write_off`, who may also close Orders) records it with its reason; Payment keeps
  * the write-off (the amount still owed, who decided, when, on which Order version) and the table's
  * Order is closed on it in the same transaction, as an Order the store wrote off — never hidden or
  * removed: the sale and what was paid stay in every report. The table is then closed as usual.
  * Everything else a close requires still applies (items served or resolved, nothing pending).
  */
-export const unpaidDepartureApprovalPermission = "payment.refund.approve" as const;
+export const unpaidDepartureApprovalPermission = "ordering.order.write_off" as const;
 export const unpaidDepartureReasonCode = "GUEST_LEFT_UNPAID" as const;
 
 export type UnpaidDepartureErrorCode =

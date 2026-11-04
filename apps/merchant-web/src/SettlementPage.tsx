@@ -415,6 +415,20 @@ export function SettlementReport({
               </span>
             </li>
           </ul>
+          {view.unpaidWriteOffs.recordedBy.map((person, index) => (
+            <p key={index}>
+              {person.name === null
+                ? t("Recorded by someone no longer on staff: {tables}, {amount}", {
+                    tables: countOf(person.count, "table"),
+                    amount: formatSettlementMoney(person.amountMinor, "CAD"),
+                  })
+                : t("Recorded by {name}: {tables}, {amount}", {
+                    name: person.name,
+                    tables: countOf(person.count, "table"),
+                    amount: formatSettlementMoney(person.amountMinor, "CAD"),
+                  })}
+            </p>
+          ))}
           <p className="bop-muted">
             {t(
               "These guests were recorded as leaving without paying. Not collected, so not in the takings above.",

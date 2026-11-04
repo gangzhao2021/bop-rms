@@ -76,8 +76,12 @@
  * v24 (2026-11-02, WP-2423 取舍 18 DEC-MEMBER-POINTS): loyalty.program.manage changes the Brand's points
  * rules (Owner, Brand Owner); loyalty.member.read reads the member list, with only the last four
  * digits of a phone, and the points report (Owner, Store Manager, Area Manager, Brand Owner).
+ * v25 (2026-11-04, WP-2423, Owner "按你建议做"): ordering.order.write_off records that a table's
+ * guests left without paying, so the table can close on a night the Owner is away. Owner, Store
+ * Manager and Area Manager hold it (the managers through the `ordering.order.` prefix); Front of
+ * House does not. It no longer rides on payment.refund.approve, which stays with the Owner.
  */
-export const storePermissionCatalogVersion = 24 as const;
+export const storePermissionCatalogVersion = 25 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -324,6 +328,8 @@ const catalog: readonly StorePermissionDefinition[] = Object.freeze([
     ["ordering.order.close", "Close an order", "Medium"],
     // v19 (WP-2423 item 8 ①): money off a table's bill, so a manager's and High.
     ["ordering.order.comp", "Comp or discount dishes before the table pays", "High"],
+    // v25 (WP-2423): a bill never collected, recorded under the manager's name.
+    ["ordering.order.write_off", "Record that a table's guests left without paying", "High"],
     ["loyalty.program.manage", "Change the points rules", "High"],
     ["loyalty.member.read", "See members and the points report", "Medium"],
     ["ordering.order.fulfill", "Mark an order fulfilled", "Medium"],

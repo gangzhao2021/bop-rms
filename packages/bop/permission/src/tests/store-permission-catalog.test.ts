@@ -155,6 +155,7 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       "payment.refund.approve",
       "payment.refund.request",
       "payment.refund.execute",
+      "ordering.order.write_off",
       "ordering.order.cancel",
       "operations.order_exception.manage",
       "task.create",
@@ -177,6 +178,20 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       expect(replacements).not.toContain("ordering.order.comp");
     expect(
       storePermissionCatalog().find((entry) => entry.code === "ordering.order.comp"),
+    ).toMatchObject({ module: "ordering", risk: "High", specified: false });
+  });
+  it("lets Owner and the managers record guests who left without paying, and no one else (v25)", () => {
+    for (const role of ["owner", "store-manager", "area-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).toContain("ordering.order.write_off");
+    for (const role of ["front-of-house", "kitchen", "inventory-manager"] as const)
+      expect(storeRoleTemplateActions(role), role).not.toContain("ordering.order.write_off");
+    for (const [role, codes] of Object.entries(brandRoleTemplates))
+      expect(codes, role).not.toContain("ordering.order.write_off");
+    for (const replacements of Object.values(legacyPermissionReplacements))
+      expect(replacements).not.toContain("ordering.order.write_off");
+    expect(storeRoleTemplateActions("store-manager")).not.toContain("payment.refund.approve");
+    expect(
+      storePermissionCatalog().find((entry) => entry.code === "ordering.order.write_off"),
     ).toMatchObject({ module: "ordering", risk: "High", specified: false });
   });
   it("lets the Brand Owner and Menu Manager read fee classification choices (v14)", () => {
@@ -229,7 +244,7 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
       });
   });
   it("v24 WP-2423 取舍 18: the Owner changes the points rules; managers read members; others neither", () => {
-    expect(storePermissionCatalogVersion).toBe(24);
+    expect(storePermissionCatalogVersion).toBe(25);
     expect(storeRoleTemplateActions("owner")).toEqual(
       expect.arrayContaining(["loyalty.program.manage", "loyalty.member.read"]),
     );

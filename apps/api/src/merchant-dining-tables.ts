@@ -38,7 +38,7 @@ const tablePageActions = Object.freeze([
   // WP-2423 abandoned payment: "Cancel unpaid round" is offered to staff who may cancel orders.
   "ordering.order.cancel",
   // WP-2423 item 8 ①: "Guests left without paying" (a write-off) is offered to managers only.
-  "payment.refund.approve",
+  "ordering.order.write_off",
 ]);
 
 /** WP-2423 item 8 ⑤ decision 3: a phone that joined in the last 10 minutes is pointed out. */
@@ -101,7 +101,7 @@ export function createMerchantDiningTables(options: {
               ),
               canTransferHost: decisions.get("dining.host.transfer")?.effect === "Allow",
               canCancelUnpaidRounds: decisions.get("ordering.order.cancel")?.effect === "Allow",
-              canWriteOff: decisions.get("payment.refund.approve")?.effect === "Allow",
+              canWriteOff: decisions.get("ordering.order.write_off")?.effect === "Allow",
             });
           },
           recheck: async ({ current }) => (await current.allowed()) === true,

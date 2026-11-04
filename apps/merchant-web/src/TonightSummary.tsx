@@ -294,7 +294,7 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
             </p>
             <p className="tonight__detail">
               {t(
-                "Take each table's payment before closing. If guests left without paying, an owner or finance member records it on the table.",
+                "Take each table's payment before closing. If guests left without paying, a manager or the owner records it on the table.",
               )}
             </p>
           </>

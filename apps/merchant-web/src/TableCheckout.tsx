@@ -829,7 +829,7 @@ export function TableCheckout({
               {/* Owner 2026-11-04 walkthrough: staff who can't record it are told who can. */}
               {!canWriteOff ? (
                 <p className="table-checkout__hint">
-                  {t("Guests left without paying? An owner or finance member records it here.")}
+                  {t("Guests left without paying? A manager or the owner records it here.")}
                 </p>
               ) : null}
               {canWriteOff &&

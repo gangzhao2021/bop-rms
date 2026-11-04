@@ -188,9 +188,8 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
             joinProof = null;
           }
           await page.getByRole("button", { name: "Join with this code", exact: true }).click();
-          await page
-            .getByRole("heading", { name: "You’ve joined this table", exact: true })
-            .waitFor();
+          // Owner 2026-11-03: joined, the menu opens.
+          await page.waitForURL(/\/menu$/u);
           assert.equal(
             await page.getByLabel("Join code or invitation", { exact: true }).count(),
             0,
@@ -207,7 +206,8 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
           assert.equal(await sessionCount(), before + 2);
           await dining.verify();
         }
-        await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
+        if (!dining)
+          await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
         await page.getByText("Latte", { exact: true }).first().waitFor();
         // No Store price is published in this lab: the menu says it is priced at checkout.
         await page.getByText("Priced at checkout", { exact: true }).first().waitFor();
@@ -267,9 +267,14 @@ export async function verifyCustomerLab(origin, sessionCount, stopAfter = false,
   }
 }
 
-/** The configure page confirms the add in place; its own "View cart" link opens the cart. */
-function viewAddedCart(page) {
-  return page.getByRole("status").getByRole("link", { name: "View cart", exact: true }).click();
+/** Owner 2026-11-03: adding returns to the menu, which says so; its "View cart" opens the cart. */
+async function viewAddedCart(page) {
+  await page.getByRole("status").getByText("Added to your cart.", { exact: true }).waitFor();
+  await page
+    .getByRole("link", { name: "View cart", exact: true })
+    .filter({ visible: true })
+    .first()
+    .click();
 }
 
 async function verifySharedTable(browser, origin, dining, cart) {
@@ -307,8 +312,7 @@ async function verifySharedTable(browser, origin, dining, cart) {
         proof = null;
       }
       await page.getByRole("button", { name: "Join with this code", exact: true }).click();
-      await page.getByRole("heading", { name: "You’ve joined this table", exact: true }).waitFor();
-      await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
+      await page.waitForURL(/\/menu$/u);
       await page.getByRole("link", { name: "View Latte", exact: true }).click();
       await page.getByLabel("Preparation note (optional)", { exact: true }).fill(notes[index]);
       await page.getByRole("button", { name: "Add to cart", exact: true }).click();

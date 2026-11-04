@@ -66,11 +66,8 @@ export async function verifyPickupQuoteLab(origin, pickup) {
         await page.getByRole("button", { name: "Continue to menu", exact: true }).click();
         await page.getByRole("link", { name: "View Latte", exact: true }).click();
         await page.getByRole("button", { name: "Add to cart", exact: true }).click();
-        // The configure page confirms the add in place, with its own link to the cart.
-        const added = page
-          .getByRole("status")
-          .getByRole("link", { name: "View cart", exact: true });
-        await expect(added)
+        // Owner 2026-11-03: adding returns to the menu, which says so.
+        await expect(page.getByRole("status").getByText("Added to your cart.", { exact: true }))
           .toBeVisible()
           .catch(async () => {
             throw new Error(
@@ -83,7 +80,11 @@ export async function verifyPickupQuoteLab(origin, pickup) {
               }),
             );
           });
-        await added.click();
+        await page
+          .getByRole("link", { name: "View cart", exact: true })
+          .filter({ visible: true })
+          .first()
+          .click();
         await expect(page.getByLabel("Latte quantity", { exact: true })).toHaveText("1");
         const bound = (await context.cookies()).find((c) => c.name === "__Host-bop-guest");
         assert(bound?.secure && bound.httpOnly && bound.sameSite === "Lax");

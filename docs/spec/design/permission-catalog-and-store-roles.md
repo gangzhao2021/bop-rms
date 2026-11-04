@@ -97,7 +97,7 @@
 - 原状：开始结账、取消结账与关台（`dining.session.close`）以及关闭已结清的订单（`ordering.order.close`）只有 Owner 与
   Store Manager 持有；记录刷卡机与现金收款（`dining.operate`）前台已持有，但页面只对能关台的人显示结账。
 - 决定：权限目录 v18 让前台模板也持有 `dining.session.close` 与 `ordering.order.close`。两者都拒绝任何未付的结束方式：
-  关台要求已付清或已核销、每道菜已上或已取消；关单只关已结清的订单。核销（`payment.refund.approve`）、取消与退款
+  关台要求已付清或已核销、每道菜已上或已取消；关单只关已结清的订单。核销（当时为 `payment.refund.approve`，v25 起见下“店长登记未付离开”）、取消与退款
   （`ordering.order.cancel`、`payment.refund.*`）、异常任务（`task.create`）仍只给经理，免单/折让另设经理权限（第 2 段）。
 - 批准：Owner 常设批准 2026-10-14“我都批准，之后不需要问我”（门店角色升级），本项由 2026-10-27 原话授权。已开通门店需安装
   目录 v18 并把门店角色升级到 v18（前台新增 2 项授权，另含旧名对照 `order.close`）；品牌模板不变。
@@ -110,6 +110,15 @@
 - 批准：Owner 常设批准 2026-10-14“我都批准，之后不需要问我”；本项依据 2026-10-27 决定 2 原话“后厨已开始做的菜由经理
   免单或折让……经理确认并选原因，作为补偿记录；报表单列‘免单/折让’，不能删除”。已开通门店需安装目录 v19 并把门店角色
   升级到 v19（Owner、Store Manager 各新增 1 项）。
+
+## 店长登记未付离开（2026-11-04，Owner“按你建议做”）
+
+- 原状：登记“客人未付离开”借用 `payment.refund.approve`，只有 Owner 持有；晚市 Owner 不在时这一桌无法关台。
+- 决定：权限目录 v25 新增 `ordering.order.write_off`（风险 High），Owner、Store Manager、Area Manager 持有（两种经理经
+  `ordering.order.` 前缀），前台、厨房、库存管理员与品牌模板不持有，无旧名对照。`payment.refund.approve` 仍不给店长。共享平板上的
+  PIN 会话仍需完整登录确认。每笔照旧记录金额、登记人和时间，写入报表，不能删除；结算页按人显示谁登记了多少，店主第二天可查。
+- 批准：Owner 2026-11-04 原话“按你建议做”；发放依据常设批准 2026-10-14。已开通门店需安装目录 v25 并把门店角色升级到 v25
+  （Owner、Store Manager、Area Manager 各新增 1 项）。自定义角色若只持有 `payment.refund.approve`，不再能登记未付离开。
 
 ## 不改变
 

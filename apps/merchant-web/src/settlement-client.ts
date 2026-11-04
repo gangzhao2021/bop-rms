@@ -21,6 +21,14 @@ export interface SettlementAmount {
   readonly amountMinor: string;
   readonly currencyCode: string;
 }
+/** WP-2423 v25: managers record these on their own, so the Owner reads who recorded how much. */
+export interface SettlementWriteOffs extends SettlementAmount {
+  readonly recordedBy: readonly {
+    readonly name: string | null;
+    readonly count: number;
+    readonly amountMinor: string;
+  }[];
+}
 export type SettlementOutcome = "Matched" | "Healed" | "Unresolved" | "Unavailable" | "Difference";
 const settlementOutcomes: readonly SettlementOutcome[] = [
   "Matched",
@@ -106,7 +114,7 @@ export interface SettlementView {
    * DEC-DINE-IN-PAY-LATER (decision 4): bills written off when the guests left without paying —
    * never collected; null when unreadable, undefined from older servers.
    */
-  readonly unpaidWriteOffs?: SettlementAmount | null;
+  readonly unpaidWriteOffs?: SettlementWriteOffs | null;
   /**
    * WP-2423 item 8 ① segment 2: comps and discounts managers decided in the day (by dish); null
    * when unreadable, undefined from older servers.
@@ -146,6 +154,26 @@ const amount = (value: unknown): SettlementAmount | null => {
     count: count(raw.count),
     amountMinor: minor(raw.amountMinor),
     currencyCode: "CAD",
+  });
+};
+const writeOffs = (value: unknown): SettlementWriteOffs | null => {
+  if (value === null) return null;
+  const raw = exact(value, ["count", "amountMinor", "currencyCode", "recordedBy"]);
+  if (raw.currencyCode !== "CAD" || !Array.isArray(raw.recordedBy)) return fail();
+  return Object.freeze({
+    count: count(raw.count),
+    amountMinor: minor(raw.amountMinor),
+    currencyCode: "CAD",
+    recordedBy: Object.freeze(
+      raw.recordedBy.map((entry: unknown) => {
+        const person = exact(entry, ["name", "count", "amountMinor"]);
+        return Object.freeze({
+          name: optionalText(person.name, 200),
+          count: count(person.count),
+          amountMinor: minor(person.amountMinor),
+        });
+      }),
+    ),
   });
 };
 const optionalText = (value: unknown, max: number) => (value === null ? null : text(value, max));
@@ -432,7 +460,9 @@ export function parseSettlementView(value: unknown): SettlementView {
             });
           })(),
         }),
-    ...(raw.unpaidWriteOffs === undefined ? {} : { unpaidWriteOffs: amount(raw.unpaidWriteOffs) }),
+    ...(raw.unpaidWriteOffs === undefined
+      ? {}
+      : { unpaidWriteOffs: writeOffs(raw.unpaidWriteOffs) }),
     ...(raw.comps === undefined ? {} : { comps: amount(raw.comps) }),
     ...(raw.unmatchedProviderCharges === undefined
       ? {}

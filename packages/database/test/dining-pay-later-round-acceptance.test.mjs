@@ -1314,7 +1314,12 @@ async function journey(ending) {
           scope: ownerScope,
           actor: id(0x701),
           at: now(),
-          extraPermissions: [...staffPermissions, "payment.refund.approve", "ordering.order.comp"],
+          extraPermissions: [
+            ...staffPermissions,
+            "payment.refund.approve",
+            "ordering.order.comp",
+            "ordering.order.write_off",
+          ],
           referencePrefix: "01909966",
           sessionReferencePrefix: "01909965",
         });
@@ -2895,8 +2900,32 @@ async function journey(ending) {
         await assert.rejects(departure(server, orderVersion), {
           code: "UNPAID_DEPARTURE_PERMISSION_DENIED",
         });
+        // v25: approving refunds is not what allows it; the write-off permission alone is enough.
+        const refundApprover = await seedMerchantAcceptanceSession({
+          admin,
+          runner: transactions(),
+          scope: ownerScope,
+          actor: id(0x7a1),
+          at: now(),
+          extraPermissions: [...staffPermissions, "payment.refund.approve"],
+          referencePrefix: "01909962",
+          sessionReferencePrefix: "01909961",
+        });
+        await assert.rejects(departure(refundApprover, orderVersion), {
+          code: "UNPAID_DEPARTURE_PERMISSION_DENIED",
+        });
+        const nightManager = await seedMerchantAcceptanceSession({
+          admin,
+          runner: transactions(),
+          scope: ownerScope,
+          actor: id(0x7a2),
+          at: now(),
+          extraPermissions: [...staffPermissions, "ordering.order.write_off"],
+          referencePrefix: "01909960",
+          sessionReferencePrefix: "0190995f",
+        });
         // A manager can't write off a table whose dishes are not all served or resolved yet.
-        await assert.rejects(departure(manager, orderVersion), (error) => {
+        await assert.rejects(departure(nightManager, orderVersion), (error) => {
           assert.equal(error.code, "UNPAID_DEPARTURE_NOT_READY");
           assert.ok(error.reasons.includes("EXECUTION_NOT_FINAL"), String(error.reasons));
           return true;

@@ -146,9 +146,7 @@ export function CompensationReconciliationAction({
             <SourceTime instant={view.refund.confirmedAt} />
           </p>
           {recorded ? (
-            <p role="status">
-              {t("Checked. This case closes on its own within a few minutes.")}
-            </p>
+            <p role="status">{t("Checked. This case closes on its own within a few minutes.")}</p>
           ) : (
             <>
               <label>

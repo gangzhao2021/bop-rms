@@ -1,4 +1,5 @@
 import type { ConsumerTransaction } from "@bop/eventing";
+import { MemberDirectoryError, loadStoreMember } from "@bop/membership";
 import {
   createPostgresCardMachinePaymentStore,
   createPostgresConfirmedCompensationRefundSource,
@@ -208,7 +209,11 @@ export function createPersistentMerchantSettlement(options: {
         refundCount: number;
         refundedMinor: bigint;
       };
-      readonly writeOffs: { count: number; amountMinor: bigint };
+      readonly writeOffs: {
+        count: number;
+        amountMinor: bigint;
+        byActor: Map<string, { count: number; amountMinor: bigint }>;
+      };
     }
     const tableWindow = (
       tx: ConsumerTransaction,
@@ -263,10 +268,19 @@ export function createPersistentMerchantSettlement(options: {
           cash.refundCount++;
           cash.refundedMinor += refund.amountMinor;
         }
-        const writeOffs = { count: 0, amountMinor: 0n };
+        const writeOffs = {
+          count: 0,
+          amountMinor: 0n,
+          byActor: new Map<string, { count: number; amountMinor: bigint }>(),
+        };
         for (const writeOff of listed.writeOffs) {
           writeOffs.count++;
           writeOffs.amountMinor += writeOff.writtenOffMinor;
+          const actor = writeOff.approvedByActorReference;
+          const total = writeOffs.byActor.get(actor) ?? { count: 0, amountMinor: 0n };
+          total.count++;
+          total.amountMinor += writeOff.writtenOffMinor;
+          writeOffs.byActor.set(actor, total);
         }
         return Object.freeze({ card, cash, writeOffs });
       })();
@@ -435,10 +449,26 @@ export function createPersistentMerchantSettlement(options: {
       unpaidWriteOffs: (tx, scope, window) =>
         optional(async () => {
           const { writeOffs } = await tableWindow(tx, scope, window);
+          const recordedBy = [];
+          for (const [actor, total] of writeOffs.byActor) {
+            let name: string | null = null;
+            try {
+              name = (await loadStoreMember(tx, scope, actor)).displayName;
+            } catch (error) {
+              if (!(error instanceof MemberDirectoryError)) throw error;
+            }
+            recordedBy.push({
+              name,
+              count: total.count,
+              amountMinor: total.amountMinor.toString(),
+            });
+          }
+          if (!(await guard(scope)(tx))) return null;
           return {
             count: writeOffs.count,
             amountMinor: writeOffs.amountMinor.toString(),
             currencyCode: "CAD" as const,
+            recordedBy,
           };
         }),
       // WP-2423 item 8 ① segment 2: comps and discounts managers decided in the day (by dish).

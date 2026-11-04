@@ -5916,8 +5916,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests left without paying": "客人未付离开",
   "Record that the guests at table {table} left without paying {amount}? It is recorded under your name and stays in the reports as written off.":
     "确认 {table} 桌客人未付 {amount} 就离开？会记在你名下，作为核销留在报表中。",
-  "Guests left without paying? An owner or finance member records it here.":
-    "客人没付钱就走了？请店主或财务人员在这里登记。",
+  "Guests left without paying? A manager or the owner records it here.":
+    "客人没付钱就走了？请店长或店主在这里登记。",
+  "Record that a table's guests left without paying": "登记整桌客人未付离开",
+  "Recorded by {name}: {tables}, {amount}": "{name} 登记：{tables}，{amount}",
+  "Recorded by someone no longer on staff: {tables}, {amount}":
+    "已离职员工登记：{tables}，{amount}",
   "Yes, they left without paying": "确认，客人未付离开",
   "Receipt for table {table}": "{table} 桌收据",
   "Cash rounding": "现金取整",
@@ -6043,11 +6047,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Dish: "菜品",
   "Points it costs": "所需积分",
   "Add this dish": "添加这道菜",
-  "The guests left without paying. {amount} was written off. The reports list it apart; it isn\'t counted as sales or as money received.":
+  "The guests left without paying. {amount} was written off. The reports list it apart; it isn't counted as sales or as money received.":
     "客人未付离开，已核销 {amount}。报表里单独列出，不计入销售和收款。",
   "Close the table when it has been cleared.": "收拾好以后关台。",
-  "The table hasn\'t paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask an owner or finance member to record it there.":
-    "这桌还没付款。请在上方的结账里收款；如果客人未付离开，请店主或财务人员在那里登记。",
+  "The table hasn't paid yet. Take the payment in Checkout above, or, if the guests left without paying, ask a manager or the owner to record it there.":
+    "这桌还没付款。请在上方的结账里收款；如果客人未付离开，请店长或店主在那里登记。",
   "1 item is still being sent to the kitchen. Check again in a moment.":
     "有 1 道菜还在送往后厨，请稍后再查看。",
   "{count} items are still being sent to the kitchen. Check again in a moment.":
@@ -6250,8 +6254,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{tables} · {amount} to take before closing": "{tables} · 打烊前要收 {amount}",
   "Checking out": "结账中",
   "open {minutes} min": "已开 {minutes} 分钟",
-  "Take each table\'s payment before closing. If guests left without paying, an owner or finance member records it on the table.":
-    "打烊前请收款；客人已离开没付的，由店主或财务人员在桌台登记“客人未付离开”。",
+  "Take each table's payment before closing. If guests left without paying, a manager or the owner records it on the table.":
+    "打烊前请收款；客人已离开没付的，由店长或店主在桌台登记“客人未付离开”。",
   "not taken": "不是实收",
   "Refunds and cancellations": "退款和取消",
   "Listed only, not sales": "只列出来，不算销售",

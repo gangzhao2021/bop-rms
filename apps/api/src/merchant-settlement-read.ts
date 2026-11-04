@@ -20,6 +20,15 @@ export interface MerchantSettlementAmount {
   readonly amountMinor: string;
   readonly currencyCode: "CAD";
 }
+/** WP-2423 v25: managers record these on their own, so the Owner reads who recorded how much. */
+export interface MerchantSettlementWriteOffs extends MerchantSettlementAmount {
+  readonly recordedBy: readonly {
+    /** Null when the person is no longer in the Store's directory. */
+    readonly name: string | null;
+    readonly count: number;
+    readonly amountMinor: string;
+  }[];
+}
 /** The day's reconciliation facts without the window the view already carries. */
 export type MerchantSettlementReconciliation = Pick<
   PaymentReconciliationDay,
@@ -75,7 +84,7 @@ export interface MerchantSettlementView {
    * DEC-DINE-IN-PAY-LATER (decision 4): tables a manager wrote off when the guests left without
    * paying — never collected, kept in the day's summary. Null when not read.
    */
-  readonly unpaidWriteOffs: MerchantSettlementAmount | null;
+  readonly unpaidWriteOffs: MerchantSettlementWriteOffs | null;
   /**
    * WP-2423 item 8 ① segment 2: comps and discounts managers decided in the day (by dish), off
    * the tables' bills before they paid — not money taken or given back, listed on their own line.
@@ -173,7 +182,7 @@ export function createMerchantSettlementRead(options: {
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
-  ): Promise<MerchantSettlementAmount | null>;
+  ): Promise<MerchantSettlementWriteOffs | null>;
   comps?(
     tx: ConsumerTransaction,
     scope: MerchantSettlementScope,

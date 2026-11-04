@@ -85,15 +85,21 @@ describe("WP-2423 P1 settlement report", () => {
   it("DEC-DINE-IN-PAY-LATER: keeps tables written off unpaid in the day's summary", () => {
     const html = render({
       ...settlementViewFixture(),
-      unpaidWriteOffs: { count: 1, amountMinor: "537", currencyCode: "CAD" },
+      unpaidWriteOffs: {
+        count: 1,
+        amountMinor: "537",
+        currencyCode: "CAD",
+        recordedBy: [{ name: "Mia", count: 1, amountMinor: "537" }],
+      },
     });
     expect(html).toContain("Guests left without paying (written off)");
+    expect(html).toContain("Recorded by Mia: 1 table, $5.37");
     expect(html).toContain("$5.37");
     expect(html).toContain("1 table");
     expect(
       render({
         ...settlementViewFixture(),
-        unpaidWriteOffs: { count: 0, amountMinor: "0", currencyCode: "CAD" },
+        unpaidWriteOffs: { count: 0, amountMinor: "0", currencyCode: "CAD", recordedBy: [] },
       }),
     ).not.toContain("written off");
   });

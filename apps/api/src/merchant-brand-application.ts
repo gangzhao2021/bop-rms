@@ -51,7 +51,13 @@ export async function createMerchantBrandApplication(options: {
     const root = await lstat(directory);
     if (!root.isDirectory() || root.isSymbolicLink()) return unavailable();
     const entries = await readdir(directory);
-    if (entries.length !== 2 || !entries.includes("index.html") || !entries.includes("assets"))
+    // operations/ holds the store outage page's files (public/operations); this application never
+    // serves it: requests are answered only from index.html and assets captured below.
+    if (
+      entries.some((entry) => !["index.html", "assets", "operations"].includes(entry)) ||
+      !entries.includes("index.html") ||
+      !entries.includes("assets")
+    )
       return unavailable();
     const assetsDirectory = join(directory, "assets"),
       assetsStat = await lstat(assetsDirectory);

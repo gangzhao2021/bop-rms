@@ -241,7 +241,12 @@ const dineIn = {
   canViewPayments: true,
   counter: null,
   // DEC-DINE-IN-PAY-LATER: the table's bill on the Orders row (v15 2026-10-27: it was dropped).
-  tableBill: { totalMinor: "8000", paid: { amountMinor: "9200", method: "Cash" } },
+  tableBill: {
+    totalMinor: "8000",
+    writtenOffMinor: "0",
+    partlyPaid: { remainingMinor: "0", paidParts: 2, partCount: 2 },
+    paid: { amountMinor: "9200", method: "Cash", refundedMinor: "0" },
+  },
   paidOnline: { amountMinor: "8000", currencyCode: "CAD" },
   paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
   heldStock: null,
@@ -611,6 +616,7 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
     },
   ],
   chase: { count: 1, lastChasedAt: at(20) },
+  takenOnPaper: true,
   workItemCreatedAt: at(16),
   acceptedAt: at(16),
   orderItemReadyAt: status === "Completed" ? at(25) : null,
@@ -789,7 +795,12 @@ const settlementView = {
     netMinor: "845",
     recordedAfterOutageCount: 0,
   },
-  unpaidWriteOffs: { count: 1, amountMinor: "537", currencyCode: "CAD" },
+  unpaidWriteOffs: {
+    count: 1,
+    amountMinor: "537",
+    currencyCode: "CAD",
+    recordedBy: [{ name: "Mia", count: 1, amountMinor: "537" }],
+  },
   comps: { count: 2, amountMinor: "2830", currencyCode: "CAD" },
   unmatchedProviderCharges: {
     captured: { count: 0, amountMinor: "0", currencyCode: "CAD" },
