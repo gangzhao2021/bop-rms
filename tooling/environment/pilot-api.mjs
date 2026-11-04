@@ -195,6 +195,8 @@ export async function createRuntime(
             purpose: "CustomerEntry",
             requestedLocale: "en-CA",
           });
+          // Busy is not gone: the guest is told to try again, never that there is no menu.
+          if (result.busy === true) throw new Error("PUBLIC_STORE_BUSY");
           return result.status === "Available" ? { ...resources.scope, status: "Active" } : null;
         },
       },

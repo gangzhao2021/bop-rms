@@ -115,14 +115,23 @@ export function createPersistentPublicStoreProfilePorts(
   });
 }
 
+/** Longer than a listing takes, short enough that a Store closed since is noticed soon. */
+const rememberedStoreMs = 5 * 60_000;
+
 /** A complete read uses one database transaction. This reader can serve Cart;
  * entry assembly should instead use the request-scoped ports above in its transaction.
  */
 export function createPersistentPublicStoreProfileReader(
   options: PersistentPublicStoreProfileOptions & {
     transactions: { run<T>(work: (tx: Transaction) => Promise<T>): Promise<T> };
+    /** The clock for how old a remembered answer is; the wall clock unless a test supplies one. */
+    clock?: () => number;
   },
 ) {
+  const clock = options.clock ?? (() => Date.now());
+  // Owner 2026-11-04: while a menu is being listed this read can wait on a lock and give up. The
+  // Store has not gone away, so the answer from a few minutes ago stands in for it.
+  const lastAvailable = new Map<string, { readonly at: number; readonly answer: unknown }>();
   return Object.freeze({
     async getPublicStore(input: unknown) {
       let request: GetPublicStoreRequest;
@@ -131,13 +140,29 @@ export function createPersistentPublicStoreProfileReader(
       } catch {
         return { status: "InvalidRequest" } as const;
       }
+      const key = [request.publicStoreReference, request.purpose, request.requestedLocale].join();
       try {
-        return await options.transactions.run((tx) =>
+        const answer = await options.transactions.run((tx) =>
           createPublicStoreProfileService(
             createPersistentPublicStoreProfilePorts(tx, options, request),
           ).getPublicStore(request),
         );
-      } catch {
+        if (answer.status === "Available") lastAvailable.set(key, { at: clock(), answer });
+        else lastAvailable.delete(key);
+        return answer;
+      } catch (error) {
+        if (
+          (error as { readonly code?: unknown } | null)?.code ===
+          "TENANT_DATABASE_TRANSACTION_CONFLICT"
+        ) {
+          const remembered = lastAvailable.get(key);
+          if (remembered !== undefined && clock() - remembered.at <= rememberedStoreMs)
+            return remembered.answer as Awaited<
+              ReturnType<ReturnType<typeof createPublicStoreProfileService>["getPublicStore"]>
+            >;
+          // Busy, not gone: callers that can say "try again" tell it apart.
+          return { status: "StoreUnavailable", busy: true } as const;
+        }
         return { status: "StoreUnavailable" } as const;
       }
     },
