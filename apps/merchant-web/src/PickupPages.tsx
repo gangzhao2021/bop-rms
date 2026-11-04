@@ -91,7 +91,7 @@ export function pickupWaitText(minutes: number): string {
   if (minutes < 60) return t("{minutes} min", { minutes: minutes });
   if (minutes < 24 * 60) {
     const rest = minutes % 60;
-    return `${Math.floor(minutes / 60)} h${rest ? t(" {rest} min", { rest: rest }) : ""}`;
+    return `${t("{hours} h", { hours: Math.floor(minutes / 60) })}${rest ? t(" {rest} min", { rest: rest }) : ""}`;
   }
   const days = Math.floor(minutes / (24 * 60));
   return days === 1 ? t("1 day") : t("{days} days", { days: days });

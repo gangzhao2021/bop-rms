@@ -2365,6 +2365,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No dish matches “{query}”.": "没有找到“{query}”。",
   "Change {name}": "修改 {name}",
   "Table settings": "桌台设置",
+  "{hours} h": "{hours} 小时",
   "Only opens the kitchen, not orders, refunds or settings.": "只开后厨，不含订单、退款和设置。",
   "On this Store's menu": "在本店菜单上",
   "On {value}.": "用于{value}。",
@@ -3813,7 +3814,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "步骤 {value}：{instruction} — {value2} 分钟，{value3}{value4}",
   "Still needed: {value} review, by someone who holds recipe review{value2}{value3}":
     "仍需要：{value}审核，由持有配方审核权限的人{value2}{value3}",
-  "Still open": "仍未解决",
+  "Still open": "还没结束",
   "Still open from an earlier day and holding ingredients that cannot be sold. Make it and hand it over if the guest comes back; otherwise cancel it — the guest is refunded and the ingredients go back into stock.":
     "较早营业日仍未关闭，并占用着不能售卖的配料。如果顾客回来，请制作并交付；否则请取消 — 顾客会获得退款，配料退回库存。",
   "Still open from an earlier day and holding ingredients that cannot be sold. Serve it, or cancel the round — the guest is refunded and the ingredients go back into stock.":
