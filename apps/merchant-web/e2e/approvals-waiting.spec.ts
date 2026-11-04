@@ -89,8 +89,7 @@ test("@production refunds waiting for approval are counted on the home page and 
   await page.goto("/app");
   const navigation = page.getByRole("navigation", { name: "Workspace" });
   await expect(navigation.getByRole("link", { name: "Approvals 3 waiting" })).toBeVisible();
-  const line = page.locator(".overview-counts li", { hasText: "Refunds waiting for approval" });
-  await expect(line).toContainText("3");
+  const line = page.locator(".overview-attention li", { hasText: "Refunds waiting for approval" });
   await expect(line).toContainText("2 to approve · 1 approved, not sent yet");
   await expect(line.getByRole("link", { name: "Review approvals" })).toHaveAttribute(
     "href",
@@ -111,7 +110,8 @@ test("@production refunds waiting for approval are counted on the home page and 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.reload();
   await expect(navigation.getByRole("link", { name: "Approvals", exact: true })).toBeVisible();
-  await expect(line).toContainText("Nothing waiting");
+  await expect(page.getByRole("heading", { name: "Right now" })).toBeVisible();
+  await expect(line).toHaveCount(0);
 });
 
 test("@production staff without the approvals page are never asked for approvals", async ({

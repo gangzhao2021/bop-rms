@@ -1,284 +1,430 @@
-/* WP-2423 merchant UI refresh (2026-10-21): home. Loaded after styles.css so it refines the shared baseline. */
+/*
+ * Home (rebuilt 2026-11-03 after the Owner's walkthrough): at a glance, what needs doing.
+ * Title and meta; "Needs attention" as the Orders page's rows; a few numbers staff use now; the
+ * opening and closing checklist closed; the store system in one quiet line at the bottom.
+ * White page, no boxes; hairlines only between rows; 28/20/16/14 at 600/400; one accent for what
+ * can be clicked; every status word follows a dot. Loaded after quiet.css, which it replaces here.
+ */
 
-/* One 12-column grid for the Home: the store system line on top, the store status beside the
-   "Right now" figures on wide screens, the opening and closing checklist across the full width. */
-.workspace-page--overview .overview-grid {
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: var(--bop-space-4);
-  align-items: stretch;
+/* ---- Header: the language switch ends the title row, as on every other page ---------------- */
+.workspace-page--overview .workspace-page__header {
+  flex-wrap: nowrap;
+  align-items: center;
+  margin-bottom: var(--bop-space-8);
 }
-.workspace-page--overview .overview-grid > * {
-  grid-column: 1 / -1;
+.workspace-page--overview .workspace-page__title {
   min-width: 0;
 }
-.workspace-page--overview .overview-card header {
+.workspace-page--overview .workspace-page__title h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.workspace-page--overview .workspace-page__meta,
+.workspace-page--overview .workspace-page__status {
+  font-size: 14px;
+}
+.workspace-page--overview .workspace-page__toolbar {
+  flex-wrap: nowrap;
+}
+.workspace-page--overview .workspace-page__freshness {
+  white-space: nowrap;
+}
+.workspace-page--overview .workspace-page__freshness[data-freshness="Stale"] {
+  color: var(--bop-color-text-default);
+  font-weight: 400;
+}
+.workspace-page--overview .workspace-page__freshness[data-freshness="Stale"]::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+
+/* The store switch, for those with more than one Store: a plain select and accent words. */
+.workspace-page--overview .scope-switcher {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--bop-space-3);
+  min-width: 0;
+}
+.workspace-page--overview .scope-switcher .scope-switcher__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.workspace-layout .workspace-content .workspace-page--overview .scope-switcher select {
+  min-width: 0;
+  max-width: 16rem;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+}
+.workspace-page--overview .workspace-page__header .scope-switcher button {
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace-page--overview .workspace-page__header .scope-switcher button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+}
+
+/* ---- The sections: only space between them ------------------------------------------------- */
+.workspace-page--overview.workspace-page--overview .overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--bop-space-8);
+}
+.workspace-page--overview :is(.overview-needs, .overview-now, .overview-note) h2 {
+  margin: 0;
+  color: var(--bop-color-text-default);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+.workspace-page--overview :is(.overview-now, .overview-note) h2 {
+  font-size: 16px;
+}
+.workspace-page--overview .overview-note p {
+  margin: var(--bop-space-2) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .stale-warning {
+  margin: 0 0 var(--bop-space-4);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* Words that act: the accent, no underline until pointed at. */
+.workspace-page--overview :is(.overview-text-action, .overview-attention__action) {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.workspace-page--overview .overview-attention__action {
+  font-weight: 600;
+}
+.workspace-page--overview :is(.overview-text-action, .overview-attention__action):hover {
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workspace-page--overview .overview-text-action:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+/* ---- Needs attention: the Orders page's rows ----------------------------------------------- */
+.workspace-page--overview .overview-attention {
+  margin: var(--bop-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page--overview .overview-attention li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 13.5rem 9rem;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-6);
+  min-height: 72px;
+  padding: var(--bop-space-4) 0;
+  border: 0;
+}
+.workspace-page--overview .overview-attention li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page--overview .overview-attention__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.workspace-page--overview .overview-attention__text strong {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.workspace-page--overview .overview-attention__text p {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.workspace-page--overview .overview-attention__label {
+  color: var(--bop-color-text-default);
+}
+.workspace-page--overview .overview-attention__status {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+.workspace-page--overview .overview-attention__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 400;
+}
+.workspace-page--overview .overview-attention__state::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tag-dot);
+}
+/* Three meanings only: needs someone (both tones), under way. */
+.workspace-page--overview
+  :is(.overview-attention__state--danger, .overview-attention__state--warning) {
+  --tag-dot: var(--bop-color-danger-mark);
+}
+.workspace-page--overview .overview-attention__state--progress {
+  --tag-dot: var(--bop-color-accent);
+}
+.workspace-page--overview .overview-attention__since {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .overview-attention__action {
+  grid-column: 3;
+  justify-self: end;
+}
+.workspace-page--overview .overview-attention__empty {
+  margin: var(--bop-space-2) 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+/* The evening reminder has already said what is left; "nothing" would contradict it. */
+.overview-needs:has(.closing-reminder__title[data-tone="action"]) .overview-attention__empty {
+  display: none;
+}
+
+/* The evening reminder: the first row of the list. */
+.workspace-page--overview .closing-reminder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--bop-space-2) var(--bop-space-6);
+  min-height: 72px;
+  margin: var(--bop-space-2) 0 0;
+  padding: var(--bop-space-4) 0;
+  border: 0;
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.workspace-page--overview .closing-reminder__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page--overview .closing-reminder__detail {
+  margin-top: 2px !important;
+  font-size: 14px;
+}
+.workspace-page--overview .closing-reminder__open {
+  min-height: 44px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.workspace-page--overview .closing-reminder__open:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* With only the reminder there is no list after it, so no line under it. */
+.overview-needs:has(.overview-attention__empty) .closing-reminder {
+  border-bottom: 0;
+}
+
+/* ---- Right now: a small row of numbers ------------------------------------------------------ */
+.workspace-page--overview .overview-now header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--bop-space-2) var(--bop-space-3);
+  gap: 0 var(--bop-space-4);
 }
-.workspace-page--overview .overview-card header h3 {
-  margin: 0;
-}
-.workspace-page--overview .overview-card header button {
-  min-height: 44px;
-  padding: 0 var(--bop-space-4);
-}
-.overview-card__tools {
+.workspace-page--overview .overview-now__tools {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--bop-space-2) var(--bop-space-3);
+  gap: var(--bop-space-3);
 }
-.workspace-page--overview .overview-card__tools .overview-updated {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Store status: a compact strip, never a tall empty column. */
-.workspace-page--overview .overview-card--status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--bop-space-1) var(--bop-space-4);
-  padding: var(--bop-space-3) var(--bop-space-5);
-}
-.workspace-page--overview .overview-card--status h3 {
+.workspace-page--overview .overview-updated {
   margin: 0;
   color: var(--bop-color-text-muted);
-  font-size: 13px;
-  font-weight: 500;
-}
-.workspace-page--overview .overview-card--status .overview-status-value {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1.2;
-}
-.workspace-page--overview .overview-card--status .overview-status-date {
-  margin: 0;
   font-size: 14px;
+  font-variant-numeric: tabular-nums;
 }
-/* Wide screens: the status beside "Right now" (or the release note shown in its place). */
-@media (min-width: 1200px) {
-  .workspace-page--overview
-    .overview-grid:has(> .overview-card--today, > .overview-card:not([class*="overview-card--"]))
-    > .overview-card--status {
-    grid-column: span 3;
-    display: grid;
-    align-content: start;
-    gap: var(--bop-space-1);
-    padding: var(--bop-space-5);
-  }
-  .workspace-page--overview
-    .overview-grid:has(> .overview-card--today, > .overview-card:not([class*="overview-card--"]))
-    > .overview-card--status
-    .overview-status-value {
-    margin-top: var(--bop-space-3);
-    font-size: 30px;
-  }
-  .workspace-page--overview .overview-grid > .overview-card--today,
-  .workspace-page--overview .overview-grid > .overview-card:not([class*="overview-card--"]) {
-    grid-column: span 9;
-  }
-}
-
-/* Store system: one calm line while everything works; a full card with a coloured edge when not. */
-.workspace-page--overview .overview-card--alerts-clear {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    "title status action"
-    ". meta action";
-  align-items: center;
-  gap: var(--bop-space-1) var(--bop-space-4);
-  padding: var(--bop-space-3) var(--bop-space-5);
-}
-.workspace-page--overview .overview-card--alerts-clear header {
-  display: contents;
-}
-.workspace-page--overview .overview-card--alerts-clear header h3 {
-  grid-area: title;
-  font-size: 15px;
-}
-.workspace-page--overview .overview-card--alerts-clear header button {
-  grid-area: action;
-}
-.workspace-page--overview .overview-card--alerts-clear > [aria-live] {
-  grid-area: status;
-}
-.workspace-page--overview .overview-card--alerts-clear .system-alert__footer {
-  grid-area: meta;
-}
-.workspace-page--overview .overview-card--alerts-clear .system-alert__headline {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--bop-space-2);
-  margin: 0;
-}
-/* A small check mark beside the words; the words carry the state. */
-.workspace-page--overview .overview-card--alerts-clear .system-alert__headline::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 11px;
-  margin: -3px 2px 0;
-  border: solid var(--bop-color-success-mark);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-.system-alert__footer {
+.workspace-page--overview .overview-counts {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 var(--bop-space-2);
+  align-items: flex-end;
+  gap: var(--bop-space-4) var(--bop-space-12, 48px);
+  margin: var(--bop-space-2) 0 0;
+  padding: 0;
+  list-style: none;
 }
-.workspace-page--overview .system-alert__footer .overview-updated,
-.workspace-page--overview .system-alert__footer .system-alert__resolved {
-  margin: 0;
-}
-.workspace-page--overview .overview-card--alerts-clear .system-alert__footer > p + p::before {
-  content: "·";
-  margin-right: var(--bop-space-2);
-}
-.workspace-page--overview
-  .overview-card--alerts:not(.overview-card--alerts-clear)
-  .system-alert__footer {
-  flex-direction: column;
-  margin-top: var(--bop-space-3);
-  padding-top: var(--bop-space-3);
-  border-top: 1px solid var(--bop-color-border-default);
-}
-.workspace-page--overview .overview-card--alerts-critical header h3,
-.workspace-page--overview .overview-card--alerts-warning header h3 {
-  font-size: 18px;
-}
-.workspace-page--overview .overview-card--alerts > [aria-live] {
-  margin-top: var(--bop-space-3);
-}
-.workspace-page--overview .overview-card--alerts-clear > [aria-live] {
-  margin-top: 0;
-}
-.workspace-page--overview .system-alert__badge {
-  border-radius: var(--bop-radius-control);
-  text-transform: none;
-}
-@media (max-width: 767px) {
-  .workspace-page--overview .overview-card--alerts-clear {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "title action"
-      "status status"
-      "meta meta";
-    padding: var(--bop-space-3) var(--bop-space-4);
-  }
-  .workspace-page--overview .overview-card--alerts-clear .system-alert__footer {
-    flex-direction: column;
-  }
-  .workspace-page--overview .overview-card--alerts-clear .system-alert__footer > p + p::before {
-    content: none;
-  }
-}
-
-/* Right now: KPI tiles on one grid, hairline rules between them, big tabular figures. */
-.workspace-page--overview .overview-card--today {
+.workspace-page--overview .overview-counts li {
   display: grid;
   align-content: start;
-  gap: var(--bop-space-4);
-}
-.workspace-page--overview .overview-card--today .overview-counts {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  justify-items: start;
   gap: 0;
-  /* The first tile's words line up with the card heading; the clipped rule sits in the padding. */
-  margin: 0 0 0 calc(-1 * var(--bop-space-4));
-  overflow: hidden;
+  min-width: 7rem;
+  max-width: 18rem;
 }
-.workspace-page--overview .overview-card--today .overview-counts li {
-  grid-template-rows: auto auto 1fr auto;
-  gap: var(--bop-space-1);
-  padding: var(--bop-space-2) var(--bop-space-4) var(--bop-space-1);
-  /* Rules to the left and above each tile; the list clips those on its outer edges. */
-  box-shadow:
-    -1px 0 0 0 var(--bop-color-border-default),
-    0 -1px 0 0 var(--bop-color-border-default);
-}
-.workspace-page--overview .overview-card--today .overview-count__label {
-  color: var(--bop-color-text-muted);
-  font-size: 13px;
-  font-weight: 500;
-}
-.workspace-page--overview .overview-card--today .overview-count__value {
-  font-size: 36px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
+.workspace-page--overview .overview-count__value {
+  color: var(--bop-color-text-default);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
   font-variant-numeric: tabular-nums;
 }
-.workspace-page--overview .overview-card--today .overview-count__detail {
-  font-size: 13px;
-  line-height: 1.4;
+.workspace-page--overview .overview-count__qualifier {
+  font-size: 14px;
+  font-weight: 400;
 }
-/* "At least 3": the words sit small before the number, so the tile keeps its width. */
-.workspace-page--overview .overview-card--today .overview-count__qualifier {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0;
+.workspace-page--overview .overview-count__unread {
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  line-height: 26px;
 }
-.workspace-page--overview .overview-card--today .overview-count__note {
-  display: block;
-  color: var(--bop-color-text-muted);
+.workspace-page--overview .overview-counts .overview-count__label {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
 }
-.workspace-page--overview .overview-card--today .overview-counts a {
-  justify-self: start;
-  min-height: 44px;
+.workspace-page--overview .overview-counts .overview-count__label:hover {
+  text-decoration: underline;
   text-underline-offset: 3px;
 }
-@media (max-width: 767px) {
-  .workspace-page--overview .overview-card--today .overview-counts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin-left: calc(-1 * var(--bop-space-3));
-  }
-  .workspace-page--overview .overview-card--today .overview-counts li {
-    padding: var(--bop-space-3) var(--bop-space-3) var(--bop-space-1);
-  }
-  .workspace-page--overview .overview-card--today .overview-count__value {
-    font-size: 30px;
-  }
+.workspace-page--overview :is(.overview-count__note, .overview-count__detail) {
+  display: block;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
 }
 
-/* Opening and closing: a table-like list — what to check | status | link, columns aligned. */
-.workspace-page--overview .overview-card--checklist {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
-  gap: 0 var(--bop-space-8);
-  align-items: start;
+/* ---- Below the numbers: closed until asked for, then quiet ---------------------------------- */
+.workspace-page--overview .overview-more > summary {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  color: var(--bop-color-accent);
+  font-size: 14px;
+  cursor: pointer;
+  list-style: none;
 }
-.workspace-page--overview .overview-card--checklist > header {
-  grid-column: 1 / -1;
-  padding-bottom: var(--bop-space-3);
+.workspace-page--overview .overview-more > summary::-webkit-details-marker {
+  display: none;
+}
+.workspace-page--overview .overview-more > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border: solid currentColor;
+  border-width: 0 1px 1px 0;
+  transform: rotate(45deg);
+}
+.workspace-page--overview .overview-more[open] > summary::after {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+.workspace-page--overview .overview-more > summary:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workspace-page--overview .overview-more > p {
+  margin: 0 0 var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+/* A problem's background sits under its words, so its "more" is a little tighter. */
+.workspace-page--overview .overview-attention__text .overview-more > summary {
+  min-height: 32px;
+}
+
+/* Opening and closing: two lists of the same rows. */
+.workspace-page--overview .overview-checklist {
+  margin-top: calc(-1 * var(--bop-space-4));
+}
+.workspace-page--overview .overview-checklist__groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+  gap: var(--bop-space-4) var(--bop-space-8);
+  align-items: start;
 }
 .workspace-page--overview .overview-checklist__group {
   min-width: 0;
 }
 .workspace-page--overview .overview-checklist__group h4 {
-  margin: var(--bop-space-4) 0 var(--bop-space-1);
-  color: var(--bop-color-text-muted);
-  font-size: 13px;
+  margin: var(--bop-space-2) 0;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
   font-weight: 600;
 }
 .workspace-page--overview .overview-checklist__group ul {
-  grid-template-columns: minmax(12rem, 1fr) auto auto;
-  column-gap: var(--bop-space-4);
+  display: block;
 }
 .workspace-page--overview .overview-checklist__group li {
-  grid-column: 1 / -1;
-  grid-template-columns: subgrid;
-  gap: var(--bop-space-1) var(--bop-space-4);
-  min-height: 52px;
-  padding: var(--bop-space-1) 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--bop-space-4);
+  align-items: center;
+  padding: var(--bop-space-2) 0;
+  border: 0;
   font-size: 14px;
 }
-.workspace-page--overview .overview-checklist__group li:last-child {
-  border-bottom: 1px solid var(--bop-color-border-default);
+.workspace-page--overview .overview-checklist__group li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
 }
 .workspace-page--overview .overview-checklist__text {
   grid-column: 1;
@@ -286,295 +432,127 @@
   overflow-wrap: break-word;
 }
 .workspace-page--overview .overview-checklist__status {
-  grid-column: 2;
-  justify-self: end;
-  max-width: 14rem;
-  text-align: right;
+  grid-column: 1;
+  color: var(--bop-color-text-muted);
+  font-weight: 400;
   white-space: normal;
 }
 .workspace-page--overview .overview-checklist__group li > a {
-  grid-column: 3;
+  grid-column: 2;
+  grid-row: 1 / span 2;
   justify-self: end;
-  min-height: 44px;
-  text-underline-offset: 3px;
-}
-/* Instructions have no status: their words use the status column too. */
-.workspace-page--overview
-  .overview-checklist__group
-  li:not(:has(.overview-checklist__status))
-  .overview-checklist__text {
-  grid-column: 1 / 3;
-  color: var(--bop-color-text-muted);
-}
-.workspace-page--overview
-  .overview-checklist__group
-  li:not(:has(.overview-checklist__status, a))
-  .overview-checklist__text {
-  grid-column: 1 / -1;
-}
-@media (max-width: 767px) {
-  .workspace-page--overview .overview-checklist__group ul {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .workspace-page--overview .overview-checklist__group li {
-    padding: var(--bop-space-2) 0 0;
-  }
-  .workspace-page--overview .overview-checklist__group .overview-checklist__text,
-  .workspace-page--overview
-    .overview-checklist__group
-    li:not(:has(.overview-checklist__status))
-    .overview-checklist__text {
-    grid-column: 1 / -1;
-  }
-  .workspace-page--overview .overview-checklist__status {
-    grid-column: 1;
-    justify-self: start;
-    max-width: none;
-    text-align: left;
-  }
-  .workspace-page--overview .overview-checklist__group li > a {
-    grid-column: 2;
-  }
-  .workspace-page--overview
-    .overview-checklist__group
-    li:not(:has(.overview-checklist__status))
-    > a {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
 }
 
-/*
- * Figma v1 (2026-10-25) Home: the figures as separate tiles across the top, "Needs attention now"
- * on the left with one action per row, the store's status, system and checklist on the right.
- */
-.workspace-page--overview .overview-card--today {
+/* The store system: one quiet line. */
+.workspace-page--overview .overview-system {
+  margin-top: calc(-1 * var(--bop-space-4));
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .overview-system__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-3);
+}
+.workspace-page--overview .overview-system p {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.workspace-page--overview .overview-system__note {
+  max-width: 44rem;
+}
+
+/* The name prompt: something to do now, in words, without a box or a coloured edge. */
+.workspace-page--overview.workspace-page--overview .own-name-prompt {
+  margin-bottom: var(--bop-space-8);
   padding: 0;
   border: 0;
-  background: none;
+  border-radius: 0;
 }
-.workspace-page--overview .overview-card--today > header h3 {
-  font-size: 15px;
-}
-.workspace-page--overview .overview-card--today .overview-counts {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
-  gap: var(--bop-space-3);
-  margin: 0;
-  overflow: visible;
-}
-.workspace-page--overview .overview-card--today .overview-counts li {
-  padding: var(--bop-space-4);
-  border: 1px solid var(--bop-color-border-default);
-  border-radius: var(--bop-radius-card);
-  background: var(--bop-color-surface-default);
-  box-shadow: none;
-}
-.workspace-page--overview .overview-card--today .overview-count__value {
-  font-size: 28px;
-  font-weight: 600;
-}
-/* The words to act on also read in the warning colour; the words carry the meaning. */
-.workspace-page--overview .overview-counts .overview-count--attention .overview-count__detail {
-  color: var(--bop-color-warning);
-}
-.workspace-page--overview .overview-counts .overview-count--attention .overview-count__note {
-  color: var(--bop-color-text-muted);
-}
-
-.workspace-page--overview .overview-card--attention header h3 {
-  font-size: 18px;
-}
-.overview-attention {
-  margin: var(--bop-space-3) 0 0;
-  padding: 0;
-  list-style: none;
-}
-.overview-attention li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--bop-space-2) var(--bop-space-4);
-  padding: var(--bop-space-3) 0;
-  border-bottom: 1px solid var(--bop-color-border-default);
-}
-.overview-attention__text {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-.overview-attention__text strong {
-  font-size: 15px;
-  font-weight: 600;
-}
-.overview-attention__text span {
-  color: var(--bop-color-text-muted);
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-/* Figma "Status tag": an outlined word with a dot, coloured by state. */
-.overview-attention__state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 8px;
-  border: 1px solid currentColor;
-  border-radius: var(--bop-radius-control);
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.overview-attention__state::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-.overview-attention__state--warning {
-  color: var(--bop-color-warning);
-}
-.overview-attention__state--danger {
-  color: var(--bop-color-danger);
-}
-.workspace-page--overview .overview-attention__action {
-  display: inline-flex;
-  min-height: 40px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 var(--bop-space-4);
-  border: 1px solid var(--bop-color-border-strong);
-  border-radius: var(--bop-radius-control);
+.workspace-page--overview .own-name-prompt h3 {
+  margin: 0 0 var(--bop-space-1);
   color: var(--bop-color-text-default);
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
 }
-.workspace-page--overview .overview-attention__action:hover {
+.workspace-page--overview .own-name-prompt :is(p, label, .own-name-prompt__hint) {
+  font-size: 14px;
+}
+.workspace-page--overview .own-name-prompt button[type="submit"] {
+  min-height: 44px;
+  padding: 0 var(--bop-space-4);
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.workspace-page--overview .own-name-prompt button[type="submit"]:disabled {
   background: var(--bop-color-surface-raised);
-}
-.overview-attention__empty {
-  margin: var(--bop-space-3) 0 0;
   color: var(--bop-color-text-muted);
-}
-@media (max-width: 767px) {
-  .overview-attention li {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-  .overview-attention__text {
-    grid-column: 1 / -1;
-  }
+  cursor: default;
 }
 
-/* Doubled class: wins over the 2026-10-21 status-beside-figures rule above. */
-@media (min-width: 1200px) {
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention) {
-    grid-template-rows: auto auto auto auto 1fr;
-    align-items: start;
-  }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--today {
-    grid-row: 1;
-    grid-column: 1 / -1;
-  }
-  .workspace-page--overview.workspace-page--overview .overview-grid > .overview-card--attention {
-    grid-row: 2 / span 4;
-    grid-column: 1 / span 7;
-  }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > :is(.overview-card--status, .overview-card--alerts, .overview-card--checklist) {
-    grid-column: 8 / -1;
-  }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--status {
-    grid-row: 2;
-  }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--alerts {
-    grid-row: 3;
-  }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--checklist {
-    grid-row: 4;
-    grid-template-columns: minmax(0, 1fr);
-  }
-  /* In the right column the status is a compact strip and the system card stacks its lines. */
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--status {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--bop-space-1) var(--bop-space-4);
-    padding: var(--bop-space-4) var(--bop-space-5);
-  }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--status
-    .overview-status-value {
-    margin-top: 0;
-    font-size: 22px;
-  }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--alerts-clear {
+/* ---- Phone: title and switch on top, then the store controls; each row stacks --------------- */
+@media (max-width: 48rem) {
+  .workspace-page--overview .workspace-page__header {
+    display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      "title action"
-      "status status"
-      "meta meta";
+      "title language"
+      "toolbar toolbar";
+    align-items: start;
+    gap: var(--bop-space-1) var(--bop-space-3);
+    margin-bottom: var(--bop-space-6);
   }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--alerts-clear
-    .system-alert__footer {
-    flex-direction: column;
+  .workspace-page--overview .workspace-page__title {
+    grid-area: title;
   }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--alerts-clear
-    .system-alert__footer
-    > p
-    + p::before {
-    content: none;
+  .workspace-page--overview .workspace-page__language {
+    grid-area: language;
   }
-  /* An alert that needs action (not "everything is working") leads the page, above the figures. */
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention):has(
-      > .overview-card--alerts:not(.overview-card--alerts-clear)
-    ) {
-    grid-template-rows: auto auto auto auto 1fr;
+  .workspace-page--overview .workspace-page__toolbar {
+    grid-area: toolbar;
+    flex-wrap: wrap;
+    margin-inline-start: 0;
   }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--attention)
-    > .overview-card--alerts:not(.overview-card--alerts-clear) {
-    grid-row: 1;
+  .workspace-page--overview .scope-switcher {
+    flex: 1 1 100%;
+  }
+  .workspace-layout .workspace-content .workspace-page--overview .scope-switcher select {
+    flex: 1 1 0;
+    width: 100%;
+    max-width: none;
+  }
+  .workspace-page--overview .overview-attention li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--bop-space-1) var(--bop-space-4);
+  }
+  .workspace-page--overview .overview-attention__text {
     grid-column: 1 / -1;
   }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--alerts:not(.overview-card--alerts-clear))
-    > .overview-card--today {
-    grid-row: 2;
+  .workspace-page--overview .overview-attention__action {
+    grid-column: 2;
   }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--alerts:not(.overview-card--alerts-clear))
-    > .overview-card--attention {
-    grid-row: 3 / span 3;
+  .workspace-page--overview .overview-counts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+    gap: var(--bop-space-3) var(--bop-space-4);
   }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--alerts:not(.overview-card--alerts-clear))
-    > .overview-card--status {
-    grid-row: 3;
+  .workspace-page--overview .overview-counts li {
+    min-width: 0;
+    max-width: none;
   }
-  .workspace-page--overview.workspace-page--overview
-    .overview-grid:has(> .overview-card--alerts:not(.overview-card--alerts-clear))
-    > .overview-card--checklist {
-    grid-row: 4;
+  .workspace-page--overview .closing-reminder {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-page--overview .closing-reminder__open {
+    justify-self: start;
   }
 }

@@ -922,8 +922,8 @@ test("@production WP-2423: a table whose dish is being remade reads Being remade
   await expectNoInternalText(page);
 
   await page.goto("/app");
-  const open = page.locator(".overview-counts li").filter({ hasText: "Open orders" });
-  await expect(open).toContainText("1 ready to serve");
+  const ready = page.locator(".overview-attention li").filter({ hasText: "Food ready to serve" });
+  await expect(ready).toContainText("1 ready to serve");
   await expectNoInternalText(page);
 });
 

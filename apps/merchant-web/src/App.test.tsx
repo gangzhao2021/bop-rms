@@ -74,7 +74,9 @@ describe("HOME-OVERVIEW Merchant shell", () => {
     expect(html).toContain('data-freshness="Stale"');
     expect(html).not.toContain("Training Store · Stale");
     expect(html).toContain("Second Store");
-    expect(html).toContain("Store status");
+    // The Store's status and business date are the page's meta line.
+    expect(html).toContain("<span>Open</span>");
+    expect(html).toContain("Business date");
     expect(html).toContain("not available in this release");
     expect(html).not.toContain("WP-1905");
     expect(html).toContain("Stale data");

@@ -1,6 +1,6 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
 import { useApprovalsWaiting, type ApprovalsWaiting } from "./approvals-waiting.js";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
@@ -20,8 +20,13 @@ import {
 import { createPickupClient } from "./pickup-client.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { storeTime } from "./StoreTime.js";
-import { ClosingReminder } from "./ClosingReminder.js";
-import { OperationsAlerts } from "./OperationsAlerts.js";
+import { ClosingReminder, closingReminderScreen } from "./ClosingReminder.js";
+import {
+  StoreSystemLine,
+  systemAttentionItems,
+  useOperationsAlerts,
+  type OperationsAlertsRead,
+} from "./OperationsAlerts.js";
 import {
   createDiningSessionClient,
   longOpenSessionMinutes,
@@ -262,89 +267,77 @@ function Count<T>({
   value,
   detail,
   href,
-  linkLabel,
-  attention,
 }: {
   readonly label: string;
   readonly read: OverviewRead<T>;
-  readonly value: (summary: T) => CountShown | string;
-  readonly detail: (summary: T) => string;
+  readonly value: (summary: T) => CountShown;
+  /** Only what the list above doesn't already say. */
+  readonly detail?: ((summary: T) => string | null) | undefined;
   readonly href: string;
-  readonly linkLabel: string;
-  /** Figma v1: the detail words are the ones to act on (shown in the warning colour too). */
-  readonly attention?: ((summary: T) => boolean) | undefined;
 }) {
   if (read.kind === "Hidden") return null;
-  const shown = read.kind === "Ready" ? value(read.value) : null;
-  const count: CountShown | null =
-    typeof shown === "string" ? { qualifier: null, number: shown, note: null } : shown;
-  const needsAction = read.kind === "Ready" && attention?.(read.value) === true;
+  const count = read.kind === "Ready" ? value(read.value) : null;
+  const words = read.kind === "Ready" ? (detail?.(read.value) ?? null) : null;
   return (
-    <li
-      aria-busy={read.kind === "Loading"}
-      className={needsAction ? "overview-count--attention" : undefined}
-    >
-      <span className="overview-count__label">{label}</span>
-      {read.kind === "Ready" && count !== null ? (
-        <>
-          <strong className="overview-count__value">
-            {count.qualifier === null ? null : (
-              <span className="overview-count__qualifier">{count.qualifier} </span>
-            )}
-            {count.number}
-          </strong>
-          <span className="overview-count__detail">
-            {detail(read.value)}
-            {count.note === null ? null : (
-              <span className="overview-count__note">{count.note}</span>
-            )}
-          </span>
-        </>
+    <li aria-busy={read.kind === "Loading"}>
+      {count !== null ? (
+        <strong className="overview-count__value">
+          {count.qualifier === null ? null : (
+            <span className="overview-count__qualifier">{count.qualifier} </span>
+          )}
+          {count.number}
+        </strong>
       ) : (
-        <span className="overview-count__detail" role="status">
+        <span className="overview-count__unread" role="status">
           {read.kind === "Loading" ? t("Reading…") : t("Could not be read")}
         </span>
       )}
-      <Link to={href}>{linkLabel}</Link>
+      <Link className="overview-count__label" to={href}>
+        {label}
+      </Link>
+      {count?.note == null ? null : <span className="overview-count__note">{count.note}</span>}
+      {words === null ? null : <span className="overview-count__detail">{words}</span>}
     </li>
   );
 }
 
-/** The "right now" card; pure so the states can be rendered and checked without a network. */
+/** "Right now": the few numbers staff use; what someone must act on is in "Needs attention". */
 export function OverviewToday({
   state,
   timeZone,
   busy = false,
   onRefresh,
-  approvals = null,
+  reportsHref = null,
 }: {
   readonly state: OverviewTodayState;
-  /** WP-2423 Q35: refunds waiting for an approver; null when not permitted or not read. */
-  readonly approvals?: ApprovalsWaiting | null;
   readonly timeZone?: string | undefined;
   readonly busy?: boolean;
   readonly onRefresh?: (() => void) | undefined;
+  /** Where Today's summary lives; null when this staff member has no reports screen. */
+  readonly reportsHref?: string | null;
 }) {
   if (
-    [state.orders, state.pickups, state.exceptions, state.tables].every(
-      (read) => read.kind === "Hidden",
-    )
+    reportsHref === null &&
+    [state.orders, state.pickups, state.tables].every((read) => read.kind === "Hidden")
   )
     return null;
-  const tables = tablesSummary(state);
-  const pickups = state.pickups;
   return (
-    <section className="overview-card overview-card--today" aria-labelledby="today-summary-heading">
+    <section className="overview-now" aria-labelledby="today-summary-heading">
       <header>
-        <h3 id="today-summary-heading">{t("Right now")}</h3>
-        <div className="overview-card__tools">
+        <h2 id="today-summary-heading">{t("Right now")}</h2>
+        <div className="overview-now__tools">
           <p className="overview-updated">
             {state.updatedAt === null
               ? t("Reading current work…")
               : t("Last checked {updatedAt}", { updatedAt: storeTime(state.updatedAt, timeZone) })}
           </p>
           {onRefresh ? (
-            <button type="button" onClick={onRefresh} disabled={busy}>
+            <button
+              type="button"
+              className="overview-text-action"
+              onClick={onRefresh}
+              disabled={busy}
+            >
               {t("Refresh")}
             </button>
           ) : null}
@@ -355,138 +348,81 @@ export function OverviewToday({
           label={t("Open orders")}
           read={state.orders}
           value={(o) => countShown(o.open, o.more, t("the most recent orders"))}
-          detail={(o) =>
-            awaitingAcceptanceText({
-              orders: o.awaitingAcceptance,
-              rounds: o.awaitingRounds,
-              urgentRounds: o.urgentRounds,
-            }) +
-            (o.dineIn
-              ? t(" · {readyToServe} ready to serve", { readyToServe: o.readyToServe })
-              : "")
-          }
           href="/operations/orders"
-          linkLabel={t("View orders")}
-          attention={(o) => o.awaitingAcceptance + o.awaitingRounds > 0}
         />
         <Count
-          label={t("Pickups waiting")}
+          label={t("Waiting for pickup")}
           read={state.pickups}
           value={(p) => countShown(p.waiting, p.more, t("the first pickups listed"))}
-          detail={(p) =>
-            p.waiting === 0
-              ? t("Nothing waiting for collection")
-              : p.remaking === 0
-                ? t("Ready for collection")
-                : t("{remaking} waiting on a remake", { remaking: countOf(p.remaking, "order") })
-          }
           href="/operations/pickup"
-          linkLabel={t("View pickups")}
         />
-        {state.orders.kind === "Ready" && state.orders.value.earlierUnfinished > 0 ? (
-          <Count
-            label={t("Earlier orders not finished")}
-            read={state.orders}
-            value={(o) => String(o.earlierUnfinished)}
-            detail={() => t("Make it if the guest comes back; otherwise cancel it and refund them")}
-            href="/operations/orders"
-            linkLabel={t("View orders")}
-            attention={() => true}
-          />
-        ) : null}
-        {pickups.kind === "Ready" && pickups.value.earlierDays > 0 ? (
-          // WP-2423 (3cd0f8dd L7): earlier days' uncollected orders apart from today's, with the
-          // Pickup page's "check and close" section.
-          <Count
-            label={t("Pickups from earlier days")}
-            read={pickups}
-            value={(p) => String(p.earlierDays)}
-            detail={() =>
-              t("Check whether they were collected; if not, a manager marks them not collected")
-            }
-            href="/operations/pickup"
-            linkLabel={t("Check and close")}
-            attention={() => true}
-          />
-        ) : null}
         <Count
           label={t("Open tables")}
-          read={tables}
+          read={tablesSummary(state)}
           value={(read) => countShown(read.open, read.more, t("the first tables listed"))}
           detail={(read) =>
-            read.open === 0
-              ? t("No tables open")
-              : read.toClose === null
-                ? t("A manager or the owner closes tables when the guests have left")
-                : read.toClose === 0
-                  ? t("None waiting to be closed")
-                  : t("{toClose} served — close when the guests have left", {
-                      toClose: countOf(read.toClose, "table"),
-                    })
+            read.open > 0 && read.toClose === null
+              ? t("A manager or the owner closes tables when the guests have left")
+              : null
           }
           href="/operations/dining"
-          linkLabel={t("View tables")}
-          attention={(read) => (read.toClose ?? 0) > 0}
         />
-        <Count
-          label={t("Open exceptions")}
-          read={state.exceptions}
-          value={(e) => String(e.open)}
-          detail={(e) =>
-            e.overdue === 0 ? t("None overdue") : t("{overdue} overdue", { overdue: e.overdue })
-          }
-          href="/operations/order-exceptions"
-          linkLabel={t("View exceptions")}
-          attention={(e) => e.overdue > 0}
-        />
-        {approvals === null ? null : (
-          <Count
-            label={t("Refunds waiting for approval")}
-            read={{ kind: "Ready", value: approvals }}
-            value={(a) => String(a.awaiting + a.approvedNotSent)}
-            detail={(a) =>
-              a.awaiting === 0 && a.approvedNotSent === 0
-                ? t("Nothing waiting")
-                : [
-                    a.awaiting === 0 ? null : t("{count} to approve", { count: a.awaiting }),
-                    a.approvedNotSent === 0
-                      ? null
-                      : t("{count} approved, not sent yet", { count: a.approvedNotSent }),
-                  ]
-                    .filter((part) => part !== null)
-                    .join(" · ")
-            }
-            href="/app/approvals"
-            linkLabel={t("Review approvals")}
-            attention={(a) => a.awaiting > 0}
-          />
+        {reportsHref === null ? null : (
+          <li className="overview-counts__summary">
+            <Link className="overview-count__label" to={reportsHref}>
+              {t("Today's summary")}
+            </Link>
+          </li>
         )}
       </ul>
     </section>
   );
 }
 
-/** One row of "Needs attention now": what, the detail, its state in words, and where to act. */
+/** One row of "Needs attention": what, the detail, its state in words, and where to act. */
 export interface AttentionItem {
   readonly key: string;
   readonly title: string;
+  /** Words before the detail ("What to do:"). */
+  readonly detailLabel?: string;
   readonly detail: string;
+  /** The background, on request. */
+  readonly more?: string;
+  /** Grey words under the state ("Since 11:56 AM"). */
+  readonly since?: string;
   readonly state: string;
-  readonly tone: "warning" | "danger";
-  readonly href: string;
-  readonly action: string;
+  /** "warning" and "danger" both need someone; "progress" is under way. Words carry the meaning. */
+  readonly tone: "warning" | "danger" | "progress";
+  /** The page that settles it, or null when the row has no page. */
+  readonly href: string | null;
+  readonly action: string | null;
+  /** The row's action reads again rather than opens a page. */
+  readonly retry?: "reads" | "system";
+  /** Work that can wait for the live service: listed after it. */
+  readonly backlog?: boolean;
 }
 /**
- * Figma v1 (2026-10-25): the work on Home that someone has to act on now, most urgent first, each
- * with the page that settles it. Built only from the summaries Home already reads.
+ * Figma v1 (2026-10-25), reordered after the Owner's 2026-11-03 walkthrough: the work on Home that
+ * someone has to act on now, the guests in front of you first, the backlog after, each with the
+ * page that settles it. This is the only place Home says these things, so a fact dropped from the
+ * numbers must be here (and a read that failed says so, never a false "nothing needs attention").
+ * Built only from the summaries Home already reads.
  */
 export function attentionItems(
   state: OverviewTodayState,
   approvals: ApprovalsWaiting | null,
   dayStartsAt: string | null = null,
   kitchenSetupHref: string | null = null,
+  settlement: SettlementStatusRead = { kind: "Hidden" },
 ): readonly AttentionItem[] {
   const items: AttentionItem[] = [];
+  const unread = [
+    ...(state.orders.kind === "Unavailable" ? [t("Orders")] : []),
+    ...(state.pickups.kind === "Unavailable" ? [t("Pickup")] : []),
+    ...(state.tables.kind === "Unavailable" ? [t("Tables")] : []),
+    ...(state.exceptions.kind === "Unavailable" ? [t("Exceptions")] : []),
+    ...(settlement.kind === "Unavailable" ? [t("Settlement")] : []),
+  ];
   // WP-2423 item 11: first, since no guest can order until this is done.
   if (kitchenSetupHref !== null)
     items.push({
@@ -497,6 +433,17 @@ export function attentionItems(
       tone: "danger",
       href: kitchenSetupHref,
       action: t("Set up the kitchen"),
+    });
+  if (unread.length > 0)
+    items.push({
+      key: "unread",
+      title: t("This list may be missing something"),
+      detail: t("Could not read: {value}", { value: unread.join(" · ") }),
+      state: t("Not read"),
+      tone: "danger",
+      href: null,
+      action: t("Refresh"),
+      retry: "reads",
     });
   const tables = state.tables.kind === "Ready" ? state.tables.value.tables : [];
   const calls = tables.filter((table) => table.staffCall != null).length;
@@ -524,48 +471,30 @@ export function attentionItems(
         state: t("To accept"),
         tone: o.urgentRounds > 0 ? "danger" : "warning",
         href: "/operations/orders",
-        action: t("Open orders"),
+        action: t("View orders"),
+      });
+    if (o.readyToServe > 0)
+      items.push({
+        key: "ready-to-serve",
+        title: t("Food ready to serve"),
+        detail: t("{ready} ready to serve", { ready: o.readyToServe }),
+        state: t("To serve"),
+        tone: "warning",
+        href: state.tables.kind === "Hidden" ? "/operations/orders" : "/operations/dining",
+        action: state.tables.kind === "Hidden" ? t("View orders") : t("Go to Tables"),
       });
   }
-  if (state.exceptions.kind === "Ready" && state.exceptions.value.overdue > 0)
+  if (state.pickups.kind === "Ready" && state.pickups.value.remaking > 0)
     items.push({
-      key: "exceptions",
-      title: t("Exceptions overdue"),
-      detail: t("{overdue} overdue", { overdue: state.exceptions.value.overdue }),
-      state: t("Overdue"),
-      tone: "danger",
-      href: "/operations/order-exceptions",
-      action: t("View exceptions"),
-    });
-  if (approvals !== null && approvals.awaiting > 0)
-    items.push({
-      key: "approvals",
-      title: t("Refunds waiting for approval"),
-      detail: t("{count} to approve", { count: approvals.awaiting }),
-      state: t("To approve"),
-      tone: "warning",
-      href: "/app/approvals",
-      action: t("Review approvals"),
-    });
-  if (state.orders.kind === "Ready" && state.orders.value.earlierUnfinished > 0)
-    items.push({
-      key: "earlier-orders",
-      title: t("Earlier orders not finished"),
-      detail: t("Make it if the guest comes back; otherwise cancel it and refund them"),
-      state: t("To check"),
-      tone: "warning",
-      href: "/operations/orders",
-      action: t("View orders"),
-    });
-  if (state.pickups.kind === "Ready" && state.pickups.value.earlierDays > 0)
-    items.push({
-      key: "pickups",
-      title: t("Pickups from earlier days"),
-      detail: t("Check whether they were collected; if not, a manager marks them not collected"),
-      state: t("To check"),
+      key: "pickup-remakes",
+      title: t("Pickups waiting on a remake"),
+      detail: t("{remaking} waiting on a remake", {
+        remaking: countOf(state.pickups.value.remaking, "order"),
+      }),
+      state: t("Don't hand over yet"),
       tone: "warning",
       href: "/operations/pickup",
-      action: t("Check and close"),
+      action: t("View pickups"),
     });
   const summary = tablesSummary(state, dayStartsAt);
   if (summary.kind === "Ready" && (summary.value.toClose ?? 0) > 0)
@@ -580,48 +509,199 @@ export function attentionItems(
       href: "/operations/dining",
       action: t("View tables"),
     });
+  if (approvals !== null && approvals.awaiting + approvals.approvedNotSent > 0)
+    items.push({
+      key: "approvals",
+      title: t("Refunds waiting for approval"),
+      detail: [
+        approvals.awaiting === 0 ? null : t("{count} to approve", { count: approvals.awaiting }),
+        approvals.approvedNotSent === 0
+          ? null
+          : t("{count} approved, not sent yet", { count: approvals.approvedNotSent }),
+      ]
+        .filter((part) => part !== null)
+        .join(" · "),
+      state: approvals.awaiting > 0 ? t("To approve") : t("Not sent yet"),
+      tone: "warning",
+      href: "/app/approvals",
+      action: t("Review approvals"),
+      backlog: true,
+    });
+  // The last closed day's money not matching is a problem, not a line in a checklist.
+  if (settlement.kind === "Ready" && settlement.value.needsLook === true)
+    items.push({
+      key: "settlement",
+      title: t("Settlement for {businessDate}", {
+        businessDate: businessDateText(settlement.value.businessDate),
+      }),
+      detail: settlement.value.text,
+      state: t("To check"),
+      tone: "warning",
+      href: "/app/operations/payment-reconciliation",
+      action: t("Go to {value}", { value: t("Settlement") }),
+      backlog: true,
+    });
+  if (state.orders.kind === "Ready" && state.orders.value.earlierUnfinished > 0)
+    items.push({
+      key: "earlier-orders",
+      title: t("Earlier orders not finished"),
+      detail:
+        String(state.orders.value.earlierUnfinished) +
+        " · " +
+        t("Make it if the guest comes back; otherwise cancel it and refund them"),
+      state: t("To check"),
+      tone: "warning",
+      href: "/operations/orders",
+      action: t("View orders"),
+      backlog: true,
+    });
+  if (state.pickups.kind === "Ready" && state.pickups.value.earlierDays > 0)
+    items.push({
+      key: "pickups",
+      title: t("Pickups from earlier days"),
+      detail:
+        String(state.pickups.value.earlierDays) +
+        " · " +
+        t("Check whether they were collected; if not, a manager marks them not collected"),
+      state: t("To check"),
+      tone: "warning",
+      href: "/operations/pickup",
+      action: t("Check and close"),
+      backlog: true,
+    });
+  if (state.exceptions.kind === "Ready" && state.exceptions.value.open > 0) {
+    const { open, overdue } = state.exceptions.value;
+    items.push(
+      overdue > 0
+        ? {
+            key: "exceptions",
+            title: t("Exceptions overdue"),
+            detail:
+              t("{overdue} overdue", { overdue }) +
+              (open > overdue ? " · " + t("{open} open", { open }) : ""),
+            state: t("Overdue"),
+            tone: "danger",
+            href: "/operations/order-exceptions",
+            action: t("View exceptions"),
+            backlog: true,
+          }
+        : {
+            key: "exceptions",
+            title: t("Open exceptions"),
+            detail: t("{open} open", { open }) + " · " + t("None overdue"),
+            state: t("To check"),
+            tone: "warning",
+            href: "/operations/order-exceptions",
+            action: t("View exceptions"),
+            backlog: true,
+          },
+    );
+  }
   return items;
+}
+function AttentionRow({
+  item,
+  onRefresh,
+  onCheckSystem,
+}: {
+  readonly item: AttentionItem;
+  readonly onRefresh?: (() => void) | undefined;
+  readonly onCheckSystem?: (() => void) | undefined;
+}) {
+  const retry = item.retry === "system" ? onCheckSystem : onRefresh;
+  return (
+    <li>
+      <div className="overview-attention__text">
+        <strong>{item.title}</strong>
+        <p>
+          {item.detailLabel === undefined ? null : (
+            <span className="overview-attention__label">{item.detailLabel} </span>
+          )}
+          {item.detail}
+        </p>
+        {item.more === undefined ? null : (
+          <details className="overview-more">
+            <summary>{t("More about this")}</summary>
+            <p>{item.more}</p>
+          </details>
+        )}
+      </div>
+      <div className="overview-attention__status">
+        <span className={`overview-attention__state overview-attention__state--${item.tone}`}>
+          {item.state}
+        </span>
+        {item.since === undefined ? null : (
+          <span className="overview-attention__since">{item.since}</span>
+        )}
+      </div>
+      {item.href !== null && item.action !== null ? (
+        <Link className="overview-attention__action" to={item.href}>
+          {item.action}
+        </Link>
+      ) : item.action !== null && retry !== undefined ? (
+        <button type="button" className="overview-attention__action" onClick={retry}>
+          {item.action}
+        </button>
+      ) : null}
+    </li>
+  );
 }
 export function NeedsAttention({
   state,
   approvals = null,
   kitchenSetupHref = null,
+  settlement = { kind: "Hidden" },
+  system = { kind: "NotPermitted" },
+  timeZone,
+  reminder = null,
+  onRefresh,
+  onCheckSystem,
 }: {
   readonly state: OverviewTodayState;
   readonly approvals?: ApprovalsWaiting | null;
   readonly kitchenSetupHref?: string | null;
+  readonly settlement?: SettlementStatusRead;
+  /** The store system's board: a real problem is a row here, not only in the status line. */
+  readonly system?: OperationsAlertsRead;
+  readonly timeZone?: string | undefined;
+  /** The evening reminder, which reads for itself: a row above the rest when it shows. */
+  readonly reminder?: ReactNode;
+  readonly onRefresh?: (() => void) | undefined;
+  readonly onCheckSystem?: (() => void) | undefined;
 }) {
   const reads = [state.orders, state.pickups, state.exceptions, state.tables];
-  if (kitchenSetupHref === null && reads.every((read) => read.kind === "Hidden")) return null;
-  const items = attentionItems(state, approvals, null, kitchenSetupHref);
+  const { urgent, later } = systemAttentionItems(system, timeZone);
+  if (
+    kitchenSetupHref === null &&
+    urgent.length + later.length === 0 &&
+    reads.every((read) => read.kind === "Hidden")
+  )
+    return <>{reminder}</>;
+  const work = attentionItems(state, approvals, null, kitchenSetupHref, settlement);
+  const items = [
+    ...urgent,
+    ...work.filter((item) => item.backlog !== true),
+    ...later,
+    ...work.filter((item) => item.backlog === true),
+  ];
   const reading = reads.some((read) => read.kind === "Loading");
   return (
-    <section
-      className="overview-card overview-card--attention"
-      aria-labelledby="needs-attention-heading"
-    >
-      <header>
-        <h3 id="needs-attention-heading">{t("Needs attention now")}</h3>
-      </header>
+    <section className="overview-needs" aria-labelledby="needs-attention-heading">
+      <h2 id="needs-attention-heading">{t("Needs attention")}</h2>
+      {reminder}
       {items.length === 0 ? (
         <p className="overview-attention__empty" role="status">
           {reading ? t("Reading current work…") : t("Nothing needs attention right now.")}
         </p>
       ) : (
-        <ul className="overview-attention">
+        <ul className="overview-attention" aria-live="polite">
           {items.map((item) => (
-            <li key={item.key}>
-              <span className="overview-attention__text">
-                <strong>{item.title}</strong>
-                <span>{item.detail}</span>
-              </span>
-              <span className={`overview-attention__state overview-attention__state--${item.tone}`}>
-                {item.state}
-              </span>
-              <Link className="overview-attention__action" to={item.href}>
-                {item.action}
-              </Link>
-            </li>
+            <AttentionRow
+              key={item.key}
+              item={item}
+              onRefresh={onRefresh}
+              onCheckSystem={onCheckSystem}
+            />
           ))}
         </ul>
       )}
@@ -634,24 +714,36 @@ export function NeedsAttention({
  * checklist. Unfinished guest payments (nothing charged) are not something to look at.
  */
 export function settlementStatusText(view: SettlementView): string {
+  return settlementStatus(view).text;
+}
+function settlementStatus(view: SettlementView): {
+  readonly text: string;
+  /** Payments differ: someone has to look. "Not checked yet" is only a state of the day. */
+  readonly needsLook: boolean;
+} {
   const reconciliation = view.reconciliation;
-  if (reconciliation === null) return t("Not checked yet");
+  if (reconciliation === null) return { text: t("Not checked yet"), needsLook: false };
   const attention = reconciliation.differences.filter((check) => !unfinishedGuestPayment(check));
   if (attention.length > 0)
-    return t("{length} payment{value} to look at", {
-      length: attention.length,
-      value: attention.length === 1 ? "" : "s",
-    });
+    return {
+      text: t("{length} payment{value} to look at", {
+        length: attention.length,
+        value: attention.length === 1 ? "" : "s",
+      }),
+      needsLook: true,
+    };
   const settlement = reconciliation.settlement;
-  if (settlement === null) return t("Not checked against the payment provider yet");
+  if (settlement === null)
+    return { text: t("Not checked against the payment provider yet"), needsLook: false };
   const checks = settlement.recheck === null ? settlement.checks : [settlement.recheck.check];
   return checks.every((check) => check.outcome === "Matched" || check.outcome === "Healed")
-    ? t("Matches the payment provider")
-    : t("Differs from the payment provider — look at it");
+    ? { text: t("Matches the payment provider"), needsLook: false }
+    : { text: t("Differs from the payment provider — look at it"), needsLook: true };
 }
 export type SettlementStatusRead = OverviewRead<{
   readonly businessDate: string;
   readonly text: string;
+  readonly needsLook?: boolean;
 }>;
 interface ChecklistItem {
   readonly key: string;
@@ -835,7 +927,7 @@ function ChecklistList({
               <strong className="overview-checklist__status">{systemText(entry.status)}</strong>
             )}
             {entry.href === undefined ? null : (
-              <Link to={entry.href}>
+              <Link className="overview-text-action" to={entry.href}>
                 {t("Go to {value}", { value: entry.linkLabel ?? t("the page") })}
               </Link>
             )}
@@ -845,7 +937,7 @@ function ChecklistList({
     </div>
   );
 }
-/** WP-2423 (3cd0f8dd M6): the day-start and day-end checklist card on Home. */
+/** WP-2423 (3cd0f8dd M6): the day-start and day-end checklist on Home, closed until asked for. */
 export function DayChecklist({
   state,
   settlement,
@@ -859,15 +951,14 @@ export function DayChecklist({
   const { opening, closing } = dayChecklist(state, settlement, serviceHref, dayStartsAt);
   if (opening.length === 0 && closing.length === 0) return null;
   return (
-    <section
-      className="overview-card overview-card--checklist"
-      aria-labelledby="day-checklist-heading"
-    >
-      <header>
-        <h3 id="day-checklist-heading">{t("Opening and closing")}</h3>
-      </header>
-      <ChecklistList label={t("When you open")} items={opening} />
-      <ChecklistList label={t("Before you close")} items={closing} />
+    <section className="overview-checklist" aria-label={t("Opening and closing")}>
+      <details className="overview-more">
+        <summary>{t("Opening and closing")}</summary>
+        <div className="overview-checklist__groups">
+          <ChecklistList label={t("When you open")} items={opening} />
+          <ChecklistList label={t("Before you close")} items={closing} />
+        </div>
+      </details>
     </section>
   );
 }
@@ -882,6 +973,7 @@ export const overviewScreens = Object.freeze({
   settlement: "PAY-RECONCILIATION",
   service: "ORG-STORE-LIST",
   kitchenSetup: "STORE-SETUP",
+  reports: closingReminderScreen,
 } as const);
 export function StoreOverview({
   csrf,
@@ -926,6 +1018,7 @@ export function StoreOverview({
       settlement: ids.includes(overviewScreens.settlement),
       service: ids.includes(overviewScreens.service),
       kitchenSetup: ids.includes(overviewScreens.kitchenSetup),
+      reports: ids.includes(overviewScreens.reports),
     };
   }, [screenKey]);
   const hidden = { kind: "Hidden" } as const;
@@ -1035,7 +1128,7 @@ export function StoreOverview({
                 if (!controller.signal.aborted)
                   setSettlement({
                     kind: "Ready",
-                    value: { businessDate: view.businessDate, text: settlementStatusText(view) },
+                    value: { businessDate: view.businessDate, ...settlementStatus(view) },
                   });
               })
               .catch((error: unknown) => {
@@ -1081,27 +1174,42 @@ export function StoreOverview({
       active.current?.abort();
     };
   }, [live, load, permitted]);
+  // WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store Manager);
+  // for other roles it answers "not permitted" and neither the rows nor the line appear.
+  const system = useOperationsAlerts(fetcher);
   return (
     <>
-      {/* WP-2423 Q13: store system alerts. The server decides who may read them (Owner, Store
-          Manager); for other roles it answers "not permitted" and the card renders nothing. */}
-      <OperationsAlerts timeZone={timeZone} fetcher={fetcher} />
-      {/* WP-2423 item 8 ②: in the evening, what is still open before closing. */}
-      <ClosingReminder screens={screens} fetcher={fetcher} />
+      <NeedsAttention
+        state={state}
+        approvals={approvals}
+        kitchenSetupHref={kitchenSetupHref}
+        settlement={settlement}
+        system={system.read}
+        timeZone={timeZone}
+        // WP-2423 item 8 ②: in the evening, what is still open before closing.
+        reminder={<ClosingReminder screens={screens} fetcher={fetcher} />}
+        onRefresh={() => void load(true)}
+        onCheckSystem={() => void system.refresh()}
+      />
       <OverviewToday
         state={state}
         timeZone={timeZone}
         busy={busy}
         onRefresh={() => void load(true)}
-        approvals={approvals}
+        reportsHref={permitted.reports ? "/app/reports/operations" : null}
       />
-      <NeedsAttention state={state} approvals={approvals} kitchenSetupHref={kitchenSetupHref} />
       <DayChecklist
         state={state}
         settlement={settlement}
         serviceHref={
           permitted.service ? `/app/organization/stores/${storeReference}/service` : null
         }
+      />
+      <StoreSystemLine
+        read={system.read}
+        timeZone={timeZone}
+        busy={system.busy}
+        onRefresh={() => void system.refresh()}
       />
     </>
   );
