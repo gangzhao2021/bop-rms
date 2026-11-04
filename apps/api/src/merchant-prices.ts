@@ -27,6 +27,7 @@ import {
   MerchantSingleStoreListingError,
   MerchantSoleOperatorGateError,
 } from "./merchant-sole-operator.js";
+import { staffContentName } from "./staff-content-locale.js";
 
 /**
  * WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: PRICE-BOOK-LIST / PRICE-BOOK-EDITOR. Brand price books are drafted
@@ -286,11 +287,8 @@ export function createMerchantPrices(options: {
       sellableReference: sku.skuReference,
       skuCode: sku.skuCode,
       productReference: sku.productReference,
-      productName:
-        sku.productLocalizedNames[options.locale] ??
-        Object.values(sku.productLocalizedNames)[0] ??
-        "",
-      sizeName: sku.localizedNames[options.locale] ?? Object.values(sku.localizedNames)[0] ?? "",
+      productName: staffContentName(sku.productLocalizedNames, options.locale),
+      sizeName: staffContentName(sku.localizedNames, options.locale),
       active: sku.active,
     }));
   const bookView = (snapshot: PriceBookSnapshot) => ({

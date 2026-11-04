@@ -28,6 +28,7 @@ import {
   type MerchantDirectListingMode,
   requireMerchantBrandSoleOperator,
 } from "./merchant-sole-operator.js";
+import { staffContentName } from "./staff-content-locale.js";
 
 /**
  * WP-2423 slice 4.3: PRICE-OPTION-LIST — what each option costs on each product (Brand-wide, every
@@ -222,7 +223,7 @@ export function createMerchantOptionPrices(options: {
   }
   type Scope = Awaited<ReturnType<typeof scopeFor>>;
   const name = (names: Readonly<Record<string, string>>, fallback = "") =>
-    names[options.locale] ?? Object.values(names)[0] ?? fallback;
+    staffContentName(names, options.locale) || fallback;
 
   /** Every product option customers can be offered: product, set, option. */
   async function productOptions(tx: Tx, s: Scope) {

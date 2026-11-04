@@ -18,6 +18,7 @@ import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { staffContentName } from "./staff-content-locale.js";
 
 /**
  * WP-2423 slice 4: CAT-OPTIONSET-LIST / CAT-OPTIONSET-EDIT for the selected Store's Brand — choices
@@ -270,7 +271,8 @@ export function createMerchantOptionSets(options: {
         summary.productReference,
       );
       if (product === null) continue;
-      const productName = name(product.draft.localizedNames, product.internalCode);
+      const productName =
+        staffContentName(product.draft.localizedNames, options.locale) || product.internalCode;
       for (const binding of product.draft.optionBindings) {
         const names = used.get(String(binding.optionSetReference)) ?? [];
         if (!names.includes(productName)) names.push(productName);

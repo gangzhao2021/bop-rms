@@ -37,6 +37,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { recipeIngredientItems } from "./recipe-ingredient-items.js";
 import { createStaffLabels } from "./merchant-staff-labels.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { staffContentName } from "./staff-content-locale.js";
 
 /**
  * WP-2423 slice 4.4: RECIPE-OPTION-LIST — what choosing each option of a product does to its recipes
@@ -232,7 +233,7 @@ export function createMerchantOptionRecipes(options: {
   }
   type Scope = Awaited<ReturnType<typeof scopeFor>>;
   const name = (names: Readonly<Record<string, string>>, fallback = "") =>
-    names[options.locale] ?? Object.values(names)[0] ?? fallback;
+    staffContentName(names, options.locale) || fallback;
 
   /** Each product option and what a change must cover: the product's sizes and quantities. */
   async function targets(tx: Tx, s: Scope) {

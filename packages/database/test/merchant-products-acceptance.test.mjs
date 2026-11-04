@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import pg from "pg";
 import { it } from "vitest";
 import { createMerchantProducts } from "../../../apps/api/src/merchant-products.ts";
+import { withStaffContentLocale } from "../../../apps/api/src/staff-content-locale.ts";
 import { listBrandSkuChoices } from "../../rms/catalog/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { productApiGrants } from "../test-support/merchant-api-grants.mjs";
@@ -291,6 +292,36 @@ it("creates products with sizes, edits them, starts selling and refuses unsafe c
         ]),
         [["Caffè Latte", "Active", 3, 2]],
       );
+      // Owner 2026-11-04: the list follows the staff member's language; the editor keeps each name
+      // in its own field, so saving from Chinese cannot write Chinese over the English name.
+      const chinese = (
+        await products.query({ ...session, productReference: latte.productReference })
+      ).product;
+      await command({
+        action: "SaveDraft",
+        operationReference: op(),
+        productReference: latte.productReference,
+        expectedAggregateVersion: chinese.aggregateVersion,
+        name: chinese.name,
+        nameZh: "拿铁",
+        taxClassificationReference: chinese.taxClassificationReference,
+        sizes: chinese.sizes.map(({ skuReference, skuCode, name }) => ({
+          skuReference,
+          skuCode,
+          name,
+        })),
+      });
+      const listIn = (locale) =>
+        withStaffContentLocale(locale, () =>
+          products.query({ ...session, productReference: null }),
+        );
+      assert.equal((await listIn("zh-Hans-CA")).products[0].name, "拿铁");
+      assert.equal((await listIn(null)).products[0].name, "Caffè Latte");
+      const editorIn = await withStaffContentLocale("zh-Hans-CA", () =>
+        products.query({ ...session, productReference: latte.productReference }),
+      );
+      assert.equal(editorIn.product.name, "Caffè Latte");
+      assert.equal(editorIn.product.nameZh, "拿铁");
       const choices = await persistence.transactions.run((tx) =>
         listBrandSkuChoices(tx, { brandReference }),
       );
@@ -314,6 +345,7 @@ it("creates products with sizes, edits them, starts selling and refuses unsafe c
           "CATALOG_PRODUCT_CHANGELIFECYCLE",
           "CATALOG_PRODUCT_CHANGELIFECYCLE",
           "CATALOG_PRODUCT_REPLACEDRAFT",
+          "CATALOG_PRODUCT_REPLACEDRAFT",
         ],
       );
       assert(audits.every((row) => row.actor_reference === owner));
@@ -326,7 +358,7 @@ it("creates products with sizes, edits them, starts selling and refuses unsafe c
             )
           ).rows[0].count,
         ),
-        6,
+        7,
       );
 
       // A reader sees products but cannot change them; without read permission nothing shows.

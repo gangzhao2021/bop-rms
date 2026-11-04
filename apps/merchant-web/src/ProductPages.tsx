@@ -1,5 +1,5 @@
 import { PageIntro } from "./PageIntro.js";
-import { t } from "./i18n/i18n.js";
+import { currentLanguage, t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
@@ -425,10 +425,14 @@ function ProductEditor({
     problems.descriptionZh !== undefined ||
     problems.altText !== undefined;
 
+  // The heading follows the staff member's language; the fields below keep each name as written.
+  const productTitle =
+    currentLanguage() === "zh-Hans" && product?.nameZh ? product.nameZh : (product?.name ?? "");
+
   return (
     <AppFrame
       className="product-editor-page"
-      title={product ? product.name : t("New product")}
+      title={product ? productTitle : t("New product")}
       description={product ? t("Edit product") : t("New product")}
     >
       <header className="screen-heading">
@@ -436,7 +440,7 @@ function ProductEditor({
           <p className="bop-eyebrow">
             {t("{value} · Brand", { value: product ? t("Edit product") : t("New product") })}
           </p>
-          <h2>{product ? product.name : t("New product")}</h2>
+          <h2>{product ? productTitle : t("New product")}</h2>
           <p>
             {product ? (
               <>

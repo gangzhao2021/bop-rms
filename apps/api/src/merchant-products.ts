@@ -28,6 +28,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
+import { staffContentName } from "./staff-content-locale.js";
 
 /**
  * WP-2423 / DEC-CAT-PRODUCT-ADMIN: CAT-PRODUCT-LIST / CAT-PRODUCT-DETAIL for the selected Store's Brand.
@@ -412,7 +413,7 @@ export function productView(
 /** The Brand's option sets a product can use, with their options (archived options left out). */
 export function optionSetChoices(sets: readonly OptionSetAggregate[], locale: string) {
   const name = (names: Readonly<Record<string, string>>, fallback: string) =>
-    names[locale] ?? Object.values(names)[0] ?? fallback;
+    staffContentName(names, locale) || fallback;
   return sets.map((set) => ({
     optionSetReference: set.optionSetReference,
     name: name(set.draft.localizedNames, set.internalCode),
@@ -569,10 +570,7 @@ export function createMerchantProducts(options: {
               : null,
             products: products.map((product) => ({
               ...product,
-              name:
-                product.localizedNames[options.locale] ??
-                Object.values(product.localizedNames)[0] ??
-                "",
+              name: staffContentName(product.localizedNames, options.locale),
             })),
           };
         }),

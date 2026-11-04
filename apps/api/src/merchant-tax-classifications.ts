@@ -16,6 +16,7 @@ import { derivedReference } from "./merchant-products.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { staffContentName } from "./staff-content-locale.js";
 
 /**
  * WP-2423 Store setup in product: CAT-TAX-CLASSIFICATION-LIST — the Brand Owner adds, renames and
@@ -412,8 +413,7 @@ export function createMerchantTaxClassifications(options: {
                 if (product.lifecycle === "Archived") continue;
                 const names = groups.get(product.taxClassificationReference) ?? [];
                 names.push(
-                  product.localizedNames[decided.brandLocale] ??
-                    Object.values(product.localizedNames)[0] ??
+                  staffContentName(product.localizedNames, decided.brandLocale) ||
                     "Unnamed product",
                 );
                 groups.set(product.taxClassificationReference, names);

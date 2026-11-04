@@ -38,6 +38,7 @@ import { createStaffLabels } from "./merchant-staff-labels.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { staffContentName } from "./staff-content-locale.js";
 
 /**
  * WP-2423 / DEC-RECIPE-AUTHORING: RECIPE-LIST / RECIPE-EDITOR for the selected Store's Brand. Recipes
@@ -270,7 +271,7 @@ export function createMerchantRecipes(options: {
     };
   }
   const name = (names: Readonly<Record<string, string>>, fallback: string) =>
-    names[options.locale] ?? Object.values(names)[0] ?? fallback;
+    staffContentName(names, options.locale) || fallback;
 
   async function facts(tx: Tx, scope: Awaited<ReturnType<typeof scopeFor>>) {
     // DEC-ALLERGEN-DECLARATIONS: each item's current declaration, for its current version and

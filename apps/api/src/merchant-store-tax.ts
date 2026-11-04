@@ -9,6 +9,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { staffContentName } from "./staff-content-locale.js";
 
 /**
  * WP-2423 8.7: TAX-STORE-REVIEW — the selected Store's current tax configuration (what governs, how
@@ -44,7 +45,7 @@ export function createMerchantStoreTax(options: {
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
   const ctx = (tx: Tx) => tx as unknown as ProductLifecycleTransaction;
   const name = (names: Readonly<Record<string, string>>, fallback: string) =>
-    names[options.locale] ?? Object.values(names)[0] ?? fallback;
+    staffContentName(names, options.locale) || fallback;
   const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
