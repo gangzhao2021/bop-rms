@@ -62,6 +62,8 @@ function details(item: Record<string, unknown>) {
         });
       }),
     ),
+    // WP-2423 DEC-ALCOHOL: a line that contains alcohol says so (absent otherwise).
+    ageCheck: item.ageCheck === true,
     // A note is the customer's own text (it may span lines); shown as written, never logged.
     customerNote:
       item.customerNote === null

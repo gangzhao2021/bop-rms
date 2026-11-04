@@ -926,7 +926,9 @@ export function quickAddable(family: MenuFamily): boolean {
   return (
     family.variants.length === 1 &&
     sellable.optionRules.length === 0 &&
-    sellable.availability === "Available"
+    sellable.availability === "Available" &&
+    // WP-2423 DEC-ALCOHOL: a guest reads the age notice on the dish before adding it.
+    sellable.alcohol === undefined
   );
 }
 
@@ -1024,6 +1026,9 @@ function MenuItemCard({
                     : t("Featured")}
               </span>
             ) : null}
+            {primaryVariant(family).sellable.alcohol === undefined ? null : (
+              <span className="menu-badge">{t("Alcohol 19+")}</span>
+            )}
           </span>
           {description === null ? null : (
             <span className="menu-card__description">{description}</span>
@@ -1045,7 +1050,13 @@ function MenuItemCard({
             >
               {price ?? t("Priced at checkout")}
             </span>
-            {soldOut ? <span className="menu-sold-out">{t("Sold out")}</span> : null}
+            {soldOut ? (
+              <span className="menu-sold-out">
+                {primaryVariant(family).sellable.alcohol === "OutsideHours"
+                  ? t("Served 9 am to 2 am")
+                  : t("Sold out")}
+              </span>
+            ) : null}
           </span>
           {alreadyOrdered > 0 ? (
             <span className="menu-card__table-ordered">
@@ -1193,7 +1204,16 @@ function SellableDetail({
         {description === null ? null : (
           <p className="sellable-detail__description">{description}</p>
         )}
-        {sellable.availability === "SoldOut" ? (
+        {sellable.alcohol === undefined ? null : (
+          <p className="sellable-detail__description" role="note">
+            {t(
+              "This contains alcohol. You must be 19 or older to order it, and staff may ask for ID when they serve it.",
+            )}
+          </p>
+        )}
+        {sellable.alcohol === "OutsideHours" ? (
+          <p className="menu-sold-out">{t("Alcohol is served from 9 am to 2 am.")}</p>
+        ) : sellable.availability === "SoldOut" ? (
           <p className="menu-sold-out">{sized ? t("This size is sold out") : t("Sold out")}</p>
         ) : null}
         <AllergenSummary sellable={sellable} />
@@ -1201,7 +1221,8 @@ function SellableDetail({
           <div className="menu-readonly-boundary" role="status">
             {readOnlyNotice}
           </div>
-        ) : sellable.availability === "SoldOut" && !sized ? (
+        ) : sellable.alcohol === "OutsideHours" ? null : sellable.availability === "SoldOut" &&
+          !sized ? (
           <p role="status">{t("Sold out at this store right now. Please choose another item.")}</p>
         ) : (
           <SellableConfigurator

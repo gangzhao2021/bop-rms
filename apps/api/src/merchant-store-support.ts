@@ -331,6 +331,7 @@ export function createMerchantStoreSupport(options: {
               pickup: raw.value as boolean,
               inventory: setting.inventory,
               loyalty: setting.loyalty,
+              alcohol: setting.alcohol,
               complianceDocuments: setting.complianceDocuments,
             },
             actorReference: found.actorReference,

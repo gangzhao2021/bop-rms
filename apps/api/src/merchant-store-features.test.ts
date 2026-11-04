@@ -8,6 +8,7 @@ describe("WP-2423 item 8 ⑦ DEC-STORE-FEATURES navigation", () => {
     inventory: true,
     loyalty: true,
     complianceDocuments: true,
+    alcohol: false,
   };
   const navigation = [
     "HOME-OVERVIEW",

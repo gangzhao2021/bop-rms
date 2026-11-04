@@ -1395,4 +1395,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Points used": "积分抵扣",
   "Taken off by the restaurant": "店家减免",
   "Points used (already taken off)": "积分抵扣（已减去）",
+  "Alcohol 19+": "酒水 · 19 岁以上",
+  "Served 9 am to 2 am": "9:00 至次日 2:00 供应",
+  "Alcohol is served from 9 am to 2 am.": "酒水供应时间为 9:00 至次日 2:00。",
+  "This contains alcohol. You must be 19 or older to order it, and staff may ask for ID when they serve it.":
+    "含酒精。须年满 19 岁才能点，上酒时店员可能查看证件。",
 });

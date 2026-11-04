@@ -1,3 +1,4 @@
+import { listAlcoholSkus } from "@rms/catalog";
 import { staffNameLocales } from "./staff-content-locale.js";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
@@ -253,6 +254,15 @@ export function createPersistentMerchantOrderQueue(options: {
                     staffNameLocales(options.locale ?? "en-CA"),
                   );
                 })();
+          // WP-2423 DEC-ALCOHOL: which lines remind staff to check the guest's age.
+          const alcoholSkus =
+            lines === null
+              ? new Set<string>()
+              : await listAlcoholSkus(
+                  businessTransaction as never,
+                  { brandReference: String(resolved.context.brand.brandReference) },
+                  lines.items.map((line) => line.sellableReference),
+                );
           // WP-2423: a paid Order that can no longer be fulfilled (for example not accepted before its
           // capacity expired) is refunded by Payment; it is shown as such and never offered for acceptance.
           const unfulfillable =
@@ -1029,10 +1039,11 @@ export function createPersistentMerchantOrderQueue(options: {
                     }),
                   }),
                   items: Object.freeze(
-                    lines.items.map((line) => {
+                    lines.items.map(({ sellableReference, ...line }) => {
                       const cancelled = itemCancellations.get(line.orderItemReference) ?? null;
                       return Object.freeze({
                         ...line,
+                        ...(alcoholSkus.has(sellableReference) ? { ageCheck: true } : {}),
                         // The detail shows each option by name (v15 2026-10-29: the choice
                         // reference added for combos made every order with options unreadable).
                         options: Object.freeze(

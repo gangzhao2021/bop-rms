@@ -17,6 +17,7 @@ import {
   type CustomerRecipeInventoryCoverageInput,
   type CustomerRecipeInventoryObservationInput,
 } from "./customer-recipe-inventory-observation.js";
+import { alcoholMaySell } from "./alcohol-sale-rule.js";
 import {
   cartDisplayArguments,
   type CustomerCartPort,
@@ -81,6 +82,15 @@ export function createCustomerCartSelectionInventory(
         },
       }).validateSelection(input);
       if (result.status !== "Accepted") return result;
+      // WP-2423 DEC-ALCOHOL: the guest's phone, staff and the checkout all pass through here.
+      if (
+        !(await alcoholMaySell(runner, scope, {
+          sellableReference: String(result.sellableReference),
+          orderType: input.orderType,
+          at: String(result.validatedAt),
+        }))
+      )
+        return { status: "Rejected", reason: "SELLABLE_UNAVAILABLE" };
       const snapshot = captured.snapshot;
       if (snapshot === null) throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
       const selections = result.optionSelections.map((selected) => {

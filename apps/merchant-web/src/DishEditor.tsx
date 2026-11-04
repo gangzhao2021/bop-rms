@@ -2,6 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AllergenFields, type AllergenAnswer } from "./dish-allergens.js";
+import { DishAlcoholMark } from "./DishAlcoholMark.js";
 import { DishKitchenMark } from "./DishKitchenMark.js";
 import { NewChoiceGroupForm } from "./NewChoiceGroupForm.js";
 import { newOperationReference } from "./operation-reference.js";
@@ -558,6 +559,8 @@ export function DishEditor({
       </fieldset>
       {/* WP-2423 item 8 ⑦: a dish the kitchen does not prepare (saved on its own). */}
       <DishKitchenMark productReference={productReference} client={client} />
+      {/* WP-2423 DEC-ALCOHOL: a dish that contains alcohol (saved on its own). */}
+      <DishAlcoholMark productReference={productReference} client={client} />
       {problem ? (
         <p className="dish-editor__problem" role="alert">
           {problem}

@@ -5885,6 +5885,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-TABLE-ONLINE-REFUND (Owner 2026-11-03 \"按你建议即可 无需问我\", known gap 5): a manager records a refund made on the card machine of a table paid there; settlement and reports read it"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_alcohol_mark",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-ALCOHOL (Owner 2026-11-04 \"要卖酒\"): a dish that contains alcohol"
+    },
+    {
+      "type": "table",
+      "schema": "rms_catalog",
+      "object": "product_alcohol_mark",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-ALCOHOL (Owner 2026-11-04 \"要卖酒\"): a dish that contains alcohol"
     }
   ]
 }

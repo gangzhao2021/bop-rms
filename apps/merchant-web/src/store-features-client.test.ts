@@ -4,7 +4,7 @@ import { createStoreFeaturesClient, parseStoreFeatures } from "./store-features-
 const view = {
   version: 2,
   templateCode: "Custom",
-  modules: { counterOrder: true, pickup: true, inventory: false, loyalty: false },
+  modules: { counterOrder: true, pickup: true, inventory: false, loyalty: false, alcohol: false },
   changedAt: "2026-10-29T15:05:00.000Z",
   services: {
     version: 1,
@@ -31,6 +31,7 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
       pickup: true,
       inventory: false,
       loyalty: false,
+      alcohol: false,
     });
     for (const bad of [
       { ...view, version: -1 },
@@ -84,13 +85,13 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
     await client.change({
       operationReference: "0190a7f2-0000-7000-8000-000000000001",
       expectedVersion: 1,
-      modules: { counterOrder: true, pickup: false, inventory: false, loyalty: false },
+      modules: { counterOrder: true, pickup: false, inventory: false, loyalty: false, alcohol: false },
     });
     expect(sent[0]).toEqual({
       action: "Change",
       operationReference: "0190a7f2-0000-7000-8000-000000000001",
       expectedVersion: 1,
-      modules: { counterOrder: true, pickup: false, inventory: false, loyalty: false },
+      modules: { counterOrder: true, pickup: false, inventory: false, loyalty: false, alcohol: false },
     });
     await expect(client.read()).rejects.toMatchObject({ code: "Changed" });
   });

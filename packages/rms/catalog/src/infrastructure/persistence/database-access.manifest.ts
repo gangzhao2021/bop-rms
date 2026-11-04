@@ -34,6 +34,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 DEC-ALCOHOL: a dish that contains alcohol (versioned mark, applies at once).
+      table: "product_alcohol_mark",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/catalog" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑥ part 4: the dish a combo is compiled into (append-only).
       table: "bundle_combo_dish",
       classification: "append-only-record",

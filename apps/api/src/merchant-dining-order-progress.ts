@@ -1,3 +1,4 @@
+import { listAlcoholSkus } from "@rms/catalog";
 import { staffContentLocale, staffNameLocales } from "./staff-content-locale.js";
 import { comboPartsByOrderItem, type ComboPart } from "./merchant-combo-parts.js";
 import { withOptionalRead } from "./merchant-round-business-date.js";
@@ -135,8 +136,10 @@ export function createMerchantDiningOrderProgress(options: {
             {
               options: readonly { optionReference: string; name: string; quantity: number }[];
               customerNote: string | null;
+              sellableReference: string;
             }
           > | null = null;
+          let alcoholSkus: ReadonlySet<string> = new Set();
           try {
             if ((await allowed()) === true) {
               const lines = await loadMerchantOrderLines(
@@ -145,8 +148,15 @@ export function createMerchantDiningOrderProgress(options: {
                 orderReference,
                 staffNameLocales(options.locale),
               );
-              if (lines !== null)
+              if (lines !== null) {
                 details = new Map(lines.items.map((line) => [line.orderItemReference, line]));
+                // WP-2423 DEC-ALCOHOL: which lines remind staff to check the guest's age.
+                alcoholSkus = await listAlcoholSkus(
+                  businessTransaction as never,
+                  { brandReference: scope.brandReference },
+                  lines.items.map((line) => line.sellableReference),
+                );
+              }
             }
           } catch (error) {
             // A database failure aborts this transaction: never continue on it.
@@ -237,6 +247,7 @@ export function createMerchantDiningOrderProgress(options: {
                 : {
                     options: detail.options.map((o) => ({ name: o.name, quantity: o.quantity })),
                     customerNote: detail.customerNote,
+                    ...(alcoholSkus.has(detail.sellableReference) ? { ageCheck: true } : {}),
                   }),
               ...(parts.has(label.orderItemReference)
                 ? { comboParts: parts.get(label.orderItemReference) }

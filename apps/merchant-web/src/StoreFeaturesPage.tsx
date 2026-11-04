@@ -44,12 +44,14 @@ interface Modules {
   readonly pickup: boolean;
   readonly inventory: boolean;
   readonly loyalty: boolean;
+  readonly alcohol: boolean;
 }
 const modulesOf = (view: StoreFeatures): Modules => ({
   counterOrder: view.modules.counterOrder,
   pickup: view.modules.pickup,
   inventory: view.modules.inventory,
   loyalty: view.modules.loyalty,
+  alcohol: view.modules.alcohol,
 });
 const rows: readonly { key: keyof Modules; name: () => string; detail: () => string }[] = [
   {
@@ -72,6 +74,14 @@ const rows: readonly { key: keyof Modules; name: () => string; detail: () => str
     detail: () =>
       t(
         "Stock items, receiving, counts, waste and recipes. Turned off, these pages are hidden; stock already recorded is kept, and sold out is still set in Item availability.",
+      ),
+  },
+  {
+    key: "alcohol",
+    name: () => t("Alcohol at tables"),
+    detail: () =>
+      t(
+        "Turn this on only if the store holds a valid liquor sales licence and staff who take orders or serve alcohol have completed Smart Serve. Dishes marked as containing alcohol can then be ordered at tables from 9 am to 2 am; they are never sold for pickup.",
       ),
   },
   {
@@ -207,7 +217,8 @@ export function StoreFeaturesPage({
     draft.counterOrder !== view.modules.counterOrder ||
     draft.pickup !== view.modules.pickup ||
     draft.inventory !== view.modules.inventory ||
-    draft.loyalty !== view.modules.loyalty;
+    draft.loyalty !== view.modules.loyalty ||
+    draft.alcohol !== view.modules.alcohol;
   const fullService =
     view.templateCode === "FullService" &&
     !view.modules.counterOrder &&

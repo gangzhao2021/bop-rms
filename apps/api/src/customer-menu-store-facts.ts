@@ -20,6 +20,7 @@ import {
   resolvePrice,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
+import { alcoholMenuFact, readAlcoholSale } from "./alcohol-sale-rule.js";
 import type { CustomerInventoryEvidenceSource } from "./customer-menu-inventory-evidence.js";
 
 /**
@@ -171,6 +172,12 @@ export function createCustomerMenuStoreFacts(options: {
             optionPrices,
             ...(comboChoices.size === 0 ? {} : { comboChoices }),
           });
+        }
+        // WP-2423 DEC-ALCOHOL: where and when the dishes that contain alcohol can be ordered.
+        const alcohol = await readAlcoholSale(tx, scope, input.requestedAt, [...facts.keys()]);
+        for (const sellable of alcohol.skus) {
+          const fact = facts.get(sellable);
+          if (fact !== undefined) facts.set(sellable, alcoholMenuFact(fact, alcohol, orderType));
         }
         // Read last, so a failed stock read cannot disturb the Store's offers and prices above.
         // One observation per shown item in this same read-only transaction (bounded by the

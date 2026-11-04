@@ -326,6 +326,11 @@ export function CurrentOrderLines({
               .join(" · ")}
           </span>
         ) : null}
+        {item.ageCheck ? (
+          <span className="order-line-note">
+            {t("Alcohol: check ID if the guest looks under 19")}
+          </span>
+        ) : null}
         {item.customerNote !== null ? (
           <span className="order-line-note">
             {t("Note: {customerNote}", { customerNote: item.customerNote })}

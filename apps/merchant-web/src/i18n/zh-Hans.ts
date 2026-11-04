@@ -7384,4 +7384,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "店主批准后，需在刷卡机上退款 {amount}。",
   "{left} of {total} left to refund": "可退 {left} 份，共 {total} 份",
   "{reason}. Nothing was refunded; you can request again.": "{reason}。没有退款，可以重新申请。",
+  Alcohol: "酒水",
+  "Alcohol at tables": "堂食售酒",
+  "Turn this on only if the store holds a valid liquor sales licence and staff who take orders or serve alcohol have completed Smart Serve. Dishes marked as containing alcohol can then be ordered at tables from 9 am to 2 am; they are never sold for pickup.":
+    "只有门店持有有效酒牌、接单和上酒的员工都完成 Smart Serve 培训后才能开启。开启后，标为含酒精的菜品可在 9:00 至次日 2:00 堂食点单，不支持自取。",
+  "Whether this dish contains alcohol could not be read.": "读取不到这道菜是否含酒精。",
+  "After the dish is saved you can mark it as containing alcohol.": "菜品保存后可以标记为含酒精。",
+  "Contains alcohol": "含酒精",
+  "Sold only at tables, from 9 am to 2 am, and only while Alcohol at tables is on in Store features. Guests see that they must be 19 or older, and staff see a reminder to check ID.":
+    "只能堂食，9:00 至次日 2:00 供应，且门店功能里“堂食售酒”已开启。顾客会看到须年满 19 岁，员工会看到查验证件的提醒。",
+  "Alcohol: check ID if the guest looks under 19": "酒水：顾客看起来未满 19 岁请查验证件",
 });

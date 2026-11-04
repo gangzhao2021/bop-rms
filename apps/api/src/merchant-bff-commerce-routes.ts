@@ -1,6 +1,7 @@
 /** Merchant BFF routes: commerce workbench (recipes, products, prices, allergens, menus, availability, option sets, tax classifications). Registered by createMerchantBffRouter (merchant-bff.ts). */
 import express, { type Router } from "express";
 import { MerchantKitchenNotPreparedError } from "./merchant-kitchen-not-prepared.js";
+import { MerchantProductAlcoholError } from "./merchant-product-alcohol.js";
 import { MerchantKitchenSectionsError } from "./merchant-kitchen-sections.js";
 import { MerchantRecipeError } from "./merchant-recipes.js";
 import { MerchantDishAllergenError } from "./merchant-dish-allergens.js";
@@ -147,6 +148,51 @@ export function installMerchantCommerceRoutes(
             return;
           }
           response.status(dishAllergenStatus[error.code]).json({ error: error.code });
+        });
+    },
+  );
+
+  // WP-2423 DEC-ALCOHOL: the menu's "contains alcohol" mark of dishes.
+  router.post(
+    "/commerce/product-alcohol/command",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.productAlcohol) {
+        response.status(503).json({ error: "product_alcohol_unavailable" });
+        return;
+      }
+      void options
+        .productAlcohol({ sessionCookie, csrf, command: request.body })
+        .then((result) => response.set("Cache-Control", "no-store").json(result))
+        .catch((error: unknown) => {
+          if (
+            !(error instanceof MerchantProductAlcoholError) ||
+            error.code === "PRODUCT_ALCOHOL_PERMISSION_DENIED"
+          ) {
+            denied(response);
+            return;
+          }
+          response
+            .status(
+              error.code === "PRODUCT_ALCOHOL_INPUT_INVALID"
+                ? 400
+                : error.code === "PRODUCT_ALCOHOL_CHANGED"
+                  ? 409
+                  : 503,
+            )
+            .set("Cache-Control", "no-store")
+            .json({ error: error.code.toLowerCase() });
         });
     },
   );

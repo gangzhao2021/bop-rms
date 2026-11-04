@@ -10,6 +10,7 @@ export interface StoreFeatures {
     readonly pickup: boolean;
     readonly inventory: boolean;
     readonly loyalty: boolean;
+    readonly alcohol: boolean;
   };
   readonly changedAt: string | null;
   /** WP-2423 item 8 ⑦ (Owner decision 4): guests call staff; servers chase a dish. */
@@ -117,7 +118,7 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       (typeof raw.changedAt !== "string" || !instant.test(raw.changedAt))) ||
     modules === null ||
     typeof modules !== "object" ||
-    Object.keys(modules).sort().join(",") !== "counterOrder,inventory,loyalty,pickup" ||
+    Object.keys(modules).sort().join(",") !== "alcohol,counterOrder,inventory,loyalty,pickup" ||
     Object.values(modules).some((entry) => typeof entry !== "boolean") ||
     services === null ||
     typeof services !== "object" ||
@@ -140,6 +141,7 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       pickup: modules.pickup === true,
       inventory: modules.inventory === true,
       loyalty: modules.loyalty === true,
+      alcohol: modules.alcohol === true,
     }),
     changedAt: raw.changedAt as string | null,
     services: Object.freeze({
@@ -242,7 +244,13 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
     change: (input: {
       operationReference: string;
       expectedVersion: number;
-      modules: { counterOrder: boolean; pickup: boolean; inventory: boolean; loyalty: boolean };
+      modules: {
+        counterOrder: boolean;
+        pickup: boolean;
+        inventory: boolean;
+        loyalty: boolean;
+        alcohol: boolean;
+      };
     }) =>
       send({
         action: "Change",

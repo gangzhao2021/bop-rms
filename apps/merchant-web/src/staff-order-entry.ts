@@ -230,8 +230,8 @@ function counterItem(value: unknown): CounterMenuItem {
       "displayPrice",
       "taxDisplayContext",
     ],
-    // The customer description and photo; the counter does not show them.
-    ["description", "photo"],
+    // The customer description and photo, and that it contains alcohol; the counter does not show them.
+    ["description", "photo", "alcohol"],
   );
   const price = record(item.displayPrice, ["status", "amount", "currency", "reason"]);
   if (

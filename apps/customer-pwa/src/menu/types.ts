@@ -67,6 +67,8 @@ export interface MenuSellable {
   readonly pinned: boolean;
   /** WP-2423 8.6: SoldOut while the Store has marked it sold out. */
   readonly availability: "Available" | "SoldOut";
+  /** WP-2423 DEC-ALCOHOL: the dish contains alcohol; OutsideHours can't be ordered right now. */
+  readonly alcohol?: "OnSale" | "OutsideHours";
   /** The Store's base price before options and tax, when it has one. */
   readonly price: { readonly amount: string; readonly currency: string } | null;
   /** Everything the item may contain across all its choices. */

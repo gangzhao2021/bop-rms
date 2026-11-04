@@ -128,6 +128,7 @@ const moduleManifestInput =
         "product_version_category_assignment",
         "sku",
         "product_operation_record",
+        "product_alcohol_mark",
         "product_operation_snapshot",
         "product_publication_revision",
         "product_publication_validation_report",

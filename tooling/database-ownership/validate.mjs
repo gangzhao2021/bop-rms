@@ -1601,6 +1601,8 @@ async function scanUnsupported(root, module, diagnostics) {
               "src/infrastructure/persistence/option-set-store.ts",
               // WP-2423 item 8 ⑥ part 4: combos (Bundles) and what they are compiled into.
               "src/infrastructure/persistence/bundle-store.ts",
+              // WP-2423 DEC-ALCOHOL: dishes that contain alcohol.
+              "src/infrastructure/persistence/product-alcohol-mark-store.ts",
             ].includes(moduleRelative)) ||
           (module.packageName === "@rms/pricing" &&
             module.manifest.ownedDatabase?.schema === "rms_pricing" &&

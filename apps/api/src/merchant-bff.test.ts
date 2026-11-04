@@ -2035,7 +2035,7 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
   const view = {
     version: 1,
     templateCode: "FullService" as const,
-    modules: { counterOrder: false, pickup: true, inventory: false, loyalty: false },
+    modules: { counterOrder: false, pickup: true, inventory: false, loyalty: false, alcohol: false },
     changedAt: serverTime,
     services: {
       version: 0,

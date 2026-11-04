@@ -367,6 +367,8 @@ export interface MerchantOrderLineMoney {
 export interface MerchantOrderLine {
   readonly orderItemReference: string;
   readonly orderBatchReference: string;
+  /** The size ordered (WP-2423 DEC-ALCOHOL: to remind staff which lines contain alcohol). */
+  readonly sellableReference: string;
   readonly name: string;
   readonly options: readonly {
     /** WP-2423 item 8 ⑥ part 4: the choice (a combo's dish is served on its own). */
@@ -449,6 +451,7 @@ export async function loadMerchantOrderLines(
     return Object.freeze({
       orderItemReference: String(snapshot.orderItemReference),
       orderBatchReference: String(snapshot.orderBatchReference),
+      sellableReference: String(snapshot.catalog.sellableReference),
       name: name(snapshot.catalog.localizedNames),
       options: Object.freeze(
         snapshot.catalog.options.map((option) =>

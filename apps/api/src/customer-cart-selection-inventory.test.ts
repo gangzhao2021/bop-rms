@@ -86,7 +86,12 @@ function snapshot(): CurrentCatalogSelectionSnapshot {
 }
 function setup() {
   const authorize = vi.fn(async () => true);
-  const runner = { run: vi.fn() };
+  // No dish here contains alcohol (WP-2423 DEC-ALCOHOL).
+  const runner = {
+    run: vi.fn(async (work: (tx: never) => unknown) =>
+      work({ query: async () => ({ rows: [], rowCount: 0 }) } as never),
+    ) as never,
+  };
   const service = createCustomerCartSelectionInventory(
     runner,
     scope,
@@ -210,7 +215,12 @@ it("keeps overlapping requests attached to their own snapshot and Cart context",
 
 it("WP-2423: asks Inventory about the Cart's lines together, with each item's current product and bindings", async () => {
   const authorize = vi.fn(async () => true);
-  const runner = { run: vi.fn() };
+  // No dish here contains alcohol (WP-2423 DEC-ALCOHOL).
+  const runner = {
+    run: vi.fn(async (work: (tx: never) => unknown) =>
+      work({ query: async () => ({ rows: [], rowCount: 0 }) } as never),
+    ) as never,
+  };
   const coverage = createCustomerCartStockCoverage(
     runner,
     scope,

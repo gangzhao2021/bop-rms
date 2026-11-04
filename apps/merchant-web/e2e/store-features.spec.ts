@@ -53,7 +53,7 @@ test("@production the owner applies the full-service setup, turns a module back 
   let current = {
     version: 0,
     templateCode: null as string | null,
-    modules: { counterOrder: true, pickup: true, inventory: true, loyalty: false },
+    modules: { counterOrder: true, pickup: true, inventory: true, loyalty: false, alcohol: false },
     changedAt: null as string | null,
     services: {
       version: 0,
@@ -150,7 +150,13 @@ test("@production the owner applies the full-service setup, turns a module back 
             ...current,
             version: current.version + 1,
             templateCode: "FullService",
-            modules: { counterOrder: false, pickup: false, inventory: false, loyalty: false },
+            modules: {
+              counterOrder: false,
+              pickup: false,
+              inventory: false,
+              loyalty: false,
+              alcohol: false,
+            },
             changedAt: "2026-10-29T15:00:00.000Z",
           }
         : {
@@ -282,7 +288,13 @@ test("@production the owner applies the full-service setup, turns a module back 
   expect(commands.at(-1)).toMatchObject({
     action: "Change",
     expectedVersion: 1,
-    modules: { counterOrder: false, pickup: false, inventory: true, loyalty: false },
+    modules: {
+      counterOrder: false,
+      pickup: false,
+      inventory: true,
+      loyalty: false,
+      alcohol: false,
+    },
   });
   await expect(page.getByText(/Last changed/u)).toBeVisible();
 

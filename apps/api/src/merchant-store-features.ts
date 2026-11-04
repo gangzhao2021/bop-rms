@@ -109,7 +109,10 @@ export interface StoreFeaturesView {
   readonly version: number;
   /** "FullService" when the modules are the full-service template's; null when never set. */
   readonly templateCode: StoreFeatureSetting["templateCode"];
-  readonly modules: Pick<StoreFeatureModules, "counterOrder" | "pickup" | "inventory" | "loyalty">;
+  readonly modules: Pick<
+    StoreFeatureModules,
+    "counterOrder" | "pickup" | "inventory" | "loyalty" | "alcohol"
+  >;
   readonly changedAt: string | null;
   /** Owner decision 4: guests call staff, servers chase a dish (Dining's own switches). */
   readonly services: {
@@ -199,7 +202,7 @@ export function createMerchantStoreFeatures(options: {
       template: "FullService" | null;
       modules: Pick<
         StoreFeatureModules,
-        "counterOrder" | "pickup" | "inventory" | "loyalty"
+        "counterOrder" | "pickup" | "inventory" | "loyalty" | "alcohol"
       > | null;
     } = null;
     try {
@@ -306,6 +309,7 @@ export function createMerchantStoreFeatures(options: {
           "pickup",
           "inventory",
           "loyalty",
+          "alcohol",
         ]);
         if (
           raw.action !== "Change" ||
@@ -323,6 +327,7 @@ export function createMerchantStoreFeatures(options: {
             pickup: modules.pickup === true,
             inventory: modules.inventory === true,
             loyalty: modules.loyalty === true,
+            alcohol: modules.alcohol === true,
           },
         };
       }
@@ -369,6 +374,7 @@ export function createMerchantStoreFeatures(options: {
                   pickup: setting.pickup,
                   inventory: setting.inventory,
                   loyalty: setting.loyalty,
+                  alcohol: setting.alcohol,
                   complianceDocuments: setting.complianceDocuments,
                   ...(change.template === "FullService" ? fullServiceTemplate : change.modules),
                 },
@@ -457,6 +463,7 @@ function storeFeaturesView(
       pickup: setting.pickup,
       inventory: setting.inventory,
       loyalty: setting.loyalty,
+      alcohol: setting.alcohol,
     }),
     changedAt: setting.changedAt,
     services: Object.freeze({
@@ -601,6 +608,8 @@ const allModules: StoreFeatureModules = Object.freeze({
   inventory: true,
   loyalty: true,
   complianceDocuments: true,
+  // Never assumed: an unreadable setting sells no alcohol.
+  alcohol: false,
 });
 
 /**

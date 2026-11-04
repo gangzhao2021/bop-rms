@@ -68,7 +68,8 @@ beforeEach(() => {
   ];
 });
 async function load(inventory?: CustomerInventoryEvidenceSource, sellables = [10, 11, 12, 13, 14]) {
-  const tx = { query: vi.fn() };
+  // No dish here contains alcohol (WP-2423 DEC-ALCOHOL).
+  const tx = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) };
   return createCustomerMenuStoreFacts({
     transactions: { run: async (work) => work(tx as never) },
     currencyMetadata: { currencyCode: "CAD", minorUnitExponent: 2 } as never,

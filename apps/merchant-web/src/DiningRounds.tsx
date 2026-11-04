@@ -577,6 +577,11 @@ export function DiningRoundProgressItems({ sequence }: { readonly sequence: numb
                     .join(" · ")}
                 </span>
               ) : null}
+              {item.details?.ageCheck ? (
+                <span className="order-line-note">
+                  {t("Alcohol: check ID if the guest looks under 19")}
+                </span>
+              ) : null}
               {item.details?.customerNote ? (
                 <span className="order-line-note">
                   {t("Note: {customerNote}", { customerNote: item.details.customerNote })}

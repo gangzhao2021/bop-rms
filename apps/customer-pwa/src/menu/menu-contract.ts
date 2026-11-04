@@ -384,7 +384,10 @@ function allergensByChoice(value: unknown, names: ReadonlyMap<string, string>) {
 }
 
 function sellable(value: unknown, language: MenuLanguage): MenuSellable {
+  // WP-2423 DEC-ALCOHOL: a dish that contains alcohol says so (absent otherwise).
+  const alcohol = value !== null && typeof value === "object" && Object.hasOwn(value, "alcohol");
   const raw = exact(value, [
+    ...(alcohol ? ["alcohol"] : []),
     "sellableReference",
     "productVersionReference",
     "name",
@@ -471,6 +474,7 @@ function sellable(value: unknown, language: MenuLanguage): MenuSellable {
     presentationRole: raw.presentationRole as MenuSellable["presentationRole"],
     pinned: raw.pinned,
     availability: raw.availability as MenuSellable["availability"],
+    ...(raw.alcohol === "OnSale" || raw.alcohol === "OutsideHours" ? { alcohol: raw.alcohol } : {}),
     price: priced ? { amount: price.amount as string, currency: price.currency as string } : null,
     ...(() => {
       const disclosure = allergenDisclosure(raw.allergenDisclosure, language);

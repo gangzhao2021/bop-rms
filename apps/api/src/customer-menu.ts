@@ -143,6 +143,7 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
           presentationRole: sellable.presentationRole,
           pinned: sellable.pinned,
           availability: sellable.availability,
+          ...(sellable.alcohol === undefined ? {} : { alcohol: sellable.alcohol }),
           optionRules: sellable.optionRules.map((rule) => ({
             ...(rule.semanticsVersion === 2
               ? {

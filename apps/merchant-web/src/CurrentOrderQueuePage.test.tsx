@@ -309,6 +309,7 @@ it("WP-2423: shows what was ordered with options, notes and totals", () => {
               { name: "Extra shot", quantity: 2 },
             ],
             quantity: 2,
+            ageCheck: false,
             customerNote: "Extra hot",
             unitPrice: money("700"),
             subtotal: money("1400"),

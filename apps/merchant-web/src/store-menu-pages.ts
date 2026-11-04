@@ -571,6 +571,7 @@ export interface MenuClient {
           readonly notPrepared: boolean;
         },
   ): Promise<unknown>;
+  productAlcohol?(command: unknown): Promise<unknown>;
   /** WP-2423 item 8 ⑥ (v15 finding g): a simple choice group made from the dish editor. */
   createChoiceGroup?(command: NewChoiceGroupCommand): Promise<unknown>;
   /**
@@ -920,6 +921,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
     combos: () => post("/merchant/commerce/one-store-combos/query", {}),
     kitchenNotPrepared: (command) =>
       post("/merchant/commerce/kitchen-not-prepared/command", command),
+    productAlcohol: (command) => post("/merchant/commerce/product-alcohol/command", command),
     kitchenSections: (command) => post("/merchant/commerce/kitchen-sections/command", command),
     createChoiceGroup: (command) => post("/merchant/commerce/option-sets/command", command),
     guestUnreadable: async () => {

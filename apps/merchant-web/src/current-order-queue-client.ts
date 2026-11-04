@@ -1182,7 +1182,11 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
     return fail();
   const batches = new Set(order.batches.map((batch) => batch.orderBatchReference));
   const items = lines.items.map((value) => {
+    // WP-2423 DEC-ALCOHOL: a line that contains alcohol says so (absent otherwise).
+    const ageCheck =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "ageCheck");
     const item = exact(value, [
+      ...(ageCheck ? ["ageCheck"] : []),
       "orderItemReference",
       "orderBatchReference",
       "name",
@@ -1235,6 +1239,7 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
       ),
       quantity: item.quantity,
       customerNote: item.customerNote === null ? null : text(item.customerNote, 2000),
+      ageCheck: item.ageCheck === true,
       unitPrice: money(item.unitPrice),
       subtotal: money(item.subtotal),
       discount: money(item.discount),

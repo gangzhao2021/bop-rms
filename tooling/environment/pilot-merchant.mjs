@@ -39,6 +39,7 @@ import { createMerchantDiningJoinRegenerate } from "../../apps/api/dist/merchant
 import { createMerchantDiningChase } from "../../apps/api/dist/merchant-dining-chase.js";
 import { createMerchantDiningPartySize } from "../../apps/api/dist/merchant-dining-party-size.js";
 import { createMerchantKitchenNotPrepared } from "../../apps/api/dist/merchant-kitchen-not-prepared.js";
+import { createMerchantProductAlcohol } from "../../apps/api/dist/merchant-product-alcohol.js";
 import { createMerchantKitchenSections } from "../../apps/api/dist/merchant-kitchen-sections.js";
 import { createMerchantKitchenSetup } from "../../apps/api/dist/merchant-kitchen-setup.js";
 import { createMerchantMemberPoints } from "../../apps/api/dist/merchant-member-points.js";
@@ -1629,6 +1630,12 @@ export async function createInternalMerchant(
       }),
       // WP-2423 item 8 ⑦: the menu's "not prepared by the kitchen" mark of dishes.
       kitchenNotPrepared: createMerchantKitchenNotPrepared({
+        persistence,
+        authentication: service,
+        now: resources.now,
+      }),
+      // WP-2423 DEC-ALCOHOL: the menu's "contains alcohol" mark of dishes.
+      productAlcohol: createMerchantProductAlcohol({
         persistence,
         authentication: service,
         now: resources.now,

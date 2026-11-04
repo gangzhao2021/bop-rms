@@ -194,6 +194,7 @@ function publicSellable(
     presentationRole: item.presentationRole as CustomerMenuSellableDto["presentationRole"],
     pinned: item.pinned,
     availability: fact?.availability === "SoldOut" ? "SoldOut" : "Available",
+    ...(fact?.alcohol === undefined ? {} : { alcohol: fact.alcohol }),
     optionRules: Object.freeze(
       item.optionRules
         .filter(

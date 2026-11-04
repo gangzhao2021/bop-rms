@@ -175,6 +175,7 @@ import type {
 import type { createMerchantDiningChase } from "./merchant-dining-chase.js";
 import type { createMerchantDiningPartySize } from "./merchant-dining-party-size.js";
 import type { createMerchantKitchenNotPrepared } from "./merchant-kitchen-not-prepared.js";
+import type { createMerchantProductAlcohol } from "./merchant-product-alcohol.js";
 import type { createMerchantKitchenSections } from "./merchant-kitchen-sections.js";
 import type { createMerchantDiningTeaCharge } from "./merchant-dining-tea-charge.js";
 import type { createMerchantDiningHostSelection } from "./merchant-dining-host-selection.js";
@@ -621,6 +622,7 @@ export interface MerchantBffRouterOptions {
   readonly diningPartySize?: ReturnType<typeof createMerchantDiningPartySize>;
   /** WP-2423 item 8 ⑦: dishes the kitchen does not prepare (the menu's mark). */
   readonly kitchenNotPrepared?: ReturnType<typeof createMerchantKitchenNotPrepared>;
+  readonly productAlcohol?: ReturnType<typeof createMerchantProductAlcohol>;
   /** WP-2423 item 8 ⑧ (decision 5): the kitchen sections (档口) and each dish's section. */
   /** WP-2423 取舍 15: platform support staff, and the Owner's say over them. */
   readonly storeSupport?: ReturnType<typeof createMerchantStoreSupport>;

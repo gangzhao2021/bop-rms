@@ -15,6 +15,8 @@ export interface CustomerMenuStoreContext {
 /** WP-2423 8.6: one item's state at the Store — offered, sold out, and its current base price. */
 export interface CustomerMenuStoreFact {
   readonly availability: "Available" | "SoldOut" | "NotOffered";
+  /** WP-2423 DEC-ALCOHOL: the dish contains alcohol, and whether it can be ordered right now. */
+  readonly alcohol?: "OnSale" | "OutsideHours";
   readonly price: { readonly amount: string; readonly currency: string } | null;
   /** WP-2423 slice 4.5: each published option's current price for one, by "binding:option". */
   readonly optionPrices?: ReadonlyMap<
