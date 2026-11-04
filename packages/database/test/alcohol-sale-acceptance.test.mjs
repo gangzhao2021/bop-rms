@@ -165,17 +165,30 @@ it("sells a marked dish only at tables, while switched on and within the hours",
         },
       });
       const sku = beer.product.sizes[0].skuReference;
+      // Live requests work with a Store selected, and products and sizes are hidden then: the rule
+      // must still see them (a dish it can't see would be sold as an ordinary one).
+      const runForStore = (work) =>
+        run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [brandReference, storeReference],
+          );
+          const value = await work(tx);
+          const after = await tx.query("SELECT current_setting('bop.store_id',true) store", []);
+          assert.equal(after.rows[0].store, storeReference);
+          return value;
+        });
       const ids = { brandReference, storeReference };
       const dinner = "2026-10-07T23:00:00.000Z"; // 19:00 in Toronto
       const dawn = "2026-10-07T10:00:00.000Z"; // 06:00 in Toronto
       const may = (orderType, at) =>
-        alcoholMaySell({ run }, ids, { sellableReference: sku, orderType, at });
+        alcoholMaySell({ run: runForStore }, ids, { sellableReference: sku, orderType, at });
 
       // Not marked: an ordinary dish, whatever the switch, the service or the hour.
       assert.equal(await may("Pickup", dawn), true);
 
       const mark = (containsAlcohol, expectedVersion, operationReference = op()) =>
-        run((tx) =>
+        runForStore((tx) =>
           changeProductAlcoholMark(
             tx,
             { tenantReference, brandReference },
@@ -221,7 +234,7 @@ it("sells a marked dish only at tables, while switched on and within the hours",
       assert.equal(await may("DineIn", dinner), true);
       assert.equal(await may("DineIn", dawn), false);
       assert.equal(await may("Pickup", dinner), false);
-      const sale = await run((tx) => readAlcoholSale(tx, ids, dinner, [sku, id(999)]));
+      const sale = await runForStore((tx) => readAlcoholSale(tx, ids, dinner, [sku, id(999)]));
       assert.deepEqual([...sale.skus], [sku]);
       assert.equal(sale.offered, true);
       assert.equal(sale.withinHours, true);

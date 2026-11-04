@@ -27,10 +27,32 @@ const reference = (value: string): string => {
   if (!uuid.test(value)) throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_INPUT_INVALID");
   return value;
 };
-const brandOf = async (tx: AlcoholMarkTransaction, brandReference: string) => {
+/**
+ * Runs `work` in the Brand's scope. Products and sizes are read with no Store selected (their RLS
+ * refuses them otherwise, showing nothing rather than an error), while the callers here work for a
+ * Store: its context is put back afterwards.
+ */
+const inBrandScope = async <T>(
+  tx: AlcoholMarkTransaction,
+  brandReference: string,
+  work: (brand: string) => Promise<T>,
+): Promise<T> => {
   const brand = reference(brandReference);
-  await tx.query("SELECT set_config('bop.brand_id',$1,true)", [brand]);
-  return brand;
+  const before = (
+    await tx.query<{ brand: string | null; store: string | null }>(
+      "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
+      [],
+    )
+  ).rows[0];
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
+    brand,
+  ]);
+  const value = await work(brand);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    before?.brand ?? "",
+    before?.store ?? "",
+  ]);
+  return value;
 };
 
 /** The dishes asked about that have a mark, with each mark's version (absent: never marked). */
@@ -39,22 +61,27 @@ export async function loadProductAlcoholMarks(
   scope: { readonly brandReference: string },
   productReferences: readonly string[],
 ): Promise<ReadonlyMap<string, { readonly containsAlcohol: boolean; readonly version: number }>> {
-  const brand = await brandOf(tx, scope.brandReference);
-  const { rows } = await tx.query<Record<string, unknown>>(
-    "SELECT DISTINCT ON (product_id) product_id::text AS product,version,contains_alcohol FROM rms_catalog.product_alcohol_mark WHERE brand_id=$1 AND product_id=ANY($2::uuid[]) ORDER BY product_id,version DESC",
-    [brand, productReferences.map(reference)],
-  );
-  const found = new Map<string, { containsAlcohol: boolean; version: number }>();
-  for (const row of rows) {
-    const version = Number(row.version);
-    if (!Number.isSafeInteger(version) || version < 1 || typeof row.contains_alcohol !== "boolean")
-      throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_UNAVAILABLE");
-    found.set(
-      String(row.product),
-      Object.freeze({ containsAlcohol: row.contains_alcohol, version }),
+  return inBrandScope(tx, scope.brandReference, async (brand) => {
+    const { rows } = await tx.query<Record<string, unknown>>(
+      "SELECT DISTINCT ON (product_id) product_id::text AS product,version,contains_alcohol FROM rms_catalog.product_alcohol_mark WHERE brand_id=$1 AND product_id=ANY($2::uuid[]) ORDER BY product_id,version DESC",
+      [brand, productReferences.map(reference)],
     );
-  }
-  return found;
+    const found = new Map<string, { containsAlcohol: boolean; version: number }>();
+    for (const row of rows) {
+      const version = Number(row.version);
+      if (
+        !Number.isSafeInteger(version) ||
+        version < 1 ||
+        typeof row.contains_alcohol !== "boolean"
+      )
+        throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_UNAVAILABLE");
+      found.set(
+        String(row.product),
+        Object.freeze({ containsAlcohol: row.contains_alcohol, version }),
+      );
+    }
+    return found;
+  });
 }
 
 /** Of the sizes (SKUs) asked about, those whose dish contains alcohol now. */
@@ -63,12 +90,13 @@ export async function listAlcoholSkus(
   scope: { readonly brandReference: string },
   skuReferences: readonly string[],
 ): Promise<ReadonlySet<string>> {
-  const brand = await brandOf(tx, scope.brandReference);
-  const { rows } = await tx.query<Record<string, unknown>>(
-    "SELECT s.sku_id::text AS sku FROM rms_catalog.sku s JOIN LATERAL (SELECT m.contains_alcohol FROM rms_catalog.product_alcohol_mark m WHERE m.brand_id=s.brand_id AND m.product_id=s.product_id ORDER BY m.version DESC LIMIT 1) latest ON latest.contains_alcohol WHERE s.brand_id=$1 AND s.sku_id=ANY($2::uuid[])",
-    [brand, skuReferences.map(reference)],
-  );
-  return new Set(rows.map((row) => String(row.sku)));
+  return inBrandScope(tx, scope.brandReference, async (brand) => {
+    const { rows } = await tx.query<Record<string, unknown>>(
+      "SELECT s.sku_id::text AS sku FROM rms_catalog.sku s JOIN LATERAL (SELECT m.contains_alcohol FROM rms_catalog.product_alcohol_mark m WHERE m.brand_id=s.brand_id AND m.product_id=s.product_id ORDER BY m.version DESC LIMIT 1) latest ON latest.contains_alcohol WHERE s.brand_id=$1 AND s.sku_id=ANY($2::uuid[])",
+      [brand, skuReferences.map(reference)],
+    );
+    return new Set(rows.map((row) => String(row.sku)));
+  });
 }
 
 /**
@@ -87,7 +115,6 @@ export async function changeProductAlcoholMark(
     readonly observedAt: string;
   },
 ): Promise<{ readonly containsAlcohol: boolean; readonly version: number }> {
-  const brand = await brandOf(tx, scope.brandReference);
   const product = reference(input.productReference);
   const operation = reference(input.operationReference);
   if (
@@ -97,45 +124,47 @@ export async function changeProductAlcoholMark(
     !instant.test(input.observedAt)
   )
     throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_INPUT_INVALID");
-  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-    `ProductAlcoholMark:${brand}:${product}`,
-  ]);
-  const prior = (
-    await tx.query<Record<string, unknown>>(
-      "SELECT product_id::text AS product,version,contains_alcohol FROM rms_catalog.product_alcohol_mark WHERE brand_id=$1 AND operation_id=$2",
-      [brand, operation],
-    )
-  ).rows[0];
-  if (prior !== undefined) {
-    if (prior.product !== product || prior.contains_alcohol !== input.containsAlcohol)
+  return inBrandScope(tx, scope.brandReference, async (brand) => {
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      `ProductAlcoholMark:${brand}:${product}`,
+    ]);
+    const prior = (
+      await tx.query<Record<string, unknown>>(
+        "SELECT product_id::text AS product,version,contains_alcohol FROM rms_catalog.product_alcohol_mark WHERE brand_id=$1 AND operation_id=$2",
+        [brand, operation],
+      )
+    ).rows[0];
+    if (prior !== undefined) {
+      if (prior.product !== product || prior.contains_alcohol !== input.containsAlcohol)
+        throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_CHANGED");
+      return Object.freeze({
+        containsAlcohol: input.containsAlcohol,
+        version: Number(prior.version),
+      });
+    }
+    const current = (await loadProductAlcoholMarks(tx, scope, [product])).get(product);
+    if ((current?.version ?? 0) !== input.expectedVersion)
       throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_CHANGED");
-    return Object.freeze({
-      containsAlcohol: input.containsAlcohol,
-      version: Number(prior.version),
-    });
-  }
-  const current = (await loadProductAlcoholMarks(tx, scope, [product])).get(product);
-  if ((current?.version ?? 0) !== input.expectedVersion)
-    throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_CHANGED");
-  const known = await tx.query(
-    "SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND product_id=$2",
-    [brand, product],
-  );
-  if (known.rows.length !== 1)
-    throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_INPUT_INVALID");
-  const version = input.expectedVersion + 1;
-  await tx.query(
-    "INSERT INTO rms_catalog.product_alcohol_mark (tenant_id,brand_id,product_id,version,operation_id,contains_alcohol,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-    [
-      reference(scope.tenantReference),
-      brand,
-      product,
-      version,
-      operation,
-      input.containsAlcohol,
-      reference(input.actorReference),
-      input.observedAt,
-    ],
-  );
-  return Object.freeze({ containsAlcohol: input.containsAlcohol, version });
+    const known = await tx.query(
+      "SELECT 1 FROM rms_catalog.product WHERE brand_id=$1 AND product_id=$2",
+      [brand, product],
+    );
+    if (known.rows.length !== 1)
+      throw new ProductAlcoholMarkError("PRODUCT_ALCOHOL_MARK_INPUT_INVALID");
+    const version = input.expectedVersion + 1;
+    await tx.query(
+      "INSERT INTO rms_catalog.product_alcohol_mark (tenant_id,brand_id,product_id,version,operation_id,contains_alcohol,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+      [
+        reference(scope.tenantReference),
+        brand,
+        product,
+        version,
+        operation,
+        input.containsAlcohol,
+        reference(input.actorReference),
+        input.observedAt,
+      ],
+    );
+    return Object.freeze({ containsAlcohol: input.containsAlcohol, version });
+  });
 }
