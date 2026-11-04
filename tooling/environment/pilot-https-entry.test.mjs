@@ -274,8 +274,30 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: serves each listed Store of the same
     expect(
       (await options.additionalStores[0].createInternalTestResources()).publicProfile.binding,
     ).toEqual(second);
-    // Another database, Brand, or the installation's own Store is never served; v15 2026-10-31:
-    // the installation's own Store still is (the Store is logged and skipped, not the service).
+    // DEC-MULTI-MERCHANT-ONE-INSTALLATION: a Store of another Tenant and Brand is served.
+    const merchantTwo = {
+      tenantReference: "tenant-2",
+      brandReference: "brand-2",
+      storeReference: "store-2",
+    };
+    const another = await startConfiguredPilotHttps(directory, {
+      ...setup(),
+      loadInstallation: loadFor(
+        storeInstallation({
+          loadCustomerRuntime: async () => ({ scope: merchantTwo, diningTableFiles: [] }),
+          loadMerchantRuntime: async () => ({ ...merchantConfig, scope: merchantTwo }),
+        }),
+      ),
+      createResources: async (dir) => ({
+        publicProfile: { binding: dir.endsWith("demo-2") ? merchantTwo : scope },
+      }),
+      loadHosting: async () => ({}),
+      startServer: async (options) => options,
+    });
+    expect(another.additionalStores.map((store) => store.storeReference)).toEqual(["store-2"]);
+    // Another database, a Store whose customer and staff scopes differ, or the installation's own
+    // Store is never served; v15 2026-10-31: the installation's own Store still is (the Store is
+    // logged and skipped, not the service).
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       for (const other of [

@@ -175,7 +175,7 @@ test("v15 2026-10-31: a served Store that cannot start is logged and skipped; th
       createInternalPaymentTerminal: () => ({}),
       createInternalMerchant: async (served) => {
         // The installation's own staff side is offered no Store it does not serve.
-        expect(served.servedStoreReferences).toBeUndefined();
+        expect(served.servedStores).toBeUndefined();
         return {
           staffSignInMode: "cognito",
           bff: {

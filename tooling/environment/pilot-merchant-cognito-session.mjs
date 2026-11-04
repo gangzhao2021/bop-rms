@@ -173,7 +173,8 @@ export async function createInternalMerchantCognitoSession(
         servedStoreFor(resources, selected) !== null &&
         session.actor.actorReference !== null &&
         (await isActiveStoreMember(tx, {
-          brandReference: scope.brandReference,
+          // DEC-MULTI-MERCHANT-ONE-INSTALLATION: the Brand of the Store selected.
+          brandReference: selected.brandReference,
           storeReference: selected.storeReference,
           actorReference: session.actor.actorReference,
           at,

@@ -68,7 +68,8 @@ export async function startConfiguredPilotHttps(
     }),
   );
   // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the other Stores this installation serves, each a
-  // complete Store runtime directory of the same database, Tenant and Brand (absent: one Store).
+  // complete Store runtime directory of the same database (absent: one Store).
+  // DEC-MULTI-MERCHANT-ONE-INSTALLATION: each of its own Tenant and Brand.
   // v15 2026-10-31: one Store that cannot be loaded never stops the others; it is logged (its
   // code) and not served until it is fixed and the service restarts.
   const additionalStores = [];
@@ -80,8 +81,6 @@ export async function startConfiguredPilotHttps(
         storeMerchantConfig = await storeInstallation.loadMerchantRuntime();
       if (
         storeInstallation.database !== installation.database ||
-        storeCustomerConfig.scope.tenantReference !== customerConfig.scope.tenantReference ||
-        storeCustomerConfig.scope.brandReference !== customerConfig.scope.brandReference ||
         storeCustomerConfig.scope.storeReference === customerConfig.scope.storeReference ||
         Object.entries(storeCustomerConfig.scope).some(
           ([key, value]) => storeMerchantConfig.scope[key] !== value,

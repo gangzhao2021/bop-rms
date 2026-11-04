@@ -14,7 +14,9 @@ import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identit
  *   cookie, hashed with the installation's guest key, looked up through Identity's Store-scoped
  *   owner read in each Store in turn; a found answer is remembered for that Session);
  * - otherwise (no Session, unknown token or reference): the installation's first Store, which
- *   answers as a single-Store installation would (a refusal for anything not its own).
+ *   answers as a single-Store installation would (a refusal for anything not its own). With Stores
+ *   of more than one Tenant (DEC-MULTI-MERCHANT-ONE-INSTALLATION) no merchant answers for a request
+ *   that isn't its own: null, and the entry refuses it without reaching any Store.
  */
 const GUEST_COOKIE = "__Host-bop-guest";
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -50,12 +52,17 @@ export function qrTokenPublicStore(body) {
 
 /**
  * `stores`: the installation's Stores, its own first: { storeReference, brandReference,
- * publicStoreReference, target, transactions, hashSession(cookie) → hex selector }.
+ * tenantReference, publicStoreReference, target, transactions, hashSession(cookie) → hex selector }.
  */
-export function createCustomerStoreRouting({ stores, cacheLimit = 10_000 }) {
+export function createCustomerStoreRouting({
+  stores,
+  cacheLimit = 10_000,
+  createSessions = createPostgresGuestSessionEntryStore,
+}) {
   if (!Array.isArray(stores) || stores.length < 1)
     throw new Error("CUSTOMER_STORE_ROUTING_INVALID");
   const primary = stores[0];
+  const unowned = new Set(stores.map((store) => store.tenantReference)).size > 1 ? null : primary;
   const sessionStores = new Map();
   const remember = (selector, store) => {
     if (sessionStores.size >= cacheLimit) sessionStores.delete(sessionStores.keys().next().value);
@@ -64,7 +71,7 @@ export function createCustomerStoreRouting({ stores, cacheLimit = 10_000 }) {
   const byPublic = new Map(stores.map((store) => [store.publicStoreReference, store]));
   const owners = stores.map((store) => ({
     store,
-    sessions: createPostgresGuestSessionEntryStore(store.transactions, {
+    sessions: createSessions(store.transactions, {
       brandReference: store.brandReference,
       storeReference: store.storeReference,
     }),
@@ -73,28 +80,29 @@ export function createCustomerStoreRouting({ stores, cacheLimit = 10_000 }) {
   return async function storeOf({ method, url, cookie, body }) {
     if (stores.length === 1) return primary;
     const menu = typeof url === "string" ? MENU.exec(url) : null;
-    if (menu) return byPublic.get(decodeURIComponent(menu[1])) ?? primary;
+    if (menu) return byPublic.get(decodeURIComponent(menu[1])) ?? unowned;
     if (isBodyRouted(method, url) && body !== undefined) {
       const reference = qrTokenPublicStore(body);
-      return (reference !== null && UUID_V7.test(reference) && byPublic.get(reference)) || primary;
+      return (reference !== null && UUID_V7.test(reference) && byPublic.get(reference)) || unowned;
     }
     const credential = guestCookie(cookie);
-    if (credential === null) return primary;
-    let selector;
-    try {
-      selector = primary.hashSession(credential);
-    } catch {
-      return primary;
-    }
-    const known = sessionStores.get(selector);
-    if (known !== undefined) return known;
+    if (credential === null) return unowned;
+    // Each Store's own hash of the cookie, in its own records (merchants don't share a guest key).
     for (const { store, sessions } of owners) {
+      let selector;
+      try {
+        selector = store.hashSession(credential);
+      } catch {
+        continue;
+      }
+      const known = sessionStores.get(selector);
+      if (known !== undefined) return known;
       const found = await sessions.resolve(selector).catch(() => null);
       if (found !== null) {
         remember(selector, store);
         return store;
       }
     }
-    return primary;
+    return unowned;
   };
 }

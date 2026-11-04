@@ -4,33 +4,40 @@ import process from "node:process";
 import { planPilotConnections } from "./pilot-connection-budget.mjs";
 /**
  * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores this installation serves, as Tenant/Brand/Store
- * scopes, the installation's own Store first. Every Store is of the installation's Tenant and Brand.
- * `resources.servedStoreReferences` lists the other Stores (absent: a single-Store installation, as
- * before). Never derived from a request.
+ * scopes, the installation's own Store first. DEC-MULTI-MERCHANT-ONE-INSTALLATION: each is of its own
+ * Tenant and Brand. `resources.servedStores` lists the other Stores (absent: a single-Store
+ * installation, as before). Never derived from a request.
  */
 const referencePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export function servedStoresOf(resources) {
-  const tenantReference = resources.publicProfile?.binding?.tenantReference,
-    brandReference = resources.scope?.brandReference,
-    primary = resources.scope?.storeReference;
-  const others = resources.servedStoreReferences ?? [];
-  const references = [primary, ...others];
+  const others = resources.servedStores ?? [];
+  if (!Array.isArray(others) || others.length > 99)
+    throw new Error("INTERNAL_SERVED_STORES_INVALID");
+  const stores = [servedScopeOf(resources), ...others];
   if (
-    !Array.isArray(others) ||
-    others.length > 99 ||
-    [tenantReference, brandReference, ...references].some(
-      (value) => typeof value !== "string" || !referencePattern.test(value),
+    stores.some((store) =>
+      [store?.tenantReference, store?.brandReference, store?.storeReference].some(
+        (value) => typeof value !== "string" || !referencePattern.test(value),
+      ),
     ) ||
-    new Set(references).size !== references.length
+    new Set(stores.map((store) => store.storeReference)).size !== stores.length
   )
     throw new Error("INTERNAL_SERVED_STORES_INVALID");
   return Object.freeze(
-    references.map((storeReference) =>
+    stores.map(({ tenantReference, brandReference, storeReference }) =>
       Object.freeze({ tenantReference, brandReference, storeReference }),
     ),
   );
 }
-/** The served Store this selection names, or null (another Tenant, Brand or an unserved Store). */
+/** This composition's own Store as a Tenant/Brand/Store scope. */
+export function servedScopeOf(resources) {
+  return {
+    tenantReference: resources.publicProfile?.binding?.tenantReference,
+    brandReference: resources.scope?.brandReference,
+    storeReference: resources.scope?.storeReference,
+  };
+}
+/** The served Store this selection names, or null (a Store this installation does not serve). */
 export function servedStoreFor(resources, selected) {
   return (
     servedStoresOf(resources).find(

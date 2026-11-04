@@ -13,6 +13,7 @@ import {
   createCustomerStoreRouting,
   isBodyRouted,
 } from "./pilot-customer-store-routing.mjs";
+import { servedScopeOf } from "./pilot-served-stores.mjs";
 import {
   createMerchantSessionStoreResolver,
   createMerchantStoreRouting,
@@ -47,6 +48,8 @@ const express = require("express");
  */
 const STORE_PAYMENT_ROUTE =
   /^\/(?:api\/v1\/checkout-sessions\/[^/]+\/(?:payment-reconciliation|payment-handoff|simulation-confirm|simulation-fail)|api\/v1\/dine-in\/table-payment(?:\/[a-z-]+)?|bff\/customer\/payment-configuration|bff\/customer\/member)$/u;
+const storeNotFound = (res) =>
+  res.status(404).set("Cache-Control", "no-store").json({ code: "CUSTOMER_STORE_NOT_FOUND" });
 export const isStorePaymentRoute = (method, path) =>
   (method === "POST" || method === "GET") && STORE_PAYMENT_ROUTE.test(path);
 
@@ -356,16 +359,18 @@ export async function startInternalCustomerServer({
     }
     const routers = new Map(),
       ports = new Map();
-    const storeReferences = () =>
+    const servedScopes = () =>
       served.length === 0
         ? []
-        : [resources.scope.storeReference, ...served.map(({ store }) => store.storeReference)];
+        : [resources, ...served.map((entry) => entry.resources)].map(servedScopeOf);
     for (const entry of [...served]) {
-      const others = storeReferences().filter((value) => value !== entry.store.storeReference);
+      const others = servedScopes().filter(
+        (scope) => scope.storeReference !== entry.store.storeReference,
+      );
       try {
         const storeMerchant = await entry.store.createInternalMerchant({
           ...entry.resources,
-          servedStoreReferences: others,
+          servedStores: others,
         });
         routers.set(entry.store.storeReference, createMerchantBffRouter(storeMerchant.bff));
         additionalResources.push(entry.resources);
@@ -381,8 +386,8 @@ export async function startInternalCustomerServer({
         ? resources
         : {
             ...resources,
-            servedStoreReferences: storeReferences().filter(
-              (value) => value !== resources.scope.storeReference,
+            servedStores: servedScopes().filter(
+              (scope) => scope.storeReference !== resources.scope.storeReference,
             ),
           },
     );
@@ -397,6 +402,7 @@ export async function startInternalCustomerServer({
         stores: [resources, ...additionalResources].map((storeResources) => ({
           storeReference: storeResources.scope.storeReference,
           brandReference: storeResources.scope.brandReference,
+          tenantReference: storeResources.publicProfile.binding.tenantReference,
           publicStoreReference: storeResources.publicProfile.binding.publicStoreReference,
           port: ports.get(storeResources.scope.storeReference),
           transactions: storeResources.transactions,
@@ -434,6 +440,8 @@ export async function startInternalCustomerServer({
           .set("Cache-Control", "no-store")
           .json({ code: "INTERNAL_API_UNAVAILABLE" });
       }
+      // DEC-MULTI-MERCHANT-ONE-INSTALLATION: no merchant's Store owns this request.
+      if (store === null) return storeNotFound(res);
       if (store.storeReference === resources.scope.storeReference)
         return primaryPayments(req, res, next);
       // Never another Store's payments for this Store's guest (its stack failed to start: logged).
@@ -470,14 +478,14 @@ export async function startInternalCustomerServer({
           body = Buffer.concat(chunks);
         }
         try {
-          port = (
-            await customerStore({
-              method: req.method,
-              url: req.url,
-              cookie: req.headers.cookie,
-              body,
-            })
-          ).port;
+          const store = await customerStore({
+            method: req.method,
+            url: req.url,
+            cookie: req.headers.cookie,
+            body,
+          });
+          if (store === null) return storeNotFound(res);
+          port = store.port;
         } catch {
           return res
             .status(503)

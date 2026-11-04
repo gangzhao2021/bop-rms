@@ -343,7 +343,13 @@ it("WP-2423 Q18: a full sign-in on a registered tablet finalizes in the transact
 it("v15 2026-11-01: a kitchen display started for another served Store belongs to that Store", async () => {
   const f = setup(),
     storeTwo = id(9);
-  f.resources.servedStoreReferences = [storeTwo];
+  f.resources.servedStores = [
+    {
+      tenantReference: f.resources.publicProfile.binding.tenantReference,
+      brandReference: scope.brandReference,
+      storeReference: storeTwo,
+    },
+  ];
   const session = await f.create();
   seam.members = new Set([id(4) + " " + scope.storeReference, id(4) + " " + storeTwo]);
   seam.members.add(id(5) + " " + scope.storeReference);
