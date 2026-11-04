@@ -75,6 +75,9 @@ export function TableSplitControls({
     (split?.paidParts ?? 0) > 0 ||
     split?.parts.some((part) => part.guestPaying) === true ||
     bill.onlinePayment?.status === "InProgress";
+  // Rounds only divide a bill between people when different phones or merged tables sent them.
+  const offersByRounds =
+    split?.mode === "ByRounds" || new Set(defaultRoundParts(bill).values()).size >= 2;
   const [mode, setMode] = useState<"Whole" | "Even" | "ByRounds">(split?.mode ?? "Whole");
   const [people, setPeople] = useState(split?.mode === "Even" ? split.parts.length : 2);
   const [partOf, setPartOf] = useState<ReadonlyMap<number, number>>(() =>
@@ -118,6 +121,11 @@ export function TableSplitControls({
       setBusy(false);
     }
   };
+  const evenApplied = split?.mode === "Even" && split.parts.length === people && !split.stale;
+  const changePeople = (count: number) => {
+    setPeople(count);
+    void apply("Even", count);
+  };
   const partCount = Math.max(1, ...owing.map((round) => partOf.get(round.roundNumber) ?? 1));
   const byRoundsValid =
     partCount >= 2 &&
@@ -136,7 +144,10 @@ export function TableSplitControls({
         </p>
       ) : (
         <div className="table-split__modes" role="group" aria-label={t("Split the bill")}>
-          {(["Whole", "Even", "ByRounds"] as const).map((value) => (
+          {(offersByRounds
+            ? (["Whole", "Even", "ByRounds"] as const)
+            : (["Whole", "Even"] as const)
+          ).map((value) => (
             <button
               key={value}
               type="button"
@@ -145,6 +156,7 @@ export function TableSplitControls({
               onClick={() => {
                 setMode(value);
                 if (value === "Whole" && split !== null) void apply("Whole");
+                if (value === "Even" && !evenApplied) void apply("Even");
               }}
             >
               {value === "Whole"
@@ -163,7 +175,7 @@ export function TableSplitControls({
             type="button"
             aria-label={t("Fewer people")}
             disabled={disabled || busy || people <= 2}
-            onClick={() => setPeople((value) => Math.max(2, value - 1))}
+            onClick={() => changePeople(people - 1)}
           >
             −
           </button>
@@ -172,20 +184,23 @@ export function TableSplitControls({
             type="button"
             aria-label={t("More people")}
             disabled={disabled || busy || people >= 20}
-            onClick={() => setPeople((value) => Math.min(20, value + 1))}
+            onClick={() => changePeople(people + 1)}
           >
             +
           </button>
-          <button
-            type="button"
-            className="table-split__apply"
-            disabled={disabled || busy}
-            onClick={() => void apply("Even")}
-          >
-            {split?.mode === "Even" && split.parts.length === people && !split.stale
-              ? t("Split again")
-              : t("Split in {count}", { count: String(people) })}
-          </button>
+          {/* Choosing Even or a number splits at once; this remains to retry or follow a bill change. */}
+          {evenApplied || busy ? null : (
+            <button
+              type="button"
+              className="table-split__apply"
+              disabled={disabled}
+              onClick={() => void apply("Even")}
+            >
+              {split?.mode === "Even" && split.parts.length === people
+                ? t("Split again")
+                : t("Split in {count}", { count: String(people) })}
+            </button>
+          )}
         </div>
       ) : null}
       {mode === "ByRounds" && !locked ? (

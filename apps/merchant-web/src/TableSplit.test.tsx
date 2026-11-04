@@ -50,6 +50,64 @@ describe("WP-2423 item 8 ④ split bill at the Tables checkout", () => {
     ]);
   });
 
+  it("offers each paying for their own rounds only when different phones sent them", () => {
+    const render = (orderedBy: readonly (number | null)[]) => {
+      const value = splitBillFixture();
+      value.split = null;
+      const rounds = value.rounds as Record<string, unknown>[];
+      orderedBy.forEach((phone, index) => {
+        rounds[index] = { ...rounds[0], roundNumber: index + 1, orderedBy: phone };
+      });
+      rounds.length = orderedBy.length;
+      return renderToStaticMarkup(
+        <TableSplitControls
+          bill={parseTableBill(value)}
+          csrf={"a".repeat(43)}
+          client={createTableCheckoutClient()}
+          disabled={false}
+          selectedPart={null}
+          onSelectPart={() => undefined}
+          onBill={() => undefined}
+          onProblem={() => undefined}
+        />,
+      );
+    };
+    expect(render([1])).not.toContain("Each pays own rounds");
+    expect(render([1, 1])).not.toContain("Each pays own rounds");
+    expect(render([1, null])).not.toContain("Each pays own rounds");
+    expect(render([1])).toContain("Split evenly");
+    expect(render([1, 2])).toContain("Each pays own rounds");
+  });
+
+  it("asks for no second step once split evenly, except when the bill has changed", () => {
+    const render = (stale: boolean) => {
+      const value = splitBillFixture();
+      const split = value.split as Record<string, unknown>;
+      split.stale = stale;
+      split.paidParts = 0;
+      split.parts = (split.parts as Record<string, unknown>[]).map((part) => ({
+        ...part,
+        payment: null,
+        guestPaying: false,
+      }));
+      return renderToStaticMarkup(
+        <TableSplitControls
+          bill={parseTableBill(value)}
+          csrf={"a".repeat(43)}
+          client={createTableCheckoutClient()}
+          disabled={false}
+          selectedPart={null}
+          onSelectPart={() => undefined}
+          onBill={() => undefined}
+          onProblem={() => undefined}
+        />,
+      );
+    };
+    expect(render(false)).not.toContain("Split again");
+    expect(render(false)).not.toContain("Split in ");
+    expect(render(true)).toContain("Split again");
+  });
+
   it("lists each part with its status, collects only an open part, and locks the split once paid", () => {
     const html = renderToStaticMarkup(
       <TableSplitControls
