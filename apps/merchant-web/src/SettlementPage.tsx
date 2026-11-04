@@ -325,7 +325,7 @@ export function SettlementReport({
               <span className="overview-count__label">{t("Cash received")}</span>
               <strong className="overview-count__value">{money(view.cash.received)}</strong>
               <span className="overview-count__detail">
-                {t("{count} table{value} · tips {tipMinor}", {
+                {t("{count} payment{value} · tips {tipMinor}", {
                   count: view.cash.received.count,
                   value: view.cash.received.count === 1 ? "" : "s",
                   tipMinor: formatSettlementMoney(view.cash.tipMinor),

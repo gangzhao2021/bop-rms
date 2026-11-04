@@ -5931,7 +5931,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Print receipt": "打印收据",
   "Cash payments could not be read.": "现金收款读取失败。",
   "Cash totals": "现金合计",
-  "{count} table{value} · tips {tipMinor}": "{count} 桌 · 小费 {tipMinor}",
   "Cash refunds": "现金退款",
   "Net cash": "现金净额",
   "Cash rounding {roundingMinor}": "现金取整 {roundingMinor}",
