@@ -306,10 +306,9 @@
     flex: 0 0 auto;
     min-height: 44px;
     padding: 0 12px;
-    border: 1px solid var(--bop-color-border-default);
-    border-radius: var(--bop-radius-control);
-    background: var(--bop-color-surface-default);
-    color: var(--bop-color-text-default);
+    border: 0;
+    background: none;
+    color: var(--bop-color-accent);
     font: inherit;
     font-size: 14px;
     cursor: pointer;

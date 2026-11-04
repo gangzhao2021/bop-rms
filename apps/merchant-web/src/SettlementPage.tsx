@@ -132,7 +132,7 @@ function DayDifferenceHelp({ check }: { readonly check: SettlementCheck }) {
           },
         )}{" "}
         <Link to="/operations/order-exceptions">{t("Exceptions")}</Link>{" "}
-        {t("and tell the pilot operator.")}
+        {t("and tell BOP support.")}
       </p>
     </div>
   );

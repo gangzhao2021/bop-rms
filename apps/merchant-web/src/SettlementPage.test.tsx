@@ -142,7 +142,7 @@ describe("WP-2423 P1 settlement report", () => {
       "The store&#x27;s records show $11.30 in refunds; the payment provider&#x27;s statement shows $22.60 ($11.30 more at the payment provider).",
     );
     expect(html).toContain("This day is checked again automatically when new records arrive.");
-    expect(html).toContain("tell the pilot operator");
+    expect(html).toContain("tell BOP support");
   });
   it("WP-2423: shows a day re-checked after an unmatched charge was refunded as resolved", () => {
     const view = settlementViewFixture();

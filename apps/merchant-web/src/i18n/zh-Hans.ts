@@ -5204,7 +5204,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "现在与支付方的对账单一致。无需再处理；两次核对都保留在当天的记录中。",
   "and now matches the payment provider. Nothing more to do; both checks stay in the store's history.":
     "现在与支付方一致。无需再处理；两次核对都保留在门店记录中。",
-  "and tell the pilot operator.": "并告知试点运维人员。",
+  "and tell BOP support.": "并告知 BOP 技术支持。",
   "another staff member": "另一位员工",
   "any number": "不限数量",
   approved: "已批准",

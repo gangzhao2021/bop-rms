@@ -225,7 +225,7 @@ export function RefundExecutionAction({
               ? "The check did not finish. Keep this page open and retry the same check."
               : error instanceof OrdinaryRefundExecutionError && error.code === "PermissionDenied"
                 ? "Your session or permissions do not allow this check. Sign in again, then retry."
-                : "Checking refunds is not set up for this store. Contact the pilot operator.",
+                : "Checking refunds is not set up for this store. Contact BOP support.",
         );
       }
     } finally {

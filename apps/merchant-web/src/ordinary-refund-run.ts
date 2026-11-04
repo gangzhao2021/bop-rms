@@ -303,13 +303,13 @@ export function refundRunFailureText(error: RefundRunError): string {
         ? "The refund request is recorded but was not sent: your permissions do not allow sending refunds, or this refund needs an owner's approval. Ask a manager to check it."
         : code === "Conflict"
           ? "The refund request is recorded but was not sent: it changed on another screen. Check the request's status below before sending."
-          : "The refund request is recorded but was not sent: sending refunds is not set up for this store. Contact the pilot operator.";
+          : "The refund request is recorded but was not sent: sending refunds is not set up for this store. Contact BOP support.";
   if (error.step === "Send")
     return uncertain
       ? "It is not confirmed that the card provider received this refund. Continue sending this refund: the same refund is reused and the customer is never refunded twice. If the card provider or the internet is down, the refund stays recorded here as not sent: open this order again once it is back and send it then."
       : code === "PermissionDenied" || code === "Denied"
         ? "The refund was not sent: your session or permissions no longer allow sending refunds. Sign in again, then continue."
-        : "The refund was not sent: sending refunds is not set up for this store. Contact the pilot operator.";
+        : "The refund was not sent: sending refunds is not set up for this store. Contact BOP support.";
   return uncertain
     ? "The refund request result is unknown. Retry the same request; do not start another refund."
     : "The refund request was not recorded.";
