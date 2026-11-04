@@ -3920,8 +3920,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Switch staff with a PIN": "用 PIN 换人",
   "Switch staff · {storeLabel}": "换人 · {storeLabel}",
   "Switching…": "正在切换…",
-  "System alerts could not be read. Check again in a moment; if this stays, ask the pilot operator to check the store system.":
-    "无法读取系统提醒。请稍后再检查；如果一直如此，请联系试点运维人员检查门店系统。",
+  "System alerts could not be read. Check again in a moment; if this stays, ask BOP support to check the store system.":
+    "无法读取系统提醒。请稍后再检查；如果一直如此，请联系 BOP 技术支持检查门店系统。",
   "System template role: its permissions follow the released template.":
     "系统模板角色：其权限跟随已发布的模板。",
   "System update in progress — ordering may pause for a few minutes.":
@@ -4088,10 +4088,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "保存此设置后门店的配置已变更。创建配置前请再次保存设置（它会基于最新配置）。",
   "The action was not accepted. Refresh and review the current work item.":
     "操作未被接受。请刷新并查看当前工作项。",
-  "The alert monitor is not running, so problems with the store system, backups and certificate are not being checked. Ask the pilot operator to start it.":
-    "提醒监控未运行，因此门店系统、备份和证书的问题未被检查。请联系试点运维人员启动它。",
-  "The alert monitor stopped reporting{value}. Problems are not being checked. Ask the pilot operator to restart it.":
-    "提醒监控已停止报告{value}。问题未被检查。请联系试点运维人员重启它。",
+  "The alert monitor is not running, so problems with the store system, backups and certificate are not being checked. Ask BOP support to start it.":
+    "提醒监控未运行，因此门店系统、备份和证书的问题未被检查。请联系 BOP 技术支持启动它。",
+  "The alert monitor stopped reporting{value}. Problems are not being checked. Ask BOP support to restart it.":
+    "提醒监控已停止报告{value}。问题未被检查。请联系 BOP 技术支持重启它。",
   "The amount changed. Charge the new total before recording it.":
     "金额已变化。请先按新的合计收款，再记录。",
   "The amount to charge is now {totalMinor}. Charge the difference, then record it.":
@@ -7010,4 +7010,168 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Store system: update in progress": "门店系统：正在更新",
   "Store system: all good": "门店系统：一切正常",
   "System details": "系统详情",
+  "Pickup orders cannot be taken": "现在无法接自取订单",
+  "Pickup times are running out": "自取时间快用完了",
+  "Secure connection certificate has expired": "安全连接证书已过期",
+  "Secure connection certificate expires soon": "安全连接证书快到期了",
+  "The store's ordering setup has expired": "门店点单服务已到期",
+  "The store's ordering setup expires soon": "门店点单服务快到期了",
+  "Follow the store outage procedure (pause online ordering, take paper orders). Ask BOP support to check the store system and restart it.":
+    "按门店停机流程处理（暂停线上点单，改用纸质点单）。请 BOP 技术支持检查门店系统并重启。",
+  "Pause online ordering if staff screens still work, otherwise follow the store outage procedure. Ask BOP support to restart the store system.":
+    "如果员工页面还能用，就暂停线上点单；否则按门店停机流程处理。请 BOP 技术支持重启门店系统。",
+  "Follow the store outage procedure. Ask BOP support to check the store system and restart it.":
+    "按门店停机流程处理。请 BOP 技术支持检查门店系统并重启。",
+  "Ask BOP support to check the store system and restart it.":
+    "请 BOP 技术支持检查门店系统并重启。",
+  "Ask BOP support to find out what failed and restart the part named in this alert. Check Orders and Exceptions for work that may be waiting.":
+    "请 BOP 技术支持查明出错原因，并重启这条提醒里提到的部分。查看“订单”和“异常”，看有没有等着处理的事。",
+  "Do not take a second payment from guests who say they paid. Check Orders and Exceptions; ask BOP support to review the stuck updates and send them again.":
+    "客人说已付款的，不要再收一次。查看“订单”和“异常”；请 BOP 技术支持检查卡住的更新并重新发送。",
+  'Hand over ready orders in person: check the order number plus the guest\'s name or phone number. Compare the kitchen board with Orders. Ask BOP support to look into this now; if it is not fixed, this becomes "Order or payment updates are stuck".':
+    "做好的订单由员工当面交给客人：核对订单号，以及客人的姓名或电话。对照后厨看板和“订单”。现在就请 BOP 技术支持查看；如果没有解决，这条提醒会变成“订单或付款更新卡住了”。",
+  'Open Orders: these orders are listed first with today\'s. Make and hand over one the guest still wants, or cancel it (the guest is refunded and the ingredients go back into stock). For an order that is already finished, choose "Release held ingredients".':
+    "打开“订单”：这些订单和今天的订单一起排在最前面。客人还要的，做好交给客人；不要的就取消（客人会收到退款，配料回到库存）。已经完成的订单，选择“释放占用的配料”。",
+  "Take pickup orders on paper (order sheet, items, name, time) and take payment on the card machine, then enter them once this clears. Ask BOP support to check the pickup times now.":
+    "自取订单先记在纸上（点单纸、菜品、姓名、时间），在刷卡机上收款，等这条提醒消失后再录入系统。现在就请 BOP 技术支持检查自取时间。",
+  "Nothing changes for guests yet. Ask BOP support to check the pickup times today; if it reaches the last hour, take pickup orders on paper.":
+    "客人暂时不受影响。今天内请 BOP 技术支持检查自取时间；如果只剩最后一小时，自取订单改记在纸上。",
+  "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.":
+    "有客人问起，告诉他们修好后收据会显示在订单页面上。店主：在“门店设置”里选择一个已发布的收据模板（第 5 步），然后发送、批准并发布设置（第 8 步）。这段时间已付款订单的收据之后会自动补上；如果持续超过 30 分钟，请 BOP 技术支持重新发送卡住的更新。",
+  'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
+    "新订单先记在纸上（菜品、姓名、桌号或自取时间），在刷卡机上收款，等这条提醒消失后再录入系统。店主：在“门店设置”第 8 步，税务选择“使用当前门店的设置”，然后发送、批准并发布。否则请联系 BOP 技术支持。",
+  "Open Exceptions to see each difference. For a business day's totals, open Settlement and choose that day; it explains the difference and what to do.":
+    "打开“异常”查看每一项差异。如果是某个营业日的总额差异，打开“结算”并选择那一天，页面会说明差异和处理办法。",
+  "Open Settlement, review the listed business day and resolve each item.":
+    "打开“结算”，查看列出的营业日，逐项处理。",
+  "Ask BOP support to run the backup by hand and check free disk space. Store operation is not affected.":
+    "请 BOP 技术支持手动备份一次，并检查剩余磁盘空间。门店营业不受影响。",
+  "Ask BOP support to run a backup now and check that the scheduled backup is running.":
+    "请 BOP 技术支持马上备份一次，并检查定时备份是否在运行。",
+  "Ask BOP support to take a new backup and test that it can be restored. Keep the previous backups.":
+    "请 BOP 技术支持重新备份一次，并测试能否恢复。保留之前的备份。",
+  "Ask BOP support to check the off-site folder or drive is connected and has space.":
+    "请 BOP 技术支持检查异地备份的文件夹或硬盘是否已连接、是否还有空间。",
+  "Ask BOP support to renew the secure connection certificate and set up the new one on staff devices.":
+    "请 BOP 技术支持更新安全连接证书，并在员工设备上装好新证书。",
+  "Approve a new end date and ask BOP support to renew it during a planned update before it expires.":
+    "确认新的到期日，并请 BOP 技术支持在到期前的计划更新时续期。",
+  "Ask BOP support to free space (old system files, old backup copies) or add storage.":
+    "请 BOP 技术支持清理空间（旧的系统文件、旧的备份副本）或增加存储空间。",
+  "Ask BOP support to find out why these checks could not run.":
+    "请 BOP 技术支持查明这些检查为什么没能运行。",
+  "Check the alert account details and send a test alert. Watch this Home screen meanwhile.":
+    "检查提醒账号信息，并发送一条测试提醒。在此期间请留意这个首页。",
+  "a while": "一段时间",
+  "less than a minute": "不到一分钟",
+  "{count} minutes": "{count}分钟",
+  "{count} hours": "{count}小时",
+  "{count} days": "{count}天",
+  "A background task": "一项后台工作",
+  "Staff and ordering service": "员工和点单服务",
+  "Customer ordering pages and staff screens": "客人点单页和员工页面",
+  "Order processing": "订单处理",
+  "Kitchen board updates": "后厨看板更新",
+  "Payment checks": "付款核对",
+  "Day-end settlement": "日结",
+  "Table service follow-ups": "堂食后续处理",
+  "order updates": "订单更新",
+  "waiting for payment results": "等待付款结果",
+  "stock release": "释放库存",
+  "unpaid pickup expiry": "未付款自取单到期处理",
+  "table checkout expiry": "桌台结账到期处理",
+  "refunds to guests' cards from table payments": "堂食付款退回客人银行卡",
+  "customer contact deletion": "删除客人联系方式",
+  "old card payment message deletion": "删除旧的刷卡付款消息",
+  "pickup times": "自取时间",
+  cancellations: "取消处理",
+  "automatic refunds": "自动退款",
+  "kitchen board": "后厨看板",
+  "payment checks": "付款核对",
+  "day-end settlement": "日结",
+  "table follow-ups": "堂食后续处理",
+  "background work": "后台工作",
+  "{name} ({part})": "{name}（{part}）",
+  "{names} and more": "{names}等",
+  dump: "导出数据",
+  "restore check": "恢复检查",
+  "off-site copy": "异地备份",
+  retention: "清理旧备份",
+  backup: "备份",
+  "the store data folder": "门店数据文件夹",
+  "the backup folder": "备份文件夹",
+  "the database disk": "数据库磁盘",
+  "the off-site backup folder": "异地备份文件夹",
+  "{disk} has {free} free ({percent}%)": "{disk}还剩 {free}（{percent}%）",
+  "the service status": "服务状态",
+  "payment and settlement status": "付款和结算状态",
+  "the backup status": "备份状态",
+  "the certificate": "证书",
+  "the store setup end date": "门店点单服务到期日",
+  "disk space": "磁盘空间",
+  "the receipt template check": "收据模板检查",
+  "the check for orders holding stock": "订单占用库存的检查",
+  "the check for pickup times": "自取时间检查",
+  "the check that orders can be priced": "订单能否计价的检查",
+  "Email alerts": "邮件",
+  "Phone alerts": "电话或消息",
+  "Another alert channel": "某个提醒渠道",
+  "The ordering service has failed its health check for {duration}. Staff screens and online ordering are probably not working.":
+    "点单服务已有{duration}检查不通过。员工页面和线上点单很可能无法使用。",
+  "The secure customer ordering page has not loaded for {duration}. Guests cannot scan, order or pay online.":
+    "客人点单页已有{duration}打不开。客人无法扫码、点单或在线付款。",
+  "The staff app (Orders, Kitchen, Pickup) has not loaded for {duration}.":
+    "员工系统（订单、后厨、自取）已有{duration}打不开。",
+  "The part of the system that watches background work has not reported since the checks started. Background work (kitchen updates, payment checks, refunds) may have stopped.":
+    "负责看管后台工作的部分从检查开始后就没有回报。后台工作（后厨更新、付款核对、退款）可能已经停了。",
+  "The part of the system that watches background work last reported {duration} ago. Background work (kitchen updates, payment checks, refunds) may have stopped.":
+    "负责看管后台工作的部分上次回报是在{duration}前。后台工作（后厨更新、付款核对、退款）可能已经停了。",
+  "{names} has kept failing and will not fix itself.": "{names}一直出错，不会自行恢复。",
+  "{names} have kept failing and will not fix themselves.": "{names}一直出错，不会自行恢复。",
+  "{count} updates (such as a payment result or an order change) could not be processed after automatic retries (oldest {duration} ago). Paid orders may look unpaid, not reach the kitchen, or not show as ready for pickup after the kitchen finished them.":
+    "有 {count} 条更新（比如付款结果或订单变更）自动重试后仍未处理成功（最早的在{duration}前）。已付款的订单可能显示未付款、没有送到后厨，或后厨做好后没有显示可取餐。",
+  "{count} order updates are being retried (failing for {duration}). Ready orders may not show for pickup yet, and kitchen or payment changes may be late.":
+    "有 {count} 条订单更新正在重试（已失败{duration}）。做好的订单可能还没显示可取餐，后厨或付款的变更也可能延迟。",
+  "{count} orders from earlier days still have ingredients set aside (the oldest for {duration}). Items made from them can show as sold out to guests although the stock is on the shelf.":
+    "有 {count} 笔往日订单还占用着配料（最久的已占用{duration}）。用这些配料做的菜可能对客人显示售罄，其实货架上还有。",
+  "No pickup times are set up for now, so guests cannot place pickup orders online and staff cannot take them at the counter. Dine-in is not affected.":
+    "现在没有设好的自取时间，所以客人无法在线下自取订单，员工也无法在柜台接自取订单。堂食不受影响。",
+  "Pickup times are set up only for the next {duration}. After that, guests cannot place pickup orders online and staff cannot take them at the counter.":
+    "自取时间只设到接下来的{duration}。之后客人无法在线下自取订单，员工也无法在柜台接自取订单。",
+  "The Store's published settings could not be read, so guests who pay now do not get a receipt yet.":
+    "读取不到门店已发布的设置，所以现在付款的客人暂时拿不到收据。",
+  "The receipt template chosen in Store setup cannot be used, so guests who pay now do not get a receipt. Orders, payments and the kitchen are not affected.":
+    "“门店设置”里选择的收据模板无法使用，所以现在付款的客人拿不到收据。订单、付款和后厨不受影响。",
+  "The Store's published settings could not be read, so no new order can be priced, online or at the counter. Orders already paid are not affected.":
+    "读取不到门店已发布的设置，所以线上和柜台的新订单都无法计价。已付款的订单不受影响。",
+  "The tax settings published in Store setup are not the ones this store is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.":
+    "“门店设置”里发布的税务设置和这家门店应收的税不一致，所以线上和柜台的新订单都无法计价。已付款的订单不受影响。",
+  "{count} differences between the store's records and the payment provider are still open (oldest {duration} ago). A difference can be one payment or a business day's totals.":
+    "门店记录和支付服务商之间还有 {count} 项差异没有处理（最早的在{duration}前）。差异可能是一笔付款，也可能是某个营业日的总额。",
+  "{count} settlement problems are still open (oldest {duration} ago).":
+    "还有 {count} 个结算问题没有处理（最早的在{duration}前）。",
+  "The scheduled backup failed at the {stage} step. It will retry automatically ({count} tries left today).":
+    "定时备份在“{stage}”这一步失败了。系统会自动重试（今天还剩 {count} 次）。",
+  "The scheduled backup failed at the {stage} step. No more automatic tries today.":
+    "定时备份在“{stage}”这一步失败了。今天不会再自动重试。",
+  "No successful backup has been recorded for this store yet.": "这家门店还没有成功备份的记录。",
+  "The newest successful backup is {duration} old. If the server failed now, recent orders and payments could be lost.":
+    "最近一次成功备份是在{duration}前。如果服务器现在出故障，最近的订单和付款可能会丢失。",
+  "The automatic restore check of the newest backup failed, so it may not be usable.":
+    "最新备份的自动恢复检查没有通过，这份备份可能用不了。",
+  "The encrypted copy of the newest backup could not be written to the off-site location. The local backup is fine.":
+    "最新备份的加密副本没能写入异地位置。本地备份没有问题。",
+  "Guests and staff devices will refuse to open the store pages.":
+    "客人和员工的设备会拒绝打开门店页面。",
+  "It expires in {duration}. After that, guests and staff devices will refuse to open the store pages.":
+    "还有{duration}到期。到期后，客人和员工的设备会拒绝打开门店页面。",
+  "Guests cannot order and staff cannot use the store screens until it is renewed.":
+    "续期之前，客人无法点单，员工也无法使用门店页面。",
+  "It expires in {duration}. After that, guests cannot order and staff cannot use the store screens.":
+    "还有{duration}到期。到期后，客人无法点单，员工也无法使用门店页面。",
+  "{disks}. When it fills, orders and backups stop.": "{disks}。空间用完后，订单和备份都会停止。",
+  "The system could not read {sources}. Problems there would not be reported.":
+    "系统读取不到{sources}。这些地方出问题也不会有提醒。",
+  "{channels} alerts have failed for {duration}. The Owner may not be told about problems.":
+    "{channels}提醒已失败{duration}。店主可能收不到问题通知。",
 });

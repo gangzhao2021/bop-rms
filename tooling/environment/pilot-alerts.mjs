@@ -39,7 +39,7 @@ const COMPONENT_NAMES = Object.freeze({
   workload: "background work",
 });
 const DISK_NAMES = Object.freeze({
-  runtime: "the pilot data folder",
+  runtime: "the store data folder",
   backups: "the backup folder",
   database: "the database disk",
   offsite: "the off-site backup folder",
@@ -78,7 +78,9 @@ const list = (values) => {
 /**
  * The closed alert catalog. `severity` may be overridden per condition (escalation). Each entry
  * renders a title, a plain summary and what staff or the Owner should do; `runbook` names the
- * runbook anchor in docs/runbooks/single-store-pilot.md ("What each alert means").
+ * runbook anchor in docs/runbooks/single-store-pilot.md ("What each alert means"). The text is read
+ * by restaurant owners, in plain words ("BOP support" runs the system). The merchant app holds its
+ * Chinese by this exact English (apps/merchant-web/src/operations-alert-words.ts): change both.
  */
 export const ALERT_CATALOG = Object.freeze({
   "entry.api": {
@@ -88,7 +90,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       `The ordering service has failed its health check for ${formatDuration(p.downMs)}. Staff screens and online ordering are probably not working.`,
     action: () =>
-      "Follow the store outage procedure (pause online ordering, take paper orders). Ask the pilot operator to check the host and restart the pilot.",
+      "Follow the store outage procedure (pause online ordering, take paper orders). Ask BOP support to check the store system and restart it.",
     runbook: "alert-store-system-down",
   },
   "entry.customer": {
@@ -98,7 +100,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       `The secure customer ordering page has not loaded for ${formatDuration(p.downMs)}. Guests cannot scan, order or pay online.`,
     action: () =>
-      "Pause online ordering if staff screens still work, otherwise follow the store outage procedure. Ask the pilot operator to restart the pilot.",
+      "Pause online ordering if staff screens still work, otherwise follow the store outage procedure. Ask BOP support to restart the store system.",
     runbook: "alert-customer-entry-down",
   },
   "entry.merchant": {
@@ -108,7 +110,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       `The staff app (Orders, Kitchen, Pickup) has not loaded for ${formatDuration(p.downMs)}.`,
     action: () =>
-      "Follow the store outage procedure. Ask the pilot operator to check the host and restart the pilot.",
+      "Follow the store outage procedure. Ask BOP support to check the store system and restart it.",
     runbook: "alert-merchant-entry-down",
   },
   "supervisor.silent": {
@@ -117,9 +119,9 @@ export const ALERT_CATALOG = Object.freeze({
     title: () => "Background services are not being watched",
     summary: (p) =>
       p.reportAgeMs === null
-        ? "The pilot supervisor has not reported since the monitor started. Background work (kitchen updates, payment checks, refunds) may have stopped."
-        : `The pilot supervisor last reported ${formatDuration(p.reportAgeMs)} ago. Background work (kitchen updates, payment checks, refunds) may have stopped.`,
-    action: () => "Ask the pilot operator to check the pilot container and restart it.",
+        ? "The part of the system that watches background work has not reported since the checks started. Background work (kitchen updates, payment checks, refunds) may have stopped."
+        : `The part of the system that watches background work last reported ${formatDuration(p.reportAgeMs)} ago. Background work (kitchen updates, payment checks, refunds) may have stopped.`,
+    action: () => "Ask BOP support to check the store system and restart it.",
     runbook: "alert-supervisor-silent",
   },
   "service.attention": {
@@ -129,7 +131,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       `${list(p.services)} ${p.services.length === 1 ? "has" : "have"} kept failing and will not fix ${p.services.length === 1 ? "itself" : "themselves"}.`,
     action: () =>
-      "Ask the pilot operator to read the service log and restart the named service. Check Orders and Exceptions for work that may be waiting.",
+      "Ask BOP support to find out what failed and restart the part named in this alert. Check Orders and Exceptions for work that may be waiting.",
     runbook: "alert-service-attention",
   },
   "payment.updates": {
@@ -139,7 +141,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       `${count(p.count, "update", "updates")} (such as a payment result or an order change) could not be processed after automatic retries (oldest ${formatDuration(p.oldestAgeMs)} ago). Paid orders may look unpaid, not reach the kitchen, or not show as ready for pickup after the kitchen finished them.`,
     action: () =>
-      "Do not take a second payment from guests who say they paid. Check Orders and Exceptions; ask the pilot operator to review the stuck updates (dead-letter list) and retry them.",
+      "Do not take a second payment from guests who say they paid. Check Orders and Exceptions; ask BOP support to review the stuck updates and send them again.",
     runbook: "alert-payment-updates",
   },
   // WP-2423 (2026-10-16): early warning while events are still being retried, before any dead
@@ -151,7 +153,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       `${count(p.count, "order update is", "order updates are")} being retried (failing for ${formatDuration(p.oldestAgeMs)}). Ready orders may not show for pickup yet, and kitchen or payment changes may be late.`,
     action: () =>
-      'Hand over ready orders in person: check the order number plus the guest\'s name or phone number. Compare the kitchen board with Orders. Ask the pilot operator to read the order processing log now; if it is not fixed, this becomes "Order or payment updates are stuck".',
+      'Hand over ready orders in person: check the order number plus the guest\'s name or phone number. Compare the kitchen board with Orders. Ask BOP support to look into this now; if it is not fixed, this becomes "Order or payment updates are stuck".',
     runbook: "alert-updates-retrying",
   },
   // WP-2423 (2026-10-16 v15 stock leak): an Order of an earlier business day still holds stock,
@@ -180,8 +182,8 @@ export const ALERT_CATALOG = Object.freeze({
         : `Pickup times are set up only for the next ${formatDuration(p.coveredMs)}. After that, guests cannot place pickup orders online and staff cannot take them at the counter.`,
     action: (p) =>
       p.coveredMs <= 0
-        ? "Take pickup orders on paper (order sheet, items, name, time) and take payment on the card machine, then enter them once this clears. Ask the pilot operator to check Order processing (pickup times) now."
-        : "Nothing changes for guests yet. Ask the pilot operator to check Order processing (pickup times) today; if it reaches the last hour, take pickup orders on paper.",
+        ? "Take pickup orders on paper (order sheet, items, name, time) and take payment on the card machine, then enter them once this clears. Ask BOP support to check the pickup times now."
+        : "Nothing changes for guests yet. Ask BOP support to check the pickup times today; if it reaches the last hour, take pickup orders on paper.",
     runbook: "alert-pickup-capacity-horizon",
   },
   // WP-2423 DEC-STORE-SETUP-PUBLICATION: the receipt template the Store's published settings
@@ -195,7 +197,7 @@ export const ALERT_CATALOG = Object.freeze({
         ? "The Store's published settings could not be read, so guests who pay now do not get a receipt yet."
         : "The receipt template chosen in Store setup cannot be used, so guests who pay now do not get a receipt. Orders, payments and the kitchen are not affected.",
     action: () =>
-      "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask the pilot operator to retry stuck updates.",
+      "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.",
     runbook: "alert-receipts-template",
   },
   // WP-2423 DEC-STORE-SETUP-PUBLICATION: quotes take the tax configuration the Store's published
@@ -208,9 +210,9 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       p.reason === "StoreConfigurationUnavailable"
         ? "The Store's published settings could not be read, so no new order can be priced, online or at the counter. Orders already paid are not affected."
-        : "The tax settings published in Store setup are not the ones this pilot is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.",
+        : "The tax settings published in Store setup are not the ones this store is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.",
     action: () =>
-      'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask the pilot operator.',
+      'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
     runbook: "alert-pricing-tax-configuration",
   },
   "reconciliation.differences": {
@@ -240,7 +242,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       `The scheduled backup failed at the ${p.stage} step. ${p.attemptsLeft > 0 ? `It will retry automatically (${count(p.attemptsLeft, "try", "tries")} left today).` : "No more automatic tries today."}`,
     action: () =>
-      "Ask the pilot operator to run the backup by hand and check free disk space. Store operation is not affected.",
+      "Ask BOP support to run the backup by hand and check free disk space. Store operation is not affected.",
     runbook: "alert-backup-failed",
   },
   "backup.stale": {
@@ -250,9 +252,9 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       p.ageMs === null
         ? "No successful backup has been recorded for this store yet."
-        : `The newest successful backup is ${formatDuration(p.ageMs)} old. If the host failed now, recent orders and payments could be lost.`,
+        : `The newest successful backup is ${formatDuration(p.ageMs)} old. If the server failed now, recent orders and payments could be lost.`,
     action: () =>
-      "Ask the pilot operator to run a backup now and check that the scheduled backup is running.",
+      "Ask BOP support to run a backup now and check that the scheduled backup is running.",
     runbook: "alert-backup-stale",
   },
   "backup.restore_check": {
@@ -262,7 +264,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: () =>
       "The automatic restore check of the newest backup failed, so it may not be usable.",
     action: () =>
-      "Ask the pilot operator to take a new backup and run the restore check by hand. Keep the previous backups.",
+      "Ask BOP support to take a new backup and test that it can be restored. Keep the previous backups.",
     runbook: "alert-backup-restore-check",
   },
   "backup.offsite": {
@@ -272,7 +274,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: () =>
       "The encrypted copy of the newest backup could not be written to the off-site location. The local backup is fine.",
     action: () =>
-      "Ask the pilot operator to check the off-site folder or drive is connected and has space.",
+      "Ask BOP support to check the off-site folder or drive is connected and has space.",
     runbook: "alert-backup-offsite",
   },
   "certificate.expiring": {
@@ -287,7 +289,7 @@ export const ALERT_CATALOG = Object.freeze({
         ? "Guests and staff devices will refuse to open the store pages."
         : `It expires in ${formatDuration(p.remainingMs)}. After that, guests and staff devices will refuse to open the store pages.`,
     action: () =>
-      "Ask the pilot operator to renew the secure connection certificate and trust the new one on staff devices.",
+      "Ask BOP support to renew the secure connection certificate and set up the new one on staff devices.",
     runbook: "alert-certificate-expiring",
   },
   // DEC-PILOT-INSTALLATION: the installation's validity window (internal-test-profile.json
@@ -305,7 +307,7 @@ export const ALERT_CATALOG = Object.freeze({
         ? "Guests cannot order and staff cannot use the store screens until it is renewed."
         : `It expires in ${formatDuration(p.remainingMs)}. After that, guests cannot order and staff cannot use the store screens.`,
     action: () =>
-      "Approve a new end date and ask the pilot operator to renew it during a planned update before it expires.",
+      "Approve a new end date and ask BOP support to renew it during a planned update before it expires.",
     runbook: "alert-installation-validity",
   },
   "disk.low": {
@@ -315,7 +317,7 @@ export const ALERT_CATALOG = Object.freeze({
     summary: (p) =>
       `${p.disks.map((d) => `${DISK_NAMES[d.name]} has ${bytes(d.freeBytes)} free (${d.freePercent}%)`).join("; ")}. When it fills, orders and backups stop.`,
     action: () =>
-      "Ask the pilot operator to free space (old logs, old backup copies) or add storage.",
+      "Ask BOP support to free space (old system files, old backup copies) or add storage.",
     runbook: "alert-disk-low",
   },
   "monitor.source": {
@@ -323,8 +325,8 @@ export const ALERT_CATALOG = Object.freeze({
     raiseAfterMs: 5 * MINUTE,
     title: () => "Some checks could not run",
     summary: (p) =>
-      `The monitor could not read ${p.sources.join(", ")}. Problems there would not be reported.`,
-    action: () => "Ask the pilot operator to check the monitor log.",
+      `The system could not read ${p.sources.join(", ")}. Problems there would not be reported.`,
+    action: () => "Ask BOP support to find out why these checks could not run.",
     runbook: "alert-monitor-source",
   },
   "channel.delivery": {

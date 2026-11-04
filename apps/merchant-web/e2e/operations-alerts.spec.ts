@@ -275,7 +275,7 @@ const problem = {
       summary:
         "The secure customer ordering page has not loaded for 4 minutes. Guests cannot scan, order or pay online.",
       action:
-        "Pause online ordering if staff screens still work, otherwise follow the store outage procedure. Ask the pilot operator to restart the pilot.",
+        "Pause online ordering if staff screens still work, otherwise follow the store outage procedure. Ask BOP support to restart the store system.",
       raisedAt: "2026-10-15T15:56:00.000Z",
     },
     {
@@ -285,7 +285,7 @@ const problem = {
       summary:
         "It expires in 6 days. After that, guests and staff devices will refuse to open the store pages.",
       action:
-        "Ask the pilot operator to renew the secure connection certificate and trust the new one on staff devices.",
+        "Ask BOP support to renew the secure connection certificate and set up the new one on staff devices.",
       raisedAt: "2026-10-15T09:00:00.000Z",
     },
   ],

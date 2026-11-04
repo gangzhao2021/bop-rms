@@ -6838,12 +6838,8 @@ body:has(.product-complete-draft) .bop-shell__header,
   margin: 0 8px 20px;
 }
 .workspace-sidebar__brand strong {
-  padding: 2px 6px;
-  border-radius: var(--bop-radius-control);
-  color: var(--bop-color-on-primary);
-  background: var(--bop-color-brand-primary);
-  font-size: 12px;
-  letter-spacing: 0.06em;
+  font-size: 16px;
+  font-weight: 600;
 }
 .workspace-sidebar__store {
   margin: 0 8px 12px;
