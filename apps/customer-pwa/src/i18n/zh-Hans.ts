@@ -1256,6 +1256,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张桌刚加入了很多手机，请找店员帮忙。",
   "Tap to join the people at this table. You don’t need an account.":
     "点一下就能和同桌的人一起点餐，不用注册账号。",
+  "We couldn't confirm that. Check your cart before adding it again.":
+    "没能确认是否加上了。再加之前请先看看购物车。",
+  "You’re offline. Nothing was added.": "你已离线，没有加入。",
+  "Add {name} to your cart": "把{name}加入购物车",
   "I have a join code": "我有入桌码",
   "Ask staff, or the person who joined your table first, for the table’s join code.":
     "请向店员或先入桌的人要入桌码。",

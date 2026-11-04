@@ -8,7 +8,16 @@ import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
 import { formatDecimalMoney, formatMoney } from "../journey/format.js";
 import { cartIssueMessage } from "../journey/messages.js";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
@@ -389,125 +398,153 @@ export function MenuScreen({
   const browseFound = mode === "browse" && state.kind === "Found";
   const withCart = context !== undefined && mode !== "detail";
   const justAdded = useBackOnMenu(browseFound);
+  const [quickMessage, setQuickMessage] = useState<string | null>(null);
+  const [cartReads, setCartReads] = useState(0);
+  useEffect(() => {
+    if (quickMessage === null) return;
+    const timer = window.setTimeout(() => setQuickMessage(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [quickMessage]);
+  const channel = context?.channel;
+  const quickAdd = useMemo(
+    () =>
+      channel === undefined || readOnlyNotice !== undefined
+        ? null
+        : {
+            channel,
+            onAdded: (message: string) => {
+              setQuickMessage(message);
+              setCartReads((value) => value + 1);
+            },
+          },
+    [channel, readOnlyNotice],
+  );
   return (
     // WP-2423 item 8 ③ (decision 13): at a table, a dish the table already ordered says so.
     <TableOrderedProvider enabled={context?.channel === "DineIn"} client={tableOrderedClient}>
-      <CustomerPage
-        step="menu"
-        className={`customer-menu-screen customer-menu-screen--${mode}`}
-        store={
-          context
-            ? {
-                storeName: context.storeDisplayName,
-                brandName: context.brandDisplayName,
-                serviceMode: context.channel,
-              }
-            : undefined
-        }
-      >
-        <div className={`menu-layout${withCart ? " menu-layout--with-cart" : ""}`}>
-          <div className="menu-layout__main">
-            {mode === "browse" && context !== undefined ? (
-              <StoreStatusStrip
-                load={storeProfile === undefined ? browserStoreProfile : storeProfile}
-              />
-            ) : null}
-            {/* Follow-up: after last orders, said before the guest chooses anything. */}
-            {mode !== "search" && context !== undefined ? (
-              <OrdersStoppedNotice
-                load={storeProfile === undefined ? browserStoreProfile : storeProfile}
-              />
-            ) : null}
-            {mode === "detail" ? (
-              <h2 className="sr-only">{title}</h2>
-            ) : (
-              <div className={`menu-page-intro menu-page-intro--${mode}`}>
-                {/* Figma v1: browsing shows the search field first; the journey bar already says
-                  "Menu", so its heading is for assistive technology only. */}
-                {browseFound ? (
-                  <h2 className="sr-only" ref={headingRef} tabIndex={-1}>
-                    {title}
-                  </h2>
-                ) : (
-                  <h2 className={mode === "browse" ? "sr-only" : undefined}>{title}</h2>
-                )}
-                <nav className="menu-navigation" aria-label={t("Menu")}>
-                  {mode === "search" ? (
-                    <div className="menu-navigation__links menu-navigation__links--search">
-                      <Link to="/menu">{t("← Back to menu")}</Link>
-                    </div>
-                  ) : (
-                    <Link className="menu-navigation__search" to="/menu/search">
-                      {t("Search menu")}
-                    </Link>
-                  )}
-                </nav>
-              </div>
-            )}
-            {/* Above the menu from the start (also while it loads), so it never pushes the menu down. */}
-            {mode === "search" &&
-            state.kind !== "PermissionDenied" &&
-            state.kind !== "MissingContext" ? (
-              <AllergenHelp />
-            ) : null}
-            {mode === "browse" &&
-            state.kind !== "PermissionDenied" &&
-            state.kind !== "MissingContext" ? (
-              <AllergenHelpLine />
-            ) : null}
-            {state.kind === "MissingContext" ? null : search}
-            {state.kind === "Found" && mode === "search" ? (
-              <section className="menu-search-summary" aria-label={t("Search results")}>
-                <h2>{t("Search results")}</h2>
-                {searchTerm ? (
-                  <p>
-                    {t("Matched term ·")} {searchTerm}
-                  </p>
-                ) : null}
-              </section>
-            ) : null}
-            <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
-              <MenuState
-                key={
-                  context ? `${context.publicStoreReference}:${context.channel}` : "missing-context"
+      <MenuQuickAdd.Provider value={quickAdd}>
+        <CustomerPage
+          step="menu"
+          className={`customer-menu-screen customer-menu-screen--${mode}`}
+          store={
+            context
+              ? {
+                  storeName: context.storeDisplayName,
+                  brandName: context.brandDisplayName,
+                  serviceMode: context.channel,
                 }
-                channel={context?.channel}
-                detail={detail}
-                detailFamily={detailFamily}
-                headingRef={headingRef}
-                mode={mode}
-                onRetry={onRetry}
-                readOnlyNotice={readOnlyNotice}
-                state={state}
-              />
-            </div>
-            {/* An item's page adds it under the loaded item, never under the short loading notice
+              : undefined
+          }
+        >
+          <div className={`menu-layout${withCart ? " menu-layout--with-cart" : ""}`}>
+            <div className="menu-layout__main">
+              {mode === "browse" && context !== undefined ? (
+                <StoreStatusStrip
+                  load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+                />
+              ) : null}
+              {/* Follow-up: after last orders, said before the guest chooses anything. */}
+              {mode !== "search" && context !== undefined ? (
+                <OrdersStoppedNotice
+                  load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+                />
+              ) : null}
+              {mode === "detail" ? (
+                <h2 className="sr-only">{title}</h2>
+              ) : (
+                <div className={`menu-page-intro menu-page-intro--${mode}`}>
+                  {/* Figma v1: browsing shows the search field first; the journey bar already says
+                  "Menu", so its heading is for assistive technology only. */}
+                  {browseFound ? (
+                    <h2 className="sr-only" ref={headingRef} tabIndex={-1}>
+                      {title}
+                    </h2>
+                  ) : (
+                    <h2 className={mode === "browse" ? "sr-only" : undefined}>{title}</h2>
+                  )}
+                  <nav className="menu-navigation" aria-label={t("Menu")}>
+                    {mode === "search" ? (
+                      <div className="menu-navigation__links menu-navigation__links--search">
+                        <Link to="/menu">{t("← Back to menu")}</Link>
+                      </div>
+                    ) : (
+                      <Link className="menu-navigation__search" to="/menu/search">
+                        {t("Search menu")}
+                      </Link>
+                    )}
+                  </nav>
+                </div>
+              )}
+              {/* Above the menu from the start (also while it loads), so it never pushes the menu down. */}
+              {mode === "search" &&
+              state.kind !== "PermissionDenied" &&
+              state.kind !== "MissingContext" ? (
+                <AllergenHelp />
+              ) : null}
+              {mode === "browse" &&
+              state.kind !== "PermissionDenied" &&
+              state.kind !== "MissingContext" ? (
+                <AllergenHelpLine />
+              ) : null}
+              {state.kind === "MissingContext" ? null : search}
+              {state.kind === "Found" && mode === "search" ? (
+                <section className="menu-search-summary" aria-label={t("Search results")}>
+                  <h2>{t("Search results")}</h2>
+                  {searchTerm ? (
+                    <p>
+                      {t("Matched term ·")} {searchTerm}
+                    </p>
+                  ) : null}
+                </section>
+              ) : null}
+              <div className="menu-content" aria-live="polite" aria-busy={state.kind === "Loading"}>
+                <MenuState
+                  key={
+                    context
+                      ? `${context.publicStoreReference}:${context.channel}`
+                      : "missing-context"
+                  }
+                  channel={context?.channel}
+                  detail={detail}
+                  detailFamily={detailFamily}
+                  headingRef={headingRef}
+                  mode={mode}
+                  onRetry={onRetry}
+                  readOnlyNotice={readOnlyNotice}
+                  state={state}
+                />
+              </div>
+              {/* An item's page adds it under the loaded item, never under the short loading notice
               where the arriving item would push it down. */}
-            {mode === "detail" && state.kind !== "PermissionDenied" && state.kind !== "Loading" ? (
-              <AllergenHelp />
-            ) : null}
-            {/* WP-2423 item 8 ③ (decision 16): the Store's hours, holidays, address and phone,
+              {mode === "detail" &&
+              state.kind !== "PermissionDenied" &&
+              state.kind !== "Loading" ? (
+                <AllergenHelp />
+              ) : null}
+              {/* WP-2423 item 8 ③ (decision 16): the Store's hours, holidays, address and phone,
                 once the menu has loaded or failed (when its phone matters most), never above a
                 loading menu that would then push it down. */}
-            {mode === "browse" && context !== undefined && state.kind !== "Loading" ? (
-              <StoreInfoSection
-                load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+              {mode === "browse" && context !== undefined && state.kind !== "Loading" ? (
+                <StoreInfoSection
+                  load={storeProfile === undefined ? browserStoreProfile : storeProfile}
+                />
+              ) : null}
+            </div>
+            {justAdded || quickMessage !== null ? (
+              <p className="menu-added-toast" role="status">
+                {quickMessage ?? t("Added to your cart.")}
+              </p>
+            ) : null}
+            {withCart ? (
+              <MenuCart
+                reads={cartReads}
+                load={cartSummary ?? browserCartSummary}
+                menu={state.kind === "Found" && mode === "browse" ? state.menu : null}
               />
             ) : null}
           </div>
-          {justAdded ? (
-            <p className="menu-added-toast" role="status">
-              {t("Added to your cart.")}
-            </p>
-          ) : null}
-          {withCart ? (
-            <MenuCart
-              load={cartSummary ?? browserCartSummary}
-              menu={state.kind === "Found" && mode === "browse" ? state.menu : null}
-            />
-          ) : null}
-        </div>
-      </CustomerPage>
+        </CustomerPage>
+      </MenuQuickAdd.Provider>
     </TableOrderedProvider>
   );
 }
@@ -520,8 +557,11 @@ export function MenuScreen({
 function MenuCart({
   load,
   menu,
+  reads = 0,
 }: {
   readonly load: CartSummaryLoader;
+  /** Counts dishes added from the list: each one reads the cart again. */
+  readonly reads?: number;
   /** The published menu shown, so lines the Store hasn't priced yet use the prices shown here. */
   readonly menu: MenuView | null;
 }) {
@@ -538,7 +578,7 @@ function MenuCart({
     return () => {
       active = false;
     };
-  }, [load]);
+  }, [load, reads]);
   if (cart === null) return null;
   const summary = summarizeCart(cart.view, menu);
   const items = summary.count === 1 ? t("1 item") : t("{count} items", { count: summary.count });
@@ -872,6 +912,77 @@ function useBackOnMenu(found: boolean): boolean {
   return added;
 }
 
+/**
+ * Owner 2026-11-03 walkthrough: a dish with nothing to choose goes on the order with one tap from
+ * the list. Anything else, or a guest who can't order yet, opens the dish's page, which says why.
+ */
+const MenuQuickAdd = createContext<{
+  readonly channel: MenuJourneyContext["channel"];
+  readonly onAdded: (message: string) => void;
+} | null>(null);
+
+export function quickAddable(family: MenuFamily): boolean {
+  const { sellable } = primaryVariant(family);
+  return (
+    family.variants.length === 1 &&
+    sellable.optionRules.length === 0 &&
+    sellable.availability === "Available"
+  );
+}
+
+function QuickAddButton({ family }: { readonly family: MenuFamily }) {
+  const quick = useContext(MenuQuickAdd);
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  if (quick === null || !quickAddable(family)) return null;
+  const { sellable } = primaryVariant(family);
+  const add = async () => {
+    if (busy) return;
+    setBusy(true);
+    const controller = createConfigureController({
+      client:
+        quick.channel === "Pickup"
+          ? createBrowserPickupCartClient()
+          : createBrowserCustomerCartClient(),
+    });
+    await controller.submit(
+      sellable.sellableReference,
+      Object.freeze({ quantity: 1, optionSelections: [], customerNote: null }),
+    );
+    const state = controller.getState();
+    setBusy(false);
+    if (state.status === "added")
+      quick.onAdded(
+        state.earlierCartCleared === true
+          ? t("Added to your cart.") +
+              " " +
+              t(
+                "Your table's earlier cart timed out, so items that hadn't been ordered were cleared. Orders already placed are not affected.",
+              )
+          : t("Added to your cart."),
+      );
+    else if (state.status === "outcome-unknown")
+      quick.onAdded(t("We couldn't confirm that. Check your cart before adding it again."));
+    else if (state.status === "offline") quick.onAdded(t("You’re offline. Nothing was added."));
+    else {
+      menuScrollWhenLeft = window.scrollY;
+      void navigate(`/menu/items/${sellable.sellableReference}`);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="menu-card__quick-add"
+      aria-label={t("Add {name} to your cart", { name: family.name })}
+      aria-busy={busy}
+      disabled={busy}
+      onClick={() => void add()}
+    >
+      +
+    </button>
+  );
+}
+
 function MenuItemCard({
   family,
   sectionName,
@@ -954,6 +1065,7 @@ function MenuItemCard({
           />
         )}
       </Link>
+      <QuickAddButton family={family} />
     </article>
   );
 }

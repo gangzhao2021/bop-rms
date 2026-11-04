@@ -662,3 +662,37 @@ describe("WP-2423 sizes of one Product", () => {
     expect(html).toContain('aria-label="Increase quantity"');
   });
 });
+
+describe("Owner 2026-11-03: one tap for a dish with nothing to choose", () => {
+  const plain: MenuSellable = { ...sellable, optionRules: [] };
+  const withOptions: MenuView = {
+    ...menu,
+    sections: menu.sections.map((section) => ({ ...section, sellables: [plain] })),
+  };
+  const soldOut: MenuView = {
+    ...menu,
+    sections: menu.sections.map((section) => ({
+      ...section,
+      sellables: [{ ...plain, availability: "SoldOut" as const }],
+    })),
+  };
+  const screen = (view: MenuView, extra: object = {}) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <MenuScreen
+          mode="browse"
+          context={context}
+          state={{ kind: "Found", menu: view }}
+          onRetry={vi.fn()}
+          {...extra}
+        />
+      </MemoryRouter>,
+    );
+
+  it("offers it on the list, not for a sold-out dish or a read-only menu", () => {
+    const add = 'aria-label="Add Latte to your cart"';
+    expect(screen(withOptions)).toContain(add);
+    expect(screen(soldOut)).not.toContain(add);
+    expect(screen(withOptions, { readOnlyNotice: "Read only" })).not.toContain(add);
+  });
+});
