@@ -98,11 +98,20 @@ export function PickupNotCollectedAction({
   };
   return (
     <>
-      <button disabled={outcome === "Closed" || paused} onClick={() => dialog.current?.showModal()}>
+      <button
+        className="pickup-not-collected"
+        data-variant="destructive"
+        disabled={outcome === "Closed" || paused}
+        onClick={() => dialog.current?.showModal()}
+      >
         {t("Mark not collected")}
       </button>
       {outcome === "Closed" ? <p role="status">{message.Closed}</p> : null}
-      <dialog ref={dialog} aria-labelledby={"not-collected-" + item.fulfillmentReference}>
+      <dialog
+        className="order-cancel-dialog pickup-handoff-dialog"
+        ref={dialog}
+        aria-labelledby={"not-collected-" + item.fulfillmentReference}
+      >
         <h2 id={"not-collected-" + item.fulfillmentReference}>{t("Close as not collected")}</h2>
         <p>
           {t(
@@ -142,7 +151,11 @@ export function PickupNotCollectedAction({
               />
               {t("I checked the pickup shelf and nobody collected this order")}
             </label>
-            <button disabled={!confirmed || paused} onClick={() => void submit()}>
+            <button
+              data-variant="destructive"
+              disabled={!confirmed || paused}
+              onClick={() => void submit()}
+            >
               {outcome === "Unknown" ? t("Retry same close") : t("Close as not collected")}
             </button>
           </>

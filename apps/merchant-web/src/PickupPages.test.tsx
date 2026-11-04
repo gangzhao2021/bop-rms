@@ -236,8 +236,7 @@ it("WP-2423: a counter order is handed over in person at once, never by pickup c
     return html.slice(html.indexOf("<article"), html.indexOf("</article>"));
   };
   const counter = render("NotIssued", true);
-  expect(counter).toContain("Taken at the counter — call the order number and hand it over.");
-  expect(counter).toContain("Not needed · taken at the counter");
+  expect(counter).toContain("Counter order");
   expect(counter).toContain(">Hand over</button>");
   expect(counter).toContain("This order was taken at the counter, so no pickup code was sent.");
   expect(counter).toContain("Order number called at the counter");
@@ -245,7 +244,7 @@ it("WP-2423: a counter order is handed over in person at once, never by pickup c
     expect(counter).not.toContain(text);
   // A guest's QR pickup order keeps the code flow.
   const guest = render("Ready", false);
-  expect(guest).not.toContain("Taken at the counter");
+  expect(guest).not.toContain("Counter order");
   expect(guest).not.toContain(">Hand over</button>");
   expect(render("NotIssued", false)).toContain("No code sent · check in person");
   // Only `true` is accepted from the server.
@@ -433,7 +432,7 @@ it("WP-2423 UI refresh: the card lists what is in the bag and the page counts wh
     </MemoryRouter>,
   );
   expect(html).toContain('aria-label="Items in order ORD-1001"');
-  expect(html).toContain("2 ×</span> Latte (Oat milk)");
+  expect(html).toContain("2 × Latte (Oat milk)");
   expect(html).toContain("1 order waiting");
   // One page only: no page buttons to press.
   expect(html).not.toContain("Next page");

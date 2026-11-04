@@ -49,8 +49,9 @@ it("IDR-0039: paused while offline or stale, so nothing can be sent", () => {
         paused={paused}
       />,
     );
-  expect(render(false)).toContain("<button>Mark not collected</button>");
-  expect(render(true)).toContain('<button disabled="">Mark not collected</button>');
+  const open = '<button class="pickup-not-collected" data-variant="destructive"';
+  expect(render(false)).toContain(`${open}>Mark not collected</button>`);
+  expect(render(true)).toContain(`${open} disabled="">Mark not collected</button>`);
   expect(render(true)).toContain("Paused until the connection returns.");
 });
 

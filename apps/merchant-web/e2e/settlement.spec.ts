@@ -149,7 +149,28 @@ test("@production Settlement shows the day's totals, the run result and differen
       .getByRole("link", { name: "Settlement" })
       .first(),
   ).toHaveAttribute("aria-current", "page");
+  // Owner 2026-11-03: the page opens on today's picture, so what is left of yesterday is said here.
+  await expect(page.getByRole("heading", { name: "Business day: Tue, Sep 22" })).toBeVisible();
+  await expect(page.getByText("Still open")).toBeVisible();
+  await expect(page.getByText("after the business day closes", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Today · Tue, Sep 22" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    page.getByText("Yesterday · Mon, Sep 21 still needs closing: 1 payment to look at."),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+  expect(requested.slice().sort()).toEqual(["2026-09-22", null]);
+  // The closing day is one tap away, its result whole.
+  await page.getByRole("button", { name: "Yesterday · Mon, Sep 21" }).click();
   await expect(page.getByRole("heading", { name: "Business day: Mon, Sep 21" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Yesterday · Mon, Sep 21" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByText("still needs closing", { exact: false })).toHaveCount(0);
+  expect(requested.at(-1)).toBe("2026-09-21");
   await expect(page.getByText("$1,234.50", { exact: true })).toBeVisible();
   await expect(page.getByText("14 payments", { exact: true })).toBeVisible();
   await expect(page.getByText("$1,223.20")).toBeVisible();
@@ -167,22 +188,22 @@ test("@production Settlement shows the day's totals, the run result and differen
     "/operations/order-exceptions",
   );
   await expect(page.locator("body")).not.toContainText(id(1));
-  expect(requested).toEqual([null]);
   // Staff read store-time wording, never a machine date, code or internal statement reference
   // (WP-2423 v15 showed "simset_20261014_9df991b5…"): the statement is named by its day.
   await expect(page.getByText("Provider statement for Mon, Sep 21")).toBeVisible();
   await expect(page.getByText("SETTLE-2026-09-21-01")).toHaveCount(0);
   await expectNoInternalText(page);
 
-  // A day that is still open: totals so far, no run yet.
-  await page.getByRole("textbox", { name: "Business day" }).fill("2026-09-22");
+  // Any other day through the date field; back to today and on to yesterday by the tabs.
+  await page.getByRole("textbox", { name: "Business day" }).fill("2026-09-20");
   await page.getByRole("button", { name: "Show", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Business day: Sun, Sep 20" })).toBeVisible();
+  expect(requested.at(-1)).toBe("2026-09-20");
+  await page.getByRole("button", { name: "Today · Tue, Sep 22" }).click();
   await expect(page.getByRole("heading", { name: "Business day: Tue, Sep 22" })).toBeVisible();
-  await expect(page.getByText("Still open")).toBeVisible();
-  await expect(page.getByText("after the business day closes", { exact: false })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Business day" })).toHaveValue("2026-09-22");
   await expectNoInternalText(page);
-  expect(requested.at(-1)).toBe("2026-09-22");
-  await page.getByRole("button", { name: "Latest closed day" }).click();
+  await page.getByRole("button", { name: "Show Mon, Sep 21" }).click();
   await expect(page.getByRole("heading", { name: "Business day: Mon, Sep 21" })).toBeVisible();
 
   for (const width of [1440, 390, 320]) {
@@ -296,7 +317,7 @@ test("@production WP-2423 Settlement explains an open day difference and a day r
       },
     });
   });
-  await page.goto("/app/operations/payment-reconciliation");
+  await page.goto("/app/operations/payment-reconciliation?businessDate=2026-09-21");
   await expect(
     page.getByText("Settlement difference · the day's totals differ from the provider statement"),
   ).toBeVisible();

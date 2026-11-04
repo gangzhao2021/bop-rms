@@ -43,6 +43,19 @@ const date = (instant: string, timeZone: string | undefined) =>
     month: "long",
     day: "numeric",
   }).format(new Date(instant));
+/** The meaning a code state's dot carries: needs action, working, or set aside on purpose. */
+const codeTone: Record<TableQrRow["codeState"], "action" | "done" | "off"> = {
+  Active: "done",
+  None: "action",
+  NotPrintable: "action",
+  TurnedOff: "off",
+  SetupIncomplete: "action",
+};
+/** "PATIO" or "main_room" as staff say it: the stored area is a short code, not a sentence. */
+const areaText = (areaCode: string) => {
+  const words = areaCode.replace(/[_-]+/gu, " ").toLocaleLowerCase();
+  return words.charAt(0).toLocaleUpperCase() + words.slice(1);
+};
 const codeText: Record<TableQrRow["codeState"], string> = {
   Active: t("Ready to print"),
   None: t("No code yet"),
@@ -99,6 +112,8 @@ export function TableQrCodesPage({
   }, [refresh]);
 
   const rows = load.kind === "Ready" ? load.rows : [];
+  // One area says nothing: the column appears when there is a choice of areas to tell apart.
+  const showArea = new Set(rows.map((row) => row.areaCode)).size > 1;
   const printable = rows.filter((row) => row.codeState === "Active");
   const expiring = printable.filter(
     (row) => row.validUntil !== null && Date.parse(row.validUntil) - now() < soonDays * day,
@@ -120,14 +135,17 @@ export function TableQrCodesPage({
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setMessage({
         tone: "neutral",
-        text:
-          t("Downloaded {fileName} with {value}. ", {
-            fileName: sheet.fileName,
-            value:
-              tables.length === 1
-                ? "the code for table " + (tables[0]?.stableLabel ?? "")
-                : String(tables.length) + " table QR codes",
-          }) + t("Open it and print at 100% scale."),
+        text: `${
+          tables.length === 1
+            ? t("Downloaded {fileName} with the code for table {stableLabel}.", {
+                fileName: sheet.fileName,
+                stableLabel: saidTable(tables[0]?.stableLabel ?? ""),
+              })
+            : t("Downloaded {fileName} with {count} table QR codes.", {
+                fileName: sheet.fileName,
+                count: tables.length,
+              })
+        } ${t("Open it and print at 100% scale.")}`,
       });
     } catch (error) {
       setMessage({
@@ -191,6 +209,13 @@ export function TableQrCodesPage({
       setBusy(false);
     }
   };
+
+  // The form and the result are above the list, which can be long: bring them into view.
+  const noticeRef = useRef<HTMLDivElement>(null);
+  const noticeKey = `${pending?.table.tableReference ?? ""}:${pending?.action ?? ""}:${change?.kind ?? ""}:${message?.text ?? ""}`;
+  useEffect(() => {
+    if (noticeKey !== ":::") noticeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [noticeKey]);
 
   const start = (action: Pending["action"], table: TableQrRow) => {
     setPending({ action, table, operationReference: serviceOperationReference(), unknown: false });
@@ -437,6 +462,7 @@ export function TableQrCodesPage({
       <div className="table-qr__confirm-actions">
         <button
           type="submit"
+          data-variant={change.kind === "Retire" ? "destructive" : "primary"}
           disabled={
             busy ||
             (change.kind !== "Retire" && !nameValid) ||
@@ -522,6 +548,7 @@ export function TableQrCodesPage({
       <div className="table-qr__confirm-actions">
         <button
           type="submit"
+          data-variant={pending.action === "TurnOff" ? "destructive" : "primary"}
           disabled={
             busy || (pending.table.codeState === "Active" && !understood && !pending.unknown)
           }
@@ -547,12 +574,14 @@ export function TableQrCodesPage({
 
   return (
     <WorkspacePage
+      className="table-qr-page"
       title={t("Table QR codes")}
       meta={storeLabel}
       actions={
         <>
           <button
             type="button"
+            data-variant="primary"
             disabled={busy || printable.length === 0 || pending !== null}
             onClick={() => void print(printable)}
           >
@@ -576,34 +605,36 @@ export function TableQrCodesPage({
           "Guests scan the code on their table to order and pay. Print each code once. If a sticker is damaged, print it again — the code stays the same. If a code is lost or copied, replace it: the old one stops working at once, and only that table needs a new sticker.",
         )}
       </p>
-      {message ? (
-        <StatePanel
-          heading={message.tone === "error" ? t("Not done") : t("Done")}
-          tone={message.tone}
-          status
-        >
-          <p>{message.text}</p>
-        </StatePanel>
-      ) : null}
-      {expiring.length > 0 ? (
-        <StatePanel heading={t("Codes stop working soon")} tone="offline" status>
-          <p>
-            {t("{value}: {value2} working on {value3}. Replace and print {value4} before then.", {
-              value: expiring.map((row) => row.stableLabel).join(", "),
-              value2: expiring.length === 1 ? t("this code stops") : t("these codes stop"),
-              value3: date(
-                expiring
-                  .flatMap((row) => (row.validUntil === null ? [] : [row.validUntil]))
-                  .sort()[0] ?? "",
-                timeZone,
-              ),
-              value4: expiring.length === 1 ? t("it") : t("them"),
-            })}
-          </p>
-        </StatePanel>
-      ) : null}
-      {confirmation}
-      {tableForm}
+      <div className="table-qr__notices" ref={noticeRef}>
+        {message ? (
+          <StatePanel
+            heading={message.tone === "error" ? t("Not done") : t("Done")}
+            tone={message.tone}
+            status
+          >
+            <p>{message.text}</p>
+          </StatePanel>
+        ) : null}
+        {expiring.length > 0 ? (
+          <StatePanel heading={t("Codes stop working soon")} tone="offline" status>
+            <p>
+              {t("{value}: {value2} working on {value3}. Replace and print {value4} before then.", {
+                value: expiring.map((row) => row.stableLabel).join(", "),
+                value2: expiring.length === 1 ? t("this code stops") : t("these codes stop"),
+                value3: date(
+                  expiring
+                    .flatMap((row) => (row.validUntil === null ? [] : [row.validUntil]))
+                    .sort()[0] ?? "",
+                  timeZone,
+                ),
+                value4: expiring.length === 1 ? t("it") : t("them"),
+              })}
+            </p>
+          </StatePanel>
+        ) : null}
+        {confirmation}
+        {tableForm}
+      </div>
       {load.kind === "Loading" ? (
         <p role="status">{t("Loading tables…")}</p>
       ) : load.kind === "PermissionDenied" ? (
@@ -625,7 +656,7 @@ export function TableQrCodesPage({
           <thead>
             <tr>
               <th scope="col">{t("Table")}</th>
-              <th scope="col">{t("Area")}</th>
+              {showArea ? <th scope="col">{t("Area")}</th> : null}
               <th scope="col">{t("Code")}</th>
               <th scope="col">{t("Works until")}</th>
               <th scope="col" aria-label={t("Actions")} />
@@ -635,38 +666,19 @@ export function TableQrCodesPage({
             {rows.map((row) => (
               <tr key={row.tableReference}>
                 <th scope="row">{row.stableLabel}</th>
-                <td data-label={t("Area")}>{row.areaCode}</td>
+                {showArea ? <td data-label={t("Area")}>{areaText(row.areaCode)}</td> : null}
                 <td data-label={t("Code")}>
-                  {codeText[row.codeState]}
-                  {row.seated ? t(" · Guests seated") : ""}
+                  <span className="table-qr__state" data-tone={codeTone[row.codeState]}>
+                    {codeText[row.codeState]}
+                  </span>
+                  {row.seated ? (
+                    <span className="table-qr__seated">{t(" · Guests seated")}</span>
+                  ) : null}
                 </td>
                 <td data-label={t("Works until")}>
                   {row.validUntil === null ? "—" : date(row.validUntil, timeZone)}
                 </td>
                 <td className="table-qr__actions">
-                  {row.codeState === "SetupIncomplete" ? null : (
-                    <>
-                      <button
-                        type="button"
-                        disabled={busy || pending !== null || change !== null}
-                        onClick={() => beginChange("Rename", row)}
-                      >
-                        {t("Rename")}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy || pending !== null || change !== null || row.seated}
-                        title={
-                          row.seated
-                            ? t("Guests are seated here; close their table first.")
-                            : undefined
-                        }
-                        onClick={() => beginChange("Retire", row)}
-                      >
-                        {t("Retire")}
-                      </button>
-                    </>
-                  )}
                   {row.codeState === "Active" ? (
                     <>
                       <button
@@ -683,21 +695,49 @@ export function TableQrCodesPage({
                       >
                         {t("Replace")}
                       </button>
-                      <button
-                        type="button"
-                        disabled={busy || pending !== null}
-                        onClick={() => start("TurnOff", row)}
-                      >
-                        {t("Turn off")}
-                      </button>
                     </>
                   ) : row.codeState === "SetupIncomplete" ? null : (
                     <button
                       type="button"
+                      data-variant="primary"
                       disabled={busy || pending !== null}
                       onClick={() => start("Issue", row)}
                     >
                       {t("Create code")}
+                    </button>
+                  )}
+                  {row.codeState === "SetupIncomplete" ? null : (
+                    <button
+                      type="button"
+                      disabled={busy || pending !== null || change !== null}
+                      onClick={() => beginChange("Rename", row)}
+                    >
+                      {t("Rename")}
+                    </button>
+                  )}
+                  {row.codeState === "Active" ? (
+                    <button
+                      type="button"
+                      data-variant="destructive"
+                      disabled={busy || pending !== null}
+                      onClick={() => start("TurnOff", row)}
+                    >
+                      {t("Turn off")}
+                    </button>
+                  ) : null}
+                  {row.codeState === "SetupIncomplete" ? null : (
+                    <button
+                      type="button"
+                      data-variant="destructive"
+                      disabled={busy || pending !== null || change !== null || row.seated}
+                      title={
+                        row.seated
+                          ? t("Guests are seated here; close their table first.")
+                          : undefined
+                      }
+                      onClick={() => beginChange("Retire", row)}
+                    >
+                      {t("Retire")}
                     </button>
                   )}
                 </td>

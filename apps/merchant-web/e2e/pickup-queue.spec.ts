@@ -733,7 +733,7 @@ test("@production Pickup accepts the typed six-digit code, explains wrong codes 
   // The pickup code value reads on one or two lines, never one word per line.
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    const value = page.locator(".pickup-queue__card dl > div").first().locator("dd");
+    const value = page.locator(".pickup-queue__code").first();
     const lines = await value.evaluate(
       (element) =>
         element.getBoundingClientRect().height / parseFloat(getComputedStyle(element).lineHeight),
@@ -891,15 +891,16 @@ test("@production Pickup hands a counter order over in person at once while a gu
     .locator(".pickup-queue__card")
     .filter({ has: page.getByRole("heading", { name: "Order 8", exact: true }) });
   await expect(counterCard).toBeVisible();
+  // Said once on its row; what to do is said once for the page, not repeated on every counter order.
+  await expect(counterCard.getByText("Counter order", { exact: true })).toBeVisible();
   await expect(
-    counterCard.getByText("Taken at the counter — call the order number and hand it over."),
-  ).toBeVisible();
-  await expect(counterCard.getByText("Not needed · taken at the counter")).toBeVisible();
+    page.getByText("Counter orders have no pickup code: call the number and hand it over."),
+  ).toHaveCount(1);
   await expect(counterCard.getByRole("button", { name: "Check pickup code" })).toHaveCount(0);
   await expect(counterCard.getByRole("button", { name: "Hand over", exact: true })).toBeEnabled();
   // The guest's order keeps its pickup code check.
   await expect(guestCard.getByRole("button", { name: "Check pickup code" })).toBeVisible();
-  await expect(guestCard.getByText("Taken at the counter", { exact: false })).toHaveCount(0);
+  await expect(guestCard.getByText("Counter order", { exact: false })).toHaveCount(0);
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
@@ -1060,18 +1061,16 @@ test("@production Pickup hands over a guest who can't show a still-valid code af
     .locator(".pickup-queue__card")
     .filter({ has: page.getByRole("heading", { name: "Order 9", exact: true }) });
   await expect(card).toBeVisible();
-  await expect(card.getByText("Sent to customer")).toBeVisible();
+  await expect(card.getByText("Code sent to customer")).toBeVisible();
   // The code check stays the main action; the fallback is a quieter, deliberate one beside it.
   const codeCheck = card.getByRole("button", { name: "Check pickup code" });
   const noCode = card.getByRole("button", { name: "Guest can’t show the code" });
   await expect(codeCheck).toBeVisible();
   await expect(noCode).toBeEnabled();
-  expect(await noCode.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe(
-    "underline",
-  );
-  expect(
-    await codeCheck.evaluate((element) => getComputedStyle(element).textDecorationLine),
-  ).not.toBe("underline");
+  // v3: the fallback is accent words with no fill; the code check is the row's one solid button.
+  const fill = (element: Element) => getComputedStyle(element).backgroundColor;
+  expect(await noCode.evaluate(fill)).toBe("rgba(0, 0, 0, 0)");
+  expect(await codeCheck.evaluate(fill)).not.toBe("rgba(0, 0, 0, 0)");
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     expect(
