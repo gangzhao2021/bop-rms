@@ -107,3 +107,111 @@ describe("WP-2423 item 8 ④ split bill", () => {
     expect(cash.lines.map((line) => line.roundMinor)).toEqual([2317n, 847n]);
   });
 });
+
+describe("WP-2423 by-dish split", () => {
+  const dish = (n: number, batch: number, quantity: number, subtotal: bigint, tax: bigint) => ({
+    orderBatchReference: ref(batch),
+    orderItemReference: ref(1000 + n),
+    quantity,
+    subtotalMinor: subtotal,
+    taxMinor: tax,
+    totalMinor: subtotal + tax,
+  });
+  const choice = (n: number, unit: number, partNumber: number | null) => ({
+    orderItemReference: ref(1000 + n),
+    unit,
+    partNumber,
+  });
+  // Beer taxed differently from food, a line of two dumplings, and one dish everyone shares.
+  const dishes = [dish(1, 1, 1, 800n, 120n), dish(2, 1, 2, 1000n, 51n), dish(3, 2, 1, 2000n, 100n)];
+  const rounds = [round(1, 1971n, 1800n, 171n), round(2, 2100n, 2000n, 100n)];
+
+  it("charges each part its own dishes at their own tax and shares the rest evenly", () => {
+    const split = splitDiningTableBill({
+      mode: "ByItems",
+      rounds,
+      people: 2,
+      dishes,
+      choices: [choice(1, 1, 1), choice(2, 1, 2), choice(2, 2, 2), choice(3, 1, null)],
+    });
+    expect(split.mode).toBe("ByItems");
+    expect(split.parts.map((part) => [part.amountMinor, part.taxMinor])).toEqual([
+      [920n + 1050n, 120n + 50n],
+      [1051n + 1050n, 51n + 50n],
+    ]);
+    expect(sum(split.parts.map((part) => part.amountMinor))).toBe(split.billMinor);
+    expect(split.dishChoices).toHaveLength(4);
+  });
+
+  it("splits the units of a line, the odd cent on the first unit", () => {
+    const split = splitDiningTableBill({
+      mode: "ByItems",
+      rounds: [round(1, 1051n, 1000n, 51n)],
+      people: 2,
+      dishes: [dish(2, 1, 2, 1000n, 51n)],
+      choices: [choice(2, 1, 1), choice(2, 2, 2)],
+    });
+    expect(split.parts.map((part) => [part.amountMinor, part.taxMinor])).toEqual([
+      [526n, 26n],
+      [525n, 25n],
+    ]);
+  });
+
+  it("gives a round's tax rounding to the part with most of its tax, adding up exactly", () => {
+    for (const rounding of [1n, -1n]) {
+      const split = splitDiningTableBill({
+        mode: "ByItems",
+        rounds: [round(1, 1971n + rounding, 1800n, 171n + rounding)],
+        people: 2,
+        dishes: dishes.slice(0, 2),
+        choices: [choice(1, 1, 1), choice(2, 1, 2), choice(2, 2, 2)],
+      });
+      expect(split.parts[0]?.taxMinor).toBe(120n + rounding);
+      expect(split.parts[1]?.taxMinor).toBe(51n);
+      expect(sum(split.parts.map((part) => part.amountMinor))).toBe(1971n + rounding);
+    }
+  });
+
+  it("refuses a dish left out, chosen twice or not on the bill, a part with nothing, and a dish the round doesn't explain", () => {
+    const good = [choice(1, 1, 1), choice(2, 1, 2), choice(2, 2, 2), choice(3, 1, null)];
+    const attempt =
+      (changes: { choices?: typeof good; people?: number; rounds?: typeof rounds }) => () =>
+        splitDiningTableBill({
+          mode: "ByItems",
+          rounds: changes.rounds ?? rounds,
+          people: changes.people ?? 2,
+          dishes,
+          choices: changes.choices ?? good,
+        });
+    expect(attempt({})).not.toThrow();
+    expect(attempt({ choices: good.slice(1) })).toThrow();
+    expect(attempt({ choices: [...good, choice(1, 1, 2)] })).toThrow();
+    expect(attempt({ choices: [...good.slice(1), choice(9, 1, 1)] })).toThrow();
+    expect(attempt({ choices: [...good.slice(1), choice(1, 1, 3)] })).toThrow();
+    // Nothing shared and nothing chosen for part 2.
+    expect(
+      attempt({ choices: [choice(1, 1, 1), choice(2, 1, 1), choice(2, 2, 1), choice(3, 1, 1)] }),
+    ).toThrow();
+    expect(attempt({ people: 21 })).toThrow();
+    // The round says more than its dishes before tax: the bill changed.
+    expect(attempt({ rounds: [round(1, 2071n, 1900n, 171n), rounds[1] as never] })).toThrow();
+  });
+
+  it("is paid as ordinary round slices", () => {
+    const split = splitDiningTableBill({
+      mode: "ByItems",
+      rounds,
+      people: 2,
+      dishes,
+      choices: [choice(1, 1, 1), choice(2, 1, 2), choice(2, 2, 2), choice(3, 1, null)],
+    });
+    for (const original of rounds) {
+      const slices = split.parts.flatMap((part) =>
+        part.slices.filter((slice) => slice.orderBatchReference === original.orderBatchReference),
+      );
+      expect(sum(slices.map((slice) => slice.roundMinor))).toBe(original.roundMinor);
+      expect(sum(slices.map((slice) => slice.subtotalMinor))).toBe(original.subtotalMinor);
+      expect(sum(slices.map((slice) => slice.taxMinor))).toBe(original.taxMinor);
+    }
+  });
+});

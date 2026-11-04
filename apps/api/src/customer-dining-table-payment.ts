@@ -253,6 +253,7 @@ export function customerTablePaymentBody(view: DiningTableOnlinePaymentView) {
                 partNumber: part.partNumber,
                 amountMinor: part.amountMinor,
                 subtotalMinor: part.subtotalMinor,
+                dishes: part.dishes,
                 status:
                   part.payment !== null
                     ? "Paid"

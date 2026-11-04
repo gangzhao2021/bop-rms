@@ -1236,6 +1236,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paying {amount} for part {number}, tip included.": "正在为第 {number} 份付 {amount}（含小费）。",
   "Your table split the bill evenly in {count} parts.": "这桌平均分成 {count} 份。",
   "Your table split the bill by rounds, in {count} parts.": "这桌按轮次分成 {count} 份。",
+  "Your table split the bill by dish, in {count} parts.": "这桌按菜分成 {count} 份。",
+  shared: "平分",
   "Pay one part; you can pay another one after it.": "每次付一份，付完可以再替同桌付另一份。",
   "Which part you pay": "你付哪一份",
   "Part {number} · {amount}": "第 {number} 份 · {amount}",

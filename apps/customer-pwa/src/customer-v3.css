@@ -212,6 +212,14 @@
   align-items: center;
   gap: var(--bop-space-2);
 }
+.customer-page .dining-session__split-dishes {
+  flex-basis: 100%;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
+.customer-page .dining-session__split label:has(.dining-session__split-dishes) {
+  flex-wrap: wrap;
+}
 .customer-page .dining-session__tip-amount label {
   min-height: 0;
   font-size: 0.875rem;

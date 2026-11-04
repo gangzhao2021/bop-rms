@@ -108,6 +108,43 @@ describe("WP-2423 item 8 ④ split bill at the Tables checkout", () => {
     expect(render(true)).toContain("Split again");
   });
 
+  it("by dish: says what each part pays for and offers the dishes to assign", () => {
+    const value = splitBillFixture();
+    const split = value.split as Record<string, unknown>;
+    split.mode = "ByItems";
+    split.paidParts = 0;
+    split.parts = (split.parts as Record<string, unknown>[]).map((part, index) => ({
+      ...part,
+      payment: null,
+      guestPaying: false,
+      dishes:
+        index === 0
+          ? [{ displayName: "Mapo tofu (TEST)", quantity: 2, shared: false }]
+          : [{ displayName: "Har gow (TEST)", quantity: 1, shared: true }],
+    }));
+    const rounds = value.rounds as { items: Record<string, unknown>[] }[];
+    (rounds[0]?.items[0] as Record<string, unknown>).quantity = 2;
+    const html = renderToStaticMarkup(
+      <TableSplitControls
+        bill={parseTableBill(value)}
+        csrf={"a".repeat(43)}
+        client={createTableCheckoutClient()}
+        disabled={false}
+        selectedPart={null}
+        onSelectPart={() => undefined}
+        onBill={() => undefined}
+        onProblem={() => undefined}
+      />,
+    );
+    expect(html).toContain("By dish");
+    expect(html).toContain("2 × Mapo tofu (TEST)");
+    expect(html).toContain("Har gow (TEST) (shared)");
+    // One row per unit, so one of two dishes can go to another part.
+    expect(html).toContain("Mapo tofu (TEST) (1/2)");
+    expect(html).toContain("Mapo tofu (TEST) (2/2)");
+    expect(html).toContain("Everyone shares");
+  });
+
   it("lists each part with its status, collects only an open part, and locks the split once paid", () => {
     const html = renderToStaticMarkup(
       <TableSplitControls

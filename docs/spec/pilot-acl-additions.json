@@ -4709,6 +4709,24 @@
     },
     {
       "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_split_part_item",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 按菜分单 (Owner 2026-11-04 \"需要，接着做\"): which part each dish of a table's bill goes to, recorded and read by the checkout"
+    },
+    {
+      "type": "table",
+      "schema": "rms_payment",
+      "object": "dining_table_split_part_item",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 按菜分单 (Owner 2026-11-04 \"需要，接着做\"): which part each dish of a table's bill goes to, recorded and read by the checkout"
+    },
+    {
+      "type": "table",
       "schema": "rms_ordering",
       "object": "order_item_price_reduction",
       "column": null,

@@ -793,6 +793,9 @@ describe("migration catalog", () => {
       "2000_149_create_dining_table_online_refund",
       "2000_150_create_dining_table_card_refund",
       "2000_151_alter_staff_dining_round_entry_admission",
+      "2000_152_create_product_alcohol_mark",
+      "2000_153_alter_store_feature_alcohol",
+      "2000_154_create_dining_table_split_part_item",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),

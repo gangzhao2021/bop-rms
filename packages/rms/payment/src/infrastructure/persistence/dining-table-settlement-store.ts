@@ -4,7 +4,11 @@ import {
   type DiningTableSettlementMethod,
   type DiningTableSettlementRound,
 } from "../../domain/dining-table-settlement.js";
-import type { DiningTableSplit, DiningTableSplitMode } from "../../domain/dining-table-split.js";
+import type {
+  DiningTableSplit,
+  DiningTableSplitDishChoice,
+  DiningTableSplitMode,
+} from "../../domain/dining-table-split.js";
 import { parsePaymentReference } from "../../application/payment-provider-adapter.js";
 import { parsePaymentInstant } from "../../application/payment-intent-creation.js";
 
@@ -170,6 +174,8 @@ export interface DiningTableSplitPlanRecord {
       readonly taxMinor: bigint;
     }[];
   }[];
+  /** ByItems: which part each unit of each dish goes to (null: all the parts share it). */
+  readonly dishChoices: readonly DiningTableSplitDishChoice[];
 }
 const splitPlanSelect = `SELECT p.split_plan_id::text AS plan,p.tenant_id::text AS tenant,p.operation_id::text AS operation,
  p.intent_digest,p.dining_session_id::text AS session,p.order_id::text AS "order",p.plan_version,p.mode,
@@ -181,14 +187,26 @@ const splitPlanSelect = `SELECT p.split_plan_id::text AS plan,p.tenant_id::text 
      FROM rms_payment.dining_table_split_part_round r WHERE r.split_plan_id=x.split_plan_id
      AND r.part_number=x.part_number AND r.brand_id=x.brand_id AND r.store_id=x.store_id))
    ORDER BY x.part_number),'[]'::jsonb) FROM rms_payment.dining_table_split_part x
-   WHERE x.split_plan_id=p.split_plan_id AND x.brand_id=p.brand_id AND x.store_id=p.store_id) AS parts
+   WHERE x.split_plan_id=p.split_plan_id AND x.brand_id=p.brand_id AND x.store_id=p.store_id) AS parts,
+ (SELECT coalesce(jsonb_agg(jsonb_build_object('item',i.order_item_id,'unit',i.unit_number,'part',i.part_number)
+   ORDER BY i.order_item_id,i.unit_number),'[]'::jsonb) FROM rms_payment.dining_table_split_part_item i
+   WHERE i.split_plan_id=p.split_plan_id AND i.brand_id=p.brand_id AND i.store_id=p.store_id) AS dish_choices
  FROM rms_payment.dining_table_split_plan p WHERE p.brand_id=$1 AND p.store_id=$2`;
 function splitPlanFrom(row: Record<string, unknown>): DiningTableSplitPlanRecord {
   const mode =
-    row.mode === "Whole" || row.mode === "Even" || row.mode === "ByRounds" ? row.mode : fail();
+    row.mode === "Whole" || row.mode === "Even" || row.mode === "ByRounds" || row.mode === "ByItems"
+      ? row.mode
+      : fail();
   const version = Number(row.plan_version);
   const parts = row.parts;
-  if (!Number.isSafeInteger(version) || version < 1 || !Array.isArray(parts)) return fail();
+  const dishChoices = row.dish_choices;
+  if (
+    !Number.isSafeInteger(version) ||
+    version < 1 ||
+    !Array.isArray(parts) ||
+    !Array.isArray(dishChoices)
+  )
+    return fail();
   if (parts.length !== Number(row.part_count)) return fail();
   return Object.freeze({
     splitPlanReference: ref(row.plan),
@@ -224,6 +242,15 @@ function splitPlanFrom(row: Record<string, unknown>): DiningTableSplitPlanRecord
           ),
         });
       }),
+    ),
+    dishChoices: Object.freeze(
+      dishChoices.map((choice: Record<string, unknown>) =>
+        Object.freeze({
+          orderItemReference: ref(choice.item),
+          unit: Number(choice.unit),
+          partNumber: choice.part === null ? null : Number(choice.part),
+        }),
+      ),
     ),
   });
 }
@@ -1272,6 +1299,13 @@ export function createPostgresDiningTableSettlementStore(options: {
             ],
           );
       }
+      if (input.split.mode !== "Whole")
+        for (const choice of input.split.dishChoices ?? [])
+          await tx.query(
+            `INSERT INTO rms_payment.dining_table_split_part_item (split_plan_id,brand_id,store_id,order_item_id,
+ unit_number,part_number) VALUES ($1,$2,$3,$4,$5,$6)`,
+            [plan, brand, store, ref(choice.orderItemReference), choice.unit, choice.partNumber],
+          );
       await appendAuditRecordInTransaction(tx, {
         auditId: ref(input.auditReference),
         brandId: brand,

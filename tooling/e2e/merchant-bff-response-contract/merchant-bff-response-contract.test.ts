@@ -507,6 +507,7 @@ const line = (n: number, batch: string, canCancel: boolean) => ({
   name: `Dish ${n}`,
   options: [{ name: "Extra spicy", quantity: 1 }],
   quantity: 1,
+  ageCheck: false,
   customerNote: n === 1 ? "No peanuts" : null,
   unitPrice: money("1000"),
   subtotal: money("1000"),

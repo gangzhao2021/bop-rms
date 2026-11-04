@@ -133,6 +133,7 @@ export interface OrderItemPrice {
    * guest's chosen language, then the session language), else any name it has.
    */
   readonly displayName: string;
+  readonly quantity: number;
   /** Unit price × quantity, before discount, fees and tax (the price printed beside the item). */
   readonly subtotal: { readonly amountMinor: bigint; readonly currencyCode: string };
   readonly tax: { readonly amountMinor: bigint; readonly currencyCode: string };
@@ -213,6 +214,7 @@ export async function listOrderItemPrices(
           orderItemReference: String(snapshot.orderItemReference),
           orderBatchReference: String(snapshot.orderBatchReference),
           displayName: orderLocalizedName(snapshot.catalog.localizedNames, locale),
+          quantity: snapshot.quantity,
           subtotal: money(snapshot.pricing.subtotal),
           tax: money(snapshot.pricing.tax),
           total: money(snapshot.pricing.total),

@@ -36,6 +36,14 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier", "payment"],
     },
     {
+      table: "dining_table_split_part_item",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/payment" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier", "payment"],
+    },
+    {
       table: "dining_table_online_payment",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/payment" },
@@ -474,11 +482,31 @@ const databaseAccessManifestInput = {
         "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
     },
     {
+      id: "dining-table-settlement.read.dining_table_split_part_item",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_split_part_item" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
       id: "dining-table-settlement.write.dining_table_split_part_round",
       operation: "write",
       readPattern: null,
       mechanism: "repository",
       target: { schema: "rms_payment", table: "dining_table_split_part_round" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source:
+        "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",
+    },
+    {
+      id: "dining-table-settlement.write.dining_table_split_part_item",
+      operation: "write",
+      readPattern: null,
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "dining_table_split_part_item" },
       principal: { kind: "module", id: "@rms/payment" },
       source:
         "packages/rms/payment/src/infrastructure/persistence/dining-table-settlement-store.ts",

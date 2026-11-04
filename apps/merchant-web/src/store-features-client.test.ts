@@ -85,13 +85,25 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
     await client.change({
       operationReference: "0190a7f2-0000-7000-8000-000000000001",
       expectedVersion: 1,
-      modules: { counterOrder: true, pickup: false, inventory: false, loyalty: false, alcohol: false },
+      modules: {
+        counterOrder: true,
+        pickup: false,
+        inventory: false,
+        loyalty: false,
+        alcohol: false,
+      },
     });
     expect(sent[0]).toEqual({
       action: "Change",
       operationReference: "0190a7f2-0000-7000-8000-000000000001",
       expectedVersion: 1,
-      modules: { counterOrder: true, pickup: false, inventory: false, loyalty: false, alcohol: false },
+      modules: {
+        counterOrder: true,
+        pickup: false,
+        inventory: false,
+        loyalty: false,
+        alcohol: false,
+      },
     });
     await expect(client.read()).rejects.toMatchObject({ code: "Changed" });
   });

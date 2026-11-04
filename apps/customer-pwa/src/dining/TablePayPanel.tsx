@@ -397,9 +397,13 @@ export function TablePayPanel({
                   ? t("Your table split the bill evenly in {count} parts.", {
                       count: String(view.split.parts.length),
                     })
-                  : t("Your table split the bill by rounds, in {count} parts.", {
-                      count: String(view.split.parts.length),
-                    })}{" "}
+                  : view.split.mode === "ByItems"
+                    ? t("Your table split the bill by dish, in {count} parts.", {
+                        count: String(view.split.parts.length),
+                      })
+                    : t("Your table split the bill by rounds, in {count} parts.", {
+                        count: String(view.split.parts.length),
+                      })}{" "}
                 {t("Pay one part; you can pay another one after it.")}
               </p>
               <fieldset>
@@ -422,6 +426,18 @@ export function TablePayPanel({
                       : entry.status === "Paying" || entry.status === "Mine"
                         ? ` · ${t("being paid")}`
                         : ""}
+                    {entry.dishes.length === 0 ? null : (
+                      <small className="dining-session__split-dishes">
+                        {entry.dishes
+                          .map(
+                            (dish) =>
+                              (dish.quantity > 1 ? `${dish.quantity} × ` : "") +
+                              dish.displayName +
+                              (dish.shared ? ` (${t("shared")})` : ""),
+                          )
+                          .join(", ")}
+                      </small>
+                    )}
                   </label>
                 ))}
               </fieldset>

@@ -20,6 +20,8 @@ export function splitBillFixture(): Record<string, unknown> {
         submissionReference: id(83),
         items: [
           {
+            orderItemReference: id(901),
+            quantity: 1,
             displayName: "Mapo tofu (TEST)",
             subtotalMinor: "4850",
             totalMinor: "5481",
@@ -38,6 +40,8 @@ export function splitBillFixture(): Record<string, unknown> {
         submissionReference: id(85),
         items: [
           {
+            orderItemReference: id(902),
+            quantity: 1,
             displayName: "Har gow (TEST)",
             subtotalMinor: "3550",
             totalMinor: "4011",
@@ -57,6 +61,7 @@ export function splitBillFixture(): Record<string, unknown> {
     split: {
       mode: "Even",
       stale: false,
+      dishChoices: [],
       paidParts: 1,
       remainingMinor: "6328",
       parts: [
@@ -66,6 +71,7 @@ export function splitBillFixture(): Record<string, unknown> {
           subtotalMinor: "2800",
           taxMinor: "364",
           roundNumbers: [1],
+          dishes: [],
           payment: {
             method: "CardMachine",
             tipMinor: "420",
@@ -84,6 +90,7 @@ export function splitBillFixture(): Record<string, unknown> {
           subtotalMinor: "2800",
           taxMinor: "364",
           roundNumbers: [1, 2],
+          dishes: [],
           payment: null,
           guestPaying: false,
         },
@@ -93,6 +100,7 @@ export function splitBillFixture(): Record<string, unknown> {
           subtotalMinor: "2800",
           taxMinor: "364",
           roundNumbers: [2],
+          dishes: [],
           payment: null,
           guestPaying: true,
         },

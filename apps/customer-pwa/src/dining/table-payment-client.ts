@@ -49,13 +49,19 @@ export interface TablePaymentView {
    * "Mine": this guest is paying it; "Paying": someone else is.
    */
   readonly split: null | {
-    readonly mode: "Even" | "ByRounds";
+    readonly mode: "Even" | "ByRounds" | "ByItems";
     readonly paidParts: number;
     readonly remainingMinor: string;
     readonly parts: readonly {
       readonly partNumber: number;
       readonly amountMinor: string;
       readonly subtotalMinor: string;
+      /** By dish: what this part pays for, so guests can find their own part. */
+      readonly dishes: readonly {
+        readonly displayName: string;
+        readonly quantity: number;
+        readonly shared: boolean;
+      }[];
       readonly status: "Paid" | "Mine" | "Paying" | "ToPay";
     }[];
   };
@@ -208,7 +214,7 @@ function splitOf(value: unknown): TablePaymentView["split"] {
   if (value === undefined || value === null) return null;
   const raw = value as Record<string, unknown>;
   if (
-    (raw.mode !== "Even" && raw.mode !== "ByRounds") ||
+    (raw.mode !== "Even" && raw.mode !== "ByRounds" && raw.mode !== "ByItems") ||
     !Number.isSafeInteger(raw.paidParts) ||
     !Array.isArray(raw.parts) ||
     raw.parts.length < 2 ||
@@ -231,6 +237,22 @@ function splitOf(value: unknown): TablePaymentView["split"] {
           partNumber: index + 1,
           amountMinor: amount(part.amountMinor),
           subtotalMinor: amount(part.subtotalMinor),
+          dishes: Object.freeze(
+            (Array.isArray(part.dishes) ? part.dishes : []).map((value: unknown) => {
+              const dish = value as Record<string, unknown>;
+              if (
+                typeof dish.displayName !== "string" ||
+                !Number.isSafeInteger(dish.quantity) ||
+                typeof dish.shared !== "boolean"
+              )
+                return fail();
+              return Object.freeze({
+                displayName: dish.displayName,
+                quantity: dish.quantity as number,
+                shared: dish.shared,
+              });
+            }),
+          ),
           status: part.status as "Paid" | "Mine" | "Paying" | "ToPay",
         });
       }),

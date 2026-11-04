@@ -42,6 +42,8 @@ export interface TableBill {
   readonly rounds: readonly {
     readonly roundNumber: number;
     readonly items: readonly {
+      readonly orderItemReference: string;
+      readonly quantity: number;
       readonly displayName: string;
       readonly subtotalMinor: string;
       readonly totalMinor: string;
@@ -115,6 +117,12 @@ export interface TableSplitPart {
   readonly subtotalMinor: string;
   readonly taxMinor: string;
   readonly roundNumbers: readonly number[];
+  /** By dish: the dishes this part pays for, those all the parts share marked as shared. */
+  readonly dishes: readonly {
+    readonly displayName: string;
+    readonly quantity: number;
+    readonly shared: boolean;
+  }[];
   readonly payment: null | {
     readonly method: "CardMachine" | "Cash" | "Online";
     readonly tipMinor: string;
@@ -128,8 +136,14 @@ export interface TableSplitPart {
   readonly guestPaying: boolean;
 }
 export interface TableSplit {
-  readonly mode: "Even" | "ByRounds";
+  readonly mode: "Even" | "ByRounds" | "ByItems";
   readonly stale: boolean;
+  /** By dish: which part each unit of each dish went to (null: all the parts share it). */
+  readonly dishChoices: readonly {
+    readonly orderItemReference: string;
+    readonly unit: number;
+    readonly partNumber: number | null;
+  }[];
   readonly parts: readonly TableSplitPart[];
   readonly paidParts: number;
   readonly remainingMinor: string;
@@ -194,6 +208,15 @@ export function parseTableBill(value: unknown): TableBill {
           items: Object.freeze(
             round.items.map((item: Record<string, unknown>) =>
               Object.freeze({
+                orderItemReference:
+                  typeof item.orderItemReference === "string" &&
+                  reference.test(item.orderItemReference)
+                    ? item.orderItemReference
+                    : invalid(),
+                quantity:
+                  Number.isSafeInteger(item.quantity) && (item.quantity as number) >= 1
+                    ? (item.quantity as number)
+                    : invalid(),
                 displayName: text(item.displayName),
                 subtotalMinor: amount(item.subtotalMinor),
                 totalMinor: amount(item.totalMinor),
@@ -260,8 +283,9 @@ function splitOf(value: unknown): TableSplit | null {
   if (value === undefined || value === null) return null;
   const raw = value as Record<string, unknown>;
   if (
-    (raw.mode !== "Even" && raw.mode !== "ByRounds") ||
+    (raw.mode !== "Even" && raw.mode !== "ByRounds" && raw.mode !== "ByItems") ||
     typeof raw.stale !== "boolean" ||
+    !Array.isArray(raw.dishChoices) ||
     !Array.isArray(raw.parts) ||
     raw.parts.length < 2 ||
     raw.parts.length > 20 ||
@@ -271,6 +295,23 @@ function splitOf(value: unknown): TableSplit | null {
   return Object.freeze({
     mode: raw.mode,
     stale: raw.stale,
+    dishChoices: Object.freeze(
+      raw.dishChoices.map((value: unknown) => {
+        const choice = value as Record<string, unknown>;
+        if (
+          typeof choice.orderItemReference !== "string" ||
+          !reference.test(choice.orderItemReference) ||
+          !Number.isSafeInteger(choice.unit) ||
+          (choice.partNumber !== null && !Number.isSafeInteger(choice.partNumber))
+        )
+          return invalid();
+        return Object.freeze({
+          orderItemReference: choice.orderItemReference,
+          unit: choice.unit as number,
+          partNumber: choice.partNumber as number | null,
+        });
+      }),
+    ),
     paidParts: raw.paidParts as number,
     remainingMinor: amount(raw.remainingMinor),
     parts: Object.freeze(
@@ -279,6 +320,7 @@ function splitOf(value: unknown): TableSplit | null {
         if (
           part.partNumber !== index + 1 ||
           !Array.isArray(part.roundNumbers) ||
+          !Array.isArray(part.dishes) ||
           typeof part.guestPaying !== "boolean"
         )
           return invalid();
@@ -292,6 +334,18 @@ function splitOf(value: unknown): TableSplit | null {
             part.roundNumbers.map((round: unknown) =>
               Number.isSafeInteger(round) ? (round as number) : invalid(),
             ),
+          ),
+          dishes: Object.freeze(
+            part.dishes.map((value: unknown) => {
+              const dish = value as Record<string, unknown>;
+              if (!Number.isSafeInteger(dish.quantity) || typeof dish.shared !== "boolean")
+                return invalid();
+              return Object.freeze({
+                displayName: text(dish.displayName),
+                quantity: dish.quantity as number,
+                shared: dish.shared,
+              });
+            }),
           ),
           payment:
             payment === null
@@ -487,10 +541,17 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
       command: {
         readonly operationReference: string;
         readonly diningSessionReference: string;
-        readonly mode: "Whole" | "Even" | "ByRounds";
+        readonly mode: "Whole" | "Even" | "ByRounds" | "ByItems";
         readonly people: number | null;
         readonly rounds:
           readonly { readonly roundNumber: number; readonly partNumber: number }[] | null;
+        readonly dishes:
+          | readonly {
+              readonly orderItemReference: string;
+              readonly unit: number;
+              readonly partNumber: number | null;
+            }[]
+          | null;
       },
     ) {
       const raw = (await post("/merchant/dining/table-split", csrf, command)) as {

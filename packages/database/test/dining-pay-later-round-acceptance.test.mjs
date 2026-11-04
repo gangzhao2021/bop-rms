@@ -213,6 +213,9 @@ it("a table's bill is charged its whole-bill tax; the rounding is recorded and p
 // paid once, by its own method, with its own tip and cash rounding; a whole-table payment, a
 // second payment of a part and a new split once paying started are all refused.
 it("a table splits the bill evenly and pays it part by part", () => journey("PaidSplit"));
+// WP-2423 按菜分单: each dish goes to one part at its own price and tax, or everyone shares it; the
+// parts are paid as usual, and a dish left out, a part with nothing or a changed bill is refused.
+it("a table splits the bill by dish and pays it part by part", () => journey("PaidByDish"));
 // WP-2423 取舍 18 DEC-MEMBER-POINTS: points on a real bill: a comp and a redemption come off what
 // earns, tax and tip never earn, the reports and settlement still agree, refunds take back.
 it("a member earns and spends points on a table's bill, and the books still agree", () =>
@@ -5470,6 +5473,127 @@ async function journey(ending) {
           (await closePlan()).rounds.map((round) => [round.sequence, round.state, round.refund]),
           [[1, "OnTableBill", null]],
         );
+        if (ending === "PaidByDish") {
+          // What this table still owes: one round, one line of two dishes.
+          const current = await bill();
+          const owing = current.rounds.filter((round) => round.totalMinor !== "0");
+          assert.equal(owing.length, 1);
+          const [first] = owing;
+          const dish = first.items[0];
+          assert.equal(dish.quantity, 2);
+          const splitByDish = (people, partOf) =>
+            createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "ByItems",
+                people,
+                rounds: null,
+                dishes: [1, 2].map((unit) => ({
+                  orderItemReference: dish.orderItemReference,
+                  unit,
+                  partNumber: partOf(unit),
+                })),
+              },
+            });
+          const totalMinor = BigInt(first.totalMinor);
+          const each = totalMinor / 2n;
+          assert.equal(totalMinor % 2n, 0n);
+          // One unit to part 1, the other shared by the two parts.
+          const shared = await splitByDish(2, (unit) => (unit === 1 ? 1 : null));
+          assert.equal(shared.status, "Recorded");
+          assert.equal(shared.bill.split.mode, "ByItems");
+          assert.deepEqual(
+            shared.bill.split.parts.map((part) => BigInt(part.amountMinor)),
+            [each + each / 2n, each / 2n],
+          );
+          assert.deepEqual(shared.bill.split.parts[1].dishes, [
+            { displayName: dish.displayName, quantity: 1, shared: true },
+          ]);
+          assert.equal(shared.bill.split.parts[0].dishes.length, 2);
+          // Each part its own unit: exactly half, tax included.
+          const own = await splitByDish(2, (unit) => unit);
+          assert.deepEqual(
+            own.bill.split.parts.map((part) => [
+              BigInt(part.amountMinor),
+              BigInt(part.subtotalMinor),
+              BigInt(part.taxMinor),
+            ]),
+            [1, 2].map(() => [each, BigInt(first.subtotalMinor) / 2n, BigInt(first.taxMinor) / 2n]),
+          );
+          assert.equal(own.bill.split.stale, false);
+          const choices = await rows(
+            "SELECT i.unit_number,i.part_number FROM rms_payment.dining_table_split_part_item i JOIN rms_payment.dining_table_split_plan p USING (split_plan_id) WHERE p.order_id=$1 AND p.plan_version=(SELECT max(plan_version) FROM rms_payment.dining_table_split_plan WHERE order_id=$1) ORDER BY 1",
+            [orderReference],
+          );
+          assert.deepEqual(
+            choices.map((row) => [row.unit_number, row.part_number]),
+            [
+              [1, 1],
+              [2, 2],
+            ],
+          );
+          // A part with nothing to pay, a wrong number of parts: refused, nothing recorded.
+          await assert.rejects(
+            splitByDish(2, () => 1),
+            { code: "TABLE_CHECKOUT_INPUT_INVALID" },
+          );
+          await assert.rejects(
+            splitByDish(2, () => 3),
+            { code: "TABLE_CHECKOUT_INPUT_INVALID" },
+          );
+          // A dish left out or one that isn't on this bill.
+          const command = (dishes) =>
+            createMerchantDiningTableSplit({
+              persistence: persistenceOf(server),
+              authentication: server.authentication,
+              nextReference: fresh,
+            })({
+              ...as(server),
+              command: {
+                operationReference: fresh(),
+                diningSessionReference: sessionReference,
+                mode: "ByItems",
+                people: 2,
+                rounds: null,
+                dishes,
+              },
+            });
+          await assert.rejects(
+            command([{ orderItemReference: dish.orderItemReference, unit: 1, partNumber: 1 }]),
+            { code: "TABLE_CHECKOUT_INPUT_INVALID" },
+          );
+          await assert.rejects(command([{ orderItemReference: fresh(), unit: 1, partNumber: 1 }]), {
+            code: "TABLE_CHECKOUT_INPUT_INVALID",
+          });
+          assert.equal(BigInt((await bill()).split.parts[0].amountMinor), each);
+          // The choices are a record: never changed afterwards.
+          await assert.rejects(
+            admin.query("UPDATE rms_payment.dining_table_split_part_item SET part_number=NULL"),
+          );
+          // The whole table is no longer one payment; each part is paid once, then no new split.
+          await assert.rejects(settleWith(server, {}), { code: "TABLE_CHECKOUT_INPUT_INVALID" });
+          const none = { tip: { kind: "None" }, tenderedMinor: "100000" };
+          assert.equal((await settleWith(server, { ...none, partNumber: 1 })).status, "Recorded");
+          await assert.rejects(
+            splitByDish(2, (round) => round),
+            {
+              code: "TABLE_CHECKOUT_SPLIT_LOCKED",
+            },
+          );
+          await assert.rejects(settleWith(server, { ...none, partNumber: 1 }));
+          assert.equal((await settleWith(server, { ...none, partNumber: 2 })).status, "Recorded");
+          const paid = await bill();
+          assert.equal(paid.split.paidParts, 2);
+          assert.equal(paid.owed.totalMinor, "0");
+          await assertSalesCountEveryRoundOnce();
+          return;
+        }
         if (ending === "PaidSplit" || ending === "SplitWrittenOff") {
           const splitWith = (command) =>
             createMerchantDiningTableSplit({

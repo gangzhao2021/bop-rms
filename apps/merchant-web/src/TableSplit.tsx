@@ -78,8 +78,38 @@ export function TableSplitControls({
   // Rounds only divide a bill between people when different phones or merged tables sent them.
   const offersByRounds =
     split?.mode === "ByRounds" || new Set(defaultRoundParts(bill).values()).size >= 2;
-  const [mode, setMode] = useState<"Whole" | "Even" | "ByRounds">(split?.mode ?? "Whole");
-  const [people, setPeople] = useState(split?.mode === "Even" ? split.parts.length : 2);
+  const [mode, setMode] = useState<"Whole" | "Even" | "ByRounds" | "ByItems">(
+    split?.mode ?? "Whole",
+  );
+  const owingUnits = bill.rounds
+    .filter((round) => round.totalMinor !== "0")
+    .flatMap((round) =>
+      round.items.flatMap((item) =>
+        Array.from({ length: item.quantity }, (_, index) => ({
+          orderItemReference: item.orderItemReference,
+          unit: index + 1,
+          quantity: item.quantity,
+          displayName: item.displayName,
+          unitMinor: BigInt(item.totalMinor) / BigInt(item.quantity),
+        })),
+      ),
+    );
+  const [dishPart, setDishPart] = useState<ReadonlyMap<string, number | null>>(
+    () =>
+      new Map(
+        (split?.dishChoices ?? []).map((choice) => [
+          `${choice.orderItemReference}:${choice.unit}`,
+          choice.partNumber,
+        ]),
+      ),
+  );
+  const partOfUnit = (key: string) => {
+    const part = dishPart.get(key) ?? null;
+    return part !== null && part <= people ? part : null;
+  };
+  const [people, setPeople] = useState(
+    split?.mode === "Even" || split?.mode === "ByItems" ? split.parts.length : 2,
+  );
   const [partOf, setPartOf] = useState<ReadonlyMap<number, number>>(() =>
     split?.mode === "ByRounds"
       ? new Map(
@@ -91,7 +121,7 @@ export function TableSplitControls({
   );
   const [busy, setBusy] = useState(false);
   const owing = bill.rounds.filter((round) => round.totalMinor !== "0");
-  const apply = async (next: "Whole" | "Even" | "ByRounds", count = people) => {
+  const apply = async (next: "Whole" | "Even" | "ByRounds" | "ByItems", count = people) => {
     if (busy || disabled || locked) return;
     setBusy(true);
     onProblem(null);
@@ -100,12 +130,20 @@ export function TableSplitControls({
         operationReference: serviceOperationReference(),
         diningSessionReference: bill.diningSessionReference,
         mode: next,
-        people: next === "Even" ? count : null,
+        people: next === "Even" || next === "ByItems" ? count : null,
         rounds:
           next === "ByRounds"
             ? owing.map((round) => ({
                 roundNumber: round.roundNumber,
                 partNumber: partOf.get(round.roundNumber) ?? 1,
+              }))
+            : null,
+        dishes:
+          next === "ByItems"
+            ? owingUnits.map((unit) => ({
+                orderItemReference: unit.orderItemReference,
+                unit: unit.unit,
+                partNumber: partOfUnit(`${unit.orderItemReference}:${unit.unit}`),
               }))
             : null,
       });
@@ -124,8 +162,26 @@ export function TableSplitControls({
   const evenApplied = split?.mode === "Even" && split.parts.length === people && !split.stale;
   const changePeople = (count: number) => {
     setPeople(count);
-    void apply("Even", count);
+    if (mode === "Even") void apply("Even", count);
   };
+  const chosenParts = new Set(
+    owingUnits.map((unit) => partOfUnit(`${unit.orderItemReference}:${unit.unit}`)),
+  );
+  // Every part pays for something: a dish of its own, or its share of one.
+  const byItemsValid =
+    chosenParts.has(null) ||
+    Array.from({ length: people }, (_, index) => index + 1).every((part) => chosenParts.has(part));
+  const byItemsApplied =
+    split?.mode === "ByItems" &&
+    !split.stale &&
+    split.parts.length === people &&
+    owingUnits.every(
+      (unit) =>
+        split.dishChoices.find(
+          (choice) =>
+            choice.orderItemReference === unit.orderItemReference && choice.unit === unit.unit,
+        )?.partNumber === partOfUnit(`${unit.orderItemReference}:${unit.unit}`),
+    );
   const partCount = Math.max(1, ...owing.map((round) => partOf.get(round.roundNumber) ?? 1));
   const byRoundsValid =
     partCount >= 2 &&
@@ -140,13 +196,15 @@ export function TableSplitControls({
         <p className="table-split__locked">
           {split.mode === "Even"
             ? t("Split evenly · {count} parts", { count: String(split.parts.length) })
-            : t("Each pays own rounds · {count} parts", { count: String(split.parts.length) })}
+            : split.mode === "ByItems"
+              ? t("By dish · {count} parts", { count: String(split.parts.length) })
+              : t("Each pays own rounds · {count} parts", { count: String(split.parts.length) })}
         </p>
       ) : (
         <div className="table-split__modes" role="group" aria-label={t("Split the bill")}>
           {(offersByRounds
-            ? (["Whole", "Even", "ByRounds"] as const)
-            : (["Whole", "Even"] as const)
+            ? (["Whole", "Even", "ByItems", "ByRounds"] as const)
+            : (["Whole", "Even", "ByItems"] as const)
           ).map((value) => (
             <button
               key={value}
@@ -163,12 +221,14 @@ export function TableSplitControls({
                 ? t("All together")
                 : value === "Even"
                   ? t("Split evenly")
-                  : t("Each pays own rounds")}
+                  : value === "ByItems"
+                    ? t("By dish")
+                    : t("Each pays own rounds")}
             </button>
           ))}
         </div>
       )}
-      {mode === "Even" && !locked ? (
+      {(mode === "Even" || mode === "ByItems") && !locked ? (
         <div className="table-split__people">
           <span>{t("People")}</span>
           <button
@@ -189,7 +249,7 @@ export function TableSplitControls({
             +
           </button>
           {/* Choosing Even or a number splits at once; this remains to retry or follow a bill change. */}
-          {evenApplied || busy ? null : (
+          {mode !== "Even" || evenApplied || busy ? null : (
             <button
               type="button"
               className="table-split__apply"
@@ -200,6 +260,59 @@ export function TableSplitControls({
                 ? t("Split again")
                 : t("Split in {count}", { count: String(people) })}
             </button>
+          )}
+        </div>
+      ) : null}
+      {mode === "ByItems" && !locked ? (
+        <div className="table-split__rounds">
+          <ul aria-label={t("Dishes")}>
+            {owingUnits.map((unit) => {
+              const key = `${unit.orderItemReference}:${unit.unit}`;
+              const name =
+                unit.quantity === 1
+                  ? unit.displayName
+                  : `${unit.displayName} (${unit.unit}/${unit.quantity})`;
+              return (
+                <li key={key}>
+                  <span>
+                    {name} · {cad(unit.unitMinor.toString())}
+                  </span>
+                  <label>
+                    <span className="sr-only">{t("Who pays for {dish}", { dish: name })}</span>
+                    <select
+                      value={partOfUnit(key) ?? 0}
+                      disabled={disabled || busy}
+                      onChange={(event) => {
+                        const value = Number(event.currentTarget.value);
+                        setDishPart(new Map(dishPart).set(key, value === 0 ? null : value));
+                      }}
+                    >
+                      <option value={0}>{t("Everyone shares")}</option>
+                      {Array.from({ length: people }, (_, index) => (
+                        <option key={index + 1} value={index + 1}>
+                          {t("Part {number}", { number: String(index + 1) })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          {byItemsApplied ? null : (
+            <button
+              type="button"
+              className="table-split__apply"
+              disabled={disabled || busy || !byItemsValid}
+              onClick={() => void apply("ByItems")}
+            >
+              {t("Split this way")}
+            </button>
+          )}
+          {byItemsValid ? null : (
+            <p className="table-split__hint">
+              {t("Give every part a dish, or let everyone share one.")}
+            </p>
           )}
         </div>
       ) : null}
@@ -297,6 +410,18 @@ export function TableSplitControls({
                         ? t("A guest is paying on their phone")
                         : t("To collect")}
                   </span>
+                  {part.dishes.length === 0 ? null : (
+                    <span className="table-split__dishes">
+                      {part.dishes
+                        .map(
+                          (dish) =>
+                            (dish.quantity > 1 ? `${dish.quantity} × ` : "") +
+                            dish.displayName +
+                            (dish.shared ? ` (${t("shared")})` : ""),
+                        )
+                        .join(", ")}
+                    </span>
+                  )}
                 </div>
                 {part.payment === null && !part.guestPaying && !split.stale ? (
                   <button

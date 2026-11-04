@@ -65,6 +65,7 @@ const moduleManifestInput =
         "dining_table_bill_order",
         "dining_table_split_part",
         "dining_table_split_part_round",
+        "dining_table_split_part_item",
         "store_payment_configuration_version",
         "store_payment_configuration_operation",
         "reconciliation_follow_up_history",

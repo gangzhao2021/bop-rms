@@ -1153,6 +1153,10 @@
   margin: 4px 0;
   font-weight: 600;
 }
+.tables-v3 .table-split__dishes {
+  color: var(--bop-color-text-muted);
+  font-size: 13px;
+}
 .tables-v3 .table-split__hint {
   color: var(--bop-color-text-muted);
   font-size: 13px;

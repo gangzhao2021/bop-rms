@@ -30,6 +30,7 @@ import {
   DiningTableSettlementError,
   DiningTableSettlementStoreError,
   splitDiningTableBill,
+  type DiningTableSplitDish,
   type DiningTableSettlementRecord,
   type DiningTableSplitPlanRecord,
 } from "@rms/payment";
@@ -123,6 +124,9 @@ export interface DiningTableBill {
     readonly orderBatchReference: string;
     readonly submissionReference: string;
     readonly items: readonly {
+      /** WP-2423 按菜分单: this line on the bill, and how many of it. */
+      readonly orderItemReference: string;
+      readonly quantity: number;
       readonly displayName: string;
       readonly subtotalMinor: string;
       readonly totalMinor: string;
@@ -193,8 +197,14 @@ export interface DiningTableBill {
    * the bill changed before anything was paid (a dish taken off or comped) — split it again.
    */
   readonly split: null | {
-    readonly mode: "Even" | "ByRounds";
+    readonly mode: "Even" | "ByRounds" | "ByItems";
     readonly stale: boolean;
+    /** ByItems: which part each unit of each dish went to (null: all the parts share it). */
+    readonly dishChoices: readonly {
+      readonly orderItemReference: string;
+      readonly unit: number;
+      readonly partNumber: number | null;
+    }[];
     readonly parts: readonly {
       readonly partNumber: number;
       readonly amountMinor: string;
@@ -202,6 +212,12 @@ export interface DiningTableBill {
       readonly taxMinor: string;
       /** The rounds this part takes from (by round number). */
       readonly roundNumbers: readonly number[];
+      /** ByItems: the dishes this part pays for, those all the parts share marked as shared. */
+      readonly dishes: readonly {
+        readonly displayName: string;
+        readonly quantity: number;
+        readonly shared: boolean;
+      }[];
       readonly payment: null | {
         readonly method: "CardMachine" | "Cash" | "Online";
         readonly tipMinor: string;
@@ -264,6 +280,8 @@ export async function readDiningTableBill(
     readonly settlementRecord: DiningTableSettlementRecord | null;
     /** The current split plan (not "Whole"), for paying a part. */
     readonly splitPlanRecord: DiningTableSplitPlanRecord | null;
+    /** WP-2423 按菜分单: the dishes of the rounds still owing, as they stand now. */
+    readonly splitDishes: readonly DiningTableSplitDish[];
   }
 > {
   const session = String(parseDiningReference(input.diningSessionReference));
@@ -308,6 +326,7 @@ export async function readDiningTableBill(
       onlinePayment: null,
       settlementRecord: null,
       splitPlanRecord: null,
+      splitDishes: Object.freeze([]),
     });
   const allowed = async () => (await input.authorize()) === true;
   // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the bill is the table's Order and the Orders of
@@ -511,6 +530,8 @@ export async function readDiningTableBill(
       items: Object.freeze(
         items.map((item) =>
           Object.freeze({
+            orderItemReference: String(item.orderItemReference),
+            quantity: item.quantity,
             displayName: item.displayName,
             subtotalMinor: item.subtotal.amountMinor.toString(),
             totalMinor: (item.total.amountMinor - (off(item)?.totalMinor ?? 0n)).toString(),
@@ -540,6 +561,25 @@ export async function readDiningTableBill(
       fromTableLabel: fromTableOf.get(String(confirmation.orderReference)) ?? null,
     });
   });
+  // WP-2423 按菜分单: the dishes of the rounds still owing, as they stand now.
+  const owingBatches = new Set(
+    rounds.filter((round) => round.totalMinor !== "0").map((round) => round.orderBatchReference),
+  );
+  const splitDishes = Object.freeze(
+    prices
+      .filter((item) => owingBatches.has(String(item.orderBatchReference)))
+      .map((item) => {
+        const off = reductions.get(String(item.orderItemReference)) ?? null;
+        return Object.freeze({
+          orderBatchReference: String(item.orderBatchReference),
+          orderItemReference: String(item.orderItemReference),
+          quantity: item.quantity,
+          subtotalMinor: item.subtotal.amountMinor - (off?.netMinor ?? 0n),
+          taxMinor: item.tax.amountMinor - (off?.taxMinor ?? 0n),
+          totalMinor: item.total.amountMinor - (off?.totalMinor ?? 0n),
+        });
+      }),
+  );
   // A split's parts: what each was paid with, and what is still owed by the parts unpaid.
   let split: DiningTableBill["split"] = null;
   if (plan !== null) {
@@ -563,17 +603,25 @@ export async function readDiningTableBill(
         const again =
           plan.mode === "Even"
             ? splitDiningTableBill({ mode: "Even", rounds: splitRounds, people: plan.parts.length })
-            : splitDiningTableBill({
-                mode: "ByRounds",
-                rounds: splitRounds,
-                partOf: new Map(
-                  plan.parts.flatMap((part) =>
-                    part.slices.map(
-                      (slice) => [slice.orderBatchReference, part.partNumber] as const,
+            : plan.mode === "ByItems"
+              ? splitDiningTableBill({
+                  mode: "ByItems",
+                  rounds: splitRounds,
+                  people: plan.parts.length,
+                  dishes: splitDishes,
+                  choices: plan.dishChoices,
+                })
+              : splitDiningTableBill({
+                  mode: "ByRounds",
+                  rounds: splitRounds,
+                  partOf: new Map(
+                    plan.parts.flatMap((part) =>
+                      part.slices.map(
+                        (slice) => [slice.orderBatchReference, part.partNumber] as const,
+                      ),
                     ),
                   ),
-                ),
-              });
+                });
         const shape = (
           parts: readonly {
             amountMinor: bigint;
@@ -600,6 +648,30 @@ export async function readDiningTableBill(
           entry.part?.splitPlanReference === plan.splitPlanReference &&
           entry.part.partNumber === partNumber,
       );
+    const nameOf = new Map(
+      prices.map((item) => [String(item.orderItemReference), item.displayName] as const),
+    );
+    const dishesOf = (partNumber: number) => {
+      const counted = new Map<string, { displayName: string; quantity: number; shared: boolean }>();
+      for (const choice of plan.dishChoices) {
+        if (choice.partNumber !== null && choice.partNumber !== partNumber) continue;
+        const key = `${choice.orderItemReference}:${choice.partNumber === null}`;
+        const entry = counted.get(key);
+        if (entry !== undefined) entry.quantity += 1;
+        else
+          counted.set(key, {
+            // A dish taken off since keeps the choice but is no longer on the bill (split is stale).
+            displayName: nameOf.get(choice.orderItemReference) ?? "",
+            quantity: 1,
+            shared: choice.partNumber === null,
+          });
+      }
+      return Object.freeze(
+        [...counted.values()]
+          .filter((entry) => entry.displayName !== "")
+          .map((entry) => Object.freeze(entry)),
+      );
+    };
     const parts = plan.parts.map((part) => {
       const paidWith = partPayments.get(part.partNumber) ?? null;
       return Object.freeze({
@@ -612,6 +684,7 @@ export async function readDiningTableBill(
             .map((slice) => roundNumberOf.get(slice.orderBatchReference) ?? 0)
             .sort((a, b) => a - b),
         ),
+        dishes: dishesOf(part.partNumber),
         payment:
           paidWith === null
             ? null
@@ -636,8 +709,9 @@ export async function readDiningTableBill(
     owedSubtotal = unpaid.reduce((sum, part) => sum + part.subtotalMinor, 0n);
     owedTax = unpaid.reduce((sum, part) => sum + part.taxMinor, 0n);
     split = Object.freeze({
-      mode: plan.mode as "Even" | "ByRounds",
+      mode: plan.mode as "Even" | "ByRounds" | "ByItems",
       stale,
+      dishChoices: plan.dishChoices,
       parts: Object.freeze(parts),
       paidParts: partPayments.size,
       remainingMinor: owedTotal.toString(),
@@ -713,6 +787,7 @@ export async function readDiningTableBill(
           }),
     settlementRecord: settlement,
     splitPlanRecord: plan,
+    splitDishes,
   });
 }
 
@@ -739,9 +814,10 @@ export async function tableRefundedMinor(
 export const publicBill = (
   bill: Awaited<ReturnType<typeof readDiningTableBill>>,
 ): DiningTableBill => {
-  const { settlementRecord, splitPlanRecord, ...rest } = bill;
+  const { settlementRecord, splitPlanRecord, splitDishes, ...rest } = bill;
   void settlementRecord;
   void splitPlanRecord;
+  void splitDishes;
   return Object.freeze(rest);
 };
 
@@ -1124,17 +1200,23 @@ export function parseDiningTableSplitCommand(value: unknown) {
       "mode",
       "people",
       "rounds",
+      ...(Object.hasOwn(value as object, "dishes") ? ["dishes"] : []),
     ]);
     const mode =
-      raw.mode === "Whole" || raw.mode === "Even" || raw.mode === "ByRounds" ? raw.mode : null;
+      raw.mode === "Whole" ||
+      raw.mode === "Even" ||
+      raw.mode === "ByRounds" ||
+      raw.mode === "ByItems"
+        ? raw.mode
+        : null;
     if (mode === null) return fail("TABLE_CHECKOUT_INPUT_INVALID");
     const people =
-      mode === "Even" &&
+      (mode === "Even" || mode === "ByItems") &&
       Number.isSafeInteger(raw.people) &&
       (raw.people as number) >= 2 &&
       (raw.people as number) <= 20
         ? (raw.people as number)
-        : raw.people === null && mode !== "Even"
+        : raw.people === null && mode !== "Even" && mode !== "ByItems"
           ? null
           : fail("TABLE_CHECKOUT_INPUT_INVALID");
     let rounds: { roundNumber: number; partNumber: number }[] | null = null;
@@ -1154,12 +1236,36 @@ export function parseDiningTableSplitCommand(value: unknown) {
         return { roundNumber: item.roundNumber as number, partNumber: item.partNumber as number };
       });
     } else if (raw.rounds !== null) return fail("TABLE_CHECKOUT_INPUT_INVALID");
+    let dishes: { orderItemReference: string; unit: number; partNumber: number | null }[] | null =
+      null;
+    if (mode === "ByItems") {
+      if (!Array.isArray(raw.dishes) || raw.dishes.length < 1 || raw.dishes.length > 1000)
+        return fail("TABLE_CHECKOUT_INPUT_INVALID");
+      dishes = raw.dishes.map((entry: unknown) => {
+        const item = readClosedRecord(entry, ["orderItemReference", "unit", "partNumber"]);
+        if (
+          !Number.isSafeInteger(item.unit) ||
+          (item.unit as number) < 1 ||
+          (item.partNumber !== null &&
+            (!Number.isSafeInteger(item.partNumber) ||
+              (item.partNumber as number) < 1 ||
+              (item.partNumber as number) > (people as number)))
+        )
+          return fail("TABLE_CHECKOUT_INPUT_INVALID");
+        return {
+          orderItemReference: String(parseDiningReference(item.orderItemReference)),
+          unit: item.unit as number,
+          partNumber: item.partNumber as number | null,
+        };
+      });
+    } else if ((raw.dishes ?? null) !== null) return fail("TABLE_CHECKOUT_INPUT_INVALID");
     return Object.freeze({
       operationReference: String(parseDiningReference(raw.operationReference)),
       diningSessionReference: String(parseDiningReference(raw.diningSessionReference)),
       mode,
       people,
       rounds,
+      dishes,
     });
   } catch (error) {
     if (error instanceof DiningTableCheckoutError) throw error;
@@ -1185,6 +1291,7 @@ export function createMerchantDiningTableSplit(options: {
         mode: command.mode,
         people: command.people,
         rounds: command.rounds,
+        ...(command.dishes === null ? {} : { dishes: command.dishes }),
       }),
     );
     try {
@@ -1268,18 +1375,26 @@ export function createMerchantDiningTableSplit(options: {
                       rounds: splitRounds,
                       people: command.people as number,
                     })
-                  : splitDiningTableBill({
-                      mode: "ByRounds",
-                      rounds: splitRounds,
-                      partOf: new Map(
-                        (command.rounds ?? []).map((entry) => {
-                          const round =
-                            owing.find((value) => value.roundNumber === entry.roundNumber) ??
-                            fail("TABLE_CHECKOUT_INPUT_INVALID");
-                          return [round.orderBatchReference, entry.partNumber] as const;
-                        }),
-                      ),
-                    });
+                  : command.mode === "ByItems"
+                    ? splitDiningTableBill({
+                        mode: "ByItems",
+                        rounds: splitRounds,
+                        people: command.people as number,
+                        dishes: bill.splitDishes,
+                        choices: command.dishes ?? [],
+                      })
+                    : splitDiningTableBill({
+                        mode: "ByRounds",
+                        rounds: splitRounds,
+                        partOf: new Map(
+                          (command.rounds ?? []).map((entry) => {
+                            const round =
+                              owing.find((value) => value.roundNumber === entry.roundNumber) ??
+                              fail("TABLE_CHECKOUT_INPUT_INVALID");
+                            return [round.orderBatchReference, entry.partNumber] as const;
+                          }),
+                        ),
+                      });
             const result = await store.recordSplitPlan(tx, {
               splitPlanReference: options.nextReference(),
               operationReference: command.operationReference,

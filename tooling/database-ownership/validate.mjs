@@ -2429,6 +2429,7 @@ async function scanUnsupported(root, module, diagnostics) {
               "dining_table_split_plan",
               "dining_table_split_part",
               "dining_table_split_part_round",
+              "dining_table_split_part_item",
             ],
           },
           // WP-2423 Q14: payments and refunds behind the Store sales reports (read only).
