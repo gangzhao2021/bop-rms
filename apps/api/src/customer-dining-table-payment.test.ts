@@ -120,12 +120,12 @@ it("DEC-DINE-IN-PAY-LATER S4: answers the guest's table payment in public fields
   expect(f.port.start).toHaveBeenCalledWith(
     { sessionCredential: "s".repeat(43), csrfCredential: "c".repeat(43) },
     {
-      action: "Start",
       operationReference: "01909968-0000-7000-8000-000000000001",
       tip: { kind: "Percent", percent: 15 },
       // WP-2423 item 8 ④: no part — the whole table.
       partNumber: null,
     },
+    null,
   );
 });
 

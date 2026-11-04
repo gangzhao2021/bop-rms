@@ -1,7 +1,11 @@
+import { nameLocale } from "../i18n/i18n.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
+
+/** Dish names on a split bill's parts in the language the guest chose. */
+const guestLocale = () => (nameLocale() === null ? {} : { locale: nameLocale() });
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER S4: paying the whole table on the guest's phone. The server works
@@ -307,7 +311,7 @@ export function createTablePaymentClient(request: typeof fetch = globalThis.fetc
   return Object.freeze({
     /** The bill and the payment, as the Provider reports it now. */
     async read() {
-      return parseTablePaymentView(await post("", { action: "Read" }));
+      return parseTablePaymentView(await post("", { action: "Read", ...guestLocale() }));
     },
     /**
      * Pay the whole table — or, for a split bill, one part (WP-2423 item 8 ④) — with this tip;
@@ -320,6 +324,7 @@ export function createTablePaymentClient(request: typeof fetch = globalThis.fetc
           operationReference,
           tip,
           ...(partNumber === null ? {} : { partNumber }),
+          ...guestLocale(),
         }),
       );
     },

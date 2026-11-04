@@ -115,8 +115,8 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
     });
   };
   return Object.freeze({
-    async read(credentials: Credentials) {
-      return options.payments.refresh(await authority(credentials));
+    async read(credentials: Credentials, displayLocale?: string | null) {
+      return options.payments.refresh({ ...(await authority(credentials)), displayLocale });
     },
     /** The settled table's bill and how it was paid, for a guest whose visit ended with it. */
     async settledReceipt(credentials: Credentials, displayLocale?: string | null) {
@@ -152,8 +152,9 @@ export function createCustomerDiningTablePayment(options: CustomerDiningTablePay
     async start(
       credentials: Credentials,
       command: { operationReference: string; tip: DiningTableTip; partNumber?: number | null },
+      displayLocale?: string | null,
     ) {
-      return options.payments.start(await authority(credentials), command);
+      return options.payments.start({ ...(await authority(credentials)), displayLocale }, command);
     },
     async handoff(credentials: Credentials) {
       if (options.handoff === undefined)
@@ -452,20 +453,30 @@ export class CustomerDiningTablePaymentHandler {
         protect(response);
         const credentials = this.credentials(request);
         let command:
-          | { action: "Read" }
+          | { action: "Read"; displayLocale: string | null }
           | { action: "SettledReceipt"; displayLocale: string | null }
           | {
               action: "Start";
               operationReference: string;
               tip: DiningTableTip;
               partNumber: number | null;
+              displayLocale: string | null;
             }
           | null = null;
         try {
           const body = (request.body ?? {}) as Record<string, unknown>;
           if (body.action === "Read") {
-            readClosedRecord(body, ["action"]);
-            command = { action: "Read" };
+            const raw = readClosedRecord(
+              body,
+              body.locale === undefined ? ["action"] : ["action", "locale"],
+            );
+            // Dish names in the language the guest chose (a part says what it pays for).
+            command = {
+              action: "Read",
+              displayLocale: customerDisplayLocale(
+                raw.locale === undefined ? {} : { locale: raw.locale },
+              ),
+            };
           } else if (body.action === "SettledReceipt") {
             const raw = readClosedRecord(
               body,
@@ -484,6 +495,7 @@ export class CustomerDiningTablePaymentHandler {
               "operationReference",
               "tip",
               ...(Object.hasOwn(body, "partNumber") ? ["partNumber"] : []),
+              ...(Object.hasOwn(body, "locale") ? ["locale"] : []),
             ]);
             const partNumber =
               raw.partNumber === undefined || raw.partNumber === null
@@ -524,6 +536,9 @@ export class CustomerDiningTablePaymentHandler {
               operationReference: raw.operationReference,
               tip: parsed,
               partNumber,
+              displayLocale: customerDisplayLocale(
+                raw.locale === undefined ? {} : { locale: raw.locale },
+              ),
             };
           }
         } catch {
@@ -546,8 +561,16 @@ export class CustomerDiningTablePaymentHandler {
           }
           const view =
             command.action === "Read"
-              ? await this.#port.read(credentials)
-              : await this.#port.start(credentials, command);
+              ? await this.#port.read(credentials, command.displayLocale)
+              : await this.#port.start(
+                  credentials,
+                  {
+                    operationReference: command.operationReference,
+                    tip: command.tip,
+                    partNumber: command.partNumber,
+                  },
+                  command.displayLocale,
+                );
           response.status(200).json(customerTablePaymentBody(view));
         } catch (error) {
           this.failure(response, error);
