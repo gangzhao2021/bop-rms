@@ -187,6 +187,32 @@ describe("Merchant workspace client boundary", () => {
     await expect(createMerchantWorkspaceClient(request).bootstrap()).resolves.toBeNull();
   });
 
+  it("a busy session is asked again, never read as signed out; other outages still fail", async () => {
+    vi.useFakeTimers();
+    try {
+      const busy = () => new Response('{"error":"retry_later"}', { status: 503 });
+      const request = vi
+        .fn<typeof fetch>()
+        .mockImplementationOnce(async () => busy())
+        .mockImplementationOnce(async () => busy())
+        .mockImplementation(
+          async () => new Response('{"error":"request_denied"}', { status: 403 }),
+        );
+      const reading = createMerchantWorkspaceClient(request).bootstrap();
+      await vi.advanceTimersByTimeAsync(4_100);
+      await expect(reading).resolves.toBeNull();
+      expect(request).toHaveBeenCalledTimes(3);
+      const always = vi.fn<typeof fetch>(async () => busy());
+      const givesUp = createMerchantWorkspaceClient(always).bootstrap();
+      const settled = expect(givesUp).rejects.toThrow("MERCHANT_WORKSPACE_UNAVAILABLE");
+      await vi.advanceTimersByTimeAsync(120_000);
+      await settled;
+      expect(always).toHaveBeenCalledTimes(30);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("WP-2423: a PIN sign-in refusal is told apart from any other refused Store switch", async () => {
     const csrf = "C".repeat(43);
     const refused = vi

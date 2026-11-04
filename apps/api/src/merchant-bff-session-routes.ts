@@ -9,6 +9,7 @@ import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import {
   cookie,
   denied,
+  readFailureKind,
   exactHeader,
   NO_STORE,
   rawHeaderValues,
@@ -197,6 +198,16 @@ export function installMerchantSessionRoutes(
           error.code === "BRAND_STORE_TOPOLOGY_DEPENDENCY_UNAVAILABLE"
         ) {
           response.status(503).json({ error: "merchant_workspace_unavailable" });
+          return;
+        }
+        // Owner 2026-11-04: while a menu is being listed this read can wait on a lock and give up.
+        // The person is still signed in: "try again", never a refusal that reads as signed out.
+        if (readFailureKind(error) === "RetryLater") {
+          response
+            .status(503)
+            .set("Cache-Control", NO_STORE)
+            .set("Retry-After", "2")
+            .json({ error: "retry_later" });
           return;
         }
         // WP-2423 取舍 15: signed in with no Store workspace may be platform support, who have their

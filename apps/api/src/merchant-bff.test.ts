@@ -456,6 +456,20 @@ describe("isolated merchant BFF transport", () => {
     expect(await response.text()).toBe('{"error":"request_denied"}');
   });
 
+  it("says a busy session is busy: a lock conflict is never read as signed out", async () => {
+    const service = fakeService();
+    vi.mocked(service.bootstrap).mockRejectedValueOnce(
+      Object.assign(new Error("conflict"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" }),
+    );
+    const root = await serve(service);
+    const response = await request(root, "/merchant/session", {
+      headers: { ...safeHeaders, Cookie: `__Host-bop-merchant=${sessionCookie}` },
+    });
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "retry_later" });
+  });
+
   it("collapses callback failures, clears auth state, and leaks no query credential", async () => {
     const service = fakeService();
     vi.mocked(service.callback).mockRejectedValueOnce(new Error("synthetic-provider-detail"));
@@ -2035,7 +2049,13 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
   const view = {
     version: 1,
     templateCode: "FullService" as const,
-    modules: { counterOrder: false, pickup: true, inventory: false, loyalty: false, alcohol: false },
+    modules: {
+      counterOrder: false,
+      pickup: true,
+      inventory: false,
+      loyalty: false,
+      alcohol: false,
+    },
     changedAt: serverTime,
     services: {
       version: 0,

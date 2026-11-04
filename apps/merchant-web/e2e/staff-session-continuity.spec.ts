@@ -464,6 +464,22 @@ test("@production a signed-out staff page offers the sign-in that works here", a
   await expect(page.getByText("TEST-ONLY", { exact: true })).toHaveCount(0);
 });
 
+test("@production a busy session keeps the page waiting and never asks staff to sign in", async ({
+  page,
+}) => {
+  let refusals = 0;
+  await page.route("**/merchant/session", (route) => {
+    refusals += 1;
+    return route.fulfill({ status: 503, json: { error: "retry_later" } });
+  });
+  await page.route("**/merchant/sign-in-entry", (route) =>
+    route.fulfill({ headers, json: { path: "/internal-test/staff", testOnly: true } }),
+  );
+  await page.goto("/operations/orders");
+  await expect.poll(() => refusals, { timeout: 6_000 }).toBeGreaterThan(1);
+  await expect(page.getByRole("link", { name: "Sign in", exact: true })).toHaveCount(0);
+});
+
 test("@production Reports and Settlement never sign staff out when an activity report is busy or refused", async ({
   page,
 }) => {

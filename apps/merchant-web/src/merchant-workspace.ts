@@ -351,6 +351,10 @@ async function boundedRequest(
   }
 }
 
+/** About two minutes in all: a listing takes about a minute and each answer here a few seconds. */
+const SESSION_BUSY_WAIT_MS = 2_000;
+const SESSION_BUSY_ATTEMPTS = 30;
+
 /** WP-2423 取舍 15: signed in as platform support, who have no Store workspace. */
 export class MerchantPlatformSupportSession extends Error {
   constructor() {
@@ -362,12 +366,31 @@ export class MerchantPlatformSupportSession extends Error {
 export function createMerchantWorkspaceClient(
   request: typeof fetch = globalThis.fetch,
 ): MerchantWorkspaceClient {
+  const readSession = async () => {
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await boundedRequest(request, "/merchant/session", {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      // Owner 2026-11-04: the session is busy (a menu being listed), not ended: keep the page
+      // waiting and ask again, for as long as a listing takes.
+      if (
+        response.status !== 503 ||
+        attempt >= SESSION_BUSY_ATTEMPTS ||
+        (
+          (await response
+            .clone()
+            .json()
+            .catch(() => null)) as { error?: unknown } | null
+        )?.error !== "retry_later"
+      )
+        return response;
+      await new Promise((resolve) => setTimeout(resolve, SESSION_BUSY_WAIT_MS));
+    }
+  };
   const bootstrap = async (): Promise<MerchantSessionBootstrap | null> => {
-    const response = await boundedRequest(request, "/merchant/session", {
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    });
+    const response = await readSession();
     if (response.status === 403) {
       const denial = (await response.json().catch(() => null)) as { error?: unknown } | null;
       if (denial?.error === "platform_support") throw new MerchantPlatformSupportSession();
