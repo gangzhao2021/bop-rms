@@ -380,6 +380,37 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
       "Open Settlement",
     );
   });
+  it("tells a restaurant owner what to do in plain words, within the board's limit", () => {
+    const params = {
+      services: ["api"],
+      count: 1,
+      oldestAgeMs: MIN,
+      downMs: MIN,
+      coveredMs: 0,
+      stage: "dump",
+      attemptsLeft: 0,
+      ageMs: MIN,
+      remainingMs: MIN,
+      disks: [{ name: "runtime", freeBytes: 1024, freePercent: 1 }],
+      sources: ["disk space"],
+      channels: ["email"],
+      failingMs: MIN,
+      reportAgeMs: MIN,
+    };
+    for (const key of ALERT_KEYS) {
+      const { summary, action } = renderAlert(key, params);
+      // The merchant Home refuses a whole board with a longer action or summary.
+      expect(action.length, key).toBeLessThanOrEqual(400);
+      expect(summary.length, key).toBeLessThanOrEqual(600);
+      for (const text of [summary, action])
+        expect(text, key).not.toMatch(
+          /pilot|container|operator|service log|monitor log|dead-letter|the host\b|\blog\b/iu,
+        );
+    }
+    expect(renderAlert("entry.api", params).action).toContain("Ask BOP support");
+    expect(renderAlert("entry.api", params).action).toContain("take paper orders");
+    expect(renderAlert("payment.updates", params).action).toContain("Do not take a second payment");
+  });
   it("names the problem in the subject of a single alert, and resolution plainly", () => {
     const o = healthy();
     o.backup = { lastSuccessAt: null };

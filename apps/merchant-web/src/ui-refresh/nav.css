@@ -119,9 +119,42 @@
   margin-top: auto;
   padding-top: 16px;
 }
-.workspace-sidebar .workspace-sidebar__footer .staff-session__switch button {
-  min-height: 44px;
+/* Brief section 2: session actions are accent text buttons, in the sidebar and the phone menu. */
+.workspace-layout
+  .workspace-sidebar
+  :is(
+    .staff-session__switch button,
+    .staff-pin__open,
+    .staff-pin__prompt,
+    .staff-pin__notice .step-up-verification > button
+  ) {
   width: 100%;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  text-align: start;
+  cursor: pointer;
+}
+.workspace-layout .workspace-sidebar .staff-pin__prompt {
+  font-weight: 600;
+}
+.workspace-layout
+  .workspace-sidebar
+  :is(
+    .staff-session__switch button,
+    .staff-pin__open,
+    .staff-pin__prompt,
+    .staff-pin__notice .step-up-verification > button
+  ):hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -302,6 +335,10 @@
   }
   .workspace-drawer__panel .staff-session__switch {
     margin-top: 16px;
+  }
+  /* The session actions' words line up with the menu's. */
+  .workspace-drawer__panel :is(.staff-session__switch, .staff-pin) {
+    margin-inline: 8px;
   }
   .workspace-layout[data-menu-open="true"] {
     overflow: hidden;

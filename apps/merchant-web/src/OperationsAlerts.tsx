@@ -1,5 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { alertAction, alertSummary } from "./operations-alert-words.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { storeTime } from "./StoreTime.js";
 import type { AttentionItem } from "./StoreOverview.js";
@@ -36,7 +37,7 @@ export interface OperationsAlertView {
   readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
 }
 /** Owner 2026-11-03 walkthrough: the watcher writes English titles; staff read their language. */
-function alertTitle(title: string): string {
+export function alertTitle(title: string): string {
   const words: Readonly<Record<string, string>> = {
     "Store system is not responding": t("Store system is not responding"),
     "Customer ordering page is not loading": t("Customer ordering page is not loading"),
@@ -50,6 +51,12 @@ function alertTitle(title: string): string {
     ),
     "Receipts are not being issued": t("Receipts are not being issued"),
     "Orders cannot be priced": t("Orders cannot be priced"),
+    "Pickup orders cannot be taken": t("Pickup orders cannot be taken"),
+    "Pickup times are running out": t("Pickup times are running out"),
+    "Secure connection certificate has expired": t("Secure connection certificate has expired"),
+    "Secure connection certificate expires soon": t("Secure connection certificate expires soon"),
+    "The store's ordering setup has expired": t("The store's ordering setup has expired"),
+    "The store's ordering setup expires soon": t("The store's ordering setup expires soon"),
     "Payment differences need checking": t("Payment differences need checking"),
     "Day-end settlement has open problems": t("Day-end settlement has open problems"),
     "Last night's backup failed": t("Last night's backup failed"),
@@ -247,7 +254,7 @@ export function systemAttentionItems(
           key: "system-unread",
           title: t("The store system could not be checked"),
           detail: t(
-            "System alerts could not be read. Check again in a moment; if this stays, ask the pilot operator to check the store system.",
+            "System alerts could not be read. Check again in a moment; if this stays, ask BOP support to check the store system.",
           ),
           state: t("Not checked"),
           tone: "warning",
@@ -267,10 +274,10 @@ export function systemAttentionItems(
           detail:
             view.monitor === "NotRunning"
               ? t(
-                  "The alert monitor is not running, so problems with the store system, backups and certificate are not being checked. Ask the pilot operator to start it.",
+                  "The alert monitor is not running, so problems with the store system, backups and certificate are not being checked. Ask BOP support to start it.",
                 )
               : t(
-                  "The alert monitor stopped reporting{value}. Problems are not being checked. Ask the pilot operator to restart it.",
+                  "The alert monitor stopped reporting{value}. Problems are not being checked. Ask BOP support to restart it.",
                   {
                     value:
                       view.observedAt === null
@@ -292,8 +299,8 @@ export function systemAttentionItems(
     title: alertTitle(item.title),
     // Owner 2026-10-25: what to do stays in view; the background is on request.
     detailLabel: t("What to do:"),
-    detail: item.action,
-    more: item.summary,
+    detail: alertAction(item.action),
+    more: alertSummary(item.summary),
     since: t("Since {raisedAt}", { raisedAt: at(item.raisedAt) }),
     state: item.severity === "critical" ? t("Urgent") : t("Today"),
     tone: item.severity === "critical" ? "danger" : "warning",
