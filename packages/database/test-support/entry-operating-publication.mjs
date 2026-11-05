@@ -16,11 +16,13 @@ export async function prepareEntryOperatingPublication({
   currentWindow = false,
   /** The Store's own tax configuration, when a real Quote reads it (default: a synthetic one). */
   taxConfigurationReference,
+  /** Another merchant's synthetic identities, when a test has two in one database. */
+  idPrefix = "0190ed19",
 }) {
   const id = (n) =>
     n === 90
       ? binding.tenantReference
-      : "0190ed19-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+      : idPrefix + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const scope = { brandReference: binding.brandReference, storeReference: binding.storeReference };
   const hashContent = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
   const localHour = Number(entryTorontoBoundary(at).localDateTime.slice(11, 13));

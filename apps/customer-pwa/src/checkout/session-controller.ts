@@ -29,6 +29,14 @@ export type CheckoutSessionState =
       readonly status: "item_short" | "item_unavailable";
       readonly canRetry: false;
       readonly line: CheckoutRefusedLine | null;
+    }
+  | {
+      /**
+       * WP-2423: the restaurant updated its menu after this cart was priced; nothing was created.
+       * The page prices the cart again and the guest continues (a new quote is a new checkout).
+       */
+      readonly status: "requote_required";
+      readonly canRetry: false;
     };
 export function createCheckoutSessionController(
   client: {
@@ -90,6 +98,16 @@ export function createCheckoutSessionController(
           publish({ status: error.code, canRetry: false, line: error.line });
           return;
         }
+        if (
+          attempt.current() &&
+          online &&
+          error instanceof CheckoutSessionClientError &&
+          error.code === "requote_required"
+        ) {
+          if (plan === attempt) plan = null;
+          publish({ status: "requote_required", canRetry: false });
+          return;
+        }
         const code = !attempt.current()
           ? "denied"
           : !online
@@ -97,7 +115,8 @@ export function createCheckoutSessionController(
             : error instanceof CheckoutSessionClientError &&
                 error.code !== "checkout_in_progress" &&
                 error.code !== "item_short" &&
-                error.code !== "item_unavailable"
+                error.code !== "item_unavailable" &&
+                error.code !== "requote_required"
               ? error.code
               : "unknown";
         publish({
@@ -140,6 +159,12 @@ export function createCheckoutSessionController(
     },
     retry() {
       return "canRetry" in state && state.canRetry ? execute() : Promise.resolve();
+    },
+    /** The cart is being priced again: what was prepared for the old price is finished with. */
+    reset() {
+      if (flight !== null) return;
+      plan = null;
+      publish({ status: "idle" });
     },
     setOnline(value: boolean) {
       online = value;

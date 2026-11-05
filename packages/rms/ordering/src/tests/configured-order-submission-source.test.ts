@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { configuredOrderItemFixture } from "./configured-order-item.fixture.js";
 import {
   createConfiguredOrderSubmissionSource,
@@ -78,4 +78,42 @@ it("rejects a different Catalog SKU despite matching sellable reference", async 
   await expect(
     f.source.load({ evidence: f.input.checkoutValidationEvidence } as never),
   ).rejects.toThrow();
+});
+describe("WP-2423: a checkout validated before an owner listed", () => {
+  const unreadable = async (current: () => Promise<string | null>) => {
+    const f = await fixture();
+    f.capture.mockRejectedValue(new Error("the old menu can no longer be read back"));
+    return createConfiguredOrderSubmissionSource({
+      ...f.options,
+      currentMenuVersion: current,
+    }).load({ evidence: f.input.checkoutValidationEvidence } as never);
+  };
+  it("is refused as 'price again' when another menu version is in force", async () => {
+    await expect(
+      unreadable(async () => "01a7ee00-0000-7000-8000-00000000abcd"),
+    ).rejects.toMatchObject({ code: "CHECKOUT_REQUOTE_REQUIRED" });
+  });
+  it("stays an outage when the same version is in force, or nothing can be said", async () => {
+    const f = await fixture();
+    const validated = f.input.checkoutValidationEvidence.catalogLines[0]?.menuVersionReference;
+    await expect(unreadable(async () => String(validated))).rejects.toMatchObject({
+      code: "ORDER_SUBMISSION_SOURCE_UNAVAILABLE",
+    });
+    await expect(unreadable(async () => null)).rejects.toMatchObject({
+      code: "ORDER_SUBMISSION_SOURCE_UNAVAILABLE",
+    });
+    await expect(
+      unreadable(async () => {
+        throw new Error("no database");
+      }),
+    ).rejects.toMatchObject({ code: "ORDER_SUBMISSION_SOURCE_UNAVAILABLE" });
+  });
+  it("costs nothing on the ordinary path: the version is asked only after a failure", async () => {
+    const f = await fixture();
+    const currentMenuVersion = vi.fn(async () => null);
+    await createConfiguredOrderSubmissionSource({ ...f.options, currentMenuVersion }).load({
+      evidence: f.input.checkoutValidationEvidence,
+    } as never);
+    expect(currentMenuVersion).not.toHaveBeenCalled();
+  });
 });

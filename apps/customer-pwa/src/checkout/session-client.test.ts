@@ -70,6 +70,22 @@ it("discards response after current session credentials change", async () => {
     code: "unknown",
   });
 });
+it("WP-2423: tells a menu update after pricing apart from an ordinary conflict", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { schemaVersion: 1, error: { code: "checkout_session_requote_required" } },
+          { status: 409 },
+        ),
+      ),
+  );
+  await expect(createCheckoutSessionClient().create(selected, id(4))).rejects.toMatchObject({
+    code: "requote_required",
+  });
+});
 it("WP-2423 Q4: tells a closed Store apart from an ordinary conflict", async () => {
   const fetch = vi
     .fn()

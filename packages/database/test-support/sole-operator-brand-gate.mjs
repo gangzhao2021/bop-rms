@@ -32,10 +32,13 @@ export async function dbNow(admin) {
 }
 
 /** Brand (Organization) row and the Brand's permission policy state. */
-export async function seedBrand(admin, { brandReference, policyReference, from }) {
+export async function seedBrand(
+  admin,
+  { brandReference, policyReference, from, code = "SYNTHETIC_Q19B" },
+) {
   await admin.query(
-    "INSERT INTO bop_tenant.brand (brand_id,code,display_name,default_locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,'SYNTHETIC_Q19B','Synthetic Q19 Brand','en-CA','CAD','Active',1,$2,$2) ON CONFLICT (brand_id) DO NOTHING",
-    [brandReference, from],
+    "INSERT INTO bop_tenant.brand (brand_id,code,display_name,default_locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$3,'Synthetic Q19 Brand','en-CA','CAD','Active',1,$2,$2) ON CONFLICT (brand_id) DO NOTHING",
+    [brandReference, from, code],
   );
   await admin.query(
     "INSERT INTO bop_permission.policy_state (brand_id,snapshot_id,version,updated_at) VALUES ($1,$2,1,$3) ON CONFLICT (brand_id) DO NOTHING",

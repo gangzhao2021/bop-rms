@@ -534,6 +534,12 @@ export const checkoutText = Object.freeze({
       "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so you haven’t been charged. To add something, ask a staff member.",
     );
   },
+  /** WP-2423: the restaurant listed a menu change while this guest was checking out. */
+  get menuUpdatedPricedAgain() {
+    return t(
+      "The restaurant just updated its menu, so we priced your order again. Nothing was sent or charged. Check the total, then continue.",
+    );
+  },
   get checkoutUnconfirmed() {
     return t("We couldn’t confirm checkout. Retry to recover the same checkout.");
   },

@@ -69,6 +69,8 @@ function PreparedSessionPaymentPage({
     | "items_short"
     /** WP-2423 item 8 ⑦: the Store turned tips off before payment started; nothing was charged. */
     | "tips_off"
+    /** WP-2423: the restaurant updated its menu after this checkout began; nothing was charged. */
+    | "requote_required"
     | "unavailable"
   >("loading");
   // WP-2423 Q10: a failed check of the checkout is retried in place, never a dead end.
@@ -162,10 +164,12 @@ function PreparedSessionPaymentPage({
               ? "items_short"
               : error instanceof SessionPaymentClientError && error.code === "tips_off"
                 ? "tips_off"
-                : error instanceof SessionPaymentClientError &&
-                    (error.code === "denied" || error.code === "conflict")
-                  ? "denied"
-                  : "unknown",
+                : error instanceof SessionPaymentClientError && error.code === "requote_required"
+                  ? "requote_required"
+                  : error instanceof SessionPaymentClientError &&
+                      (error.code === "denied" || error.code === "conflict")
+                    ? "denied"
+                    : "unknown",
         );
     } finally {
       flight.current = false;
@@ -282,11 +286,22 @@ function PreparedSessionPaymentPage({
           <Link to="/checkout">{t("Back to checkout")}</Link>
         </section>
       ) : null}
+      {status === "requote_required" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("The menu was just updated")}</h2>
+          <p>
+            {t(
+              "The restaurant updated its menu while you were checking out, so you haven’t been charged. Go back to checkout to see your total and pay.",
+            )}
+          </p>
+        </section>
+      ) : null}
       {status !== "denied" &&
       status !== "retry" &&
       status !== "closed" &&
       status !== "items_short" &&
       status !== "tips_off" &&
+      status !== "requote_required" &&
       status !== "unavailable" &&
       status !== "loading" ? (
         <section className="payment-page__amount" aria-label={t("Amount")}>

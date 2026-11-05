@@ -8,7 +8,7 @@ import {
 import type { CartQuoteAttachment } from "../domain/cart-quote-attachment.js";
 import { fixture, id } from "./configured-cart-quote.fixture.js";
 
-function setup(dining = false) {
+function setup(dining = false, evidence?: ConfiguredCartQuotePorts["evidence"]) {
   const f = fixture(dining);
   const snapshot = f.catalogLines[0]?.snapshot;
   if (snapshot === undefined) throw new Error("synthetic Catalog fixture missing");
@@ -87,6 +87,7 @@ function setup(dining = false) {
     repository: { loadCart, resolveOperation, attach },
     pricingChannelCode: f.pricingChannelCode,
     now: () => at,
+    ...(evidence === undefined ? {} : { evidence }),
   });
   const command = {
     cartReference: f.cart.cartReference,
@@ -309,5 +310,89 @@ describe("configured current-authorized Cart quote", () => {
       code: "CART_PERMISSION_DENIED",
     });
     expect(s.attach).toHaveBeenCalledOnce();
+  });
+});
+
+describe("WP-2423: a cart priced after the owner listed", () => {
+  const current = () =>
+    fixture(false).cart.items[0]?.catalogSelectionEvidence?.menuVersionReference;
+  /** What Catalog answers for one line of the menu in force now. */
+  const accepted = (input: Record<string, unknown>) => ({
+    status: "Accepted" as const,
+    brandReference: input.brandReference,
+    storeReference: input.storeReference,
+    sourceChannel: input.sourceChannel,
+    orderType: input.orderType,
+    sellableReference: input.sellableReference,
+    optionSelections: input.optionSelections,
+    observedAt: input.observedAt,
+    menuVersionReference: id(97),
+    productVersionReference: id(98),
+    catalogChannelCode: "QR",
+    catalogOrderTypeCode: "PICKUP",
+    ruleEvidence: [],
+    validatedAt: input.observedAt,
+  });
+  it("leaves the cart alone while its menu version is still in force", async () => {
+    const replace = vi.fn(async () => undefined);
+    const validateSelection = vi.fn();
+    const s = setup(false, {
+      currentMenuVersion: async () => String(current()),
+      validateSelection,
+      replace,
+    });
+    await expect(s.service.attach(s.command)).resolves.toMatchObject({ status: "Attached" });
+    expect(validateSelection).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+  });
+  it("carries each line over at the same Cart version, then prices the cart it reread", async () => {
+    const replace = vi.fn(async () => undefined);
+    const validateSelection = vi.fn(async (input: never) => accepted(input) as never);
+    const s = setup(false, {
+      currentMenuVersion: async () => id(97),
+      validateSelection,
+      replace,
+    });
+    const loads = s.loadCart.mock.calls.length;
+    await expect(s.service.attach(s.command)).resolves.toMatchObject({ status: "Attached" });
+    expect(validateSelection).toHaveBeenCalledTimes(s.f.cart.items.length);
+    expect(replace).toHaveBeenCalledWith({
+      cartReference: s.f.cart.cartReference,
+      expectedCartVersion: s.f.cart.aggregateVersion,
+      lines: s.f.cart.items.map((item) => ({
+        cartItemReference: item.cartItemReference,
+        evidence: expect.objectContaining({
+          menuVersionReference: id(97),
+          productVersionReference: id(98),
+        }),
+      })),
+    });
+    expect(s.loadCart.mock.calls.length).toBeGreaterThan(loads + 1);
+    const replaced = replace.mock.invocationCallOrder[0] ?? 0;
+    expect(s.quoteCart.mock.invocationCallOrder[0] ?? 0).toBeGreaterThan(replaced);
+  });
+  it("says so when a line can no longer be sold, and changes nothing", async () => {
+    const replace = vi.fn(async () => undefined);
+    const s = setup(false, {
+      currentMenuVersion: async () => id(97),
+      validateSelection: async () =>
+        ({ status: "Rejected", reason: "SELLABLE_UNAVAILABLE" }) as never,
+      replace,
+    });
+    await expect(s.service.attach(s.command)).rejects.toMatchObject({
+      code: "CART_SELECTION_INVALID",
+    });
+    expect(replace).not.toHaveBeenCalled();
+    expect(s.attach).not.toHaveBeenCalled();
+  });
+  it("does not touch the cart when no menu is in force", async () => {
+    const replace = vi.fn(async () => undefined);
+    const s = setup(false, {
+      currentMenuVersion: async () => null,
+      validateSelection: vi.fn(),
+      replace,
+    });
+    await s.service.attach(s.command).catch(() => undefined);
+    expect(replace).not.toHaveBeenCalled();
   });
 });

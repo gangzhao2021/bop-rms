@@ -18,6 +18,7 @@ export function checkoutSessionAlert(
     case "ready":
     case "item_short":
     case "item_unavailable":
+    case "requote_required":
       return null;
     case "offline":
       return pageOffline ? null : checkoutText.offline;

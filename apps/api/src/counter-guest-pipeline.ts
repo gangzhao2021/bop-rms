@@ -367,6 +367,9 @@ export function createGuestOrderSteps(options: {
       } catch (error) {
         if (error instanceof CheckoutSessionServiceError && error.code === "STORE_CLOSED")
           return { status: "StoreNotTakingOrders" as const };
+        // An owner listed between pricing and checkout: nothing was created; staff press again.
+        if (error instanceof CheckoutSessionServiceError && error.code === "REQUOTE_REQUIRED")
+          return { status: "RequoteRequired" as const };
         // WP-2423: which item the Store's stock can't make (and how many it can); nothing created.
         if (error instanceof CheckoutSessionServiceError && error.code === "ITEM_SHORT")
           return {

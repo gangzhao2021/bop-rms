@@ -122,12 +122,27 @@ export function CheckoutPage({
   const [payLater, setPayLater] = useState(false);
   const [sendClientValue] = useState(() => sendClient ?? createSessionPaymentClient());
   const [sendState, setSendState] = useState<"idle" | "sending" | "failed" | "pay_first">("idle");
+  // WP-2423: the restaurant updated its menu while this guest was checking out; nothing was placed
+  // or charged. The page prices the cart again once and says why, and the guest checks the total
+  // and presses again. What was chosen for the old price goes with it.
+  const [menuUpdated, setMenuUpdated] = useState(false);
+  const priceAgainAfterMenuUpdate = () => {
+    selectedTip.current = null;
+    setMenuUpdated(true);
+    setSendState("idle");
+    sessionController.reset();
+    void controller.quote();
+  };
   const sendRound = async (checkoutSessionReference: string, selectionReference: string) => {
     setSendState("sending");
     try {
       await sendClientValue.sendToKitchen(checkoutSessionReference, selectionReference);
       void navigate("/dine-in/session", { replace: true });
     } catch (error) {
+      if (error instanceof SessionPaymentClientError && error.code === "requote_required") {
+        priceAgainAfterMenuUpdate();
+        return;
+      }
       setSendState(
         error instanceof SessionPaymentClientError && error.code === "pay_first_table"
           ? "pay_first"
@@ -153,6 +168,10 @@ export function CheckoutPage({
       void navigate("/checkout/payment");
     }
   }, [navigate, sessionState, payLater]);
+  useEffect(() => {
+    if (sessionState.status === "requote_required") priceAgainAfterMenuUpdate();
+    // Once per refusal: the price-again step leaves this state straight away.
+  }, [sessionState.status]);
   useEffect(() => {
     const offline = () => sessionController.setOnline(false);
     const online = () => sessionController.setOnline(true);
@@ -680,6 +699,9 @@ export function CheckoutPage({
             </p>
           ) : null}
           {sendState === "sending" ? <p role="status">{checkoutText.sendingToKitchen}</p> : null}
+          {menuUpdated && sessionState.status === "idle" && sendState === "idle" ? (
+            <p role="status">{checkoutText.menuUpdatedPricedAgain}</p>
+          ) : null}
           {sendState === "failed" ? <p role="alert">{checkoutText.sendToKitchenFailed}</p> : null}
           {sendState === "pay_first" ? (
             <p role="alert">{checkoutText.tablePaysAsItOrders}</p>

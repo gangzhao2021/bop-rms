@@ -285,6 +285,7 @@ export interface CounterGuestPipeline {
   ): Promise<
     | { readonly status: "Started"; readonly checkoutSessionReference: string }
     | { readonly status: "StoreNotTakingOrders" }
+    | { readonly status: "RequoteRequired" }
     /** WP-2423: the Store's stock can't make the Cart as it stands, or an item can't be sold now;
      * nothing was created or charged. */
     | CounterCheckoutItemRefusal
@@ -746,6 +747,7 @@ export function createMerchantCounterOrder(options: {
       });
       if (checkout.status === "ItemShort" || checkout.status === "ItemUnavailable")
         return refusedAtCheckout(checkout, cartLines);
+      if (checkout.status === "RequoteRequired") return fail("COUNTER_ORDER_NOT_PRICED");
       if (checkout.status !== "Started") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
       const preparation = await options.pipeline.preparePayment(credentials, {
         checkoutSessionReference: checkout.checkoutSessionReference,
@@ -769,6 +771,8 @@ export function createMerchantCounterOrder(options: {
       if (code === "STORE_CLOSED") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
       // WP-2423: stock ran out between checkout and submission; nothing was placed or charged.
       if (code === "ORDER_CREATE_STOCK_SHORT") return fail("COUNTER_ORDER_ITEM_UNAVAILABLE");
+      // An owner listed between checkout and submission; nothing was placed or charged.
+      if (code === "CHECKOUT_REQUOTE_REQUIRED") return fail("COUNTER_ORDER_NOT_PRICED");
       // WP-2423: the pickup time schedule ran out; say so rather than "try again". A counter
       // order is never refused because the hour is full (DEC-COUNTER-WALK-UP-CAPACITY).
       const covered = await options.pipeline.pickupTimesNow?.().catch(() => true);

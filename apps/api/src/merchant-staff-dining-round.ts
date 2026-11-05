@@ -777,6 +777,11 @@ export function createMerchantStaffDiningRound(options: {
               sharedStock: checkout.status === "ItemShort" && checkout.sharedStock,
             });
       }
+      // An owner listed between pricing and checkout: nothing was ordered; staff press again.
+      if (checkout.status === "RequoteRequired") {
+        await withdraw();
+        return fail("STAFF_ROUND_NOT_PRICED");
+      }
       if (checkout.status !== "Started") return fail("STAFF_ROUND_STORE_NOT_TAKING_ORDERS");
       const submitPayLater = options.pipeline.submitPayLater;
       const payLaterRound = options.payLater;
@@ -795,10 +800,15 @@ export function createMerchantStaffDiningRound(options: {
             recordedAfterOutage: command.recordedAfterOutage,
           });
         } catch (error) {
-          if ((error as { code?: unknown } | null)?.code !== "ORDER_CREATE_STOCK_SHORT")
+          const code = (error as { code?: unknown } | null)?.code;
+          if (code !== "ORDER_CREATE_STOCK_SHORT" && code !== "CHECKOUT_REQUOTE_REQUIRED")
             throw error;
           await withdraw();
-          return fail("STAFF_ROUND_ITEM_UNAVAILABLE");
+          return fail(
+            code === "ORDER_CREATE_STOCK_SHORT"
+              ? "STAFF_ROUND_ITEM_UNAVAILABLE"
+              : "STAFF_ROUND_NOT_PRICED",
+          );
         }
         return await finished("Placed", entry.record);
       }
@@ -811,11 +821,18 @@ export function createMerchantStaffDiningRound(options: {
           recordedAfterOutage: command.recordedAfterOutage,
         });
       } catch (error) {
-        // WP-2423: stock ran out between checkout and submission; the submission rolled back, so
-        // nothing was ordered or charged and the round's items come back out of the table's Cart.
-        if ((error as { code?: unknown } | null)?.code !== "ORDER_CREATE_STOCK_SHORT") throw error;
+        // WP-2423: stock ran out, or an owner listed, between checkout and submission; the
+        // submission rolled back, so nothing was ordered or charged and the round's items come
+        // back out of the table's Cart.
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code !== "ORDER_CREATE_STOCK_SHORT" && code !== "CHECKOUT_REQUOTE_REQUIRED")
+          throw error;
         await withdraw();
-        return fail("STAFF_ROUND_ITEM_UNAVAILABLE");
+        return fail(
+          code === "ORDER_CREATE_STOCK_SHORT"
+            ? "STAFF_ROUND_ITEM_UNAVAILABLE"
+            : "STAFF_ROUND_NOT_PRICED",
+        );
       }
       // The round was submitted with another tip: the same command reads back what it holds.
       if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_IN_PROGRESS");

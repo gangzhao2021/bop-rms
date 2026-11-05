@@ -7,6 +7,7 @@ import {
 } from "../domain/cart.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import {
+  CheckoutValidationError,
   parseCheckoutValidationEvidence,
   parseConfiguredCheckoutValidationEvidence,
 } from "../domain/checkout-validation.js";
@@ -40,6 +41,26 @@ export interface OrderSubmissionSourceOptions {
   readonly pricing: { load(input: { readonly evidence: unknown }): Promise<readonly unknown[]> };
   readonly catalog: { capture(input: ValidateCatalogSelectionInput): Promise<unknown> };
   readonly clock: { now(): string };
+  /**
+   * WP-2423 DEC-MERCHANT-LOCK-SCOPE: the menu version in force now (null when none is). Asked only
+   * after the source could not be read: a checkout validated before an owner listed can never be
+   * read back, so it is refused as "price again", which the guest's page does, not as an outage
+   * the guest would retry for ever.
+   */
+  readonly currentMenuVersion?: (observedAt: string) => Promise<string | null>;
+}
+/** Whether this checkout was validated against a menu version that is no longer in force. */
+async function menuMovedOn(
+  options: OrderSubmissionSourceOptions,
+  lines: readonly { readonly menuVersionReference: string }[],
+): Promise<boolean> {
+  if (options.currentMenuVersion === undefined) return false;
+  try {
+    const current = await options.currentMenuVersion(options.clock.now());
+    return current !== null && lines.some((line) => line.menuVersionReference !== current);
+  } catch {
+    return false;
+  }
 }
 function createVersionedOrderSubmissionSource<V extends 1 | 2>(
   options: OrderSubmissionSourceOptions,
@@ -54,12 +75,14 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
     store = parseOrderingReference(rawScope.storeReference);
   return Object.freeze({
     async load(input: Parameters<OrderCreationPorts<V>["source"]["load"]>[0]) {
+      let validatedLines: readonly { readonly menuVersionReference: string }[] = [];
       try {
         const evidence = (
           quoteVersion === 2
             ? parseConfiguredCheckoutValidationEvidence
             : parseCheckoutValidationEvidence
         )(readClosedRecord(input, ["evidence"], "ACTOR_SHAPE_INVALID").evidence);
+        validatedLines = evidence.catalogLines;
         let last = parseOrderingInstant(options.clock.now());
         const fresh = () => {
           const now = parseOrderingInstant(options.clock.now());
@@ -199,6 +222,8 @@ function createVersionedOrderSubmissionSource<V extends 1 | 2>(
         assertCartLifecycleActive(cart.lifecycle, last);
         return Object.freeze({ cart, lines: Object.freeze(lines) });
       } catch {
+        if (await menuMovedOn(options, validatedLines))
+          throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
         throw new OrderSubmissionSourceError();
       }
     },

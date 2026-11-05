@@ -8,6 +8,7 @@ import {
 } from "@rms/payment";
 import {
   CartError,
+  CheckoutSessionServiceError,
   CheckoutValidationError,
   OrderCreationError,
   parseCheckoutSession,
@@ -264,6 +265,23 @@ it.each([
     error: { code: "payment_items_short", messageKey: "customer.payment.items_short" },
   });
 });
+
+it.each([
+  [new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED"), 422],
+  [new CheckoutSessionServiceError("REQUOTE_REQUIRED"), 409],
+])(
+  "WP-2423: says the menu moved on after checkout began (nothing placed or charged): %s",
+  async (error, status) => {
+    const f = await setup();
+    f.create.mockRejectedValue(error);
+    const response = await f.send();
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: { code: "payment_requote_required", messageKey: "customer.payment.requote_required" },
+    });
+  },
+);
 
 it("WP-2423 abandoned payment: returns to the open payment for {resume:true} only", async () => {
   const f = await setup();

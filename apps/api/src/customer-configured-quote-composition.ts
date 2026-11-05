@@ -6,12 +6,17 @@ import {
   createPostgresCartQuoteExpiryStore,
   createConfiguredCustomerQuoteService,
   createPostgresCartQueryStore,
+  createPostgresCartLineEvidenceStore,
   createPostgresConfiguredCartQuoteStore,
   createPostgresPickupCartBindingReader,
   type ConfiguredCustomerQuoteOptions,
   type DiningCartCheckoutHoldPort,
 } from "@rms/ordering";
-import { createPostgresCatalogOrderSnapshotSource } from "@rms/catalog";
+import {
+  createPostgresCatalogOrderSnapshotSource,
+  createPostgresCatalogSelectionService,
+  createPostgresCurrentMenuReleaseStore,
+} from "@rms/catalog";
 import {
   createPostgresConfiguredPriceQuoteRequestStore,
   createPostgresCurrentConfiguredQuoteService,
@@ -83,6 +88,13 @@ export function createCustomerConfiguredQuoteComposition(
     scope,
     options.pricingReferences,
   );
+  const releases = createPostgresCurrentMenuReleaseStore(options.catalogTransactions, scope);
+  const selection = createPostgresCatalogSelectionService(
+    options.catalogTransactions,
+    { ...options.catalogScope, ...scope, orderType: options.orderType },
+    { ...options.catalogSafety, clock: { now: options.now } },
+  );
+  const lineEvidence = createPostgresCartLineEvidenceStore(options.attachmentTransactions, scope);
   return createConfiguredCustomerQuoteService({
     scope,
     sessions: options.sessions,
@@ -90,6 +102,19 @@ export function createCustomerConfiguredQuoteComposition(
     references: options.references,
     now: options.now,
     pricingChannelCode: options.pricingChannelCode,
+    evidence: {
+      currentMenuVersion: async (observedAt) =>
+        (
+          await releases.load({
+            menuReference: options.catalogScope.menuReference,
+            channelCode: options.catalogScope.channelCode,
+            orderTypeCode: options.catalogScope.orderTypeCode,
+            observedAt,
+          })
+        )?.menuVersionReference ?? null,
+      validateSelection: (input) => selection.validateSelection(input),
+      replace: (input) => lineEvidence.replace(input),
+    },
     ...(options.orderType === "Pickup"
       ? {
           orderType: "Pickup" as const,

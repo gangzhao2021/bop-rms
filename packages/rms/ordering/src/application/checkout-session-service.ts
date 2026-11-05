@@ -69,7 +69,10 @@ export class CheckoutSessionServiceError extends Error {
       | "ITEM_UNAVAILABLE"
       /** WP-2423: the Store's stock can't make the Cart as it stands; `line` says which item and
        * how many of it can still be made. Nothing was created or charged. */
-      | "ITEM_SHORT",
+      | "ITEM_SHORT"
+      /** WP-2423: the menu moved on after this Cart was priced (an owner listed): the guest's
+       * screen prices it again and sends. Nothing was created. */
+      | "REQUOTE_REQUIRED",
     readonly heldUntil: string | null = null,
     readonly line: CheckoutLineRefusal | null = null,
   ) {
@@ -88,6 +91,8 @@ export function checkoutItemRefusal(error: unknown): CheckoutSessionServiceError
     return new CheckoutSessionServiceError("ITEM_SHORT", null, error.line);
   if (error.code === "CHECKOUT_ITEM_UNAVAILABLE")
     return new CheckoutSessionServiceError("ITEM_UNAVAILABLE", null, error.line);
+  if (error.code === "CHECKOUT_REQUOTE_REQUIRED")
+    return new CheckoutSessionServiceError("REQUOTE_REQUIRED");
   return null;
 }
 const fail = (code: CheckoutSessionServiceError["code"]): never => {

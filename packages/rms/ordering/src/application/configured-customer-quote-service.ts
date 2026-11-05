@@ -164,6 +164,7 @@ export function createConfiguredCustomerQuoteService(options: ConfiguredCustomer
           repository: options.repository,
           pricing: options.pricing,
           catalog: options.catalog,
+          ...(options.evidence === undefined ? {} : { evidence: options.evidence }),
           pricingChannelCode: options.pricingChannelCode,
           references: options.references,
           now,

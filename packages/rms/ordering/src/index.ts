@@ -93,6 +93,7 @@ export {
 
 export {
   createPostgresCartQuoteStore,
+  createPostgresCartLineEvidenceStore,
   createPostgresConfiguredCartQuoteStore,
   createPostgresConfiguredCartQuoteReader,
   createPostgresCartQuoteReader,

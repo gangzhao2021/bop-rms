@@ -97,3 +97,38 @@ it("WP-2423: keeps a short item's answer (no retry of the same cart; the guest c
   await c.retry();
   expect(create).toHaveBeenCalledTimes(1);
 });
+it("WP-2423: a menu update makes a new checkout for the new price, never a retry of the old", async () => {
+  const create = vi
+    .fn()
+    .mockRejectedValueOnce(new CheckoutSessionClientError("requote_required"))
+    .mockResolvedValue({ ...session, quoteReference: id(8) });
+  const keys = [id(5), id(6)];
+  const c = createCheckoutSessionController({ create }, () => keys.shift() ?? id(7));
+  await c.start(selected);
+  expect(c.getState()).toEqual({ status: "requote_required", canRetry: false });
+  await c.retry();
+  expect(create).toHaveBeenCalledTimes(1);
+  c.reset();
+  expect(c.getState()).toEqual({ status: "idle" });
+  const priced = { ...selected, quoteReference: id(8) };
+  await c.start(priced);
+  expect(c.getState()).toEqual({ status: "ready", session: { ...session, quoteReference: id(8) } });
+  expect(create.mock.calls).toEqual([
+    [selected, id(5)],
+    [priced, id(6)],
+  ]);
+});
+it("WP-2423: after a send the old price needs, the page can begin again from a ready checkout", async () => {
+  const create = vi.fn().mockResolvedValue(session);
+  const keys = [id(5), id(6)];
+  const c = createCheckoutSessionController({ create }, () => keys.shift() ?? id(7));
+  await c.start(selected);
+  expect(c.getState()).toEqual({ status: "ready", session });
+  c.reset();
+  expect(c.getState()).toEqual({ status: "idle" });
+  await c.start(selected);
+  expect(create.mock.calls).toEqual([
+    [selected, id(5)],
+    [selected, id(6)],
+  ]);
+});

@@ -7,6 +7,7 @@ import {
   parseOrderingInstant,
   parseOrderingReference,
   isGuestCartChannel,
+  type CatalogSelectionEvidence,
 } from "../../domain/cart.js";
 import {
   parseAnyCartQuoteAttachment,
@@ -436,6 +437,63 @@ export function createPostgresConfiguredCartQuoteStore(
   references: CartQuoteAttachmentPorts["references"],
 ): CartQuoteStore<2> {
   return createQuoteStore(runner, scope, references, parseConfiguredCartQuoteAttachment);
+}
+
+/**
+ * WP-2423 DEC-MERCHANT-LOCK-SCOPE: carries cart lines over to the menu version in force. Only the
+ * evidence changes, at the Cart version the caller read: a line added or removed meanwhile (the
+ * Cart moved on) refuses, and nothing the guest chose is touched.
+ */
+export function createPostgresCartLineEvidenceStore(
+  runner: CartQueryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+) {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference);
+  return Object.freeze({
+    async replace(input: {
+      readonly cartReference: string;
+      readonly expectedCartVersion: number;
+      readonly lines: readonly {
+        readonly cartItemReference: string;
+        readonly evidence: CatalogSelectionEvidence;
+      }[];
+    }) {
+      const cart = parseOrderingReference(input.cartReference);
+      await runner.run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [brand, store],
+        );
+        const held = rows(
+          await tx.query(
+            "SELECT aggregate_version FROM rms_ordering.cart WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 FOR UPDATE",
+            [brand, store, cart],
+          ),
+        );
+        if (
+          held.length !== 1 ||
+          Number(closed(held[0], ["aggregate_version"]).aggregate_version) !==
+            input.expectedCartVersion
+        )
+          throw new CartError("CART_VERSION_CONFLICT");
+        for (const line of input.lines) {
+          const changed = await tx.query(
+            "UPDATE rms_ordering.cart_line SET catalog_selection_evidence_json=$5::jsonb WHERE brand_id=$1 AND store_id=$2 AND cart_id=$3 AND cart_line_id=$4",
+            [
+              brand,
+              store,
+              cart,
+              parseOrderingReference(line.cartItemReference),
+              JSON.stringify(line.evidence),
+            ],
+          );
+          if (Object.getOwnPropertyDescriptor(changed, "rowCount")?.value !== 1)
+            throw new CartError("CART_VERSION_CONFLICT");
+        }
+      });
+    },
+  });
 }
 
 /**

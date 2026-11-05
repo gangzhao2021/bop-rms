@@ -254,6 +254,10 @@ describe("counter guest pipeline — WP-2423 Q7", () => {
       sharedStock: true,
     });
     options.checkout.create.mockRejectedValueOnce(
+      new CheckoutSessionServiceError("REQUOTE_REQUIRED"),
+    );
+    expect(await p.startCheckout(guest, checkout)).toEqual({ status: "RequoteRequired" });
+    options.checkout.create.mockRejectedValueOnce(
       new CheckoutSessionServiceError("ITEM_UNAVAILABLE", null, null),
     );
     expect(await p.startCheckout(guest, checkout)).toEqual({

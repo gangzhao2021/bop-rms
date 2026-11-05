@@ -43,7 +43,7 @@ function refusedLine(error: CheckoutSessionServiceError) {
 function reject(
   response: Response,
   status: number,
-  explicit?: "store_closed" | "checkout_in_progress",
+  explicit?: "store_closed" | "checkout_in_progress" | "requote_required",
 ) {
   if (explicit === "checkout_in_progress") {
     // DEC-DINING-ANY-PARTICIPANT-SUBMIT: same code as the Cart and quote refusals.
@@ -155,6 +155,7 @@ export class CustomerCheckoutSessionHandler {
                   CHECKOUT_IN_PROGRESS: 409,
                   ITEM_UNAVAILABLE: 409,
                   ITEM_SHORT: 409,
+                  REQUOTE_REQUIRED: 409,
                 } as const
               )[error.code]
             : 503;
@@ -194,7 +195,9 @@ export class CustomerCheckoutSessionHandler {
           status,
           error instanceof CheckoutSessionServiceError && error.code === "STORE_CLOSED"
             ? "store_closed"
-            : undefined,
+            : error instanceof CheckoutSessionServiceError && error.code === "REQUOTE_REQUIRED"
+              ? "requote_required"
+              : undefined,
         );
         return;
       }
@@ -287,6 +290,7 @@ export class CustomerCheckoutSessionReadHandler {
                   CHECKOUT_IN_PROGRESS: 409,
                   ITEM_UNAVAILABLE: 409,
                   ITEM_SHORT: 409,
+                  REQUOTE_REQUIRED: 409,
                 } as const
               )[error.code]
             : 503,

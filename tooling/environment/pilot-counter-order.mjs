@@ -341,6 +341,12 @@ export async function createInternalCounterOrder(
       },
     }),
     ...(staffDiningRound === undefined ? {} : { staffDiningRound: staffDiningRound.command }),
+    ...(staffDiningRound === undefined
+      ? {}
+      : {
+          tableGuestPipeline: staffDiningRound.pipeline,
+          tableGuestDetails: staffDiningRound.details,
+        }),
     ...(staffDiningRound === undefined ? {} : { diningPayLaterRound: staffDiningRound.payLater }),
     cardMachineRefund: createMerchantCardMachineCancellationRefund({
       persistence,
@@ -579,6 +585,9 @@ async function createInternalStaffDiningRound(
     });
   };
   return {
+    // The table guest's own steps, for the acceptance tests that walk a guest's phone.
+    pipeline,
+    details,
     // WP-2423 item 8 ⑤: staff send a guest round that waited for them to the kitchen.
     payLater,
     command: createMerchantStaffDiningRound({

@@ -52,7 +52,10 @@ import { seedSubmissionInventoryWorkflow } from "./submission-inventory-workflow
 import { seedTaxConfiguration } from "./tax-configuration-seed.mjs";
 
 const { Client, Pool } = pg;
-const id = (n) => "01a7ee00-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const idsOf = (merchant) => (n) =>
+  (0x01a7ee00 + merchant).toString(16).padStart(8, "0") +
+  "-0000-7000-8000-" +
+  n.toString(16).padStart(12, "0");
 const uuidTime = () =>
   Date.now()
     .toString(16)
@@ -86,7 +89,12 @@ export async function prepareRealStaffRoundStore({
   api,
   /** "PayLater": tables pay once at the end. "PayNow": each round is charged on the card machine. */
   paymentTiming = "PayLater",
+  /** 1 and up: another merchant in the same database, with its own synthetic identities. */
+  merchant = 0,
 }) {
+  const id = idsOf(merchant);
+  const fixtureIds = (n) => (0x01a80000 + merchant * 0x100 + n).toString(16).padStart(8, "0");
+  const another = merchant === 0 ? null : (n) => fixtureIds(n);
   const tenantReference = id(1),
     brandReference = id(2),
     storeReference = id(3),
@@ -95,7 +103,7 @@ export async function prepareRealStaffRoundStore({
   const ownerScope = { tenantReference, brandReference, storeReference };
   const scope = { brandReference, storeReference };
   const now = () => new Date().toISOString();
-  let sequence = 0x10000;
+  let sequence = 0x10000 + merchant * 0x1000000;
   const reference = () => uuidTime() + "-7000-8000-" + (sequence++).toString(16).padStart(12, "0");
   const start = Date.parse(
     (await admin.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS at")).rows[0].at,
@@ -104,7 +112,7 @@ export async function prepareRealStaffRoundStore({
   const database = context.clientConfig.database;
 
   // Setup helpers also grant step by step to a role of theirs: never the role under test.
-  const seedRole = "wp2423_rsr_seed_" + context.runId;
+  const seedRole = "wp2423_rsr_seed" + merchant + "_" + context.runId;
   await admin.query(
     "CREATE ROLE " + seedRole + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
   );
@@ -182,7 +190,12 @@ export async function prepareRealStaffRoundStore({
   };
 
   // ── The Store: organization facts, published profile, the pilot's installation files.
-  await seedBrand(admin, { brandReference, policyReference: id(6), from: at });
+  await seedBrand(admin, {
+    brandReference,
+    policyReference: id(6),
+    from: at,
+    ...(merchant === 0 ? {} : { code: "SYNTHETIC_MERCHANT_" + merchant }),
+  });
   await admin.query(
     "INSERT INTO bop_tenant.store (store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,'REAL_ROUND','Synthetic real round Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
     [storeReference, brandReference, at],
@@ -196,6 +209,7 @@ export async function prepareRealStaffRoundStore({
     brandReference,
     storeReference,
     existingOrganizationFacts: true,
+    ...(another === null ? {} : { idPrefix: another(1) }),
   });
   const directory = await realpath(await mkdtemp(join(tmpdir(), "bop-real-staff-round-")));
   await chmod(directory, 0o700);
@@ -213,6 +227,8 @@ export async function prepareRealStaffRoundStore({
     database,
     createdAt: at,
     binding: publicOptions.binding,
+    // Another merchant's own synthetic tax identities, as a served TEST Store has.
+    ...(another === null ? {} : { storeTaxConfiguration: { createdAt: at } }),
   };
   const loadProfile = async () => profile,
     loadMenu = async () => menu;
@@ -237,6 +253,7 @@ export async function prepareRealStaffRoundStore({
     at,
     currentWindow: true,
     taxConfigurationReference: policy.taxConfiguration.configurationReference,
+    ...(another === null ? {} : { idPrefix: another(2) }),
   });
   await seedStoreKitchenInEffect({ admin, role: seedRole, scope, at, id: (n) => id(0x2000 + n) });
 
@@ -247,6 +264,7 @@ export async function prepareRealStaffRoundStore({
     ownerScope,
     actorReference: owner,
     at,
+    ...(another === null ? {} : { idPrefix: another(3) }),
   });
   const workflow = await seedSubmissionInventoryWorkflow({
     runner: () => ({ run: ownerRun }),
@@ -254,6 +272,7 @@ export async function prepareRealStaffRoundStore({
     actorReference: owner,
     at,
     orderType: "DineIn",
+    ...(another === null ? {} : { idPrefix: another(4) }),
   });
   if (paymentTiming === "PayLater")
     await admin.query(
@@ -263,6 +282,7 @@ export async function prepareRealStaffRoundStore({
 
   // ── The menu, through the one-page menu commands an Owner uses (restricted role).
   const dishes = await listRealMenu({
+    id,
     admin,
     context,
     api,
@@ -284,6 +304,7 @@ export async function prepareRealStaffRoundStore({
         cart: { items: [{ sellableReference: soupSku, optionSelections: [] }] },
         stock,
         allergenDeclarationReference: id(0x65),
+        ...(another === null ? {} : { idPrefix: another(5) }),
       }),
     asApi,
     reference,
@@ -296,6 +317,7 @@ export async function prepareRealStaffRoundStore({
     run: ownerRun,
     binding: publicOptions.binding,
     at,
+    idOffset: merchant * 1000,
   });
   const qr = createInternalQrLoaders({
     file: join(directory, "internal-test-qr-key.pem"),
@@ -356,8 +378,9 @@ export async function prepareRealStaffRoundStore({
   let sessions = 0;
   const staff = (actor, extraPermissions) => {
     sessions += 1;
-    const prefix = (0x01a7e000 + sessions * 2).toString(16).padStart(8, "0");
-    const sessionPrefix = (0x01a7e001 + sessions * 2).toString(16).padStart(8, "0");
+    const base = 0x01a7e000 + merchant * 0x1000 + sessions * 2;
+    const prefix = base.toString(16).padStart(8, "0");
+    const sessionPrefix = (base + 1).toString(16).padStart(8, "0");
     return seedMerchantAcceptanceSession({
       admin,
       runner: { run: asApi },
@@ -491,6 +514,7 @@ export async function prepareRealStaffRoundStore({
         });
       }),
     async close() {
+      await dishes.owner.close();
       await resources.close();
       await rm(directory, { recursive: true, force: true });
       await admin.query("DROP OWNED BY " + seedRole).catch(() => undefined);
@@ -504,6 +528,7 @@ export async function prepareRealStaffRoundStore({
  * recipe, and the tea, "a charge, no stock ingredients", marked not prepared by the kitchen.
  */
 async function listRealMenu({
+  id,
   admin,
   context,
   api,
@@ -589,9 +614,11 @@ async function listRealMenu({
       auditReference: id(0x66),
     }),
   );
-  // The authoring commands use one connection of their own, as the restricted role.
+  // The authoring commands use one connection of their own, as the restricted role. It stays open
+  // for the Owner's later changes; `atCommit` holds a step of a listing just before its COMMIT.
   const authoring = new Client(context.clientConfig);
   await authoring.connect();
+  const hooks = { atCommit: null };
   try {
     const persistence = {
       now: () => new Date().toISOString(),
@@ -600,8 +627,10 @@ async function listRealMenu({
           await authoring.query("BEGIN");
           try {
             await authoring.query("SET LOCAL ROLE " + api);
+            await authoring.query("SET LOCAL lock_timeout='2s'");
             await authoring.query("SELECT set_config('bop.tenant_id',$1,true)", [tenantReference]);
             const value = await work(authoring);
+            if (hooks.atCommit !== null) await hooks.atCommit();
             await authoring.query("COMMIT");
             return value;
           } catch (error) {
@@ -743,10 +772,12 @@ async function listRealMenu({
     );
     const soupDish = await saveDish("Hot and sour soup (TEST)", "酸辣汤", "650");
     await bindRecipe(soupDish.skuReference);
-    await commands.command({
-      ...session,
-      body: { action: "ListAll", operationReference: op(), menuReference },
-    });
+    const listAll = () =>
+      commands.command({
+        ...session,
+        body: { action: "ListAll", operationReference: op(), menuReference },
+      });
+    await listAll();
     return {
       tea: {
         skuReference: teaDish.skuReference,
@@ -758,8 +789,17 @@ async function listRealMenu({
         productReference: soupDish.productReference,
         priceMinor: 650n,
       },
+      owner: {
+        hooks,
+        saveDish,
+        listAll,
+        /** The connection the Owner's commands run on, for a test watching what waits on them. */
+        backendPid: () => authoring.processID,
+        close: () => authoring.end(),
+      },
     };
-  } finally {
+  } catch (error) {
     await authoring.end();
+    throw error;
   }
 }

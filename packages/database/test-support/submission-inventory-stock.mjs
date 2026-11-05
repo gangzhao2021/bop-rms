@@ -14,6 +14,8 @@ export async function seedSubmissionInventoryStock({
   actorReference,
   at,
   datedLot = false,
+  /** Another merchant's synthetic identities, when a test has two in one database. */
+  idPrefix = "01909995",
 }) {
   const scope = {
     tenantReference: ownerScope.tenantReference,
@@ -28,7 +30,7 @@ export async function seedSubmissionInventoryStock({
           ? actorReference
           : n === 300
             ? ownerScope.storeReference
-            : "01909995-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+            : idPrefix + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   let sequence = 100;
   const now = at;
   const lotReference = datedLot ? id(304) : null;

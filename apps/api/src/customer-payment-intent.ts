@@ -70,7 +70,9 @@ type ExplicitRejection =
   /** DEC-DINE-IN-PAY-LATER: this table pays each round as it is sent. */
   | "pay_first_table"
   /** WP-2423 item 8 ⑦: the Store turned tips off; pay again with no tip. */
-  | "tips_turned_off";
+  | "tips_turned_off"
+  /** WP-2423: an owner listed after this checkout began; nothing placed, the cart prices again. */
+  | "requote_required";
 function reject(response: Response, status: number, explicit?: ExplicitRejection) {
   const code =
     explicit ??
@@ -214,6 +216,7 @@ function failure(error: unknown) {
         CHECKOUT_IN_PROGRESS: 409,
         ITEM_UNAVAILABLE: 409,
         ITEM_SHORT: 409,
+        REQUOTE_REQUIRED: 409,
       } as const
     )[error.code];
   if (error instanceof PaymentTipSelectionError)
@@ -299,6 +302,11 @@ function stockRejection(error: unknown): ExplicitRejection | undefined {
     (error instanceof CheckoutSessionServiceError && error.code === "ITEM_SHORT")
   )
     return "items_short";
+  if (
+    (error instanceof CheckoutValidationError && error.code === "CHECKOUT_REQUOTE_REQUIRED") ||
+    (error instanceof CheckoutSessionServiceError && error.code === "REQUOTE_REQUIRED")
+  )
+    return "requote_required";
   return undefined;
 }
 /** WP-2423 Q20: what the customer needs to know when another card cannot be tried. */

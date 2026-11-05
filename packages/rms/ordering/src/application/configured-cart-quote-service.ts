@@ -18,6 +18,7 @@ import {
   parseOrderingInstant,
   parseOrderingHash,
   type CartAggregate,
+  type CatalogSelectionEvidence,
   isGuestCartChannel,
 } from "../domain/cart.js";
 // Version-specific on purpose: this service attaches configured (v2) Quotes only.
@@ -28,10 +29,12 @@ import {
 import { parseOrderCatalogLineSnapshot } from "../domain/order-item-snapshot.js";
 import { assertCartLifecycleActive } from "../domain/cart-lifecycle.js";
 import { bindConfiguredCartQuote } from "./configured-cart-quote-binding.js";
+import { validatedCatalogEvidence } from "./cart-item-command-service.js";
 import type {
   CartQuoteAttachmentPorts,
   PricingCartInput,
 } from "./ports/cart-quote-attachment-ports.js";
+import type { CartItemCommandPorts } from "./ports/cart-item-command-ports.js";
 
 export interface ConfiguredCartQuotePorts {
   /** Current Identity/CSRF and Dining participation, not a cached Guest snapshot. */
@@ -47,6 +50,26 @@ export interface ConfiguredCartQuotePorts {
     ): Promise<ConfiguredPriceQuoteSnapshot>;
   };
   readonly catalog: { capture(input: ValidateCatalogSelectionInput): Promise<unknown> };
+  /**
+   * WP-2423 DEC-MERCHANT-LOCK-SCOPE: an owner lists with the tables full. A line added before that
+   * still holds the old menu version, so every price and send was refused until the guest edited
+   * every line. Pricing the cart carries its lines over: each is checked as if added now and its
+   * evidence replaced (the guest changed nothing, so the Cart version stays), and the guest sees
+   * the current total before sending. A line no longer sold is refused as any unsellable line is.
+   */
+  readonly evidence?: {
+    /** The menu version in force now; null when none is (nothing to carry the lines over to). */
+    currentMenuVersion(observedAt: string): Promise<string | null>;
+    validateSelection: CartItemCommandPorts["catalog"]["validateSelection"];
+    replace(input: {
+      readonly cartReference: string;
+      readonly expectedCartVersion: number;
+      readonly lines: readonly {
+        readonly cartItemReference: string;
+        readonly evidence: CatalogSelectionEvidence;
+      }[];
+    }): Promise<void>;
+  };
   readonly pricingChannelCode: string;
   readonly now: () => string;
   readonly repository: {
@@ -178,7 +201,7 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
             return fail();
           return cart;
         }
-        const cart = owned(await ports.repository.loadCart(cartReference));
+        let cart = owned(await ports.repository.loadCart(cartReference));
         if (cart.aggregateVersion < expectedCartVersion)
           throw new CartError("CART_VERSION_CONFLICT");
         await authorize();
@@ -229,6 +252,35 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
           cart.items.some((item) => item.catalogSelectionEvidence === null)
         )
           throw new CartError("CART_QUOTE_INVALID");
+        if (ports.evidence !== undefined) {
+          const evidence = ports.evidence;
+          const observedAt = now();
+          const version = await evidence.currentMenuVersion(observedAt);
+          const carried = cart.items.filter(
+            (item) => item.catalogSelectionEvidence?.menuVersionReference !== version,
+          );
+          if (version !== null && carried.length > 0) {
+            const lines = [];
+            for (const item of carried)
+              lines.push({
+                cartItemReference: item.cartItemReference,
+                evidence: await validatedCatalogEvidence(
+                  evidence,
+                  cart,
+                  item.sellableReference,
+                  item.optionSelections,
+                  observedAt,
+                  item.quantity,
+                  parseOrderingReference(first.session.sessionReference),
+                ),
+              });
+            await authorize();
+            await evidence.replace({ cartReference, expectedCartVersion, lines });
+            cart = owned(await ports.repository.loadCart(cartReference));
+            if (cart.aggregateVersion !== expectedCartVersion)
+              throw new CartError("CART_VERSION_CONFLICT");
+          }
+        }
         const quote = decodeConfiguredPriceQuoteSnapshot(
           encodeConfiguredPriceQuoteSnapshot(
             await ports.pricing.quoteCart(

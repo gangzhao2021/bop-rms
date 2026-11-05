@@ -727,6 +727,43 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     expect(f.onUnexpected).not.toHaveBeenCalled();
   });
 
+  it("WP-2423: an owner listing mid-round asks staff to send again, the round's items taken back", async () => {
+    const atCheckout = setup();
+    atCheckout.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    atCheckout.pipeline.startCheckout.mockResolvedValueOnce({
+      status: "RequoteRequired",
+    } as never);
+    const removedAtCheckout = vi.fn(async () => "Removed" as const);
+    Object.assign(atCheckout.pipeline, { removeItems: removedAtCheckout });
+    await expect(atCheckout.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_PRICED" });
+    expect(removedAtCheckout).toHaveBeenCalledTimes(1);
+    expect(atCheckout.pipeline.preparePayment).not.toHaveBeenCalled();
+    expect(atCheckout.onUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("WP-2423: an owner listing just before the submission does the same, nothing ordered", async () => {
+    const atSubmission = setup();
+    atSubmission.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    atSubmission.pipeline.preparePayment.mockRejectedValueOnce(
+      Object.assign(new Error("checkout validation failed"), {
+        code: "CHECKOUT_REQUOTE_REQUIRED",
+      }),
+    );
+    const removedAtSubmission = vi.fn(async () => "Removed" as const);
+    Object.assign(atSubmission.pipeline, { removeItems: removedAtSubmission });
+    await expect(atSubmission.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NOT_PRICED" });
+    expect(removedAtSubmission).toHaveBeenCalledTimes(1);
+    expect(atSubmission.onUnexpected).not.toHaveBeenCalled();
+  });
+
   it("WP-2423: a failure before the checkout takes the round's items back so a new attempt is sent", async () => {
     const f = setup();
     f.pipeline.addItem.mockResolvedValue({

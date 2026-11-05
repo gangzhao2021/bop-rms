@@ -31,6 +31,8 @@ it("keeps the refusal text for real server refusals only", () => {
   );
   for (const status of ["idle", "pending"] as const)
     expect(checkoutSessionAlert({ status }, false)).toBeNull();
+  // The page prices the cart again and says so itself.
+  expect(checkoutSessionAlert({ status: "requote_required", canRetry: false }, false)).toBeNull();
 });
 
 it("maps a server conflict through the controller to the refusal text", async () => {

@@ -194,6 +194,20 @@ it("WP-2423 Q4: says the Store is not taking orders instead of a generic conflic
     },
   });
 });
+it("WP-2423: says the menu moved on after pricing, so the guest's page prices again", async () => {
+  const f = await setup();
+  f.create.mockRejectedValue(new CheckoutSessionServiceError("REQUOTE_REQUIRED"));
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(response.headers.get("retry-after")).toBe(null);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: {
+      code: "checkout_session_requote_required",
+      messageKey: "customer.checkoutSession.requote_required",
+    },
+  });
+});
 it("WP-2423: names the short cart line and how many are left (409, nothing created)", async () => {
   const f = await setup();
   const line = "018f5400-0000-7000-8000-000000000070";

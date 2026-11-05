@@ -426,6 +426,27 @@ describe("counter order command — WP-2423 Q7", () => {
       expect(onUnexpected).not.toHaveBeenCalled();
     });
 
+    it("WP-2423: an owner listing mid-order asks staff to send again (nothing placed or charged)", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.addItem.mockResolvedValue({
+        status: "Applied",
+        cartVersion: 3,
+        lines: [{ cartItemReference: id(40), quantity: 1 }],
+      } as never);
+      pipeline.startCheckout.mockResolvedValueOnce({ status: "RequoteRequired" } as never);
+      await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_NOT_PRICED" });
+      expect(pipeline.preparePayment).not.toHaveBeenCalled();
+      pipeline.preparePayment.mockRejectedValueOnce(
+        Object.assign(new Error("checkout validation failed"), {
+          code: "CHECKOUT_REQUOTE_REQUIRED",
+        }),
+      );
+      await expect(send({ operationReference: id(33) })).rejects.toMatchObject({
+        code: "COUNTER_ORDER_NOT_PRICED",
+      });
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
     it("never hides the refusal when the stock cannot be read", async () => {
       const { pipeline, send } = setup();
       Object.assign(pipeline, {

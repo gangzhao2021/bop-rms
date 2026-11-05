@@ -294,8 +294,13 @@ function sameSelections(
   );
 }
 
-async function catalogEvidence(
-  ports: CartItemCommandPorts,
+/**
+ * What Catalog says about one cart line now: its evidence when it can still be sold as selected,
+ * CART_SELECTION_INVALID when not. The one check for a line added, changed or carried over a new
+ * menu version.
+ */
+export async function validatedCatalogEvidence(
+  catalog: CartItemCommandPorts["catalog"],
   cart: CartAggregate,
   sellableReference: OrderingReference,
   optionSelections: readonly CartOptionSelection[],
@@ -305,7 +310,7 @@ async function catalogEvidence(
 ): Promise<CatalogSelectionEvidence> {
   let result;
   try {
-    result = await ports.catalog.validateSelection(
+    result = await catalog.validateSelection(
       {
         brandReference: cart.brandReference as never,
         storeReference: cart.storeReference as never,
@@ -484,8 +489,8 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         throw new CartError("CART_VERSION_CONFLICT");
       assertCartLifecycleActive(current.aggregate.lifecycle, requestedAt);
       if (current.aggregate.items.length >= 100) throw new CartError("CART_ITEM_LIMIT_REACHED");
-      const selectionEvidence = await catalogEvidence(
-        ports,
+      const selectionEvidence = await validatedCatalogEvidence(
+        ports.catalog,
         current.aggregate,
         sellableReference,
         optionSelections,
@@ -586,8 +591,8 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
       if (!canMutateItem(item, current.aggregate, current.session))
         throw new CartError("CART_PERMISSION_DENIED");
-      const selectionEvidence = await catalogEvidence(
-        ports,
+      const selectionEvidence = await validatedCatalogEvidence(
+        ports.catalog,
         current.aggregate,
         item.sellableReference,
         optionSelections,

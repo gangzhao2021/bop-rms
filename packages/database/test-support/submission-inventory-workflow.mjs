@@ -12,6 +12,8 @@ export async function seedSubmissionInventoryWorkflow({
   actorReference,
   at,
   orderType,
+  /** Another merchant's synthetic identities, when a test has two in one database. */
+  idPrefix = "01909996",
 }) {
   const id = (n) =>
     n === 1
@@ -20,7 +22,7 @@ export async function seedSubmissionInventoryWorkflow({
         ? scope.brandReference
         : n === 5
           ? actorReference
-          : "01909996-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+          : idPrefix + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const draft = parseWorkflowDefinitionVersion({
     schemaVersion: 1,
     workflowReference: id(3),

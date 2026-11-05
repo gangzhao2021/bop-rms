@@ -34,6 +34,8 @@ export class CheckoutSessionClientError extends Error {
       | "checkout_in_progress"
       | "item_short"
       | "item_unavailable"
+      /** WP-2423: the restaurant updated its menu after this cart was priced; nothing was created. */
+      | "requote_required"
       | "unknown",
     /** WP-2423: the server's bounded wait before retrying, when it sent one. */
     readonly retryAfterSeconds: number | null = null,
@@ -137,6 +139,8 @@ export function createCheckoutSessionClient() {
         throw new CheckoutSessionClientError("item_short", null, refusedLine(payload, true));
       if (response.status === 409 && errorCode(payload) === "checkout_session_item_unavailable")
         throw new CheckoutSessionClientError("item_unavailable", null, refusedLine(payload, false));
+      if (response.status === 409 && errorCode(payload) === "checkout_session_requote_required")
+        throw new CheckoutSessionClientError("requote_required");
       if (![200, 201].includes(response.status))
         throw new CheckoutSessionClientError(
           response.status === 404

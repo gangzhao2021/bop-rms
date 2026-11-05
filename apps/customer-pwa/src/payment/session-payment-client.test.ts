@@ -100,6 +100,24 @@ it("WP-2423 Q4: reports a Store that stopped taking orders before payment starte
   });
 });
 
+it("WP-2423: tells a menu update after checkout began apart from other refusals", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json(
+        { schemaVersion: 1, error: { code: "payment_requote_required" } },
+        { status: 422 },
+      ),
+    ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "requote_required",
+  });
+  await expect(createSessionPaymentClient().sendToKitchen(id(1), id(4))).rejects.toMatchObject({
+    code: "requote_required",
+  });
+});
+
 it("WP-2423: tells items ran out after checkout apart from other refusals", async () => {
   vi.stubGlobal(
     "fetch",

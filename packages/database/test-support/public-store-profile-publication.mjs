@@ -7,8 +7,10 @@ export async function preparePublicStoreProfilePublication({
   version,
   digest,
   tenantReference,
+  /** Another merchant's synthetic identities, when a test has two in one database. */
+  idPrefix = "0190ed16",
 }) {
-  const id = (n) => "0190ed16-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const id = (n) => idPrefix + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const at = version.publishedAt,
     tenant = tenantReference ?? id(90),
     family = id(70);

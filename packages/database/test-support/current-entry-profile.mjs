@@ -24,10 +24,24 @@ export async function prepareCurrentEntryProfile({
   brandReference = ids.brand,
   storeReference = ids.store,
   existingOrganizationFacts = false,
+  /** Another merchant's synthetic identities, when a test has two in one database. */
+  idPrefix = null,
 }) {
   const hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
   const until = new Date(Date.parse(at) + 86400000).toISOString();
-  const profile = candidate({ brandReference, storeReference });
+  const own = (value) =>
+    idPrefix === null
+      ? value
+      : JSON.parse(
+          JSON.stringify(value).replaceAll(
+            "00000000-0000-7000-8000-",
+            idPrefix + "-0000-7000-8000-",
+          ),
+        );
+  const mine = own(ids);
+  const auditId = (n) =>
+    (idPrefix ?? "01909980") + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const profile = own(candidate({ brandReference, storeReference }));
   profile.logo = null;
   profile.timeZone = "America/Toronto";
   profile.effectiveVersion.createdAt = at;
@@ -41,9 +55,14 @@ export async function prepareCurrentEntryProfile({
     admin,
     role,
     scope: { brandReference, storeReference },
-    version: { publishedAt: at, versionReference: ids.profile, publicationReference: ids.release },
+    version: {
+      publishedAt: at,
+      versionReference: mine.profile,
+      publicationReference: mine.release,
+    },
     digest: profile.contentDigest,
     ...(tenantReference ? { tenantReference } : {}),
+    ...(idPrefix === null ? {} : { idPrefix }),
   });
   await admin.query(
     "GRANT USAGE ON SCHEMA bop_tenant,rms_store,platform_helpers,platform_audit TO " + role,
@@ -103,7 +122,7 @@ export async function prepareCurrentEntryProfile({
     timingStore.append(tx, {
       timing,
       recordedAt: at,
-      auditReference: "01909980-0000-7000-8000-000000000003",
+      auditReference: auditId(0xfff3),
       approval: {
         evidenceReference: timing.approvalEvidenceReference,
         familyReference: timing.familyReference,
@@ -151,9 +170,9 @@ export async function prepareCurrentEntryProfile({
     await run((tx) =>
       profiles.append(tx, {
         profile,
-        actorReference: ids.approval,
+        actorReference: mine.approval,
         recordedAt: at,
-        auditReference: "01909980-0000-7000-8000-000000000002",
+        auditReference: auditId(0xfff2),
       }),
     ),
     "Created",
@@ -172,14 +191,14 @@ export async function prepareCurrentEntryProfile({
     transactions: { run },
     binding: {
       tenantReference: publication.tenantReference,
-      publicStoreReference: ids.publicStore,
+      publicStoreReference: mine.publicStore,
       brandReference,
       storeReference,
-      lookupEvidenceReference: ids.lookup,
+      lookupEvidenceReference: mine.lookup,
       validFrom: at,
       validUntil: until,
     },
-    selection: { profileReference: ids.profile, profileVersion: profile.profileVersion },
+    selection: { profileReference: mine.profile, profileVersion: profile.profileVersion },
     authorize: async () => true,
     hashContent: hash,
     hashSnapshot: hash,

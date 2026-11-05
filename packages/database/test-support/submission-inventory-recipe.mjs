@@ -9,13 +9,15 @@ export async function seedSubmissionInventoryRecipe({
   stock,
   /** The ingredient's allergen declaration, for a recipe a menu listing review reads. */
   allergenDeclarationReference,
+  /** Another merchant's synthetic identities, when a test has two in one database. */
+  idPrefix = "01909994",
 }) {
   const id = (n) =>
     n === 2
       ? scope.brandReference
       : n === 3
         ? actorReference
-        : "01909994-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+        : idPrefix + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const digest = (c) => "sha256:" + c.repeat(64);
   const snapshot = {
     recipeReference: id(1),

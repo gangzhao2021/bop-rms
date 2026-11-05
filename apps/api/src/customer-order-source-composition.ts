@@ -1,4 +1,7 @@
-import { createPostgresCatalogOrderSnapshotSource } from "@rms/catalog";
+import {
+  createPostgresCatalogOrderSnapshotSource,
+  createPostgresCurrentMenuReleaseStore,
+} from "@rms/catalog";
 import {
   createPostgresPriceQuoteHistoryReader,
   createPostgresConfiguredPriceQuoteHistoryReader,
@@ -33,10 +36,20 @@ function createVersionedCustomerOrderSourceComposition(
   quoteVersion: 1 | 2,
 ) {
   const scope = Object.freeze({ ...options.scope });
+  const releases = createPostgresCurrentMenuReleaseStore(options.catalogTransactions, scope);
   return (quoteVersion === 2 ? createConfiguredOrderSubmissionSource : createOrderSubmissionSource)(
     {
       scope,
       clock: options.clock,
+      currentMenuVersion: async (observedAt) =>
+        (
+          await releases.load({
+            menuReference: options.catalogScope.menuReference,
+            channelCode: options.catalogScope.channelCode,
+            orderTypeCode: options.catalogScope.orderTypeCode,
+            observedAt,
+          })
+        )?.menuVersionReference ?? null,
       carts: createPostgresCartQueryStore(options.cartTransactions, scope),
       pricing:
         quoteVersion === 2

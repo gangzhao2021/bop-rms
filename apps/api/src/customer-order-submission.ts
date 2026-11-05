@@ -97,6 +97,7 @@ function failure(error: unknown): Failure {
       // Not raised by submission (only by checkout preparation); a changed Cart if it ever is.
       ITEM_UNAVAILABLE: "order_requote_required",
       ITEM_SHORT: "order_requote_required",
+      REQUOTE_REQUIRED: "order_requote_required",
     } as const;
     return codes[error.code];
   }

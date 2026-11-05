@@ -8,7 +8,15 @@ import {
 import { id } from "../../../apps/api/test-support/customer-entry-composition-fixture.ts";
 
 /** Real commands/Audit; Staff authorization is explicitly synthetic test evidence. */
-export async function prepareEntryDiningTable({ admin, role, run, binding, at }) {
+export async function prepareEntryDiningTable({
+  admin,
+  role,
+  run,
+  binding,
+  at,
+  /** Another merchant's table, when a test has two in one database. */
+  idOffset = 0,
+}) {
   await admin.query("GRANT USAGE ON SCHEMA rms_dining TO " + role);
   await admin.query("GRANT SELECT,INSERT,UPDATE ON rms_dining.dining_table TO " + role);
   await admin.query("GRANT SELECT,INSERT ON rms_dining.dining_table_operation TO " + role);
@@ -17,7 +25,7 @@ export async function prepareEntryDiningTable({ admin, role, run, binding, at })
     brandReference: binding.brandReference,
     storeReference: binding.storeReference,
   };
-  let sequence = 30000;
+  let sequence = 30000 + idOffset;
   const reference = () => id(++sequence);
   const references = {
     hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
@@ -29,19 +37,19 @@ export async function prepareEntryDiningTable({ admin, role, run, binding, at })
     authorization: {
       authorize: async (input) => ({
         ...scope,
-        actorReference: id(31000),
+        actorReference: id(31000 + idOffset),
         purpose: "dining-table",
         permission: { effect: "Allow", action: "dining.operate", scopeKind: "Store" },
         audit: {
           auditId: reference(),
           brandId: scope.brandReference,
           storeId: scope.storeReference,
-          actor: { type: "User", reference: id(31000) },
+          actor: { type: "User", reference: id(31000 + idOffset) },
           actionCode: "DINING_TABLE_" + input.action.toUpperCase(),
           targetType: "DiningTable",
           targetId: input.targetReference,
           reasonCode: "AUTHORIZED_OPERATION",
-          correlationId: id(31001),
+          correlationId: id(31001 + idOffset),
           occurredAt: input.observedAt,
           sourceChannel: "API",
           dataClassification: "Internal",
@@ -61,9 +69,9 @@ export async function prepareEntryDiningTable({ admin, role, run, binding, at })
   });
   let table = createDiningTable({
     ...scope,
-    tableReference: id(31002),
+    tableReference: id(31002 + idOffset),
     stableLabel: "T01",
-    areaReference: id(31003),
+    areaReference: id(31003 + idOffset),
     areaCode: "MAIN",
     capacity: 4,
     accessibilityAttributes: [],
@@ -100,8 +108,8 @@ export async function prepareEntryDiningTable({ admin, role, run, binding, at })
   await transition("IssueQr");
   return {
     tableReference: table.tableReference,
-    publicTableReference: id(31004),
-    qrReference: id(31005),
+    publicTableReference: id(31004 + idOffset),
+    qrReference: id(31005 + idOffset),
     qrVersion: table.qrVersion,
     revoke: () => transition("RevokeQr"),
   };

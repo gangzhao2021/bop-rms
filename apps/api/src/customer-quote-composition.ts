@@ -145,8 +145,11 @@ function initialFailure(error: unknown): QuoteCartResult {
       return { status: "VersionConflict" };
     case "CART_IDEMPOTENCY_CONFLICT":
       return { status: "IdempotencyConflict" };
+    // CART_SELECTION_INVALID: a line the menu no longer sells, found when it was carried over a new
+    // menu version.
     case "CART_QUOTE_INVALID":
     case "CART_QUOTE_EXPIRED":
+    case "CART_SELECTION_INVALID":
       return { status: "InvalidConfiguration" };
     default:
       return unavailable;
