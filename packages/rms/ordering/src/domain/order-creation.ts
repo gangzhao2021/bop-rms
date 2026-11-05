@@ -46,8 +46,8 @@ export type OrderCreationErrorCode = (typeof orderCreationErrorCodes)[number];
 export class OrderCreationError extends Error {
   readonly code: OrderCreationErrorCode;
 
-  constructor(code: OrderCreationErrorCode) {
-    super("order creation is unavailable");
+  constructor(code: OrderCreationErrorCode, options?: { readonly cause?: unknown }) {
+    super("order creation is unavailable", options);
     this.name = "OrderCreationError";
     this.code = code;
   }

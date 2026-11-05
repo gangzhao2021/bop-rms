@@ -10,13 +10,22 @@ const codeOf = (error) => {
   const code = error?.code ?? codeMessage ?? error?.name;
   return { code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE", codeMessage };
 };
+const framesOf = (error) =>
+  String(error?.stack ?? "")
+    .match(
+      /(?:apps\/(?:api|worker)\/(?:dist|src)|packages\/[a-z]+\/[a-z-]+\/src|tooling\/environment)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
+    )
+    ?.slice(0, 5) ?? [];
 export function reportUnexpected(event, error, context = {}) {
   const { code, codeMessage } = codeOf(error);
   // v15 2026-11-01: a wrapped error names the code of what it wraps (owner services rewrite
   // their own failures generically), up to three levels; codes only.
   const causes = [];
-  for (let at = error?.cause; at !== undefined && at !== null && causes.length < 3; at = at.cause)
+  let deepest = error;
+  for (let at = error?.cause; at !== undefined && at !== null && causes.length < 3; at = at.cause) {
     causes.push(codeOf(at).code);
+    deepest = at;
+  }
   console.error(
     JSON.stringify({
       event,
@@ -39,12 +48,9 @@ export function reportUnexpected(event, error, context = {}) {
       /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*:v[1-9][0-9]*$/.test(context.consumer)
         ? { consumer: context.consumer }
         : {}),
-      frames:
-        String(error?.stack ?? "")
-          .match(
-            /(?:apps\/(?:api|worker)\/(?:dist|src)|packages\/[a-z]+\/[a-z-]+\/src|tooling\/environment)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
-          )
-          ?.slice(0, 5) ?? [],
+      frames: framesOf(error),
+      // Where the wrapped failure itself happened, when something wraps it.
+      ...(deepest !== error ? { causeFrames: framesOf(deepest) } : {}),
     }),
   );
 }

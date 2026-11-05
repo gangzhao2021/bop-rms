@@ -61,8 +61,11 @@ import {
   type OrderCreationQueryTransaction,
 } from "./order-creation-query-store.js";
 
-function fail(): never {
-  throw new OrderCreationError("ORDER_CREATE_DEPENDENCY_UNAVAILABLE");
+function fail(cause?: unknown): never {
+  throw new OrderCreationError(
+    "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    cause === undefined ? undefined : { cause },
+  );
 }
 function closed(value: unknown, fields: readonly string[]): Record<string, unknown> {
   if (
@@ -831,7 +834,7 @@ export function createPostgresOrderCreationStore<V extends 1 | 2 = 1>(
         // WP-2423: the Inventory finalizer found too little stock; the transaction rolled back.
         if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT")
           throw error;
-        return fail();
+        return fail(error);
       }
     },
   });
