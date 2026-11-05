@@ -1,11 +1,14 @@
 import {
   listBrandOptionSets,
   listBrandProducts,
+  listCurrentProductOptionBindings,
   loadBrandProduct,
   type ProductLifecycleTransaction,
 } from "@rms/catalog";
 import {
   createPostgresOptionPriceAuthoringStore,
+  listBrandWideOptionPrices,
+  listWaitingOptionPriceRules,
   OptionPriceAuthoringError,
   recordOptionPriceSoleOperatorApproval,
   recordPricingSingleStoreListing,
@@ -176,6 +179,44 @@ const brandWide = (rule: OptionPriceRuleSnapshot | null) =>
 /** The rule this page owns for a product's option: one per binding and option. */
 export const optionPriceRuleReference = (bindingReference: string, optionReference: string) =>
   derivedReference(bindingReference, "option-price:" + optionReference);
+/**
+ * WP-2423 item 3: the extra a choice usually costs at this Brand: the amount most of its current
+ * dishes charge (a waiting price over the published one); a tie goes to the latest change. Only a
+ * choice that is on a dish now votes: a binding removed from a dish, or a dish retired, keeps its
+ * old rule but no longer says what pearls cost. Derived, so Pricing stays the only owner of the
+ * price and there is no second answer to drift apart.
+ */
+export function usualOptionPrices(
+  prices: readonly {
+    readonly bindingReference: string;
+    readonly optionReference: string;
+    readonly amountMinor: string;
+    readonly updatedAt: string;
+  }[],
+  current: readonly { readonly bindingReference: string; readonly optionReference: string }[],
+): Readonly<Record<string, string>> {
+  const onDishes = new Set(current.map((row) => row.bindingReference + ":" + row.optionReference));
+  const votes = new Map<string, Map<string, { count: number; latest: string }>>();
+  for (const price of prices) {
+    if (!onDishes.has(price.bindingReference + ":" + price.optionReference)) continue;
+    const amounts = votes.get(price.optionReference) ?? new Map();
+    const vote = amounts.get(price.amountMinor) ?? { count: 0, latest: "" };
+    amounts.set(price.amountMinor, {
+      count: vote.count + 1,
+      latest: price.updatedAt > vote.latest ? price.updatedAt : vote.latest,
+    });
+    votes.set(price.optionReference, amounts);
+  }
+  const usual: Record<string, string> = {};
+  for (const [option, amounts] of votes) {
+    const [winner] = [...amounts].sort(
+      ([, a], [, b]) => b.count - a.count || b.latest.localeCompare(a.latest),
+    );
+    if (winner !== undefined) usual[option] = winner[0];
+  }
+  return Object.freeze(usual);
+}
+
 // TEST-ONLY pilot publication policy identity (WP-2423 bypass list): four-eyes publication.
 const pilotPolicy = {
   family: "01a00000-0000-7000-8000-00000000a423",
@@ -225,17 +266,27 @@ export function createMerchantOptionPrices(options: {
   const name = (names: Readonly<Record<string, string>>, fallback = "") =>
     staffContentName(names, options.locale) || fallback;
 
-  /** Every product option customers can be offered: product, set, option. */
-  async function productOptions(tx: Tx, s: Scope) {
+  /**
+   * Every product option customers can be offered: product, set, option. `only`: one dish (a dish
+   * save and the dish editor read no more than they need); null: none (a new dish); absent: all.
+   */
+  async function productOptions(tx: Tx, s: Scope, only?: string | null) {
+    if (only === null) return [];
     const sets = await listBrandOptionSets(catalogTx(tx), { brandReference: s.brand });
     const products = [];
-    for (const summary of await listBrandProducts(catalogTx(tx) as never, {
-      brandReference: s.brand,
-    })) {
+    const references =
+      only !== undefined
+        ? [only]
+        : (
+            await listBrandProducts(catalogTx(tx) as never, {
+              brandReference: s.brand,
+            })
+          ).map((summary) => summary.productReference);
+    for (const reference of references) {
       const product = await loadBrandProduct(
         catalogTx(tx) as never,
         { brandReference: s.brand },
-        summary.productReference,
+        reference,
       );
       if (product === null || product.draft.optionBindings.length === 0) continue;
       products.push({
@@ -442,22 +493,40 @@ export function createMerchantOptionPrices(options: {
     throw error;
   };
 
-  const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
+  const query = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    /** One dish; null: no dish (a new one); absent: every dish (the Option prices page). */
+    productReference?: string | null;
+    /** The usual extras too (for the dish editor; a save reading a dish's own prices skips them). */
+    usual?: boolean;
+  }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
       options.persistence.transactions.run((tx) =>
         withRememberedBrandAuthorization(tx, async () => {
           const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
-          const products = await productOptions(tx, s);
-          const { store, beforeCommit } = priceStore(
-            tx,
-            s,
-            derivedReference(s.actor, "read"),
-            "Read",
-          );
+          const products = await productOptions(tx, s, input.productReference);
+          const usual =
+            input.usual === true
+              ? usualOptionPrices(
+                  await listBrandWideOptionPrices(tx as never, { brandReference: s.brand }),
+                  await listCurrentProductOptionBindings(catalogTx(tx) as never, {
+                    brandReference: s.brand,
+                  }),
+                )
+              : {};
           const rows = [];
           try {
+            // One store window per dish: its few seconds cover one dish's choices, so a long menu
+            // cannot run out the window and fail the whole page.
             for (const product of products) {
+              const { store, beforeCommit } = priceStore(
+                tx,
+                s,
+                derivedReference(s.actor, "read"),
+                "Read",
+              );
               const optionSets = [];
               for (const set of product.optionSets) {
                 const optionRows = [];
@@ -481,8 +550,8 @@ export function createMerchantOptionPrices(options: {
                 optionSets.push({ ...set, options: optionRows });
               }
               rows.push({ ...product, optionSets });
+              await beforeCommit();
             }
-            await beforeCommit();
           } catch (error) {
             return mapError(error);
           }
@@ -522,13 +591,55 @@ export function createMerchantOptionPrices(options: {
                     verifiedUntil: gate.verifiedUntil,
                   },
             products: rows,
+            usual,
           };
         }),
       ),
     );
   };
 
-  const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
+  /**
+   * WP-2423 item 3: the choice prices waiting to be listed on a dish now, each with the version a
+   * publish needs and whether the viewer wrote it. A listing reads this one list instead of every
+   * choice of every dish (`query`), which a long menu ran out of its window.
+   */
+  const waiting = async (input: { sessionCookie: unknown; csrf: unknown }) => {
+    const current = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          const onDishes = new Set(
+            (
+              await listCurrentProductOptionBindings(catalogTx(tx) as never, {
+                brandReference: s.brand,
+              })
+            ).map((row) => row.bindingReference + ":" + row.optionReference),
+          );
+          return (await listWaitingOptionPriceRules(tx as never, { brandReference: s.brand }))
+            .filter(
+              (rule) =>
+                onDishes.has(rule.bindingReference + ":" + rule.optionReference) &&
+                rule.ruleReference ===
+                  optionPriceRuleReference(rule.bindingReference, rule.optionReference),
+            )
+            .map((rule) => ({
+              ruleReference: rule.ruleReference,
+              aggregateVersion: rule.aggregateVersion,
+              byViewer: rule.draftAuthorActorReference === s.actor,
+            }));
+        }),
+      ),
+    );
+  };
+
+  const command = async (input: {
+    sessionCookie: unknown;
+    csrf: unknown;
+    body: unknown;
+    /** Setting one dish's prices: its choices are all that is read (not an input of the route). */
+    productReference?: string;
+  }) => {
     const body = parseOptionPriceCommandBody(input.body);
     const current = await session(input);
     return retryTransactionConflict(() =>
@@ -537,9 +648,13 @@ export function createMerchantOptionPrices(options: {
           const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
           if (body.action === "SetPrices" ? !s.permissions.mayEdit : !s.permissions.mayApprove)
             fail("PermissionDenied");
-          const products = await productOptions(tx, s);
           const sole = body.action === "Publish" && body.approvalMode === "SoleOperator";
           const single = body.action === "Publish" && body.approvalMode === "SingleStoreListing";
+          // Publishing by rule reads no dish, unless it must say whose draft each rule holds.
+          const products =
+            body.action === "Publish" && !sole
+              ? []
+              : await productOptions(tx, s, input.productReference);
           // WP-2423 item 8 ⑥: the author's own publication at a single store ("List it"): they
           // hold price approval and the Brand has exactly one store (held until this commits).
           let listingMode: MerchantDirectListingMode = "SingleStoreListing";
@@ -722,5 +837,5 @@ export function createMerchantOptionPrices(options: {
       ),
     );
   };
-  return { query, command };
+  return { query, command, waiting };
 }

@@ -63,6 +63,18 @@ const sha256 = (value: string) => "sha256:" + sha256Hex(value);
 const iso = (value: unknown) =>
   value instanceof Date ? value.toISOString() : new Date(String(value)).toISOString();
 const scopeSql = "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)";
+/**
+ * WP-2423 item 3: an option recipe write takes both tables at once, in the order every reader of
+ * them asks. A publish holds ROW EXCLUSIVE on the modifier versions until it commits and its
+ * kitchen content then asks SHARE on both, so two publishes would each wait for the other (a
+ * deadlock, across merchants on this database). Taken first, they queue instead. Guests' orders and
+ * kitchen intake take SHARE on the same tables with a 2 s lock timeout: writers keep the hold short.
+ */
+const optionRecipeWriteLockSql =
+  "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_modifier_version IN SHARE ROW EXCLUSIVE MODE";
+export async function lockOptionRecipeTables(tx: RecipeAuthoringTransaction): Promise<void> {
+  await tx.query(optionRecipeWriteLockSql, []);
+}
 /** A stable UUIDv7-shaped reference derived from another one (keeps its timestamp). */
 export function derivedRecipeReference(base: string, purpose: string): string {
   const digest = sha256Hex("bop-rms/option-recipe-change/v1:" + base + ":" + purpose);
@@ -583,6 +595,7 @@ export async function saveOptionRecipeChange(
       fail("OPTION_RECIPE_CONFLICT");
     return { status: "AlreadyApplied", changeVersionReference: String(recorded.id) };
   }
+  await lockOptionRecipeTables(tx);
   const changeReference = derivedRecipeReference(
     input.target.bindingReference,
     "option-recipe-change:" + input.target.optionReference,
@@ -914,6 +927,7 @@ export async function publishOptionRecipeChange(
         }
       : {}),
   }));
+  await lockOptionRecipeTables(tx);
   await tx.query(scopeSql, [brand, ""]);
   const writer = createPostgresRecipeModifierWriteStore(runnerOf(tx), brand);
   const content = createPostgresRecipePreparationContentStore({
@@ -1105,4 +1119,100 @@ export async function optionRecipeCovered(
       if (row === undefined) return false;
     }
   return true;
+}
+
+/** One target's coverage: its sizes all have a recipe, and how many rules cover it fully. */
+export interface OptionRecipeCoverage {
+  /** Every size of the target has a published recipe bound here. */
+  readonly bound: boolean;
+  /** Every bound recipe has a published rule for each quantity. */
+  readonly covered: boolean;
+  /** How many rules a change of this target writes: bound recipes × quantities. */
+  readonly rules: number;
+}
+const coverageChunk = 500;
+const chunks = <T>(values: readonly T[], size: number): readonly (readonly T[])[] =>
+  Array.from({ length: Math.ceil(values.length / size) }, (_, index) =>
+    values.slice(index * size, (index + 1) * size),
+  );
+/**
+ * WP-2423 item 3: `optionRecipeCovered` for many targets at once, with the same answer: a read of
+ * the bound versions and a read of the rules, however many targets. Reads every row (no limit that
+ * would turn a truncated answer into "not covered"), in chunks of targets. Answers per target given.
+ */
+export async function optionRecipesCovered(
+  tx: RecipeAuthoringTransaction,
+  scope: RecipeAuthoringScope,
+  targets: readonly OptionRecipeTarget[],
+  at: string,
+): Promise<ReadonlyMap<OptionRecipeTarget, OptionRecipeCoverage>> {
+  await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
+  const versionsOf = new Map<string, Set<string>>();
+  const skus = [...new Set(targets.flatMap((target) => target.skuReferences))];
+  for (const part of chunks(skus, coverageChunk))
+    for (const row of (
+      await tx.query(
+        `SELECT DISTINCT b.sku_id::text sku,b.recipe_version_id::text version
+         FROM rms_recipe.recipe_scope_binding b
+         JOIN rms_recipe.recipe_version v ON v.recipe_version_id=b.recipe_version_id AND v.recipe_id=b.recipe_id AND v.brand_id=b.brand_id
+         WHERE b.brand_id=$1 AND b.option_binding_id IS NULL AND b.sku_id=ANY($2::uuid[])
+           AND b.effective_from<=$3::timestamptz AND (b.effective_until IS NULL OR b.effective_until>$3::timestamptz)
+           AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding_end e
+             WHERE e.recipe_scope_binding_id=b.recipe_scope_binding_id AND e.ended_at<=$3::timestamptz)`,
+        [scope.brandReference, [...part], at],
+      )
+    ).rows) {
+      const versions = versionsOf.get(String(row.sku)) ?? new Set<string>();
+      versions.add(String(row.version));
+      versionsOf.set(String(row.sku), versions);
+    }
+  const published = new Set<string>();
+  const ruleKey = (binding: string, option: string, version: string, quantity: unknown) =>
+    binding + ":" + option + ":" + version + ":" + String(quantity);
+  const allVersions = [...new Set([...versionsOf.values()].flatMap((set) => [...set]))];
+  if (allVersions.length > 0)
+    for (const part of chunks(targets, coverageChunk))
+      for (const row of (
+        await tx.query(
+          `SELECT binding_id::text binding,option_id::text option,recipe_version_id::text version,selected_quantity quantity
+           FROM (SELECT DISTINCT ON (rule_id) lifecycle,binding_id,option_id,recipe_version_id,selected_quantity
+             FROM rms_recipe.recipe_modifier_version
+             WHERE brand_id=$1 AND recipe_version_id=ANY($2::uuid[])
+               AND (binding_id,option_id) IN (SELECT * FROM unnest($3::uuid[],$4::uuid[]))
+               AND lifecycle<>'Draft' AND occurred_at<=$5::timestamptz
+             ORDER BY rule_id,version DESC) v
+           WHERE lifecycle='Published'`,
+          [
+            scope.brandReference,
+            allVersions,
+            part.map((target) => target.bindingReference),
+            part.map((target) => target.optionReference),
+            at,
+          ],
+        )
+      ).rows)
+        published.add(
+          ruleKey(String(row.binding), String(row.option), String(row.version), row.quantity),
+        );
+  const coverage = new Map<OptionRecipeTarget, OptionRecipeCoverage>();
+  for (const target of targets) {
+    const versions = new Set(
+      target.skuReferences.flatMap((sku) => [...(versionsOf.get(sku) ?? [])]),
+    );
+    const bound = target.skuReferences.every((sku) => (versionsOf.get(sku)?.size ?? 0) > 0);
+    coverage.set(target, {
+      bound,
+      covered:
+        bound &&
+        [...versions].every((version) =>
+          target.quantities.every((quantity) =>
+            published.has(
+              ruleKey(target.bindingReference, target.optionReference, version, quantity),
+            ),
+          ),
+        ),
+      rules: versions.size * target.quantities.length,
+    });
+  }
+  return coverage;
 }

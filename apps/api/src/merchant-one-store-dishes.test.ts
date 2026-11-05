@@ -62,6 +62,18 @@ function fakes() {
     published: true,
     declared: null as unknown,
     optionRecipes: new Map<string, { published: boolean; reviews: string[] }>(),
+    /** How many rounds of choice recipes a save took, and each round's choices. */
+    coverRounds: [] as { skuReference: string; choices: Map<string, string | null> }[],
+    /** The size has no recipe yet (its allergens are not declared). */
+    noRecipe: false,
+    /** A round reports this many left without covering any. */
+    stuck: false,
+    /** The next round throws this. */
+    coverFails: null as unknown,
+    /** Product commands answer what they recorded back then (a replay after a lost response). */
+    replayProductCommands: false,
+    /** Each round covers this many choices. */
+    perRound: 12,
     /** The menu's own check refuses (a choice without a recipe). */
     menuRefused: false,
     // Store availability by size: absent = never decided here (NotOffered).
@@ -88,9 +100,16 @@ function fakes() {
       },
     },
     products: {
-      query: async () => ({ product: state.product }),
+      query: async () => {
+        calls.push("product:read");
+        return { product: state.product };
+      },
       command: async ({ body }: { body: Record<string, unknown> }) => {
         record("product", body);
+        const replay = state.replayProductCommands
+          ? { status: "AlreadyApplied", product: state.product }
+          : null;
+        if (replay !== null && replay.product !== null) return replay;
         if (body.action === "Create") {
           state.product = {
             productReference: id(10),
@@ -111,7 +130,7 @@ function fakes() {
             optionSets: [],
             presentation: { description: "", descriptionZh: "", photo: null },
           };
-          return { product: { productReference: id(10) } };
+          return { status: "Applied", product: state.product };
         }
         const p = state.product;
         if (p === null) throw new Error("TEST_NO_PRODUCT");
@@ -126,7 +145,7 @@ function fakes() {
           p.sizes = p.sizes.map((s) => ({ ...s, lifecycle: "Active" }));
         }
         p.aggregateVersion += 1;
-        return {};
+        return { status: "Applied", product: p };
       },
     },
     prices: {
@@ -164,6 +183,10 @@ function fakes() {
       },
     },
     optionPrices: {
+      waiting: async () =>
+        [...state.optionPrices]
+          .filter(([, v]) => v.pending !== null)
+          .map(([rule]) => ({ ruleReference: rule, aggregateVersion: 1, byViewer: true })),
       query: async () => ({
         products:
           state.product === null
@@ -220,7 +243,10 @@ function fakes() {
         record("menu", body);
         if (body.action === "Check") {
           if (state.menuRefused)
-            throw Object.assign(new Error("refused"), { code: "OptionRecipeMissing" });
+            throw Object.assign(new Error("refused"), {
+              name: "MerchantMenuError",
+              code: "OptionRecipeMissing",
+            });
           return { status: "Ready" };
         }
         if (body.action === "Revise") state.published = false;
@@ -239,36 +265,26 @@ function fakes() {
       },
     },
     optionRecipes: {
-      query: async () => ({
-        options: [MILD, HOT].map((o) => {
-          const r = state.optionRecipes.get(o);
-          return {
-            bindingReference: id(30),
-            optionReference: o,
-            sizes: [{ skuReference: id(11) }],
-            covered: r?.published === true,
-            change:
-              r === undefined
-                ? null
-                : {
-                    changeVersionReference: id(40),
-                    version: 1,
-                    published: r.published,
-                    reviews: r.reviews.map((kind) => ({ kind, decision: "Approved" })),
-                  },
-          };
-        }),
-      }),
-      command: async ({ body }: { body: Record<string, unknown> }) => {
-        record("optionRecipe", body);
-        const o = String(body.optionReference ?? "");
-        if (body.action === "Save") state.optionRecipes.set(o, { published: false, reviews: [] });
-        for (const [k, v] of state.optionRecipes) {
-          if (body.action === "Review" && !v.published) v.reviews.push(String(body.kind));
-          if (body.action === "Publish" && v.reviews.length === 2)
-            state.optionRecipes.set(k, { ...v, published: true });
+      coverDishChoices: async (input: {
+        skuReference: string;
+        choices: Map<string, string | null>;
+      }) => {
+        if (state.coverFails !== null) {
+          const failure = state.coverFails;
+          state.coverFails = null;
+          throw failure;
         }
-        return {};
+        const uncovered = [...input.choices.keys()].filter(
+          (o) => state.optionRecipes.get(o)?.published !== true,
+        );
+        if (uncovered.length === 0) return { remaining: 0, waitingForAllergens: false };
+        if (state.noRecipe) return { remaining: uncovered.length, waitingForAllergens: true };
+        calls.push("optionRecipe:cover");
+        state.coverRounds.push({ skuReference: input.skuReference, choices: input.choices });
+        if (state.stuck) return { remaining: uncovered.length, waitingForAllergens: false };
+        const taken = uncovered.slice(0, state.perRound);
+        for (const o of taken) state.optionRecipes.set(o, { published: true, reviews: [] });
+        return { remaining: uncovered.length - taken.length, waitingForAllergens: false };
       },
     },
   };
@@ -322,14 +338,7 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       "menu:Revise",
       "menu:SaveDraft",
       "allergens:DeclareDish",
-      "optionRecipe:Save",
-      "optionRecipe:Review",
-      "optionRecipe:Review",
-      "optionRecipe:Publish",
-      "optionRecipe:Save",
-      "optionRecipe:Review",
-      "optionRecipe:Review",
-      "optionRecipe:Publish",
+      "optionRecipe:cover",
     ]);
     expect(state.books[0]?.prices).toEqual([{ sellableReference: id(11), amountMinor: "1288" }]);
     expect(state.menu.sections[0]?.items).toEqual([{ skuReference: id(11), featured: false }]);
@@ -341,7 +350,135 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
     // answers AlreadyApplied).
     calls.length = 0;
     await dishes.command({ ...session, body: save({ productReference: id(10) }) });
-    expect(calls).toEqual(["allergens:DeclareDish"]);
+    expect(calls).toEqual(["product:read", "allergens:DeclareDish"]);
+  });
+
+  describe("WP-2423 item 3: saving a dish with many choices", () => {
+    const manyChoices = (count: number, offset = 200) => ({
+      choiceGroups: [
+        {
+          optionSetReference: SPICE,
+          options: Array.from({ length: count }, (_, n) => ({
+            optionReference: id(offset + n),
+            amountMinor: "0",
+          })),
+        },
+      ],
+    });
+
+    it("a dish with 19 choices covers them through coverDishChoices, not one command per step", async () => {
+      const { calls, state, dishes } = fakes();
+      state.perRound = 6;
+      const saved = await dishes.command({ ...session, body: save(manyChoices(19)) });
+      expect(saved).toMatchObject({ status: "Saved", choicesWaiting: false });
+      expect(calls.filter((c) => c.startsWith("optionRecipe"))).toEqual([
+        "optionRecipe:cover",
+        "optionRecipe:cover",
+        "optionRecipe:cover",
+        "optionRecipe:cover",
+      ]);
+      // Every round is for this dish's one size and all of its choices, with no item to add.
+      expect(state.coverRounds[0]?.skuReference).toBe(id(11));
+      expect([...(state.coverRounds[0]?.choices.values() ?? [])].every((v) => v === null)).toBe(
+        true,
+      );
+      expect(state.coverRounds[0]?.choices.size).toBe(19);
+      // A new dish needs no read the commands already answered.
+      expect(calls).not.toContain("product:read");
+    });
+
+    it("a replay reads the product and the Store's availability again", async () => {
+      const { calls, state, dishes } = fakes();
+      await dishes.command({ ...session, body: save({ choiceGroups: [] }) });
+      // The response of the first save was lost, and staff hid the dish since: the same save again
+      // answers what it recorded back then, and the dish stays hidden.
+      calls.length = 0;
+      state.replayProductCommands = true;
+      state.offered.set(id(11), "Hidden");
+      await dishes.command({ ...session, body: save({ choiceGroups: [] }) });
+      expect(calls[0]).toBe("product:Create");
+      expect(calls).toContain("product:read");
+      expect(calls).not.toContain("availability:Offer");
+      expect(state.offered.get(id(11))).toBe("Hidden");
+    });
+
+    it("a dish whose allergens are not declared yet saves, and says its choices wait", async () => {
+      const { calls, state, dishes } = fakes();
+      state.noRecipe = true;
+      const saved = await dishes.command({ ...session, body: save({ allergens: null }) });
+      expect(saved).toMatchObject({ status: "Saved", choicesWaiting: true });
+      expect(calls).not.toContain("optionRecipe:cover");
+    });
+
+    it("allergens sent and still no recipe is a real failure, not a waiting dish", async () => {
+      const { state, dishes } = fakes();
+      state.noRecipe = true;
+      await expect(dishes.command({ ...session, body: save() })).rejects.toMatchObject({
+        code: "NoRecipe",
+        productReference: id(10),
+      });
+    });
+
+    it("a round that covers nothing stops as stopped part-way, naming the dish", async () => {
+      const { state, dishes } = fakes();
+      state.stuck = true;
+      await expect(dishes.command({ ...session, body: save() })).rejects.toMatchObject({
+        code: "StoppedPartWay",
+        productReference: id(10),
+      });
+    });
+
+    it("a lock that outlived its retries is stopped part-way too, never a refusal", async () => {
+      const { state, dishes } = fakes();
+      state.coverFails = Object.assign(new Error("conflict"), {
+        code: "TENANT_DATABASE_TRANSACTION_CONFLICT",
+      });
+      const failure = await dishes.command({ ...session, body: save() }).catch((e: unknown) => e);
+      expect(failure).toBeInstanceOf(MerchantOneStoreDishError);
+      expect(failure).toMatchObject({ code: "StoppedPartWay", productReference: id(10) });
+    });
+
+    it("a page's refusal stays what it was, and names the dish once it exists", async () => {
+      const { state, dishes } = fakes();
+      state.coverFails = Object.assign(new Error("denied"), {
+        name: "MerchantOptionRecipeError",
+        code: "PermissionDenied",
+      });
+      await expect(dishes.command({ ...session, body: save() })).rejects.toMatchObject({
+        code: "PermissionDenied",
+        productReference: id(10),
+      });
+    });
+
+    it("no price and no section leave both as they are (an existing dish only)", async () => {
+      const { calls, state, dishes } = fakes();
+      await dishes.command({ ...session, body: save({ allergens: null }) });
+      state.books[0]?.prices.splice(0, 1, { sellableReference: id(11), amountMinor: "999" });
+      calls.length = 0;
+      state.published = true;
+      await dishes.command({
+        ...session,
+        body: save({
+          productReference: id(10),
+          operationReference: id(105),
+          priceMinor: null,
+          sectionCode: null,
+          allergens: null,
+        }),
+      });
+      expect(calls.filter((c) => c.startsWith("price"))).toEqual([]);
+      expect(calls).not.toContain("menu:SaveDraft");
+      // A listed menu still opens a draft: what changed is listed with it.
+      expect(calls).toContain("menu:Revise");
+      expect(state.books[0]?.prices).toEqual([{ sellableReference: id(11), amountMinor: "999" }]);
+      for (const missing of [{ priceMinor: null }, { sectionCode: null }])
+        expect(() => parseOneStoreDishBody(save(missing))).toThrow(MerchantOneStoreDishError);
+      expect(
+        parseOneStoreDishBody(
+          save({ productReference: id(10), priceMinor: null, sectionCode: null }),
+        ),
+      ).toMatchObject({ priceMinor: null, sectionCode: null });
+    });
   });
 
   it("WP-2423 item 8 ⑦: declares a charge with no stock ingredients in the same save", async () => {
@@ -402,7 +539,7 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
         allergens: null,
       }),
     });
-    expect(calls).toEqual(["price:CreateDraft", "price:SaveDraft", "menu:Revise"]);
+    expect(calls).toEqual(["product:read", "price:CreateDraft", "price:SaveDraft", "menu:Revise"]);
     expect(state.books[1]?.prices).toEqual([{ sellableReference: id(11), amountMinor: "1388" }]);
   });
 

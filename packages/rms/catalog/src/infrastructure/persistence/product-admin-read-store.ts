@@ -107,6 +107,40 @@ export async function listBrandProductSections(
   return found;
 }
 
+/**
+ * WP-2423 item 3: which choices are on which binding of the Brand's products now: the current
+ * version of every product not archived. A binding removed from a dish, or a dish retired, is not
+ * here. Caller authorizes (catalog.option_set.read) and restores the Store scope it needs.
+ */
+export async function listCurrentProductOptionBindings(
+  tx: Tx,
+  scope: { readonly brandReference: string },
+): Promise<
+  readonly {
+    readonly productReference: string;
+    readonly bindingReference: string;
+    readonly optionReference: string;
+  }[]
+> {
+  const brand = parseCatalogReference(scope.brandReference);
+  await brandScope(tx, brand);
+  return (
+    await tx.query(
+      `SELECT p.product_id::text product,b.binding_id::text binding,o.option_id::text option
+       FROM rms_catalog.product p
+       JOIN rms_catalog.product_version v ON v.product_id=p.product_id AND v.brand_id=p.brand_id AND v.status='Draft'
+       JOIN rms_catalog.product_option_binding b ON b.product_id=p.product_id AND b.brand_id=p.brand_id AND b.product_version_id=v.product_version_id
+       JOIN rms_catalog.product_option_binding_option o ON o.binding_id=b.binding_id AND o.product_id=b.product_id AND o.brand_id=b.brand_id
+       WHERE p.brand_id=$1 AND p.lifecycle<>'Archived'`,
+      [brand],
+    )
+  ).rows.map((row) => ({
+    productReference: String(row.product),
+    bindingReference: String(row.binding),
+    optionReference: String(row.option),
+  }));
+}
+
 /** The Product with its current version; null when it does not belong to the Brand. */
 export async function loadBrandProduct(
   tx: Tx,

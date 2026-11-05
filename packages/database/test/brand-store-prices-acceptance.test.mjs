@@ -238,7 +238,7 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
           dishes: createMerchantOneStoreDishes({
             products: createMerchantProducts(common),
             prices,
-            optionPrices: { query: async () => ({ products: [] }), command: unused.command },
+            optionPrices: { waiting: async () => [], command: unused.command },
             menus,
             dishAllergens: unused,
             optionRecipes: unused,

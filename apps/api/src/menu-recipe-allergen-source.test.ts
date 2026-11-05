@@ -34,6 +34,33 @@ vi.mock("@rms/recipe", async (importOriginal) => ({
           results.push(await resolve(tx, { ...query, selections }));
         return results;
       },
+      resolveCoverage: async (
+        tx: unknown,
+        query: object,
+        covering: readonly unknown[],
+        everySet: () => readonly unknown[],
+      ) => {
+        const list = async (configurations: readonly unknown[]) => {
+          const results = [];
+          for (const selections of configurations)
+            results.push(
+              (await resolve(tx, { ...query, selections })) as {
+                modifierRules: { changes: unknown[] }[];
+              },
+            );
+          return results;
+        };
+        const first = await list(covering);
+        const changesNothing = first.every((recipe) =>
+          recipe.modifierRules.every((rule) => rule.changes.length === 0),
+        );
+        const selections = changesNothing ? covering : everySet();
+        return {
+          selections,
+          results: changesNothing ? first : await list(selections),
+          changesNothing,
+        };
+      },
     };
   },
 }));
@@ -88,6 +115,8 @@ beforeEach(() => {
   fixtures.recipe = {
     configuredIngredients: [requirement()],
     graph: [],
+    // A choice that does change the recipe, so every set of choices is reviewed.
+    modifierRules: [{ changes: [{ action: "Remove" }] }],
     observedAt: input.recipe.observedAt,
     sourceDigest: "sha256:" + "a".repeat(64),
   };
@@ -164,7 +193,9 @@ it("resolves every legal quantity and deduplicates shared source evidence", asyn
   expect(
     result.configurations.map((item) => item.selections.map((selection) => selection.quantity)),
   ).toEqual([[], [1], [2]]);
-  expect(fixtures.requests).toHaveLength(3);
+  // Every option at every quantity first (2), to see whether any changes the recipe, then every set.
+  expect(fixtures.requests).toHaveLength(5);
+  expect(result.changesNothing).toBe(false);
   // One allergen read covers every configuration (v15 2026-10-22: one per configuration was slow).
   expect(fixtures.allergenReads).toBe(1);
   expect(result.configurations.map((item) => item.evidenceReferences)).toEqual([
@@ -174,6 +205,25 @@ it("resolves every legal quantity and deduplicates shared source evidence", asyn
   ]);
   expect(result.allergens.evidence).toHaveLength(1);
   expect(result.sourceDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+});
+it("WP-2423 item 3: where no choice changes the recipe, every option at every quantity is the whole review", async () => {
+  fixtures.recipe = {
+    ...(fixtures.recipe as object),
+    modifierRules: [{ changes: [] }],
+  };
+  const result = await complete().resolve(tx, completeInput());
+  expect(
+    result.configurations.map((item) => item.selections.map((selection) => selection.quantity)),
+  ).toEqual([[1], [2]]);
+  expect(fixtures.requests).toHaveLength(2);
+  expect(result.changesNothing).toBe(true);
+  // At another Store of the menu one does: this one is then reviewed set by set too.
+  fixtures.requests = [];
+  const everySet = await complete().resolve(tx, { ...completeInput(), everySet: true });
+  expect(everySet.changesNothing).toBe(false);
+  expect(
+    everySet.configurations.map((item) => item.selections.map((selection) => selection.quantity)),
+  ).toEqual([[], [1], [2]]);
 });
 it("rejects the whole coverage when a later configuration has no source", async () => {
   fixtures.failAt = 3;

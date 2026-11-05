@@ -366,6 +366,63 @@ export interface CatalogReviewOptionSelection {
   readonly quantity: number;
 }
 
+/** Independent groups: the Nth configuration takes each group's Nth option and quantity. */
+function coverEveryOption(
+  rules: ReturnType<typeof parsedRules>,
+  budget: { readonly maximumConfigurations: number },
+): readonly (readonly CatalogReviewOptionSelection[])[] {
+  const groups = [...rules]
+    .sort((a, b) => a.bindingReference.localeCompare(b.bindingReference))
+    .map((candidate) => {
+      const options = [...candidate.options].sort((a, b) =>
+        a.optionReference.localeCompare(b.optionReference),
+      );
+      const select = (
+        chosen: { readonly optionReference: CatalogReference; readonly quantity: number } | null,
+      ) => {
+        // Filled up to the group's minimum from its first options.
+        const selection: { optionReference: CatalogReference; quantity: number }[] =
+          chosen === null ? [] : [{ ...chosen }];
+        let total = chosen?.quantity ?? 0;
+        for (const option of options) {
+          if (total >= candidate.minimumQuantity) break;
+          if (option.optionReference === chosen?.optionReference) continue;
+          const quantity = Math.min(option.maximumQuantity, candidate.minimumQuantity - total);
+          selection.push({ optionReference: option.optionReference, quantity });
+          total += quantity;
+        }
+        return total < candidate.minimumQuantity || total > candidate.maximumQuantity
+          ? null
+          : selection.map((item) =>
+              Object.freeze({ bindingReference: candidate.bindingReference, ...item }),
+            );
+      };
+      const least = select(null);
+      const steps = options.flatMap((option) =>
+        Array.from(
+          { length: Math.min(option.maximumQuantity, candidate.maximumQuantity) },
+          (_, index) => select({ optionReference: option.optionReference, quantity: index + 1 }),
+        ).flatMap((selection) => (selection === null ? [] : [selection])),
+      );
+      return { least: least ?? steps[0] ?? null, steps };
+    });
+  // A group nothing valid can be chosen in: no configuration at all, as a search would find.
+  if (groups.some((group) => group.least === null))
+    throw new CatalogError("CATALOG_LIFECYCLE_CONFLICT");
+  const count = Math.max(1, ...groups.map((group) => group.steps.length));
+  if (count > budget.maximumConfigurations)
+    throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+  return Object.freeze(
+    Array.from({ length: count }, (_, index) =>
+      Object.freeze(
+        groups
+          .flatMap((group) => group.steps[index] ?? group.least ?? [])
+          .sort((a, b) => a.optionReference.localeCompare(b.optionReference)),
+      ),
+    ),
+  );
+}
+
 /** Complete review coverage only. Budget exhaustion never returns a partial list.
  * No current publication/availability or customer authorization is inferred.
  *
@@ -375,6 +432,11 @@ export interface CatalogReviewOptionSelection {
  * quantity, never on combinations of quantities — such as recipe allergens and per-quantity recipe
  * rules: two pumps of a syrup add the same ingredients as one, but still need their own rule. The
  * budget counts the configurations returned. Default: every valid quantity combination.
+ *
+ * `coverage: "every-option"` (WP-2423 item 3) returns as few valid configurations as cover every
+ * option at every quantity, with no search: all a review needs when no option changes the recipe.
+ * A 19-choice drink has about 10,000 distinct sets of options, the whole menu's review budget. Rules
+ * with conditions or conflicts take the "distinct-options" answer, a superset of the same coverage.
  */
 export function enumerateCatalogReviewSelections(
   rulesInput: unknown,
@@ -382,9 +444,14 @@ export function enumerateCatalogReviewSelections(
     maximumConfigurations: number;
     maximumSearchSteps: number;
   },
-  coverage: "every-quantity" | "distinct-options" = "every-quantity",
+  coverage: "every-quantity" | "distinct-options" | "every-option" = "every-quantity",
 ): readonly (readonly CatalogReviewOptionSelection[])[] {
-  if (coverage !== "every-quantity" && coverage !== "distinct-options") return invalid();
+  if (
+    coverage !== "every-quantity" &&
+    coverage !== "distinct-options" &&
+    coverage !== "every-option"
+  )
+    return invalid();
   if (
     !Number.isSafeInteger(budget.maximumConfigurations) ||
     budget.maximumConfigurations < 1 ||
@@ -395,6 +462,15 @@ export function enumerateCatalogReviewSelections(
   )
     return invalid();
   const rules = parsedRules(rulesInput);
+  if (
+    coverage === "every-option" &&
+    rules.every(
+      (candidate) =>
+        candidate.activationOptionReferences.length === 0 &&
+        candidate.options.every((option) => option.conflictOptionReferences.length === 0),
+    )
+  )
+    return coverEveryOption(rules, budget);
   const owner = new Map(
     rules.flatMap((candidate) =>
       candidate.options.map(
@@ -454,7 +530,7 @@ export function enumerateCatalogReviewSelections(
         const configuration = Object.freeze(
           [...selected.values()].sort((a, b) => a.optionReference.localeCompare(b.optionReference)),
         );
-        if (coverage === "distinct-options") {
+        if (coverage !== "every-quantity") {
           const set = configuration.map((item) => item.optionReference).join(",");
           const quantities = configuration.map(
             (item) => item.optionReference + "×" + item.quantity,

@@ -402,19 +402,20 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       const realAllergens = createMerchantDishAllergens({ ...common, references: { next: op } });
       const declarations = [];
       let asBefore = false;
+      let stopAtAllergens = false;
       const declaredAllergens = {
         command: async (input) => {
+          if (stopAtAllergens) throw new Error("TEST stop at the allergens");
           declarations.push(input.body);
           return realAllergens.command(input);
         },
       };
       const realOptionRecipes = createMerchantOptionRecipes(common);
       const optionRecipes = {
-        query: realOptionRecipes.query,
-        command: async (input) => {
-          if (asBefore && input.body.action === "Save")
-            throw new Error("TEST stop at a choice recipe");
-          return realOptionRecipes.command(input);
+        ...realOptionRecipes,
+        coverDishChoices: async (input) => {
+          if (asBefore) throw new Error("TEST stop at a choice recipe");
+          return realOptionRecipes.coverDishChoices(input);
         },
       };
       const availability = createMerchantAvailability(common);
@@ -580,7 +581,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       // is on the menu with that dish (it offers the combo's own choice groups); saving it again
       // from Edit finishes that same dish, and no second combo or dish is made.
       asBefore = true;
-      await assert.rejects(dishes.command({ ...session, body: comboBody() }), /TEST stop/u);
+      await assert.rejects(
+        dishes.command({ ...session, body: comboBody() }),
+        (error) =>
+          // A stop part-way to the owner, with what really stopped it kept.
+          error.code === "StoppedPartWay" && /TEST stop/u.test(String(error.cause)),
+      );
       asBefore = false;
       const stopped = (await combos.query(session)).combos;
       assert.equal(stopped.length, 1);
@@ -1361,6 +1367,40 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           )
         ).rows[0].n,
         2,
+      );
+      // WP-2423 item 3: a combo stopped before its own (empty) allergen declaration has no recipe,
+      // and no form to declare it on. Its choices can't be covered yet, so that is no "saved, its
+      // choices wait": saving it again declares it, and finishes it.
+      stopAtAllergens = true;
+      await assert.rejects(
+        dishes.command({
+          ...session,
+          body: comboBody({ name: "Combo stopped early (TEST)", nameZh: "没存完的套餐" }),
+        }),
+        { code: "StoppedPartWay" },
+      );
+      stopAtAllergens = false;
+      const early = (await combos.query(session)).combos.find(
+        (combo) => combo.name === "Combo stopped early (TEST)",
+      );
+      assert.equal(early.dishRecorded, true);
+      const finished = await dishes.command({
+        ...session,
+        body: comboBody({
+          name: "Combo stopped early (TEST)",
+          nameZh: "没存完的套餐",
+          bundleReference: early.bundleReference,
+          expectedAggregateVersion: early.aggregateVersion,
+          slots: comboBody().slots.map((slot, n) => ({ ...slot, code: "SLOT-" + (n + 1) })),
+        }),
+      });
+      assert.equal(finished.status, "Saved");
+      assert.equal(finished.productReference, early.productReference);
+      assert.equal(
+        (await realOptionRecipes.query(session)).options
+          .filter((row) => row.sizes.some((size) => size.skuReference === finished.skuReference))
+          .every((row) => row.covered),
+        true,
       );
     } finally {
       await admin.end();

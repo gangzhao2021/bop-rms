@@ -153,6 +153,91 @@ const selectState = `SELECT r.option_price_rule_id::text rule_id,r.brand_id::tex
 
 /** Borrowed actual transaction only. Results remain tentative until its owning
  * host executes both hooks and COMMIT; the API then calls assertFinalized. */
+/** The Brand-wide price for every size, channel and order type, in a rule version's columns. */
+const brandWideVersion =
+  "v.scope_kind='Brand' AND v.sku_id IS NULL AND v.channel_code IS NULL AND v.order_type IS NULL AND v.included_quantity=0";
+interface OptionPriceReadTransaction {
+  query(
+    sql: string,
+    values: readonly unknown[],
+  ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+}
+
+/**
+ * WP-2423 item 3: the Brand-wide choice prices waiting to be published, in one plain read of the
+ * Brand's rules, so listing a menu never walks every choice of every dish inside one store window.
+ * Each publish still checks its rule against `aggregateVersion`. Caller authorizes.
+ */
+export async function listWaitingOptionPriceRules(
+  tx: OptionPriceReadTransaction,
+  scope: { readonly brandReference: string },
+): Promise<
+  readonly {
+    readonly ruleReference: string;
+    readonly bindingReference: string;
+    readonly optionReference: string;
+    readonly aggregateVersion: number;
+    readonly amountMinor: string;
+    readonly draftAuthorActorReference: string;
+  }[]
+> {
+  const brand = parsePricingReference(scope.brandReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true)", [brand]);
+  return (
+    await tx.query(
+      `SELECT r.option_price_rule_id::text rule,r.binding_id::text binding,r.option_id::text option,r.aggregate_version::text version,
+         v.unit_amount_minor::text amount,r.draft_author_actor_id::text author
+       FROM rms_pricing.option_price_rule r
+       JOIN rms_pricing.option_price_rule_version v ON v.option_price_rule_version_id=r.draft_version_id AND v.brand_id=r.brand_id
+       WHERE r.brand_id=$1 AND r.draft_version_id IS NOT NULL AND ${brandWideVersion}
+       ORDER BY r.option_price_rule_id`,
+      [brand],
+    )
+  ).rows.map((row) => ({
+    ruleReference: String(row.rule),
+    bindingReference: String(row.binding),
+    optionReference: String(row.option),
+    aggregateVersion: Number(row.version),
+    amountMinor: String(row.amount),
+    draftAuthorActorReference: String(row.author),
+  }));
+}
+
+/**
+ * WP-2423 item 3: what each Brand-wide choice price is now (a waiting price over the published one),
+ * by binding and option, in one plain read with no table lock. Feeds the usual extra a new dish
+ * starts from. Caller authorizes.
+ */
+export async function listBrandWideOptionPrices(
+  tx: OptionPriceReadTransaction,
+  scope: { readonly brandReference: string },
+): Promise<
+  readonly {
+    readonly bindingReference: string;
+    readonly optionReference: string;
+    readonly amountMinor: string;
+    readonly updatedAt: string;
+  }[]
+> {
+  const brand = parsePricingReference(scope.brandReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true)", [brand]);
+  return (
+    await tx.query(
+      `SELECT r.binding_id::text binding,r.option_id::text option,v.unit_amount_minor::text amount,${utc("r.updated_at")} updated
+       FROM rms_pricing.option_price_rule r
+       JOIN rms_pricing.option_price_rule_version v
+         ON v.option_price_rule_version_id=COALESCE(r.draft_version_id,r.current_version_id) AND v.brand_id=r.brand_id
+       WHERE r.brand_id=$1 AND ${brandWideVersion}`,
+      [brand],
+    )
+  ).rows.map((row) => ({
+    bindingReference: String(row.binding),
+    optionReference: String(row.option),
+    amountMinor: String(row.amount),
+    updatedAt: String(row.updated),
+  }));
+}
+
 export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuthoringStoreOptions) {
   const tx = options.transaction,
     queryPort = tx.query,

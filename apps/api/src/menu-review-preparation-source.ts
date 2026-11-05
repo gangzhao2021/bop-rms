@@ -288,67 +288,84 @@ export function createMenuReviewPreparationSource(options: {
           const optionReferences = new Map<string, Set<string>>();
           // WP-2423 ⑪: evidence per distinct set of chosen options (every Store and channel).
           const choiceEvidence = new Map<string, { options: string[]; evidence: Set<string> }>();
-          for (const store of [...menu.draft.storeReferences].sort())
-            for (const channel of optionSource.channels) {
-              const resolved = await recipes.resolve(tx, {
-                recipe: {
-                  actorType: "User",
-                  actorReference: actor,
-                  action: "ResolveMenuRecipeFacts",
-                  purpose: "ReviewMenu",
-                  brandReference: brand,
-                  storeReference: store,
-                  skuReference: product.sellableReference,
-                  observedAt: at,
-                },
-                rules: channel.rules,
-                registryVersionReference,
-                defaultLocale: locale,
-                budget: {
-                  maximumConfigurations: maximumConfigurations - resolvedConfigurations,
-                  maximumSearchSteps,
-                },
-              });
-              resolvedConfigurations += resolved.configurations.length;
-              if (
-                registry !== null &&
-                canonicalizeRfc8785(registry) !== canonicalizeRfc8785(resolved.allergens.registry)
-              )
-                return fail();
-              registry = resolved.allergens.registry;
-              for (const item of resolved.allergens.evidence) {
-                const existing = evidence.get(item.evidenceReference);
-                if (existing && canonicalizeRfc8785(existing) !== canonicalizeRfc8785(item))
-                  return fail();
-                evidence.set(item.evidenceReference, item);
-              }
-              for (const configuration of resolved.configurations) {
-                for (const reference of configuration.evidenceReferences)
-                  allReferences.add(reference);
-                const chosen = [
-                  ...new Set(configuration.selections.map((item) => item.optionReference)),
-                ].sort();
-                const entry = choiceEvidence.get(chosen.join(",")) ?? {
-                  options: chosen,
-                  evidence: new Set<string>(),
-                };
-                for (const reference of configuration.evidenceReferences)
-                  entry.evidence.add(reference);
-                choiceEvidence.set(chosen.join(","), entry);
-                for (const selection of configuration.selections) {
-                  const union =
-                    optionReferences.get(selection.optionReference) ?? new Set<string>();
-                  for (const reference of configuration.evidenceReferences) union.add(reference);
-                  optionReferences.set(selection.optionReference, union);
-                }
-              }
-              recipeDependencies.push({
-                sellableReference: product.sellableReference,
+          const resolveAt = async (
+            store: string,
+            channel: (typeof optionSource.channels)[number],
+            everySet: boolean,
+          ) => {
+            const resolved = await recipes.resolve(tx, {
+              recipe: {
+                actorType: "User",
+                actorReference: actor,
+                action: "ResolveMenuRecipeFacts",
+                purpose: "ReviewMenu",
+                brandReference: brand,
                 storeReference: store,
-                channelCode: channel.channelCode,
-                sourceDigest: resolved.sourceDigest,
-              });
+                skuReference: product.sellableReference,
+                observedAt: at,
+              },
+              rules: channel.rules,
+              registryVersionReference,
+              defaultLocale: locale,
+              budget: {
+                maximumConfigurations: maximumConfigurations - resolvedConfigurations,
+                maximumSearchSteps,
+              },
+              everySet,
+            });
+            resolvedConfigurations += resolved.configurations.length;
+            return resolved;
+          };
+          const reviewed = [];
+          for (const store of [...menu.draft.storeReferences].sort())
+            for (const channel of optionSource.channels)
+              reviewed.push({ store, channel, resolved: await resolveAt(store, channel, false) });
+          // WP-2423 item 3: where another Store's recipe does change with a choice, guests get what
+          // each set of choices contains, so every Store of the menu is reviewed set by set.
+          const changesNothing = reviewed.every((item) => item.resolved.changesNothing);
+          if (!changesNothing)
+            for (const item of reviewed)
+              if (item.resolved.changesNothing)
+                item.resolved = await resolveAt(item.store, item.channel, true);
+          for (const { store, channel, resolved } of reviewed) {
+            if (
+              registry !== null &&
+              canonicalizeRfc8785(registry) !== canonicalizeRfc8785(resolved.allergens.registry)
+            )
+              return fail();
+            registry = resolved.allergens.registry;
+            for (const item of resolved.allergens.evidence) {
+              const existing = evidence.get(item.evidenceReference);
+              if (existing && canonicalizeRfc8785(existing) !== canonicalizeRfc8785(item))
+                return fail();
+              evidence.set(item.evidenceReference, item);
             }
+            for (const configuration of resolved.configurations) {
+              for (const reference of configuration.evidenceReferences)
+                allReferences.add(reference);
+              const chosen = [
+                ...new Set(configuration.selections.map((item) => item.optionReference)),
+              ].sort();
+              const entry = choiceEvidence.get(chosen.join(",")) ?? {
+                options: chosen,
+                evidence: new Set<string>(),
+              };
+              for (const reference of configuration.evidenceReferences)
+                entry.evidence.add(reference);
+              choiceEvidence.set(chosen.join(","), entry);
+              for (const selection of configuration.selections) {
+                const union = optionReferences.get(selection.optionReference) ?? new Set<string>();
+                for (const reference of configuration.evidenceReferences) union.add(reference);
+                optionReferences.set(selection.optionReference, union);
+              }
+            }
+            recipeDependencies.push({
+              sellableReference: product.sellableReference,
+              storeReference: store,
+              channelCode: channel.channelCode,
+              sourceDigest: resolved.sourceDigest,
+            });
+          }
           paths.push({
             sellableReference: product.sellableReference,
             productVersionReference: product.productVersionReference,
@@ -363,7 +380,8 @@ export function createMenuReviewPreparationSource(options: {
                   ]),
               ),
             ),
-            ...(optionReferences.size === 0
+            // No choice changes the dish: the dish's own allergens are what any choices contain.
+            ...(optionReferences.size === 0 || changesNothing
               ? {}
               : { choiceEvidence: compactMenuChoiceEvidence(choiceEvidence) }),
           });

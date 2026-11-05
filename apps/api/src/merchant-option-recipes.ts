@@ -20,8 +20,9 @@ import {
 } from "@rms/catalog";
 import {
   listOptionRecipeChanges,
+  lockOptionRecipeTables,
   OptionRecipeChangeError,
-  optionRecipeCovered,
+  optionRecipesCovered,
   parseOptionRecipeChangeContent,
   publishOptionRecipeChange,
   reviewOptionRecipeChange,
@@ -36,6 +37,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { recipeIngredientItems } from "./recipe-ingredient-items.js";
 import { createStaffLabels } from "./merchant-staff-labels.js";
+import { derivedReference } from "./merchant-products.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { staffContentName } from "./staff-content-locale.js";
 
@@ -195,6 +197,13 @@ const changeErrors: Record<OptionRecipeChangeError["code"], MerchantOptionRecipe
   OPTION_RECIPE_NOT_SINGLE_STORE: "NotSingleStore",
 };
 
+/**
+ * WP-2423 item 3: the most rules one transaction of a dish save writes. A guest's order and kitchen
+ * intake at any merchant on this database wait behind the hold with a 2 s lock timeout, so a batch
+ * stays near 0.3 s; a choice with more rules than this (up to 20 of each) goes alone.
+ */
+export const OPTION_RECIPE_RULES_PER_TRANSACTION = 12;
+
 export function createMerchantOptionRecipes(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -235,17 +244,26 @@ export function createMerchantOptionRecipes(options: {
   const name = (names: Readonly<Record<string, string>>, fallback = "") =>
     staffContentName(names, options.locale) || fallback;
 
-  /** Each product option and what a change must cover: the product's sizes and quantities. */
-  async function targets(tx: Tx, s: Scope) {
+  /**
+   * Each product option and what a change must cover: the product's sizes and quantities. With a
+   * `productReference`, that one dish only (a dish save never reads the rest of the menu).
+   */
+  async function targets(tx: Tx, s: Scope, productReference: string | null = null) {
     const sets = await listBrandOptionSets(ctx(tx), { brandReference: s.brandReference });
     const rows = [];
-    for (const summary of await listBrandProducts(ctx(tx) as never, {
-      brandReference: s.brandReference,
-    })) {
+    const products =
+      productReference !== null
+        ? [productReference]
+        : (
+            await listBrandProducts(ctx(tx) as never, {
+              brandReference: s.brandReference,
+            })
+          ).map((summary) => summary.productReference);
+    for (const reference of products) {
       const product = await loadBrandProduct(
         ctx(tx) as never,
         { brandReference: s.brandReference },
-        summary.productReference,
+        reference,
       );
       if (product === null) continue;
       for (const binding of product.draft.optionBindings) {
@@ -287,6 +305,91 @@ export function createMerchantOptionRecipes(options: {
     throw error;
   };
 
+  /** WP-2423 Q19 and item 8 ⑥: the Brand's recipe review gates, read in this transaction. */
+  function reviewGates(tx: Tx, s: Scope, at: string) {
+    const gateInput = (actor: string) => ({
+      tenantReference: s.tenantReference,
+      brandReference: s.brandReference,
+      storeReference: s.storeReference,
+      actorReference: actor,
+      permissionCode: "recipe.approve",
+      observedAt: at,
+      allowed: async () => s.permissions.mayReview || s.permissions.mayPublish,
+    });
+    // The author's own single-store listing review: they hold recipe approval and the Brand has
+    // exactly this one store (held until this commits).
+    const singleStore = (actor: string) =>
+      requireMerchantBrandSingleStore(tx as never, {
+        brandReference: s.brandReference,
+        storeReference: s.storeReference,
+        actorReference: actor,
+        permissionCode: "recipe.approve",
+        observedAt: at,
+        allowed: async () => s.permissions.mayReview || s.permissions.mayPublish,
+      });
+    return { gateInput, singleStore };
+  }
+  /**
+   * What publishing a change asks about its reviewers, answered in this transaction. Each answer
+   * is remembered for the rest of the transaction: a dish save publishes many changes by the same
+   * reviewers, and these reads have no business inside its hold on the recipe tables.
+   */
+  function publishChecks(tx: Tx, s: Scope, at: string) {
+    const { gateInput, singleStore } = reviewGates(tx, s, at);
+    const once = <T>(memo: Map<string, Promise<T>>, key: string, read: () => Promise<T>) => {
+      const known = memo.get(key);
+      if (known !== undefined) return known;
+      const pending = read();
+      memo.set(key, pending);
+      return pending;
+    };
+    const authorized = new Map<string, Promise<boolean>>();
+    const soleOperator = new Map<string, Promise<boolean>>();
+    const listing = new Map<string, Promise<boolean>>();
+    const stillAuthorized = (actor: string) =>
+      once(
+        authorized,
+        actor,
+        async () =>
+          (await brandActionHeldBy(tx as unknown as RoleAssignmentTransaction, {
+            brandReference: s.brandReference,
+            actorReferences: [actor],
+            action: "recipe.approve",
+            at,
+          })) &&
+          (await confirmActiveBrandMembers(tx as unknown as MemberDirectoryTransaction, {
+            brandReference: s.brandReference,
+            actorReferences: [actor],
+            at,
+          })),
+      );
+    return {
+      reviewersAuthorized: async (actors: readonly string[]) => {
+        if (actors.length === 0) return false;
+        for (const actor of new Set(actors)) if (!(await stillAuthorized(actor))) return false;
+        return true;
+      },
+      soleOperatorEffective: (actor: string) =>
+        once(
+          soleOperator,
+          actor,
+          async () =>
+            (await merchantBrandSoleOperatorGate(tx as never, gateInput(actor))).status ===
+            "Effective",
+        ),
+      singleStoreListingEffective: (actor: string) =>
+        once(listing, actor, async () => {
+          try {
+            await singleStore(actor);
+            return true;
+          } catch (error) {
+            if (error instanceof MerchantSingleStoreListingError) return false;
+            throw error;
+          }
+        }),
+    };
+  }
+
   const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>
@@ -324,6 +427,12 @@ export function createMerchantOptionRecipes(options: {
             at,
             names: people,
           });
+          const coverage = await optionRecipesCovered(
+            rtx(tx),
+            scope,
+            rows.map((row) => row.target),
+            at,
+          );
           const options_ = [];
           for (const row of rows) {
             const change =
@@ -337,7 +446,7 @@ export function createMerchantOptionRecipes(options: {
               optionReference: row.target.optionReference,
               quantities: row.target.quantities,
               sizes: row.sizes,
-              covered: await optionRecipeCovered(rtx(tx), scope, row.target, at),
+              covered: coverage.get(row.target)?.covered === true,
               change:
                 change === null
                   ? null
@@ -438,27 +547,7 @@ export function createMerchantOptionRecipes(options: {
                 expectedVersion: body.expectedVersion,
               });
             }
-            // WP-2423 Q19: the Brand's recipe review gate, read in this transaction.
-            const gateInput = (actor: string) => ({
-              tenantReference: s.tenantReference,
-              brandReference: s.brandReference,
-              storeReference: s.storeReference,
-              actorReference: actor,
-              permissionCode: "recipe.approve",
-              observedAt: at,
-              allowed: async () => s.permissions.mayReview || s.permissions.mayPublish,
-            });
-            // WP-2423 item 8 ⑥: the author's own single-store listing review: they hold recipe
-            // approval and the Brand has exactly this one store (held until this commits).
-            const singleStore = (actor: string) =>
-              requireMerchantBrandSingleStore(tx as never, {
-                brandReference: s.brandReference,
-                storeReference: s.storeReference,
-                actorReference: actor,
-                permissionCode: "recipe.approve",
-                observedAt: at,
-                allowed: async () => s.permissions.mayReview || s.permissions.mayPublish,
-              });
+            const { gateInput, singleStore } = reviewGates(tx, s, at);
             if (body.action === "Review") {
               if (!s.permissions.mayReview) fail("PermissionDenied");
               const soleOperator =
@@ -491,30 +580,7 @@ export function createMerchantOptionRecipes(options: {
               actorReference: s.actor,
               at,
               changeVersionReference: body.changeVersionReference,
-              reviewersAuthorized: async (actors) =>
-                (await brandActionHeldBy(tx as unknown as RoleAssignmentTransaction, {
-                  brandReference: s.brandReference,
-                  actorReferences: actors,
-                  action: "recipe.approve",
-                  at,
-                })) &&
-                (await confirmActiveBrandMembers(tx as unknown as MemberDirectoryTransaction, {
-                  brandReference: s.brandReference,
-                  actorReferences: actors,
-                  at,
-                })),
-              soleOperatorEffective: async (actor) =>
-                (await merchantBrandSoleOperatorGate(tx as never, gateInput(actor))).status ===
-                "Effective",
-              singleStoreListingEffective: async (actor) => {
-                try {
-                  await singleStore(actor);
-                  return true;
-                } catch (error) {
-                  if (error instanceof MerchantSingleStoreListingError) return false;
-                  throw error;
-                }
-              },
+              ...publishChecks(tx, s, at),
             });
           } catch (error) {
             return mapError(error);
@@ -523,5 +589,196 @@ export function createMerchantOptionRecipes(options: {
       ),
     );
   };
-  return { query, command };
+
+  /**
+   * WP-2423 item 3: the "no change" (or a combo's "adds this dish") option recipes of one dish's
+   * choices that are not covered yet, in one transaction per round instead of one command per step
+   * per choice: one session check, one authorization and one re-check. Each choice does exactly what
+   * the page's commands do (the same rows, review marks and audit), under the same operation
+   * references, so a save stopped under older code, or a retry, continues without duplicates. A
+   * round takes at most `OPTION_RECIPE_RULES_PER_TRANSACTION` rules; call again until `remaining`
+   * is 0. Nothing here is a route; the dish save calls it.
+   */
+  const coverDishChoices = async (input: {
+    readonly sessionCookie: unknown;
+    readonly csrf: unknown;
+    /** The dish save's operation. */
+    readonly operationReference: string;
+    readonly productReference: string;
+    readonly skuReference: string;
+    /** The dish's choices; each with the item it adds to the recipe (a combo's), or null. */
+    readonly choices: ReadonlyMap<string, string | null>;
+  }): Promise<{ readonly remaining: number; readonly waitingForAllergens: boolean }> => {
+    const current = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run((tx) =>
+        withRememberedBrandAuthorization(tx, async () => {
+          const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+          // One instant for the round, read here as a command reads it: before anything that takes
+          // time, so what it records stays earlier than the database clock of each audit record.
+          const at = options.persistence.now();
+          const scope = { brandReference: s.brandReference, storeReference: s.storeReference };
+          const step = (purpose: string) => derivedReference(input.operationReference, purpose);
+          try {
+            const rows = (await targets(tx, s, input.productReference)).filter(
+              (row) =>
+                input.choices.has(row.target.optionReference) &&
+                row.sizes.some((size) => size.skuReference === input.skuReference),
+            );
+            const coverage = await optionRecipesCovered(
+              rtx(tx),
+              scope,
+              rows.map((row) => row.target),
+              at,
+            );
+            const uncovered = rows.filter((row) => coverage.get(row.target)?.covered !== true);
+            if (uncovered.length === 0) return { remaining: 0, waitingForAllergens: false };
+            // No recipe for the size yet: its allergens are not declared, so there is nothing a
+            // choice could change. Nothing is written; declaring them later covers the choices.
+            if (uncovered.some((row) => coverage.get(row.target)?.bound !== true))
+              return { remaining: uncovered.length, waitingForAllergens: true };
+            // Always the first one, however many rules it has (up to 20 of each); then as many as
+            // fit in one short hold.
+            let rules = 0;
+            const picked = uncovered.filter((row, index) => {
+              const count = coverage.get(row.target)?.rules ?? 0;
+              if (index > 0 && rules + count > OPTION_RECIPE_RULES_PER_TRANSACTION) return false;
+              rules += count;
+              return true;
+            });
+            const changeOf = (
+              found: Awaited<ReturnType<typeof listOptionRecipeChanges>>,
+              target: OptionRecipeTarget,
+            ) => found.get(target.bindingReference + ":" + target.optionReference) ?? null;
+            const changes = await listOptionRecipeChanges(
+              rtx(tx),
+              scope,
+              picked.map((row) => row.target),
+            );
+            const plan = picked.map((row) => {
+              const change = changeOf(changes, row.target);
+              const save = change === null || change.publishedAt !== null;
+              return { row, change, save };
+            });
+            // The three commands' own permissions, only for what this round really does.
+            if (plan.some((entry) => entry.save) && !s.permissions.mayEdit)
+              fail("PermissionDenied");
+            const reviewing = plan.some(
+              (entry) =>
+                entry.save ||
+                (["Cost", "FoodSafety"] as const).some(
+                  (kind) =>
+                    !entry.change?.reviews.some(
+                      (review) => review.kind === kind && review.decision === "Approved",
+                    ),
+                ),
+            );
+            if (reviewing && !s.permissions.mayReview) fail("PermissionDenied");
+            if (!s.permissions.mayPublish) fail("PermissionDenied");
+            // Every read that can wait comes before the hold on the recipe tables. Publishing asks
+            // these again, of the same people, and gets the answers remembered here.
+            const { singleStore } = reviewGates(tx, s, at);
+            const listingMode = reviewing ? await singleStore(s.actor) : null;
+            const checks = publishChecks(tx, s, at);
+            for (const actor of new Set([
+              s.actor,
+              ...plan.flatMap((entry) =>
+                entry.save
+                  ? []
+                  : (entry.change?.reviews ?? []).map((review) => review.reviewerReference),
+              ),
+            ]))
+              await checks.reviewersAuthorized([actor]);
+            await checks.singleStoreListingEffective(s.actor);
+            const adding = plan.some(
+              (entry) =>
+                entry.save &&
+                (input.choices.get(entry.row.target.optionReference) ?? null) !== null,
+            );
+            // A combo's choice adds its dish's staff-declared allergen item.
+            const items = adding
+              ? (await recipeIngredientItems(tx, s, at, { staffDeclared: true })).facts
+              : new Map();
+            await lockOptionRecipeTables(rtx(tx));
+            for (const { row, change, save } of plan) {
+              const key = row.target.optionReference.slice(-12);
+              let version = change?.changeVersionReference ?? null;
+              let reviews = change?.reviews ?? [];
+              if (save) {
+                const item = input.choices.get(row.target.optionReference) ?? null;
+                const saved = await saveOptionRecipeChange(rtx(tx), scope, {
+                  operationReference: step("option-recipe-" + key),
+                  actorReference: s.actor,
+                  at,
+                  target: row.target,
+                  content:
+                    item !== null
+                      ? {
+                          kind: "Add",
+                          fromItemReference: null,
+                          toItemReference: item,
+                          quantity: "1",
+                          unitCostCents: null,
+                          lossPercent: "0",
+                        }
+                      : {
+                          kind: "NoChange",
+                          fromItemReference: null,
+                          toItemReference: null,
+                          quantity: null,
+                          unitCostCents: null,
+                          lossPercent: "0",
+                        },
+                  items,
+                  expectedVersion: change?.version ?? null,
+                });
+                version = saved.changeVersionReference;
+                reviews = [];
+                // A replay: what that operation already recorded stands, reviews included.
+                if (saved.status === "AlreadyApplied")
+                  reviews =
+                    changeOf(
+                      await listOptionRecipeChanges(rtx(tx), scope, [row.target]),
+                      row.target,
+                    )?.reviews ?? [];
+              }
+              if (version === null) return fail("NotFound");
+              for (const kind of ["Cost", "FoodSafety"] as const)
+                if (
+                  !reviews.some((review) => review.kind === kind && review.decision === "Approved")
+                )
+                  await reviewOptionRecipeChange(rtx(tx), scope, {
+                    ...(listingMode !== null
+                      ? {
+                          singleStoreListing: {
+                            storeReference: s.storeReference,
+                            mode: listingMode,
+                          },
+                        }
+                      : {}),
+                    operationReference: step("option-review-" + kind + "-" + key),
+                    actorReference: s.actor,
+                    at,
+                    changeVersionReference: version,
+                    kind,
+                    decision: "Approved",
+                    comment: null,
+                  });
+              await publishOptionRecipeChange(rtx(tx), scope, {
+                operationReference: step("option-publish-" + key),
+                actorReference: s.actor,
+                at,
+                changeVersionReference: version,
+                ...checks,
+              });
+            }
+            return { remaining: uncovered.length - picked.length, waitingForAllergens: false };
+          } catch (error) {
+            return mapError(error);
+          }
+        }),
+      ),
+    );
+  };
+  return { query, command, coverDishChoices };
 }

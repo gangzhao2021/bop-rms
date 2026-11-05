@@ -467,6 +467,100 @@ describe("complete review configuration coverage", () => {
       enumerateCatalogReviewSelections(rules, budget, "partial" as "distinct-options"),
     ).toThrowError();
   });
+  it("WP-2423 item 3: covers every option at every quantity in a few valid configurations, however many sets there are", () => {
+    const option = (n: number, maximumQuantity = 1) => ({
+      optionReference: id(n),
+      maximumQuantity,
+      conflictOptionReferences: [],
+    });
+    const group = (
+      n: number,
+      minimumQuantity: number,
+      maximumQuantity: number,
+      options: readonly ReturnType<typeof option>[],
+    ) => ({
+      bindingReference: id(n),
+      optionSetVersionReference: id(n + 500),
+      activationOptionReferences: [],
+      minimumQuantity,
+      maximumQuantity,
+      options,
+    });
+    // A drink: choose a size, a sugar and an ice; any toppings, up to 2 of each, at most 6.
+    const rules = [
+      group(700, 1, 1, [option(701), option(702)]),
+      group(710, 1, 1, [option(711), option(712), option(713), option(714), option(715)]),
+      group(720, 1, 1, [option(721), option(722), option(723), option(724)]),
+      group(
+        730,
+        0,
+        6,
+        [731, 732, 733, 734, 735, 736, 737, 738].map((n) => option(n, 2)),
+      ),
+    ];
+    const pairs = (
+      configurations: readonly (readonly { optionReference: string; quantity: number }[])[],
+    ) =>
+      [
+        ...new Set(
+          configurations.flatMap((items) =>
+            items.map((item) => item.optionReference + "×" + item.quantity),
+          ),
+        ),
+      ].sort();
+    const few = enumerateCatalogReviewSelections(rules, budget, "every-option");
+    // 2 × 5 × 4 × (8 toppings at 0-2, at most 6) would be thousands of sets; 16 cover them all.
+    expect(few).toHaveLength(16);
+    const distinct = enumerateCatalogReviewSelections(
+      rules,
+      { maximumConfigurations: 10000, maximumSearchSteps: 1000000 },
+      "distinct-options",
+    );
+    expect(distinct.length).toBeGreaterThan(5000);
+    expect(pairs(few)).toEqual(pairs(distinct));
+    for (const configuration of few) {
+      for (const candidate of rules) {
+        const chosen = configuration.filter(
+          (item) => item.bindingReference === candidate.bindingReference,
+        );
+        const total = chosen.reduce((sum, item) => sum + item.quantity, 0);
+        expect(total).toBeGreaterThanOrEqual(candidate.minimumQuantity);
+        expect(total).toBeLessThanOrEqual(candidate.maximumQuantity);
+      }
+      const order = configuration.map((item) => item.optionReference);
+      expect(order).toEqual([...order].sort());
+    }
+    // A minimum that needs more than one option is filled; a limit below an option's quantity is
+    // kept, and every option is still chosen.
+    const filled = enumerateCatalogReviewSelections(
+      [group(740, 2, 3, [option(741), option(742), option(743, 3)])],
+      budget,
+      "every-option",
+    );
+    expect(pairs(filled)).toEqual(
+      [`${id(741)}×1`, `${id(742)}×1`, `${id(743)}×1`, `${id(743)}×2`, `${id(743)}×3`].sort(),
+    );
+    expect(enumerateCatalogReviewSelections([], budget, "every-option")).toEqual([[]]);
+    // Nothing can satisfy the group: as the search says.
+    expect(() =>
+      enumerateCatalogReviewSelections([group(750, 3, 3, [option(751)])], budget, "every-option"),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_LIFECYCLE_CONFLICT" }));
+    expect(() =>
+      enumerateCatalogReviewSelections(
+        rules,
+        { ...budget, maximumConfigurations: 15 },
+        "every-option",
+      ),
+    ).toThrowError(expect.objectContaining({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" }));
+    // Conditions or conflicts between options: the full answer.
+    const conflicted = [
+      group(760, 0, 1, [{ ...option(761), conflictOptionReferences: [id(771)] }]),
+      group(770, 0, 1, [option(771)]),
+    ];
+    expect(enumerateCatalogReviewSelections(conflicted, budget, "every-option")).toEqual(
+      enumerateCatalogReviewSelections(conflicted, budget, "distinct-options"),
+    );
+  });
   it("returns the one empty configuration for no rules", () => {
     expect(enumerateCatalogReviewSelections([], budget)).toEqual([[]]);
   });

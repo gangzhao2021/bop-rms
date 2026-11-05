@@ -375,6 +375,10 @@ export function installMerchantCommerceRoutes(
               ...((error as { problem?: unknown }).problem
                 ? { problem: (error as { problem?: unknown }).problem }
                 : {}),
+              // The dish exists although this save stopped: saving again continues it.
+              ...((error as { productReference?: unknown }).productReference
+                ? { productReference: (error as { productReference?: unknown }).productReference }
+                : {}),
             });
         });
     },
@@ -930,7 +934,17 @@ export function installMerchantCommerceRoutes(
       Object.keys(request.query).length !== 0 ||
       body === undefined ||
       body === null ||
-      Object.keys(body).length !== 0
+      // {} for every dish (the Option prices page); {productReference} for what the dish editor
+      // reads: that dish's prices, or none for a new dish, and the usual extras.
+      !(
+        Object.keys(body).length === 0 ||
+        (Object.keys(body).join(",") === "productReference" &&
+          (body.productReference === null ||
+            (typeof body.productReference === "string" &&
+              /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+                body.productReference,
+              ))))
+      )
     ) {
       denied(response);
       return;
@@ -940,7 +954,13 @@ export function installMerchantCommerceRoutes(
       return;
     }
     void options.optionPrices
-      .query({ sessionCookie, csrf })
+      .query({
+        sessionCookie,
+        csrf,
+        ...(Object.keys(body).length === 0
+          ? {}
+          : { productReference: body.productReference as string | null, usual: true }),
+      })
       .then((result) => response.json(result))
       .catch((error: unknown) => optionPriceFailure(response, error));
   });

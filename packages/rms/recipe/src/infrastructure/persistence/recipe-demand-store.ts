@@ -480,6 +480,92 @@ export function createPostgresRecipeReviewSource(options: {
       throw error;
     return fail();
   };
+  /** Reads the base recipe once, and each option rule and SubRecipe once however often it is used. */
+  const openConfigurations = async (
+    tx: RecipeTransaction,
+    input: Omit<RecipeReviewInput, "selections">,
+  ) => {
+    const scope = await begin(tx, { ...input, selections: [] });
+    const base = await createPostgresBaseRecipeSource(scope.runner, brand)
+      .resolve({ storeReference: scope.store, skuReference: scope.sku, occurredAt: scope.at })
+      .catch((): never => {
+        throw new RecipeReviewGapError({ missing: "Recipe" });
+      });
+    const modifiers = createPostgresRecipeModifierSource(scope.runner);
+    const rules = new Map<string, Promise<RecipeModifierRule>>();
+    const ruleFor = (selection: RecipeOptionSelection) => {
+      const key = `${selection.bindingReference}|${selection.optionReference}|${selection.quantity}`;
+      let rule = rules.get(key);
+      if (!rule) {
+        rule = modifiers.resolve(base.snapshot, [selection], scope.at).then(
+          ([found]) => found ?? fail(),
+          (): never => {
+            throw new RecipeReviewGapError({ missing: "OptionRecipe", selection });
+          },
+        );
+        rule.catch(() => undefined);
+        rules.set(key, rule);
+      }
+      return rule;
+    };
+    const load = subRecipeLoader(tx, base.brandReference, scope.at);
+    const subRecipes = new Map<string, Promise<RecipeSnapshot>>();
+    const subRecipeFor = (requirement: IngredientRequirement) => {
+      const key = `${requirement.sourceReference}|${requirement.sourceVersionReference}`;
+      let snapshot = subRecipes.get(key);
+      if (!snapshot) {
+        snapshot = load(requirement).catch((): never => {
+          throw new RecipeReviewGapError({ missing: "SubRecipe" });
+        });
+        snapshot.catch(() => undefined);
+        subRecipes.set(key, snapshot);
+      }
+      return snapshot;
+    };
+    return {
+      allowed: scope.allowed,
+      async resolve(configurations: readonly (readonly RecipeOptionSelection[])[]) {
+        if (
+          !Array.isArray(configurations) ||
+          configurations.length < 1 ||
+          configurations.length > 10000
+        )
+          return fail();
+        const results = [];
+        // This loop is CPU in the one process all guests and staff enter through: let them in.
+        let working = Date.now();
+        for (const configuration of configurations) {
+          if (Date.now() - working >= 15) {
+            await yieldToWaitingWork();
+            working = Date.now();
+          }
+          const selections = parseSelections(configuration);
+          const applied: RecipeModifierRule[] = [];
+          for (const selection of selections) applied.push(await ruleFor(selection));
+          const modifierRules = Object.freeze(applied);
+          const configured = applyRecipeIngredientModifiers(
+            base.snapshot,
+            selections,
+            modifierRules,
+          );
+          const graph = await loadSubRecipeGraph(
+            createRecipeSnapshot({ ...base.snapshot, ingredients: configured.ingredients }),
+            subRecipeFor,
+          );
+          // Same demand check `resolve` makes; a configuration it rejects is rejected here too.
+          calculateConfiguredRecipeInventoryDemand(
+            base.snapshot,
+            graph,
+            selections,
+            modifierRules,
+            "1",
+          );
+          results.push(factsOf(scope, base, graph, modifierRules, configured.ingredients));
+        }
+        return Object.freeze(results);
+      },
+    };
+  };
   return Object.freeze({
     async resolve(tx: RecipeTransaction, input: RecipeReviewInput) {
       try {
@@ -521,82 +607,36 @@ export function createPostgresRecipeReviewSource(options: {
       configurations: readonly (readonly RecipeOptionSelection[])[],
     ) {
       try {
-        if (
-          !Array.isArray(configurations) ||
-          configurations.length < 1 ||
-          configurations.length > 10000
-        )
-          return fail();
-        const scope = await begin(tx, { ...input, selections: [] });
-        const base = await createPostgresBaseRecipeSource(scope.runner, brand)
-          .resolve({ storeReference: scope.store, skuReference: scope.sku, occurredAt: scope.at })
-          .catch((): never => {
-            throw new RecipeReviewGapError({ missing: "Recipe" });
-          });
-        const modifiers = createPostgresRecipeModifierSource(scope.runner);
-        const rules = new Map<string, Promise<RecipeModifierRule>>();
-        const ruleFor = (selection: RecipeOptionSelection) => {
-          const key = `${selection.bindingReference}|${selection.optionReference}|${selection.quantity}`;
-          let rule = rules.get(key);
-          if (!rule) {
-            rule = modifiers.resolve(base.snapshot, [selection], scope.at).then(
-              ([found]) => found ?? fail(),
-              (): never => {
-                throw new RecipeReviewGapError({ missing: "OptionRecipe", selection });
-              },
-            );
-            rule.catch(() => undefined);
-            rules.set(key, rule);
-          }
-          return rule;
-        };
-        const load = subRecipeLoader(tx, base.brandReference, scope.at);
-        const subRecipes = new Map<string, Promise<RecipeSnapshot>>();
-        const subRecipeFor = (requirement: IngredientRequirement) => {
-          const key = `${requirement.sourceReference}|${requirement.sourceVersionReference}`;
-          let snapshot = subRecipes.get(key);
-          if (!snapshot) {
-            snapshot = load(requirement).catch((): never => {
-              throw new RecipeReviewGapError({ missing: "SubRecipe" });
-            });
-            snapshot.catch(() => undefined);
-            subRecipes.set(key, snapshot);
-          }
-          return snapshot;
-        };
-        const results = [];
-        // This loop is CPU in the one process all guests and staff enter through: let them in.
-        let working = Date.now();
-        for (const configuration of configurations) {
-          if (Date.now() - working >= 15) {
-            await yieldToWaitingWork();
-            working = Date.now();
-          }
-          const selections = parseSelections(configuration);
-          const applied: RecipeModifierRule[] = [];
-          for (const selection of selections) applied.push(await ruleFor(selection));
-          const modifierRules = Object.freeze(applied);
-          const configured = applyRecipeIngredientModifiers(
-            base.snapshot,
-            selections,
-            modifierRules,
-          );
-          const graph = await loadSubRecipeGraph(
-            createRecipeSnapshot({ ...base.snapshot, ingredients: configured.ingredients }),
-            subRecipeFor,
-          );
-          // Same demand check `resolve` makes; a configuration it rejects is rejected here too.
-          calculateConfiguredRecipeInventoryDemand(
-            base.snapshot,
-            graph,
-            selections,
-            modifierRules,
-            "1",
-          );
-          results.push(factsOf(scope, base, graph, modifierRules, configured.ingredients));
-        }
-        await scope.allowed();
-        return Object.freeze(results);
+        const resolver = await openConfigurations(tx, input);
+        const results = await resolver.resolve(configurations);
+        await resolver.allowed();
+        return results;
+      } catch (error) {
+        return rethrow(error);
+      }
+    },
+    /**
+     * WP-2423 item 3: `covering` shows every option at every quantity. Where none of those rules
+     * changes the recipe, every set of choices has the dish's own ingredients, so `covering` is the
+     * whole answer. Otherwise the configurations of `everySet` are resolved too, reading nothing
+     * twice. Says which, and with which configurations.
+     */
+    async resolveCoverage(
+      tx: RecipeTransaction,
+      input: Omit<RecipeReviewInput, "selections">,
+      covering: readonly (readonly RecipeOptionSelection[])[],
+      everySet: () => readonly (readonly RecipeOptionSelection[])[],
+    ) {
+      try {
+        const resolver = await openConfigurations(tx, input);
+        const first = await resolver.resolve(covering);
+        const changesNothing = first.every((recipe) =>
+          recipe.modifierRules.every((rule) => rule.changes.length === 0),
+        );
+        const selections = changesNothing ? covering : everySet();
+        const results = changesNothing ? first : await resolver.resolve(selections);
+        await resolver.allowed();
+        return Object.freeze({ selections, results, changesNothing });
       } catch (error) {
         return rethrow(error);
       }

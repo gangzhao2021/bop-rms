@@ -15,7 +15,8 @@ import {
 import { readStoreKitchenLine } from "@rms/kitchen";
 import {
   listRecipeKitchenCapabilities,
-  optionRecipeCovered,
+  optionRecipesCovered,
+  type OptionRecipeTarget,
   skusWithRecipe,
   type RecipeAuthoringTransaction,
 } from "@rms/recipe";
@@ -129,7 +130,7 @@ export async function menuOptionsWithoutRecipes(
       section.placements.map((placement) => String(placement.sellableReference)),
     ),
   );
-  const missing: { skuReference: string; optionReference: string }[] = [];
+  const targets: { skuReference: string; target: OptionRecipeTarget }[] = [];
   for (const skuReference of placed) {
     const sku = skus.find((item) => item.skuReference === skuReference);
     if (sku === undefined) continue;
@@ -146,23 +147,32 @@ export async function menuOptionsWithoutRecipes(
       for (const option of set.draft.options)
         if (
           option.lifecycle === "Active" &&
-          binding.enabledOptionReferences.includes(option.optionReference) &&
-          !(await optionRecipeCovered(
-            tx as unknown as RecipeAuthoringTransaction,
-            owner,
-            {
+          binding.enabledOptionReferences.includes(option.optionReference)
+        )
+          targets.push({
+            skuReference,
+            target: {
               bindingReference: String(binding.bindingReference),
               optionReference: String(option.optionReference),
               skuReferences: [skuReference],
               quantities: Array.from({ length: most }, (_, index) => index + 1),
             },
-            observedAt,
-          ))
-        )
-          missing.push({ skuReference, optionReference: String(option.optionReference) });
+          });
     }
   }
-  return missing;
+  // WP-2423 item 3: one read for the whole menu, however many choices it has.
+  const coverage = await optionRecipesCovered(
+    tx as unknown as RecipeAuthoringTransaction,
+    owner,
+    targets.map((item) => item.target),
+    observedAt,
+  );
+  return targets
+    .filter((item) => coverage.get(item.target)?.covered !== true)
+    .map((item) => ({
+      skuReference: item.skuReference,
+      optionReference: item.target.optionReference,
+    }));
 }
 
 /**

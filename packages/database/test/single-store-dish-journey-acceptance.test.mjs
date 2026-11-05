@@ -211,7 +211,7 @@ it("one-page menu journey: a new dish, listed, is offered to guests at the store
         products: createMerchantProducts(common),
         prices: createMerchantPrices({ ...common, currencyMetadata }),
         // No choice prices waiting (a listing reads them).
-        optionPrices: { query: async () => ({ products: [] }), command: unused.command },
+        optionPrices: { waiting: async () => [], command: unused.command },
         menus,
         dishAllergens: unused,
         optionRecipes: unused,

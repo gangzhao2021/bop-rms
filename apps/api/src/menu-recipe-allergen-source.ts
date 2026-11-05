@@ -247,6 +247,8 @@ export function createCompleteMenuRecipeAllergenSource(
         registryVersionReference: string;
         defaultLocale: string;
         budget: Parameters<typeof enumerateCatalogReviewSelections>[1];
+        /** Review every distinct set of options even where no option changes the recipe. */
+        everySet?: boolean;
       },
     ) {
       const missing = (gap: Gap): never => {
@@ -262,32 +264,48 @@ export function createCompleteMenuRecipeAllergenSource(
         // every option at every quantity proves the same as every quantity combination (v15
         // 2026-10-22: a Latte with milk, shots, syrups and sweeteners has 13,440 quantity
         // combinations per size, which exceeded the whole menu's review budget).
-        const selections = enumerateCatalogReviewSelections(
-          input.rules,
-          input.budget,
-          "distinct-options",
-        );
+        const enumerate = (coverage: "distinct-options" | "every-option") =>
+          enumerateCatalogReviewSelections(input.rules, input.budget, coverage);
         // Each configuration's facts equal a separate `createMenuRecipeAllergenSource` resolution
         // (the evidence reader orders by reference, so one read of every pinned record filtered
         // per configuration is the same record list), but the recipe, option rules, SubRecipes and
         // allergen records are read once: one resolution per configuration took 50 s on v15.
-        const recipes = await createPostgresRecipeReviewSource({
+        const named = (error: unknown): never => {
+          if (error instanceof RecipeReviewGapError)
+            return missing({
+              missing: error.gap.missing,
+              optionReference:
+                error.gap.missing === "OptionRecipe" ? error.gap.selection.optionReference : null,
+              quantity: error.gap.missing === "OptionRecipe" ? error.gap.selection.quantity : null,
+              ingredientReference: null,
+            });
+          throw error;
+        };
+        const source = createPostgresRecipeReviewSource({
           brandReference: brand,
           authorize: async (_tx, query) => options.authorize(tx, query, "Recipe"),
-        })
-          .resolveConfigurations(tx, input.recipe, selections)
-          .catch((error: unknown) => {
-            if (error instanceof RecipeReviewGapError)
-              return missing({
-                missing: error.gap.missing,
-                optionReference:
-                  error.gap.missing === "OptionRecipe" ? error.gap.selection.optionReference : null,
-                quantity:
-                  error.gap.missing === "OptionRecipe" ? error.gap.selection.quantity : null,
-                ingredientReference: null,
-              });
-            throw error;
-          });
+        });
+        // WP-2423 item 3: where no choice changes the recipe ("no change" rules, the one-page
+        // menu's usual case), every set of choices has the dish's own ingredients, so one review
+        // of every option at every quantity proves them all. Counting every set made one drink of
+        // 19 choices use the whole menu's review budget, and thirty could never be listed.
+        const covered = input.everySet
+          ? await (async () => {
+              const selections = enumerate("distinct-options");
+              return {
+                selections,
+                results: await source
+                  .resolveConfigurations(tx, input.recipe, selections)
+                  .catch(named),
+                changesNothing: false,
+              };
+            })()
+          : await source
+              .resolveCoverage(tx, input.recipe, enumerate("every-option"), () =>
+                enumerate("distinct-options"),
+              )
+              .catch(named);
+        const { selections, results: recipes, changesNothing } = covered;
         const expected = recipes.map((recipe) => {
           try {
             return expectedEvidence(recipe);
@@ -411,6 +429,8 @@ export function createCompleteMenuRecipeAllergenSource(
         return Object.freeze({
           configurations: Object.freeze(configurations),
           allergens,
+          /** No choice changes the recipe: nothing differs by which choices a guest makes. */
+          changesNothing,
           sourceDigest:
             "sha256:" +
             sha256Hex(

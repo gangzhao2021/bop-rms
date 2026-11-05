@@ -3743,7 +3743,7 @@
       "privilege": "MAINTAIN",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 2026-10-18 append-only least privilege (open item 2026-10-07): withdraw data-changing privileges the api role does not use",
-      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: recipe demand, owner coverage and preparation stores LOCK TABLE IN SHARE MODE"
+      "justification": "LOCK TABLE IN SHARE / SHARE ROW EXCLUSIVE MODE needs MAINTAIN (PostgreSQL 17+), not UPDATE; MAINTAIN cannot change rows: recipe demand, owner coverage and preparation stores LOCK TABLE IN SHARE MODE; option recipe saves, publishes and the dish save batch LOCK TABLE IN SHARE ROW EXCLUSIVE MODE (WP-2423 item 3, under the standing approval)"
     },
     {
       "type": "table",

@@ -1,4 +1,5 @@
 import { derivedReference } from "./merchant-products.js";
+import { MerchantOptionRecipeError } from "./merchant-option-recipes.js";
 import type { createMerchantAvailability } from "./merchant-availability.js";
 import type { ComboSlot, ComboView, createMerchantCombos } from "./merchant-combos.js";
 import type { createMerchantDishAllergens } from "./merchant-dish-allergens.js";
@@ -40,7 +41,13 @@ export class MerchantOneStoreDishError extends Error {
        * A dish in a combo has a real recipe: until the combo's choices carry recipes (and stock),
        * combos offer dishes whose allergens staff declared.
        */
-      | "DishHasRecipe",
+      | "DishHasRecipe"
+      /**
+       * A step could not finish: a round of choice recipes covered nothing, or a lock or a store
+       * would not answer. What was saved stays, and saving again goes on from there (409 with its
+       * part, which the page shows as "Saving stopped part-way").
+       */
+      | "StoppedPartWay",
   ) {
     super(code);
     this.name = "MerchantOneStoreDishError";
@@ -49,6 +56,17 @@ export class MerchantOneStoreDishError extends Error {
 const fail = (code: MerchantOneStoreDishError["code"]): never => {
   throw new MerchantOneStoreDishError(code);
 };
+/**
+ * A failure of a save that was not a refusal by one of the six pages' commands: a lock that outlived
+ * its retries, a store that would not answer. Never an answer of "no permission". The original
+ * error stays as the cause.
+ */
+const refusedByAPage = (error: unknown) =>
+  error instanceof Error && /^Merchant[A-Za-z]+Error$/u.test(error.name);
+const stoppedPartWay = (error: unknown): Error =>
+  refusedByAPage(error)
+    ? (error as Error)
+    : Object.assign(new MerchantOneStoreDishError("StoppedPartWay"), { cause: error });
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const ref = (value: unknown): string =>
   typeof value === "string" && uuid.test(value) ? value : fail("Invalid");
@@ -68,13 +86,18 @@ export interface SaveDishBody {
   readonly menuReference: string;
   /** null: a new dish (one size). */
   readonly productReference: string | null;
-  readonly sectionCode: string;
+  /** null (an existing dish only): its place on the menu stays as it is. */
+  readonly sectionCode: string | null;
   readonly name: string;
   readonly nameZh: string;
   readonly description: string;
   readonly descriptionZh: string;
   readonly taxClassificationReference: string;
-  readonly priceMinor: string;
+  /**
+   * null (an existing dish only): its price stays as it is. What the page read may be another
+   * Store's price, or minutes old; a save that does not change the price must not write one.
+   */
+  readonly priceMinor: string | null;
   readonly choiceGroups: readonly {
     readonly optionSetReference: string;
     readonly options: readonly { readonly optionReference: string; readonly amountMinor: string }[];
@@ -276,8 +299,12 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
             classification: a.classification as "Contains" | "CrossContactPossible",
           };
         });
-  const sectionCode = typeof r.sectionCode === "string" ? r.sectionCode : "";
-  if (!/^[A-Z][A-Z0-9_-]{0,63}$/u.test(sectionCode)) return fail("Invalid");
+  // Only an existing dish can keep its place and price: a new one has neither yet.
+  if (r.productReference === null && (r.sectionCode === null || r.priceMinor === null))
+    return fail("Invalid");
+  const sectionCode =
+    r.sectionCode === null ? null : typeof r.sectionCode === "string" ? r.sectionCode : "";
+  if (sectionCode !== null && !/^[A-Z][A-Z0-9_-]{0,63}$/u.test(sectionCode)) return fail("Invalid");
   return {
     action: "SaveDish",
     operationReference: ref(r.operationReference),
@@ -289,7 +316,7 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
     description: text(r.description, 240, false),
     descriptionZh: text(r.descriptionZh, 240, false),
     taxClassificationReference: ref(r.taxClassificationReference),
-    priceMinor: amount(r.priceMinor),
+    priceMinor: r.priceMinor === null ? null : amount(r.priceMinor),
     choiceGroups,
     allergens,
   };
@@ -436,9 +463,46 @@ export function createMerchantOneStoreDishes(options: {
           product: ProductDetail;
         }
       ).product;
+    // The dish as soon as it exists: any later failure says which one, so saving again continues
+    // this dish instead of making a second one.
+    let existing = body.productReference;
+    try {
+      return await saveDishSteps(
+        session,
+        body,
+        choiceItems,
+        onProduct,
+        rebind,
+        step,
+        product,
+        (r) => {
+          existing = r;
+        },
+      );
+    } catch (error) {
+      const stopped = stoppedPartWay(error);
+      if (existing !== null)
+        Object.defineProperty(stopped, "productReference", { value: existing, enumerable: false });
+      throw stopped;
+    }
+  };
 
-    // 1. The product: names, descriptions, tax class and choice groups (one size).
+  const saveDishSteps = async (
+    session: Session,
+    body: SaveDishBody,
+    choiceItems: ReadonlyMap<string, string>,
+    onProduct: ((productReference: string, skuReference: string) => Promise<void>) | undefined,
+    rebind: boolean,
+    step: (purpose: string) => string,
+    product: (productReference: string) => Promise<ProductDetail>,
+    known: (productReference: string) => void,
+  ) => {
+    // 1. The product: names, descriptions, tax class and choice groups (one size). A command that
+    // applied answers the product as it now is; a replay answers what it recorded back then, so
+    // the product is read again.
     let productReference = body.productReference;
+    let detail: ProductDetail | null = null;
+    let createdNow = false;
     if (productReference === null) {
       const code = newDishCode(body.operationReference);
       const created = (await options.products.command({
@@ -460,10 +524,13 @@ export function createMerchantOneStoreDishes(options: {
             },
           ],
         },
-      })) as unknown as { product: { productReference: string } };
+      })) as unknown as { status: string; product: ProductDetail };
       productReference = created.product.productReference;
+      createdNow = created.status === "Applied";
+      if (createdNow) detail = created.product;
     }
-    let detail = await product(productReference);
+    known(productReference);
+    detail ??= await product(productReference);
     if (detail.sizes.length !== 1) return fail("ManySizes");
     const size = detail.sizes[0] ?? fail("NotFound");
     await onProduct?.(productReference, size.skuReference);
@@ -481,7 +548,7 @@ export function createMerchantOneStoreDishes(options: {
       detail.presentation.descriptionZh === body.descriptionZh &&
       JSON.stringify(detail.optionSets) === JSON.stringify(groups);
     if (!same || rebind) {
-      await options.products.command({
+      const saved = (await options.products.command({
         ...session,
         body: {
           action: "SaveDraft",
@@ -512,8 +579,8 @@ export function createMerchantOneStoreDishes(options: {
                   },
           },
         },
-      });
-      detail = await product(productReference);
+      })) as unknown as { status: string; product: ProductDetail };
+      detail = saved.status === "Applied" ? saved.product : await product(productReference);
     }
     if (detail.lifecycle !== "Active" || detail.sizes.some((s) => s.lifecycle !== "Active"))
       await options.products.command({
@@ -526,68 +593,80 @@ export function createMerchantOneStoreDishes(options: {
         },
       });
     const sku = size.skuReference;
-    // A new dish is offered at the store (one store: the store it was made for).
-    if (body.productReference === null) await offerUndecided(session, new Set([sku]), step);
-
-    // 2. The price, in the store's open price book draft (published by "List it").
-    const books = (await options.prices.query({ ...session, priceBookReference: null })) as {
-      books: readonly { priceBookReference: string; lifecycle: string; createdAt: string }[];
-      storeAssignment: { priceBookReference: string } | null;
-    };
-    const charged = async () => {
-      if (books.storeAssignment === null) return null;
-      const book = (await options.prices.query({
+    // A new dish is offered at the store (one store: the store it was made for). One created just
+    // now has no decision to read; on a replay, a dish staff hid since stays hidden.
+    if (createdNow)
+      await options.availability.command({
         ...session,
-        priceBookReference: books.storeAssignment.priceBookReference,
-      })) as { book: { prices: readonly { sellableReference: string; amountMinor: string }[] } };
-      return book.book.prices.find((p) => p.sellableReference === sku)?.amountMinor ?? null;
-    };
-    let draft = [...books.books]
-      .filter((book) => book.lifecycle === "Draft")
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.priceBookReference;
-    if (draft !== undefined || (await charged()) !== body.priceMinor) {
-      if (draft === undefined)
-        draft = (
-          (await options.prices.command({
+        body: {
+          action: "Offer",
+          operationReference: step("offer-" + sku.slice(-12)),
+          skuReference: sku,
+        },
+      });
+    else if (body.productReference === null) await offerUndecided(session, new Set([sku]), step);
+
+    // 2. The price, in the store's open price book draft (published by "List it"). No price given:
+    // this save leaves it as it is.
+    const priceMinor = body.priceMinor;
+    if (priceMinor !== null) {
+      const books = (await options.prices.query({ ...session, priceBookReference: null })) as {
+        books: readonly { priceBookReference: string; lifecycle: string; createdAt: string }[];
+        storeAssignment: { priceBookReference: string } | null;
+      };
+      const charged = async () => {
+        if (books.storeAssignment === null) return null;
+        const book = (await options.prices.query({
+          ...session,
+          priceBookReference: books.storeAssignment.priceBookReference,
+        })) as { book: { prices: readonly { sellableReference: string; amountMinor: string }[] } };
+        return book.book.prices.find((p) => p.sellableReference === sku)?.amountMinor ?? null;
+      };
+      let draft = [...books.books]
+        .filter((book) => book.lifecycle === "Draft")
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.priceBookReference;
+      if (draft !== undefined || (await charged()) !== priceMinor) {
+        if (draft === undefined)
+          draft = (
+            (await options.prices.command({
+              ...session,
+              body: {
+                action: "CreateDraft",
+                operationReference: step("price-book"),
+                stableCode:
+                  "MENU-" +
+                  options.now().slice(0, 10).replaceAll("-", "") +
+                  "-" +
+                  step("code").slice(-4).toUpperCase(),
+                copyFrom: books.storeAssignment?.priceBookReference ?? null,
+              },
+            })) as { priceBookReference: string }
+          ).priceBookReference;
+        const editor = (await options.prices.query({ ...session, priceBookReference: draft })) as {
+          book: {
+            aggregateVersion: number;
+            prices: readonly { sellableReference: string; amountMinor: string }[];
+          };
+          draftAuthor: string | null;
+          viewer: string;
+        };
+        if (editor.draftAuthor !== null && editor.draftAuthor !== editor.viewer)
+          return fail("OthersPending");
+        if (editor.book.prices.find((p) => p.sellableReference === sku)?.amountMinor !== priceMinor)
+          await options.prices.command({
             ...session,
             body: {
-              action: "CreateDraft",
-              operationReference: step("price-book"),
-              stableCode:
-                "MENU-" +
-                options.now().slice(0, 10).replaceAll("-", "") +
-                "-" +
-                step("code").slice(-4).toUpperCase(),
-              copyFrom: books.storeAssignment?.priceBookReference ?? null,
+              action: "SaveDraft",
+              operationReference: step("price"),
+              priceBookReference: draft,
+              expectedAggregateVersion: editor.book.aggregateVersion,
+              prices: [
+                ...editor.book.prices.filter((p) => p.sellableReference !== sku),
+                { sellableReference: sku, amountMinor: priceMinor },
+              ],
             },
-          })) as { priceBookReference: string }
-        ).priceBookReference;
-      const editor = (await options.prices.query({ ...session, priceBookReference: draft })) as {
-        book: {
-          aggregateVersion: number;
-          prices: readonly { sellableReference: string; amountMinor: string }[];
-        };
-        draftAuthor: string | null;
-        viewer: string;
-      };
-      if (editor.draftAuthor !== null && editor.draftAuthor !== editor.viewer)
-        return fail("OthersPending");
-      if (
-        editor.book.prices.find((p) => p.sellableReference === sku)?.amountMinor !== body.priceMinor
-      )
-        await options.prices.command({
-          ...session,
-          body: {
-            action: "SaveDraft",
-            operationReference: step("price"),
-            priceBookReference: draft,
-            expectedAggregateVersion: editor.book.aggregateVersion,
-            prices: [
-              ...editor.book.prices.filter((p) => p.sellableReference !== sku),
-              { sellableReference: sku, amountMinor: body.priceMinor },
-            ],
-          },
-        });
+          });
+      }
     }
 
     // 3. Choice prices (waiting until "List it").
@@ -595,7 +674,10 @@ export function createMerchantOneStoreDishes(options: {
       body.choiceGroups.flatMap((g) => g.options.map((o) => [o.optionReference, o.amountMinor])),
     );
     if (wanted.size > 0) {
-      const view = (await options.optionPrices.query(session)) as unknown as {
+      const view = (await options.optionPrices.query({
+        ...session,
+        productReference,
+      })) as unknown as {
         products: readonly {
           productReference: string;
           optionSets: readonly {
@@ -633,41 +715,45 @@ export function createMerchantOneStoreDishes(options: {
       if (prices.length > 0)
         await options.optionPrices.command({
           ...session,
+          productReference,
           body: { action: "SetPrices", operationReference: step("choice-prices"), prices },
         });
     }
 
-    // 4. Its place on the menu (moved to the chosen section, last), in an open draft.
+    // 4. Its place on the menu (moved to the chosen section, last), in an open draft. No section
+    // given: the place stays, but a listed menu still opens a draft for what changed to be listed.
     const menu = await editableMenu(session, body.menuReference, step("menu-revise"));
-    const target = menu.menu.sections.find((s) => s.code === body.sectionCode);
-    if (target === undefined) return fail("NoSection");
-    const placed = target.items.some((item) => item.skuReference === sku);
-    const elsewhere = menu.menu.sections.some(
-      (s) => s.code !== body.sectionCode && s.items.some((item) => item.skuReference === sku),
-    );
-    if (!placed || elsewhere) {
-      await options.menus.command({
-        ...session,
-        body: {
-          action: "SaveDraft",
-          operationReference: step("menu"),
-          menuReference: body.menuReference,
-          expectedAggregateVersion: menu.menu.aggregateVersion,
-          name: menu.menu.name,
-          sections: menu.menu.sections.map((s) => ({
-            sectionReference: s.sectionReference,
-            code: s.code,
-            name: s.name,
-            nameZh: s.nameZh ?? "",
-            items: [
-              ...s.items.filter((item) => item.skuReference !== sku),
-              ...(s.code === body.sectionCode && !placed
-                ? [{ skuReference: sku, featured: false }]
-                : []),
-            ].map((item) => ({ skuReference: item.skuReference, featured: item.featured })),
-          })),
-        },
-      });
+    if (body.sectionCode !== null) {
+      const target = menu.menu.sections.find((s) => s.code === body.sectionCode);
+      if (target === undefined) return fail("NoSection");
+      const placed = target.items.some((item) => item.skuReference === sku);
+      const elsewhere = menu.menu.sections.some(
+        (s) => s.code !== body.sectionCode && s.items.some((item) => item.skuReference === sku),
+      );
+      if (!placed || elsewhere) {
+        await options.menus.command({
+          ...session,
+          body: {
+            action: "SaveDraft",
+            operationReference: step("menu"),
+            menuReference: body.menuReference,
+            expectedAggregateVersion: menu.menu.aggregateVersion,
+            name: menu.menu.name,
+            sections: menu.menu.sections.map((s) => ({
+              sectionReference: s.sectionReference,
+              code: s.code,
+              name: s.name,
+              nameZh: s.nameZh ?? "",
+              items: [
+                ...s.items.filter((item) => item.skuReference !== sku),
+                ...(s.code === body.sectionCode && !placed
+                  ? [{ skuReference: sku, featured: false }]
+                  : []),
+              ].map((item) => ({ skuReference: item.skuReference, featured: item.featured })),
+            })),
+          },
+        });
+      }
     }
 
     // 5. Its allergens, declared by staff (a generated recipe; a real recipe is kept).
@@ -689,94 +775,38 @@ export function createMerchantOneStoreDishes(options: {
               },
       });
 
-    // 6. A "no change" option recipe for each of its choices that has none yet.
+    // 6. A "no change" option recipe for each of its choices that has none yet, a few choices per
+    // transaction (WP-2423 item 3: one authorization each, not one command per step per choice).
+    let choicesWaiting = false;
     if (wanted.size > 0) {
-      const recipes = (await options.optionRecipes.query(session)) as unknown as {
-        options: readonly {
-          bindingReference: string;
-          optionReference: string;
-          sizes: readonly { skuReference: string }[];
-          covered: boolean;
-          change: {
-            changeVersionReference: string;
-            version: number;
-            published: boolean;
-            reviews: readonly { kind: string; decision: string }[];
-          } | null;
-        }[];
-      };
-      for (const row of recipes.options.filter(
-        (candidate) =>
-          wanted.has(candidate.optionReference) &&
-          candidate.sizes.some((s) => s.skuReference === sku) &&
-          !candidate.covered,
-      )) {
-        const key = row.optionReference.slice(-12);
-        let change = row.change;
-        if (change === null || change.published) {
-          await options.optionRecipes.command({
-            ...session,
-            body: {
-              action: "Save",
-              operationReference: step("option-recipe-" + key),
-              bindingReference: row.bindingReference,
-              optionReference: row.optionReference,
-              expectedVersion: change?.version ?? null,
-              change: choiceItems.has(row.optionReference)
-                ? {
-                    kind: "Add",
-                    fromItemReference: null,
-                    toItemReference: choiceItems.get(row.optionReference) ?? null,
-                    quantity: "1",
-                    unitCostCents: null,
-                    lossPercent: "0",
-                  }
-                : {
-                    kind: "NoChange",
-                    fromItemReference: null,
-                    toItemReference: null,
-                    quantity: null,
-                    unitCostCents: null,
-                    lossPercent: "0",
-                  },
-            },
-          });
-          const again = (await options.optionRecipes.query(session)) as unknown as typeof recipes;
-          change =
-            again.options.find(
-              (o) =>
-                o.bindingReference === row.bindingReference &&
-                o.optionReference === row.optionReference,
-            )?.change ?? null;
-          if (change === null) return fail("NotFound");
-        }
-        for (const kind of ["Cost", "FoodSafety"] as const)
-          if (
-            !change.reviews.some((review) => review.kind === kind && review.decision === "Approved")
-          )
-            await options.optionRecipes.command({
-              ...session,
-              body: {
-                action: "Review",
-                operationReference: step("option-review-" + kind + "-" + key),
-                changeVersionReference: change.changeVersionReference,
-                kind,
-                decision: "Approved",
-                comment: null,
-                approvalMode: "SingleStoreListing",
-              },
-            });
-        await options.optionRecipes.command({
+      const choices = new Map(
+        [...wanted.keys()].map((option) => [option, choiceItems.get(option) ?? null]),
+      );
+      let left = Number.POSITIVE_INFINITY;
+      for (;;) {
+        const round = await options.optionRecipes.coverDishChoices({
           ...session,
-          body: {
-            action: "Publish",
-            operationReference: step("option-publish-" + key),
-            changeVersionReference: change.changeVersionReference,
-          },
+          operationReference: body.operationReference,
+          productReference,
+          skuReference: sku,
+          choices,
         });
+        if (round.waitingForAllergens) {
+          // A dish whose allergens simply are not declared yet saves: declaring them later covers
+          // its choices. A combo declares its own, and allergens sent in this save should have
+          // given it a recipe: there, no recipe is a real failure and stays one.
+          if (body.allergens !== null || choiceItems.size > 0)
+            throw new MerchantOptionRecipeError("NoRecipe", sku);
+          choicesWaiting = true;
+          break;
+        }
+        if (round.remaining === 0) break;
+        // A round that covered nothing would never finish.
+        if (round.remaining >= left) return fail("StoppedPartWay");
+        left = round.remaining;
       }
     }
-    return { status: "Saved" as const, productReference, skuReference: sku };
+    return { status: "Saved" as const, productReference, skuReference: sku, choicesWaiting };
   };
 
   /**
@@ -935,8 +965,14 @@ export function createMerchantOneStoreDishes(options: {
           })),
         })),
         // The combo itself declares no allergens of its own (its recipe holds the kitchen step);
-        // each choice adds its dish's.
-        allergens: current?.dishRecorded === true ? null : [],
+        // each choice adds its dish's. A combo stopped before this step has no recipe yet, so
+        // saving it again declares it now.
+        allergens:
+          current?.dishRecorded === true &&
+          (menu.sellables.find((x) => x.skuReference === current.skuReference)?.allergens?.source ??
+            "None") !== "None"
+            ? null
+            : [],
       },
       new Map(
         slots.flatMap((slot) =>
@@ -996,27 +1032,14 @@ export function createMerchantOneStoreDishes(options: {
         },
       });
     }
-    const view = (await options.optionPrices.query(session)) as unknown as {
-      products: readonly {
-        optionSets: readonly {
-          options: readonly {
-            ruleReference: string | null;
-            aggregateVersion: number | null;
-            pending: { byViewer: boolean } | null;
-          }[];
-        }[];
-      }[];
-    };
-    const waiting = view.products.flatMap((p) =>
-      p.optionSets.flatMap((s) => s.options.filter((o) => o.pending !== null)),
-    );
-    if (waiting.some((o) => o.pending?.byViewer !== true)) return fail("OthersPending");
+    const waiting = await options.optionPrices.waiting(session);
+    if (waiting.some((rule) => !rule.byViewer)) return fail("OthersPending");
     // A drinks menu easily waits on more choice prices than one publish takes; a retry after a
     // stop part-way carries on from what is still waiting.
     for (let at = 0; at < waiting.length; at += OPTION_PRICE_PUBLISH_LIMIT) {
-      const rules = waiting.slice(at, at + OPTION_PRICE_PUBLISH_LIMIT).map((o) => ({
-        ruleReference: o.ruleReference ?? fail("NotFound"),
-        expectedAggregateVersion: o.aggregateVersion ?? fail("NotFound"),
+      const rules = waiting.slice(at, at + OPTION_PRICE_PUBLISH_LIMIT).map((rule) => ({
+        ruleReference: rule.ruleReference,
+        expectedAggregateVersion: rule.aggregateVersion,
       }));
       await options.optionPrices.command({
         ...session,
@@ -1044,11 +1067,14 @@ export function createMerchantOneStoreDishes(options: {
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
     const body = parseOneStoreDishBody(input.body);
     const session = { sessionCookie: input.sessionCookie, csrf: input.csrf };
-    return body.action === "SaveDish"
-      ? saveDish(session, body)
-      : body.action === "SaveCombo"
-        ? saveCombo(session, body)
-        : listAll(session, body);
+    if (body.action === "SaveDish") return saveDish(session, body);
+    try {
+      return body.action === "SaveCombo"
+        ? await saveCombo(session, body)
+        : await listAll(session, body);
+    } catch (error) {
+      throw stoppedPartWay(error);
+    }
   };
   return { command };
 }
