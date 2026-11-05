@@ -1,6 +1,7 @@
 import { isPilotPaymentProvider } from "./pilot-stripe-provider.mjs";
 import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createHash } from "node:crypto";
+import { reportUnexpected } from "./pilot-unexpected.mjs";
 import { pilotCreateIntentIdempotencyKey } from "./pilot-open-payment-resolution.mjs";
 import { createInternalExpiryCutoff } from "./pilot-expiry-cutoff.mjs";
 import { createCustomerSessionPaymentIntent } from "../../apps/api/dist/customer-session-payment-intent.js";
@@ -208,7 +209,13 @@ export async function createInternalPaymentIntent(
   return {
     resolveRequest,
     async create(input) {
-      return (await resolveRequest(input)).service.create(input);
+      try {
+        return await (await resolveRequest(input)).service.create(input);
+      } catch (error) {
+        // The guest only sees "preparing payment": the cause must reach the log (codes only).
+        reportUnexpected("CUSTOMER_PAYMENT_INTENT_UNAVAILABLE", error);
+        throw error;
+      }
     },
     // WP-2423 Q7 slice 2: the same preparation for a staff-entered round paid on the card machine.
     async prepare(input) {
