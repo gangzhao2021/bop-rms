@@ -7488,6 +7488,32 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Store system: needs attention, see the list above": "门店系统：有问题，请看上面的列表",
   "Store system: update in progress": "门店系统：正在更新",
   "Store system: all good": "门店系统：一切正常",
+  "Store system: not checked yet": "门店系统：还没有检查",
+  "Store system: last checked {observedAt}": "门店系统：最近检查 {observedAt}",
+  " · as of {observedAt}": " · 截至 {observedAt}",
+  "Call BOP support: {value}": "致电 BOP 技术支持：{value}",
+  "(test number)": "（测试号码）",
+  "Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to check the store system.":
+    "继续用店里自己的收银机或纸单点单，用刷卡机收款。请 BOP 技术支持检查门店系统。",
+  "Pause online ordering if staff screens still work. Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to restart the store system.":
+    "如果员工页面还能用，就暂停线上点单。继续用店里自己的收银机或纸单点单，用刷卡机收款。请 BOP 技术支持重启门店系统。",
+  "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.":
+    "部分后台工作已停止。请到“订单”和“异常”页查看有没有待处理的工作；需要 BOP 技术支持重启。",
+  "Background work": "后台工作",
+  "Background work of the other Stores": "其他门店的后台工作",
+  "Day-end settlement is not set up for this Store": "这家店还没有设置日结",
+  "This Store has a closed business day but no day-end settlement, so its payments are not being compared with the payment provider.":
+    "这家店已有结束的营业日，但还没有日结，所以它的付款没有与支付方核对。",
+  "BOP support: record this Store's first closed business day so its day-end settlement starts.":
+    "BOP 技术支持：记录这家店第一个已结束的营业日，让它的日结开始运行。",
+  "Some Stores need BOP support": "有门店需要 BOP 技术支持处理",
+  "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are not told about this.":
+    "BOP 技术支持：运行状态检查，查清这些门店的检查为什么没有运行，并补上缺少的设置。这些门店的老板不会收到这条提醒。",
+  "Not being checked: {names}.": "没有在检查：{names}。",
+  "Some checks could not run: {names}.": "部分检查无法运行：{names}。",
+  "Closed business days with no day-end settlement: {names}.": "营业日已结束但没有日结：{names}。",
+  "Ordering setup ending soon: {names}.": "点单服务快到期：{names}。",
+  "{names} and {count} more": "{names} 和另外 {count} 家",
   "System details": "系统详情",
   "Pickup orders cannot be taken": "现在无法接自取订单",
   "Pickup times are running out": "自取时间快用完了",

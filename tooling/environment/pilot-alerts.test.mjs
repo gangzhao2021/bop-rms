@@ -7,11 +7,13 @@ import {
   buildAlertBoard,
   emptyAlertState,
   evaluateAlertConditions,
+  evaluateStoreConditions,
   planChannelDelivery,
   recordChannelDelivery,
   renderAlert,
   renderMessage,
   uncheckedAlertKeys,
+  storeOutboundNotifications,
 } from "./pilot-alerts.mjs";
 
 const T0 = Date.parse("2026-10-15T03:00:00.000Z");
@@ -870,17 +872,23 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
       channels: ["email"],
       failingMs: MIN,
       reportAgeMs: MIN,
+      // The most the other Stores' summary can name: the board's limit still holds.
+      unchecked: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
+      checksFailing: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
+      settlementNotCovered: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
+      setupEnding: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
     };
-    for (const key of ALERT_KEYS) {
-      const { summary, action } = renderAlert(key, params);
-      // The merchant Home refuses a whole board with a longer action or summary.
-      expect(action.length, key).toBeLessThanOrEqual(400);
-      expect(summary.length, key).toBeLessThanOrEqual(600);
-      for (const text of [summary, action])
-        expect(text, key).not.toMatch(
-          /pilot|container|operator|service log|monitor log|dead-letter|the host\b|\blog\b/iu,
-        );
-    }
+    for (const key of ALERT_KEYS)
+      for (const audience of ["Installation", "Merchant"]) {
+        const { summary, action } = renderAlert(key, params, { audience });
+        // The merchant Home refuses a whole board with a longer action or summary.
+        expect(action.length, key).toBeLessThanOrEqual(400);
+        expect(summary.length, key).toBeLessThanOrEqual(600);
+        for (const text of [summary, action])
+          expect(text, key).not.toMatch(
+            /pilot|container|operator|service log|monitor log|dead-letter|the host\b|\blog\b/iu,
+          );
+      }
     expect(renderAlert("entry.api", params).action).toContain("Ask BOP support");
     expect(renderAlert("entry.api", params).action).toContain("take paper orders");
     expect(renderAlert("payment.updates", params).action).toContain("Do not take a second payment");
@@ -957,5 +965,118 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
         .matchAll(/"([a-z]+\.[a-z_]+)"/gu),
     ].map((m) => m[1]);
     expect(listed.sort()).toEqual([...ALERT_KEYS].sort());
+  });
+});
+
+// DEC-PILOT-ALERTS-BACKUP correction 2: what a Store's own board is made of.
+describe("a Store's own conditions", () => {
+  const store = (change = {}) => ({
+    now: T0,
+    store: "tea",
+    probes: healthy().probes,
+    supervisor: healthy().supervisor,
+    business: healthy().business,
+    installation: { validUntil: new Date(T0 + 30 * 86400_000).toISOString() },
+    ...change,
+  });
+  it("raises nothing about the installation: no backup, certificate, disk or channel", () => {
+    expect(keys(evaluateStoreConditions(store()))).toEqual([]);
+    // The same observations that the root would raise on.
+    expect(
+      keys(
+        evaluateStoreConditions(
+          store({
+            backup: { lastSuccessAt: null },
+            certificate: { validTo: new Date(T0).toISOString() },
+            disks: [{ name: "runtime", freeBytes: 1, totalBytes: 100 }],
+            channels: [{ kind: "email", failingSince: new Date(T0 - 40 * MIN).toISOString() }],
+          }),
+        ),
+      ),
+    ).toEqual([]);
+  });
+  it("gives the same answer as the root for the same business signals", () => {
+    const business = {
+      stuckUpdates: { count: 2, oldestAgeMs: 10 * MIN },
+      retryingUpdates: { count: 1, oldestAgeMs: 40 * MIN },
+      reconciliationDifferences: { count: 1, oldestAgeMs: 30 * 3600_000 },
+      settlementExceptions: { count: 1, oldestAgeMs: 8 * 3600_000 },
+      receiptTemplate: { ready: false, reason: "TemplateNotProven" },
+      quoteTax: { ready: false, reason: "TaxConfigurationMismatch" },
+      heldStock: { count: 3, openCount: 3, oldestAgeMs: 26 * 3600_000 },
+      pickupCapacity: { coveredMs: 0 },
+    };
+    const root = evaluateAlertConditions({ ...healthy(), business });
+    const own = evaluateStoreConditions(store({ business }));
+    expect([...own.entries()].sort()).toEqual([...root.entries()].sort());
+  });
+  it("at the root a settings read that failed still says receipts and pricing are down", () => {
+    const held = { ready: false, reason: "StoreConfigurationUnavailable" };
+    const business = { ...healthy().business, receiptTemplate: held, quoteTax: held };
+    expect(keys(evaluateAlertConditions({ ...healthy(), business }))).toEqual([
+      "pricing.tax_configuration",
+      "receipts.template",
+    ]);
+    const own = evaluateStoreConditions(store({ business }));
+    expect(keys(own)).toEqual(["monitor.source"]);
+    expect(own.get("monitor.source").params.sources).toEqual([
+      "the receipt template check",
+      "the check that orders can be priced",
+    ]);
+  });
+  it("sends BOP only what is that Store's own", () => {
+    const item = (key, params = {}) => ({
+      id: key,
+      kind: "raised",
+      key,
+      severity: "warning",
+      params,
+      at: "x",
+    });
+    const own = [
+      "payment.updates",
+      "updates.retrying",
+      "receipts.template",
+      "pricing.tax_configuration",
+      "orders.held_stock",
+      "pickup.capacity_horizon",
+      "reconciliation.differences",
+      "settlement.exceptions",
+      "settlement.not_covered",
+      "installation.validity",
+    ].map((key) => item(key));
+    const shared = [
+      item("entry.api"),
+      item("entry.customer"),
+      item("entry.merchant"),
+      item("service.attention", { services: ["store-background"], sharedHost: true }),
+      item("monitor.source", { sources: ["the service status"] }),
+    ];
+    const sent = storeOutboundNotifications(
+      [
+        ...own,
+        ...shared,
+        item("service.attention", { services: ["business-worker:events"], sharedHost: false }),
+        item("monitor.source", { sources: ["the service status", "disk space"] }),
+      ],
+      "tea",
+    );
+    expect(sent.map((entry) => entry.key).sort()).toEqual(
+      [...own.map((entry) => entry.key), "monitor.source", "service.attention"].sort(),
+    );
+    expect(sent.every((entry) => entry.store === "tea")).toBe(true);
+  });
+  it("names the Store on each line and in a single alert's subject, and only a Store's name", () => {
+    const base = { kind: "raised", key: "payment.updates", severity: "critical", at: "x" };
+    const params = { count: 1, oldestAgeMs: MIN };
+    const config = { siteLabel: "Main St", runbookBase: "x" };
+    const one = renderMessage([{ ...base, params, store: "tea" }], config);
+    expect(one.subject).toBe("Main St · tea: URGENT - Order or payment updates are stuck");
+    expect(one.text).toMatch(/^tea - Problem \(urgent\)/u);
+    const hostile = renderMessage([{ ...base, params, store: "guest@example.com" }], config);
+    expect(`${hostile.subject} ${hostile.text}`).not.toContain("guest@");
+    const none = renderMessage([{ ...base, params }], config);
+    expect(none.subject).toBe("Main St: URGENT - Order or payment updates are stuck");
+    expect(none.text).toMatch(/^Problem \(urgent\)/u);
   });
 });

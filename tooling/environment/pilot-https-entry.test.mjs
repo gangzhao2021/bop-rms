@@ -5,7 +5,10 @@ import {
   startConfiguredPilotHttps,
   parsePilotHttpsArguments,
 } from "./pilot-https-entry.mjs";
-import { composeMerchantDependencies } from "./pilot-merchant-composition.mjs";
+import {
+  composeMerchantDependencies,
+  operationsAlertAudienceOf,
+} from "./pilot-merchant-composition.mjs";
 const scope = { tenantReference: "tenant", brandReference: "brand", storeReference: "store" };
 const customerConfig = { scope, diningTableFiles: ["internal-test-dining-table.json"] };
 const merchantConfig = {
@@ -124,6 +127,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "cancellationRefundProvider",
       "createInternalCounterOrder",
       "readOperationsAlertBoard",
+      // DEC-PILOT-ALERTS-BACKUP correction 2: a Store below stores/ reads as a merchant.
+      "operationsAlertAudience",
       "exceptionPaymentMode",
       "providerAccountReference",
       "createInternalUnpaidRoundCancellation",
@@ -164,6 +169,18 @@ it("preserves configured refund roles, provider and Pickup workstation without g
   );
   expect(dependencies.publicOrigin).toBe("https://127.0.0.1:4443");
   expect(typeof dependencies.refundUnmatchedCapture).toBe("function");
+  expect(dependencies.operationsAlertAudience).toBe("Installation");
+});
+it("DEC-PILOT-ALERTS-BACKUP correction 2: a Store below stores/ reads as a merchant, the runtime root as the installation", () => {
+  for (const directory of ["/app/.local/pilot-v15/stores/tea", ".local/pilot-v15/stores/demo-2/"])
+    expect(operationsAlertAudienceOf(directory)).toBe("Merchant");
+  for (const directory of [
+    "/app/.local/pilot-v15",
+    "/app/.local/stores",
+    "/app/.local/pilot-v15/stores/tea/ops",
+    "/app/.local/pilot-v15/stores/../x",
+  ])
+    expect(operationsAlertAudienceOf(directory)).toBe("Installation");
 });
 it("accepts only an explicit safe installation", () => {
   expect(parsePilotHttpsArguments([".local/pilot-example"])).toBe(".local/pilot-example");

@@ -5,8 +5,9 @@ import { readPilotDailySettlementStatus } from "./pilot-daily-settlement-status.
 import { matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { createInternalSettlementDays } from "./pilot-settlement-window.mjs";
 
-export async function readPilotSettlementProblems({ resources, installation }) {
-  const active = async () => {
+const activeInstallation =
+  ({ resources, installation }) =>
+  async () => {
     const p = await installation.loadProfile();
     return (
       matchesPilotEnvironment(p.environment) &&
@@ -16,6 +17,27 @@ export async function readPilotSettlementProblems({ resources, installation }) {
       resources.now() < p.binding.validUntil
     );
   };
+
+/**
+ * DEC-PILOT-ALERTS-BACKUP correction 2: whether this Store has a closed business day to settle (its
+ * published hours were in force before today's business day began). A read that fails says no, and
+ * is asked again next cycle.
+ */
+export async function readPilotHasClosedBusinessDay({ resources, installation }) {
+  const days = createInternalSettlementDays({
+    resources,
+    active: activeInstallation({ resources, installation }),
+  });
+  try {
+    await days.bounds();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function readPilotSettlementProblems({ resources, installation }) {
+  const active = activeInstallation({ resources, installation });
   const read = createPostgresPaymentReconciliationRunSource({
     scope: resources.scope,
     authorize: active,

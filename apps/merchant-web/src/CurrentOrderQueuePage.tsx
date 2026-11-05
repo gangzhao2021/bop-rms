@@ -1,4 +1,5 @@
 import { systemText, displayLocale, t, saidTable } from "./i18n/i18n.js";
+import { formatContactPhone } from "./contact-phone.js";
 import { useRoundPhones, WithRoundPhones } from "./TablePhones.js";
 import {
   AcceptanceHoldDecision,
@@ -1098,11 +1099,7 @@ export function storeRefusedBatches(view: CurrentOrderQueue): ReadonlySet<string
   );
 }
 
-/** "+14165550123" → "(416) 555-0123"; other countries keep the international form. */
-export function formatContactPhone(phone: string): string {
-  const match = /^\+1([2-9][0-9]{2})([0-9]{3})([0-9]{4})$/u.exec(phone);
-  return match ? `(${match[1]}) ${match[2]}-${match[3]}` : phone;
-}
+export { formatContactPhone };
 
 /**
  * WP-2423 Q10: who the pickup is for and how to reach them about this order — the contact the

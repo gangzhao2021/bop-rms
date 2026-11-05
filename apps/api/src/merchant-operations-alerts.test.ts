@@ -16,6 +16,7 @@ vi.mock("./merchant-store-scope.js", () => ({
 }));
 import {
   createPersistentMerchantOperationsAlerts,
+  merchantOperationsAlertKeys,
   operationsAlertKeys,
   projectOperationsAlertBoard,
 } from "./merchant-operations-alerts.js";
@@ -107,6 +108,7 @@ describe("WP-2423 Q13 operations alert board projection", () => {
   it("projects the closed board and reports a fresh monitor", () => {
     const view = projectOperationsAlertBoard(board(), "2026-10-15T08:02:00.000Z");
     expect(view).toEqual({
+      audience: "Installation",
       monitor: "Reporting",
       observedAt: "2026-10-15T08:00:00.000Z",
       active: [
@@ -129,6 +131,8 @@ describe("WP-2423 Q13 operations alert board projection", () => {
       outbound: { email: true, webhooks: 1, heartbeat: false },
       lastSuccessfulBackupAt: "2026-10-14T02:00:00.000Z",
       plannedUpdate: null,
+      checksIncomplete: false,
+      support: null,
     });
   });
   it("WP-2423 (2026-10-18): passes a planned update window while it is in force, only its instants", () => {
@@ -192,6 +196,117 @@ describe("WP-2423 Q13 operations alert board projection", () => {
   });
 });
 
+// DEC-PILOT-ALERTS-BACKUP correction 2: a restaurant reads about its own Store.
+describe("a merchant's projection of its own board", () => {
+  const entry = (key: string, severity = "warning") => ({
+    key,
+    severity,
+    raisedAt: "2026-10-15T07:00:00.000Z",
+    lastSeenAt: "2026-10-15T08:00:00.000Z",
+    title: "Title",
+    summary: "Summary.",
+    action: "Action.",
+    runbook: "alert-x",
+  });
+  const everything = () => ({
+    ...board(),
+    active: operationsAlertKeys.map((key) => entry(key)),
+    recentlyCleared: [
+      { key: "backup.stale", title: "No recent backup", clearedAt: "2026-10-15T06:00:00.000Z" },
+      { key: "monitor.source", title: "Some checks", clearedAt: "2026-10-15T06:00:00.000Z" },
+      { key: "payment.updates", title: "Stuck", clearedAt: "2026-10-15T06:00:00.000Z" },
+    ],
+    maintenance: { startedAt: "2026-10-15T07:58:00.000Z", expiresAt: "2026-10-15T08:13:00.000Z" },
+  });
+  const at = "2026-10-15T08:02:00.000Z";
+  it("keeps its own Store's problems and the outages that stop its guests or staff, and nothing else", () => {
+    const view = projectOperationsAlertBoard(everything(), at, { audience: "Merchant" });
+    expect(view.audience).toBe("Merchant");
+    expect(view.active.map((item) => item.key)).toEqual(
+      operationsAlertKeys.filter((key) => merchantOperationsAlertKeys.has(key)),
+    );
+    for (const dropped of [
+      "backup.failed",
+      "backup.stale",
+      "backup.restore_check",
+      "backup.offsite",
+      "certificate.expiring",
+      "disk.low",
+      "monitor.source",
+      "channel.delivery",
+      "supervisor.silent",
+      // Each is BOP's to renew or set up, by a tool, before any guest notices.
+      "installation.validity",
+      "settlement.not_covered",
+      "stores.attention",
+    ])
+      expect(view.active.map((item) => item.key)).not.toContain(dropped);
+    expect(view.recentlyCleared.map((item) => item.key)).toEqual(["payment.updates"]);
+    expect(view.outbound).toEqual({ email: false, webhooks: 0, heartbeat: false });
+    expect(view.lastSuccessfulBackupAt).toBe(null);
+    // A planned update stops their guests and staff too: the calm notice stays.
+    expect(view.plannedUpdate).toEqual({
+      startedAt: "2026-10-15T07:58:00.000Z",
+      expiresAt: "2026-10-15T08:13:00.000Z",
+    });
+  });
+  it("says when some of its checks could not run, without naming them", () => {
+    const incomplete = { ...board(), active: [entry("monitor.source")] };
+    const view = projectOperationsAlertBoard(incomplete, at, { audience: "Merchant" });
+    expect(view.active).toEqual([]);
+    expect(view.checksIncomplete).toBe(true);
+    expect(
+      projectOperationsAlertBoard({ ...board(), active: [] }, at, { audience: "Merchant" })
+        .checksIncomplete,
+    ).toBe(false);
+    // The board that says it in words keeps saying it.
+    const installation = projectOperationsAlertBoard(incomplete, at);
+    expect(installation.active.map((item) => item.key)).toEqual(["monitor.source"]);
+    expect(installation.checksIncomplete).toBe(false);
+  });
+  it("still refuses a board that is not one, whatever the audience", () => {
+    const value = everything();
+    Object.assign(value.active[0] as object, { phone: "555-0100" });
+    expect(() => projectOperationsAlertBoard(value, at, { audience: "Merchant" })).toThrow(
+      "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE",
+    );
+  });
+  it("is unchanged for the installation, apart from saying who it is for", () => {
+    const value = everything();
+    const { audience, checksIncomplete, support, ...view } = projectOperationsAlertBoard(value, at);
+    expect([audience, checksIncomplete, support]).toEqual(["Installation", false, null]);
+    expect(view.active).toHaveLength(operationsAlertKeys.length);
+    expect(view.recentlyCleared).toHaveLength(3);
+    expect(view.outbound).toEqual(value.outboundChannels);
+    expect(view.lastSuccessfulBackupAt).toBe(value.lastSuccessfulBackupAt);
+  });
+  it("carries the support contact to both, and refuses one that is not a phone number", () => {
+    const support = { phone: "+14165550100", testOnly: true };
+    for (const audience of ["Installation", "Merchant"] as const)
+      expect(
+        projectOperationsAlertBoard({ ...board(), support }, at, { audience }).support,
+      ).toEqual(support);
+    expect(projectOperationsAlertBoard(board(), at).support).toBe(null);
+    expect(projectOperationsAlertBoard({ ...board(), support: null }, at).support).toBe(null);
+    for (const bad of [
+      { phone: "call us", testOnly: false },
+      { phone: "+14165550100" },
+      { phone: "+14165550100", testOnly: "no" },
+      { phone: "+14165550100", testOnly: false, name: "x" },
+    ])
+      expect(() => projectOperationsAlertBoard({ ...board(), support: bad }, at)).toThrow(
+        "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE",
+      );
+  });
+  it("a board that has never been written reads as not running, for the audience asking", () => {
+    expect(projectOperationsAlertBoard(null, at, { audience: "Merchant" })).toMatchObject({
+      audience: "Merchant",
+      monitor: "NotRunning",
+      active: [],
+    });
+  });
+});
+
 describe("WP-2423 Q13 persistent operations alerts read", () => {
   const persistence = {
     now: () => "2026-10-15T08:01:00.000Z",
@@ -205,8 +320,26 @@ describe("WP-2423 Q13 persistent operations alerts read", () => {
       storeReference: scope.storeReference,
       readBoard,
     });
-    expect(await read({ sessionCookie: "cookie" })).toMatchObject({ active: [{}] });
+    expect(await read({ sessionCookie: "cookie" })).toMatchObject({
+      audience: "Installation",
+      active: [{}],
+    });
     expect(scope.calls.at(-1)?.slice(1)).toEqual(["cookie", "operations.order-exception.manage"]);
+  });
+  it("answers a Store below stores/ as a merchant, as its composition says", async () => {
+    scope.allowed = true;
+    const read = createPersistentMerchantOperationsAlerts({
+      persistence,
+      storeReference: scope.storeReference,
+      readBoard: async () => board(),
+      audience: "Merchant",
+    });
+    // The only row on this board is about backups: not this reader's to act on.
+    expect(await read({ sessionCookie: "cookie" })).toMatchObject({
+      audience: "Merchant",
+      active: [],
+      lastSuccessfulBackupAt: null,
+    });
   });
   it("answers 'not permitted' to other roles and refuses another Store, without reading the board", async () => {
     const readBoard = vi.fn(async () => board());

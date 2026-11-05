@@ -518,6 +518,112 @@ test("@production Home keeps staff on paper when the order rules row clears (WP-
   expect(home.unexpected).toEqual([]);
 });
 
+// DEC-PILOT-ALERTS-BACKUP correction 2: a restaurant on the installation reads about its own Store,
+// and nothing it cannot act on. The installation's own Home keeps the test above.
+const merchantBoard = {
+  audience: "Merchant",
+  monitor: "Reporting",
+  observedAt: "2026-10-15T16:00:00.000Z",
+  active: [],
+  recentlyCleared: [],
+  outbound: { email: false, webhooks: 0, heartbeat: false },
+  lastSuccessfulBackupAt: null,
+  plannedUpdate: null,
+  checksIncomplete: false,
+  support: null,
+};
+const stuckUpdates = {
+  key: "payment.updates",
+  severity: "critical",
+  title: "Order or payment updates are stuck",
+  summary:
+    "1 update (such as a payment result or an order change) could not be processed after automatic retries (oldest 4 minutes ago).",
+  action:
+    "Do not take a second payment from guests who say they paid. Check Orders and Exceptions; ask BOP support to review the stuck updates and send them again.",
+  raisedAt: "2026-10-15T15:56:00.000Z",
+};
+
+test("@production A merchant's Home says nothing about a monitor it cannot start, and keeps its own problems in view", async ({
+  page,
+}) => {
+  let board: unknown = { ...merchantBoard, monitor: "NotRunning", observedAt: null };
+  const home = await pilotHome(page, "owner", () => board);
+  await page.goto("/app");
+  const needs = page.getByRole("region", { name: "Needs attention" });
+  const card = page.getByRole("region", { name: "Store system" });
+  // What every new merchant's Home said: an urgent row telling a restaurant to ask for the monitor.
+  await expect(card.getByText("Store system: not checked yet")).toBeVisible();
+  await expect(page.getByText("Store system problems are not being checked")).toHaveCount(0);
+  await expect(page.getByText("The alert monitor")).toHaveCount(0);
+  await expect(needs.getByText("Urgent", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/backup/iu)).toHaveCount(0);
+  await expect(page.getByText(/email or phone alerts/u)).toHaveCount(0);
+
+  // Reporting: the same calm line as any other Store, without the installation's facts.
+  board = merchantBoard;
+  await card.getByRole("button", { name: "Check again" }).click();
+  await expect(card.getByText("Store system: all good")).toBeVisible();
+  await expect(card.getByText(/Last checked 12:00/u)).toBeVisible();
+  await expect(page.getByText(/backup/iu)).toHaveCount(0);
+
+  // Some of its checks could not run: BOP is told; here it does not say all is good.
+  board = { ...merchantBoard, checksIncomplete: true };
+  await card.getByRole("button", { name: "Check again" }).click();
+  await expect(card.getByText("Store system: last checked Oct 15, 2026, 12:00 PM")).toBeVisible();
+  await expect(card.getByText("all good")).toHaveCount(0);
+
+  // Its own problem: what to do, the page that settles it and who to call.
+  board = {
+    ...merchantBoard,
+    active: [stuckUpdates],
+    support: { phone: "+14165550100", testOnly: true },
+  };
+  await card.getByRole("button", { name: "Check again" }).click();
+  await expect(needs.getByText("Order or payment updates are stuck")).toBeVisible();
+  await expect(needs.getByRole("link", { name: "Go to Orders" })).toHaveAttribute(
+    "href",
+    "/operations/orders",
+  );
+  const call = needs.getByRole("link", { name: "Call BOP support: (416) 555-0100" });
+  await expect(call).toHaveAttribute("href", "tel:+14165550100");
+  await expect(needs.getByText("(test number)", { exact: false })).toBeVisible();
+  for (const width of [1440, 1024, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(call).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/home-merchant-alerts-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectNoInternalText(page);
+
+  // The monitor stops with that on the board: staff must not charge that guest again.
+  board = { ...merchantBoard, monitor: "Silent", active: [stuckUpdates] };
+  await card.getByRole("button", { name: "Check again" }).click();
+  await expect(
+    needs.getByText("Do not take a second payment from guests who say they paid.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(needs.getByText("Urgent", { exact: true })).toBeVisible();
+  await expect(needs.getByText(/as of Oct 15, 2026, 12:00 PM/u)).toBeVisible();
+  await expect(page.getByText("The alert monitor")).toHaveCount(0);
+  await expect(card.getByText("Store system: needs attention")).toBeVisible();
+
+  // Nothing on the board and no monitor: quiet, and says when it last looked.
+  board = { ...merchantBoard, monitor: "Silent" };
+  await card.getByRole("button", { name: "Check again" }).click();
+  await expect(card.getByText("Store system: last checked Oct 15, 2026, 12:00 PM")).toBeVisible();
+  await expect(needs.getByText("Urgent", { exact: true })).toHaveCount(0);
+  await expectNoInternalText(page);
+  expect(home.errors).toEqual([]);
+  expect(home.unexpected).toEqual([]);
+});
+
 // v15 finding: the pilot navigation has never had to carry an exceptions entry for the card to
 // appear; the server's answer decides. Owner and Store Manager see it, front of house does not.
 for (const role of ["owner", "store-manager"] as const)

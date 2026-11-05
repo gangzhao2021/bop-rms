@@ -209,6 +209,31 @@ describe("WP-2423 Q13 alert log and configuration", () => {
     expect(JSON.parse(await fs.readFile(`${file}.1`, "utf8")).key).toBe("backup.stale");
     await fs.rm(dir, { recursive: true });
   });
+  it("DEC-PILOT-ALERTS-BACKUP correction 2: reads who staff call, and says so when it is a test number", () => {
+    expect(parsePilotOpsConfig(null, ".local/pilot-v15").support).toBe(null);
+    expect(parsePilotOpsConfig({ schemaVersion: 1 }, ".local/pilot-v15").support).toBe(null);
+    expect(
+      parsePilotOpsConfig(
+        { schemaVersion: 1, support: { phone: "+14165550100" } },
+        ".local/pilot-v15",
+      ).support,
+    ).toEqual({ phone: "+14165550100", testOnly: false });
+    expect(
+      parsePilotOpsConfig(
+        { schemaVersion: 1, support: { phone: "+14165550100", testOnly: true } },
+        ".local/pilot-v15",
+      ).support,
+    ).toEqual({ phone: "+14165550100", testOnly: true });
+    for (const support of [
+      {},
+      { phone: "416-555-0100" },
+      { phone: "+14165550100", testOnly: "yes" },
+      { phone: "+14165550100", name: "Ana" },
+    ])
+      expect(() => parsePilotOpsConfig({ schemaVersion: 1, support }, ".local/pilot-v15")).toThrow(
+        "PILOT_OPS_CONFIG_INVALID",
+      );
+  });
   it("accepts a complete configuration and refuses plaintext, unknown keys and S3 (external gate)", () => {
     const valid = {
       schemaVersion: 1,

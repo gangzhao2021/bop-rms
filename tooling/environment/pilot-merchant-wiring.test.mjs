@@ -98,3 +98,9 @@ it("wires every method the merchant BFF routes call on options the pilot builds 
   expect(checked).toBeGreaterThan(0);
   expect(missing).toEqual([]);
 });
+
+it("DEC-PILOT-ALERTS-BACKUP correction 2: the composition's audience reaches the Home's read", async () => {
+  const pilot = await readFile(new URL("./pilot-merchant.mjs", import.meta.url), "utf8");
+  const read = pilot.slice(pilot.indexOf("createPersistentMerchantOperationsAlerts({"));
+  expect(read.slice(0, read.indexOf("})"))).toContain("audience: operationsAlertAudience");
+});

@@ -3,7 +3,7 @@
 //   pilot-ops.mjs run <runtime>                 monitor loop: probes, alerts, channels, backups
 //   pilot-ops.mjs test-alert <runtime>          send a test alert to every configured channel
 //   pilot-ops.mjs backup-now <runtime>          ask the running monitor to back up now
-//   pilot-ops.mjs status <runtime>              current alerts (keys and severities only)
+//   pilot-ops.mjs status <runtime>              current alerts, each Store's too (keys and severities only)
 //   pilot-ops.mjs maintenance start <runtime> --reason <text> [--minutes 1-15] [--by <name>]
 //   pilot-ops.mjs maintenance end <runtime>     planned update window (deploys; see the runbook)
 //   pilot-ops.mjs generate-offsite-key <runtime>
@@ -20,6 +20,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  DEFAULT_THRESHOLDS,
   PLANNED_MAINTENANCE_HELD_KEYS,
   advanceAlertState,
   buildAlertBoard,
@@ -56,6 +57,7 @@ import {
   observeSupervisor,
   probeTargetsFor,
 } from "./pilot-ops-observe.mjs";
+import { createStoreMonitors, readStoresStatus } from "./pilot-ops-stores.mjs";
 import { loadPilotHosting } from "./pilot-hosting.mjs";
 import {
   PLANNED_MAINTENANCE_MAX_MINUTES,
@@ -137,6 +139,8 @@ export async function runMonitorCycle({ now, state, config, io }) {
       kind: channel.kind,
       failingSince: state.channels[channel.id]?.failingSince ?? null,
     })),
+    // DEC-PILOT-ALERTS-BACKUP correction 2: what only BOP can act on at the other Stores.
+    ...(io.stores ? { stores: io.stores.summary(now) } : {}),
   };
   const conditions = evaluateAlertConditions(observations);
   // WP-2423 (2026-10-18): a planned update holds the "store system down" alerts for its window.
@@ -153,6 +157,13 @@ export async function runMonitorCycle({ now, state, config, io }) {
           ? "maintenance_expired"
           : "maintenance_ended",
     });
+  // The other Stores' boards run beside this cycle (never delaying these probes) from what it saw.
+  io.onCycle?.({
+    now,
+    probes: probes.probes,
+    supervisor: observations.supervisor,
+    maintenance,
+  });
   const advanced = advanceAlertState(state.alert, conditions, now, undefined, {
     held: maintenance === null ? [] : PLANNED_MAINTENANCE_HELD_KEYS,
     unchecked: uncheckedAlertKeys(observations),
@@ -167,10 +178,12 @@ export async function runMonitorCycle({ now, state, config, io }) {
       // screen or in a message.
       ...(typeof item.params?.refused === "string" ? { refused: item.params.refused } : {}),
     });
+  // One channel state and one hourly cap, whatever the number of Stores: their items go out here.
+  const fromStores = io.stores?.pending() ?? [];
   const channels = await deliver({
     channels: io.channels,
     channelState: state.channels,
-    notifications: advanced.notifications,
+    notifications: [...advanced.notifications, ...fromStores],
     now,
     config,
     log: io.log,
@@ -183,6 +196,7 @@ export async function runMonitorCycle({ now, state, config, io }) {
     maintenance,
   };
   await io.writeState(next);
+  io.stores?.acknowledge(fromStores);
   await io.writeBoard(
     buildAlertBoard(advanced.state, {
       observedAt: new Date(now).toISOString(),
@@ -193,6 +207,7 @@ export async function runMonitorCycle({ now, state, config, io }) {
       },
       backup: observations.backup === "unreadable" ? null : observations.backup,
       maintenance,
+      support: config.support ?? null,
     }),
   );
   return next;
@@ -238,11 +253,13 @@ function createIo(runtimeDirectory, opsDirectory, config, log) {
   };
 }
 
-async function loadBusiness(runtimeDirectory) {
+/**
+ * The reads behind one Store's business signals. `store`: a Store below `stores/`, with what differs
+ * on its own board (DEC-PILOT-ALERTS-BACKUP correction 2); the installation's own Store has none of it.
+ */
+export async function composeBusinessDependencies({ directory, installation, store = false }) {
   // Loaded lazily: these modules need the workspace TypeScript loader and the database.
   const [
-    { loadPilotInstallation },
-    { createConfiguredPilotResources },
     reconciliation,
     status,
     receipt,
@@ -251,9 +268,9 @@ async function loadBusiness(runtimeDirectory) {
     quote,
     pricing,
     workflow,
+    storeModule,
+    environment,
   ] = await Promise.all([
-    import("./pilot-installation.mjs"),
-    import("./pilot-configured-resources.mjs"),
     import("./pilot-reconciliation-exceptions.mjs"),
     import("./pilot-ops-settlement.mjs"),
     import("./pilot-receipt.mjs"),
@@ -262,30 +279,83 @@ async function loadBusiness(runtimeDirectory) {
     import("./pilot-configured-quote.mjs"),
     import("./pilot-pricing-policy.mjs"),
     import("./pilot-workflow-readiness.mjs"),
+    import("../../packages/rms/store/src/index.ts"),
+    import("./pilot-environment.mjs"),
+  ]);
+  // Once a closed business day exists it stays closed: this read need not run again.
+  let closedBusinessDay = false;
+  return {
+    createReconciliationExceptions: reconciliation.createInternalReconciliationExceptions,
+    readSettlementStatus: status.readPilotSettlementProblems,
+    readReceiptTemplate: receipt.readInternalReceiptTemplateReadiness,
+    readHeldStockOrders: heldStock.readInternalHeldStockOrders,
+    readPickupCapacityHorizon: pickupCapacity.readInternalPickupCapacityHorizon,
+    readWorkflowReadiness: (current) =>
+      workflow.readInternalWorkflowReadiness(current, installation),
+    readQuoteTaxConfiguration: (current) =>
+      quote.readInternalQuoteTaxReadiness(current, () =>
+        pricing.createInternalPricingPolicy({
+          loadProfile: installation.loadProfile,
+          loadMenu: installation.loadMenu,
+          expectedDatabaseName: installation.database,
+        }),
+      ),
+    ...(store
+      ? {
+          readOwnerPublishedSetup: (current) =>
+            current.transactions.run((tx) =>
+              storeModule.hasOwnerPublishedStoreSetup(tx, current.scope),
+            ),
+          // A real Store always has this file; without it its checks read as unreadable.
+          isSettlementCovered: () =>
+            environment.isPilotStore()
+              ? true
+              : fs.lstat(path.join(directory, "daily-settlement-coverage.json")).then(
+                  () => true,
+                  (error) => {
+                    if (error.code === "ENOENT") return false;
+                    throw error;
+                  },
+                ),
+          readClosedBusinessDay: async (current) => {
+            closedBusinessDay ||= await status.readPilotHasClosedBusinessDay({
+              resources: current,
+              installation,
+            });
+            return closedBusinessDay;
+          },
+          // Asked only when pickup times run short, so an ordinary minute costs nothing more.
+          readPickupCapacityHorizon: async (current) => {
+            const horizon = await pickupCapacity.readInternalPickupCapacityHorizon(current);
+            return horizon.coveredMs >= DEFAULT_THRESHOLDS.pickupHorizonWarnMs ||
+              (await pickupCapacity.readInternalPickupOffered(current))
+              ? horizon
+              : null;
+          },
+        }
+      : {}),
+  };
+}
+
+async function loadBusiness(runtimeDirectory, { store = false } = {}) {
+  const [
+    { loadPilotInstallation },
+    { createBackgroundPilotResources, createConfiguredPilotResources },
+  ] = await Promise.all([
+    import("./pilot-installation.mjs"),
+    import("./pilot-configured-resources.mjs"),
   ]);
   const directory = path.resolve(runtimeDirectory);
   const installation = await loadPilotInstallation(directory);
-  const resources = await createConfiguredPilotResources(directory);
+  // A Store's reads ride out another merchant's menu listing (the Publishing history table is
+  // shared), so one long listing never reads as a problem at every other merchant.
+  const resources = store
+    ? await createBackgroundPilotResources(directory)
+    : await createConfiguredPilotResources(directory);
   return {
     resources,
     installation,
-    dependencies: {
-      createReconciliationExceptions: reconciliation.createInternalReconciliationExceptions,
-      readSettlementStatus: status.readPilotSettlementProblems,
-      readReceiptTemplate: receipt.readInternalReceiptTemplateReadiness,
-      readHeldStockOrders: heldStock.readInternalHeldStockOrders,
-      readPickupCapacityHorizon: pickupCapacity.readInternalPickupCapacityHorizon,
-      readWorkflowReadiness: (current) =>
-        workflow.readInternalWorkflowReadiness(current, installation),
-      readQuoteTaxConfiguration: (current) =>
-        quote.readInternalQuoteTaxReadiness(current, () =>
-          pricing.createInternalPricingPolicy({
-            loadProfile: installation.loadProfile,
-            loadMenu: installation.loadMenu,
-            expectedDatabaseName: installation.database,
-          }),
-        ),
-    },
+    dependencies: await composeBusinessDependencies({ directory, installation, store }),
   };
 }
 
@@ -310,6 +380,12 @@ export async function runPilotOps({ runtimeDirectory, signal }) {
   const statusFile = path.join(opsDirectory, BACKUP_STATUS_FILE);
   const requestFile = path.join(opsDirectory, BACKUP_REQUEST_FILE);
   const business = createBusinessObserver({ runtimeDirectory, load: loadBusiness });
+  const stores = createStoreMonitors({
+    runtimeDirectory,
+    load: (directory) => loadBusiness(directory, { store: true }),
+    log,
+  });
+  let storesRun = null;
   let config = null;
   let state = (await readPrivateJson(path.join(opsDirectory, ALERT_STATE_FILE)).catch(
     () => null,
@@ -332,6 +408,18 @@ export async function runPilotOps({ runtimeDirectory, signal }) {
         ...createIo(runtimeDirectory, opsDirectory, config, log),
         observeBusiness: business,
         channels: createOutboundChannels(config, runtimeDirectory),
+        stores,
+        // Beside the loop, like backups: one run at a time, never delaying the probes.
+        onCycle: (cycle) => {
+          if (storesRun !== null) return;
+          const current = config;
+          storesRun = stores
+            .run({ ...cycle, config: current })
+            .catch(() => log({ event: "store_monitors_failed" }))
+            .finally(() => {
+              storesRun = null;
+            });
+        },
       };
       try {
         state = await runMonitorCycle({ now, state, config, io });
@@ -386,7 +474,7 @@ export async function runPilotOps({ runtimeDirectory, signal }) {
         break;
       }
     }
-    await backupRun;
+    await Promise.all([backupRun, storesRun]);
   } finally {
     await log({ event: "monitor_stopped" });
     await fs.rm(lock, { force: true });
@@ -451,10 +539,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         marker === null || marker === "unreadable"
           ? marker
           : { ...marker, inForce: activePlannedMaintenance(marker, Date.now()) !== null };
+      // DEC-PILOT-ALERTS-BACKUP correction 2: each served Store's own board (absent: one Store).
+      const stores = await readStoresStatus(runtimeDirectory).catch(() => "unreadable");
+      const others = stores === "unreadable" || Object.keys(stores).length > 0 ? { stores } : {};
       console.log(
         JSON.stringify(
           board === null
-            ? { monitor: "NotRunning", plannedUpdate }
+            ? { monitor: "NotRunning", plannedUpdate, ...others }
             : {
                 observedAt: board.observedAt,
                 active: board.active.map((item) => ({
@@ -464,6 +555,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
                 })),
                 lastSuccessfulBackupAt: board.lastSuccessfulBackupAt,
                 plannedUpdate,
+                ...others,
               },
         ),
       );

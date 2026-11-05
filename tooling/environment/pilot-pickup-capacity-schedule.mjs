@@ -134,3 +134,17 @@ export async function readInternalPickupCapacityHorizon(
   const coverage = await store.coverage(now);
   return { observedAt: now, coveredMs: Date.parse(coverage.coveredUntil) - Date.parse(now) };
 }
+
+/**
+ * For the operations monitor: whether the Store's published settings offer pickup. A dine-in Store
+ * still has slots for paper orders, but "Pickup orders cannot be taken" is not its problem.
+ */
+export async function readInternalPickupOffered(
+  resources,
+  readCalendar = (tx, now) =>
+    createPostgresPublishedStoreServiceCalendarReader(resources.operating)(tx, now),
+) {
+  const now = new Date(resources.now()).toISOString();
+  const calendar = await resources.transactions.run((tx) => readCalendar(tx, now));
+  return calendar.enabledServiceModes.includes("Pickup");
+}

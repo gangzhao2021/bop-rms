@@ -264,6 +264,15 @@ describe("WP-2423 pilot-ops maintenance command", () => {
     const status = JSON.parse((await ops("status", ".local/pilot-cli")).stdout);
     expect(status.monitor).toBe("NotRunning");
     expect(status.plannedUpdate).toMatchObject({ reason: "deploy f5ae43a5", inForce: true });
+    // DEC-PILOT-ALERTS-BACKUP correction 2: each served Store's own board, once there are any.
+    expect(status).not.toHaveProperty("stores");
+    const list = path.join(cwd, ".local/pilot-cli/stores.json");
+    await fs.writeFile(list, JSON.stringify({ schemaVersion: 1, stores: ["stores/tea"] }));
+    expect(JSON.parse((await ops("status", ".local/pilot-cli")).stdout).stores).toEqual({
+      tea: { monitor: "NotRunning" },
+    });
+    await fs.writeFile(list, "{not json");
+    expect(JSON.parse((await ops("status", ".local/pilot-cli")).stdout).stores).toBe("unreadable");
     const log = await fs.readFile(path.join(cwd, ".local/pilot-cli/ops/alerts.log"), "utf8");
     expect(log).toContain("maintenance_started");
     expect(log).not.toContain("f5ae43a5");

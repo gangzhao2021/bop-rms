@@ -20,6 +20,11 @@ export interface OperationsAlert {
   readonly raisedAt: string;
 }
 export interface OperationsAlertView {
+  /**
+   * DEC-PILOT-ALERTS-BACKUP correction 2. Installation: whoever runs the installation. Merchant: a
+   * restaurant on it, told its own Store's problems and nothing only BOP can act on.
+   */
+  readonly audience: "Installation" | "Merchant";
   readonly monitor: "Reporting" | "Silent" | "NotRunning";
   readonly observedAt: string | null;
   readonly active: readonly OperationsAlert[];
@@ -36,6 +41,10 @@ export interface OperationsAlertView {
   readonly lastSuccessfulBackupAt: string | null;
   /** WP-2423 (2026-10-18): a planned update in progress; store-down alerts wait during it. */
   readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
+  /** Merchant: some of this Store's checks could not run, so the Home must not say all is good. */
+  readonly checksIncomplete: boolean;
+  /** Who staff call when a row says "Ask BOP support"; null until it is configured. */
+  readonly support: { readonly phone: string; readonly testOnly: boolean } | null;
 }
 /**
  * The cleared titles that still keep staff waiting for BOP support (pilot-alerts `clearedTitle`).
@@ -125,6 +134,10 @@ export function alertTitle(title: string): string {
     "Disk space is running low": t("Disk space is running low"),
     "Some checks could not run": t("Some checks could not run"),
     "Alert messages are not being delivered": t("Alert messages are not being delivered"),
+    "Day-end settlement is not set up for this Store": t(
+      "Day-end settlement is not set up for this Store",
+    ),
+    "Some Stores need BOP support": t("Some Stores need BOP support"),
   };
   return words[title] ?? title;
 }
@@ -167,13 +180,28 @@ export function parseOperationsAlertView(value: unknown): OperationsAlertView {
     "outbound",
     "lastSuccessfulBackupAt",
   ];
-  // An older server sends no planned-update entry.
-  const view = exact(
-    value,
-    value !== null && typeof value === "object" && Object.hasOwn(value, "plannedUpdate")
-      ? [...keys, "plannedUpdate"]
-      : keys,
-  );
+  // An older server sends none of these.
+  const view = exact(value, [
+    ...keys,
+    ...["plannedUpdate", "audience", "checksIncomplete", "support"].filter(
+      (optional) => value !== null && typeof value === "object" && Object.hasOwn(value, optional),
+    ),
+  ]);
+  const audience = view.audience ?? "Installation";
+  if (audience !== "Installation" && audience !== "Merchant") return invalid();
+  const checksIncomplete = view.checksIncomplete ?? false;
+  if (typeof checksIncomplete !== "boolean") return invalid();
+  let support: OperationsAlertView["support"] = null;
+  if (view.support !== undefined && view.support !== null) {
+    const contact = exact(view.support, ["phone", "testOnly"]);
+    if (
+      typeof contact.phone !== "string" ||
+      !/^\+[1-9][0-9]{6,14}$/u.test(contact.phone) ||
+      typeof contact.testOnly !== "boolean"
+    )
+      return invalid();
+    support = { phone: contact.phone, testOnly: contact.testOnly };
+  }
   let plannedUpdate: OperationsAlertView["plannedUpdate"] = null;
   if (view.plannedUpdate !== undefined && view.plannedUpdate !== null) {
     const window = exact(view.plannedUpdate, ["startedAt", "expiresAt"]);
@@ -191,6 +219,7 @@ export function parseOperationsAlertView(value: unknown): OperationsAlertView {
   )
     return invalid();
   return {
+    audience,
     monitor: view.monitor,
     observedAt: view.observedAt === null ? null : instant(view.observedAt),
     active: view.active.map((item: unknown) => {
@@ -221,6 +250,8 @@ export function parseOperationsAlertView(value: unknown): OperationsAlertView {
     lastSuccessfulBackupAt:
       view.lastSuccessfulBackupAt === null ? null : instant(view.lastSuccessfulBackupAt),
     plannedUpdate,
+    checksIncomplete,
+    support,
   };
 }
 
@@ -293,6 +324,20 @@ function outboundNote(outbound: OperationsAlertView["outbound"]): string {
     : t("The Owner is also alerted by {value}.", { value: channels.join(" and ") });
 }
 
+/** The page that settles an alert (a closed list: every other row says what to do in words). */
+const ALERT_PAGES: Readonly<Record<string, { readonly href: string; label(): string }>> = {
+  "payment.updates": { href: "/operations/orders", label: () => t("Orders") },
+  "orders.held_stock": { href: "/operations/orders", label: () => t("Orders") },
+  "reconciliation.differences": {
+    href: "/operations/order-exceptions",
+    label: () => t("Exceptions"),
+  },
+  "settlement.exceptions": {
+    href: "/app/operations/payment-reconciliation",
+    label: () => t("Settlement"),
+  },
+};
+
 /**
  * Owner 2026-11-03 walkthrough: a real problem with the store system is a row in "Needs attention",
  * never tucked into the status line. Urgent ones (and a planned update, which can pause ordering)
@@ -325,7 +370,10 @@ export function systemAttentionItems(
       ],
     };
   const view = read.value;
-  if (view.monitor !== "Reporting")
+  // DEC-PILOT-ALERTS-BACKUP correction 2: a merchant cannot start the monitor and must not learn to
+  // ignore "Urgent". BOP hears of it; here the last problems stay in view, as of when last checked
+  // ("Do not take a second payment" must not vanish because the checks went quiet).
+  if (view.monitor !== "Reporting" && view.audience !== "Merchant")
     return {
       urgent: [
         {
@@ -354,19 +402,33 @@ export function systemAttentionItems(
       ],
       later: [],
     };
-  const row = (item: OperationsAlert): AttentionItem => ({
-    key: `system-${item.key}`,
-    title: alertTitle(item.title),
-    // Owner 2026-10-25: what to do stays in view; the background is on request.
-    detailLabel: t("What to do:"),
-    detail: alertAction(item.action),
-    more: alertSummary(item.summary),
-    since: t("Since {raisedAt}", { raisedAt: at(item.raisedAt) }),
-    state: item.severity === "critical" ? t("Urgent") : t("Today"),
-    tone: item.severity === "critical" ? "danger" : "warning",
-    href: null,
-    action: null,
-  });
+  const asOf =
+    view.monitor === "Silent" && view.observedAt !== null
+      ? t(" · as of {observedAt}", { observedAt: at(view.observedAt) })
+      : "";
+  const row = (item: OperationsAlert): AttentionItem => {
+    const page = ALERT_PAGES[item.key];
+    return {
+      key: `system-${item.key}`,
+      title: alertTitle(item.title),
+      // Owner 2026-10-25: what to do stays in view; the background is on request.
+      detailLabel: t("What to do:"),
+      detail: alertAction(item.action),
+      more: alertSummary(item.summary),
+      since: t("Since {raisedAt}", { raisedAt: at(item.raisedAt) }) + asOf,
+      state: item.severity === "critical" ? t("Urgent") : t("Today"),
+      tone: item.severity === "critical" ? "danger" : "warning",
+      href: page?.href ?? null,
+      action: page === undefined ? null : t("Go to {value}", { value: page.label() }),
+      // The monitor's catalog is English: a row that sends them to BOP support says how to reach it
+      // (not one addressed to BOP support itself).
+      ...(view.support !== null &&
+      item.action.includes("BOP support") &&
+      !item.action.startsWith("BOP support:")
+        ? { call: view.support }
+        : {}),
+    };
+  };
   return {
     urgent: [
       // WP-2423 (2026-10-18): a planned update is not an outage; if the store is still down when
@@ -415,11 +477,31 @@ export function systemAttentionItems(
   };
 }
 
-function systemStatusWords(read: OperationsAlertsRead, dayStartsAt: string | null): string {
+/** A merchant's board with nothing to report and no way to vouch for it: when it last checked. */
+const quietSince = (view: OperationsAlertView): string | null =>
+  view.audience === "Merchant" &&
+  view.active.length === 0 &&
+  view.plannedUpdate === null &&
+  (view.monitor === "Silent" || view.checksIncomplete)
+    ? view.observedAt
+    : null;
+
+function systemStatusWords(
+  read: OperationsAlertsRead,
+  timeZone: string | undefined,
+  dayStartsAt: string | null,
+): string {
   if (read.kind === "Unavailable") return t("Store system: could not be checked");
   if (read.kind !== "Ready") return t("Checking the store system…");
   const view = read.value;
-  if (view.monitor !== "Reporting") return t("Store system: problems are not being checked");
+  if (view.audience === "Merchant") {
+    if (view.monitor === "NotRunning") return t("Store system: not checked yet");
+    const since = quietSince(view);
+    if (since !== null && waitingForSupport(view, dayStartsAt).length === 0)
+      return t("Store system: last checked {observedAt}", {
+        observedAt: storeTime(since, timeZone, true),
+      });
+  } else if (view.monitor !== "Reporting") return t("Store system: problems are not being checked");
   if (view.active.length > 0 || waitingForSupport(view, dayStartsAt).length > 0)
     return t("Store system: needs attention, see the list above");
   if (view.plannedUpdate !== null) return t("Store system: update in progress");
@@ -450,23 +532,30 @@ export function StoreSystemLine({
   const at = (iso: string) => storeTime(iso, timeZone, true);
   // Only a monitor that reports can vouch for the backup and alert facts.
   const view = read.kind === "Ready" && read.value.monitor === "Reporting" ? read.value : null;
+  // A merchant has no backups or alert channels to think about: those are BOP's.
+  const merchant = view?.audience === "Merchant";
   const cleared = view?.recentlyCleared ?? [];
   // A cleared order-rules row is not all clear: it stays in "Needs attention", never "Resolved".
   const resolved = cleared.filter((item) => !waitsForSupport(item));
-  const moreToTell = view !== null && (resolved.length > 0 || !alertsOnlyHere(view.outbound));
+  const moreToTell =
+    view !== null && (resolved.length > 0 || (!merchant && !alertsOnlyHere(view.outbound)));
   return (
     <section className="overview-system" aria-label={t("Store system")}>
       <div className="overview-system__line">
         <p aria-live="polite">
-          <span>{systemStatusWords(read, startsAt)}</span>
-          {view === null ? null : (
+          <span>{systemStatusWords(read, timeZone, startsAt)}</span>
+          {view === null || quietSince(view) !== null ? null : (
             <span>
-              {" · "}
-              {view.lastSuccessfulBackupAt === null
-                ? t("No backup recorded yet")
-                : t("Last backup {lastSuccessfulBackupAt}", {
-                    lastSuccessfulBackupAt: at(view.lastSuccessfulBackupAt),
-                  })}
+              {merchant ? null : (
+                <>
+                  {" · "}
+                  {view.lastSuccessfulBackupAt === null
+                    ? t("No backup recorded yet")
+                    : t("Last backup {lastSuccessfulBackupAt}", {
+                        lastSuccessfulBackupAt: at(view.lastSuccessfulBackupAt),
+                      })}
+                </>
+              )}
               {view.observedAt === null
                 ? ""
                 : t(" · Last checked {observedAt}", {
@@ -486,7 +575,7 @@ export function StoreSystemLine({
           </button>
         ) : null}
       </div>
-      {view !== null && alertsOnlyHere(view.outbound) ? (
+      {view !== null && !merchant && alertsOnlyHere(view.outbound) ? (
         <p className="overview-system__note">{outboundNote(view.outbound)}</p>
       ) : null}
       {moreToTell ? (
@@ -503,7 +592,7 @@ export function StoreSystemLine({
               })}
             </p>
           ) : null}
-          {alertsOnlyHere(view.outbound) ? null : <p>{outboundNote(view.outbound)}</p>}
+          {merchant || alertsOnlyHere(view.outbound) ? null : <p>{outboundNote(view.outbound)}</p>}
         </details>
       ) : null}
     </section>

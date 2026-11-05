@@ -122,6 +122,28 @@ export function alertAction(english: string): string {
     "Check the alert account details and send a test alert. Watch this Home screen meanwhile.": t(
       "Check the alert account details and send a test alert. Watch this Home screen meanwhile.",
     ),
+    // DEC-PILOT-ALERTS-BACKUP correction 2: on a merchant's own board.
+    "Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to check the store system.":
+      t(
+        "Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to check the store system.",
+      ),
+    "Pause online ordering if staff screens still work. Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to restart the store system.":
+      t(
+        "Pause online ordering if staff screens still work. Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to restart the store system.",
+      ),
+    "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.":
+      t(
+        "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.",
+      ),
+    // What only BOP can act on.
+    "BOP support: record this Store's first closed business day so its day-end settlement starts.":
+      t(
+        "BOP support: record this Store's first closed business day so its day-end settlement starts.",
+      ),
+    "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are not told about this.":
+      t(
+        "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are not told about this.",
+      ),
   };
   return lookup(words, english);
 }
@@ -145,6 +167,8 @@ function serviceName(english: string): string {
     "Payment checks": t("Payment checks"),
     "Day-end settlement": t("Day-end settlement"),
     "Table service follow-ups": t("Table service follow-ups"),
+    "Background work": t("Background work"),
+    "Background work of the other Stores": t("Background work of the other Stores"),
   };
   const parts: Readonly<Record<string, string>> = {
     "order updates": t("order updates"),
@@ -391,6 +415,40 @@ const SUMMARY_RULES: readonly (readonly [RegExp, (match: Match) => string])[] = 
   ],
 ];
 
+function storeNames(english: string): string {
+  const names = (value: string) => value.split(", ").join(listSeparator());
+  const [, shown, more] = /^(.+) and (\d+) more$/u.exec(english) ?? [];
+  return shown === undefined || more === undefined
+    ? names(english)
+    : t("{names} and {count} more", { names: names(shown), count: more });
+}
+/** The other Stores' summary is a sentence for each thing they need, whichever apply. */
+const STORES_ATTENTION_RULES: readonly (readonly [RegExp, (names: string) => string])[] = [
+  [/^Not being checked: (.+)\.$/u, (names) => t("Not being checked: {names}.", { names })],
+  [
+    /^Some checks could not run: (.+)\.$/u,
+    (names) => t("Some checks could not run: {names}.", { names }),
+  ],
+  [
+    /^Closed business days with no day-end settlement: (.+)\.$/u,
+    (names) => t("Closed business days with no day-end settlement: {names}.", { names }),
+  ],
+  [
+    /^Ordering setup ending soon: (.+)\.$/u,
+    (names) => t("Ordering setup ending soon: {names}.", { names }),
+  ],
+];
+function storesAttentionSummary(english: string): string | null {
+  const sentences = english.split(/(?<=\.) (?=[A-Z])/u).map((sentence) => {
+    for (const [pattern, say] of STORES_ATTENTION_RULES) {
+      const match = pattern.exec(sentence);
+      if (match !== null) return say(storeNames(match[1] as string));
+    }
+    return null;
+  });
+  return sentences.every((sentence) => sentence !== null) ? sentences.join("") : null;
+}
+
 /** "More about this": the monitor's summary in the chosen language. */
 export function alertSummary(english: string): string {
   // English is the monitor's own text, word for word.
@@ -492,11 +550,15 @@ export function alertSummary(english: string): string {
     "Guests cannot order and staff cannot use the store screens until it is renewed.": t(
       "Guests cannot order and staff cannot use the store screens until it is renewed.",
     ),
+    "This Store has a closed business day but no day-end settlement, so its payments are not being compared with the payment provider.":
+      t(
+        "This Store has a closed business day but no day-end settlement, so its payments are not being compared with the payment provider.",
+      ),
   };
   if (Object.hasOwn(words, english)) return words[english] as string;
   for (const [pattern, say] of SUMMARY_RULES) {
     const match = pattern.exec(english);
     if (match !== null) return say(match);
   }
-  return english;
+  return storesAttentionSummary(english) ?? english;
 }

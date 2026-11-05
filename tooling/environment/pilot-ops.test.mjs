@@ -209,6 +209,111 @@ describe("WP-2423 Q13 monitor cycle", () => {
     // Failed attempts count toward the hourly cap too: six attempts, not one a minute.
     expect(channel.send).toHaveBeenCalledTimes(6);
   });
+  it("DEC-PILOT-ALERTS-BACKUP correction 2: tells the other Stores what it saw, without waiting for them, and its own results are unchanged", async () => {
+    const run = async (extra) => {
+      const io = fakeIo({ apiUp: () => false });
+      io.observeSupervisor = async () => ({
+        maintenance: false,
+        reportAgeMs: 1000,
+        attention: ["stores/tea:business-worker:events"],
+      });
+      Object.assign(io, extra);
+      let state = fresh();
+      for (const m of [0, 1, 2])
+        state = await runMonitorCycle({ now: T0 + m * MIN, state, config, io });
+      return { state, board: io.boards.at(-1), logs: io.logs };
+    };
+    const seen = [];
+    let finished = false;
+    const beside = await run({
+      // The Stores' run takes as long as it takes: the cycle does not wait for it.
+      onCycle: (cycle) => {
+        seen.push(cycle);
+        globalThis.setTimeout(() => {
+          finished = true;
+        }, 200);
+      },
+      observeMaintenance: async () => null,
+    });
+    expect(finished).toBe(false);
+    expect(seen).toHaveLength(3);
+    expect(seen[2]).toEqual({
+      now: T0 + 2 * MIN,
+      probes: {
+        api: { ok: false, failingForMs: 2 * MIN },
+        customer: { ok: false, failingForMs: 2 * MIN },
+        merchant: { ok: false, failingForMs: 2 * MIN },
+      },
+      supervisor: {
+        maintenance: false,
+        reportAgeMs: 1000,
+        attention: ["stores/tea:business-worker:events"],
+      },
+      maintenance: null,
+    });
+    // With no other Store composed, the very same state, board and log lines.
+    const alone = await run({});
+    expect(beside.state).toEqual(alone.state);
+    expect(beside.board).toEqual(alone.board);
+    expect(beside.logs).toEqual(alone.logs);
+    expect(alone.board.active.map((item) => item.key)).toContain("service.attention");
+    expect(alone.board).not.toHaveProperty("support");
+  });
+  it("DEC-PILOT-ALERTS-BACKUP correction 2: writes the support contact on its own board, and an empty Store summary raises nothing", async () => {
+    const io = fakeIo();
+    io.stores = {
+      summary: () => ({
+        unchecked: [],
+        checksFailing: [],
+        settlementNotCovered: [],
+        setupEnding: [],
+      }),
+      pending: () => [],
+      acknowledge: () => undefined,
+    };
+    const support = { phone: "+14165550100", testOnly: false };
+    await runMonitorCycle({ now: T0, state: fresh(), config: { ...config, support }, io });
+    expect(io.boards.at(-1).support).toEqual(support);
+    expect(io.boards.at(-1).active).toEqual([]);
+  });
+  it("WP-2423: an order pricing problem raises while settlement is clean (it was left out of the reused answer)", async () => {
+    let cycles = 0;
+    const resources = {
+      scope: { brandReference: "b", storeReference: "s" },
+      transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+      database: {
+        transactions: () => ({
+          run: async (work) => work({ query: async () => ({ rows: [] }) }),
+        }),
+      },
+    };
+    const observeBusiness = createBusinessObserver({
+      runtimeDirectory: ".local/pilot-test",
+      load: async () => ({
+        resources,
+        installation: {},
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          // Every day settled: the settlement scan is reused for 5 minutes.
+          readSettlementStatus: async () => ({ days: [] }),
+          readQuoteTaxConfiguration: async () => {
+            cycles += 1;
+            return { ready: false, reason: "TaxConfigurationMismatch" };
+          },
+        },
+      }),
+    });
+    const io = fakeIo();
+    io.observeBusiness = observeBusiness;
+    let state = fresh();
+    for (const m of [0, 1, 2])
+      state = await runMonitorCycle({ now: T0 + m * MIN, state, config, io });
+    expect(cycles).toBe(3);
+    expect(io.boards.at(-1).active.map((item) => item.key)).toEqual(["pricing.tax_configuration"]);
+  });
 });
 
 describe("WP-2423 Q13 observations", () => {
@@ -564,10 +669,122 @@ describe("WP-2423 Q13 observations", () => {
     const load = vi.fn(async () => {
       throw Error("LOCAL_DATABASE_UNAVAILABLE");
     });
-    const observe = createBusinessObserver({ runtimeDirectory: ".local/pilot-test", load });
+    const report = vi.fn();
+    const observe = createBusinessObserver({ runtimeDirectory: ".local/pilot-test", load, report });
     expect(await observe(T0)).toBe("unreadable");
     expect(await observe(T0 + MIN)).toBe("unreadable");
     expect(load).toHaveBeenCalledTimes(2);
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(report.mock.calls[0][0].message).toBe("LOCAL_DATABASE_UNAVAILABLE");
+  });
+  it("DEC-PILOT-ALERTS-BACKUP correction 2: waits on a Store's readiness checks until its Owner has published, and reads no settlement it does not have", async () => {
+    const now = Date.parse("2026-10-15T16:00:00.000Z");
+    const resources = {
+      scope: { brandReference: "b", storeReference: "s" },
+      transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+      database: {
+        transactions: () => ({
+          run: async (work) => work({ query: async () => ({ rows: [] }) }),
+        }),
+      },
+    };
+    const readiness = vi.fn(async () => ({ ready: false, reason: "TemplateNotProven" }));
+    const read = (change) =>
+      readBusinessSignals({
+        resources,
+        installation: {},
+        now,
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          readReceiptTemplate: readiness,
+          readQuoteTaxConfiguration: readiness,
+          readPickupCapacityHorizon: async () => ({ coveredMs: 0 }),
+          readHeldStockOrders: async () => ({ openCount: 1, endedCount: 0, oldestAt: null }),
+          readSettlementStatus: async () => {
+            throw Error("DAILY_SETTLEMENT_COVERAGE_MISSING");
+          },
+          isSettlementCovered: async () => false,
+          readClosedBusinessDay: async () => true,
+          ...change,
+        },
+      });
+    const before = await read({ readOwnerPublishedSetup: async () => false });
+    expect(before).toMatchObject({
+      receiptTemplate: null,
+      quoteTax: null,
+      pickupCapacity: null,
+      // Stock held by real orders is real before and after opening.
+      heldStock: { count: 1 },
+      settlementExceptions: null,
+      settlementCovered: false,
+      closedBusinessDay: false,
+    });
+    expect(readiness).not.toHaveBeenCalled();
+    // The gate itself could not be read: not checked is not fine, and not a guess that it failed.
+    const unknown = await read({
+      readOwnerPublishedSetup: async () => {
+        throw Error("LOCK_TIMEOUT");
+      },
+    });
+    expect(unknown).toMatchObject({
+      receiptTemplate: "unreadable",
+      quoteTax: "unreadable",
+      pickupCapacity: "unreadable",
+      closedBusinessDay: false,
+    });
+    const after = await read({ readOwnerPublishedSetup: async () => true });
+    expect(after).toMatchObject({
+      receiptTemplate: { ready: false, reason: "TemplateNotProven" },
+      pickupCapacity: { coveredMs: 0 },
+      closedBusinessDay: true,
+    });
+    // A Store that does not offer pickup: not checked rather than unreadable.
+    expect(
+      (
+        await read({
+          readOwnerPublishedSetup: async () => true,
+          readPickupCapacityHorizon: async () => null,
+        })
+      ).pickupCapacity,
+    ).toBe(null);
+    // Covered: its settlement is read, and a failure there is a failed read, not a clean one.
+    await expect(
+      read({ readOwnerPublishedSetup: async () => true, isSettlementCovered: async () => true }),
+    ).rejects.toThrow("DAILY_SETTLEMENT_COVERAGE_MISSING");
+  });
+  it("gives a Store's connections back when it is no longer served", async () => {
+    const close = vi.fn(async () => undefined);
+    const observe = createBusinessObserver({
+      runtimeDirectory: ".local/pilot-test",
+      load: async () => ({
+        resources: {
+          close,
+          scope: { brandReference: "b", storeReference: "s" },
+          transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+          database: {
+            transactions: () => ({
+              run: async (work) => work({ query: async () => ({ rows: [] }) }),
+            }),
+          },
+        },
+        installation: {},
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          readSettlementStatus: async () => ({ days: [] }),
+        },
+      }),
+    });
+    await observe(T0);
+    await observe.close();
+    expect(close).toHaveBeenCalledOnce();
+    await observe.close();
+    expect(close).toHaveBeenCalledOnce();
   });
   it("WP-2423: reads payment signals every minute and rescans settlement every minute only while it has a problem", async () => {
     const counts = { settlement: 0, exceptions: 0 };

@@ -7,8 +7,8 @@ import { keepingCause } from "./merchant-failure.js";
  * WP-2423 Q13 (DEC-PILOT-ALERTS-BACKUP): the operations alert read for the merchant Home.
  *
  * The pilot operations monitor owns alert state (it must keep working while the database is down)
- * and publishes one alert board per installation. This read authorizes the caller for the
- * installation's Store under the exception-handling permission (Owner and Store Manager), then
+ * and publishes one alert board per served Store. This read authorizes the caller for this
+ * composition's Store under the exception-handling permission (Owner and Store Manager), then
  * projects the board through a closed contract: catalog keys, severities, instants and bounded
  * catalog text. Anything else in the file is refused rather than shown.
  */
@@ -37,10 +37,35 @@ export const operationsAlertKeys = Object.freeze([
   "disk.low",
   "monitor.source",
   "channel.delivery",
+  "settlement.not_covered",
+  "stores.attention",
 ] as const);
 export type OperationsAlertKey = (typeof operationsAlertKeys)[number];
 
+/**
+ * DEC-PILOT-ALERTS-BACKUP correction 2: who reads this Store's Home. Installation: whoever runs the
+ * installation, who is told everything about it. Merchant: a restaurant on the installation, who is
+ * told their own Store's problems and the outages that stop their guests or staff, and nothing they
+ * cannot act on (the monitor, backups, the certificate, disks, channels, renewal: BOP's to fix).
+ */
+export type OperationsAlertAudience = "Installation" | "Merchant";
+export const merchantOperationsAlertKeys: ReadonlySet<OperationsAlertKey> = new Set([
+  "entry.api",
+  "entry.customer",
+  "entry.merchant",
+  "service.attention",
+  "payment.updates",
+  "updates.retrying",
+  "receipts.template",
+  "pricing.tax_configuration",
+  "orders.held_stock",
+  "pickup.capacity_horizon",
+  "reconciliation.differences",
+  "settlement.exceptions",
+]);
+
 export interface OperationsAlertView {
+  readonly audience: OperationsAlertAudience;
   /** Reporting: the monitor wrote within the last five minutes; Silent: it stopped; NotRunning: never. */
   readonly monitor: "Reporting" | "Silent" | "NotRunning";
   readonly observedAt: string | null;
@@ -68,6 +93,13 @@ export interface OperationsAlertView {
    * 15 minutes); the Home shows a calm notice instead. Null when none is in force.
    */
   readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
+  /**
+   * Merchant: some of this Store's checks could not run (BOP has been told). The Home must not say
+   * all is good. Always false for Installation, whose board names them.
+   */
+  readonly checksIncomplete: boolean;
+  /** Who staff call when a row says "Ask BOP support"; null until the operator configures it. */
+  readonly support: { readonly phone: string; readonly testOnly: boolean } | null;
 }
 
 export const operationsAlertMonitorSilentMs = 5 * 60_000;
@@ -105,18 +137,36 @@ const key = (value: unknown): OperationsAlertKey =>
     ? (value as OperationsAlertKey)
     : unavailable();
 
+const noOutbound = Object.freeze({ email: false, webhooks: 0, heartbeat: false });
+const supportOf = (value: unknown): OperationsAlertView["support"] => {
+  if (value === undefined || value === null) return null;
+  const support = record(value, ["phone", "testOnly"]);
+  return typeof support.phone === "string" &&
+    /^\+[1-9][0-9]{6,14}$/u.test(support.phone) &&
+    typeof support.testOnly === "boolean"
+    ? Object.freeze({ phone: support.phone, testOnly: support.testOnly })
+    : unavailable();
+};
+
 /** Strict projection of the monitor's alert board (null when the monitor never ran). */
-export function projectOperationsAlertBoard(value: unknown, now: string): OperationsAlertView {
+export function projectOperationsAlertBoard(
+  value: unknown,
+  now: string,
+  { audience = "Installation" }: { readonly audience?: OperationsAlertAudience } = {},
+): OperationsAlertView {
   const at = instant(now);
   if (value === null)
     return Object.freeze({
+      audience,
       monitor: "NotRunning",
       observedAt: null,
       active: Object.freeze([]),
       recentlyCleared: Object.freeze([]),
-      outbound: Object.freeze({ email: false, webhooks: 0, heartbeat: false }),
+      outbound: noOutbound,
       lastSuccessfulBackupAt: null,
       plannedUpdate: null,
+      checksIncomplete: false,
+      support: null,
     });
   const boardKeys = [
     "schemaVersion",
@@ -126,13 +176,14 @@ export function projectOperationsAlertBoard(value: unknown, now: string): Operat
     "outboundChannels",
     "lastSuccessfulBackupAt",
   ];
-  // A board written before planned updates existed has no `maintenance` entry.
-  const board = record(
-    value,
-    value !== null && typeof value === "object" && Object.hasOwn(value, "maintenance")
-      ? [...boardKeys, "maintenance"]
-      : boardKeys,
-  );
+  // A board written before planned updates existed has no `maintenance` entry; one with no support
+  // contact configured has no `support` entry.
+  const board = record(value, [
+    ...boardKeys,
+    ...["maintenance", "support"].filter(
+      (optional) => value !== null && typeof value === "object" && Object.hasOwn(value, optional),
+    ),
+  ]);
   if (board.schemaVersion !== 1) return unavailable();
   const observedAt = instant(board.observedAt);
   if (!Array.isArray(board.active) || board.active.length > operationsAlertKeys.length)
@@ -191,19 +242,33 @@ export function projectOperationsAlertBoard(value: unknown, now: string): Operat
       plannedUpdate = Object.freeze({ startedAt, expiresAt });
   }
   const silent = Date.parse(at) - Date.parse(observedAt) > operationsAlertMonitorSilentMs;
+  const lastSuccessfulBackupAt =
+    board.lastSuccessfulBackupAt === null ? null : instant(board.lastSuccessfulBackupAt);
+  const support = supportOf(board.support);
+  // The whole board is checked above whichever the audience; a misplaced file shows no platform
+  // alert here either.
+  const merchant = audience === "Merchant";
+  const shown = <T extends { readonly key: OperationsAlertKey }>(items: readonly T[]) =>
+    Object.freeze(
+      merchant ? items.filter((item) => merchantOperationsAlertKeys.has(item.key)) : items,
+    );
   return Object.freeze({
+    audience,
     monitor: silent ? "Silent" : "Reporting",
     observedAt,
-    active: Object.freeze(active),
-    recentlyCleared: Object.freeze(recentlyCleared),
-    outbound: Object.freeze({
-      email: channels.email,
-      webhooks: channels.webhooks as number,
-      heartbeat: channels.heartbeat,
-    }),
-    lastSuccessfulBackupAt:
-      board.lastSuccessfulBackupAt === null ? null : instant(board.lastSuccessfulBackupAt),
+    active: shown(active),
+    recentlyCleared: shown(recentlyCleared),
+    outbound: merchant
+      ? noOutbound
+      : Object.freeze({
+          email: channels.email,
+          webhooks: channels.webhooks as number,
+          heartbeat: channels.heartbeat,
+        }),
+    lastSuccessfulBackupAt: merchant ? null : lastSuccessfulBackupAt,
     plannedUpdate: silent ? null : plannedUpdate,
+    checksIncomplete: merchant && active.some((item) => item.key === "monitor.source"),
+    support,
   });
 }
 
@@ -217,15 +282,17 @@ export const operationsAlertsNotPermitted: OperationsAlertsNotPermitted = Object
 
 /**
  * The persistent read: the caller's Session, selected Store and permission are resolved in one
- * transaction; only the installation's own Store is answered. The board is read after the
+ * transaction; only this composition's own Store is answered. The board is read after the
  * authorization and never written here.
  */
 export function createPersistentMerchantOperationsAlerts(options: {
   readonly persistence: PersistentMerchantBffOptions;
-  /** The single Store this installation (and its monitor) serves. */
+  /** The Store this composition serves; the monitor writes it a board of its own. */
   readonly storeReference: string;
-  /** The monitor's published board, or null when it has never written one. */
+  /** The monitor's published board for that Store, or null when it has never written one. */
   readBoard(): Promise<unknown>;
+  /** Decided by the composition from where the Store lives, never from the signed-in person. */
+  readonly audience?: OperationsAlertAudience;
 }) {
   const persistence = options.persistence,
     resolve = createMerchantStoreScope(persistence);
@@ -246,6 +313,10 @@ export function createPersistentMerchantOperationsAlerts(options: {
     } catch (cause) {
       return keepingCause(unavailable)(cause);
     }
-    return projectOperationsAlertBoard(board, persistence.now());
+    return projectOperationsAlertBoard(
+      board,
+      persistence.now(),
+      options.audience === undefined ? {} : { audience: options.audience },
+    );
   };
 }

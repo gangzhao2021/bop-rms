@@ -208,6 +208,7 @@ export async function createInternalMerchant(
     createInternalTableQr,
     createInternalStaffPinCredentials,
     readOperationsAlertBoard,
+    operationsAlertAudience,
     loadDailySettlementCoverage,
     refreshOrderReceiptObservations,
     createInternalUnpaidRoundCancellation,
@@ -588,7 +589,7 @@ export async function createInternalMerchant(
           }),
     }),
   );
-  // WP-2423 Q13: the operations monitor's alert board for the installation's Store (Home).
+  // WP-2423 Q13: the operations monitor's alert board for this Store (Home).
   const operationsAlerts =
     readOperationsAlertBoard === undefined
       ? undefined
@@ -598,6 +599,7 @@ export async function createInternalMerchant(
             persistence,
             storeReference: selected.storeReference,
             readBoard: readOperationsAlertBoard,
+            ...(operationsAlertAudience === undefined ? {} : { audience: operationsAlertAudience }),
           }),
         );
   // WP-2423 Q14: the Store's sales reports, over the same payment sources as the settlement.

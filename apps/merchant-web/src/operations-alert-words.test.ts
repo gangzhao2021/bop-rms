@@ -7,6 +7,7 @@ interface Catalog {
   readonly renderAlert: (
     key: string,
     params: unknown,
+    options?: { readonly audience: "Installation" | "Merchant" },
   ) => { title: string; summary: string; action: string };
   readonly ALERT_KEYS: readonly string[];
   readonly clearedAlertTitle: (key: string) => string;
@@ -38,6 +39,9 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
         "daily-settlement-worker:dailySettlement",
       ],
     },
+    // A merchant's own board, and the root's name for the process the other Stores share.
+    { services: ["store-background"] },
+    { services: ["store-workers"] },
   ],
   "payment.updates": [
     { count: 1, oldestAgeMs: 5 * MIN },
@@ -129,10 +133,31 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
     { channels: ["email"], failingMs: 40 * MIN },
     { channels: ["email", "webhook"], failingMs: 40 * MIN },
   ],
+  "settlement.not_covered": [{}],
+  "stores.attention": [
+    { unchecked: ["t-1"], checksFailing: [], settlementNotCovered: [], setupEnding: [] },
+    {
+      unchecked: ["t-1", "h-2"],
+      checksFailing: ["d-3"],
+      settlementNotCovered: ["h-2", "d-3"],
+      setupEnding: ["t-1", "h-2", "d-3"],
+    },
+    {
+      unchecked: Array.from({ length: 30 }, (_, index) => `s-${index}`),
+      checksFailing: [],
+      settlementNotCovered: [],
+      setupEnding: [],
+    },
+  ],
 };
 const every = () =>
   Object.entries(VARIANTS).flatMap(([key, list]) =>
-    list.map((params) => ({ key, ...renderAlert(key, params) })),
+    list.flatMap((params) =>
+      (["Installation", "Merchant"] as const).map((audience) => ({
+        key,
+        ...renderAlert(key, params, { audience }),
+      })),
+    ),
   );
 /** Latin words left in a Chinese sentence, other than the brand and the size units. */
 const english = (text: string) =>
@@ -236,6 +261,16 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     // The card-machine payment goes on the sheet now; the Counter order waits for the fix.
     expect(summary("Pickup")).toContain("马上记在情况记录表上");
     expect(summary("Pickup")).toContain("等 BOP 技术支持确认修好后，再录入“柜台点单”");
+    // A merchant's own board: the steps themselves, and what only BOP can do.
+    const own = (key: string, params: unknown) =>
+      alertAction(renderAlert(key, params, { audience: "Merchant" }).action);
+    expect(own("entry.api", { downMs: MIN })).toBe(
+      "继续用店里自己的收银机或纸单点单，用刷卡机收款。请 BOP 技术支持检查门店系统。",
+    );
+    expect(own("entry.customer", { downMs: MIN })).toContain("暂停线上点单");
+    expect(own("service.attention", { services: ["store-background"] })).toContain(
+      "需要 BOP 技术支持重启",
+    );
   });
   it("a cleared order-rules row never reads as all clear, in Chinese either", () => {
     setLanguageForTest("zh-Hans");
@@ -244,6 +279,30 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
       expect(english(shown), shown).toEqual([]);
       expect(shown).toContain("在 BOP 技术支持确认修好之前");
     }
+  });
+  it("names the other Stores in the Chinese, as many as fit", () => {
+    setLanguageForTest("zh-Hans");
+    const say = (params: unknown) => alertSummary(renderAlert("stores.attention", params).summary);
+    expect(
+      say({
+        unchecked: ["tea"],
+        checksFailing: ["hotpot", "dessert"],
+        settlementNotCovered: [],
+        setupEnding: ["tea"],
+      }),
+    ).toBe("没有在检查：tea。部分检查无法运行：hotpot、dessert。点单服务快到期：tea。");
+    const many = Array.from({ length: 30 }, (_, index) => `s-${index}`);
+    const summary = say({
+      unchecked: many,
+      checksFailing: [],
+      settlementNotCovered: [],
+      setupEnding: [],
+    });
+    expect(summary).toMatch(/^没有在检查：s-0、.*和另外 \d+ 家。$/u);
+    // A Store's own background work, in the merchant's language.
+    expect(
+      alertSummary(renderAlert("service.attention", { services: ["store-background"] }).summary),
+    ).toBe("后台工作一直出错，不会自行恢复。");
   });
   it("shows the monitor's own words when a text matches nothing, never blank", () => {
     setLanguageForTest("zh-Hans");
@@ -256,6 +315,10 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
         "It expires in soon. After that, guests cannot order and staff cannot use the store screens.",
       ),
     ).toContain("soon");
+  });
+  it("reads a merchant's rows in plain words, with no internal names", () => {
+    for (const alert of every())
+      expect(`${alert.summary} ${alert.action}`).not.toMatch(/store-background|store-workers/u);
   });
   it("shows English word for word while English is chosen", () => {
     for (const alert of every()) {

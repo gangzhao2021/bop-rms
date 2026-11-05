@@ -7,6 +7,7 @@ import {
   StoreSystemLine,
   createOperationsAlertsClient,
   parseOperationsAlertView,
+  systemAttentionItems,
   type OperationsAlertsRead,
   type OperationsAlertView,
 } from "./OperationsAlerts.js";
@@ -27,6 +28,7 @@ const { renderAlert } = (await import(/* @vite-ignore */ catalogFile)) as {
 };
 
 const view = (change: Partial<OperationsAlertView> = {}): OperationsAlertView => ({
+  audience: "Installation",
   monitor: "Reporting",
   observedAt: "2026-10-15T12:00:00.000Z",
   active: [],
@@ -34,6 +36,8 @@ const view = (change: Partial<OperationsAlertView> = {}): OperationsAlertView =>
   outbound: { email: false, webhooks: 0, heartbeat: false },
   lastSuccessfulBackupAt: "2026-10-15T08:30:00.000Z",
   plannedUpdate: null,
+  checksIncomplete: false,
+  support: null,
   ...change,
 });
 const critical = {
@@ -342,5 +346,147 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
   it("renders nothing at all for a role the server does not permit", () => {
     expect(line({ kind: "NotPermitted" })).toBe("");
     expect(rows({ kind: "NotPermitted" })).not.toContain("Store system");
+  });
+});
+
+// DEC-PILOT-ALERTS-BACKUP correction 2: a restaurant on the installation reads about its own Store.
+describe("a merchant's own Store on the Home", () => {
+  const merchant = (change: Partial<OperationsAlertView> = {}) =>
+    ({
+      kind: "Ready",
+      value: view({ audience: "Merchant", lastSuccessfulBackupAt: null, ...change }),
+    }) as const;
+  const stuck = {
+    key: "payment.updates",
+    severity: "critical" as const,
+    title: "Order or payment updates are stuck",
+    summary: "1 update could not be processed after automatic retries (oldest 3 minutes ago).",
+    action: "Do not take a second payment from guests who say they paid.",
+    raisedAt: "2026-10-15T11:56:00.000Z",
+  };
+  it("a merchant's Home raises nothing urgent about the monitor", () => {
+    expect(
+      systemAttentionItems(
+        merchant({ monitor: "NotRunning", observedAt: null }),
+        "America/Toronto",
+      ),
+    ).toEqual({ urgent: [], later: [] });
+    expect(systemAttentionItems(merchant({ monitor: "Silent" }), "America/Toronto")).toEqual({
+      urgent: [],
+      later: [],
+    });
+    const home = rows(merchant({ monitor: "NotRunning", observedAt: null }));
+    expect(home).not.toContain("Store system problems are not being checked");
+    expect(home).not.toContain("BOP support");
+    expect(home).not.toContain("Urgent");
+    // The installation's own Home still says it: BOP has to hear that the monitor stopped.
+    expect(
+      rows({ kind: "Ready", value: view({ monitor: "NotRunning", observedAt: null }) }),
+    ).toContain("Store system problems are not being checked");
+  });
+  it("keeps the last problems in view, as of when they were last checked, when the monitor goes quiet", () => {
+    const { urgent } = systemAttentionItems(
+      merchant({ monitor: "Silent", active: [stuck] }),
+      "America/Toronto",
+    );
+    expect(urgent.map((item) => item.title)).toEqual(["Order or payment updates are stuck"]);
+    expect(urgent[0]?.since).toBe("Since Oct 15, 2026, 7:56 AM · as of Oct 15, 2026, 8:00 AM");
+    const home = rows(merchant({ monitor: "Silent", active: [stuck] }));
+    expect(home).toContain("Do not take a second payment");
+    expect(home).not.toContain("The alert monitor stopped");
+    // Nothing was ever read: nothing to show.
+    expect(
+      systemAttentionItems(
+        merchant({ monitor: "NotRunning", observedAt: null, active: [] }),
+        "America/Toronto",
+      ).urgent,
+    ).toEqual([]);
+  });
+  it("says what it knows in the quiet line, without backups or alert channels", () => {
+    const fine = line(merchant());
+    expect(fine).toContain("Store system: all good");
+    expect(fine).not.toContain("backup");
+    expect(fine).not.toContain("no email or phone alerts");
+    expect(line(merchant({ monitor: "NotRunning", observedAt: null }))).toContain(
+      "Store system: not checked yet",
+    );
+    const quiet = line(merchant({ monitor: "Silent" }));
+    expect(quiet).toContain("Store system: last checked Oct 15, 2026, 8:00 AM");
+    expect(quiet).not.toContain("all good");
+    // Some of its checks could not run: not "all good", and nothing to alarm the owner about.
+    const partial = line(merchant({ checksIncomplete: true }));
+    expect(partial).toContain("Store system: last checked Oct 15, 2026, 8:00 AM");
+    expect(partial).not.toContain("all good");
+    expect(line(merchant({ active: [stuck] }))).toContain("Store system: needs attention");
+    expect(line(merchant({ monitor: "Silent", active: [stuck] }))).toContain(
+      "Store system: needs attention",
+    );
+    expect(
+      line(
+        merchant({
+          plannedUpdate: {
+            startedAt: "2026-10-15T11:58:00.000Z",
+            expiresAt: "2026-10-15T12:13:00.000Z",
+          },
+        }),
+      ),
+    ).toContain("Store system: update in progress");
+  });
+  it("offers a call to BOP support on rows that name it, and marks a test number", () => {
+    const naming = {
+      ...stuck,
+      action: "Check Orders; ask BOP support to review the stuck updates.",
+    };
+    const named = { ...critical, action: "Ask BOP support to restart the store system." };
+    const support = { phone: "+14165550100", testOnly: true };
+    const home = rows(merchant({ active: [stuck, named], support }));
+    expect(home).toContain('href="tel:+14165550100"');
+    expect(home).toContain("Call BOP support: (416) 555-0100");
+    expect(home).toContain("(test number)");
+    // Only the row that names BOP support.
+    expect(home.match(/href="tel:/gu)).toHaveLength(1);
+    expect(
+      rows(merchant({ active: [naming], support: { ...support, testOnly: false } })),
+    ).not.toContain("(test number)");
+    // Not configured: no link and no placeholder.
+    expect(rows(merchant({ active: [naming] }))).not.toContain("tel:");
+    // A number that is not one is refused rather than linked.
+    expect(() =>
+      parseOperationsAlertView({ ...view(), support: { phone: "javascript:x", testOnly: false } }),
+    ).toThrow("OPERATIONS_ALERTS_UNAVAILABLE");
+  });
+  it("links a row to the page that settles it", () => {
+    const home = rows(
+      merchant({
+        active: [
+          stuck,
+          { ...stuck, key: "orders.held_stock", severity: "warning" },
+          { ...stuck, key: "reconciliation.differences", severity: "warning" },
+          { ...stuck, key: "settlement.exceptions", severity: "warning" },
+          { ...stuck, key: "entry.api", severity: "warning" },
+        ],
+      }),
+    );
+    expect(home.match(/href="\/operations\/orders"/gu)).toHaveLength(2);
+    expect(home).toContain('href="/operations/order-exceptions"');
+    expect(home).toContain('href="/app/operations/payment-reconciliation"');
+  });
+  it("reads what an older server sends, and refuses what it does not know", () => {
+    const older: Record<string, unknown> = { ...view() };
+    delete older.audience;
+    delete older.checksIncomplete;
+    delete older.support;
+    expect(parseOperationsAlertView(older)).toMatchObject({
+      audience: "Installation",
+      checksIncomplete: false,
+      support: null,
+    });
+    expect(parseOperationsAlertView(view({ audience: "Merchant" })).audience).toBe("Merchant");
+    expect(() => parseOperationsAlertView({ ...view(), audience: "Guest" })).toThrow(
+      "OPERATIONS_ALERTS_UNAVAILABLE",
+    );
+    expect(() => parseOperationsAlertView({ ...view(), checksIncomplete: "yes" })).toThrow(
+      "OPERATIONS_ALERTS_UNAVAILABLE",
+    );
   });
 });

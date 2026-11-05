@@ -230,6 +230,11 @@
   grid-column: 3;
   justify-self: end;
 }
+.workspace-page--overview .overview-attention__call {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
 .workspace-page--overview .overview-attention__empty {
   margin: var(--bop-space-2) 0 0;
   color: var(--bop-color-text-muted);

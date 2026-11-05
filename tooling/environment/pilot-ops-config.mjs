@@ -78,11 +78,12 @@ export function parsePilotOpsConfig(value, runtimeDirectory) {
       webhooks: Object.freeze([]),
       heartbeat: null,
       backup: null,
+      support: null,
     });
   const config = exactKeys(
     value,
     ["schemaVersion"],
-    ["siteLabel", "runbookUrl", "homeUrl", "email", "webhooks", "heartbeat", "backup"],
+    ["siteLabel", "runbookUrl", "homeUrl", "email", "webhooks", "heartbeat", "backup", "support"],
     "keys",
   );
   if (config.schemaVersion !== 1) fail("schemaVersion");
@@ -155,6 +156,17 @@ export function parsePilotOpsConfig(value, runtimeDirectory) {
       everyMinutes: integer(h.everyMinutes ?? 5, 1, 60, "heartbeat.everyMinutes"),
     });
   }
+  // Who staff call when a row says "Ask BOP support". A number that is not the real one yet says so
+  // (`testOnly`) wherever it is shown. Absent: no call link, never a placeholder.
+  let support = null;
+  if (config.support !== undefined && config.support !== null) {
+    const c = exactKeys(config.support, ["phone"], ["testOnly"], "support");
+    if (c.testOnly !== undefined && typeof c.testOnly !== "boolean") fail("support.testOnly");
+    support = Object.freeze({
+      phone: phone(c.phone, "support.phone"),
+      testOnly: c.testOnly === true,
+    });
+  }
   let backup = null;
   if (config.backup !== undefined && config.backup !== null) {
     const b = exactKeys(
@@ -212,6 +224,7 @@ export function parsePilotOpsConfig(value, runtimeDirectory) {
     webhooks: Object.freeze(webhooks),
     heartbeat,
     backup,
+    support,
   });
 }
 const BUCKET = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u;

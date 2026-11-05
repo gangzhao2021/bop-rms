@@ -20,6 +20,8 @@ const SERVICE_NAMES = Object.freeze({
   "daily-settlement-worker": "Day-end settlement",
   "dining-exception-worker": "Table service follow-ups",
   "store-workers": "Background work of the other Stores",
+  // On a Store's own board: its background work, however the supervisor names it.
+  "store-background": "Background work",
 });
 const COMPONENT_NAMES = Object.freeze({
   events: "order updates",
@@ -76,6 +78,23 @@ const list = (values) => {
   const items = values.map(describeAttention);
   return items.length <= 3 ? items.join(", ") : `${items.slice(0, 3).join(", ")} and more`;
 };
+/** Store directory names, as many as fit: the Home refuses a board with a longer summary. */
+const storeNames = (names) => {
+  const shown = [];
+  for (const name of names) {
+    if ([...shown, name].join(", ").length > 70) break;
+    shown.push(name);
+  }
+  return shown.length === names.length
+    ? shown.join(", ")
+    : `${shown.join(", ")} and ${names.length - shown.length} more`;
+};
+const STORE_ATTENTION_PARTS = Object.freeze([
+  ["unchecked", "Not being checked"],
+  ["checksFailing", "Some checks could not run"],
+  ["settlementNotCovered", "Closed business days with no day-end settlement"],
+  ["setupEnding", "Ordering setup ending soon"],
+]);
 
 /**
  * WP-2423 item 9: what an order Workflow the resolver refuses stops on the floor. A refusal stops that
@@ -231,6 +250,8 @@ export const ALERT_CATALOG = Object.freeze({
       `The ordering service has failed its health check for ${formatDuration(p.downMs)}. Staff screens and online ordering are probably not working.`,
     action: () =>
       "Follow the store outage procedure (pause online ordering, take paper orders). Ask BOP support to check the store system and restart it.",
+    merchantAction: () =>
+      "Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to check the store system.",
     runbook: "alert-store-system-down",
   },
   "entry.customer": {
@@ -241,6 +262,8 @@ export const ALERT_CATALOG = Object.freeze({
       `The secure customer ordering page has not loaded for ${formatDuration(p.downMs)}. Guests cannot scan, order or pay online.`,
     action: () =>
       "Pause online ordering if staff screens still work, otherwise follow the store outage procedure. Ask BOP support to restart the store system.",
+    merchantAction: () =>
+      "Pause online ordering if staff screens still work. Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to restart the store system.",
     runbook: "alert-customer-entry-down",
   },
   "entry.merchant": {
@@ -251,6 +274,8 @@ export const ALERT_CATALOG = Object.freeze({
       `The staff app (Orders, Kitchen, Pickup) has not loaded for ${formatDuration(p.downMs)}.`,
     action: () =>
       "Follow the store outage procedure. Ask BOP support to check the store system and restart it.",
+    merchantAction: () =>
+      "Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to check the store system.",
     runbook: "alert-merchant-entry-down",
   },
   "supervisor.silent": {
@@ -272,6 +297,8 @@ export const ALERT_CATALOG = Object.freeze({
       `${list(p.services)} ${p.services.length === 1 ? "has" : "have"} kept failing and will not fix ${p.services.length === 1 ? "itself" : "themselves"}.`,
     action: () =>
       "Ask BOP support to find out what failed and restart the part named in this alert. Check Orders and Exceptions for work that may be waiting.",
+    merchantAction: () =>
+      "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.",
     runbook: "alert-service-attention",
   },
   "payment.updates": {
@@ -407,6 +434,30 @@ export const ALERT_CATALOG = Object.freeze({
       `${count(p.count, "settlement problem is", "settlement problems are")} still open (oldest ${formatDuration(p.oldestAgeMs)} ago).`,
     action: () => "Open Settlement, review the listed business day and resolve each item.",
     runbook: "alert-settlement-exceptions",
+  },
+  // DEC-PILOT-ALERTS-BACKUP correction 2: what only BOP can act on at another Store. Coverage is
+  // recorded by BOP once a Store's first business day has closed; never shown to the merchant.
+  "settlement.not_covered": {
+    severity: "warning",
+    raiseAfterMs: 0,
+    title: () => "Day-end settlement is not set up for this Store",
+    summary: () =>
+      "This Store has a closed business day but no day-end settlement, so its payments are not being compared with the payment provider.",
+    action: () =>
+      "BOP support: record this Store's first closed business day so its day-end settlement starts.",
+    runbook: "alert-settlement-none",
+  },
+  "stores.attention": {
+    severity: "warning",
+    raiseAfterMs: 0,
+    title: () => "Some Stores need BOP support",
+    summary: (p) =>
+      STORE_ATTENTION_PARTS.filter(([field]) => (p[field] ?? []).length > 0)
+        .map(([field, label]) => `${label}: ${storeNames(p[field])}.`)
+        .join(" ") || "A Store needs checking.",
+    action: () =>
+      "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are not told about this.",
+    runbook: "alert-stores-attention",
   },
   "backup.failed": {
     severity: "critical",
@@ -551,6 +602,135 @@ export const DEFAULT_THRESHOLDS = Object.freeze({
 });
 const natural = (value) => Number.isSafeInteger(value) && value >= 0;
 
+const raiserFor =
+  (conditions) =>
+  (key, params = {}, severity) =>
+    conditions.set(key, { severity: severity ?? ALERT_CATALOG[key].severity, params });
+
+function evaluateProbes(probes, raise) {
+  for (const [name, key] of Object.entries(PROBE_KEYS)) {
+    const probe = probes?.[name];
+    if (probe && probe.ok === false) raise(key, { downMs: Math.max(0, probe.failingForMs ?? 0) });
+  }
+}
+
+/**
+ * What one Store's business signals say. On a Store's own board (`configurationUnreadable`) "the
+ * published settings could not be read" is a check that could not run, not a statement that guests
+ * get no receipt or that orders cannot be priced: a menu listing at any merchant can hold that read
+ * for a moment. BOP hears through "Some checks could not run".
+ */
+export function evaluateBusinessConditions(
+  business,
+  { raise, unreadable, thresholds = DEFAULT_THRESHOLDS, configurationUnreadable = false },
+) {
+  if (business === undefined || business === "unreadable") {
+    unreadable.push("business");
+    return;
+  }
+  const pick = (value) => natural(value?.count) && value.count > 0;
+  const unavailable = (value) =>
+    configurationUnreadable && value?.reason === "StoreConfigurationUnavailable";
+  if (pick(business.stuckUpdates))
+    raise("payment.updates", {
+      count: business.stuckUpdates.count,
+      oldestAgeMs: business.stuckUpdates.oldestAgeMs,
+    });
+  if (pick(business.retryingUpdates))
+    raise(
+      "updates.retrying",
+      {
+        count: business.retryingUpdates.count,
+        oldestAgeMs: business.retryingUpdates.oldestAgeMs,
+      },
+      business.retryingUpdates.oldestAgeMs > thresholds.retryingCriticalMs ? "critical" : "warning",
+    );
+  // Absent (null) when not checked; "unreadable" when the check itself failed.
+  if (business.receiptTemplate === "unreadable" || unavailable(business.receiptTemplate))
+    unreadable.push("receipts");
+  else if (business.receiptTemplate?.ready === false)
+    raise("receipts.template", {
+      reason:
+        business.receiptTemplate.reason === "StoreConfigurationUnavailable"
+          ? "StoreConfigurationUnavailable"
+          : "TemplateNotProven",
+    });
+  if (business.quoteTax === "unreadable" || unavailable(business.quoteTax))
+    unreadable.push("quoteTax");
+  else if (business.quoteTax?.ready === false)
+    raise("pricing.tax_configuration", {
+      reason:
+        business.quoteTax.reason === "StoreConfigurationUnavailable"
+          ? "StoreConfigurationUnavailable"
+          : "TaxConfigurationMismatch",
+    });
+  if (business.workflow === "unreadable") unreadable.push("workflow");
+  else if (business.workflow?.ready === false) {
+    const { refusals, orderTypes } = business.workflow;
+    const state = orderWorkflowState({ refusals, orderTypes });
+    if (state !== null)
+      raise(
+        "orders.workflow",
+        {
+          state,
+          refused: refusedWords(refusals.filter(({ binding }) => binding !== "Cancellation")),
+        },
+        ORDER_WORKFLOW_NOT_OFFERED.includes(state) ? "warning" : "critical",
+      );
+    const unpaid = refusals.filter(({ binding }) => binding === "Cancellation");
+    if (unpaid.length > 0 && orderTypes.includes("DineIn"))
+      raise("orders.unpaid_rounds", { refused: refusedWords(unpaid) });
+  }
+  if (business.heldStock === "unreadable") unreadable.push("heldStock");
+  else if (pick(business.heldStock))
+    raise("orders.held_stock", {
+      count: business.heldStock.count,
+      oldestAgeMs: business.heldStock.oldestAgeMs,
+    });
+  // null when not composed; "unreadable" when the check itself failed.
+  if (business.pickupCapacity === "unreadable") unreadable.push("pickupCapacity");
+  else if (
+    Number.isSafeInteger(business.pickupCapacity?.coveredMs) &&
+    business.pickupCapacity.coveredMs < thresholds.pickupHorizonWarnMs
+  )
+    raise(
+      "pickup.capacity_horizon",
+      { coveredMs: Math.max(0, business.pickupCapacity.coveredMs) },
+      business.pickupCapacity.coveredMs < thresholds.pickupHorizonCriticalMs
+        ? "critical"
+        : "warning",
+    );
+  if (pick(business.reconciliationDifferences))
+    raise(
+      "reconciliation.differences",
+      {
+        count: business.reconciliationDifferences.count,
+        oldestAgeMs: business.reconciliationDifferences.oldestAgeMs,
+      },
+      business.reconciliationDifferences.oldestAgeMs > 24 * HOUR ? "critical" : "warning",
+    );
+  if (pick(business.settlementExceptions))
+    raise("settlement.exceptions", {
+      count: business.settlementExceptions.count,
+      oldestAgeMs: business.settlementExceptions.oldestAgeMs,
+    });
+}
+
+function evaluateInstallationValidity(installation, now, { raise, unreadable, thresholds }) {
+  // Absent (undefined) for monitors without an installation observation (older callers).
+  if (installation === "unreadable") unreadable.push("installation");
+  else if (installation !== undefined && installation !== null) {
+    const remaining = Date.parse(installation.validUntil) - now;
+    if (!Number.isFinite(remaining)) unreadable.push("installation");
+    else if (remaining <= thresholds.installationWarnMs)
+      raise(
+        "installation.validity",
+        { remainingMs: remaining },
+        remaining <= thresholds.installationCriticalMs ? "critical" : "warning",
+      );
+  }
+}
+
 /**
  * Turns one cycle's observations into the set of currently true conditions (key → {severity,
  * params}). Missing observation groups are reported as unreadable sources, never as healthy.
@@ -559,13 +739,9 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
   const now = observations.now;
   const conditions = new Map();
   const unreadable = [];
-  const raise = (key, params = {}, severity = ALERT_CATALOG[key].severity) =>
-    conditions.set(key, { severity, params });
+  const raise = raiserFor(conditions);
 
-  for (const [name, key] of Object.entries(PROBE_KEYS)) {
-    const probe = observations.probes?.[name];
-    if (probe && probe.ok === false) raise(key, { downMs: Math.max(0, probe.failingForMs ?? 0) });
-  }
+  evaluateProbes(observations.probes, raise);
   const supervisor = observations.supervisor;
   if (supervisor === undefined || supervisor === "unreadable") unreadable.push("supervisor");
   else if (supervisor === null || supervisor.reportAgeMs > thresholds.supervisorSilentMs)
@@ -573,94 +749,7 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
   else if (supervisor.attention.length > 0)
     raise("service.attention", { services: [...supervisor.attention].sort() });
 
-  const business = observations.business;
-  if (business === undefined || business === "unreadable") unreadable.push("business");
-  else {
-    const pick = (value) => natural(value?.count) && value.count > 0;
-    if (pick(business.stuckUpdates))
-      raise("payment.updates", {
-        count: business.stuckUpdates.count,
-        oldestAgeMs: business.stuckUpdates.oldestAgeMs,
-      });
-    if (pick(business.retryingUpdates))
-      raise(
-        "updates.retrying",
-        {
-          count: business.retryingUpdates.count,
-          oldestAgeMs: business.retryingUpdates.oldestAgeMs,
-        },
-        business.retryingUpdates.oldestAgeMs > thresholds.retryingCriticalMs
-          ? "critical"
-          : "warning",
-      );
-    // Absent (null) when not checked; "unreadable" when the check itself failed.
-    if (business.receiptTemplate === "unreadable") unreadable.push("receipts");
-    else if (business.receiptTemplate?.ready === false)
-      raise("receipts.template", {
-        reason:
-          business.receiptTemplate.reason === "StoreConfigurationUnavailable"
-            ? "StoreConfigurationUnavailable"
-            : "TemplateNotProven",
-      });
-    if (business.quoteTax === "unreadable") unreadable.push("quoteTax");
-    else if (business.quoteTax?.ready === false)
-      raise("pricing.tax_configuration", {
-        reason:
-          business.quoteTax.reason === "StoreConfigurationUnavailable"
-            ? "StoreConfigurationUnavailable"
-            : "TaxConfigurationMismatch",
-      });
-    if (business.workflow === "unreadable") unreadable.push("workflow");
-    else if (business.workflow?.ready === false) {
-      const { refusals, orderTypes } = business.workflow;
-      const state = orderWorkflowState({ refusals, orderTypes });
-      if (state !== null)
-        raise(
-          "orders.workflow",
-          {
-            state,
-            refused: refusedWords(refusals.filter(({ binding }) => binding !== "Cancellation")),
-          },
-          ORDER_WORKFLOW_NOT_OFFERED.includes(state) ? "warning" : "critical",
-        );
-      const unpaid = refusals.filter(({ binding }) => binding === "Cancellation");
-      if (unpaid.length > 0 && orderTypes.includes("DineIn"))
-        raise("orders.unpaid_rounds", { refused: refusedWords(unpaid) });
-    }
-    if (business.heldStock === "unreadable") unreadable.push("heldStock");
-    else if (pick(business.heldStock))
-      raise("orders.held_stock", {
-        count: business.heldStock.count,
-        oldestAgeMs: business.heldStock.oldestAgeMs,
-      });
-    // null when not composed; "unreadable" when the check itself failed.
-    if (business.pickupCapacity === "unreadable") unreadable.push("pickupCapacity");
-    else if (
-      Number.isSafeInteger(business.pickupCapacity?.coveredMs) &&
-      business.pickupCapacity.coveredMs < thresholds.pickupHorizonWarnMs
-    )
-      raise(
-        "pickup.capacity_horizon",
-        { coveredMs: Math.max(0, business.pickupCapacity.coveredMs) },
-        business.pickupCapacity.coveredMs < thresholds.pickupHorizonCriticalMs
-          ? "critical"
-          : "warning",
-      );
-    if (pick(business.reconciliationDifferences))
-      raise(
-        "reconciliation.differences",
-        {
-          count: business.reconciliationDifferences.count,
-          oldestAgeMs: business.reconciliationDifferences.oldestAgeMs,
-        },
-        business.reconciliationDifferences.oldestAgeMs > 24 * HOUR ? "critical" : "warning",
-      );
-    if (pick(business.settlementExceptions))
-      raise("settlement.exceptions", {
-        count: business.settlementExceptions.count,
-        oldestAgeMs: business.settlementExceptions.oldestAgeMs,
-      });
-  }
+  evaluateBusinessConditions(observations.business, { raise, unreadable, thresholds });
 
   const backup = observations.backup;
   if (backup === undefined || backup === "unreadable") unreadable.push("backup");
@@ -695,19 +784,7 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
       );
   }
 
-  // Absent (undefined) for monitors without an installation observation (older callers).
-  const installation = observations.installation;
-  if (installation === "unreadable") unreadable.push("installation");
-  else if (installation !== undefined && installation !== null) {
-    const remaining = Date.parse(installation.validUntil) - now;
-    if (!Number.isFinite(remaining)) unreadable.push("installation");
-    else if (remaining <= thresholds.installationWarnMs)
-      raise(
-        "installation.validity",
-        { remainingMs: remaining },
-        remaining <= thresholds.installationCriticalMs ? "critical" : "warning",
-      );
-  }
+  evaluateInstallationValidity(observations.installation, now, { raise, unreadable, thresholds });
 
   const disks = observations.disks;
   if (disks === undefined || disks === "unreadable") unreadable.push("disk");
@@ -739,6 +816,18 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
       channels: [...new Set(failing.map((channel) => channel.kind))].sort(),
       failingMs: Math.max(...failing.map((channel) => now - Date.parse(channel.failingSince))),
     });
+  // DEC-PILOT-ALERTS-BACKUP correction 2: the other Stores' problems only BOP can act on, on the
+  // one board BOP reads. A Store nobody is checking is urgent: its money checks are not running.
+  const stores = observations.stores;
+  if (
+    stores !== undefined &&
+    STORE_ATTENTION_PARTS.some(([field]) => (stores[field] ?? []).length > 0)
+  )
+    raise(
+      "stores.attention",
+      Object.fromEntries(STORE_ATTENTION_PARTS.map(([field]) => [field, stores[field] ?? []])),
+      (stores.unchecked ?? []).length > 0 ? "critical" : "warning",
+    );
   if (unreadable.length > 0)
     raise("monitor.source", { sources: unreadable.map((name) => SOURCE_NAMES[name]) });
   return conditions;
@@ -753,6 +842,136 @@ export function uncheckedAlertKeys(observations) {
   return business === undefined || business === "unreadable" || business.workflow === "unreadable"
     ? ["orders.workflow", "orders.unpaid_rounds"]
     : [];
+}
+
+/** A raised alert stays while the read behind it cannot run: no read is not an all-clear. */
+const HELD_WHILE_UNREADABLE = Object.freeze({
+  supervisor: ["service.attention"],
+  business: [
+    "payment.updates",
+    "updates.retrying",
+    "receipts.template",
+    "pricing.tax_configuration",
+    "orders.workflow",
+    "orders.unpaid_rounds",
+    "orders.held_stock",
+    "pickup.capacity_horizon",
+    "reconciliation.differences",
+    "settlement.exceptions",
+    "settlement.not_covered",
+  ],
+  receipts: ["receipts.template"],
+  quoteTax: ["pricing.tax_configuration"],
+  workflow: ["orders.workflow", "orders.unpaid_rounds"],
+  heldStock: ["orders.held_stock"],
+  pickupCapacity: ["pickup.capacity_horizon"],
+});
+
+/** The name a Store's own background work goes by on its board. */
+const STORE_BACKGROUND = "store-background";
+/**
+ * This Store's part of the supervisor's report: `stores/<name>:<service>[:<workload>]`, the whole
+ * Store (`stores/<name>`: refused for connections, or the shared process it runs in needs a
+ * person), and the process it shares with the other Stores (`store-workers`). When only the shared
+ * process is at fault, `sharedHost` says so: the root board has already told BOP.
+ */
+function storeAttention(attention, store) {
+  const own = `stores/${store}`;
+  const services = new Set();
+  let shared = false,
+    whole = false;
+  for (const entry of attention) {
+    if (entry === "store-workers") shared = true;
+    else if (entry === own) whole = true;
+    else if (typeof entry === "string" && entry.startsWith(`${own}:`))
+      services.add(entry.slice(own.length + 1));
+  }
+  const sharedHost = shared && services.size === 0;
+  if (shared || whole) services.add(STORE_BACKGROUND);
+  return services.size === 0 ? null : { services: [...services].sort(), sharedHost };
+}
+
+/**
+ * One Store's conditions on its own board: the outages that stop its guests or staff (the entry
+ * probes are the installation's), its own background work, its own business signals and its own
+ * validity. `previous` is its alert state, so an alert already raised is not cleared by a read that
+ * could not run. Backups, certificate, disks and channels stay on the root board.
+ */
+export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRESHOLDS) {
+  const conditions = new Map();
+  const unreadable = [];
+  const raise = raiserFor(conditions);
+  evaluateProbes(observations.probes, raise);
+  const supervisor = observations.supervisor;
+  if (
+    supervisor === undefined ||
+    supervisor === null ||
+    supervisor === "unreadable" ||
+    supervisor.reportAgeMs > thresholds.supervisorSilentMs
+  )
+    unreadable.push("supervisor");
+  else {
+    const attention = storeAttention(supervisor.attention, observations.store);
+    if (attention !== null) raise("service.attention", attention);
+  }
+  const business = observations.business;
+  evaluateBusinessConditions(business, {
+    raise,
+    unreadable,
+    thresholds,
+    configurationUnreadable: true,
+  });
+  if (business?.settlementCovered === false && business.closedBusinessDay === true)
+    raise("settlement.not_covered");
+  evaluateInstallationValidity(observations.installation, observations.now, {
+    raise,
+    unreadable,
+    thresholds,
+  });
+  const previous = observations.previous?.alerts ?? {};
+  for (const source of unreadable)
+    for (const key of HELD_WHILE_UNREADABLE[source] ?? []) {
+      const entry = previous[key];
+      if (entry?.raisedAt && !conditions.has(key)) raise(key, entry.params, entry.severity);
+    }
+  if (unreadable.length > 0)
+    raise("monitor.source", { sources: unreadable.map((name) => SOURCE_NAMES[name]) });
+  return conditions;
+}
+
+/**
+ * What a Store's board sends to BOP's channels: only that Store's own facts. The entry probes, the
+ * shared process and the supervisor's report are one outage however many Stores it touches, and the
+ * root board has already said so; each Store repeating it is a flood when BOP needs one message.
+ */
+const STORE_OUTBOUND_KEYS = new Set([
+  "service.attention",
+  "payment.updates",
+  "updates.retrying",
+  "receipts.template",
+  "pricing.tax_configuration",
+  "orders.workflow",
+  "orders.unpaid_rounds",
+  "orders.held_stock",
+  "pickup.capacity_horizon",
+  "reconciliation.differences",
+  "settlement.exceptions",
+  "settlement.not_covered",
+  "installation.validity",
+  "monitor.source",
+]);
+export function storeOutboundNotifications(notifications, store) {
+  return notifications
+    .filter(
+      (item) =>
+        STORE_OUTBOUND_KEYS.has(item.key) &&
+        item.params?.sharedHost !== true &&
+        !(
+          item.key === "monitor.source" &&
+          item.params?.sources?.every((source) => source === SOURCE_NAMES.supervisor)
+        ),
+    )
+    .map((item) => ({ ...item, store }));
 }
 
 export const DEFAULT_POLICY = Object.freeze({
@@ -939,12 +1158,15 @@ function waitsForSupport(item) {
   const title = ALERT_CATALOG[item.key]?.clearedTitle?.(item.params ?? {});
   return typeof title === "string";
 }
-export function renderAlert(key, params) {
+export function renderAlert(key, params, { audience = "Installation" } = {}) {
   const catalog = ALERT_CATALOG[key];
+  // A merchant's own board says what they can do themselves, in place of BOP's procedure.
+  const action =
+    audience === "Merchant" ? (catalog.merchantAction ?? catalog.action) : catalog.action;
   return {
     title: catalog.title(params),
     summary: catalog.summary(params),
-    action: catalog.action(params),
+    action: action(params),
     runbook: catalog.runbook,
   };
 }
@@ -954,7 +1176,11 @@ const runbookLink = (base, anchor) => `${base}#${anchor}`;
  * One outbound message for a batch. `siteLabel` and `runbookBase` come from the Owner's alert
  * configuration (validated plain text and an https URL or repository path).
  */
+const STORE_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 export function renderMessage(batch, { siteLabel, runbookBase, homeUrl = null }) {
+  // DEC-PILOT-ALERTS-BACKUP correction 2: one message for a cycle, each line naming its Store.
+  const where = (item) =>
+    typeof item.store === "string" && STORE_NAME.test(item.store) ? item.store : null;
   const ordered = [...batch].sort(
     (a, b) =>
       (a.kind === "cleared") - (b.kind === "cleared") ||
@@ -965,19 +1191,20 @@ export function renderMessage(batch, { siteLabel, runbookBase, homeUrl = null })
   const lines = ordered.map((item) => {
     if (item.kind === "test") return "Test alert: this channel works. No action is needed.";
     const text = renderAlert(item.key, item.params);
+    const store = where(item) === null ? "" : `${where(item)} - `;
     if (item.kind === "cleared")
       return waitsForSupport(item)
-        ? `${clearedAlertTitle(item.key, item.params)}.`
-        : `${KIND_LABEL.cleared}: ${text.title}.`;
-    return `${KIND_LABEL[item.kind]} (${item.severity === "critical" ? "urgent" : "today"}): ${text.title}. ${text.summary} What to do: ${text.action} Runbook: ${runbookLink(runbookBase, text.runbook)}`;
+        ? `${store}${clearedAlertTitle(item.key, item.params)}.`
+        : `${store}${KIND_LABEL.cleared}: ${text.title}.`;
+    return `${store}${KIND_LABEL[item.kind]} (${item.severity === "critical" ? "urgent" : "today"}): ${text.title}. ${text.summary} What to do: ${text.action} Runbook: ${runbookLink(runbookBase, text.runbook)}`;
   });
   let subject;
   if (top.kind === "test") subject = `${siteLabel}: test alert`;
   else if (ordered.length === 1)
     subject =
       top.kind === "cleared" && waitsForSupport(top)
-        ? `${siteLabel}: ${clearedAlertTitle(top.key, top.params)}`
-        : `${siteLabel}: ${top.kind === "cleared" ? "Resolved - " : top.severity === "critical" ? "URGENT - " : ""}${renderAlert(top.key, top.params).title}`;
+        ? `${siteLabel}${where(top) === null ? "" : ` · ${where(top)}`}: ${clearedAlertTitle(top.key, top.params)}`
+        : `${siteLabel}${where(top) === null ? "" : ` · ${where(top)}`}: ${top.kind === "cleared" ? "Resolved - " : top.severity === "critical" ? "URGENT - " : ""}${renderAlert(top.key, top.params).title}`;
   else
     subject = `${siteLabel}: ${open.length > 0 ? `${count(open.length, "problem", "problems")}${open.some((item) => item.severity === "critical") ? " (urgent)" : ""}` : ordered.some(waitsForSupport) ? "checks pass again, wait for BOP support before going back to normal" : "problems resolved"}`;
   const text = [...lines, ...(homeUrl ? [`Store Home: ${homeUrl}`] : [])].join("\n\n");
@@ -998,7 +1225,10 @@ export function renderMessage(batch, { siteLabel, runbookBase, homeUrl = null })
  * The always-on local projection read by the merchant Home (owner read). Only catalog keys,
  * severities, instants and rendered catalog text.
  */
-export function buildAlertBoard(state, { observedAt, channels, backup, maintenance = null }) {
+export function buildAlertBoard(
+  state,
+  { observedAt, channels, backup, maintenance = null, audience = "Installation", support = null },
+) {
   const active = Object.entries(state.alerts)
     .filter(([, entry]) => entry.raisedAt !== null)
     .map(([key, entry]) => ({
@@ -1006,7 +1236,7 @@ export function buildAlertBoard(state, { observedAt, channels, backup, maintenan
       severity: entry.severity,
       raisedAt: entry.raisedAt,
       lastSeenAt: entry.lastSeenAt,
-      ...renderAlert(key, entry.params),
+      ...renderAlert(key, entry.params, { audience }),
     }))
     .sort(
       (a, b) =>
@@ -1031,5 +1261,7 @@ export function buildAlertBoard(state, { observedAt, channels, backup, maintenan
       maintenance === null
         ? null
         : { startedAt: maintenance.startedAt, expiresAt: maintenance.expiresAt },
+    // Who staff call: only when the operator configured it.
+    ...(support === null ? {} : { support: { phone: support.phone, testOnly: support.testOnly } }),
   };
 }

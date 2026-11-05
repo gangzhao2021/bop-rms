@@ -231,8 +231,8 @@ export const OUTBOX_RETRYING_SUMMARY =
 const settlementMissingGraceMs = 6 * 60 * 60_000;
 
 /**
- * Payment and settlement signals for the installation's Store, through the api role and its
- * Brand/Store row security. Stuck updates: dead-lettered events (Store rows and Brand-wide rows);
+ * Payment and settlement signals for one Store, through the api role and its Brand/Store row
+ * security. Stuck updates: dead-lettered events (Store rows and Brand-wide rows);
  * retrying updates: events still being retried for a while (see above); reconciliation
  * differences: owner exception source items not yet closed by a refund; settlement: the daily
  * settlement status (days with differences, and closed days still missing after 6 h).
@@ -324,10 +324,22 @@ export async function readBusinessSignals({
     if (after === null) break;
   }
 
+  // DEC-PILOT-ALERTS-BACKUP correction 2: before a Store's Owner has published their own setup no
+  // guest can be affected and the opening list is the right place, so these readiness checks wait.
+  // Not composed for the installation's own Store, which always runs them.
+  let opened = true;
+  if (typeof dependencies.readOwnerPublishedSetup === "function")
+    try {
+      opened = (await dependencies.readOwnerPublishedSetup(resources)) === true;
+    } catch {
+      opened = "unreadable";
+    }
+  const beforeOpening = opened === "unreadable" ? "unreadable" : null;
+
   // WP-2423 DEC-STORE-SETUP-PUBLICATION: can a receipt be issued with the template the Store's
   // published settings name (read only; ready/reason only)? null when not composed.
-  let receiptTemplate = null;
-  if (typeof dependencies.readReceiptTemplate === "function")
+  let receiptTemplate = beforeOpening;
+  if (opened === true && typeof dependencies.readReceiptTemplate === "function")
     try {
       const readiness = await dependencies.readReceiptTemplate(resources);
       receiptTemplate =
@@ -340,8 +352,8 @@ export async function readBusinessSignals({
 
   // WP-2423 DEC-STORE-SETUP-PUBLICATION: can an order be priced with the tax configuration the
   // Store's published settings name (read only; ready/reason only)? null when not composed.
-  let quoteTax = null;
-  if (typeof dependencies.readQuoteTaxConfiguration === "function")
+  let quoteTax = beforeOpening;
+  if (opened === true && typeof dependencies.readQuoteTaxConfiguration === "function")
     try {
       const readiness = await dependencies.readQuoteTaxConfiguration(resources);
       quoteTax =
@@ -378,28 +390,45 @@ export async function readBusinessSignals({
     }
 
   // DEC-PICKUP-CAPACITY-SCHEDULE: how far ahead pickup capacity is set up without a gap.
-  // null when not composed; "unreadable" when the check itself failed.
-  let pickupCapacity = null;
-  if (typeof dependencies.readPickupCapacityHorizon === "function")
+  // null when not composed or when the Store does not offer pickup; "unreadable" when the check
+  // itself failed.
+  let pickupCapacity = beforeOpening;
+  if (opened === true && typeof dependencies.readPickupCapacityHorizon === "function")
     try {
       const horizon = await dependencies.readPickupCapacityHorizon(resources);
-      if (!Number.isSafeInteger(horizon?.coveredMs)) throw Error("PICKUP_CAPACITY_UNREADABLE");
-      pickupCapacity = { coveredMs: Math.max(0, horizon.coveredMs) };
+      if (horizon !== null) {
+        if (!Number.isSafeInteger(horizon?.coveredMs)) throw Error("PICKUP_CAPACITY_UNREADABLE");
+        pickupCapacity = { coveredMs: Math.max(0, horizon.coveredMs) };
+      }
     } catch {
       pickupCapacity = "unreadable";
     }
 
+  const signals = {
+    stuckUpdates,
+    retryingUpdates,
+    receiptTemplate,
+    quoteTax,
+    workflow,
+    heldStock,
+    pickupCapacity,
+    reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
+  };
   // WP-2423: a recent clean settlement answer may be reused (see createBusinessObserver).
-  if (settlementExceptions !== null)
+  if (settlementExceptions !== null) return { ...signals, settlementExceptions };
+  // DEC-PILOT-ALERTS-BACKUP correction 2: a Store whose first closed day is not recorded yet has
+  // no settlement to read: not checked, never "all settled", and BOP is told once a day has closed.
+  // Not composed for the installation's own Store, where a missing file stays unreadable.
+  if (
+    typeof dependencies.isSettlementCovered === "function" &&
+    (await dependencies.isSettlementCovered()) === false
+  )
     return {
-      stuckUpdates,
-      retryingUpdates,
-      receiptTemplate,
-      workflow,
-      heldStock,
-      pickupCapacity,
-      reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
-      settlementExceptions,
+      ...signals,
+      settlementExceptions: null,
+      settlementCovered: false,
+      closedBusinessDay:
+        opened === true && (await dependencies.readClosedBusinessDay(resources)) === true,
     };
   const settlement = await dependencies.readSettlementStatus({ resources, installation });
   const problems = settlement.days.filter(
@@ -409,14 +438,7 @@ export async function readBusinessSignals({
   );
   const settlementOldest = problems.map((day) => day.endsAt).sort()[0] ?? null;
   return {
-    stuckUpdates,
-    retryingUpdates,
-    receiptTemplate,
-    quoteTax,
-    workflow,
-    heldStock,
-    pickupCapacity,
-    reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
+    ...signals,
     settlementExceptions: { count: problems.length, oldestAgeMs: age(settlementOldest) },
   };
 }
@@ -437,13 +459,14 @@ export function createBusinessObserver({
   intervalMs = BUSINESS_SIGNAL_INTERVAL_MS,
   settlementIntervalMs = SETTLEMENT_SCAN_INTERVAL_MS,
   load,
+  report = () => undefined,
 }) {
   let state = null;
   let last = undefined;
   let lastAt = 0;
   let settlement = null;
   let settlementAt = 0;
-  return async (now) => {
+  const observe = async (now) => {
     if (last !== undefined && last !== "unreadable" && now - lastAt < intervalMs) return last;
     try {
       state ??= await load(runtimeDirectory);
@@ -457,7 +480,8 @@ export function createBusinessObserver({
         settlementAt = now;
       }
       lastAt = now;
-    } catch {
+    } catch (error) {
+      report(error);
       await state?.resources?.close?.().catch(() => undefined);
       state = null;
       settlement = null;
@@ -465,4 +489,11 @@ export function createBusinessObserver({
     }
     return last;
   };
+  /** Ends this observer's share of the connections (a Store that is no longer served). */
+  observe.close = async () => {
+    const current = state;
+    state = null;
+    await current?.resources?.close?.().catch(() => undefined);
+  };
+  return observe;
 }

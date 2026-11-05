@@ -22,6 +22,7 @@ import { createPickupClient } from "./pickup-client.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { storeTime } from "./StoreTime.js";
 import { ClosingReminder, closingReminderScreen } from "./ClosingReminder.js";
+import { formatContactPhone } from "./contact-phone.js";
 import {
   StoreSystemLine,
   systemAttentionItems,
@@ -410,6 +411,8 @@ export interface AttentionItem {
   readonly retry?: "reads" | "system";
   /** Work that can wait for the live service: listed after it. */
   readonly backlog?: boolean;
+  /** Who to call about it, when the row sends them to BOP support. */
+  readonly call?: { readonly phone: string; readonly testOnly: boolean };
 }
 /**
  * Figma v1 (2026-10-25), reordered after the Owner's 2026-11-03 walkthrough: the work on Home that
@@ -640,6 +643,14 @@ function AttentionRow({
             <summary>{t("More about this")}</summary>
             <p>{item.more}</p>
           </details>
+        )}
+        {item.call === undefined ? null : (
+          <p className="overview-attention__call">
+            <a className="overview-text-action" href={`tel:${item.call.phone}`}>
+              {t("Call BOP support: {value}", { value: formatContactPhone(item.call.phone) })}
+            </a>
+            {item.call.testOnly ? ` ${t("(test number)")}` : null}
+          </p>
         )}
       </div>
       <div className="overview-attention__status">

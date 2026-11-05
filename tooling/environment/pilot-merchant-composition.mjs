@@ -28,6 +28,14 @@ import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolu
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 import { createPilotStaffSessionFactory } from "./pilot-staff-session.mjs";
 import { createMerchantRequestReporter, storeOfDirectory } from "./pilot-unexpected.mjs";
+/**
+ * DEC-PILOT-ALERTS-BACKUP correction 2: a Store below `stores/` is a merchant on this installation;
+ * the runtime root is whoever runs it. Decided by where the Store lives, never by the signed-in
+ * person: platform support hold no Store role, and every merchant's Owner holds the same permission.
+ */
+export function operationsAlertAudienceOf(directory) {
+  return /\/stores\/[a-z0-9][a-z0-9-]{0,62}\/?$/u.test(directory) ? "Merchant" : "Installation";
+}
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -77,6 +85,7 @@ export function composeMerchantDependencies(
     onUnexpectedFailure: createMerchantRequestReporter({ store: storeOfDirectory(directory) }),
     // WP-2423 Q13: the operations monitor's alert board (ops container) for the Home.
     readOperationsAlertBoard: createPilotAlertBoardReader(directory),
+    operationsAlertAudience: operationsAlertAudienceOf(directory),
     expectedDatabaseName: installation.database,
     roleMapping: config.roleMapping,
     ...(config.product?.optionPriceSources?.currencyMetadata === undefined

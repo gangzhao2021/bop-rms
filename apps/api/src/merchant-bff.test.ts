@@ -7642,6 +7642,7 @@ describe("WP-2423 Q13 operations alerts read route", () => {
     "sec-fetch-site": "same-origin",
   };
   const view = {
+    audience: "Merchant" as const,
     monitor: "Reporting" as const,
     observedAt: "2026-10-15T08:00:00.000Z",
     active: [],
@@ -7649,6 +7650,8 @@ describe("WP-2423 Q13 operations alerts read route", () => {
     outbound: { email: false, webhooks: 0, heartbeat: false },
     lastSuccessfulBackupAt: null,
     plannedUpdate: null,
+    checksIncomplete: false,
+    support: null,
   };
   it("passes only the session cookie and answers without caching", async () => {
     const read = vi.fn<Read>(async () => view);
