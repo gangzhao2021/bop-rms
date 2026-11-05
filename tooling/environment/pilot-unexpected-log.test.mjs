@@ -108,3 +108,36 @@ it("names a failed outbox consumer and the codes its error wraps (v15 2026-11-01
   ]);
   expect(JSON.stringify(lines())).not.toContain("Sam");
 });
+
+it("names the Workflow rule from anywhere in the wrapped chain, never other text (2026-11-05)", () => {
+  const lines = logged();
+  // The order path as it fails: Ordering wraps Inventory, which wraps Workflow.
+  const refused = Object.assign(new Error("Workflow definition is unavailable"), {
+    code: "WORKFLOW_DEFINITION_UNAVAILABLE",
+    rule: "TwoBrandVersions",
+  });
+  const inventory = Object.assign(new Error("source", { cause: refused }), {
+    code: "CUSTOMER_INVENTORY_SOURCE_UNAVAILABLE",
+  });
+  reportUnexpected(
+    "EVENT",
+    Object.assign(new Error("order", { cause: inventory }), {
+      code: "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
+    }),
+  );
+  reportUnexpected("EVENT", refused);
+  reportUnexpected("EVENT", Object.assign(new Error("x"), { code: "C", rule: "guest Sam at 4" }));
+  reportUnexpected("EVENT", Object.assign(new Error("x"), { code: "C", rule: 7 }));
+  reportUnexpected("EVENT", new Error("no rule here"));
+  expect(lines().map(({ causes, rule }) => ({ causes, rule }))).toEqual([
+    {
+      causes: ["CUSTOMER_INVENTORY_SOURCE_UNAVAILABLE", "WORKFLOW_DEFINITION_UNAVAILABLE"],
+      rule: "TwoBrandVersions",
+    },
+    { causes: undefined, rule: "TwoBrandVersions" },
+    { causes: undefined, rule: undefined },
+    { causes: undefined, rule: undefined },
+    { causes: undefined, rule: undefined },
+  ]);
+  expect(JSON.stringify(lines())).not.toContain("Sam");
+});

@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { it } from "vitest";
-import { matchesPlatformWorkflow } from "./platform-workflows.mjs";
+import {
+  matchesPlatformWorkflow,
+  orderWorkflowReleases,
+  platformWorkflows,
+} from "./platform-workflows.mjs";
 import {
   derivedReference,
+  failureLine,
+  installedStatus,
   operationInstant,
   parseArguments,
   planWorkflowRelease,
+  readExistingBinding,
+  requireSameBinding,
+  runtimeFileName,
+  workflowRuntimeFile,
 } from "./workflow-release-install.mjs";
 
 const id = (n) => "0190999a-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -22,7 +35,7 @@ const flags = {
   "--approved-by": id(6),
   "--approval-evidence": id(7),
   "--operation": operation,
-  "--output": "out.json",
+  "--output": "stores/tea/cancellation-workflow-draft-result.json",
 };
 const args = (overrides = {}) =>
   Object.entries({ ...flags, ...overrides }).flatMap(([flag, value]) => [flag, value]);
@@ -105,4 +118,202 @@ it("accepts only an unchanged, Brand-wide, non-expiring released Workflow", () =
     matchesPlatformWorkflow({ ...published, purposeCode: "InternalTestBatchCancellation" }),
     false,
   );
+});
+
+const orderOptions = (release = "OrderFulfillmentPickup") => ({
+  ...parseArguments(args()),
+  release,
+});
+const later = "2026-12-01T00:00:00.000Z";
+
+it("refuses an output named for another release, the mistake that once broke a Brand", () => {
+  for (const release of orderWorkflowReleases) {
+    const name = `internal-test-workflow-${platformWorkflows[release].binding}.json`;
+    assert.equal(runtimeFileName(release), name);
+    assert.equal(
+      parseArguments(args({ "--workflow": release, "--output": "stores/tea/" + name })).output,
+      "stores/tea/" + name,
+    );
+  }
+  assert.throws(
+    () =>
+      parseArguments(
+        args({
+          "--workflow": "OrderFulfillmentPickup",
+          "--output": "stores/tea/internal-test-workflow-DineIn.json",
+        }),
+      ),
+    /WORKFLOW_RELEASE_OUTPUT_MISMATCH/u,
+  );
+  assert.throws(
+    () => parseArguments(args({ "--output": "stores/tea/out.json" })),
+    /WORKFLOW_RELEASE_OUTPUT_MISMATCH/u,
+  );
+});
+
+it("says what the Brand's one family is to this release", () => {
+  const published = planWorkflowRelease(orderOptions()).published;
+  const status = (definition, release = "OrderFulfillmentPickup") =>
+    installedStatus(definition, release, later);
+  assert.equal(status(published), "AlreadyInstalled");
+  for (const lifecycle of ["Draft", "Withdrawn"])
+    assert.equal(status({ ...published, lifecycle }), null);
+  assert.equal(status({ ...published, effectiveUntil: later }), null);
+  assert.equal(status({ ...published, effectiveFrom: "2027-01-01T00:00:00.000Z" }), null);
+  // The repository moved on, but the Brand's family still serves it and can be bound.
+  const older = {
+    ...published,
+    transitions: published.transitions.filter((t) => t.currentState !== "Ready"),
+  };
+  assert.equal(matchesPlatformWorkflow(older), false);
+  assert.equal(status(older), "AlreadyInstalledOlderDefinition");
+  // Refused when a binding cannot name it, or the compositions would refuse its payment step.
+  assert.equal(
+    status({
+      ...published,
+      transitions: published.transitions.filter((t) => t.action !== "FulfillOrder"),
+    }),
+    null,
+  );
+  const changed = (action, patch) => ({
+    ...published,
+    transitions: published.transitions.map((t) =>
+      t.action === action && t.currentState === "Submitted" ? { ...t, ...patch } : t,
+    ),
+  });
+  assert.equal(status(changed("CreatePaymentIntent", { effects: [] })), null);
+  assert.equal(status(changed("CreatePaymentIntent", { ruleReferences: [] })), null);
+  // The cancellation worker accepts only the repository's current definition.
+  const cancellation = planWorkflowRelease(orderOptions("UnpaidDineInBatchCancellation")).published;
+  assert.equal(status(cancellation, "UnpaidDineInBatchCancellation"), "AlreadyInstalled");
+  assert.equal(
+    status(
+      { ...cancellation, transitions: cancellation.transitions.slice(1) },
+      "UnpaidDineInBatchCancellation",
+    ),
+    null,
+  );
+});
+
+const runtime = (published, overrides = {}, release = "OrderFulfillmentPickup") =>
+  workflowRuntimeFile(
+    { published },
+    {
+      environment: "InternalTest",
+      database: "db",
+      scope: { tenantReference: id(1), brandReference: id(2), storeReference: id(3) },
+      operationReference: operation,
+      release,
+      ...overrides,
+    },
+  );
+
+it("writes a binding from a published version without its plan, and refuses one it cannot name", () => {
+  const published = planWorkflowRelease(orderOptions()).published;
+  const file = runtime(published);
+  assert.equal(file.release, "OrderFulfillmentPickup");
+  assert.equal(file.workflow.payment.workflowVersionReference, published.versionReference);
+  assert.equal(file.workflow.reserveCommandCode, "ReserveInventory");
+  assert.equal(file.workflow.payment.paymentCommandCode, "CreatePaymentIntent");
+  assert.throws(
+    () =>
+      runtime({
+        ...published,
+        transitions: published.transitions.filter((t) => t.action !== "Accept"),
+      }),
+    /WORKFLOW_RELEASE_BINDING_UNAVAILABLE/u,
+  );
+});
+
+it("leaves a binding naming the same thing alone and refuses to move one naming anything else", () => {
+  const published = planWorkflowRelease(orderOptions()).published;
+  const next = runtime(published);
+  // The same release and version, written by an earlier run under another operation.
+  requireSameBinding({ ...next, operationReference: id(90) }, next);
+  // From before this tool: no `release`, what it names still compared.
+  requireSameBinding({ ...next, release: undefined }, next);
+  const conflict = /WORKFLOW_RELEASE_BINDING_CONFLICT/u;
+  assert.throws(
+    () => requireSameBinding({ ...next, release: "OrderFulfillmentDineIn" }, next),
+    conflict,
+  );
+  assert.throws(
+    () =>
+      requireSameBinding(
+        {
+          ...next,
+          workflow: {
+            ...next.workflow,
+            payment: { ...next.workflow.payment, workflowVersionReference: id(91) },
+          },
+        },
+        next,
+      ),
+    conflict,
+  );
+  assert.throws(
+    () =>
+      requireSameBinding(
+        { ...next, workflow: { ...next.workflow, applicabilityCode: "DineIn" } },
+        next,
+      ),
+    conflict,
+  );
+  assert.throws(() => requireSameBinding({ ...next, environment: "Pilot" }, next), conflict);
+  assert.throws(() => requireSameBinding({ ...next, database: "other" }, next), conflict);
+  assert.throws(
+    () => requireSameBinding({ ...next, scope: { ...next.scope, storeReference: id(92) } }, next),
+    conflict,
+  );
+  // The cancellation runtime file names its definition.
+  const cancellation = planWorkflowRelease(orderOptions("UnpaidDineInBatchCancellation")).published;
+  const cancellationFile = runtime(cancellation, {}, "UnpaidDineInBatchCancellation");
+  requireSameBinding(cancellationFile, cancellationFile);
+  assert.throws(
+    () =>
+      requireSameBinding(
+        { ...cancellationFile, definition: { ...cancellation, versionReference: id(93) } },
+        cancellationFile,
+      ),
+    conflict,
+  );
+});
+
+it("reads an existing binding, none, or refuses one it cannot read", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "workflow-release-"));
+  try {
+    const file = join(directory, "internal-test-workflow-Pickup.json");
+    assert.equal(await readExistingBinding(file), null);
+    await writeFile(file, JSON.stringify({ release: "OrderFulfillmentPickup" }));
+    assert.deepEqual(await readExistingBinding(file), { release: "OrderFulfillmentPickup" });
+    for (const damaged of ["{ half a fi", "null", "7"]) {
+      await writeFile(file, damaged);
+      await assert.rejects(readExistingBinding(file), /WORKFLOW_RELEASE_BINDING_UNREADABLE/u);
+    }
+    await assert.rejects(readExistingBinding(directory), /WORKFLOW_RELEASE_BINDING_UNREADABLE/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("prints a refusal's code and rule, never other text", () => {
+  assert.equal(
+    failureLine(new Error("WORKFLOW_RELEASE_DUPLICATE_FAMILIES")),
+    "WORKFLOW_RELEASE_DUPLICATE_FAMILIES",
+  );
+  const refusal = (rule, cause) =>
+    Object.assign(new Error("Workflow definition is unavailable", { cause }), {
+      code: "WORKFLOW_DEFINITION_UNAVAILABLE",
+      rule,
+    });
+  assert.equal(
+    failureLine(refusal("FamilyAlreadyExists")),
+    "WORKFLOW_DEFINITION_UNAVAILABLE FamilyAlreadyExists",
+  );
+  assert.equal(
+    failureLine(refusal("Dependency", Object.assign(new Error("secret"), { code: "42501" }))),
+    "WORKFLOW_DEFINITION_UNAVAILABLE Dependency 42501",
+  );
+  assert.equal(failureLine(refusal("not a rule word")), "WORKFLOW_DEFINITION_UNAVAILABLE");
+  assert.equal(failureLine(null), "FAILED");
 });

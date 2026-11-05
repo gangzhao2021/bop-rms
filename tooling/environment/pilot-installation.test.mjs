@@ -265,6 +265,21 @@ it("binds business identities and workflow loads to the configured installation"
   await expect(installation.loadWorkflow("Pickup")).rejects.toThrow(
     "PILOT_INSTALLATION_UNAVAILABLE",
   );
+  // A binding released for another order type never serves this one, even under this file name.
+  const released = { ...workflow, release: "OrderFulfillmentPickup" };
+  await save("internal-test-workflow-Pickup.json", released);
+  expect(await installation.loadWorkflow("Pickup")).toEqual(released);
+  await save("internal-test-workflow-DineIn.json", released);
+  await expect(installation.loadWorkflow("DineIn")).rejects.toThrow(
+    "PILOT_INSTALLATION_UNAVAILABLE",
+  );
+  await save("internal-test-workflow-AdditionalRelease.json", {
+    ...workflow,
+    release: "NotARelease",
+  });
+  await expect(installation.loadWorkflow("AdditionalRelease")).rejects.toThrow(
+    "PILOT_INSTALLATION_UNAVAILABLE",
+  );
 });
 it("reads the existing receipt template through the protected file boundary", async () => {
   const installation = await loadPilotInstallation(directory);

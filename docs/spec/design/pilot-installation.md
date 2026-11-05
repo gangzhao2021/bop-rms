@@ -46,7 +46,10 @@ Pilot 门店进程的守卫已收尾，但 v15 的运行目录（档案与有效
    （`order.accept`）、`ReleasePaidOrder`（`order.release`）、`FulfillOrder`（`order.fulfill`）。规则引用是仓库常量（规则语义由所有者组合执行，
    不是数据行）。`workflow-release-install --workflow <名> --runtime-environment Pilot --output <runtime>/internal-test-workflow-<Pickup|DineIn|AdditionalRelease>.json`
    发布（品牌范围、不过期、独立审批人、可重放）并写出绑定文件（已发布版本与转移引用，0600 原子替换）；目录已有档案时环境、数据库与门店
-   必须一致（`WORKFLOW_RELEASE_PROFILE_MISMATCH`）。`new-operation` 打印新的操作引用。
+   必须一致（`WORKFLOW_RELEASE_PROFILE_MISMATCH`）。`new-operation` 打印新的操作引用。一个品牌每个用途和订单类型只有一个工作流（2026-11-05，
+   迁移 `2000_157` 与所有者存储都拒绝第二个）：重跑、绑定文件丢失、同品牌第二家门店都用同一命令，不写数据库，只在缺文件时写绑定文件
+   （`AlreadyInstalled`；仓库定义已更新而品牌仍在用的是 `AlreadyInstalledOlderDefinition`）。品牌已有两个、工作流无法使用、`--output` 与发布不符、
+   已有文件指向别的发布或版本，都拒绝（运行手册"What a rerun does"）。解析器仍然失败即拒绝，不在两个定义之间猜；日志与 `alerts.log` 写明哪条规则。
 8. **Pilot 续期**：`prepare-renewal` 只移动有效期（档案 `binding.validUntil`、任务队列及其异常策略的 `effectiveUntil`），新结束点必须晚于现结束点、
    最多比当前时刻晚 92 天；重读门店事实，关口要求码变化则拒绝（`launch-gate-changed`）。需 Owner 书面批准原话与平台签名；`apply` 校验两文件仍为
    准备时的内容，保留旧文件硬链接与 `record.json`，追加 `pilot-installation-log.jsonl`，写平台审计。InternalTest 续期工具保持仅 InternalTest。

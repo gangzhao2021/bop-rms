@@ -8,6 +8,7 @@ import { join, isAbsolute } from "node:path";
 import process from "node:process";
 import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 import { validateRefundRoleMapping } from "./pilot-refund-role-mapping.mjs";
+import { platformWorkflows } from "./platform-workflows.mjs";
 import { Buffer } from "node:buffer";
 const unavailable = () => {
   throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
@@ -220,7 +221,11 @@ export async function loadPilotInstallation(directory) {
             !exact(value.scope, ["tenantReference", "brandReference", "storeReference"]) ||
             Object.entries(value.scope).some(
               ([key, v]) => typeof v !== "string" || profile.binding?.[key] !== v,
-            )
+            ) ||
+            // A binding released for another order type never serves this one (the release tool
+            // refuses to write it; a copied file stops here). Files from before that tool name no
+            // release.
+            (value.release !== undefined && platformWorkflows[value.release]?.binding !== kind)
           )
             return unavailable();
           return value;

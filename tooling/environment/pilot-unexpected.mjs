@@ -16,8 +16,21 @@ const framesOf = (error) =>
       /(?:apps\/(?:api|worker)\/(?:dist|src)|packages\/[a-z]+\/[a-z-]+\/src|tooling\/environment)\/[a-zA-Z0-9_./-]+:\d+:\d+/g,
     )
     ?.slice(0, 5) ?? [];
+/**
+ * Which rule refused, anywhere in the wrapped chain (a fixed word such as TwoBrandVersions; a domain
+ * error carries it so the domain stays free of logging). Never any other text.
+ */
+const ruleOf = (error) => {
+  let at = error;
+  for (let depth = 0; depth < 8 && at !== undefined && at !== null; depth++) {
+    if (typeof at.rule === "string" && /^[A-Za-z]{1,40}$/.test(at.rule)) return at.rule;
+    at = at.cause;
+  }
+  return null;
+};
 export function reportUnexpected(event, error, context = {}) {
   const { code, codeMessage } = codeOf(error);
+  const rule = ruleOf(error);
   // v15 2026-11-01: a wrapped error names the code of what it wraps (owner services rewrite
   // their own failures generically), up to three levels; codes only.
   const causes = [];
@@ -31,6 +44,7 @@ export function reportUnexpected(event, error, context = {}) {
       event,
       code,
       ...(causes.length > 0 ? { causes } : {}),
+      ...(rule !== null ? { rule } : {}),
       // A database error raised with a code as its message (e.g. SQLSTATE 55000 with
       // STORE_REFERENCE_SOURCE_INVALID) names that code too; never other message text.
       ...(codeMessage !== null && codeMessage !== code ? { reason: codeMessage } : {}),
