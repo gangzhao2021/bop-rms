@@ -2,7 +2,7 @@
 // number never reaches a log, a URL or an error from here.
 import { Buffer } from "node:buffer";
 import process from "node:process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { CustomerMemberHandler } from "../../apps/api/dist/customer-member-http.js";
@@ -11,6 +11,7 @@ import { createMemberPointsSweep } from "../../apps/api/dist/member-points-sweep
 import { createMemberPhoneProtector } from "../../packages/rms/customer-loyalty/src/index.ts";
 import { createAbuseBudgetConsumer } from "../../packages/database/src/index.ts";
 import { currentPilotEnvironment, pilotProviderEnvironment } from "./pilot-environment.mjs";
+import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { loadPilotManagedSecrets } from "./pilot-secrets.mjs";
 
 const ROUTE = "/bff/customer/member";
@@ -62,9 +63,28 @@ export function createInternalTestMemberMessages(directory, { env = process.env 
   });
 }
 
-/** The key that protects phone numbers: managed in a Pilot, a local generated file in InternalTest. */
-export async function loadMemberKey(storeDirectory, { env = process.env } = {}) {
+const profileBrand = async (directory) =>
+  (await (await loadPilotInstallation(directory)).loadProfile()).binding.brandReference;
+
+/**
+ * The key that protects phone numbers at this Store's Brand. DEC-MULTI-MERCHANT-ONE-INSTALLATION:
+ * the installation's own Brand uses the installation's key; each other Brand a key derived from it,
+ * so one phone number at two merchants is two unrelated members.
+ */
+export async function loadMemberKey(
+  storeDirectory,
+  { env = process.env, readBrand = profileBrand } = {},
+) {
   const directory = await memberInstallationDirectory(storeDirectory);
+  const root = await loadInstallationMemberKey(directory, env);
+  if (directory === storeDirectory) return root;
+  const brand = await readBrand(storeDirectory);
+  if (brand === (await readBrand(directory))) return root;
+  return Buffer.from(hkdfSync("sha256", root, Buffer.alloc(0), "member-contact:" + brand, 32));
+}
+
+/** Managed in a Pilot, a local generated file in InternalTest. */
+async function loadInstallationMemberKey(directory, env) {
   if (currentPilotEnvironment({ unset: "development", env }) === "Pilot")
     return (await loadPilotManagedSecrets(directory)).key("member-contact-key");
   const file = join(directory, "internal-test-member-key");

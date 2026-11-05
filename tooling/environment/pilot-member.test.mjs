@@ -81,7 +81,18 @@ it("every Store of an installation shares the key and the test inbox: one member
   expect(await memberInstallationDirectory(store)).toBe(root);
   expect(await memberInstallationDirectory(root)).toBe(root);
   const own = await loadMemberKey(root, { env: internalTest });
-  expect((await loadMemberKey(store, { env: internalTest })).equals(own)).toBe(true);
+  const sameBrand = { env: internalTest, readBrand: async () => "brand-1" };
+  expect((await loadMemberKey(store, sameBrand)).equals(own)).toBe(true);
+  // DEC-MULTI-MERCHANT-ONE-INSTALLATION: another merchant's Store has its own, stable key.
+  const merchant = (brand) => ({
+    env: internalTest,
+    readBrand: async (dir) => (dir === root ? "brand-1" : brand),
+  });
+  const other = await loadMemberKey(store, merchant("brand-2"));
+  expect(other.equals(own)).toBe(false);
+  expect(other.length).toBe(32);
+  expect((await loadMemberKey(store, merchant("brand-2"))).equals(other)).toBe(true);
+  expect((await loadMemberKey(store, merchant("brand-3"))).equals(other)).toBe(false);
   expect(await readdir(store)).toEqual([]);
   const port = memberMessages({ directory: store, env: internalTest });
   await port.send({ phone: "+16135550133", kind: "Code", text: "code 333333" });
