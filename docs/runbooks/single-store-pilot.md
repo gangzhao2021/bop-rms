@@ -727,8 +727,8 @@ A guest's table page holds the dishes once a round is placed, even when the paym
 at the table before entering anything, so nothing is made or charged twice:
 
 1. **Tables** → the table → **Take order for table <table>** (为桌台 X 点单).
-2. If it says "A guest is paying on their phone, wait a minute": wait. That lasts at most 60 seconds, while
-   the phone's checkout holds the table's cart.
+2. If it says "A guest at this table is ordering or paying on their phone. Wait a minute, then send again.":
+   wait. That lasts at most 60 seconds, while the phone's checkout holds the table's cart.
 3. If it offers **Add them to this round**: use it. Nothing is retyped, and the phone can't double it.
 4. If the guest's round shows unpaid on the table: don't enter it again. A manager cancels that round first
    (`Orders`, or the table's details), then enter the order for the table and charge it on the card machine.
@@ -1145,10 +1145,10 @@ Overall: [ ] pass  [ ] fail      Owner sign-off: ________
 | G8  | No way to notify pickup customers of a delay or an expired order; only contact details shown on the order                                                                                                                                                                                                        | Q10 (notification Provider) |
 | G9  | Staff on a backup device sign in through the internal-test staff page; real named accounts wait for the Cognito gate                                                                                                                                                                                             | Step 9 (external)           |
 | G10 | Real Provider behaviour for payments approved while the host was down (late webhook, capture discovery) is unproven; pilot uses simulated payments                                                                                                                                                               | P2/B5, Q22 (external)       |
-| G11 | Taking a guest's unpaid round on the card machine with no retyping: today a manager cancels it and staff enter it again (see "When guests can't start a phone payment"). It touches payment. Trigger: before the first store on a real Provider                                                                  | WP-2423 item 2              |
-| G12 | No staff alert when guests' payment starts keep failing: staff learn it from the guests. The alert board has no key for it. Trigger: before the first store on a real Provider                                                                                                                                   | WP-2423 item 2              |
 | G11 | "Existing runtime configuration and recovery" still describes the v14 WSL host, not the v15 container commands                                                                                                                                                                                                   | P4 (runbook drift)          |
 | G12 | Backup network, backup device, card machine connectivity and contacts are not yet provided                                                                                                                                                                                                                       | Owner inputs (external)     |
+| G13 | Taking a guest's unpaid round on the card machine with no retyping: today a manager cancels it and staff enter it again (see "When guests can't start a phone payment"). It touches payment. Trigger: before the first store on a real Provider                                                                  | WP-2423 item 2              |
+| G14 | No staff alert when guests' payment starts keep failing: staff learn it from the guests. The alert board has no key for it. Trigger: before the first store on a real Provider                                                                                                                                   | WP-2423 item 2              |
 
 ## Current demo handover snapshot (2026-09-22)
 
