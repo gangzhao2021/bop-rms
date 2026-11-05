@@ -449,6 +449,51 @@ services` for the hours until opening. Guests who scan then see "isn't taking or
 6. Leave the counter tablet charging. Signing out is not required; a staff screen signs itself out
    after 30 minutes without use.
 
+## Changing the menu (WP-2423 item 3)
+
+**Setting up many drinks.** On `Menu`, press `New dish`. Fill in the first drink in full, with its
+choice groups and each choice's extra. Then press `Save and add another` (it asks you to check the
+allergens first): the form keeps everything except the names, descriptions, price and the allergen
+tick, so each next drink is its names, its price and one tick. To start from a drink you already
+have, choose it under `Same as`: its choices, extras, allergens and kitchen marks are copied, never
+its name or price, and its allergens count only once you tick `I checked every allergen of this
+dish.`. A fee is never carried on or copied, because a dish declared a fee can't be changed back.
+Above `List it`, `{n} dishes still need allergens` shows what the listing would refuse.
+
+**A new topping reaches no dish by itself.** Add it under `Option sets`; the page says it is not on
+any dish yet and links to the first dish using that group, with the choice ticked and
+`Use on other dishes` open. Choose the dishes (`All in this section`, or one by one) and answer
+whether it contains anything on your allergen list: yes adds those allergens to each dish's own
+declaration. It adds only what each dish is missing and leaves their other extras alone; to change
+existing extras, tick that box, check each line and confirm the money. Keep the screen on during the
+run. If it stops it names the dish and `Try again` carries on; after a reload, `has it` shows what is
+done. A store that keeps stock does this under `Option recipes` instead, because a choice can change
+what is deducted.
+
+**When to list.** List before or after service. `List it` can take up to a minute, and guests at
+other restaurants on the same system wait a moment longer while it finishes. During service use
+`Sold out today` and `Hide`, which act at once and need no listing.
+
+**When a choice runs out during service** (pearls, Large cups). There is no sold-out switch for one
+choice yet, so:
+
+1. Whoever finds out tells the counter and the servers at once; servers tell tables as they order.
+2. A manager opens `Option sets`, opens the group, clears `Offered` on that choice and saves. New
+   orders can't include it from that moment, on phones and at the counter.
+3. Guests still see it on their menu until the next `List it`; a guest who picks it is told it
+   can't be chosen. If it is out for the rest of the day, list after the rush. Offer it again the
+   same way when it is back, and list again.
+4. An order already placed with it: the kitchen or the counter tells the guest and offers another
+   choice. At a table paying at the end, open the order under `Orders`, use
+   `Take dishes off the bill` (with the reason) and enter the changed dish as a new round. For an
+   order already paid, use `Cancel items`, which refunds it, and take a new order for the change.
+
+A combo offers its dishes without their choices (no size, sugar or ice), so staff ask the guest for
+those and tell the kitchen by word or on the slip.
+
+If the store system can't be reached, the menu can't be changed: guests keep seeing the listed menu,
+staff say what has run out, and it is corrected and listed after recovery.
+
 ## Chinese TEST demo menu (WP-2423 item 8 ③)
 
 The pilot's internal-test menu for a Cantonese and Sichuan restaurant is
@@ -769,10 +814,12 @@ system (staff cannot open this document offline).
   and their order and bill are there). If the host's phone rejoined and needs to be host again,
   use `Dining host transfer` on the table. A table with a party can't be joined to another yet.
 - **Setting up the tea item** (owner, once): on `Menu`, press `New dish`, enter its name and
-  price, and under its allergens choose `A charge, no stock ingredients (such as tea)`; save, mark
-  it `Not prepared by the kitchen`, and press `List it`. Do not hide it: guests never see the tea item on their menu, and a
-  hidden item can't be added by staff. Then on `Store features` choose it under `Tea charge`
-  (only listed, priced items shown here can be chosen; one hidden from this store says so).
+  price, and under its allergens choose `A fee, not food (tea, corkage, sauce bar): no allergens,
+never goes to the kitchen`; save, and press `List it`. Do not hide it: guests never see the tea
+  item on their menu, and a hidden item can't be added by staff. Then on `Store features` choose it
+  under `Tea charge` (only listed, priced items shown here can be chosen; one hidden from this store
+  says so). Nothing else needs marking: a fee and the Store's tea item stay off the kitchen board and
+  count as served. If your kitchen does plate it, untick `Not prepared by the kitchen` on that dish.
 - **The bill**: the last bill seen on `Tables` (if it was open) plus the paper rounds, at the menu
   prices including tax. The guests choose the tip (none is chosen for them).
 - **Payment**: on the store card machine as usual, or in cash (rounded to 5 cents, change given).
@@ -805,6 +852,11 @@ system (staff cannot open this document offline).
   `Each pays own rounds` when paying. Without screens, write "table A merged into table B" and the
   time on table A's first slip, carry the slips to table B, and record it with `Merge into…` when
   screens come back.
+- **Fees and items the kitchen does not make** (WP-2423 item 8a): a fee (tea, corkage, sauce bar,
+  bag fee) and a dish marked `Not prepared by the kitchen` never appear on the board, on a table
+  or on a pickup. A pickup is ready as soon as the rest of it is, and one with nothing to prepare
+  is ready at once and can be handed over. On paper the counter writes them on the bill, not on the
+  kitchen's slip.
 - **Kitchen sections** (WP-2423 item 8 ⑧): the owner names the sections once on `Store features`
   under `Kitchen sections`, and gives each dish its section on `Menu` (a dish with none shows under
   `No section`). The board can then show one section on a screen, chosen on that screen and kept
