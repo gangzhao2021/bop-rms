@@ -17,6 +17,7 @@ const d = vi.hoisted(() => ({
   cardMachinePayment: vi.fn(),
   cardMachineRefunds: vi.fn(),
   remaining: vi.fn(),
+  decision: vi.fn(),
 }));
 vi.mock("./merchant-store-scope.js", () => ({ createMerchantStoreScope: () => d.scope }));
 vi.mock("@rms/ordering", async (original) => ({
@@ -27,6 +28,7 @@ vi.mock("@rms/ordering", async (original) => ({
 vi.mock("@rms/kitchen", async (original) => ({
   ...(await original<object>()),
   createPostgresKitchenBatchCancellation: d.kitchen,
+  loadKitchenBatchPreparationDecision: d.decision,
 }));
 vi.mock("@rms/payment", async (original) => ({
   ...(await original<object>()),
@@ -93,6 +95,7 @@ function setup() {
     workItemCount: 2,
     evidenceDigest: "sha256:" + "a".repeat(64),
   });
+  d.decision.mockResolvedValue(null);
   d.releaseFactory.mockReturnValue({ release: d.release, releaseLines: d.releaseLines });
   d.lines.mockResolvedValue([
     { orderItemReference: id(50), sourceCartLineReference: id(60), itemCancelled: false },
@@ -307,6 +310,36 @@ it("WP-2423 Q6: a started kitchen item or unreleasable stock refuses the whole c
   await expect(f.operation(f.input)).rejects.toMatchObject({
     code: "ORDER_CANCELLATION_UNAVAILABLE",
   });
+});
+
+it("WP-2423 item 8a: a pickup with nothing for the kitchen to prepare was ready at once and is not cancelled", async () => {
+  const f = setup();
+  d.cancel.mockResolvedValue({
+    status: "NoKitchenWork",
+    evidenceDigest: "sha256:" + "b".repeat(64),
+  });
+  d.decision.mockResolvedValue({ allNotPrepared: true });
+  await expect(f.operation(f.input)).rejects.toMatchObject({
+    code: "ORDER_CANCELLATION_PREPARATION_STARTED",
+  });
+  expect(d.decision.mock.calls[0]?.slice(1)).toEqual([
+    { tenantReference: id(10), brandReference: id(3), storeReference: id(4) },
+    id(6),
+  ]);
+  expect(d.commit).not.toHaveBeenCalled();
+  expect(d.release).not.toHaveBeenCalled();
+  // A round the kitchen has not reached yet, or one it prepares, is cancelled as before.
+  d.decision.mockResolvedValue(null);
+  expect((await f.operation(f.input)).status).toBe("Cancelled");
+  d.decision.mockResolvedValue({ allNotPrepared: false });
+  expect((await f.operation(f.input)).status).toBe("Cancelled");
+  // A table's round of tea only is served at the table, and may still be cancelled.
+  d.decision.mockResolvedValue({ allNotPrepared: true });
+  d.prepare.mockResolvedValue({
+    status: "Ready",
+    plan: { synthetic: "plan", orderType: "DineIn" },
+  });
+  expect((await f.operation(f.input)).status).toBe("Cancelled");
 });
 
 it("WP-2423 Q6 step 2a: after item cancellations the whole cancellation releases only the remaining lines", async () => {

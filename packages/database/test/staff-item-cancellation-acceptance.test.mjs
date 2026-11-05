@@ -17,6 +17,7 @@ import {
   createKitchenWorkLifecycleService,
   createPostgresKitchenWorkLifecycleStore,
   parseKitchenItemReadyEnvelope,
+  recordKitchenBatchPreparationDecision,
 } from "../../rms/kitchen/src/index.ts";
 import {
   createOrderFulfillmentCompletionRecord,
@@ -538,7 +539,8 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
        * acceptance, Payment's captured terminal fact (quote total plus tip), Ordering's Confirmed
        * payment disposition and the kitchen ticket with one queued work item per line.
        */
-      async function seedOrder(n, { perLine = true } = {}) {
+      // WP-2423 item 8a: `kitchenTicket: false` is a round the kitchen had nothing to prepare for.
+      async function seedOrder(n, { perLine = true, kitchenTicket = true } = {}) {
         const b = n + 100;
         const order = { order: id(n + 1), guest: id(n + 2), version: 0 };
         const refs = {
@@ -852,6 +854,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
             }),
           )
         ).evidenceDigest;
+        if (!kitchenTicket) return order;
         await admin.query(
           "INSERT INTO rms_kitchen.kitchen_ticket (kitchen_ticket_id,brand_id,store_id,order_id,order_batch_id,confirmation_id,consumer_name,consumer_version,source_event_id,source_aggregate_version,source_snapshot_digest,confirmed_at,correlation_id,semantic_event_binding_digest,source_evidence_id,source_evidence_version,source_evidence_digest,source_evidence_captured_at,work_plan_id,work_plan_version,work_plan_digest,work_plan_generated_at,aggregate_version,status,created_by_actor_type,updated_by_actor_type,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'kitchen.confirmed-order:v1',1,$7,2,$8,$9,$10,$11,$12,1,$13,$9,$15,1,$16,$14,1,'Open','System','System',$14,$14)",
           [
@@ -1059,7 +1062,8 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
       const raceCancel = await seedOrder(5000); // scenario 4b
       const legacy = await seedOrder(6000, { perLine: false }); // scenario 8
       const journey = await seedOrder(7000); // scenario 9
-      assert.deepEqual(await stock(), { onHand: "50", reserved: "21" });
+      const bottles = await seedOrder(8000, { kitchenTicket: false }); // scenario 10
+      assert.deepEqual(await stock(), { onHand: "50", reserved: "24" });
 
       // Store business-date publication for Payment's businessDate port (synthetic Store
       // configuration, actual published owner records and proof).
@@ -1379,7 +1383,7 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         [pickup.batch.reservations[0]]: "0",
         [pickup.batch.reservations[1]]: "1",
       });
-      assert.deepEqual(await stock(), { onHand: "50", reserved: "19" });
+      assert.deepEqual(await stock(), { onHand: "50", reserved: "22" });
       const releases = (
         await admin.query(
           "SELECT record_json FROM rms_inventory.stock_movement WHERE movement_type='Release'",
@@ -2339,6 +2343,189 @@ it("staff cancel item lines of a paid order before the kitchen starts them, refu
         );
         // The fulfilled Order still reads as this fulfillment's Order (pickup history, receipts).
         assert.equal(await worker((tx) => validateCurrentSource(tx, journey.order)), true);
+      }
+
+      // ── Scenario 10 (WP-2423 item 8a): a pickup round with nothing for the kitchen to prepare (a
+      // bottle, a bag fee) is ready for collection the moment it reaches the kitchen. Kitchen records
+      // that decision and says so with its own ready events; no ticket exists. Staff can no longer
+      // take it off "before preparation" (they hand it over or refund it), so the pickup queue never
+      // holds a cancelled Order. Before: the cancellation went through, the Ready pickup stayed, and
+      // every read of the store's pickup queue failed from then on.
+      {
+        merchant.allowed = () => true;
+        merchant.store = store;
+        const refs = bottles.batch;
+        const worker = scoped;
+        const now = () => new Date().toISOString();
+        const derive = (prefix) => (purpose, identity) => {
+          const digest = createHash("sha256")
+            .update(purpose + ":" + identity)
+            .digest("hex");
+          return (
+            prefix +
+            "-" +
+            digest.slice(0, 4) +
+            "-7" +
+            digest.slice(4, 7) +
+            "-8" +
+            digest.slice(7, 10) +
+            "-" +
+            digest.slice(10, 22)
+          );
+        };
+        const audit = {
+          append: ({ transaction, record }) => appendAuditRecordInTransaction(transaction, record),
+        };
+        const resolveConfirmation = async (transaction, orderReference) => {
+          assert.equal(orderReference, bottles.order);
+          const stored = await createPostgresOrderPaymentDispositionReader(
+            scope,
+          ).loadByPaymentEvent({ transaction, paymentEventReference: refs.event });
+          return stored.orderConfirmedEvent;
+        };
+        const fulfillmentSource = createPostgresOrderFulfillmentSourceStore({
+          brandReference: brand,
+          storeReference: store,
+          quoteVersion: 1,
+          sha256: sha,
+          authorize: async () => true,
+        });
+        const validateCurrentSource = createPickupReadinessCurrentSource({
+          scope: { brandReference: brand, storeReference: store },
+          sha256: sha,
+          now,
+          authorize: () => true,
+          resolveConfirmation,
+          quoteVersion: 1,
+        });
+        // Kitchen's decision for the round, as its intake adapter records it (no ticket).
+        const decided = await worker((tx) =>
+          recordKitchenBatchPreparationDecision(tx, scope, {
+            orderReference: bottles.order,
+            orderBatchReference: refs.batch,
+            sourceEventReference: refs.confirmedEvent,
+            confirmationReference: refs.confirmation,
+            notPreparedOrderItemReferences: refs.items,
+            allNotPrepared: true,
+            // Test-only stand-in for the stored intake receipt (not read by this scenario).
+            intakeReceipt: { synthetic: "intake receipt" },
+            decidedAt: now(),
+          }),
+        );
+        assert.equal(decided.allNotPrepared, true);
+        const confirmed = await worker((tx) => resolveConfirmation(tx, bottles.order));
+        const created = await worker((tx) =>
+          createPickupFulfillmentService({
+            authorization: { authorize: async () => true },
+            orderingSource: {
+              resolve: (input) => fulfillmentSource.resolve({ transaction: tx, query: input }),
+            },
+            references: { derive: derive("0190fa42") },
+            digests: { sha256: sha },
+            repository: createPostgresPickupFulfillmentStore({
+              brandReference: brand,
+              storeReference: store,
+              sha256: sha,
+              authorize: async () => true,
+              validateCurrentSource: async (transaction, effect) =>
+                (
+                  await fulfillmentSource.resolve({
+                    transaction,
+                    query: {
+                      brandReference: brand,
+                      storeReference: store,
+                      observedAt: effect.aggregate.createdAt,
+                      orderReference: effect.aggregate.orderReference,
+                      orderBatchReference: effect.aggregate.orderBatchReference,
+                      confirmationReference: effect.aggregate.confirmationReference,
+                      sourceEventReference: effect.aggregate.sourceEventReference,
+                      sourceAggregateVersion: effect.aggregate.sourceAggregateVersion,
+                      sourceSnapshotDigest: effect.aggregate.sourceSnapshotDigest,
+                    },
+                  })
+                ).evidenceDigest === effect.aggregate.sourceEvidenceDigest,
+            }),
+            audit,
+          }).consume(tx, confirmed),
+        );
+        assert.equal(created.status, "Created");
+        const readinessOptions = {
+          brandReference: brand,
+          storeReference: store,
+          sha256: sha,
+          now,
+          authorize: async () => true,
+          validateCurrentSource,
+        };
+        // Kitchen's ready events for each line (its adapter publishes them with the decision).
+        for (const item of created.effect.aggregate.items) {
+          const result = fresh();
+          const readyAt = now();
+          const event = parseKitchenItemReadyEnvelope({
+            eventId: fresh(),
+            eventType: "KitchenItemReady",
+            schemaVersion: 1,
+            occurredAt: readyAt,
+            producerModule: "@rms/kitchen",
+            tenantId: brand,
+            storeId: store,
+            aggregateType: "KitchenOrderItemReadyResult",
+            aggregateId: result,
+            aggregateVersion: 1n,
+            correlationId: fresh(),
+            causationId: fresh(),
+            actor: { type: "System" },
+            payload: {
+              kitchenTicketReference: fresh(),
+              orderReference: bottles.order,
+              orderBatchReference: refs.batch,
+              orderItemReference: item.orderItemReference,
+              readyResultReference: result,
+              readyQuantity: item.orderedQuantity,
+              requiredQuantity: item.orderedQuantity,
+              readyAt,
+            },
+            redactionClassification: "indirect_identifier",
+            replayMetadata: { replaySafe: true },
+          });
+          const applied = await worker((tx) =>
+            createFulfillmentReadinessService({
+              authorization: { authorize: async () => true },
+              references: { derive: derive("0190fa43") },
+              digests: { sha256: sha },
+              repository: createPostgresFulfillmentReadinessStore(readinessOptions),
+              audit,
+            }).consume(tx, event),
+          );
+          assert.equal(applied.status, "Applied");
+        }
+        const queueRead = () =>
+          transactions().runSnapshot((tx) =>
+            createPostgresFulfillmentReadinessStore({
+              ...readinessOptions,
+              authorizeQueue: async () => true,
+            }).listPickupQueue({
+              transaction: tx,
+              afterFulfillmentReference: null,
+              limit: 50,
+              includeCompleted: false,
+            }),
+          );
+        const ready = (await queueRead()).items.find(
+          (item) => String(item.orderReference) === bottles.order,
+        );
+        assert.equal(ready?.phase, "Ready");
+        // Cancelling every line (the whole Order) is refused and writes nothing.
+        before = await counts();
+        await assert.rejects(cancel(bottles, [0, 1]), {
+          code: "ORDER_CANCELLATION_PREPARATION_STARTED",
+        });
+        assert.deepEqual(await counts(), before);
+        // The queue still reads, with the bottle ready to hand over.
+        const after = (await queueRead()).items.find(
+          (item) => String(item.orderReference) === bottles.order,
+        );
+        assert.equal(after?.phase, "Ready");
       }
 
       // History stays append-only for the API role.

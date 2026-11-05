@@ -4,6 +4,7 @@ import {
   createPostgresKitchenBatchCancellation,
   KitchenBatchCancellationError,
   listStoreKitchenBatchesNotPrepared,
+  loadKitchenBatchPreparationDecision,
 } from "@rms/kitchen";
 import {
   createPostgresStaffOrderCancellationStore,
@@ -371,6 +372,17 @@ export async function cancelPaidBatch(
     ...(input.bySystem === true ? { bySystem: true } : {}),
   });
   if (kitchen.status === "AlreadyCancelled") return fail("ORDER_CANCELLATION_UNAVAILABLE");
+  // WP-2423 item 8a: a pickup round with nothing for the kitchen to prepare (a bottle, a bag) was
+  // ready for collection the moment it reached the kitchen, so staff never take it off "before
+  // preparation": they hand it over or refund it, as for a served dish.
+  if (
+    input.bySystem !== true &&
+    kitchen.status === "NoKitchenWork" &&
+    plan.orderType === "Pickup" &&
+    (await loadKitchenBatchPreparationDecision(tx as never, selected, orderBatchReference))
+      ?.allNotPrepared === true
+  )
+    return fail("ORDER_CANCELLATION_PREPARATION_STARTED");
   const created = await ordering.commit(tx, {
     plan,
     cancellationReference,
