@@ -189,12 +189,30 @@ let timeStep = 100;
 /** A verified second-factor step-up at the Store, `ageMs` old (owner-seeded evidence). */
 export async function seedStepUp(
   admin,
-  { id, n, brandReference, storeReference, actorReference, ageMs = 0 },
+  {
+    id,
+    n,
+    brandReference,
+    storeReference,
+    actorReference,
+    ageMs = 0,
+    purposeCode = "ORGANIZATION_SOLE_OPERATOR_APPROVAL",
+  },
 ) {
   const at = new Date(Date.parse(await dbNow(admin)) - ageMs).toISOString();
   await admin.query(
-    "INSERT INTO bop_identity.workforce_mfa_step_up (step_up_id,brand_id,store_id,actor_id,session_id,method,purpose_code,outcome,rejection_reason,time_step,attempted_at,audit_id) VALUES ($1,$2,$3,$4,$5,'InternalTestTotp','ORGANIZATION_SOLE_OPERATOR_APPROVAL','Verified',NULL,$6,$7,$8)",
-    [id(n), brandReference, storeReference, actorReference, id(n + 1), timeStep++, at, id(n + 2)],
+    "INSERT INTO bop_identity.workforce_mfa_step_up (step_up_id,brand_id,store_id,actor_id,session_id,method,purpose_code,outcome,rejection_reason,time_step,attempted_at,audit_id) VALUES ($1,$2,$3,$4,$5,'InternalTestTotp',$9,'Verified',NULL,$6,$7,$8)",
+    [
+      id(n),
+      brandReference,
+      storeReference,
+      actorReference,
+      id(n + 1),
+      timeStep++,
+      at,
+      id(n + 2),
+      purposeCode,
+    ],
   );
   return at;
 }

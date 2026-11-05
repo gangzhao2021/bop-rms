@@ -166,6 +166,13 @@ it("history refuses changed reader, cursor, ordering, record tuple and extra aut
   expect(() => history(page, scope, 4)).toThrow();
 });
 // WP-2423 v15 (`8bd902e3` D1): the Store's tax configuration in force travels with the workspace.
+it("carries whether the go-live check holds, only as a yes or no", () => {
+  expect(parse({ ...workspace(), goLive: true }, scope).goLive).toBe(true);
+  expect(parse({ ...workspace(), goLive: false }, scope).goLive).toBe(false);
+  expect(parse(workspace(), scope)).not.toHaveProperty("goLive");
+  denied({ ...workspace(), goLive: "Yes" });
+  denied({ ...workspace(), goLive: null });
+});
 it("carries the Store's tax configuration in force, or none, and refuses anything else", () => {
   expect(
     parse({ ...workspace(), storeTaxConfigurationReference: id(40) }, scope)

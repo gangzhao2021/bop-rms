@@ -291,7 +291,9 @@ export async function exercisePilotPlatformSupport(context) {
         "allergenList",
         "menuListed",
         "setupPublished",
+        "taxRatesSet",
       ]);
+      // WP-2423 item 14: this runs after the Store's first publication from Store setup.
       assert.equal(opening.body.setupPublished, true);
     },
     routes,

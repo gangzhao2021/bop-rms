@@ -234,3 +234,141 @@ it("allergen roster: recorder ≠ approver; the sole operator approves alone wit
     }
   });
 });
+
+/**
+ * WP-2423 item 14: before a list exists, whoever could record it is told who approves it, so a
+ * first opening can ask once. Record then approve is the page's one press, under one code asked for
+ * the sole-operator setting; a Brand with a list reads no gate, as before.
+ */
+it("no allergen list yet: the gate is read before recording, and one code approves it", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_so_allergen1" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const tenantReference = id(0x101),
+      brandReference = id(0x102),
+      storeReference = id(0x103),
+      owner = id(0x104),
+      noah = id(0x105);
+    let operation = 0x8000;
+    const op = () => "019a0002-0000-7000-8000-" + (++operation).toString(16).padStart(12, "0");
+    try {
+      const role = await createPilotApiRole(admin, context, "wp2423_sof");
+      const start = Date.parse(await dbNow(admin));
+      const from = new Date(start - 3 * 3600_000).toISOString();
+      const enrolledAt = new Date(start - 2 * 3600_000).toISOString();
+      await seedBrand(admin, { brandReference, policyReference: id(0x300), from });
+      const managerRole = await seedBrandRole(admin, {
+        id,
+        brandReference,
+        roleId: id(0x310),
+        code: "brand_owner",
+        actions: ["catalog.allergen_registry.manage", "catalog.allergen.read"],
+        from,
+      });
+      await seedBrandMember(admin, {
+        id,
+        base: 0x400,
+        brandReference,
+        storeReference,
+        actorReference: owner,
+        name: "Sam",
+        roles: [managerRole],
+        from,
+        enrolledAt,
+      });
+      const tx = async (work) => {
+        await admin.query("BEGIN");
+        try {
+          await admin.query("SET LOCAL ROLE " + role);
+          const value = await work(admin);
+          await admin.query("COMMIT");
+          return value;
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+      };
+      const actions = ["catalog.allergen.read", "catalog.allergen_registry.manage"];
+      const brandScope = syntheticMerchantBrandScope({
+        tenantReference,
+        brandReference,
+        storeReference,
+        policyReference: id(0x300),
+        grants: { [owner]: actions, [noah]: actions },
+      });
+      const allergens = createMerchantAllergens({
+        persistence: { now: () => new Date().toISOString(), transactions: { run: tx } },
+        authentication: { authorize: async () => ({ sessionReference: id(7) }) },
+        references: { next: op },
+        locale: "en-CA",
+        resolveScope: brandScope.resolveScope,
+      });
+      const session = { sessionCookie: "c", csrf: "c" };
+      const read = () => allergens.query({ ...session, itemReference: null });
+      brandScope.as(owner);
+
+      // Off: named as off, nothing recorded yet.
+      const off = await read();
+      assert.deepEqual(
+        [off.registry, off.registryProposal, off.soleOperator.status],
+        [null, null, "NotSet"],
+      );
+      await seedSoleOperatorSetting(admin, {
+        id,
+        n: 0x500,
+        tenantReference,
+        brandReference,
+        actorReference: owner,
+        state: "On",
+        version: 1,
+      });
+      const on = await read();
+      assert.deepEqual([on.registryProposal, on.soleOperator.status], [null, "Effective"]);
+      assert.equal(on.soleOperator.verifiedUntil, null);
+
+      // The page's one press, under the code the Owner gave while turning the setting on.
+      await seedStepUp(admin, {
+        id,
+        n: 0x520,
+        brandReference,
+        storeReference,
+        actorReference: owner,
+        purposeCode: "ORGANIZATION_SOLE_OPERATOR_SETTING",
+      });
+      assert.notEqual((await read()).soleOperator.verifiedUntil, null);
+      const { proposalReference } = await allergens.command({
+        ...session,
+        body: {
+          action: "RecordRegistry",
+          operationReference: op(),
+          template: "CA_PRIORITY_TEST",
+        },
+      });
+      const approved = await allergens.command({
+        ...session,
+        body: {
+          action: "ApproveRegistry",
+          operationReference: op(),
+          proposalReference,
+          approvalMode: "SoleOperator",
+        },
+      });
+      assert.equal(approved.status, "Applied");
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT reviewer_actor_id::text reviewer,recorder_actor_id::text recorder,approval_mode,approver_mfa_at IS NOT NULL mfa FROM rms_catalog.allergen_registry_version",
+          )
+        ).rows,
+        [{ reviewer: owner, recorder: owner, approval_mode: "SoleOperator", mfa: true }],
+      );
+
+      // A list exists and nothing is proposed: no gate is read, and none is shown.
+      const listed = await read();
+      assert.equal(listed.registry.entries.length, 12);
+      assert.equal(listed.soleOperator, null);
+    } finally {
+      await admin.end();
+    }
+  });
+});

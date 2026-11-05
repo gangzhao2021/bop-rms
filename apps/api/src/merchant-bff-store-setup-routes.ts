@@ -854,6 +854,25 @@ export function installMerchantStoreSetupRoutes(
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => failed(response, error));
   });
+  // WP-2423 item 14: who else holds each approval a first opening needs, for its Owner.
+  router.get("/store/opening-approvers", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      !options.openingChecklist
+    ) {
+      denied(response);
+      return;
+    }
+    const port = options.openingChecklist;
+    void Promise.resolve()
+      .then(() => port.approvers({ sessionCookie }))
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch(() => denied(response));
+  });
   router.get("/store/kitchen-setup", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     if (

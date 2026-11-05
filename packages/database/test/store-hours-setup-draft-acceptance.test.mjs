@@ -9,6 +9,7 @@ import { storeRoleTemplateActions } from "../../bop/permission/src/index.ts";
 import {
   createPostgresPublishedStoreOperatingStatusReader,
   createPostgresStoreSetupDraftStore,
+  hasOwnerPublishedStoreSetup,
   parseStoreSetupSaveCommand,
 } from "../../rms/store/src/index.ts";
 import { input as quoteInput } from "../../rms/pricing/src/tests/price-quote.fixture.ts";
@@ -547,6 +548,9 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         assert.equal(read.current.approvedByReference, people.owner.actor);
         assert.equal(read.current.authoredByReference, people.owner.actor);
         assert.equal(read.current.setupBasis, undefined);
+        // WP-2423 item 14: an hours change on the installed configuration is not the Store's setup;
+        // the first opening page stays, and an unopened Store is not read as an open one.
+        assert.equal(await transactions.run((tx) => hasOwnerPublishedStoreSetup(tx, scope)), false);
         const mark = (
           await admin.query(
             "SELECT actor_id::text actor,approval_evidence_id::text evidence,actor_mfa_at FROM rms_store.store_configuration_sole_operator_approval WHERE configuration_id=$1",
@@ -1063,7 +1067,10 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
       await publishStep(people.owner, "Validate");
       await publishStep(people.owner, "Submit");
       await publishStep(people.secondOwner, "Approve");
+      assert.equal(await transactions.run((tx) => hasOwnerPublishedStoreSetup(tx, scope)), false);
       await publishStep(people.secondOwner, "Publish");
+      // WP-2423 item 14: the first publication from Store setup is what makes it established.
+      assert.equal(await transactions.run((tx) => hasOwnerPublishedStoreSetup(tx, scope)), true);
 
       // --- Restart: the hours editor starts on a configuration from Store setup and reads it.
       // Before WP-2423 Q4 this refused to start (PILOT_STORE_CONFIGURATION_SETUP_BASIS_UNSUPPORTED).

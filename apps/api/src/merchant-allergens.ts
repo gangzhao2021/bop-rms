@@ -296,11 +296,12 @@ export function createMerchantAllergens(options: {
             };
           });
           // WP-2423 Q19: a roster recorded and waiting for another person's approval; its recorder
-          // sees whether they may approve it alone as sole operator, and why not.
+          // sees whether they may approve it alone as sole operator, and why not. WP-2423 item 14:
+          // so does whoever could record one, before a roster exists: a first opening says who
+          // approves before anything is recorded.
           const proposal = await pendingAllergenRegistryProposal(reads(tx), s.owner);
           const gate =
-            proposal !== null &&
-            proposal.recorderReference === s.actor &&
+            (proposal === null ? registry === null : proposal.recorderReference === s.actor) &&
             s.permissions.mayManageRegistry
               ? await merchantBrandSoleOperatorGate(tx as never, {
                   ...s.owner,

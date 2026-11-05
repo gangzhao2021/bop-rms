@@ -1727,6 +1727,20 @@ export async function createInternalMerchant(
       openingChecklist: createMerchantOpeningChecklist({
         persistence,
         authentication: service,
+        // WP-2423 item 14: each Store member read as an approval would read them.
+        approvalContext: (tx, scope) =>
+          createInternalRefundWorkforceContext({
+            expected: {
+              tenantReference: scope.selected.tenantReference,
+              brandReference: scope.context.brand.brandReference,
+              storeReference: scope.store.storeReference,
+            },
+            persistence,
+            sessionActorReference: String(scope.actorReference),
+            sessionContext: async () => scope.context,
+            current: async (t) => t === tx && (await scope.allowed()),
+            permissions: ["organization.manage", "store.service.approve"],
+          }),
       }),
       // WP-2423 item 11: the Store's kitchen setup, in the product.
       kitchenSetup: createMerchantKitchenSetup({
