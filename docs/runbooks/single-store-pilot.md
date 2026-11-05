@@ -3023,14 +3023,27 @@ backup, its restore check and its off-site copy; no successful backup in 26 hour
 certificate expiring within 7 days; free space of the pilot data folder, the backup folder, the
 database volume and the off-site folder; and whether its own outbound alerts are being delivered.
 
+Each Store in `stores.json` gets the same business checks, its own, every minute, on its own board
+(`stores/<name>/ops/alert-board.json`, [correction 2](../spec/design/pilot-alerts-backup.md)). One
+Store failing never stops the others: `store_monitor_failed` in `alerts.log`, with `store`, and the
+code on the `ops` container's stderr (`PILOT_OPS_STORE_READ_UNAVAILABLE`).
+
 Where alerts appear:
 
-- **Home, "Store system" card** (Owner and Store Manager; the same permission as Exceptions):
-  every open problem with "Urgent" or "Today", what to do and since when, recently resolved
-  problems, the last backup time and whether email or phone alerts are set up. If the monitor
-  stops, the card says "The alert monitor stopped reporting" instead of "Everything is working".
-- **Log**: `<runtime>/ops/alerts.log` (JSON lines: alert key, severity, delivery result).
-- **Email and phone/message alerts**: only after the Owner provides accounts (external gate).
+- **Home at the runtime root** (Owner and Store Manager; the same permission as Exceptions): every
+  open problem with "Urgent" or "Today", what to do and since when, recently resolved problems, the
+  last backup time and whether email or phone alerts are set up. If the monitor stops, it says "The
+  alert monitor stopped reporting". This is the installation's board: put BOP's own Store here.
+- **Home at a Store below `stores/`**: a merchant, same permission. Only their own Store's problems,
+  an outage that stops their guests or staff, and a planned update. Nothing about the monitor,
+  backups, the certificate, disks, alert channels or renewal: BOP hears of those. If the monitor
+  stops, their last problems stay "as of" that time and no row appears about the monitor.
+- **`pilot-ops.mjs status`**: each Store's keys, severities and instants.
+- **Log**: `<runtime>/ops/alerts.log` (JSON lines: alert key, severity, delivery result, `store`).
+- **Email and phone/message alerts**: only after the Owner provides accounts (external gate). One
+  channel state and one hourly cap for the whole installation; a Store's own problems name it on
+  their line, and an outage that touches every Store is sent once. A heartbeat or webhook must be on
+  before a real merchant runs below `stores/`: otherwise nobody hears if the monitor stops.
 
 Noise control: a failed entry probe must last 2 minutes before it alerts; each problem is sent once,
 again only if it gets worse or after a reminder interval (urgent 3 hours, today 24 hours), and
@@ -3068,6 +3081,7 @@ values below are placeholders.
     { "format": "pushover", "tokenFile": "ops-pushover-token", "userKeyFile": "ops-pushover-user" }
   ],
   "heartbeat": { "urlFile": "ops-heartbeat-url", "everyMinutes": 5 },
+  "support": { "phone": "<BOP support, E.164>", "testOnly": false },
   "backup": {
     "role": "<migration admin role>",
     "passwordFile": "migration-admin-password",
@@ -3089,6 +3103,8 @@ values below are placeholders.
 - `webhooks[].format`: `json` (`urlFile`; body `{severity, subject, text}`), `slack` (`urlFile`,
   an incoming-webhook URL), `pushover` (`tokenFile`, `userKeyFile`) or `twilio-sms`
   (`accountSid`, `authTokenFile`, `from`, `to`: E.164 numbers). URLs are secrets and live in files.
+- `support` is who staff call: rows that say "Ask BOP support" show it as a call link. Without it
+  there is no link. `testOnly: true` marks a number that is not the real one yet; the link says so.
 - `heartbeat` is a dead man's switch: an HTTPS URL of an external uptime service (for example a
   healthchecks-style "ping" URL) pinged every few minutes. If the whole host or its internet is
   down, nothing on the host can send an alert; the external service notices the missing pings and
@@ -3290,6 +3306,8 @@ anything that stops ordering; the pilot operator fixes the cause.
 | <a id="alert-pickup-capacity-horizon"></a>Pickup times are running out               | Pickup times (laid 14 days ahead from the published hours) reach under 24 hours ahead (warning) or under 1 hour or none (urgent: no pickup order online or at the counter); clears 2 minutes after 24 hours again                                           | Warning: nothing changes for guests. Urgent: take pickup orders on paper (items, name, time) and payment on the card machine, enter them once it clears; dine-in is not affected                                                                                                                                             | `business-worker.log`: `pickup_capacity_schedule_applied` and the cycle failure code (`PICKUP_CAPACITY_POLICY_UNAVAILABLE`, `PICKUP_CAPACITY_CONFIGURATION_ENDED`: publish Store hours without either); the next run fills from now                                                                                                                          |
 | <a id="alert-reconciliation-differences"></a>Payment differences need checking       | Open differences between store records and the payment provider, for one payment or a business day's totals (urgent after 24 hours)                                                                                                                         | Store Manager: `Exceptions` for each difference; for a day's totals, `Settlement` for that day, which explains it and what to do                                                                                                                                                                                             | Only if a difference is a system fault                                                                                                                                                                                                                                                                                                                       |
 | <a id="alert-settlement-exceptions"></a>Day-end settlement has open problems         | A closed day has a difference, or no settlement 6 hours after close                                                                                                                                                                                         | Store Manager: `Settlement` for that day                                                                                                                                                                                                                                                                                     | If days are missing: `daily-settlement-worker.log` `daily_settlement_day_failed` lines name the day and safe code; that day is retried on its own (1 minute, doubling to 30) while later days settle; fix the cause, no restart needed                                                                                                                       |
+| <a id="alert-settlement-none"></a>Day-end settlement is not set up for this Store    | A Store below `stores/` has published its setup and has a closed business day, but no `daily-settlement-coverage.json`: its payments are not being compared with the Provider. Not shown to the merchant                                                    | Nothing in store                                                                                                                                                                                                                                                                                                             | `pilot-internal-test-store-open.mjs settlement` records its first closed day; its settlement worker then starts. In a Pilot Store the file is required, and a missing one reads as "Some checks could not run"                                                                                                                                               |
+| <a id="alert-stores-attention"></a>Some Stores need BOP support                      | Root board only. Names Stores whose board is over 5 minutes old (Urgent), whose checks could not run, with closed days and no settlement, or whose ordering setup ends within 14 days. Their owners are not told                                            | Nothing in store                                                                                                                                                                                                                                                                                                             | `pilot-ops.mjs status`; `ops/alerts.log` lines with that `store`; the `ops` container's `PILOT_OPS_STORE_READ_UNAVAILABLE` line gives the code. Renew as for "The store's ordering setup expires soon"                                                                                                                                                       |
 | <a id="alert-backup-failed"></a>Last night's backup failed                           | The dump failed; retries follow (3 a day)                                                                                                                                                                                                                   | Nothing in store; service is unaffected                                                                                                                                                                                                                                                                                      | `ops/alerts.log` reason; free space; database reachable; `backup-now`                                                                                                                                                                                                                                                                                        |
 | <a id="alert-backup-stale"></a>No recent backup                                      | No successful backup for 26 hours, or none configured yet                                                                                                                                                                                                   | Owner: ask for a backup today                                                                                                                                                                                                                                                                                                | Configure `backup` in `ops.json`, or find why the schedule did not run; `backup-now`                                                                                                                                                                                                                                                                         |
 | <a id="alert-backup-restore-check"></a>The newest backup could not be restored       | The scratch restore, row comparison or photo check failed (`media missing`: photos the menu uses are not in the photo folder)                                                                                                                               | Nothing in store                                                                                                                                                                                                                                                                                                             | Keep older backups; run `drill` by hand on the newest and on the previous one; take a new backup                                                                                                                                                                                                                                                             |
@@ -3330,9 +3348,9 @@ then the same command without `--dry-run`. Each update moved is recorded in
 reason. The alert clears 2 minutes after the updates are processed; if an update fails again it
 returns to its normal backoff.
 
-If the Home card says "The alert monitor is not running" or "stopped reporting": nothing above is
-being checked. The pilot operator runs `docker compose -f compose.pilot.yaml up -d ops` and reads
-`docker compose logs ops`.
+If the runtime root's Home says "The alert monitor is not running" or "stopped reporting": nothing
+above is being checked, at any Store (a merchant's Home says only when it last checked). The pilot
+operator runs `docker compose -f compose.pilot.yaml up -d ops` and reads `docker compose logs ops`.
 
 #### Order Workflow alerts (WP-2423 item 9)
 
