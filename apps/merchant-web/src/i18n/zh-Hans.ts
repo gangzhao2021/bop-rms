@@ -6929,6 +6929,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "当前登录：{name}。你打开的内容都会列给该店店主看。",
   "Choose a Store": "选择门店",
   Merchants: "商家",
+  "Open {store}": "打开 {store}",
+  "Approve your allergen list first: open Allergens, approve the list, then list the menu.":
+    "请先批准过敏原清单：打开“过敏原”，批准清单，再上架菜单。",
   "Looked at whether your Store is ready and when its last order came":
     "查看了门店是否就绪和最近一单的时间",
   "We can't read the merchants right now.": "现在读不出商家。",

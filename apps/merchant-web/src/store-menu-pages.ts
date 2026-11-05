@@ -158,6 +158,11 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         { item: item, store: problem.storeName ?? t("one of this menu's Stores") },
       );
     case "Stopped":
+      // A new merchant's first listing: the one step this page can name for them.
+      if (problem.reason?.endsWith(":NoAllergenList"))
+        return t(
+          "Approve your allergen list first: open Allergens, approve the list, then list the menu.",
+        );
       return t(
         "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.",
         { item: item, reason: problem.reason ?? "Unknown" },

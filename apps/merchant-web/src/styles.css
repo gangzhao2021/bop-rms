@@ -9707,6 +9707,9 @@ tr[data-drop-target="true"] {
   border-bottom: 1px solid var(--bop-color-border-default);
   text-align: start;
 }
+.store-support__merchant-stores {
+  table-layout: fixed;
+}
 .store-support {
   display: grid;
   gap: var(--bop-space-3);

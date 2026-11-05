@@ -178,23 +178,23 @@ export function StoreSupportPage() {
           overview.merchants.map((merchant) => (
             <div key={merchant.brandReference}>
               <h3>{merchant.name}</h3>
-              <table className="support-access__log">
+              <table className="support-access__log store-support__merchant-stores">
                 <thead>
                   <tr>
                     <th scope="col">{t("Store")}</th>
                     <th scope="col">{t("Status")}</th>
                     <th scope="col">{t("Last order")}</th>
                     <th scope="col">
-                      <span className="visually-hidden">{t("Open")}</span>
+                      <span className="visually-hidden">{t("Open this store")}</span>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {merchant.stores.map((store) => (
                     <tr key={store.storeReference}>
-                      <td>{store.name}</td>
-                      <td>{storeReadiness(store)}</td>
-                      <td>
+                      <td data-label={t("Store")}>{store.name}</td>
+                      <td data-label={t("Status")}>{storeReadiness(store)}</td>
+                      <td data-label={t("Last order")}>
                         {store.lastOrderAt === null ? (
                           t("No orders yet")
                         ) : (
@@ -204,8 +204,12 @@ export function StoreSupportPage() {
                         )}
                       </td>
                       <td>
-                        <button type="button" onClick={() => void open(store.storeReference)}>
-                          {t("Open")}
+                        <button
+                          type="button"
+                          aria-label={t("Open {store}", { store: store.name })}
+                          onClick={() => void open(store.storeReference)}
+                        >
+                          {t("Open this store")}
                         </button>
                       </td>
                     </tr>
@@ -313,7 +317,7 @@ export function StoreSupportPage() {
           {view.orders.length === 0 ? (
             <p>{t("No orders yet.")}</p>
           ) : (
-            <table className="support-access__log">
+            <table className="support-access__log store-support__merchant-stores">
               <thead>
                 <tr>
                   <th scope="col">{t("Order")}</th>

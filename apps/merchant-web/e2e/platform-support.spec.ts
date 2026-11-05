@@ -135,7 +135,8 @@ test("@production support picks a Store, reads it masked, and changes only what 
     merchants.getByRole("cell", { name: "Still setting up: no menu listed" }),
   ).toBeVisible();
   await expect(merchants.getByRole("cell", { name: "No orders yet" })).toBeVisible();
-  await page.getByLabel("Store").selectOption(store);
+  await expect(merchants.getByRole("button", { name: "Open New Merchant Main" })).toBeVisible();
+  await page.getByRole("combobox").selectOption(store);
   await expect(
     page.getByText("Read-only: the Owner hasn't allowed changes right now."),
   ).toBeVisible();
@@ -153,8 +154,8 @@ test("@production support picks a Store, reads it masked, and changes only what 
 
   // The Owner allows: the change appears, and after it the page reads the Store again.
   allowed = true;
-  await page.getByLabel("Store").selectOption("");
-  await page.getByLabel("Store").selectOption(store);
+  await page.getByRole("combobox").selectOption("");
+  await page.getByRole("combobox").selectOption(store);
   await page.getByRole("button", { name: "Turn pickup off" }).click();
   await expect(page.getByRole("status")).toContainText("Pickup changed.");
   await expect(page.getByRole("button", { name: "Turn pickup on" })).toBeVisible();
@@ -162,7 +163,7 @@ test("@production support picks a Store, reads it masked, and changes only what 
   expect(views).toBeGreaterThanOrEqual(3);
   // Reload: nothing is remembered in the browser; the Store is opened and recorded again.
   await page.reload();
-  await page.getByLabel("Store").selectOption(store);
+  await page.getByRole("combobox").selectOption(store);
   await expect(page.getByRole("button", { name: "Turn pickup on" })).toBeVisible();
   await noOverflow(page, "support-allowed", ".store-support");
 

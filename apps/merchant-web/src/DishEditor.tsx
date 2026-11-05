@@ -126,7 +126,11 @@ export function DishEditor({
     nameZh: "",
     description: "",
     descriptionZh: "",
-    price: dish?.priceMinor ? minorToDollars(dish.pendingPriceMinor ?? dish.priceMinor) : "",
+    // A dish not listed yet has only its waiting price.
+    price:
+      (dish?.pendingPriceMinor ?? dish?.priceMinor)
+        ? minorToDollars((dish?.pendingPriceMinor ?? dish?.priceMinor) as string)
+        : "",
     tax: "",
     section: sectionCode,
   });
