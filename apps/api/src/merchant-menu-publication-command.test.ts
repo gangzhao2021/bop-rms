@@ -112,8 +112,12 @@ beforeEach(() => {
     },
   };
 });
-function handler(reviewCreation = false) {
+function handler(
+  reviewCreation = false,
+  projectPublished?: (tx: unknown, input: unknown) => Promise<unknown>,
+) {
   return createMerchantMenuPublicationCommand({
+    ...(projectPublished ? { projectPublished } : {}),
     ...(reviewCreation
       ? {
           reviewCreation: {
@@ -173,6 +177,29 @@ it("reuses evidence only within the transaction while checking permission again"
   await execute(request("Publish"));
   expect(state.dependencyReads).toBe(2);
   expect(state.evidenceReads).toBe(2);
+});
+
+it("WP-2423: going live rebuilds the customer menu in the Publish transaction, only then", async () => {
+  const projectPublished = vi.fn(async () => ({ status: "Applied" }));
+  const execute = handler(false, projectPublished);
+  await expect(execute(request("Approve"))).resolves.not.toHaveProperty("projection");
+  expect(projectPublished).not.toHaveBeenCalled();
+  await expect(execute(request("Publish"))).resolves.toMatchObject({
+    projection: { status: "Applied" },
+  });
+  expect(projectPublished).toHaveBeenCalledTimes(1);
+  expect(projectPublished).toHaveBeenCalledWith(expect.anything(), {
+    brandReference: id(1),
+    operationReference: id(10),
+  });
+});
+it("WP-2423: a menu that cannot go live whole does not go live at all", async () => {
+  const failure = new Error("the customer menu could not be rebuilt");
+  await expect(
+    handler(false, async () => {
+      throw failure;
+    })(request("Publish")),
+  ).rejects.toBe(failure);
 });
 
 it("treats a reordered copy of one command as the same evidence", async () => {

@@ -198,62 +198,75 @@ export function createPostgresPublishedMenuQueryStore(
         const orderTypeCode = parseCatalogCode(input.orderTypeCode);
         const observedAt = parseCatalogInstant(input.requestedAt);
         return await runner.run(async (transaction) => {
-          // Projection RLS is Brand-only; Store applicability is filtered in the read below.
-          await transaction.query(
-            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
-            [brand, ""],
-          );
-          const result = await transaction.query(select, [brand, store]);
-          if (result === null || typeof result !== "object" || !("rows" in result))
-            throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-          if (!Array.isArray(result.rows)) throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-          const candidates = result.rows.map((row: { projection?: unknown } | null) => {
-            const projection = parsePublishedMenuProjection(
-              row?.projection as PublishedMenuProjection,
+          // WP-2423 DEC-MERCHANT-LOCK-SCOPE: a menu's release and customer menu go live in one
+          // commit, but this read has two statements: that commit can fall between them. Read once
+          // more, then both are from after it. Still apart then, something is really wrong.
+          const readCurrent = async (lastChance: boolean) => {
+            // Projection RLS is Brand-only; Store applicability is filtered in the read below.
+            await transaction.query(
+              "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+              [brand, ""],
             );
-            if (
-              projection.snapshot.brandReference !== brand ||
-              (projection.snapshot.storeReferences.length > 0 &&
-                !projection.snapshot.storeReferences.includes(store))
-            )
+            const result = await transaction.query(select, [brand, store]);
+            if (result === null || typeof result !== "object" || !("rows" in result))
               throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-            return projection;
-          });
-          if (
-            new Set(candidates.map((item) => item.snapshot.menuReference)).size !==
-            candidates.length
-          )
-            throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-          const releases = createPostgresCurrentMenuReleaseStore(
-            { run: (work) => work(transaction) },
-            { brandReference: brand, storeReference: store },
-          );
-          const current: PublishedMenuProjection[] = [];
-          for (const candidate of candidates) {
-            const snapshot = candidate.snapshot;
-            if (
-              !snapshot.channelCodes.includes(channelCode) ||
-              !snapshot.orderTypeCodes.includes(orderTypeCode)
-            )
-              continue;
-            const release = await releases.load({
-              menuReference: snapshot.menuReference,
-              channelCode,
-              orderTypeCode,
-              observedAt,
+            if (!Array.isArray(result.rows))
+              throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+            const candidates = result.rows.map((row: { projection?: unknown } | null) => {
+              const projection = parsePublishedMenuProjection(
+                row?.projection as PublishedMenuProjection,
+              );
+              if (
+                projection.snapshot.brandReference !== brand ||
+                (projection.snapshot.storeReferences.length > 0 &&
+                  !projection.snapshot.storeReferences.includes(store))
+              )
+                throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+              return projection;
             });
-            if (release === null) continue;
             if (
-              release.menuVersionReference !== snapshot.menuVersionReference ||
-              release.releaseReference !== snapshot.releaseReference ||
-              release.snapshotDigest !== snapshot.snapshotDigest ||
-              release.effectiveFrom !== snapshot.effectiveFrom ||
-              release.effectiveUntil !== snapshot.effectiveUntil
+              new Set(candidates.map((item) => item.snapshot.menuReference)).size !==
+              candidates.length
             )
               throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
-            current.push(candidate);
-          }
-          return Object.freeze(current);
+            const releases = createPostgresCurrentMenuReleaseStore(
+              { run: (work) => work(transaction) },
+              { brandReference: brand, storeReference: store },
+            );
+            const current: PublishedMenuProjection[] = [];
+            for (const candidate of candidates) {
+              const snapshot = candidate.snapshot;
+              if (
+                !snapshot.channelCodes.includes(channelCode) ||
+                !snapshot.orderTypeCodes.includes(orderTypeCode)
+              )
+                continue;
+              const release = await releases.load({
+                menuReference: snapshot.menuReference,
+                channelCode,
+                orderTypeCode,
+                observedAt,
+              });
+              if (release === null) continue;
+              if (
+                release.menuVersionReference !== snapshot.menuVersionReference ||
+                release.releaseReference !== snapshot.releaseReference ||
+                release.snapshotDigest !== snapshot.snapshotDigest ||
+                release.effectiveFrom !== snapshot.effectiveFrom ||
+                release.effectiveUntil !== snapshot.effectiveUntil
+              ) {
+                if (lastChance) throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+                return null;
+              }
+              current.push(candidate);
+            }
+            return Object.freeze(current);
+          };
+          return (
+            (await readCurrent(false)) ??
+            (await readCurrent(true)) ??
+            Object.freeze<PublishedMenuProjection[]>([])
+          );
         });
       } catch {
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");

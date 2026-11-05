@@ -991,8 +991,29 @@ export function createMerchantMenus(options: {
     );
   };
 
+  /** A publication's MenuPublished event into the customer menu (idempotent), on this transaction. */
+  const projectEvent = async (
+    tx: Parameters<typeof brandScope>[0],
+    brandReference: string,
+    publishOperation: string,
+  ) => {
+    await brandScope(tx, brandReference);
+    const envelope = await loadOutboxEnvelope(
+      tx as unknown as ConsumerTransaction,
+      derivedReference(publishOperation, "publication:Event"),
+    );
+    if (envelope === null) return fail("NotFound");
+    return createPostgresPublishedMenuConsumerService({
+      brandReference,
+      authorize: async () => true,
+      generateGeneration: () => derivedReference(publishOperation, "projection"),
+      now: () => options.persistence.now(),
+    }).consume(tx as unknown as ConsumerTransaction, envelope);
+  };
   const publication = createMerchantMenuPublicationCommand({
     merchant: options.persistence,
+    projectPublished: (tx, input) =>
+      projectEvent(tx, input.brandReference, input.operationReference),
     authentication: options.authentication,
     reviewCreation: {
       budget: { maximumConfigurations: 10000, maximumSearchSteps: 1000000 },
@@ -1030,7 +1051,7 @@ export function createMerchantMenus(options: {
     ...(options.resolveScope === undefined ? {} : { resolveScope: options.resolveScope }),
   });
 
-  /** Projects a publication's MenuPublished event into the customer menu (idempotent). */
+  /** Replays a publication's projection in its own transaction (the Rebuild command). */
   const project = async (
     sessionCookie: unknown,
     sessionReference: string,
@@ -1041,19 +1062,7 @@ export function createMerchantMenus(options: {
         withRememberedBrandAuthorization(tx, async () => {
           const s = await scopeFor(tx, sessionCookie, sessionReference);
           if (!s.permissions.mayPublish) fail("PermissionDenied");
-          await brandScope(tx, s.owner.brandReference);
-          const envelope = await loadOutboxEnvelope(
-            tx as unknown as ConsumerTransaction,
-            derivedReference(publishOperation, "publication:Event"),
-          );
-          if (envelope === null) return fail("NotFound");
-          const result = await createPostgresPublishedMenuConsumerService({
-            brandReference: s.owner.brandReference,
-            authorize: async () => true,
-            generateGeneration: () => derivedReference(publishOperation, "projection"),
-            now: () => options.persistence.now(),
-          }).consume(tx as unknown as ConsumerTransaction, envelope);
-          return result;
+          return projectEvent(tx, s.owner.brandReference, publishOperation);
         }),
       ),
     );
@@ -1214,24 +1223,18 @@ export function createMerchantMenus(options: {
                       }
                     : null,
               };
-        const result = await publication({
-          sessionCookie: input.sessionCookie,
-          csrf: input.csrf,
-          command: commandBody,
-          ...(body.action === "Approve" && body.approvalMode !== undefined
-            ? { approvalMode: body.approvalMode }
-            : {}),
-        });
-        if (body.action === "Publish")
-          return {
-            ...result,
-            projection: await project(
-              input.sessionCookie,
-              current.sessionReference,
-              body.operationReference,
-            ),
-          };
-        return result;
+        // Each step's command is the same on a rerun (a stable operation reference, the same period):
+        // beside a busy merchant the step tries again instead of failing the owner's listing.
+        return await retryTransactionConflict(() =>
+          publication({
+            sessionCookie: input.sessionCookie,
+            csrf: input.csrf,
+            command: commandBody,
+            ...(body.action === "Approve" && body.approvalMode !== undefined
+              ? { approvalMode: body.approvalMode }
+              : {}),
+          }),
+        );
       }
       if (body.action === "Rebuild")
         return {

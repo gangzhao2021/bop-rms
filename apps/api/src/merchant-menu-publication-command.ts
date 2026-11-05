@@ -157,6 +157,16 @@ export function createMerchantMenuPublicationCommand(options: {
     purpose: "Audit" | "Lifecycle" | "Release" | "Event" | "Timing",
     operationReference: string,
   ): string;
+  /**
+   * WP-2423 DEC-MERCHANT-LOCK-SCOPE: going live is one step for guests. The customer menu is rebuilt
+   * inside the Publish transaction, so a guest reads the whole old menu until COMMIT and the whole
+   * new one after it, never a new release beside the old menu (which answered "Menu is unavailable"
+   * and refused add to cart).
+   */
+  projectPublished?(
+    transaction: ProductLifecycleTransaction,
+    input: { brandReference: string; operationReference: string },
+  ): Promise<unknown>;
   /** Test seam: the Brand scope resolver (defaults to the current session's Brand scope). */
   resolveScope?: ReturnType<typeof createMerchantBrandScope>;
 }) {
@@ -525,6 +535,13 @@ export function createMerchantMenuPublicationCommand(options: {
           },
         });
         const result = await service.execute(command);
+        const projection =
+          command.action === "Publish" && options.projectPublished
+            ? await options.projectPublished(transaction, {
+                brandReference: brand,
+                operationReference: command.operationReference,
+              })
+            : undefined;
         if (single && options.reviewApproval) {
           const listed = await transaction.query<{ n: number }>(
             "SELECT count(*)::int n FROM rms_catalog.menu_single_store_listing WHERE brand_id=$1 AND operation_id=$2",
@@ -597,6 +614,7 @@ export function createMerchantMenuPublicationCommand(options: {
           state: result.record.lifecycle.state,
           snapshotDigest: command.snapshotDigest,
           releaseReference: result.record.release?.releaseId ?? null,
+          ...(projection === undefined ? {} : { projection }),
         };
       });
     });
