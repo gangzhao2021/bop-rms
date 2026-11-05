@@ -2156,30 +2156,33 @@ Paths are as the container sees them (`.local/...` is `.local/pilot-runtime/...`
    wait for `/ready`, `maintenance end`). It starts serving; check `supervisor.health.json` shows
    `stores/<name>:…` running.
 7. **In the product, as the Owner** (`/internal-test/staff`, `owner-<name>`), Store setup
-   (`/app/organization/stores/<store>/setup`), in this order. The order matters:
-   - **Name and address** (top panel), then **Set up one kitchen line**, then **Receipts and privacy**
-     (business name; save).
-   - **Step 2 again:** the wizard has its own address form. Save it and "Use saved address"; the
-     top panel is not enough, and the tax step reads this one. Step 7: contact, save, "Use saved
-     contact". "Save setup draft".
-   - **Tax:** `pilot-internal-test-store-open.mjs tax ... --merchant $OP` with the flags of step 4.
-     Before this the dish form's tax class list is empty and "Save dish" stays disabled.
-   - Step 8 **"Use the live Store's settings"**, after tax; step 1 "This Store"; step 6 "No order
-     limits"; step 5 each fee "Off", payment channels, "Save payment configuration".
-   - **Sole operator on** (below Receipts; reason, then the authenticator code from
-     `stores/<name>/internal-test-staff-totp.json`). A second person is not needed then.
-   - **Receipt template** (step 5): "Save receipt layout", "Save required receipt fields", "Refresh
-     available presets", choose both, "Save template draft"; "Refresh template list", choose draft 1,
-     "Submit template for review", verify, tick, "Approve receipt template on my own", "Publish
-     receipt template"; "Refresh saved templates", choose it, "Check published receipt template",
-     "Use published receipt template", "Save setup draft".
-   - Step 8: "Create configuration from saved setup", "Validate configuration", "Submit
-     configuration for review", verify, tick, "Approve configuration on my own", "Publish Store
-     configuration".
-8. **Menu:** Allergens (`/app/compliance/allergens`): "Record this allergen list for approval", then
-   "Approve this list on my own". Without it listing stops with `Check:NoAllergenList`. Menu: new
-   section, new dish; Edit it, enter the price again (the form shows it empty until listed), answer
-   each allergen and tick the check; "List it".
+   (`/app/organization/stores/<store>/setup`): one page, "Open your store" (DEC-STORE-FIRST-OPENING).
+   - **Fill the page:** name, address, phone, business name and GST/HST number, order types, opening
+     hours, last orders, preparation time, tips. Press **"Save my details"**: tax rates are not set
+     yet, so only this is saved and no code is asked for.
+   - **Tax:** `pilot-internal-test-store-open.mjs tax ... --merchant $OP` with the flags of step 4. It
+     reads the address just saved. Before this the dish form's tax class list is empty and "Save
+     dish" stays disabled.
+   - **Reload the page.** Read "What you are approving", tick the box, press **"Publish my store
+     setup"** and enter the authenticator code from `stores/<name>/internal-test-staff-totp.json`.
+     Sole operator, the kitchen line, the standard receipt, the payment rules, the allergen list and
+     the configuration all follow from that one press.
+   - **If it stops,** the page says what to do. Press "Continue", here or on another device: what was
+     done stays and nothing is written twice. The Store runs on its first configuration until the
+     last step. A host or network failure during the run needs nothing more than that: a Store still
+     opening normally has no guests yet.
+   - **Two Owners:** the first presses "Send for approval"; the other opens the same page and presses
+     "Approve and continue". They take turns until it is published.
+   - **Other merchants:** the press makes about ten publishing writes. If other merchants see 503s
+     while it runs (a publishing record lock timeout in the postgres log), open merchants outside
+     service hours until that lock is fixed.
+   - "All settings, step by step" under the page is the full wizard, for a Store that needs something
+     the page does not ask. Once published, the Store's setup page is the wizard as for any other.
+8. **Menu:** the allergen list was approved in step 7. An Owner without Brand-level allergen access
+   leaves it to whoever holds it, on Allergens (`/app/compliance/allergens`); alone it is one press,
+   "Approve this list on my own". Without a list, listing says so in plain words. Menu: new section,
+   new dish; Edit it, enter the price again (the form shows it empty until listed), answer each
+   allergen and tick the check; "List it".
 9. **Tables:** Table QR codes: "Add a table", "Create code", "Print". The pickup link is on the same
    page. Tables: "Open table" before guests join.
 
