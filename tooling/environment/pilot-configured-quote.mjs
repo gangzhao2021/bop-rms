@@ -31,8 +31,8 @@ export async function readInternalQuoteTaxConfiguration(
   let published;
   try {
     published = await transactions.run((tx) => source(tx, at));
-  } catch {
-    return Object.freeze({ ready: false, reason: "StoreConfigurationUnavailable" });
+  } catch (cause) {
+    return Object.freeze({ ready: false, reason: "StoreConfigurationUnavailable", cause });
   }
   if (published.taxConfigurationReference !== policy.taxConfiguration.configurationReference)
     return Object.freeze({ ready: false, reason: "TaxConfigurationMismatch" });

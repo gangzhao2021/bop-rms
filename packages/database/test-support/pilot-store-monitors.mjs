@@ -155,10 +155,12 @@ export async function exercisePilotStoreMonitors(context) {
     close: async () => undefined,
   });
   const logs = [];
+  const reported = [];
   const loaded = [];
   const monitors = createStoreMonitors({
     runtimeDirectory: directory,
     log: async (entry) => logs.push(entry),
+    report: (event, error, where) => reported.push({ event, error, ...where }),
     // This run steps through minutes by the instants it passes, however long each read takes.
     clock: () => 0,
     load: async (storeDirectory) => {
@@ -311,6 +313,43 @@ export async function exercisePilotStoreMonitors(context) {
     assert.match(bySummary(refused, "monitor.source"), /payment and settlement status/u);
     await admin.query(`GRANT SELECT ON platform_eventing.dead_letter_item TO ${api}`);
     assert.ok(logs.some((entry) => entry.event === "store_monitor_failed"));
+
+    // One check's read refused, as by a grant a migration left out: the merchant is told nothing,
+    // so BOP can find which check it was and the real code.
+    const sqlStateOf = (error) => {
+      for (let at = error; at !== undefined && at !== null; at = at.cause) {
+        const found = at.diagnostic?.sqlState ?? at[Symbol.for("bop.database.failure")]?.sqlState;
+        if (typeof found === "string") return found;
+      }
+      return null;
+    };
+    await admin.query(`REVOKE SELECT ON rms_inventory.stock_reservation_version FROM ${api}`);
+    await run(T0 + 11 * 60_000);
+    await run(T0 + 12 * 60_000);
+    await admin.query(`GRANT SELECT ON rms_inventory.stock_reservation_version TO ${api}`);
+    const failedChecks = (store, check) =>
+      logs.filter(
+        (entry) =>
+          entry.event === "store_check_failed" && entry.store === store && entry.check === check,
+      );
+    assert.equal(failedChecks("first", "heldStock").length, 1);
+    const held = reported.find(
+      (item) => item.step === "heldStock" && item.store === "stores/first",
+    );
+    assert.equal(held.event, "PILOT_OPS_STORE_READ_UNAVAILABLE");
+    assert.equal(sqlStateOf(held.error), "42501");
+    // Nothing of that reaches what anyone reads: the board has the catalog's words only.
+    assert.ok(!JSON.stringify(await boardOf("first")).includes("42501"));
+
+    // The published settings refused: the receipt and pricing checks are just as findable.
+    await admin.query(`REVOKE SELECT ON bop_publishing.publishing_mutation_record FROM ${api}`);
+    await run(T0 + 13 * 60_000);
+    await admin.query(`GRANT SELECT ON bop_publishing.publishing_mutation_record TO ${api}`);
+    for (const check of ["receipts", "quoteTax"]) {
+      assert.equal(failedChecks("first", check).length, 1, check);
+      const answer = reported.find((item) => item.step === check && item.store === "stores/first");
+      assert.equal(sqlStateOf(answer.error), "42501", check);
+    }
   } finally {
     await pool.end().catch(() => undefined);
     await rm(directory, { recursive: true, force: true });

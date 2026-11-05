@@ -68,10 +68,12 @@ describe("the tax configuration a quote uses", () => {
     });
   });
   it("refuses when the published configuration cannot be read", async () => {
-    mocks.published.mockRejectedValueOnce(new Error("STORE_TAX_CONFIGURATION_UNAVAILABLE"));
+    const cause = new Error("STORE_TAX_CONFIGURATION_UNAVAILABLE");
+    mocks.published.mockRejectedValueOnce(cause);
     expect(await readInternalQuoteTaxConfiguration(resources, policy, at)).toEqual({
       ready: false,
       reason: "StoreConfigurationUnavailable",
+      cause,
     });
   });
   it("reports readiness now for the operations monitor, without references", async () => {

@@ -666,6 +666,42 @@ describe("WP-2423 Q13 observations", () => {
       ).pickupCapacity,
     ).toBe("unreadable");
   });
+  it("DEC-PILOT-ALERTS-BACKUP correction 2: says why a check could not run only where it is asked to", async () => {
+    const refused = Object.assign(Error("permission denied"), { code: "42501" });
+    const load = async () => ({
+      resources: {
+        scope: { brandReference: "b", storeReference: "s" },
+        transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+        database: {
+          transactions: () => ({
+            run: async (work) => work({ query: async () => ({ rows: [] }) }),
+          }),
+        },
+      },
+      installation: {},
+      dependencies: {
+        createReconciliationExceptions: () => async () => ({
+          items: [],
+          nextAfterExceptionReference: null,
+        }),
+        readSettlementStatus: async () => ({ days: [] }),
+        readHeldStockOrders: async () => {
+          throw refused;
+        },
+      },
+    });
+    const report = vi.fn();
+    // The installation's own Store: as before, the board says "could not run" and nothing else.
+    const root = await createBusinessObserver({ runtimeDirectory: "x", load, report })(T0);
+    expect(root.heldStock).toBe("unreadable");
+    expect(report).not.toHaveBeenCalled();
+    const reportCheck = vi.fn();
+    const own = createBusinessObserver({ runtimeDirectory: "x", load, report, reportCheck });
+    expect((await own(T0)).heldStock).toBe("unreadable");
+    expect((await own(T0 + MIN)).heldStock).toBe("unreadable");
+    expect(reportCheck.mock.calls).toEqual([["heldStock", refused]]);
+    expect(report).not.toHaveBeenCalled();
+  });
   it("reports business signals as unreadable when the database cannot be reached, and retries", async () => {
     const load = vi.fn(async () => {
       throw Error("LOCAL_DATABASE_UNAVAILABLE");

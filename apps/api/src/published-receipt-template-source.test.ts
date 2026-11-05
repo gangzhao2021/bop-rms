@@ -286,6 +286,11 @@ describe("WP-2423: the template the Store's published configuration names", () =
     await expect(source.readiness(tx, at)).resolves.toEqual({
       ready: false,
       reason: "StoreConfigurationUnavailable",
+      // Why it could not be read, for the monitor's report to BOP.
+      cause: expect.objectContaining({
+        code: "DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE",
+        cause: expect.anything(),
+      }),
     });
   });
 

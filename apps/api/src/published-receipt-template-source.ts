@@ -28,10 +28,11 @@ export type ReceiptTemplateReadiness =
       versionReference: string;
       versionCode: string;
     }>
-  | Readonly<{ ready: false; reason: ReceiptTemplateUnavailableReason }>;
+  /** `cause`: for the monitor's report to BOP (codes only), never for a screen. */
+  | Readonly<{ ready: false; reason: ReceiptTemplateUnavailableReason; cause?: unknown }>;
 
-const unavailable = (code: DigitalReceiptError["code"]): never => {
-  throw new DigitalReceiptError(code);
+const unavailable = (code: DigitalReceiptError["code"], cause?: unknown): never => {
+  throw Object.assign(new DigitalReceiptError(code), cause === undefined ? {} : { cause });
 };
 const ownerReadWindowMs = 5000;
 
@@ -79,8 +80,8 @@ export function createPublishedReceiptTemplateSource(options: {
     let binding: Binding;
     try {
       binding = await readStore(transaction, observedAt);
-    } catch {
-      return unavailable("DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE");
+    } catch (cause) {
+      return unavailable("DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE", cause);
     }
     const templateReference = String(parseOrderingReference(binding.templateReference));
     const pending: { guard: () => Promise<void>; final: () => void }[] = [];
@@ -278,7 +279,11 @@ export function createPublishedReceiptTemplateSource(options: {
         error instanceof DigitalReceiptError &&
         error.code === "DIGITAL_RECEIPT_DEPENDENCY_UNAVAILABLE"
       )
-        return Object.freeze({ ready: false, reason: "StoreConfigurationUnavailable" });
+        return Object.freeze({
+          ready: false,
+          reason: "StoreConfigurationUnavailable",
+          cause: error,
+        });
       throw error;
     }
   };

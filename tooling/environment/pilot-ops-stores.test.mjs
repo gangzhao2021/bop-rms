@@ -36,6 +36,12 @@ const fact = (change = {}) => ({
   ...change,
 });
 
+/** A fact given as an Error is a read that fails with it. */
+const answer = (value) => {
+  if (value instanceof Error) throw value;
+  return value;
+};
+
 function businessOf(facts, closes) {
   return vi.fn(async (directory) => {
     const name = path.basename(directory);
@@ -70,16 +76,18 @@ function businessOf(facts, closes) {
             nextAfterExceptionReference: null,
           };
         },
-        readSettlementStatus: async () => ({ days: current().days ?? [] }),
-        readOwnerPublishedSetup: async () => current().opened,
+        readSettlementStatus: async () => ({ days: answer(current().days ?? []) }),
+        readOwnerPublishedSetup: async () => answer(current().opened),
         isSettlementCovered: async () => current().covered,
         readClosedBusinessDay: async () => current().closedDay,
-        readReceiptTemplate: async () => current().receipt,
-        readQuoteTaxConfiguration: async () => current().quoteTax,
+        readReceiptTemplate: async () => answer(current().receipt),
+        readQuoteTaxConfiguration: async () => answer(current().quoteTax),
+        readHeldStockOrders: async () =>
+          answer(current().held ?? { openCount: 0, endedCount: 0, oldestAt: null }),
         readPickupCapacityHorizon: async () =>
           current().pickupOffered === false
             ? null
-            : { coveredMs: current().pickup ?? 14 * 86400_000 },
+            : { coveredMs: answer(current().pickup ?? 14 * 86400_000) },
       },
     };
   });
@@ -347,6 +355,105 @@ describe("a new Store must not cry wolf", () => {
     Object.assign(facts.tea, { loadFails: false, dead: 0, differences: 0 });
     for (const minute of [8, 10]) await failing(minute);
     expect((await boardOf(directory, "tea")).active).toEqual([]);
+  });
+});
+
+// The merchant is told nothing of a check that could not run, so this is BOP's only way to a fix.
+describe("BOP can find out why a Store's check could not run", () => {
+  const refused = () => Object.assign(Error("permission denied"), { code: "42501" });
+  const failedChecks = (logs) => logs.filter((entry) => entry.event === "store_check_failed");
+  it.each([
+    ["receipts", "receipt"],
+    ["quoteTax", "quoteTax"],
+    ["heldStock", "held"],
+    ["pickupCapacity", "pickup"],
+    ["openingSetup", "opened"],
+  ])("a %s read refused gives one line naming the check, and its code", async (check, field) => {
+    const error = refused();
+    const facts = { tea: fact({ [field]: error }), hotpot: fact() };
+    const { cycle, logs, report } = await monitorsFor(facts);
+    for (const minute of [0, 1, 2]) await cycle(minute);
+    // When it turned unreadable, not every minute that it stays so.
+    expect(failedChecks(logs)).toEqual([{ event: "store_check_failed", store: "tea", check }]);
+    expect(report.mock.calls).toEqual([
+      ["PILOT_OPS_STORE_READ_UNAVAILABLE", error, { store: "stores/tea", step: check }],
+    ]);
+  });
+  it.each([
+    ["receipts", "receipt"],
+    ["quoteTax", "quoteTax"],
+  ])("a %s answer that the settings could not be read gives its cause", async (check, field) => {
+    const cause = refused();
+    const reason = "StoreConfigurationUnavailable";
+    const facts = { tea: fact({ [field]: { ready: false, reason, cause } }) };
+    const { directory, cycle, logs, report } = await monitorsFor(facts);
+    for (const minute of [0, 1, 2, 3, 4, 5]) await cycle(minute);
+    expect(failedChecks(logs)).toEqual([{ event: "store_check_failed", store: "tea", check }]);
+    expect(report.mock.calls).toEqual([
+      ["PILOT_OPS_STORE_READ_UNAVAILABLE", cause, { store: "stores/tea", step: check }],
+    ]);
+    // The cause stays out of what anyone reads: the board has only the catalog's words.
+    expect(JSON.stringify(await boardOf(directory, "tea"))).not.toContain("42501");
+    expect(await stateOf(directory, "tea", "alert-state.json")).not.toHaveProperty("cause");
+    expect(JSON.stringify(await stateOf(directory, "tea", "alert-state.json"))).not.toContain(
+      "42501",
+    );
+  });
+  it("an answer with no cause still names the check", async () => {
+    const receipt = { ready: false, reason: "StoreConfigurationUnavailable" };
+    const { cycle, report } = await monitorsFor({ tea: fact({ receipt }) });
+    await cycle(0);
+    expect(report.mock.calls[0][1].message).toBe("STORE_CONFIGURATION_UNAVAILABLE");
+    expect(report.mock.calls[0][2]).toEqual({ store: "stores/tea", step: "receipts" });
+  });
+  it("says so again when a check that recovered fails again, and only for that check", async () => {
+    const facts = { tea: fact({ held: refused() }) };
+    const { cycle, logs } = await monitorsFor(facts);
+    await cycle(0);
+    facts.tea.held = undefined;
+    await cycle(1);
+    expect(failedChecks(logs)).toHaveLength(1);
+    facts.tea.held = refused();
+    await cycle(2);
+    expect(failedChecks(logs)).toHaveLength(2);
+    facts.tea.receipt = refused();
+    await cycle(3);
+    expect(failedChecks(logs).map((entry) => entry.check)).toEqual([
+      "heldStock",
+      "heldStock",
+      "receipts",
+    ]);
+  });
+  it("a whole read that fails between checks does not repeat the line for a check still failing", async () => {
+    const facts = { tea: fact({ held: refused() }) };
+    const { cycle, logs } = await monitorsFor(facts);
+    await cycle(0);
+    // The settlement scan, read after the checks and due again now, fails the read as a whole.
+    facts.tea.days = refused();
+    await cycle(6);
+    await cycle(7);
+    facts.tea.days = [];
+    await cycle(8);
+    expect(failedChecks(logs)).toHaveLength(1);
+    expect(logs).toContainEqual({ event: "store_monitor_failed", store: "tea", stage: "read" });
+  });
+  it("a read past the time limit is logged by name, once for each time it fires", async () => {
+    const facts = { tea: fact({ hangs: true }), hotpot: fact() };
+    const { cycle, logs } = await monitorsFor(facts, { readLimitMs: 20 });
+    const timedOut = () =>
+      logs.filter((entry) => entry.event === "store_monitor_failed" && entry.stage === "timeout");
+    await cycle(0);
+    expect(timedOut()).toEqual([{ event: "store_monitor_failed", store: "tea", stage: "timeout" }]);
+    // Still going a minute later: nothing new to say, and no new read started.
+    await cycle(1);
+    expect(timedOut()).toHaveLength(1);
+  });
+  it("a healthy Store writes no such line", async () => {
+    const { cycle, logs, report } = await monitorsFor({ tea: fact() });
+    await cycle(0);
+    await cycle(1);
+    expect(logs).toEqual([]);
+    expect(report).not.toHaveBeenCalled();
   });
 });
 

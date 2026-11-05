@@ -263,7 +263,15 @@ export async function readBusinessSignals({
   now,
   dependencies,
   settlementExceptions = null,
+  // DEC-PILOT-ALERTS-BACKUP correction 2: a Store's owner hears nothing of a check that could not
+  // run, so BOP must be able to find out why. Not composed for the installation's own Store.
+  reportCheck = () => undefined,
 }) {
+  /** An answer rather than a failure: the Store's published settings could not be read. */
+  const reportSettingsUnread = (check, readiness) => {
+    if (readiness?.reason === "StoreConfigurationUnavailable")
+      reportCheck(check, readiness.cause ?? Error("STORE_CONFIGURATION_UNAVAILABLE"));
+  };
   const age = (instant) => (instant === null ? 0 : Math.max(0, now - Date.parse(instant)));
   const iso = (value) =>
     value === null || value === undefined ? null : new Date(value).toISOString();
@@ -331,7 +339,8 @@ export async function readBusinessSignals({
   if (typeof dependencies.readOwnerPublishedSetup === "function")
     try {
       opened = (await dependencies.readOwnerPublishedSetup(resources)) === true;
-    } catch {
+    } catch (error) {
+      reportCheck("openingSetup", error);
       opened = "unreadable";
     }
   const beforeOpening = opened === "unreadable" ? "unreadable" : null;
@@ -342,11 +351,13 @@ export async function readBusinessSignals({
   if (opened === true && typeof dependencies.readReceiptTemplate === "function")
     try {
       const readiness = await dependencies.readReceiptTemplate(resources);
+      reportSettingsUnread("receipts", readiness);
       receiptTemplate =
         readiness?.ready === true
           ? { ready: true }
           : { ready: false, reason: String(readiness?.reason ?? "TemplateNotProven") };
-    } catch {
+    } catch (error) {
+      reportCheck("receipts", error);
       receiptTemplate = "unreadable";
     }
 
@@ -356,11 +367,13 @@ export async function readBusinessSignals({
   if (opened === true && typeof dependencies.readQuoteTaxConfiguration === "function")
     try {
       const readiness = await dependencies.readQuoteTaxConfiguration(resources);
+      reportSettingsUnread("quoteTax", readiness);
       quoteTax =
         readiness?.ready === true
           ? { ready: true }
           : { ready: false, reason: String(readiness?.reason ?? "TaxConfigurationMismatch") };
-    } catch {
+    } catch (error) {
+      reportCheck("quoteTax", error);
       quoteTax = "unreadable";
     }
 
@@ -385,7 +398,8 @@ export async function readBusinessSignals({
         openCount: Number(held.openCount),
         oldestAgeMs: age(held.oldestAt ?? null),
       };
-    } catch {
+    } catch (error) {
+      reportCheck("heldStock", error);
       heldStock = "unreadable";
     }
 
@@ -400,7 +414,8 @@ export async function readBusinessSignals({
         if (!Number.isSafeInteger(horizon?.coveredMs)) throw Error("PICKUP_CAPACITY_UNREADABLE");
         pickupCapacity = { coveredMs: Math.max(0, horizon.coveredMs) };
       }
-    } catch {
+    } catch (error) {
+      reportCheck("pickupCapacity", error);
       pickupCapacity = "unreadable";
     }
 
@@ -460,12 +475,15 @@ export function createBusinessObserver({
   settlementIntervalMs = SETTLEMENT_SCAN_INTERVAL_MS,
   load,
   report = () => undefined,
+  reportCheck = () => undefined,
 }) {
   let state = null;
   let last = undefined;
   let lastAt = 0;
   let settlement = null;
   let settlementAt = 0;
+  // A check is reported when it turns unreadable, not every minute that it stays so.
+  const reportedChecks = new Set();
   const observe = async (now) => {
     if (last !== undefined && last !== "unreadable" && now - lastAt < intervalMs) return last;
     try {
@@ -474,7 +492,18 @@ export function createBusinessObserver({
         settlement !== null && settlement.count === 0 && now - settlementAt < settlementIntervalMs
           ? settlement
           : null;
-      last = await readBusinessSignals({ ...state, now, settlementExceptions: reuse });
+      const failing = new Set();
+      last = await readBusinessSignals({
+        ...state,
+        now,
+        settlementExceptions: reuse,
+        reportCheck: (check, error) => {
+          failing.add(check);
+          if (!reportedChecks.has(check)) reportCheck(check, error);
+          reportedChecks.add(check);
+        },
+      });
+      for (const check of reportedChecks) if (!failing.has(check)) reportedChecks.delete(check);
       if (reuse === null) {
         settlement = last.settlementExceptions;
         settlementAt = now;

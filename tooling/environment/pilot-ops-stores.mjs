@@ -85,6 +85,11 @@ export function createStoreMonitors({
             report("PILOT_OPS_STORE_READ_UNAVAILABLE", error, { store: relative });
             void log({ event: "store_monitor_failed", store: name, stage: "read" });
           },
+          // The merchant is told nothing of a check that could not run: BOP must find out why.
+          reportCheck: (check, error) => {
+            report("PILOT_OPS_STORE_READ_UNAVAILABLE", error, { store: relative, step: check });
+            void log({ event: "store_check_failed", store: name, check });
+          },
         }),
       };
       monitors.set(name, monitor);
@@ -105,7 +110,14 @@ export function createStoreMonitors({
     return Promise.race([
       reading,
       new Promise((resolve) => {
-        timer = startTimer(() => resolve("unreadable"), readLimitMs);
+        timer = startTimer(() => {
+          void log({
+            event: "store_monitor_failed",
+            store: nameOf(monitor.relative),
+            stage: "timeout",
+          });
+          resolve("unreadable");
+        }, readLimitMs);
       }),
     ]).finally(() => clearTimeout(timer));
   };
