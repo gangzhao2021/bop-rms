@@ -23,10 +23,12 @@ import {
   staffCallReasonText,
   tableInTab,
   tableNeed,
+  tablesFreeingSoon,
   tableTabs,
   type TableNeed,
   type TableTab,
 } from "./table-needs.js";
+import { TablesGuestStarts } from "./TablesGuestStarts.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { Link } from "react-router";
@@ -437,6 +439,7 @@ export function DiningSessionWorkspace({
     readonly canTurnOff: boolean;
     readonly startsBusy: boolean;
   } | null>(null);
+  const guestStartsNow = useRef<typeof guestStarts>(null);
   const [canOperateTables, setCanOperateTables] = useState(false),
     [blockReasonCode, setBlockReasonCode] = useState(""),
     [checkoutRevision, setCheckoutRevision] = useState(0),
@@ -561,6 +564,7 @@ export function DiningSessionWorkspace({
         setCanCancelUnpaidRounds(loaded.canCancelUnpaidRounds);
         setCanWriteOff(loaded.canWriteOff);
         setGuestStarts(loaded.guestTableStart);
+        guestStartsNow.current = loaded.guestTableStart;
         if (loaded.items.length === 0 && !more)
           setMessage(t("No tables are available in this Store."));
         void loadFacts(items, controller.signal);
@@ -988,6 +992,20 @@ export function DiningSessionWorkspace({
       ? ""
       : " · " + (count === 1 ? t("1 guest") : t("{count} guests", { count }));
   };
+  // DEC-DINING-GUEST-TABLE-START: staff can see that a new phone ended the party before it.
+  const endedText = (table: StaffDiningTable) =>
+    table.guestStart?.endedLastParty === true ? " · " + t("a new party ended the last visit") : "";
+  // Warn before timeouts: on this page, whichever list staff are on.
+  const freeingSoon = tablesFreeingSoon(
+    rows.map(({ table }) => ({
+      table,
+      order: table.session?.orderReference
+        ? (orderFacts.get(table.session.orderReference) ?? null)
+        : null,
+    })),
+    now,
+  );
+  const soonest = freeingSoon[0];
   const tableRow = ({ table, need }: { table: StaffDiningTable; need: TableNeed }) => (
     <li
       key={table.tableReference}
@@ -1015,7 +1033,9 @@ export function DiningSessionWorkspace({
                 : t("Seats {capacity} · {open}", {
                     capacity: table.capacity,
                     open: elapsedText(table.elapsedMinutes),
-                  }) + guestsText(table)}
+                  }) +
+                  guestsText(table) +
+                  endedText(table)}
           </span>
         </span>
         <span
@@ -1101,36 +1121,35 @@ export function DiningSessionWorkspace({
                 )}
               </span>
             ) : null}
-            {guestStarts !== null ? (
-              <span className="dining-floor-guest-starts">
-                {t("Guests can start free tables.")}{" "}
-                {guestStarts.canTurnOff ? (
-                  <button
-                    type="button"
-                    disabled={locked}
-                    onClick={() => {
-                      const operationReference = serviceOperationReference();
-                      void createDiningSessionClient()
-                        .turnOffGuestTableStart(csrf, {
-                          operationReference,
-                          expectedVersion: guestStarts.version,
-                        })
-                        .then(
-                          () =>
-                            load().then(() =>
-                              setMessage(t("New tables need staff to open them now.")),
-                            ),
-                          () =>
-                            load().then(() =>
-                              setMessage(t("Not saved. Check your connection and save again.")),
-                            ),
-                        );
-                    }}
-                  >
-                    {t("Turn off")}
-                  </button>
-                ) : null}
+            {soonest !== undefined ? (
+              <span className="dining-floor-guest-starts-busy" data-attention="true">
+                {freeingSoon.length > 1
+                  ? t("{count} tables free themselves within 10 min", {
+                      count: String(freeingSoon.length),
+                    })
+                  : soonest.minutes === 0
+                    ? t("Table {table} frees itself shortly", {
+                        table: saidTable(soonest.table.stableLabel),
+                      })
+                    : t("Table {table} frees itself in {minutes} min", {
+                        table: saidTable(soonest.table.stableLabel),
+                        minutes: String(soonest.minutes),
+                      })}
               </span>
+            ) : null}
+            {guestStarts !== null ? (
+              <TablesGuestStarts
+                starts={guestStarts}
+                csrf={csrf}
+                locked={locked}
+                reread={async () => {
+                  // Whatever read is on its way began before this change.
+                  pending.current?.abort();
+                  await loadRef.current(false, true);
+                  return guestStartsNow.current;
+                }}
+                onResult={(text) => setResult({ text })}
+              />
             ) : null}
           </span>
         ) : null
@@ -1246,6 +1265,7 @@ export function DiningSessionWorkspace({
               canWriteOff={canWriteOff}
               canOperateTables={canOperateTables}
               canTakeOrders={canTakeOrders}
+              guestStartsOn={guestStarts !== null}
               tableQrHref={tableQrHref}
               checkoutRevision={checkoutRevision}
               refreshKey={String(loadedAt.current)}
@@ -1284,11 +1304,16 @@ export function DiningSessionWorkspace({
                 reread();
               }}
               onClosed={() => {
+                const frees = selected.guestStart != null && guestStarts !== null;
                 void loadRef.current(false, true).then(() =>
                   setResult({
-                    text: t("Table {table} is closed. Clean it, then mark it cleaned.", {
-                      table: saidTable(selected.stableLabel),
-                    }),
+                    text: (frees
+                      ? t("Table {table} is closed and free for the next guest.", {
+                          table: saidTable(selected.stableLabel),
+                        })
+                      : t("Table {table} is closed. Clean it, then mark it cleaned.", {
+                          table: saidTable(selected.stableLabel),
+                        })),
                   }),
                 );
               }}
@@ -1335,6 +1360,7 @@ function TablePanel({
   canWriteOff,
   canOperateTables,
   canTakeOrders,
+  guestStartsOn,
   tableQrHref,
   checkoutRevision,
   refreshKey,
@@ -1352,6 +1378,8 @@ function TablePanel({
   tables,
   onMoved,
 }: {
+  /** DEC-DINING-GUEST-TABLE-START: guests can start free tables at this Store now. */
+  readonly guestStartsOn: boolean;
   /** WP-2423 item 8 ⑧: every table on the floor (where the party may move to). */
   readonly tables: readonly StaffDiningTable[];
   /** After a move (target null when only the tables are read again). */
@@ -1417,6 +1445,9 @@ function TablePanel({
                 : t("pays each round")
               : tableFloorStatus(table).label,
             table.guestStart != null ? t("started by a guest") : null,
+            table.guestStart?.endedLastParty === true
+              ? t("a new party ended the last visit")
+              : null,
           ]
             .filter((part) => part !== null)
             .join(" · ")}
@@ -1559,6 +1590,7 @@ function TablePanel({
           timeZone={timeZone}
           locked={locked}
           canResolveGuestsLeft={canCancelUnpaidRounds}
+          freesStraightAway={table.guestStart != null && guestStartsOn}
           onBusy={() => undefined}
           onClosed={onClosed}
           onRefresh={onReread}

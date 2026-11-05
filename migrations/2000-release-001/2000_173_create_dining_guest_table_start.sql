@@ -11,8 +11,9 @@
 -- table can start it with no staff. Pay first only, so nothing reaches the kitchen unpaid: the
 -- database refuses the switch at a pay-later Store, pay later while the switch is on, and a guest
 -- start at a table that was not opened pay first. Each start is recorded with the setting version it
--- relied on, and at most 3 per table and 40 per Store start in any 10 minutes. Off until the owner
--- turns it on (existing versions read as off); append-only, Store RLS.
+-- relied on, and at most 3 per table and 40 per Store start in any 10 minutes. A start that ended the
+-- table's last party (the guest said they weren't with them) names that Session, so staff can see it
+-- happened. Off until the owner turns it on (existing versions read as off); append-only, Store RLS.
 -- Grants: api SELECT/INSERT on dining_session_guest_start (Owner standing approval 2026-10-14,
 -- WP-2423); dining_service_setting keeps its grants.
 ALTER TABLE rms_dining.dining_service_setting
@@ -28,12 +29,15 @@ CREATE TABLE rms_dining.dining_session_guest_start (
  operation_id platform_helpers.uuid_v7 NOT NULL,
  service_setting_version integer NOT NULL,
  started_at timestamptz NOT NULL CHECK (isfinite(started_at) AND started_at=date_trunc('milliseconds',started_at)),
+ ended_session_id platform_helpers.uuid_v7,
  PRIMARY KEY (brand_id,store_id,session_id),
  CONSTRAINT dining_session_guest_start_operation UNIQUE (brand_id,store_id,operation_id),
  CONSTRAINT dining_session_guest_start_session FOREIGN KEY (tenant_id,brand_id,store_id,session_id)
   REFERENCES rms_dining.dining_session(tenant_id,brand_id,store_id,session_id),
  CONSTRAINT dining_session_guest_start_setting FOREIGN KEY (brand_id,store_id,service_setting_version)
-  REFERENCES rms_dining.dining_service_setting(brand_id,store_id,version)
+  REFERENCES rms_dining.dining_service_setting(brand_id,store_id,version),
+ CONSTRAINT dining_session_guest_start_ended FOREIGN KEY (tenant_id,brand_id,store_id,ended_session_id)
+  REFERENCES rms_dining.dining_session(tenant_id,brand_id,store_id,session_id)
 );
 CREATE INDEX dining_session_guest_start_table ON rms_dining.dining_session_guest_start (brand_id,store_id,table_id,started_at);
 CREATE INDEX dining_session_guest_start_store ON rms_dining.dining_session_guest_start (brand_id,store_id,started_at);
@@ -55,6 +59,11 @@ BEGIN
   WHERE s.tenant_id=NEW.tenant_id AND s.brand_id=NEW.brand_id AND s.store_id=NEW.store_id AND s.session_id=NEW.session_id;
  IF NOT FOUND OR session_row.table_id<>NEW.table_id OR session_row.phase<>'Active' OR session_row.started_at<>NEW.started_at THEN
   RAISE EXCEPTION 'guest start only for the Session it opened' USING ERRCODE='23514';
+ END IF;
+ IF NEW.ended_session_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_session s
+      WHERE s.tenant_id=NEW.tenant_id AND s.brand_id=NEW.brand_id AND s.store_id=NEW.store_id
+       AND s.session_id=NEW.ended_session_id AND s.table_id=NEW.table_id AND s.phase='Closed') THEN
+  RAISE EXCEPTION 'guest start can only name a Session that closed at this table' USING ERRCODE='23514';
  END IF;
  SELECT t.payment_timing INTO timing FROM rms_dining.dining_session_payment_timing t
   WHERE t.brand_id=NEW.brand_id AND t.store_id=NEW.store_id AND t.session_id=NEW.session_id;

@@ -256,15 +256,28 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You pay on your phone each time you order. No account needed.":
     "每次点餐在手机上付款，不用注册。",
   "Start ordering": "开始点餐",
-  "Starting a new visit ends your receipt on this phone.":
+  "After you start, this receipt won’t open on this phone.":
     "开始新的点餐后，这部手机上就看不到刚才的收据了。",
+  "After you answer, this receipt won’t open on this phone.":
+    "回答之后，这部手机上就看不到刚才的收据了。",
   "This table is being cleaned. Pick another table or ask staff.":
     "这张桌正在清理，请换一张桌或找店员。",
   "Are you with the people already at this table?": "你们和这桌的人是一起的吗？",
   "Yes, join them": "是，加入",
   "No, we just sat down": "不是，我们刚坐下",
-  "Someone at this table just ordered. You can join them, or ask staff.":
-    "这桌刚刚有人点单。可以加入他们，或找店员。",
+  "People are using this table. If you’re together, join them, or ask staff.":
+    "这张桌已经有人在用。如果是一起的就加入，或者找店员。",
+  "This table can’t be started just now. Pick another table or ask staff.":
+    "这张桌暂时不能开始。请换一张桌或找店员。",
+  "First tell us if you’re with the people at this table.":
+    "请先告诉我们，你们是不是和这桌的人一起的。",
+  "Back to the question": "回到这个问题",
+  "Start this table first": "请先开始用这张桌",
+  "Add a dish from the menu to start, or go back to start this table.":
+    "从菜单加一道菜就可以开始，或者回到开始页开始用这张桌。",
+  "Being remade · we'll call order {number}": "正在重做 · 做好了会叫 {number} 号",
+  "We’re remaking an item for you. We’ll call order {number}.":
+    "我们正在为您重做一道菜，做好了会叫 {number} 号。",
   "This table can’t be started just now. Pick another table or ask staff. Your choices are kept here.":
     "这张桌暂时不能开始。请换一张桌或找店员。您选的内容还在这里。",
   "Nothing in your cart yet": "购物车还是空的",

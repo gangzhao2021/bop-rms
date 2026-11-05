@@ -31,6 +31,40 @@ describe("contextual Dining admission screen", () => {
     // Paused: only the code entry; otherwise the guest can tap again once staff have helped.
     expect(html.includes("Join this table</button>")).toBe(!code);
   });
+  describe("DEC-DINING-GUEST-TABLE-START: a guest who came to start this table", () => {
+    const starting = (state: DiningAdmissionUiState) =>
+      renderToStaticMarkup(<DiningAdmissionView state={state} online starting />);
+    it("is not told to join people or to ask anyone for a code", () => {
+      for (const state of ["NotOpen", "TableBusy", "BeingCleaned", "TableInUse"] as const) {
+        const html = starting(state);
+        expect(html).toContain("Order at this table");
+        expect(html).not.toContain("Tap to join the people");
+        expect(html).not.toContain("I have a join code");
+      }
+    });
+    it.each(["NotOpen", "TableBusy"] as const)(
+      "%s says this table can't be started, and can be tried again",
+      (state) => {
+        const html = starting(state);
+        expect(html).toContain("This table can’t be started just now");
+        expect(html).toContain("Try again</button>");
+        expect(html).not.toContain("Join this table</button>");
+        expect(html).not.toContain("Many phones joined");
+      },
+    );
+    it("people turning up at the table first can be joined, and that is true of whoever they are", () => {
+      const html = starting("TableInUse");
+      expect(html).toContain("People are using this table. If you’re together, join them");
+      expect(html).toContain("Join this table</button>");
+      expect(html).not.toContain("just ordered");
+    });
+    it("a staff pause still asks for the code", () => {
+      expect(starting("QrPaused")).toContain("<input");
+    });
+    it("shows no choice while the join is on its way", () => {
+      expect(starting("Ready")).not.toContain("<button");
+    });
+  });
   it("provides protected unpopulated input with explicit help and accessible labels", () => {
     const html = renderToStaticMarkup(<DiningAdmissionView state="Ready" online codeMode />);
     expect(html).toContain('type="password"');

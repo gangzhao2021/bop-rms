@@ -65,11 +65,16 @@ export interface CustomerDiningJoinCompositionOptions {
     startIfFree?(input: {
       readonly guestSessionReference: string;
       readonly tableReference: string;
+      /** The Session this guest just ended by saying they weren't with the people there. */
+      readonly endedSessionReference?: string;
     }): Promise<DiningGuestTableStartResult>;
     /** The guest said they aren't with the people at this table: the System closes it if it may. */
     closeForNewParty?(input: {
       readonly tableReference: string;
-    }): Promise<{ readonly status: "Closed" | "Held" }>;
+    }): Promise<
+      | { readonly status: "Closed"; readonly diningSessionReference: string }
+      | { readonly status: "Held"; readonly hold: string }
+    >;
   };
   readonly now: () => unknown;
 }
@@ -232,7 +237,8 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
           const refusal = await inTurn(String(table.context.tableReference), async () => {
             // Another phone scanning at the same moment replaces the code just issued; the join
             // then refuses it without writing anything, so issue again (bounded).
-            let closedForNewParty = false;
+            let askedToClose = false;
+            let endedSessionReference: string | undefined;
             const attempts = 6;
             for (let attempt = 0; attempt < attempts; attempt += 1) {
               // Fresh on every attempt: a start commits with its own instant under the table's
@@ -242,10 +248,15 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
                 current(initial.sessionReference, instant),
               );
               const tableReference = String(parseDiningReference(evidence.context.tableReference));
-              if (newParty && !closedForNewParty && qr.closeForNewParty !== undefined) {
+              if (newParty && !askedToClose && qr.closeForNewParty !== undefined) {
+                askedToClose = true;
                 const closed = await qr.closeForNewParty({ tableReference });
-                if (closed.status !== "Closed") return "TableInUse" as const;
-                closedForNewParty = true;
+                if (closed.status === "Closed")
+                  endedSessionReference = closed.diningSessionReference;
+                // Nobody's table to end any more (the System just freed it): this phone goes on.
+                else if (closed.hold === "Paused") return "Paused" as const;
+                else if (closed.hold === "Budget") return "TooManyJoins" as const;
+                else if (closed.hold !== "Changed") return "TableInUse" as const;
               }
               const issued = await qr.issue(
                 {
@@ -274,6 +285,7 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
                 const started = await qr.startIfFree({
                   guestSessionReference: String(initial.sessionReference),
                   tableReference,
+                  ...(endedSessionReference === undefined ? {} : { endedSessionReference }),
                 });
                 if (started.status === "Started" || started.status === "AlreadyOpen") continue;
                 if (started.status === "Busy") return "TooManyJoins" as const;

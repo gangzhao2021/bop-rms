@@ -160,11 +160,15 @@ export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): Ord
     ).length,
     awaitingRounds: rounds.rounds,
     urgentRounds: rounds.urgentRounds,
-    readyToServe: dineIn.filter((order) =>
-      // An older server sends no count: then only an Order that is Ready as a whole.
-      order.readyToServeItemCount === null
-        ? order.currentPhase === "Ready"
-        : order.readyToServeItemCount > 0,
+    readyToServe: dineIn.filter(
+      (order) =>
+        // DEC-DINING-GUEST-TABLE-START: at a table a guest started, the kitchen finishing a dish is
+        // the last step anyone has to take (Tables says the same).
+        order.startedByGuest !== true &&
+        // An older server sends no count: then only an Order that is Ready as a whole.
+        (order.readyToServeItemCount === null
+          ? order.currentPhase === "Ready"
+          : order.readyToServeItemCount > 0),
     ).length,
     dineIn: dineIn.length > 0,
     more: queue.nextAfterOrderReference !== null,

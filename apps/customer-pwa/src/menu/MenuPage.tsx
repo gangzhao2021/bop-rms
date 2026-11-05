@@ -1371,6 +1371,7 @@ export function ConfigureStatus({
     "table-start-refused": t(
       "This table can’t be started just now. Pick another table or ask staff. Your choices are kept here.",
     ),
+    "table-question": t("First tell us if you’re with the people at this table."),
     unavailable: t("We couldn’t add this right now. Please try again."),
     "outcome-unknown": t("The connection dropped before we could confirm. Retry to check."),
   } as const;
@@ -1394,6 +1395,7 @@ export function ConfigureStatus({
       ) : null}
       {state.status === "conflict" ? <Link to="/cart">{t("Review cart")}</Link> : null}
       {state.status === "session-expired" ? <Link to="/">{t("Return to entry")}</Link> : null}
+      {state.status === "table-question" ? <Link to="/">{t("Back to the question")}</Link> : null}
     </div>
   );
 }

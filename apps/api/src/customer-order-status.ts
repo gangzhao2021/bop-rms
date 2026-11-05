@@ -153,6 +153,7 @@ export class CustomerOrderStatusHandler {
             : {
                 sources: {
                   checkedAt: sources.checkedAt,
+                  ...(sources.startedByGuest === true ? { startedByGuest: true } : {}),
                   ...(sources.dining === undefined
                     ? {}
                     : {

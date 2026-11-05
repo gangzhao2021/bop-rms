@@ -172,6 +172,25 @@ it("WP-2423 D4 / item 8 ①: offers closing a table nobody ordered at in one tap
       />
     </MemoryRouter>,
   );
+  expect(html).toContain("it waits for cleaning");
+  // DEC-DINING-GUEST-TABLE-START: where no cleaning step follows, the words say so before the close.
+  const straightAway = renderToStaticMarkup(
+    <MemoryRouter>
+      <TableSessionClose
+        table={table}
+        session={{ phase: "Active", version: 4, orderReference: null }}
+        csrf={csrf}
+        locked={false}
+        freesStraightAway
+        onBusy={() => undefined}
+        onClosed={() => undefined}
+        onRefresh={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+  expect(straightAway).toContain("clean the table, then close it");
+  expect(straightAway).toContain("the next guest can start it straight away");
+  expect(straightAway).not.toContain("waits for cleaning");
   // Owner decision 2 (2026-10-27): closing is an everyday step, said in its result, not confirmed.
   expect(html).not.toContain("have left</label>");
   expect(html).not.toContain('type="checkbox"');

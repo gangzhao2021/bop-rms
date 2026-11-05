@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StaffDiningTable } from "./dining-session-client.js";
-import { compareTables, tableInTab, tableNeed } from "./table-needs.js";
+import { compareTables, tableInTab, tableNeed, tablesFreeingSoon } from "./table-needs.js";
 import type { TableOrderFacts } from "./table-order-facts.js";
 
 const id = (n: number) => `00000000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -251,6 +251,93 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
     const need = tableNeed(table(1, { guestStart: closes(80) }), facts({ readyToServe: 2 }), now);
     expect([need.tone, need.step]).toEqual(["progress", "ServeAll"]);
     expect(tableNeed(table(1), facts({ readyToServe: 2 }), now).tone).toBe("action");
+  });
+  it("a dish nobody marked served warns too: the System records it served when it frees the table", () => {
+    const ready = facts({ readyToServe: 1 });
+    expect(tableNeed(table(1, { guestStart: closes(5) }), ready, now)).toMatchObject({
+      tone: "progress",
+      words: "1 dish ready to serve",
+      detail: "frees itself in 5 min",
+      step: "ServeAll",
+    });
+    expect(tableNeed(table(1, { guestStart: closes(80) }), ready, now).detail).toBeNull();
+    // Something else still being made: the table isn't going anywhere yet.
+    expect(
+      tableNeed(
+        table(1, { guestStart: closes(5) }),
+        facts({ readyToServe: 1, inKitchen: true }),
+        now,
+      ).detail,
+    ).toBeNull();
+  });
+  it("a table something holds is promised nothing, and stays out of the way", () => {
+    const held = { closesByItselfAt: null };
+    for (const order of [facts({ readyToServe: 1 }), facts({ allServed: true })]) {
+      const need = tableNeed(table(1, { guestStart: held }), order, now);
+      expect(need.detail).toBeNull();
+      expect(need.tone).not.toBe("action");
+    }
+  });
+  it("long past its time it stops promising and asks a person to look", () => {
+    const served = facts({ allServed: true });
+    // The System reaches every table within minutes of it being due.
+    expect(tableNeed(table(1, { guestStart: closes(-9) }), served, now)).toMatchObject({
+      tone: "done",
+      detail: "frees itself shortly",
+    });
+    const stuck = tableNeed(table(1, { guestStart: closes(-10) }), served, now);
+    expect(stuck).toMatchObject({
+      tone: "action",
+      words: "Hasn’t freed itself",
+      detail: "open the table",
+    });
+    expect(tableInTab(table(1), stuck, "Needs")).toBe(true);
+    expect(tableNeed(table(1, { guestStart: closes(-30) }), facts({ readyToServe: 1 }), now)).toMatchObject(
+      { tone: "action", words: "Hasn’t freed itself" },
+    );
+    // The kitchen working on it, or a table checking out, is something else.
+    expect(
+      tableNeed(table(1, { guestStart: closes(-30) }), facts({ inKitchen: true }), now).words,
+    ).toBe("Kitchen is making it");
+    expect(
+      tableNeed(
+        table(1, {
+          guestStart: closes(-30),
+          session: { phase: "Closing", version: 3, orderReference: id(201) },
+        }),
+        facts({ bill: { totalMinor: "100", paid: null } }),
+        now,
+      ).words,
+    ).toBe("Waiting for payment");
+  });
+  it("in its last minutes it comes first among the seated", () => {
+    const order = facts({ allServed: true });
+    const rows = [table(2), table(3, { guestStart: closes(5) }), table(4, { guestStart: closes(70) })].map(
+      (entry) => ({ table: entry, need: tableNeed(entry, order, now) }),
+    );
+    expect(rows.sort(compareTables).map((row) => row.table.stableLabel)).toEqual(["3", "2", "4"]);
+  });
+  it("the line at the top of Tables names what frees itself soon, soonest first", () => {
+    const empty = { orderReference: null, phase: "Active" as const, version: 2 };
+    const soon = tablesFreeingSoon(
+      [
+        { table: table(1, { guestStart: closes(9) }), order: facts({ allServed: true }) },
+        { table: table(2, { session: empty, guestStart: closes(3) }), order: null },
+        { table: table(3, { guestStart: closes(-2) }), order: facts({ readyToServe: 1 }) },
+        // None of these: not yet, held, still being made, long past due, and any other table.
+        { table: table(4, { guestStart: closes(40) }), order: facts({ allServed: true }) },
+        { table: table(5, { guestStart: { closesByItselfAt: null } }), order: null },
+        { table: table(6, { guestStart: closes(4) }), order: facts({ inKitchen: true }) },
+        { table: table(7, { guestStart: closes(-10) }), order: facts({ allServed: true }) },
+        { table: table(8), order: facts({ allServed: true }) },
+      ],
+      now,
+    );
+    expect(soon.map((row) => [row.table.stableLabel, row.minutes])).toEqual([
+      ["3", 0],
+      ["2", 3],
+      ["1", 9],
+    ]);
   });
   it("a table waiting for cleaning says when guests can start it anyway", () => {
     const blocked = (minutes: number) =>

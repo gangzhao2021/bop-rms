@@ -110,6 +110,26 @@ export async function loadDiningGuestTableStart(
   );
 }
 
+/**
+ * What a scan of this free table offers a guest: a start only while there is one left to give. With
+ * the table's or the Store's starts spent ("Spent") the guest is told what any guest at a table
+ * nobody opened is told, so they aren't offered a start that would then refuse them.
+ */
+export async function loadDiningGuestTableOffer(
+  tx: DiningTableTransaction,
+  scope: Pick<DiningTableStoreScope, "brandReference" | "storeReference">,
+  tableReference: string,
+  now: string,
+): Promise<GuestTableStartDecision | { readonly kind: "Spent" }> {
+  const decision = await loadDiningGuestTableStart(tx, scope, tableReference, now);
+  if (decision.kind !== "MayStart") return decision;
+  const spent = await countDiningGuestTableStarts(tx, scope, tableReference, now);
+  return spent.table >= guestTableStartBudget.perTable ||
+    spent.store >= guestTableStartBudget.perStore
+    ? Object.freeze({ kind: "Spent" })
+    : decision;
+}
+
 /** How many tables guests started in the budget window (the database enforces the same). */
 export async function countDiningGuestTableStarts(
   tx: DiningTableTransaction,
@@ -169,7 +189,14 @@ export async function loadDiningGuestTableStartPage(
 ): Promise<{
   readonly guestTableStart: boolean;
   readonly version: number;
-  readonly started: ReadonlyMap<string, { readonly startedAt: string }>;
+  readonly started: ReadonlyMap<
+    string,
+    {
+      readonly startedAt: string;
+      /** Started right after this guest said the table's last party wasn't theirs, ending it. */
+      readonly endedLastParty: boolean;
+    }
+  >;
   /** The Store's budget is spent: a guest at a free table is being asked to see staff right now. */
   readonly storeBudgetSpent: boolean;
 }> {
@@ -179,7 +206,7 @@ export async function loadDiningGuestTableStartPage(
   const page = rows(
     await tx.query(
       `SELECT (SELECT jsonb_build_object('version',v.version,'on',v.guest_table_start) FROM rms_dining.dining_service_setting v WHERE v.brand_id=$1 AND v.store_id=$2 ORDER BY v.version DESC LIMIT 1) AS setting,
- (SELECT coalesce(jsonb_agg(jsonb_build_object('session',g.session_id,'at',${instantSql("g.started_at")})),'[]'::jsonb) FROM rms_dining.dining_session_guest_start g WHERE g.brand_id=$1 AND g.store_id=$2 AND g.session_id=ANY($3::uuid[])) AS started,
+ (SELECT coalesce(jsonb_agg(jsonb_build_object('session',g.session_id,'at',${instantSql("g.started_at")},'ended',g.ended_session_id IS NOT NULL)),'[]'::jsonb) FROM rms_dining.dining_session_guest_start g WHERE g.brand_id=$1 AND g.store_id=$2 AND g.session_id=ANY($3::uuid[])) AS started,
  (SELECT count(*)::int FROM rms_dining.dining_session_guest_start g WHERE g.brand_id=$1 AND g.store_id=$2 AND g.started_at>$4::timestamptz - make_interval(mins => ${guestTableStartBudget.windowMinutes})) AS store_starts`,
       [brand, store, sessions, String(parseDiningInstant(observedAt))],
     ),
@@ -187,11 +214,14 @@ export async function loadDiningGuestTableStartPage(
   const setting = page?.setting as { version?: unknown; on?: unknown } | null | undefined;
   const listed = page?.started;
   if (!Array.isArray(listed) || listed.length > sessions.length) return fail();
-  const started = new Map<string, { readonly startedAt: string }>();
-  for (const row of listed as readonly { session?: unknown; at?: unknown }[])
+  const started = new Map<string, { readonly startedAt: string; readonly endedLastParty: boolean }>();
+  for (const row of listed as readonly { session?: unknown; at?: unknown; ended?: unknown }[])
     started.set(
       String(parseDiningReference(row.session)),
-      Object.freeze({ startedAt: String(parseDiningInstant(row.at)) }),
+      Object.freeze({
+        startedAt: String(parseDiningInstant(row.at)),
+        endedLastParty: row.ended === true,
+      }),
     );
   return Object.freeze({
     guestTableStart: setting?.on === true,
@@ -254,6 +284,7 @@ export async function loadDiningGuestTableActivity(
       readonly lastPhoneJoinedAt: string | null;
       readonly lastServedAt: string | null;
       readonly openStaffCall: boolean;
+      readonly scanPaused: boolean;
       readonly phase: string;
     }
   >
@@ -266,6 +297,7 @@ export async function loadDiningGuestTableActivity(
       readonly lastPhoneJoinedAt: string | null;
       readonly lastServedAt: string | null;
       readonly openStaffCall: boolean;
+      readonly scanPaused: boolean;
       readonly phase: string;
     }
   >();
@@ -276,7 +308,8 @@ export async function loadDiningGuestTableActivity(
       `SELECT s.session_id::text AS session,s.phase,
  (SELECT max(p.participant_snapshot->>'joinedAt') FROM rms_dining.dining_participant p WHERE p.tenant_id=s.tenant_id AND p.brand_id=s.brand_id AND p.store_id=s.store_id AND p.session_id=s.session_id) AS joined_at,
  (SELECT ${instantSql("max(r.recorded_at)")} FROM rms_dining.dining_item_service_record r WHERE r.tenant_id=s.tenant_id AND r.brand_id=s.brand_id AND r.store_id=s.store_id AND r.session_id=s.session_id) AS served_at,
- EXISTS (SELECT 1 FROM rms_dining.dining_staff_call c WHERE c.tenant_id=s.tenant_id AND c.brand_id=s.brand_id AND c.store_id=s.store_id AND c.session_id=s.session_id AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_staff_call_closure x WHERE x.tenant_id=c.tenant_id AND x.brand_id=c.brand_id AND x.store_id=c.store_id AND x.call_id=c.call_id)) AS open_call
+ EXISTS (SELECT 1 FROM rms_dining.dining_staff_call c WHERE c.tenant_id=s.tenant_id AND c.brand_id=s.brand_id AND c.store_id=s.store_id AND c.session_id=s.session_id AND NOT EXISTS (SELECT 1 FROM rms_dining.dining_staff_call_closure x WHERE x.tenant_id=c.tenant_id AND x.brand_id=c.brand_id AND x.store_id=c.store_id AND x.call_id=c.call_id)) AS open_call,
+ (SELECT j.state FROM rms_dining.dining_qr_join_control j WHERE j.tenant_id=s.tenant_id AND j.brand_id=s.brand_id AND j.store_id=s.store_id AND j.session_id=s.session_id ORDER BY j.occurred_at DESC,j.operation_id DESC LIMIT 1) AS scan_state
  FROM rms_dining.dining_session s WHERE s.brand_id=$1 AND s.store_id=$2 AND s.session_id=ANY($3::uuid[])`,
       [brand, store, sessions],
     ),
@@ -290,6 +323,7 @@ export async function loadDiningGuestTableActivity(
           row.joined_at === null ? null : String(parseDiningInstant(row.joined_at)),
         lastServedAt: row.served_at === null ? null : String(parseDiningInstant(row.served_at)),
         openStaffCall: row.open_call === true,
+        scanPaused: row.scan_state === "Paused",
         phase: String(row.phase),
       }),
     );
@@ -333,6 +367,8 @@ export function createPostgresDiningGuestTableStartStore(
     async startIfFree(input: {
       readonly tableReference: string;
       readonly guestSessionReference: string;
+      /** The Session this guest just ended by saying they weren't with the people there. */
+      readonly endedSessionReference?: string;
     }): Promise<DiningGuestTableStartResult> {
       const table = String(parseDiningReference(input.tableReference));
       const guest = String(parseDiningReference(input.guestSessionReference));
@@ -466,7 +502,7 @@ export function createPostgresDiningGuestTableStartStore(
           },
         });
         const inserted = (await tx.query(
-          "INSERT INTO rms_dining.dining_session_guest_start (tenant_id,brand_id,store_id,session_id,table_id,guest_session_id,operation_id,service_setting_version,started_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          "INSERT INTO rms_dining.dining_session_guest_start (tenant_id,brand_id,store_id,session_id,table_id,guest_session_id,operation_id,service_setting_version,started_at,ended_session_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
           [
             tenant,
             brand,
@@ -477,6 +513,9 @@ export function createPostgresDiningGuestTableStartStore(
             operationReference,
             rule.settingVersion,
             instant,
+            input.endedSessionReference === undefined
+              ? null
+              : String(parseDiningReference(input.endedSessionReference)),
           ],
         )) as { rowCount?: unknown };
         if (inserted.rowCount !== 1) return fail();

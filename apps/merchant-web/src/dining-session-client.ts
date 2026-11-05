@@ -90,7 +90,11 @@ export interface StaffDiningTable {
    * WP-2423 DEC-DINING-GUEST-TABLE-START: a guest started this table, and when it frees itself if
    * nothing else happens (null: something holds it). Absent on every other table.
    */
-  guestStart?: { readonly closesByItselfAt: string | null } | null;
+  guestStart?: {
+    readonly closesByItselfAt: string | null;
+    /** This guest said the table's last party wasn't theirs, which ended that party's visit. */
+    readonly endedLastParty?: true;
+  } | null;
   /** Where guests start tables: since when this table has been waiting for cleaning. */
   blockedSince?: string | null;
   /**
@@ -456,6 +460,9 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
                     obj(r.guestStart).closesByItselfAt === null
                       ? null
                       : instant(obj(r.guestStart).closesByItselfAt),
+                  ...(obj(r.guestStart).endedLastParty === true
+                    ? { endedLastParty: true as const }
+                    : {}),
                 }),
               }),
           ...(r.blockedSince === undefined || r.blockedSince === null

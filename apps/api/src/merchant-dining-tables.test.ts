@@ -1,4 +1,4 @@
-import { expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { createMerchantDiningTables } from "./merchant-dining-tables.js";
 const mock = vi.hoisted(() => ({
   resolve: vi.fn(),
@@ -15,6 +15,15 @@ const mock = vi.hoisted(() => ({
   staffCalls: vi.fn(),
   waitingRounds: vi.fn(),
   phones: vi.fn(),
+}));
+const kitchen = vi.hoisted(() => ({
+  progress: new Map<string, { lastChangedAt: string; stillMaking: boolean }>(),
+  remaking: new Map<string, { openQuantity: number }>(),
+}));
+vi.mock("@rms/kitchen", async (original) => ({
+  ...(await original<typeof import("@rms/kitchen")>()),
+  listStoreKitchenOrderProgress: async () => kitchen.progress,
+  listOpenKitchenReworkByOrder: async () => kitchen.remaking,
 }));
 vi.mock("@rms/ordering", async (original) => ({
   ...(await original<typeof import("@rms/ordering")>()),
@@ -48,13 +57,14 @@ const timing = vi.hoisted(() => ({
 const guestStart = vi.hoisted(() => ({
   on: false,
   budgetSpent: false,
-  started: new Map<string, { startedAt: string }>(),
+  started: new Map<string, { startedAt: string; endedLastParty?: boolean }>(),
   activity: new Map<
     string,
     {
       lastPhoneJoinedAt: string | null;
       lastServedAt: string | null;
       openStaffCall: boolean;
+      scanPaused?: boolean;
       phase: string;
     }
   >(),
@@ -895,4 +905,123 @@ it("DEC-DINING-GUEST-TABLE-START: a Store that never used it reads exactly as be
     expect(Object.hasOwn(item, "guestStart")).toBe(false);
     expect(Object.hasOwn(item, "blockedSince")).toBe(false);
   }
+});
+
+describe("DEC-DINING-GUEST-TABLE-START: when Tables says a table frees itself", () => {
+  const startedAt = "2026-09-25T09:00:00.000Z";
+  const closesAt = (from: string, minutes: number) =>
+    new Date(Date.parse(from) + minutes * 60_000).toISOString();
+  async function read(changes: {
+    round?: boolean;
+    still?: boolean;
+    remake?: boolean;
+    order?: boolean;
+    unpaid?: boolean;
+    awaiting?: boolean;
+    ended?: boolean;
+    kitchenAt?: string;
+    call?: boolean;
+  }) {
+    const f = setup();
+    guestStart.on = true;
+    guestStart.started = new Map([
+      [id(5), { startedAt, ...(changes.ended ? { endedLastParty: true } : {}) }],
+    ]);
+    guestStart.activity = new Map([
+      [
+        id(5),
+        {
+          lastPhoneJoinedAt: startedAt,
+          lastServedAt: null,
+          openStaffCall: changes.call === true,
+          phase: "Active",
+        },
+      ],
+    ]);
+    mock.list.mockResolvedValue({
+      items: [
+        {
+          tableReference: id(4),
+          stableLabel: "T4",
+          areaCode: "MAIN",
+          capacity: 4,
+          lifecycle: "Published",
+          operationalState: "Available",
+          aggregateVersion: 3,
+          activeDiningSessionReference: id(5),
+        },
+      ],
+      nextAfterTableReference: null,
+    });
+    mock.loadSessions.mockResolvedValue([
+      {
+        diningSessionReference: id(5),
+        brandReference: id(2),
+        storeReference: id(3),
+        phase: "Active",
+        version: 3,
+        startedAt,
+      },
+    ]);
+    mock.phones.mockResolvedValue(new Map());
+    if (changes.order !== false) mock.sessionOrders.mockResolvedValue(new Map([[id(5), id(6)]]));
+    if (changes.unpaid)
+      mock.unpaidGuestRounds.mockResolvedValue([
+        {
+          diningSessionReference: id(5),
+          orderReference: id(6),
+          orderBatchReference: id(7),
+          roundNumber: 1,
+          payBy: "2026-09-25T12:30:00.000Z",
+        },
+      ]);
+    if (changes.awaiting)
+      mock.paidAwaitingAcceptance.mockResolvedValue([
+        { diningSessionReference: id(5), roundNumber: 1, paidAt: startedAt },
+      ]);
+    kitchen.progress = new Map(
+      changes.order === false
+        ? []
+        : [
+            [
+              id(6),
+              {
+                lastChangedAt: changes.kitchenAt ?? startedAt,
+                stillMaking: changes.still === true,
+              },
+            ],
+          ],
+    );
+    kitchen.remaking = new Map(changes.remake ? [[id(6), { openQuantity: 1 }]] : []);
+    try {
+      const view = (await f.read(f.input)) as unknown as {
+        items: readonly { guestStart?: { closesByItselfAt: string | null; endedLastParty?: true } }[];
+      };
+      return view.items[0]?.guestStart;
+    } finally {
+      guestStart.on = false;
+      guestStart.started = new Map();
+      guestStart.activity = new Map();
+      kitchen.progress = new Map();
+      kitchen.remaking = new Map();
+    }
+  }
+  it("counts the kitchen's last change, as the System's own rule does", async () => {
+    const kitchenAt = "2026-09-25T09:40:00.000Z";
+    expect((await read({ kitchenAt }))?.closesByItselfAt).toBe(closesAt(kitchenAt, 90));
+    expect((await read({ order: false }))?.closesByItselfAt).toBe(closesAt(startedAt, 20));
+  });
+  it.each([
+    ["the kitchen still making something", { still: true }],
+    ["a dish being remade", { remake: true }],
+    ["a round not paid", { unpaid: true }],
+    ["a paid round not accepted", { awaiting: true }],
+    ["an open staff call", { call: true }],
+  ])("promises nothing with %s", async (_name, changes) => {
+    expect((await read(changes))?.closesByItselfAt).toBeNull();
+  });
+  it("says a new party ended the last visit only when it did", async () => {
+    expect(await read({ ended: true })).toMatchObject({ endedLastParty: true });
+    expect(Object.hasOwn((await read({})) ?? {}, "endedLastParty")).toBe(false);
+  });
 });

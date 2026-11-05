@@ -112,6 +112,20 @@ export function getGuestTableStarter(): (() => Promise<GuestTableStartAnswer>) |
   return guestTableStarter;
 }
 
+/**
+ * This scan asked whether this phone is with the people at the table, and nobody has answered: the
+ * menu sends the guest back to that question rather than to staff. Memory only.
+ */
+let guestTableQuestion = false;
+
+export function setGuestTableQuestion(value: boolean): void {
+  guestTableQuestion = value;
+}
+
+export function isGuestTableQuestion(): boolean {
+  return guestTableQuestion;
+}
+
 /** This phone said it isn't with the people at the table; the next QR join says so. Memory only. */
 let newPartyJoin = false;
 
@@ -133,6 +147,7 @@ export function setCustomerCsrfCredential(value: string | null): void {
     settledTable = null;
     unseatedTableScan = false;
     guestTableStarter = null;
+    guestTableQuestion = false;
   }
   paymentOperationReference = null;
   checkoutSessionReference = null;

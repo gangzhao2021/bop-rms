@@ -55,9 +55,14 @@ const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
     return t("This table is being cleaned. Pick another table or ask staff.");
   },
   get TableInUse() {
-    return t("Someone at this table just ordered. You can join them, or ask staff.");
+    return t("People are using this table. If you’re together, join them, or ask staff.");
   },
 };
+/** What a refusal means to a guest who came to start the table, where that differs. */
+const startRefusalText = (state: DiningAdmissionRefusedState) =>
+  state === "NotOpen" || state === "TableBusy"
+    ? t("This table can’t be started just now. Pick another table or ask staff.")
+    : refusalText[state];
 /** These refusals need a code; the others are about the table itself. */
 const needsCode = (state: DiningAdmissionUiState) =>
   state === "Invalid" ||
@@ -90,11 +95,14 @@ export function DiningAdmissionPanel({
   contextEpoch,
   onStateChange,
   autoJoin = false,
+  starting = false,
 }: {
   readonly service?: DiningAdmissionUi | undefined;
   readonly contextEpoch?: object | undefined;
   /** The guest already tapped Start, or said who they are with: join with no second tap. */
   readonly autoJoin?: boolean;
+  /** They came to start this table, not to join people at it. */
+  readonly starting?: boolean;
   /** WP-2423 item 8 ⑤: the page keeps one primary action (joining, then the menu). */
   readonly onStateChange?: ((state: DiningAdmissionUiState) => void) | undefined;
 }) {
@@ -231,7 +239,7 @@ export function DiningAdmissionPanel({
       codeMode={codeMode}
       onJoinByScan={() => run(false, true)}
       onUseCode={() => setCodeMode(true)}
-      starting={autoJoin}
+      starting={starting}
     />
   );
 }
@@ -248,7 +256,7 @@ export function DiningAdmissionView({
   onUseCode,
   starting = false,
 }: {
-  /** The guest already answered; this is their table starting, not a table to join. */
+  /** The guest came to start this table: no people to join and no code to ask anyone for. */
   readonly starting?: boolean;
   readonly state: DiningAdmissionUiState;
   readonly online: boolean;
@@ -263,7 +271,10 @@ export function DiningAdmissionView({
 }) {
   const entry = state === "Ready" || state === "Invalid" || refused(state);
   const showCode = entry && (codeMode || needsCode(state));
-  const showScan = entry && state !== "QrPaused";
+  // Starting, the join is on its way as soon as this shows.
+  const showScan = entry && state !== "QrPaused" && !(starting && state === "Ready");
+  // People turned up at the table first: joining them is what's left to do.
+  const startsAgain = starting && state !== "TableInUse";
   return (
     <section
       className="dining-admission"
@@ -284,12 +295,16 @@ export function DiningAdmissionView({
       )}
       {showScan && (
         <div className="dining-admission__scan">
-          <p>{t("Tap to join the people at this table. You don’t need an account.")}</p>
-          {refused(state) && !needsCode(state) && <p role="alert">{refusalText[state]}</p>}
+          {starting ? null : (
+            <p>{t("Tap to join the people at this table. You don’t need an account.")}</p>
+          )}
+          {refused(state) && !needsCode(state) && (
+            <p role="alert">{starting ? startRefusalText(state) : refusalText[state]}</p>
+          )}
           <button className="entry-action" type="button" disabled={!online} onClick={onJoinByScan}>
-            {t("Join this table")}
+            {startsAgain ? t("Try again") : t("Join this table")}
           </button>
-          {!showCode && (
+          {!showCode && !starting && (
             <button
               className="entry-secondary-action"
               type="button"

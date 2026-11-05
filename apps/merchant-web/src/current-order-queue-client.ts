@@ -514,6 +514,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     // WP-2423 item 8 ⑤: a dine-in Order's table session (absent from an older server).
     const withSession =
       value !== null && typeof value === "object" && Object.hasOwn(value, "diningSessionReference");
+    // DEC-DINING-GUEST-TABLE-START: sent only for a table a guest started.
+    const withGuestStart =
+      value !== null && typeof value === "object" && Object.hasOwn(value, "startedByGuest");
     const withReady =
       value !== null && typeof value === "object" && Object.hasOwn(value, "readyToServeItemCount");
     // WP-2423 (2026-10-18): dine-in portions the kitchen is remaking (absent from an older server).
@@ -541,6 +544,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       ...(withHeldStock ? ["heldStock"] : []),
       ...(withEarlierOpen ? ["earlierOpenPickup"] : []),
       ...(withSession ? ["diningSessionReference"] : []),
+      ...(withGuestStart ? ["startedByGuest"] : []),
       ...(withCounter ? ["counter"] : []),
       ...(withPaidOnline ? ["paidOnline"] : []),
       ...(withPosition ? ["paymentPosition"] : []),
@@ -980,6 +984,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         !withSession || item.diningSessionReference === null || item.orderType !== "DineIn"
           ? null
           : reference(item.diningSessionReference),
+      ...(withGuestStart && item.startedByGuest === true
+        ? { startedByGuest: true as const }
+        : {}),
       submittedAt,
       observedAt,
       initialBatchReference: reference(item.initialBatchReference),

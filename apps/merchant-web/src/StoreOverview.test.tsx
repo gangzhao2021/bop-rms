@@ -192,6 +192,27 @@ describe("WP-2423 P2 store overview", () => {
       ),
     ).toThrow();
   });
+  it("DEC-DINING-GUEST-TABLE-START: a finished dish at a table a guest started raises no alarm on Home", () => {
+    const fixture = currentOrderQueueFixture();
+    const [, , accepted] = fixture.items;
+    const staffOpened = { ...accepted, orderType: "DineIn", readyToServeItemCount: 1 };
+    // Sent only for such a table: both shapes read, and an older answer reads as before.
+    expect(
+      summarizeOrders(parseCurrentOrderQueue({ ...fixture, items: [staffOpened] }, null)),
+    ).toMatchObject({ readyToServe: 1 });
+    const guestStarted = parseCurrentOrderQueue(
+      { ...fixture, items: [{ ...staffOpened, startedByGuest: true }] },
+      null,
+    );
+    expect(guestStarted.items[0]?.startedByGuest).toBe(true);
+    expect(summarizeOrders(guestStarted)).toMatchObject({ readyToServe: 0, open: 1, dineIn: true });
+    expect(
+      Object.hasOwn(
+        parseCurrentOrderQueue({ ...fixture, items: [staffOpened] }, null).items[0] ?? {},
+        "startedByGuest",
+      ),
+    ).toBe(false);
+  });
   it("counts waiting pickups and open or overdue exceptions", () => {
     expect(
       summarizePickups({

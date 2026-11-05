@@ -74,7 +74,12 @@ export async function createInternalCustomerEntry(
     ));
   const persistent = {
     ...pickup.entry.persistent,
-    guestTables: { asksNewParty: (table) => guestTables().asksNewParty(table) },
+    now: resources.now,
+    guestTables: {
+      asksNewParty: (table) => guestTables().asksNewParty(table),
+      // Guests at free tables are being told to ask staff: worth a line in the log. Code only.
+      startsSpent: () => console.warn(JSON.stringify({ event: "GUEST_TABLE_START_BUDGET_SPENT" })),
+    },
     sources: async (tx, input) => {
       // A hint selects a verifier, never authority. The selected owner verifies the complete signed QR.
       if (typeof input.qrToken !== "string" || input.qrToken.length > 4096)

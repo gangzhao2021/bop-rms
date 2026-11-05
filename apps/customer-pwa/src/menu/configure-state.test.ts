@@ -1,5 +1,6 @@
 import {
   setCustomerCsrfCredential,
+  setGuestTableQuestion,
   setUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 import { describe, expect, it } from "vitest";
@@ -191,6 +192,21 @@ describe("WP-1702 in-memory Configurator state", () => {
       expect(state.controller.getState()).toMatchObject({ status: "not-seated" });
       expect(state.calls).toEqual([]);
     } finally {
+      setUnseatedTableScan(false);
+    }
+  });
+
+  it("DEC-DINING-GUEST-TABLE-START: a phone asked whether it's with the people there answers that first", async () => {
+    setUnseatedTableScan(true);
+    setCustomerCsrfCredential(null);
+    setGuestTableQuestion(true);
+    try {
+      const state = fixture(null);
+      await state.controller.submit(id(3), draft);
+      expect(state.controller.getState()).toMatchObject({ status: "table-question" });
+      expect(state.calls).toEqual([]);
+    } finally {
+      setGuestTableQuestion(false);
       setUnseatedTableScan(false);
     }
   });

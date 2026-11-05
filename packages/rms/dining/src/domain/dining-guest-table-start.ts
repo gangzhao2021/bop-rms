@@ -12,6 +12,11 @@ export const guestTableQuietMinutes = Object.freeze({
 });
 /** The next party is asked "are you with them?" once the table has been quiet this long. */
 export const guestTableNewPartyGapMinutes = 5;
+/**
+ * A dish left in the table's cart keeps a new phone from being asked only this long after the cart
+ * last changed: past that, nobody is composing it (the cart itself lives for an hour).
+ */
+export const guestTableCartInUseMinutes = 20;
 /** Staff get this long to clean a table before the next guest may start it anyway. */
 export const guestTableCleaningGraceMinutes = 5;
 /** At a guest-started table, "just joined" is flagged only for this many phones in 10 minutes. */
@@ -80,12 +85,16 @@ export function decideGuestTableStart(
 /** The closing facts of one guest-started table, read from their owners. */
 export interface GuestTableCloseFacts {
   readonly startedAt: string;
-  /** Latest of: a phone joined, a round submitted, an item served, a cart changed. */
+  /** See `guestTableActivity`. */
   readonly activity: readonly (string | null)[];
   readonly cartHasItems: boolean;
+  /** When a cart at this table last changed (also part of the activity). */
+  readonly cartChangedAt: string | null;
   readonly openStaffCall: boolean;
   /** Merged into or from another table. */
   readonly merged: boolean;
+  /** Staff paused joining by scan at this table: their brake, so nobody new is asked anything. */
+  readonly scanPaused: boolean;
   /** Null: nobody ordered. */
   readonly order: null | {
     /** Items not ready yet: not paid, not accepted, being made or being remade. */
@@ -97,10 +106,27 @@ export interface GuestTableCloseFacts {
   };
 }
 export type GuestTableHold =
-  "Recent" | "CartInUse" | "StaffCall" | "Merged" | "Unfinished" | "Owed";
+  "Recent" | "CartInUse" | "StaffCall" | "Merged" | "Unfinished" | "Owed" | "Paused";
 export type GuestTableCloseDecision =
   | { readonly close: true; readonly closesAt: string }
   | { readonly close: false; readonly hold: GuestTableHold; readonly closesAt: string | null };
+
+/** What counts as activity at a guest-started table, the same for the close and for Tables. */
+export function guestTableActivity(facts: {
+  readonly lastPhoneJoinedAt: string | null;
+  readonly lastServedAt: string | null;
+  readonly lastRoundAt: string | null;
+  readonly lastCartChangeAt: string | null;
+  readonly kitchenChangedAt: string | null;
+}): readonly (string | null)[] {
+  return Object.freeze([
+    facts.lastPhoneJoinedAt,
+    facts.lastServedAt,
+    facts.lastRoundAt,
+    facts.lastCartChangeAt,
+    facts.kitchenChangedAt,
+  ]);
+}
 
 export function guestTableLastActivity(
   facts: Pick<GuestTableCloseFacts, "startedAt" | "activity">,
@@ -143,8 +169,9 @@ export function decideGuestTableQuietClose(
 
 /**
  * Turnover comes from the next scan: a new phone at a guest-started table is asked whether it is
- * with the people there only when nothing is owed, nothing is unfinished, no cart is in use, the
- * table has been quiet for 5 minutes, and another start here would still be within budget.
+ * with the people there only when staff haven't paused scanning here, nothing is owed, nothing is
+ * unfinished, no cart changed in the last 20 minutes with something still in it, the table has been
+ * quiet for 5 minutes, and another start here would still be within budget.
  */
 export function decideGuestNewParty(
   facts: GuestTableCloseFacts,
@@ -153,7 +180,13 @@ export function decideGuestNewParty(
 ): { readonly ask: true } | { readonly ask: false; readonly hold: GuestTableHold | "Budget" } {
   const standing = standingHold(facts);
   if (standing !== null) return Object.freeze({ ask: false, hold: standing });
-  if (facts.cartHasItems) return Object.freeze({ ask: false, hold: "CartInUse" });
+  if (facts.scanPaused) return Object.freeze({ ask: false, hold: "Paused" });
+  if (
+    facts.cartHasItems &&
+    (facts.cartChangedAt === null ||
+      at(now) - at(facts.cartChangedAt) < guestTableCartInUseMinutes * minutes)
+  )
+    return Object.freeze({ ask: false, hold: "CartInUse" });
   if (at(now) - guestTableLastActivity(facts) < guestTableNewPartyGapMinutes * minutes)
     return Object.freeze({ ask: false, hold: "Recent" });
   // With no start left, "we just sat down" would close the table and then send them to staff.

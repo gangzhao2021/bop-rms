@@ -14,6 +14,7 @@
 .dining-floor .dining-floor-summary {
   display: inline-flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0 var(--bop-space-2);
   font-variant-numeric: tabular-nums;
 }
@@ -33,14 +34,24 @@
     content: none;
   }
 }
+.dining-floor .dining-floor-guest-starts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--bop-space-2);
+}
 .workspace-page.dining-floor .dining-floor-guest-starts button {
-  min-height: 0;
-  padding: 0;
+  min-height: 44px;
+  padding: 0 var(--bop-space-1);
   border: 0;
   background: none;
   color: var(--bop-color-accent);
   font: inherit;
   cursor: pointer;
+}
+.workspace-page.dining-floor .dining-floor-guest-starts button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
 }
 .workspace-page.dining-floor .dining-floor-guest-starts button:focus-visible {
   outline: 2px solid var(--bop-color-accent);

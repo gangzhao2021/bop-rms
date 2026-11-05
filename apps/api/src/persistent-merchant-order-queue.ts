@@ -34,7 +34,7 @@ import {
   listStoreKitchenOrderItemStates,
   listStoreStartedKitchenBatches,
 } from "@rms/kitchen";
-import { listDiningSessionTableLabels } from "@rms/dining";
+import { listDiningGuestStartedSessions, listDiningSessionTableLabels } from "@rms/dining";
 import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
@@ -1207,6 +1207,15 @@ export function createPersistentMerchantOrderQueue(options: {
                   if (!(await authority.guard(businessTransaction))) return unavailable();
                   return listDiningSessionTableLabels(businessTransaction, ownerScope, sessions);
                 })();
+          // DEC-DINING-GUEST-TABLE-START: at a table a guest started nobody has to carry a finished
+          // dish over, so Home doesn't raise it as something to serve. Said only of those Orders.
+          const guestStartedSessions =
+            ownerScope === null || sessions.length === 0
+              ? new Map<string, { readonly startedAt: string }>()
+              : await (async () => {
+                  if (!(await authority.guard(businessTransaction))) return unavailable();
+                  return listDiningGuestStartedSessions(businessTransaction, ownerScope, sessions);
+                })();
           // WP-2423: how much of an order's online payment Payment has refunded or is refunding
           // (ordinary, item-cancellation, cancellation and automatic refunds), as the receipt reads
           // it. The one-order detail always reads it; the list reads the same position for orders
@@ -1491,6 +1500,10 @@ export function createPersistentMerchantOrderQueue(options: {
                     item.currentVersion === 1,
                   // DEC-DINE-IN-PAY-LATER: on the table's bill (owed), or what the table paid.
                   tableBill: tableBills.get(item.orderReference) ?? null,
+                  ...(item.diningSessionReference !== null &&
+                  guestStartedSessions.has(item.diningSessionReference)
+                    ? { startedByGuest: true as const }
+                    : {}),
                   // WP-2423 (v15 751dd768): whether this person may record a card-machine payment
                   // and open the order's payments and refunds (the commands and reads recheck).
                   canRecordCardMachinePayment: cardMachinePaymentAllowed,

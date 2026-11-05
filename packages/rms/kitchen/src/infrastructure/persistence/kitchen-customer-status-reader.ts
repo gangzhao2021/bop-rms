@@ -170,3 +170,54 @@ export function createPostgresKitchenCustomerStatusReader(options: {
     },
   };
 }
+
+/**
+ * WP-2423 DEC-DINING-GUEST-TABLE-START: for a page of tables a guest started, when the kitchen last
+ * changed each Order (the same ticket fact the customer status reads) and whether it is still making
+ * something. One read for the page. Kitchen facts only; the caller authorizes the Orders and owns the
+ * transaction.
+ */
+export async function listStoreKitchenOrderProgress(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<
+  ReadonlyMap<string, { readonly lastChangedAt: string; readonly stillMaking: boolean }>
+> {
+  const found = new Map<string, { readonly lastChangedAt: string; readonly stillMaking: boolean }>();
+  if (orderReferences.length === 0) return found;
+  if (orderReferences.length > 200) return unavailable();
+  try {
+    const brand = parseKitchenTicketReference(scope.brandReference);
+    const store = parseKitchenTicketReference(scope.storeReference);
+    const orders = [
+      ...new Set(orderReferences.map((reference) => parseKitchenTicketReference(reference))),
+    ];
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const result = await transaction.query(
+      "SELECT t.order_id::text AS order_id,max(t.updated_at) AS last_changed," +
+        "bool_or(EXISTS (SELECT 1 FROM rms_kitchen.kitchen_work_item w WHERE w.brand_id=t.brand_id " +
+        "AND w.store_id=t.store_id AND w.kitchen_ticket_id=t.kitchen_ticket_id " +
+        "AND w.status NOT IN ('Completed','Cancelled'))) AS still_making " +
+        "FROM rms_kitchen.kitchen_ticket t WHERE t.brand_id=$1 AND t.store_id=$2 " +
+        "AND t.order_id=ANY($3::uuid[]) GROUP BY t.order_id",
+      [brand, store, orders],
+    );
+    for (const row of result.rows)
+      found.set(
+        parseKitchenTicketReference(row.order_id),
+        Object.freeze({
+          lastChangedAt: parseKitchenTicketInstant(
+            row.last_changed instanceof Date ? row.last_changed.toISOString() : row.last_changed,
+          ),
+          stillMaking: row.still_making === true,
+        }),
+      );
+    return found;
+  } catch {
+    return unavailable();
+  }
+}

@@ -7,6 +7,7 @@ import {
   createPostgresDiningTableQrStore,
   createPostgresDiningTableStore,
   decideGuestTableQuietClose,
+  guestTableActivity,
   guestTableManyPhones,
   listDiningSessionMergesInto,
   loadDiningGuestTableActivity,
@@ -22,6 +23,7 @@ import {
   listStorePaidDiningRoundsAwaitingAcceptance,
   listStoreUnpaidGuestDiningRounds,
 } from "@rms/ordering";
+import { listOpenKitchenReworkByOrder, listStoreKitchenOrderProgress } from "@rms/kitchen";
 import {
   createPostgresCardMachinePaymentStore,
   createPostgresDiningTableSettlementStore,
@@ -421,29 +423,68 @@ export function createMerchantDiningTables(options: {
             [...guestStarted.keys()],
             new Date(joinedAt).toISOString(),
           );
-          const guestStart = new Map<string, { closesByItselfAt: string | null }>();
+          // The time the worker's own rule gives, from the same facts where they can be read for a
+          // whole page: its activity, including the kitchen's, and what holds a table. What only a
+          // full read of one Order shows (a refund on its way) isn't here: past the time, Tables
+          // stops promising. Reads nothing more when no table on the page is one a guest started.
+          const guestOrders = [...guestStarted.keys()].flatMap((session) => {
+            const order = sessionOrders.get(session);
+            return order === undefined ? [] : [String(order)];
+          });
+          const kitchenProgress = await listStoreKitchenOrderProgress(
+            tx as unknown as Parameters<typeof listStoreKitchenOrderProgress>[0],
+            scoped,
+            guestOrders,
+          );
+          const remaking = await listOpenKitchenReworkByOrder(
+            tx as unknown as Parameters<typeof listOpenKitchenReworkByOrder>[0],
+            scoped,
+            guestOrders,
+          );
+          const guestStart = new Map<
+            string,
+            { closesByItselfAt: string | null; endedLastParty?: true }
+          >();
           for (const [session, started] of guestStarted) {
             const dining = guestActivity.get(session);
             const ordering = guestOrderActivity.get(session);
+            const order = sessionOrders.get(session);
+            const kitchen = order === undefined ? undefined : kitchenProgress.get(String(order));
+            const roundsNotFinished =
+              (unpaidGuestRounds.get(session)?.length ?? 0) +
+              (paidAwaitingAcceptance.get(session)?.length ?? 0) +
+              (heldRounds.get(session)?.length ?? 0);
             guestStart.set(session, {
               closesByItselfAt: decideGuestTableQuietClose(
                 {
                   startedAt: started.startedAt,
-                  activity: [
-                    dining?.lastPhoneJoinedAt ?? null,
-                    dining?.lastServedAt ?? null,
-                    ordering?.lastRoundAt ?? null,
-                    ordering?.lastCartChangeAt ?? null,
-                  ],
+                  activity: guestTableActivity({
+                    lastPhoneJoinedAt: dining?.lastPhoneJoinedAt ?? null,
+                    lastServedAt: dining?.lastServedAt ?? null,
+                    lastRoundAt: ordering?.lastRoundAt ?? null,
+                    lastCartChangeAt: ordering?.lastCartChangeAt ?? null,
+                    kitchenChangedAt: kitchen?.lastChangedAt ?? null,
+                  }),
                   cartHasItems: ordering?.cartHasItems === true,
+                  cartChangedAt: ordering?.lastCartChangeAt ?? null,
                   openStaffCall: dining?.openStaffCall === true,
                   merged: (mergesInto.get(session)?.length ?? 0) > 0,
-                  order: sessionOrders.has(session)
-                    ? { unfinishedItems: 0, blockers: [], readyItems: 0 }
-                    : null,
+                  scanPaused: dining?.scanPaused === true,
+                  order:
+                    order === undefined
+                      ? null
+                      : {
+                          unfinishedItems:
+                            roundsNotFinished +
+                            (kitchen?.stillMaking === true ? 1 : 0) +
+                            (remaking.has(String(order)) ? 1 : 0),
+                          blockers: [],
+                          readyItems: 0,
+                        },
                 },
                 new Date(joinedAt).toISOString(),
               ).closesAt,
+              ...(started.endedLastParty ? { endedLastParty: true as const } : {}),
             });
           }
           for (const session of activeReferences) {

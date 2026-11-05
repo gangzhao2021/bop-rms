@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import {
@@ -11,21 +11,27 @@ import {
  * WP-2423 DEC-DINING-GUEST-TABLE-START: guests start a free table by scanning. Dining's own switch,
  * saved on its own with the table settings' version. Only where guests pay each round first.
  * `tableAutoAccept`: whether paid table rounds go straight to the kitchen, once a Store can choose.
+ * `onConflict`: someone else changed the table settings first, so the page reads them again.
  */
 export function StoreGuestTableStart({
   view,
   client,
   locked,
   onSaved,
+  onConflict,
   tableAutoAccept,
 }: {
   readonly view: StoreFeatures;
   readonly client: StoreFeaturesClient;
   readonly locked: boolean;
   readonly onSaved: (next: StoreFeatures) => void;
+  readonly onConflict: () => void;
   readonly tableAutoAccept?: boolean | undefined;
 }) {
   const [chosen, setChosen] = useState(view.services.guestTableStart);
+  // A changed saved value (saved here, on Tables or on another device) replaces the unsaved choice.
+  const saved = view.services.guestTableStart;
+  useEffect(() => setChosen(saved), [saved]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
   // One reference per intended change, kept until it is answered (a retry is recorded once).
@@ -58,6 +64,7 @@ export function StoreGuestTableStart({
     } catch (error) {
       const code = error instanceof StoreFeaturesClientError ? error.code : "Unavailable";
       if (code !== "Unavailable") operation.current = null;
+      if (code === "Changed") onConflict();
       setMessage({
         tone: "alert",
         text:
@@ -93,7 +100,7 @@ export function StoreGuestTableStart({
           <span className="store-features__detail">
             {allowed
               ? t(
-                  "A guest who scans a free table orders right away and pays each round on their phone. A finished table frees itself with no cleaning step: 20 minutes after the last activity if nobody ordered, 90 minutes if they did. Someone with a photo of the code could start a table from elsewhere, but gets no food without paying.",
+                  "A guest who scans a free table orders right away and pays each round on their phone. A finished table frees itself with no cleaning step: 20 minutes after the last activity if nobody ordered, 90 minutes if they did. The next party, or someone with a photo of the code, can also end a table quiet for 5 minutes with nothing owed, even if its guests are still sitting there. Nobody gets food without paying.",
                 )
               : t("Only for stores where guests pay each round first.")}
           </span>

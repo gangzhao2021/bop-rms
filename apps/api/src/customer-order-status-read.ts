@@ -18,6 +18,7 @@ import {
 } from "@rms/payment";
 import { loadPickupNotCollected } from "@rms/fulfillment";
 import type { ConsumerTransaction } from "@bop/eventing";
+import { listDiningGuestStartedSessions } from "@rms/dining";
 import {
   GuestSessionService,
   GuestSessionError,
@@ -310,6 +311,16 @@ export function createCustomerOrderStatusRead(
               })),
             };
           }
+          // DEC-DINING-GUEST-TABLE-START: a guest started this table, so nobody brings the dishes over.
+          const startedByGuest =
+            dining !== null &&
+            options.diningScope !== undefined &&
+            guest.diningSessionReference !== null &&
+            (
+              await listDiningGuestStartedSessions(transaction, options.diningScope, [
+                String(guest.diningSessionReference),
+              ])
+            ).size > 0;
           const kitchenReader = createPostgresKitchenCustomerStatusReader({
             ...options.scope,
             authorize: async (_tx, scope) =>
@@ -738,6 +749,7 @@ export function createCustomerOrderStatusRead(
             sources: {
               checkedAt,
               ...(dining === null ? {} : { dining }),
+              ...(startedByGuest ? { startedByGuest: true as const } : {}),
               kitchen:
                 scopedKitchen && kitchen !== null
                   ? {

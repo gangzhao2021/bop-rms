@@ -652,4 +652,28 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
     expect(html).toContain("on its way to your table");
     expect(html).not.toContain("Ready · Order");
   });
+  it("a dish being remade is called by its number too", () => {
+    const remade = (changes: Partial<DiningSessionView>) => {
+      const base = view(changes);
+      return render({
+        status: "ready",
+        view: {
+          ...base,
+          rounds: base.rounds.map((entry) => ({
+            ...entry,
+            payment: "Paid" as const,
+            items: entry.items.map((line) => ({ ...line, beingRemade: true })),
+          })),
+        },
+        refreshing: false,
+      });
+    };
+    expect(remade({ startedByGuest: true, orderNumber: "12" })).toContain(
+      "Being remade · we&#x27;ll call order 12",
+    );
+    expect(remade({ startedByGuest: true, orderNumber: "12" })).not.toContain(
+      "bring it to your table",
+    );
+    expect(remade({ orderNumber: "12" })).toContain("bring it to your table");
+  });
 });

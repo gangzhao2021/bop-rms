@@ -26,6 +26,49 @@ function render(state: CustomerEntryScreenState): string {
   );
 }
 
+describe("DEC-DINING-GUEST-TABLE-START: a table guests start themselves", () => {
+  const table = {
+    publicStoreReference: context.publicStoreReference,
+    channel: "DineIn" as const,
+    locale: "en-CA",
+    brandDisplayName: context.brandDisplayName,
+    storeDisplayName: context.storeDisplayName,
+  };
+  it.each(["TableMayStart", "TableBeingCleaned", "TableAskNewParty"] as const)(
+    "%s names the Store, and doesn't tell the guest to scan what they just scanned",
+    (kind) => {
+      const html = render({ kind, context: table });
+      expect(html).toContain("Harbour Test Store");
+      expect(html).not.toContain("Scan the location QR code to begin");
+      expect(html).not.toContain("Start your order");
+    },
+  );
+  it("a table nobody opened at a Store without guest starts reads as it did", () => {
+    const html = render({ kind: "TableNotOpen", context: table });
+    expect(html).toContain("Scan the location QR code to begin");
+  });
+  it("the question makes the answer that ends a table the quieter one", () => {
+    const html = render({ kind: "TableAskNewParty", context: table });
+    expect(html).toContain('class="entry-action" type="button">Yes, join them');
+    expect(html).toContain('class="entry-secondary-action" type="button">No, we just sat down');
+    expect(html).not.toContain("receipt");
+  });
+  it("a guest whose visit ended sees the receipt first, and what either answer does to it", () => {
+    setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
+    try {
+      const asked = render({ kind: "TableAskNewParty", context: table });
+      expect(asked).toContain("This table is settled. Thank you for dining with us.");
+      expect(asked).toContain("Loading receipt");
+      expect(asked).toContain("After you answer, this receipt won’t open on this phone.");
+      expect(asked.indexOf("Loading receipt")).toBeLessThan(asked.indexOf("Yes, join them"));
+      const start = render({ kind: "TableMayStart", context: table });
+      expect(start).toContain("After you start, this receipt won’t open on this phone.");
+    } finally {
+      setSettledTable(null);
+    }
+  });
+});
+
 describe("CUST-ENTRY-CONTEXT", () => {
   it("a table no party is seated at says so, keeps the menu, and starts no visit", () => {
     const notOpen: CustomerEntryScreenState = {

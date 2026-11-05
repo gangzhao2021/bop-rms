@@ -50,17 +50,50 @@ export function heldRoundReasonText(reason: "FirstOrder" | "PhoneRapid" | "Table
 const cleaningGraceMinutes = 5;
 /** The warning before a guest-started table frees itself: a timer they can't act on otherwise. */
 const freesItselfWarningMinutes = 10;
+/**
+ * The System reaches every table within a few minutes of it being due. This far past that, something
+ * holds it that this list can't read (a refund on its way, say): the row stops promising.
+ */
+const freesItselfOverdueMinutes = 10;
+
+/** Whole minutes until the System would free this table; null when it says nothing is due. */
+function minutesUntilFree(table: StaffDiningTable, now: number): number | null {
+  const at = table.guestStart?.closesByItselfAt;
+  return at === null || at === undefined ? null : Math.ceil((Date.parse(at) - now) / 60_000);
+}
 
 /** "frees itself in N min", only in the last minutes before the System closes the table. */
 function freesItself(table: StaffDiningTable, now: number): string | null {
-  const at = table.guestStart?.closesByItselfAt;
-  if (at === null || at === undefined) return null;
-  const left = Math.ceil((Date.parse(at) - now) / 60_000);
-  if (left > freesItselfWarningMinutes) return null;
-  // The System reaches every table within a few minutes of it being due.
+  const left = minutesUntilFree(table, now);
+  if (left === null || left > freesItselfWarningMinutes) return null;
   return left <= 0
     ? t("frees itself shortly")
     : t("frees itself in {minutes} min", { minutes: String(left) });
+}
+
+/**
+ * The tables about to free themselves, for the line at the top of Tables: whatever list staff are
+ * on, they hear about it first. One the kitchen is still working on, or one nothing says is due, is
+ * not among them. Soonest first.
+ */
+export function tablesFreeingSoon(
+  rows: readonly {
+    readonly table: StaffDiningTable;
+    readonly order: TableOrderFacts | null;
+  }[],
+  now: number,
+): readonly { readonly table: StaffDiningTable; readonly minutes: number }[] {
+  return rows
+    .flatMap(({ table, order }) => {
+      const left = minutesUntilFree(table, now);
+      return left === null ||
+        left > freesItselfWarningMinutes ||
+        left <= -freesItselfOverdueMinutes ||
+        order?.inKitchen === true
+        ? []
+        : [{ table, minutes: Math.max(left, 0) }];
+    })
+    .sort((a, b) => a.minutes - b.minutes);
 }
 
 const cad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "CAD" });
@@ -173,18 +206,48 @@ export function tableNeed(
       step: null,
     };
   }
-  if (order !== null && order.readyToServe > 0)
+  // A guest's own table long past its time: whatever holds it, a person should look.
+  const untilFree = minutesUntilFree(table, now);
+  if (
+    table.session?.phase !== "Closing" &&
+    order?.inKitchen !== true &&
+    untilFree !== null &&
+    untilFree <= -freesItselfOverdueMinutes
+  )
     return {
-      // A guest's own table: the kitchen finishing it is the last step anyone has to take.
-      tone: table.guestStart != null ? "progress" : "action",
-      rank: table.guestStart != null ? 51 : 2,
-      words:
-        order.readyToServe === 1
-          ? t("1 dish ready to serve")
-          : t("{count} dishes ready to serve", { count: String(order.readyToServe) }),
-      detail: null,
-      step: "ServeAll",
+      tone: "action",
+      rank: 5,
+      words: t("Hasn’t freed itself"),
+      detail: t("open the table"),
+      step: null,
     };
+  // In the last minutes before the System frees a guest's table, it comes first among the seated.
+  const warned = (rank: number) =>
+    untilFree !== null && untilFree <= freesItselfWarningMinutes ? 40 : rank;
+  if (order !== null && order.readyToServe > 0)
+    return table.guestStart != null
+      ? {
+          // A guest's own table: the kitchen finishing it is the last step anyone has to take.
+          tone: "progress",
+          rank: order.inKitchen ? 51 : warned(51),
+          words:
+            order.readyToServe === 1
+              ? t("1 dish ready to serve")
+              : t("{count} dishes ready to serve", { count: String(order.readyToServe) }),
+          // The System records these as served when it frees the table; say so before it does.
+          detail: order.inKitchen ? null : freesItself(table, now),
+          step: "ServeAll",
+        }
+      : {
+          tone: "action",
+          rank: 2,
+          words:
+            order.readyToServe === 1
+              ? t("1 dish ready to serve")
+              : t("{count} dishes ready to serve", { count: String(order.readyToServe) }),
+          detail: null,
+          step: "ServeAll",
+        };
   if (table.session?.phase === "Closing") {
     // Owner 2026-11-03 walkthrough: the bill is not read yet. A paid table never flashes "to pay".
     if (order === null)
@@ -257,7 +320,7 @@ export function tableNeed(
   if (order?.allServed)
     return {
       tone: "done",
-      rank: 60,
+      rank: warned(60),
       words: t("Everything served"),
       detail: freesItself(table, now),
       step: null,
@@ -265,7 +328,7 @@ export function tableNeed(
   if (table.guestStart != null)
     return {
       tone: "progress",
-      rank: 55,
+      rank: warned(55),
       words: t("Started by a guest"),
       detail:
         table.session?.orderReference === null

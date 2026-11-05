@@ -3,6 +3,7 @@ import { CartClientError, type CartItemDraft, type CartView } from "../cart/type
 import {
   getCustomerCsrfCredential,
   getGuestTableStarter,
+  isGuestTableQuestion,
   isUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 
@@ -27,6 +28,7 @@ export type ConfigureState =
         | "table-checking-out"
         | "not-seated"
         | "table-start-refused"
+        | "table-question"
         | "expired"
         | "abandoned"
         | "unavailable"
@@ -144,6 +146,16 @@ export function createConfigureController({
       // WP-2423 DEC-DINING-GUEST-TABLE-START: where the guest may start this table, their tap on Add
       // starts and joins it, then the dish they configured goes in. Only a tap reaches here.
       const starter = getGuestTableStarter();
+      // Asked whether they're with the people here: that answer comes first, not a trip to staff.
+      if (starter === null && isGuestTableQuestion()) {
+        publish({
+          status: "table-question",
+          issueCodes: [],
+          retryAfterSeconds: null,
+          canRetry: false,
+        });
+        return;
+      }
       if (starter === null) {
         fail(new CartClientError("cart_dining_not_seated"), false);
         return;

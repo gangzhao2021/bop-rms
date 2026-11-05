@@ -24,7 +24,11 @@ import {
 } from "./dining-session-client.js";
 import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
 import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
-import { subscribeCustomerCsrfContext } from "../session/customer-transaction-context.js";
+import {
+  getGuestTableStarter,
+  isGuestTableQuestion,
+  subscribeCustomerCsrfContext,
+} from "../session/customer-transaction-context.js";
 import { SettledTableReceiptPanel, type SettledTableReceiptClient } from "./SettledTableReceipt.js";
 import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
 import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
@@ -342,7 +346,9 @@ function RoundCard({
               <span className="order-status__item-cancelled">{t("Cancelled")}</span>
             ) : item.beingRemade ? (
               <span className="order-status__item-remake">
-                {t("Being remade · we'll bring it to your table shortly")}
+                {collectOrderNumber !== null
+                  ? t("Being remade · we'll call order {number}", { number: collectOrderNumber })
+                  : t("Being remade · we'll bring it to your table shortly")}
               </span>
             ) : round.payment === "Paid" ? (
               <span>
@@ -870,12 +876,27 @@ export function DiningSessionScreen({
       ) : null}
       {state.status === "not-joined" ? (
         <section className="order-status__card" role="alert">
-          <h2>{t("Join your table first")}</h2>
-          <p>
-            {t(
-              "Ask a staff member, or the person who joined your table first, for your table's join code and enter it after scanning the table's QR code. Then you can see what your table has ordered.",
-            )}
-          </p>
+          {/* WP-2423 DEC-DINING-GUEST-TABLE-START: nobody seats these guests, so nobody is asked. */}
+          {getGuestTableStarter() !== null ? (
+            <>
+              <h2>{t("Start this table first")}</h2>
+              <p>{t("Add a dish from the menu to start, or go back to start this table.")}</p>
+            </>
+          ) : isGuestTableQuestion() ? (
+            <>
+              <h2>{t("Join your table first")}</h2>
+              <p>{t("First tell us if you’re with the people at this table.")}</p>
+            </>
+          ) : (
+            <>
+              <h2>{t("Join your table first")}</h2>
+              <p>
+                {t(
+                  "Ask a staff member, or the person who joined your table first, for your table's join code and enter it after scanning the table's QR code. Then you can see what your table has ordered.",
+                )}
+              </p>
+            </>
+          )}
           <Link className="order-status__back" to="/">
             {t("Go to the start")}
           </Link>

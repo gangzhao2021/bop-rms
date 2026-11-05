@@ -37,7 +37,8 @@ export function createPilotGuestTableClose(
  * WP-2423 DEC-DINING-GUEST-TABLE-START: every minute the System frees guest-started tables its quiet
  * rule says are finished, up to 10 tables a cycle, one transaction each. It keeps running after the
  * switch is turned off, so a table already started is never orphaned. Staff-started tables never
- * come here. A table it can't close now is logged and passed; the next cycle reaches the others.
+ * come here. A table it can't close is logged and the page goes on; the cycle then fails with the
+ * first such failure, so the workload's health and the alerts say tables aren't being freed.
  */
 export function createInternalGuestTableCloseWorkload(
   resources,

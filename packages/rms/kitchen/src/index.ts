@@ -398,6 +398,7 @@ export { createPostgresKitchenWorkLifecycleStore } from "./infrastructure/persis
 
 export {
   createPostgresKitchenCustomerStatusReader,
+  listStoreKitchenOrderProgress,
   type KitchenCustomerBatchStatus,
 } from "./infrastructure/persistence/kitchen-customer-status-reader.js";
 

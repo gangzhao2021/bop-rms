@@ -1,17 +1,29 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fixture, id } from "../test-support/customer-entry-composition-fixture.js";
 import {
   RetiredTableQrError,
   createPersistentCustomerEntryComposition,
 } from "./persistent-customer-entry.js";
 import { guestServiceModes } from "./merchant-store-features.js";
-const owner = vi.hoisted(() => ({ profile: vi.fn(), session: vi.fn() }));
+const owner = vi.hoisted(() => ({
+  profile: vi.fn(),
+  session: vi.fn(),
+  open: vi.fn(),
+  guestStarted: vi.fn(),
+  offer: vi.fn(),
+}));
 vi.mock("./persistent-public-store-profile.js", () => ({
   createPersistentPublicStoreProfilePorts: (...args: unknown[]) => owner.profile(...args),
 }));
 vi.mock("@bop/identity", async (original) => ({
   ...(await original<typeof import("@bop/identity")>()),
   createPostgresGuestSessionEntryStore: (...args: unknown[]) => owner.session(...args),
+}));
+vi.mock("@rms/dining", async (original) => ({
+  ...(await original<typeof import("@rms/dining")>()),
+  loadDiningTableOpen: (...args: unknown[]) => owner.open(...args),
+  loadDiningGuestStartedSessionAtTable: (...args: unknown[]) => owner.guestStarted(...args),
+  loadDiningGuestTableOffer: (...args: unknown[]) => owner.offer(...args),
 }));
 beforeEach(() => vi.resetAllMocks());
 function setup() {
@@ -185,4 +197,208 @@ it("WP-2423 item 8 ⑦ 1b: a pickup code at a Store that turned pickup off answe
   expect(x.events).toEqual(["begin", "sources", "rollback"]);
   expect(x.f.admission).not.toHaveBeenCalled();
   expect(x.f.create).not.toHaveBeenCalled();
+});
+
+describe("DEC-DINING-GUEST-TABLE-START: a scan at a table a guest started", () => {
+  /** A fixed number of connections, as the process's pool: one that never frees is a failure. */
+  function pool(size: number) {
+    let free = size;
+    const waiting: (() => void)[] = [];
+    return {
+      async run<T>(work: () => Promise<T>): Promise<T> {
+        if (free === 0)
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              reject(Object.assign(new Error("no connection"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }));
+            }, 300);
+            waiting.push(() => {
+              clearTimeout(timer);
+              resolve();
+            });
+          });
+        else free -= 1;
+        try {
+          return await work();
+        } finally {
+          const next = waiting.shift();
+          if (next) next();
+          else free += 1;
+        }
+      },
+    };
+  }
+  function scan(
+    changes: {
+      asks?: (table: string) => Promise<boolean>;
+      run?: <T>(work: (tx: { query: ReturnType<typeof vi.fn> }) => Promise<T>) => Promise<T>;
+    } = {},
+  ) {
+    const f = fixture();
+    owner.profile.mockReturnValue(f.options.profile);
+    owner.session.mockReturnValue(f.options.session.store);
+    owner.open.mockResolvedValue(true);
+    owner.guestStarted.mockResolvedValue(id(70));
+    const tx = { query: vi.fn(async () => ({ rows: [] })) };
+    const events: string[] = [];
+    const inputs: { intent?: string; requestedAt: string }[] = [];
+    const run =
+      changes.run ??
+      (async <T>(work: (value: typeof tx) => Promise<T>) => {
+        events.push("begin");
+        try {
+          const result = await work(tx);
+          events.push("commit");
+          return result;
+        } catch (error) {
+          events.push("rollback");
+          throw error;
+        }
+      });
+    const service = createPersistentCustomerEntryComposition({
+      transactions: { run: run as never },
+      profile: { binding: { brandReference: id(1), storeReference: id(2) } } as never,
+      session: f.options.session,
+      guestTables: {
+        asksNewParty: async (table) => {
+          events.push("asks");
+          return (changes.asks ?? (async () => true))(table);
+        },
+      },
+      now: () => "2026-01-15T12:00:01.000Z",
+      sources: async (_tx, input) => {
+        events.push("sources");
+        inputs.push(input);
+        return {
+          qr: f.options.qr,
+          operating: f.options.operating,
+          admission: f.options.admission,
+          binding: f.options.session.binding,
+        };
+      },
+    });
+    return { f, events, inputs, service };
+  }
+  it("asks with nothing held: the scan's transaction ended first, and no visit started", async () => {
+    const x = scan();
+    expect((await x.service.establish(x.f.input())).status).toBe("TableAskNewParty");
+    expect(x.events).toEqual(["begin", "sources", "rollback", "asks"]);
+    expect(x.f.admission).not.toHaveBeenCalled();
+    expect(x.f.create).not.toHaveBeenCalled();
+  });
+  it("nothing to ask: this phone joins as at any open table, in a transaction of its own", async () => {
+    const x = scan({ asks: async () => false });
+    expect(await x.service.establish(x.f.input())).toMatchObject({
+      status: "Established",
+      tableOpen: true,
+    });
+    expect(x.events).toEqual(["begin", "sources", "rollback", "asks", "begin", "sources", "commit"]);
+    expect(x.inputs[1]?.intent).toBe("Join");
+    expect(x.f.create).toHaveBeenCalledOnce();
+  });
+  it("any other open table pays one read and never asks", async () => {
+    const x = scan();
+    owner.guestStarted.mockResolvedValue(null);
+    expect((await x.service.establish(x.f.input())).status).toBe("Established");
+    expect(x.events).toEqual(["begin", "sources", "commit"]);
+  });
+  it("a phone that already answered isn't asked again", async () => {
+    const x = scan();
+    expect((await x.service.establish({ ...x.f.input(), intent: "Join" })).status).toBe(
+      "Established",
+    );
+    expect(x.events).toEqual(["begin", "sources", "commit"]);
+    expect(owner.guestStarted).not.toHaveBeenCalled();
+  });
+  it("as many scans at once as the pool has connections all answer: none waits holding one", async () => {
+    const connections = pool(2);
+    const scans = [0, 1].map(() => {
+      const tx = { query: vi.fn(async () => ({ rows: [] })) };
+      return scan({
+        run: (work) => connections.run(() => work(tx)),
+        asks: () => connections.run(async () => true),
+      });
+    });
+    const answers = await Promise.all(scans.map((x) => x.service.establish(x.f.input())));
+    expect(answers.map((answer) => answer.status)).toEqual([
+      "TableAskNewParty",
+      "TableAskNewParty",
+    ]);
+  });
+  it("a database that can't answer the question is a retry; anything else joins as before", async () => {
+    const down = scan({
+      asks: async () => {
+        throw Object.assign(new Error("down"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+      },
+    });
+    await expect(down.service.establish(down.f.input())).rejects.toMatchObject({
+      code: "TENANT_DATABASE_ACQUIRE_FAILED",
+    });
+    expect(down.f.create).not.toHaveBeenCalled();
+    const unreadable = scan({
+      asks: async () => {
+        throw new Error("DINING_GUEST_TABLE_CLOSE_UNAVAILABLE");
+      },
+    });
+    expect((await unreadable.service.establish(unreadable.f.input())).status).toBe("Established");
+  });
+  it("a table read that refused this instant is read again with a later one, bounded", async () => {
+    const x = scan();
+    owner.guestStarted.mockResolvedValue(null);
+    const resolve = x.f.options.qr.contexts.resolve as ReturnType<typeof vi.fn>;
+    const answer = resolve.getMockImplementation();
+    resolve.mockImplementationOnce(async () => null);
+    expect((await x.service.establish(x.f.input())).status).toBe("Established");
+    expect(x.inputs.map((input) => input.requestedAt)).toEqual([
+      "2026-01-15T12:00:00.000Z",
+      "2026-01-15T12:00:01.000Z",
+    ]);
+    expect(x.f.create).toHaveBeenCalledOnce();
+    // A code that really can't be used refuses every time, and stops.
+    const y = scan();
+    (y.f.options.qr.contexts.resolve as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => null,
+    );
+    expect(await y.service.establish(y.f.input())).toEqual({ status: "EntryUnavailable" });
+    expect(y.events.filter((event) => event === "sources")).toHaveLength(3);
+    expect(y.f.create).not.toHaveBeenCalled();
+    void answer;
+  });
+  it("a pickup code has no table to read again", async () => {
+    const x = scan();
+    x.f.payload.channel = x.f.context.channel = "Pickup";
+    x.f.payload.publicTableReference =
+      x.f.context.publicTableReference =
+      x.f.context.tableReference =
+        null;
+    x.f.context.tableLifecycle = x.f.context.assignmentState = null;
+    (x.f.options.qr.contexts.resolve as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => null,
+    );
+    expect(await x.service.establish(x.f.input())).toEqual({ status: "EntryUnavailable" });
+    expect(x.events.filter((event) => event === "sources")).toHaveLength(1);
+  });
+  it("no start left: the scan answers as at any table nobody opened, and staff hear why", async () => {
+    const x = scan();
+    owner.open.mockResolvedValue(false);
+    owner.offer.mockResolvedValue({ kind: "Spent" });
+    const spent = vi.fn();
+    const f = fixture();
+    owner.profile.mockReturnValue(f.options.profile);
+    owner.session.mockReturnValue(f.options.session.store);
+    const service = createPersistentCustomerEntryComposition({
+      transactions: { run: (async (work: (tx: unknown) => Promise<unknown>) => work({ query: vi.fn(async () => ({ rows: [] })) })) as never },
+      profile: { binding: { brandReference: id(1), storeReference: id(2) } } as never,
+      session: f.options.session,
+      guestTables: { asksNewParty: async () => false, startsSpent: spent },
+      sources: async () => ({
+        qr: f.options.qr,
+        operating: f.options.operating,
+        admission: f.options.admission,
+        binding: f.options.session.binding,
+      }),
+    });
+    expect((await service.establish(f.input())).status).toBe("TableNotOpen");
+    expect(spent).toHaveBeenCalledOnce();
+    void x;
+  });
 });

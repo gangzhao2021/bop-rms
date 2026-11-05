@@ -709,6 +709,8 @@ function StatusContent({
   const remaking = (orderItemReference: string) =>
     remakes.find((entry) => entry.orderItemReference === orderItemReference);
   const pickup = view.order.orderType === "Pickup";
+  // DEC-DINING-GUEST-TABLE-START: nobody brings dishes to a table a guest started.
+  const calledByNumber = view.sources?.startedByGuest === true;
   // Handoff Section 24.3: the order's own phase when no finer source (kitchen, serving) says more.
   // A queued kitchen ticket means the store has the order but hasn't started on it.
   const stage =
@@ -747,7 +749,12 @@ function StatusContent({
                   : remakes.length > 0
                     ? pickup
                       ? [progress.remakingPickupHeading, progress.remakingPickup]
-                      : [progress.remakingDineInHeading, progress.remakingDineIn]
+                      : [
+                          progress.remakingDineInHeading,
+                          calledByNumber
+                            ? progress.remakingByNumber(view.order.orderNumber)
+                            : progress.remakingDineIn,
+                        ]
                     : allServed
                       ? [progress.servedHeading, progress.served]
                       : view.order.canonicalPhase === "Fulfilled"
@@ -767,7 +774,12 @@ function StatusContent({
                             : stage === "Ready"
                               ? pickup
                                 ? [progress.readyPickupHeading, progress.readyPickup]
-                                : [progress.readyDineInHeading, progress.readyDineIn]
+                                : [
+                                    progress.readyDineInHeading,
+                                    calledByNumber
+                                      ? progress.readyByNumber(view.order.orderNumber)
+                                      : progress.readyDineIn,
+                                  ]
                               : stage === "Preparing"
                                 ? [progress.preparingHeading, progress.preparing]
                                 : stage === "Accepted"

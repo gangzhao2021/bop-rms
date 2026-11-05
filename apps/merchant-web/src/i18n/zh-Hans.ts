@@ -6635,8 +6635,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests starting tables": "客人自己开桌",
   "Save this setting": "保存这一项",
   "Guests can start a free table": "客人扫码就能开始用空桌",
-  "A guest who scans a free table orders right away and pays each round on their phone. A finished table frees itself with no cleaning step: 20 minutes after the last activity if nobody ordered, 90 minutes if they did. Someone with a photo of the code could start a table from elsewhere, but gets no food without paying.":
-    "客人扫空桌的码就能点餐，每一轮在手机上付款。吃完的桌子会自动空出，不用清理这一步：没点单的 20 分钟后，点过单的最后一次动作 90 分钟后。有人拿着桌码照片也能在别处开始这张桌，但不付款拿不到东西。",
+  "A guest who scans a free table orders right away and pays each round on their phone. A finished table frees itself with no cleaning step: 20 minutes after the last activity if nobody ordered, 90 minutes if they did. The next party, or someone with a photo of the code, can also end a table quiet for 5 minutes with nothing owed, even if its guests are still sitting there. Nobody gets food without paying.":
+    "客人扫空桌的码就能点餐，每一轮在手机上付款。吃完的桌子会自动空出，不用清理这一步：没点单的 20 分钟后，点过单的最后一次动作 90 分钟后。下一桌客人，或拿着桌码照片的人，也能结束一张安静了 5 分钟、什么都不欠的桌，即使客人还坐在那里。不付款拿不到东西。",
   "Only for stores where guests pay each round first.": "只适用于客人每轮先付款的门店。",
   "Each paid round still waits for Accept on Orders.": "每一轮付款后还要在订单页接单。",
   "Each paid round still waits for Accept on Orders. Turn on “Send paid orders straight to the kitchen” if nobody watches Orders.":
@@ -6649,6 +6649,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "no order yet": "还没点单",
   "frees itself in {minutes} min": "{minutes} 分钟后自动空出",
   "frees itself shortly": "马上自动空出",
+  "Hasn’t freed itself": "还没有自动空出",
+  "open the table": "打开这张桌看看",
+  "Table {table} frees itself shortly": "{table} 桌马上自动空出",
+  "Table {table} frees itself in {minutes} min": "{table} 桌 {minutes} 分钟后自动空出",
+  "{count} tables free themselves within 10 min": "{count} 张桌 10 分钟内自动空出",
+  "New guests at free tables will be sent to staff. Only the owner can turn this back on.":
+    "之后空桌的新客人会被请去找店员。只有店主能再打开。",
+  "Yes, turn off": "确定关掉",
+  "Keep on": "不关",
+  "Turning off…": "正在关…",
+  "a new party ended the last visit": "新客人结束了上一桌",
+  "When the guests have left, clean the table, then close it: its order is closed and the next guest can start it straight away.":
+    "客人走后先把桌子收拾干净，再关桌：订单随之关闭，下一位客人马上可以开始用这张桌。",
+  "Table {table} is closed and free for the next guest.":
+    "{table} 桌已关闭，下一位客人可以直接用。",
   "guests can start it now": "客人现在可以直接开始",
   "Guests can start free tables.": "客人可以自己开始用空桌。",
   "Many tables started by scanning · new guests are sent to staff for a few minutes":

@@ -164,14 +164,23 @@ export function App({
     [demo],
   );
   const establishMenuContext = useCallback((context: MenuJourneyContext) => {
-    setMenuContext(
-      Object.freeze({
-        publicStoreReference: context.publicStoreReference,
-        channel: context.channel,
-        locale: context.locale,
-        brandDisplayName: context.brandDisplayName,
-        storeDisplayName: context.storeDisplayName,
-      }),
+    // The same Store again keeps the same object: a new one would read the menu again and take the
+    // dish a guest is choosing off the screen (their first dish is what starts a table).
+    setMenuContext((current) =>
+      current !== undefined &&
+      current.publicStoreReference === context.publicStoreReference &&
+      current.channel === context.channel &&
+      current.locale === context.locale &&
+      current.brandDisplayName === context.brandDisplayName &&
+      current.storeDisplayName === context.storeDisplayName
+        ? current
+        : Object.freeze({
+            publicStoreReference: context.publicStoreReference,
+            channel: context.channel,
+            locale: context.locale,
+            brandDisplayName: context.brandDisplayName,
+            storeDisplayName: context.storeDisplayName,
+          }),
     );
   }, []);
   return (

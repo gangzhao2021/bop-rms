@@ -485,6 +485,7 @@ export function StoreFeaturesPage({
           client={client}
           locked={busy}
           onSaved={(next) => setView(next)}
+          onConflict={() => setRefresh((value) => value + 1)}
         />
         {/* WP-2423 item 8 ⑧ (decision 5): the kitchen sections a kitchen screen shows. */}
         <StoreKitchenSections csrf={csrf} locked={busy} />

@@ -1,4 +1,8 @@
 import { listSeparator, useReloadOnLanguageChange } from "../i18n/i18n.js";
+import {
+  getGuestTableStarter,
+  isGuestTableQuestion,
+} from "../session/customer-transaction-context.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { createBrowserCustomerCartClient } from "./cart-client.js";
@@ -319,6 +323,9 @@ function ErrorState({
           </button>
         )}
         <Link to="/menu">{commonText.returnToMenu}</Link>
+        {state.status === "not-seated" && (isGuestTableQuestion() || getGuestTableStarter()) ? (
+          <Link to="/">{failure.goToStart}</Link>
+        ) : null}
       </div>
     </StateMessage>
   );

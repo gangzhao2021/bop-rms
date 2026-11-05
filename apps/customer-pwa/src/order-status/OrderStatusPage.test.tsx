@@ -536,6 +536,41 @@ it.each(phaseTable)(
   },
 );
 
+describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
+  const dineIn = (canonicalPhase: "Ready" | "In Progress", remakes = false) => {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    const item = state.view.order.batches[0]?.items[0];
+    return render({
+      ...state,
+      view: {
+        ...state.view,
+        order: { ...state.view.order, orderType: "DineIn", canonicalPhase },
+        sources: {
+          checkedAt: "2026-08-11T14:00:00.000Z",
+          kitchen: null,
+          payments: null,
+          startedByGuest: true,
+          ...(remakes
+            ? { remakes: [{ orderItemReference: String(item?.orderItemReference), quantity: 1 }] }
+            : {}),
+        },
+      },
+    });
+  };
+  it("says a finished order is ready by its number: nobody is bringing it over", () => {
+    const html = dineIn("Ready");
+    expect(html).toContain("Your order is ready");
+    expect(html).toContain("Ready · Order ");
+    expect(html).not.toContain("brought to your table");
+  });
+  it("a remake is called by its number too", () => {
+    const html = dineIn("In Progress", true);
+    expect(html).toContain("We’ll call order ");
+    expect(html).not.toContain("brought to your table");
+  });
+});
+
 it("tells a pickup guest the store accepted the order while the kitchen ticket is still queued", () => {
   const state = readyState();
   if (state.status !== "ready") throw new Error("fixture");

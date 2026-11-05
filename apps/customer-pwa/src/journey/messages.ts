@@ -1,4 +1,7 @@
-import { getGuestTableStarter } from "../session/customer-transaction-context.js";
+import {
+  getGuestTableStarter,
+  isGuestTableQuestion,
+} from "../session/customer-transaction-context.js";
 import { t } from "../i18n/i18n.js";
 import type { CartState } from "../cart/cart-state.js";
 
@@ -229,7 +232,9 @@ export const cartText = Object.freeze({
     get "not-seated"() {
       return getGuestTableStarter() !== null
         ? t("Add a dish from the menu to start.")
-        : t("You can order once staff seat you.");
+        : isGuestTableQuestion()
+          ? t("First tell us if you’re with the people at this table.")
+          : t("You can order once staff seat you.");
     },
     get expired() {
       return t("Your cart expired. See the message on this page.");
@@ -293,10 +298,18 @@ export const cartText = Object.freeze({
             t("Nothing in your cart yet"),
             t("Add a dish from the menu and this table starts for you."),
           ] as const)
-        : ([
-            t("You can order once staff seat you"),
-            t("You can order once staff seat you. Ask a staff member, then scan again."),
-          ] as const);
+        : isGuestTableQuestion()
+          ? ([
+              t("Nothing in your cart yet"),
+              t("First tell us if you’re with the people at this table."),
+            ] as const)
+          : ([
+              t("You can order once staff seat you"),
+              t("You can order once staff seat you. Ask a staff member, then scan again."),
+            ] as const);
+    },
+    get goToStart() {
+      return t("Go to the start");
     },
     get tableCheckingOut() {
       return [
@@ -853,6 +866,13 @@ export const orderStatusText = Object.freeze({
     },
     get remakingDineIn() {
       return t("We’re remaking an item for you. It will be brought to your table shortly.");
+    },
+    /** DEC-DINING-GUEST-TABLE-START: nobody brings dishes to a table a guest started. */
+    remakingByNumber(number: string) {
+      return t("We’re remaking an item for you. We’ll call order {number}.", { number });
+    },
+    readyByNumber(number: string) {
+      return t("Ready · Order {number}", { number });
     },
     get servedHeading() {
       return t("Items served");

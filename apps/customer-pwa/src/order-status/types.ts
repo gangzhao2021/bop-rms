@@ -80,6 +80,8 @@ export interface OrderStatusSources {
     readonly orderBatchReference: string;
     readonly amount: { readonly amountMinor: bigint; readonly currencyCode: string };
   }[];
+  /** DEC-DINING-GUEST-TABLE-START: a guest started this table; nobody brings the dishes over. */
+  readonly startedByGuest?: true;
   /** WP-2423 Q26: items the kitchen is remaking (open portions per Order item). */
   readonly remakes?: readonly {
     readonly orderItemReference: string;

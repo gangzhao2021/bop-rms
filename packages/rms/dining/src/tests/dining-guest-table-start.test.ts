@@ -63,8 +63,10 @@ const quiet = (changes: Partial<GuestTableCloseFacts> = {}): GuestTableCloseFact
   startedAt: ago(200),
   activity: [null, null, null, null],
   cartHasItems: false,
+  cartChangedAt: null,
   openStaffCall: false,
   merged: false,
+  scanPaused: false,
   order: null,
   ...changes,
 });
@@ -99,6 +101,11 @@ describe("DEC-DINING-GUEST-TABLE-START: the quiet rule", () => {
     ["an open staff call", { openStaffCall: true }, "StaffCall"],
     ["a merged table", { merged: true }, "Merged"],
     ["a cart with something in it", { cartHasItems: true }, "CartInUse"],
+    [
+      "a cart with something in it, however long since it changed",
+      { cartHasItems: true, cartChangedAt: ago(100) },
+      "CartInUse",
+    ],
     ["a dish not finished", { order: { ...paid, unfinishedItems: 1 } }, "Unfinished"],
     ["a refund pending", { order: { ...paid, blockers: ["REFUND_PENDING"] } }, "Owed"],
     ["an unpaid balance", { order: { ...paid, blockers: ["ORDER_BALANCE_UNPAID"] } }, "Owed"],
@@ -113,6 +120,9 @@ describe("DEC-DINING-GUEST-TABLE-START: the quiet rule", () => {
     expect(
       decideGuestTableQuietClose(quiet({ order: { ...paid, readyItems: 2 } }), now).close,
     ).toBe(true);
+  });
+  it("a staff pause is about new phones: the table still frees itself", () => {
+    expect(decideGuestTableQuietClose(quiet({ scanPaused: true }), now).close).toBe(true);
   });
 });
 
@@ -131,12 +141,27 @@ describe("DEC-DINING-GUEST-TABLE-START: the next party", () => {
     ["anything owed", { order: { ...paid, blockers: ["REFUND_PENDING"] } }, "Owed"],
     ["a call for staff", { openStaffCall: true }, "StaffCall"],
     ["a merged table", { merged: true }, "Merged"],
-    ["a cart in use", { cartHasItems: true }, "CartInUse"],
+    ["a staff pause on scanning", { scanPaused: true }, "Paused"],
+    ["a cart nobody has dated", { cartHasItems: true }, "CartInUse"],
+    ["a cart changed 19 minutes ago", { cartHasItems: true, cartChangedAt: ago(19) }, "CartInUse"],
   ] as const)("isn't asked with %s", (_name, changes, hold) => {
     expect(decideGuestNewParty(quiet(changes as never), now, starts(0))).toEqual({
       ask: false,
       hold,
     });
+  });
+  it("a dish left in a cart nobody touched for 20 minutes doesn't stop the next party being asked", () => {
+    expect(
+      decideGuestNewParty(quiet({ cartHasItems: true, cartChangedAt: ago(20) }), now, starts(0)),
+    ).toEqual({ ask: true });
+    // An empty cart holds nothing, whenever it changed; its change still counts as activity.
+    expect(
+      decideGuestNewParty(
+        quiet({ cartChangedAt: ago(1), activity: [ago(1)] }),
+        now,
+        starts(0),
+      ),
+    ).toEqual({ ask: false, hold: "Recent" });
   });
   it("isn't asked once the table's or the Store's starts are spent", () => {
     const budget = { ask: false, hold: "Budget" };

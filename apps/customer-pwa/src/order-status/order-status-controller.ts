@@ -159,6 +159,9 @@ function parseSources(
     "checkedAt",
     "kitchen",
     "payments",
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "startedByGuest")
+      ? ["startedByGuest"]
+      : []),
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "dining")
       ? ["dining"]
       : []),
@@ -207,6 +210,8 @@ function parseSources(
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
+  if (raw.startedByGuest !== undefined && (raw.startedByGuest !== true || orderType !== "DineIn"))
+    return invalid();
   const sourceInstant = (value: unknown) => {
     const parsed = parseInstant(value);
     if (Date.parse(parsed) < Date.parse(submittedAt) || Date.parse(parsed) > Date.parse(checkedAt))
@@ -745,6 +750,7 @@ function parseSources(
     checkedAt,
     kitchen,
     payments,
+    ...(raw.startedByGuest === true ? { startedByGuest: true as const } : {}),
     ...(refunds === undefined ? {} : { refunds }),
     ...(tips === undefined ? {} : { tips }),
     ...(remakes === undefined ? {} : { remakes }),

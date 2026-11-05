@@ -617,31 +617,69 @@ describe("DEC-DINING-GUEST-TABLE-START: a guest starts a free table", () => {
   });
   it("a new party closes the table first, and is refused when the rule says no", async () => {
     const f = fixture();
-    const closeForNewParty = vi.fn(async () => ({ status: "Closed" as const }));
+    const closeForNewParty = vi.fn(async () => ({
+      status: "Closed" as const,
+      diningSessionReference: id(19),
+    }));
+    const startIfFree = vi.fn(async () => ({
+      status: "Started" as const,
+      diningSessionReference: id(20),
+    }));
     const composition = createCustomerDiningJoinComposition({
       ...f.options,
-      qr: {
-        issue: issuedAfter(f, 1),
-        startIfFree: async () => ({ status: "Started", diningSessionReference: id(20) }),
-        closeForNewParty,
-      },
+      qr: { issue: issuedAfter(f, 1), startIfFree, closeForNewParty },
     });
     expect((await composition.join({ ...qrInput(f), newParty: true }, f.request)).status).toBe(
       "Joined",
     );
     expect(closeForNewParty).toHaveBeenCalledTimes(1);
+    // The new Session says which party it ended, so staff can see it happened.
+    expect(startIfFree).toHaveBeenCalledWith(
+      expect.objectContaining({ endedSessionReference: id(19) }),
+    );
+  });
+  it.each([
+    ["Recent", "TableInUse"],
+    ["Unfinished", "TableInUse"],
+    ["Owed", "TableInUse"],
+    ["Paused", "Paused"],
+    ["Budget", "TooManyJoins"],
+  ])("a table held by %s refuses as %s, nothing joined", async (hold, reason) => {
     const g = fixture(100);
     const refused = createCustomerDiningJoinComposition({
       ...g.options,
       qr: {
         issue: issuedAfter(g, 0),
-        closeForNewParty: async () => ({ status: "Held" as const }),
+        closeForNewParty: async () => ({ status: "Held" as const, hold }),
       },
     });
     expect(await refused.join({ ...qrInput(g), newParty: true }, g.request)).toEqual({
       status: "Refused",
-      reason: "TableInUse",
+      reason,
     });
     expect(g.store.join).not.toHaveBeenCalled();
+  });
+  it("nothing left to end (the System just freed it) is no refusal: the free table is started, once", async () => {
+    const f = fixture();
+    const closeForNewParty = vi.fn(async () => ({
+      status: "Held" as const,
+      hold: "Changed",
+    }));
+    const startIfFree = vi.fn(async () => ({
+      status: "Started" as const,
+      diningSessionReference: id(20),
+    }));
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      qr: { issue: issuedAfter(f, 1), startIfFree, closeForNewParty },
+    });
+    expect((await composition.join({ ...qrInput(f), newParty: true }, f.request)).status).toBe(
+      "Joined",
+    );
+    // Asked once: the table this phone just started isn't closed on the next attempt.
+    expect(closeForNewParty).toHaveBeenCalledTimes(1);
+    expect(startIfFree).toHaveBeenCalledWith(
+      expect.not.objectContaining({ endedSessionReference: expect.anything() }),
+    );
   });
 });

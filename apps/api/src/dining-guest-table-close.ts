@@ -5,6 +5,7 @@ import {
   countDiningGuestTableStarts,
   decideGuestNewParty,
   decideGuestTableQuietClose,
+  guestTableActivity,
   listDiningGuestStartedSessions,
   listDiningSessionMergesInto,
   listOpenDiningGuestStartedSessions,
@@ -38,6 +39,14 @@ const fail = (): never => {
 };
 /** The kitchen-side reasons that only mean "items not served yet"; the close serves finished ones. */
 const servingReasons = new Set(["EXECUTION_NOT_FINAL", "FULFILLMENT_NOT_FINAL"]);
+/** Someone else was on this table just then: nothing is wrong, and the next cycle comes back to it. */
+const lostARace = (error: unknown) => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return (
+    typeof code === "string" &&
+    (code === "55P03" || code === "40001" || code === "40P01" || code.endsWith("_CONFLICT"))
+  );
+};
 
 export interface DiningGuestTableCloseOptions {
   readonly scope: {
@@ -61,6 +70,7 @@ export interface DiningGuestTableCloseOptions {
 export type DiningGuestTableCloseResult =
   | {
       readonly status: "Closed";
+      readonly diningSessionReference: string;
       readonly orderReference: string | null;
       readonly servedItems: number;
     }
@@ -188,16 +198,18 @@ export function createDiningGuestTableClose(options: DiningGuestTableCloseOption
     }
     const facts: GuestTableCloseFacts = Object.freeze({
       startedAt: startedAt.startedAt,
-      activity: Object.freeze([
-        dining.lastPhoneJoinedAt,
-        dining.lastServedAt,
-        ordering?.lastRoundAt ?? null,
-        ordering?.lastCartChangeAt ?? null,
-        kitchenAt,
-      ]),
+      activity: guestTableActivity({
+        lastPhoneJoinedAt: dining.lastPhoneJoinedAt,
+        lastServedAt: dining.lastServedAt,
+        lastRoundAt: ordering?.lastRoundAt ?? null,
+        lastCartChangeAt: ordering?.lastCartChangeAt ?? null,
+        kitchenChangedAt: kitchenAt,
+      }),
       cartHasItems: ordering?.cartHasItems === true,
+      cartChangedAt: ordering?.lastCartChangeAt ?? null,
       openStaffCall: dining.openStaffCall,
       merged: (merges?.length ?? 0) > 0,
+      scanPaused: dining.scanPaused,
       order,
     });
     return Object.freeze({ facts, binding, closureOpen, readyItems });
@@ -434,6 +446,7 @@ export function createDiningGuestTableClose(options: DiningGuestTableCloseOption
       await closing("Finalize", finalizeOperation, begun.sessionVersion);
       return Object.freeze({
         status: "Closed",
+        diningSessionReference: session,
         orderReference: current.binding?.orderReference ?? null,
         servedItems: current.readyItems.length,
       });
@@ -460,25 +473,34 @@ export function createDiningGuestTableClose(options: DiningGuestTableCloseOption
 
   let cursor: string | null = null;
   return Object.freeze({
-    /** The worker: one fair page of open guest-started tables; held tables are simply passed. */
+    /**
+     * The worker: one fair page of open guest-started tables. A held table, or one that lost a race
+     * with someone on it, is simply passed. One that could not be decided or closed doesn't keep the
+     * others from their turn, and the cycle then fails with the first such failure, so the workload's
+     * health says tables aren't being freed.
+     */
     async runOnce(input: {
       readonly limit: number;
-      /** A table that could not be decided or closed now; the cycle goes on. */
+      /** A table that could not be decided or closed now; the page goes on. */
       onFailure?(error: unknown): void;
     }): Promise<number> {
       const page = await options.transactions.run((tx) =>
         listOpenDiningGuestStartedSessions(tx, owner, { after: cursor, limit: input.limit }),
       );
       let closed = 0;
+      const failures: unknown[] = [];
       for (const session of page) {
         try {
           const result = await close(session, "GUEST_TABLE_QUIET", "SYSTEM", null);
           if (result.status === "Closed") closed += 1;
         } catch (error) {
+          if (lostARace(error)) continue;
+          failures.push(error);
           input.onFailure?.(error);
         }
       }
       cursor = page.length === input.limit ? (page.at(-1) ?? null) : null;
+      if (failures.length > 0) throw failures[0];
       return closed;
     },
     closeQuiet: (session: string) => close(session, "GUEST_TABLE_QUIET", "SYSTEM", null),

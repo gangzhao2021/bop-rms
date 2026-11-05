@@ -211,9 +211,15 @@ export function TableSessionClose({
   fetcher,
   timeZone,
   canResolveGuestsLeft = true,
+  freesStraightAway = false,
 }: {
   /** WP-2423 item 8 ①: may close out a departed table's rounds (cancel or refund: a manager). */
   readonly canResolveGuestsLeft?: boolean;
+  /**
+   * DEC-DINING-GUEST-TABLE-START: a table a guest started, where guests can still start tables: no
+   * cleaning step follows its close, and the next guest can start it at once.
+   */
+  readonly freesStraightAway?: boolean;
   /** The Store's time zone, for when an unpaid round is cancelled automatically. */
   readonly timeZone?: string | undefined;
   readonly table: StaffDiningTable;
@@ -459,9 +465,13 @@ export function TableSessionClose({
       ) : (
         <>
           <p>
-            {t(
-              "When the guests have left, close the table: its order is closed and it waits for cleaning.",
-            )}
+            {freesStraightAway
+              ? t(
+                  "When the guests have left, clean the table, then close it: its order is closed and the next guest can start it straight away.",
+                )
+              : t(
+                  "When the guests have left, close the table: its order is closed and it waits for cleaning.",
+                )}
           </p>
           <button
             type="button"
