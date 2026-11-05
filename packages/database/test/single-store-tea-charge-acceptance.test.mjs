@@ -549,7 +549,7 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
       );
       await assert.rejects(
         asApi((tx) => listDeclaredChargeSkus(tx, { brandReference, storeReference }, ["x"])),
-        /RECIPE_DECLARED_CHARGES_INPUT_INVALID/u,
+        /RECIPE_DECLARED_CHARGES?_INPUT_INVALID/u,
       );
 
       // 3. A tea choice, named once; the tea check accepts it; the Store's tea is set to it.
