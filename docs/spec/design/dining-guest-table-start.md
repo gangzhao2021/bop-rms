@@ -20,7 +20,7 @@
    - 有未处理的呼叫、并过桌、有没做完的菜（含重做中）、有未付、退款中、付款进行中等任何结算原因，都不关。
    - 关桌用店员同一条路径：Begin、结 Order、Finalize、释放，全部在一个事务里，依次取 Order 锁、桌锁、会话锁（和付款事件同序），锁内重新判断；每一步都是系统身份。
 9. **做好了就算交到客人手里**（Owner 决定见下）：自助店没人点“上菜”。关桌时，已付、后厨做好但没人点上菜的菜，由系统记为已上（`DINING_ITEM_SERVED`，系统身份，原因 `GUEST_TABLE_QUIET` 或 `GUEST_NEW_PARTY`）。没做好的菜照样挡住。退款不受影响。客人页这类桌写“做好了 · {n} 号”，不写“正在送到您的桌”。
-10. **下一桌客人**：翻台靠下一次扫码。新手机扫到客人开的桌，只有当什么都不欠、没有没做完的、没有购物车在用、已安静 5 分钟、本桌还有额度时，才问一句“你们和这桌的人是一起的吗？”。选“是，加入”就是普通入桌；选“不是，我们刚坐下”由系统关掉上一桌（原因 `GUEST_NEW_PARTY`），再开新桌，新桌看不到上一桌的轮次。其他情况和今天一样直接加入。关桌在 `qr-join` 里做，锁内再判断一次，不符合就回答“这桌刚刚有人点单”。
+10. **下一桌客人**：翻台靠下一次扫码。新手机扫到客人开的桌，只有当什么都不欠、没有没做完的、没有购物车在用、已安静 5 分钟、本桌和门店都还有额度时，才问一句“你们和这桌的人是一起的吗？”。选“是，加入”就是普通入桌；选“不是，我们刚坐下”由系统关掉上一桌（原因 `GUEST_NEW_PARTY`），再开新桌，新桌看不到上一桌的轮次。其他情况和今天一样直接加入。关桌在 `qr-join` 里做，锁内再判断一次，不符合就回答“这桌刚刚有人点单”。
 11. **清洁**：门店开关开着时，店员手动关一张客人开的桌也不进入“待清洁”（没人会去点“已清洁”）。其他桌的“待清洁”超过 5 分钟就不再挡客人：桌台页写“客人现在可以直接开始”，客人开桌时系统清掉，记 `DINING_TABLE_CLEARBLOCK`（系统身份，原因 `GUEST_START_CLEANING_NOT_MARKED`）。5 分钟内扫码回答“这张桌正在清理，请换一张桌或找店员”。开关关着的门店完全不变。
 12. **桌台页**：只在客人开的桌上带 `guestStart`（旧页面不受影响）。没点单写“客人扫码开的桌 · 还没点单”，都上齐写“都上齐了”；自动空出前 10 分钟才写“N 分钟后自动空出”。这些桌上，手机加入不再占“需要处理”（10 分钟 6 台以上才提示），未付轮次和待上的菜也不算需要处理（“付款未确认”仍算）。
 13. **不问人数、不收茶位费**：先付的桌不收茶位费（`merchant-dining-tea-charge.ts` 只对先点后付）；人数仍可由店员在面板上记，不挡任何事。
@@ -86,4 +86,4 @@
 
 ## 证据
 
-受限角色验收 `packages/database/test/dining-guest-table-start-acceptance.test.mjs` 和 `dining-guest-table-money-acceptance.test.mjs`（配置 `vitest.dining-guest-table-start`，已进 `test:database`）。钱的部分：同一张桌分别由客人开、系统关和由店员开、店员关，报表、收工汇总、日结在开着、关后、退款后三个时点逐项相同；关桌后整轮退款走真实命令到（模拟的）Stripe 并确认；付款手机的收据关桌后还能看，重新扫码不新建会话；退款在途时系统不关桌。进桌的部分：真实 Identity 的客人会话从扫码、开桌、入桌到绑定完成。还没有在验收里走真实结账：轮次和付款是种子数据，要靠 v15 实测。领域规则表驱动测试 `packages/rms/dining/src/tests/dining-guest-table-start.test.ts`；浏览器 `apps/customer-pwa/e2e/customer-table-start.spec.ts`、`apps/merchant-web/e2e/dining-guest-started-table.spec.ts`、`store-features.spec.ts`。结果记录在 WP-2423。
+受限角色验收 `packages/database/test/dining-guest-table-start-acceptance.test.mjs` 和 `dining-guest-table-money-acceptance.test.mjs`（配置 `vitest.dining-guest-table-start`，已进 `test:database`）。钱的部分：同一张桌分别由客人开、系统关和由店员开、店员关，报表、收工汇总、日结在开着、关后、退款后三个时点逐项相同；关桌后整轮退款走真实命令到（模拟的）Stripe 并确认；付款手机的收据关桌后还能看，重新扫码不新建会话；退款在途时系统不关桌。进桌的部分：真实 Identity 的客人会话从扫码、开桌、入桌到绑定完成。还没有在验收里走真实结账：轮次和付款是种子数据，要靠 v15 实测。一轮一桌的系统关桌在开发机受限角色下是 976 条语句、0.5 到 1 秒（这段时间桌子行被占着；扫码只读不等，点“开始点餐”的手机等它结束再继续）；多轮的桌和 v15 上的时间还没量。领域规则表驱动测试 `packages/rms/dining/src/tests/dining-guest-table-start.test.ts`；浏览器 `apps/customer-pwa/e2e/customer-table-start.spec.ts`、`apps/merchant-web/e2e/dining-guest-started-table.spec.ts`、`store-features.spec.ts`。结果记录在 WP-2423。
