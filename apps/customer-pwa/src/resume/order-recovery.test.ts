@@ -93,6 +93,15 @@ describe("DEC-PILOT-NOTIFICATIONS: order message options", () => {
     );
     await expect(client.read()).resolves.toEqual({ sms: true, email: false });
   });
+  // On an installation of several merchants the guest's cookie is what routes a request to the
+  // guest's own Store; without it the entry answers 404 and the Store's channels are never offered.
+  it("asks with the guest’s cookie, so the request reaches the guest’s own Store", async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>(async () =>
+      reply(200, { schemaVersion: 1, orderMessages: { sms: false, email: false } }),
+    );
+    await createOrderMessageOptionsClient(fetcher).read();
+    expect(fetcher.mock.calls[0]?.[1]?.credentials).toBe("same-origin");
+  });
   it("offers nothing when the answer is missing or malformed", async () => {
     for (const fetcher of [
       async () => reply(503, {}),

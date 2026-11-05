@@ -63,6 +63,16 @@ it("a fresh browser's CSRF token comes from the first Store: it names no merchan
   ).toBe(second);
 });
 
+it("order messages go to the guest's own Store, and without a cookie to no Store", async () => {
+  const messages = { method: "GET", url: "/api/v1/customer/order-messages" };
+  const second = store(2, 2, ["2:" + credential]);
+  const storeOf = routing([store(1, 1), second]);
+  expect(await storeOf({ ...messages, cookie: cookieOf(credential) })).toBe(second);
+  // The first Store must not answer for another merchant: a guest could be promised a text that
+  // never comes.
+  expect(await storeOf(messages)).toBeNull();
+});
+
 it("routes a guest to their own merchant's Store by server-side records", async () => {
   const a = store(1, 1),
     b = store(2, 2, ["2:" + credential]);

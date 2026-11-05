@@ -3,6 +3,8 @@ import { boundedFetch } from "../network/bounded-fetch.js";
 /**
  * DEC-PILOT-NOTIFICATIONS: which order-message channels the store can actually send now. Any
  * failure means "none": the checkout never offers a use of the customer's contact that won't happen.
+ * The answer is per Store, so the request carries the guest's cookie: on an installation of several
+ * merchants that cookie is what routes it to the guest's own Store (the answer holds no private data).
  */
 export interface OrderMessageOptions {
   readonly sms: boolean;
@@ -18,7 +20,7 @@ export function createOrderMessageOptionsClient(
       try {
         const response = await boundedFetch(request, "/api/v1/customer/order-messages", {
           method: "GET",
-          credentials: "omit",
+          credentials: "same-origin",
           cache: "no-store",
           redirect: "error",
           headers: { accept: "application/json" },
