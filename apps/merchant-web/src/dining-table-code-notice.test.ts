@@ -132,7 +132,7 @@ it("WP-2423 abandoned payment: warns staff before an unpaid guest round is cance
   expect(guestRoundPaymentNotice(table, now, "America/Toronto")).toBeNull();
   expect(guestRoundPaymentNotice(waiting, now, "America/Toronto")).toEqual({
     tier: "warning",
-    text: "Round 1 isn't paid yet. The guest pays on their phone (their table page has a pay button); unpaid at 08:30, it is cancelled and nobody is charged.",
+    text: "Round 1 isn't paid yet. The guest pays on their phone (their table page has a pay button); unpaid at 08:30, it is cancelled and nobody is charged. If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.",
   });
   expect(
     guestRoundPaymentNotice(waiting, Date.parse(payBy) - 4 * 60_000 - 1, "America/Toronto"),

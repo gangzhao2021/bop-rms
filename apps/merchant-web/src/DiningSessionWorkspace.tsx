@@ -246,7 +246,7 @@ export function guestRoundPaymentNotice(
     : {
         tier: "warning",
         text: t(
-          "{names} {verb} paid yet. The guest pays on their phone (their table page has a pay button); unpaid at {at}, it is cancelled and nobody is charged.",
+          "{names} {verb} paid yet. The guest pays on their phone (their table page has a pay button); unpaid at {at}, it is cancelled and nobody is charged. If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.",
           { names: names, verb: verb, at: at },
         ),
       };

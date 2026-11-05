@@ -187,7 +187,7 @@ export function placeErrorText(
     }
     case "TableCheckoutInProgress":
       return t(
-        "A guest at this table is paying on their phone right now. Wait a minute, then send again.",
+        "A guest at this table is ordering or paying on their phone. Wait a minute, then send again.",
       );
     case "TableUnavailable":
       return t(

@@ -221,10 +221,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " It is the Brand default now, so the Brand will have no default until you choose another.":
     " 它目前是品牌默认税类，因此在你选择其他税类之前，品牌将没有默认税类。",
   " Its dishes are listed under Recently finished.": ' 它的菜品列在"最近完成"中。',
-  " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or ask a manager to cancel it.":
-    " 尚未接单：顾客还没有为这一轮付款。请顾客在手机上完成付款（其桌台页面有付款按钮），或请店长取消。",
-  " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or cancel it below.":
-    " 尚未接单：顾客还没有为这一轮付款。请顾客在手机上完成付款（其桌台页面有付款按钮），或在下方取消。",
+  " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or ask a manager to cancel it. If their phone can't start the payment, ask a manager to cancel this round, then take the order for the table and charge it on the card machine.":
+    " 尚未接单：顾客还没有为这一轮付款。请顾客在手机上完成付款（其桌台页面有付款按钮），或请店长取消。如果顾客手机无法开始付款，请店长取消这一轮，再为桌台点单并用刷卡机收款。",
+  " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or cancel it below. If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.":
+    " 尚未接单：顾客还没有为这一轮付款。请顾客在手机上完成付款（其桌台页面有付款按钮），或在下方取消。如果顾客手机无法开始付款，请取消这一轮，为桌台点单并用刷卡机收款。",
   " Publication remains separate.": " 发布仍需另行进行。",
   " Recorded after an outage from a paper order: it may already have been made and handed over.":
     " 停电/断网后根据纸质订单补录：可能已经做好并交付。",
@@ -383,8 +383,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A dining session can't be started for table": "无法为此桌台开始堂食会话：",
   "A fee that is On may only apply to service modes this Store offers. Check step 5.":
     "开启的费用只能适用于本店提供的服务方式。请检查第 5 步。",
-  "A guest at this table is paying on their phone right now. Wait a minute, then send again.":
-    "这张桌台的一位顾客正在手机上付款。请等一分钟，再重新发送。",
+  "A guest at this table is ordering or paying on their phone. Wait a minute, then send again.":
+    "这张桌台的一位顾客正在手机上下单或付款。请等一分钟，再重新发送。",
   "A guest's online payment has no result yet. Check again in a few minutes.":
     "有顾客的在线付款尚无结果。请几分钟后再查看。",
   "A kitchen remake used more than stock showed as available. The food was thrown away; only what was in stock was taken off. Count these items and correct the count.":
@@ -5642,8 +5642,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{length} 种在用配料中有 {missing} 种需要申报。",
   "{names} wasn't paid by {at} and is being cancelled; it won't go to the kitchen and nobody is charged.":
     "{names}未在 {at} 前付款，正在取消；不会发送到后厨，也不会向任何人收费。",
-  "{names} {verb} paid yet. The guest pays on their phone (their table page has a pay button); unpaid at {at}, it is cancelled and nobody is charged.":
-    "{names}尚未付款。顾客在手机上付款（其桌台页面有付款按钮）；到 {at} 仍未付款会被取消，不会向任何人收费。",
+  "{names} {verb} paid yet. The guest pays on their phone (their table page has a pay button); unpaid at {at}, it is cancelled and nobody is charged. If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.":
+    "{names}尚未付款。顾客在手机上付款（其桌台页面有付款按钮）；到 {at} 仍未付款会被取消，不会向任何人收费。如果顾客手机无法开始付款，请取消这一轮，为桌台点单并用刷卡机收款。",
   "{name} ({code}) — {value} review{value2}.{value3}":
     "{name}（{code}）— {value}审核{value2}。{value3}",
   "{name} can't be sold right now (sold out or off the menu). Remove it and send again. Nothing was sent or charged.":

@@ -22,6 +22,7 @@ import {
   orderPhaseLabel,
   orderTypeLabel,
   paymentDueText,
+  unpaidGuestRoundGuidance,
   paymentDueTier,
   storeCancelledBatches,
   unpaidCancelledBatches,
@@ -1868,4 +1869,17 @@ describe("Owner 2026-11-04: a written-off table on the Orders list", () => {
       } as never),
     ).toBe("Guests left without paying · $20.77 written off");
   });
+});
+
+it("WP-2423 item 2: staff are told what to do when a guest's phone can't start the payment", () => {
+  const canCancel = unpaidGuestRoundGuidance(true);
+  expect(canCancel).toContain("cancel it below");
+  expect(canCancel).toContain(
+    "If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.",
+  );
+  const cannot = unpaidGuestRoundGuidance(false);
+  expect(cannot).toContain("ask a manager to cancel it");
+  expect(cannot).toContain(
+    "If their phone can't start the payment, ask a manager to cancel this round, then take the order for the table and charge it on the card machine.",
+  );
 });

@@ -1001,6 +1001,20 @@ export function orderCountText(input: {
 export const unpaidRoundUrgentMinutes = 10;
 
 /**
+ * WP-2423 item 2: what staff do about a guest's unpaid round. A payment that can't start on the
+ * guest's phone needs a way out here too: "ask them to finish paying" alone sends everyone in a loop.
+ */
+export function unpaidGuestRoundGuidance(canCancel: boolean): string {
+  return canCancel
+    ? t(
+        " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or cancel it below. If their phone can't start the payment, cancel this round, take the order for the table and charge it on the card machine.",
+      )
+    : t(
+        " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or ask a manager to cancel it. If their phone can't start the payment, ask a manager to cancel this round, then take the order for the table and charge it on the card machine.",
+      );
+}
+
+/**
  * WP-2423: an unpaid dine-in round. A failed payment — or, since item 5, a round with no payment
  * started (a round staff entered and nobody recorded as paid on the card machine) — is cancelled
  * automatically at its payment deadline; staff are told when, in Store time, before it happens, and
@@ -1718,13 +1732,7 @@ function OrderDetailBody({
               ? t(
                   " Charge it on the card machine and record it below; the kitchen starts it once recorded. If it isn't recorded in time, it is cancelled and its items go back to stock.",
                 )
-              : batch.canCancelUnpaid
-                ? t(
-                    " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or cancel it below.",
-                  )
-                : t(
-                    " Not accepted yet: the guest has not paid for this round. Ask them to finish paying on their phone (their table page has a pay button), or ask a manager to cancel it.",
-                  )}
+              : unpaidGuestRoundGuidance(batch.canCancelUnpaid)}
         </p>
       ) : batch.awaitingAcceptanceSince !== null && now !== undefined ? (
         // WP-2423: a paid round waits for staff, never for a timer; say how long.
