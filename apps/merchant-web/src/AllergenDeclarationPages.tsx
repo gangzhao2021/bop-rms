@@ -230,7 +230,8 @@ export function AllergenListPage({
                     {
                       action: "RecordRegistry",
                       operationReference: newOperationReference(),
-                      template: "CA_PRIORITY_TEST",
+                      // The list the server offers (the labelled TEST list until a reviewed one).
+                      template: view.registryTemplate.template,
                     },
                     t("Allergen list approved."),
                     (outcome) => {

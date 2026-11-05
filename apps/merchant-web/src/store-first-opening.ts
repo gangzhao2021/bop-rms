@@ -2257,6 +2257,11 @@ export function openingWaitsFromFacts(facts: OpeningFacts): OpeningWaits {
   // have to be given here. With something else to approve it goes with that, in the same press.
   const listHere = listSent && (receiptForYou || storeSetupForYou);
   const who = othersFor(facts.approvers, "AllergenList");
+  const listMine = proposal?.recordedByYou === true && who.length > 0;
+  // The same, seen by whoever recorded it: the people who approve what else waits here see the list
+  // with it and approve both in one press, so it is named with it. On its own it is for Allergens.
+  const listWithOthers =
+    listMine && forOthers.some((wait) => canonical(wait.who) === canonical(who));
   const latest = facts.live.latest;
   return Object.freeze({
     forYou: Object.freeze([
@@ -2264,11 +2269,17 @@ export function openingWaitsFromFacts(facts: OpeningFacts): OpeningWaits {
       ...(listHere ? (["AllergenList"] as const) : []),
       ...(storeSetupForYou ? (["StoreSetup"] as const) : []),
     ]),
-    forOthers: Object.freeze(forOthers),
+    forOthers: Object.freeze(
+      listWithOthers
+        ? [
+            ...forOthers.filter((wait) => wait.what === "ReceiptTemplate"),
+            Object.freeze({ what: "AllergenList" as const, who }),
+            ...forOthers.filter((wait) => wait.what === "StoreSetup"),
+          ]
+        : forOthers,
+    ),
     listForOthers:
-      proposal?.recordedByYou === true && who.length > 0
-        ? Object.freeze({ what: "AllergenList" as const, who })
-        : null,
+      listMine && !listWithOthers ? Object.freeze({ what: "AllergenList" as const, who }) : null,
     listForYou: listSent && !listHere,
     beforeAnswers: Object.freeze(beforeAnswers),
     ranOut:

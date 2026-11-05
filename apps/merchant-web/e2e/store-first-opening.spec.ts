@@ -243,7 +243,6 @@ async function install(page: Page, options: Options = {}) {
         validUntil: until,
         businessReferenceValidation: "NotEvaluated",
         storeTaxConfigurationReference: control.taxReference,
-        ...(current.setupBasis === undefined ? { goLive: true } : {}),
         ...(open && latest !== null
           ? {
               publicationChecks: {

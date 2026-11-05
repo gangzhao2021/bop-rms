@@ -1147,9 +1147,11 @@ describe("WP-2423 item 14: the press", () => {
     expect(w.writes).not.toContain("ApproveRegistry");
     expect(w.writes).not.toContain("TurnOnSoleOperator");
     expect(w.state.templateApprovals).toEqual([]);
+    // Mia approves the list with the receipt, on this page: the sender is told both, together.
     const after = openingWaitsFromFacts(await loadOpeningFacts(w.deps));
-    expect(after.forOthers.map((wait) => wait.what)).toEqual(["ReceiptTemplate"]);
-    expect(after.listForOthers?.who).toEqual([{ displayName: "Mia" }]);
+    expect(after.forOthers.map((wait) => wait.what)).toEqual(["ReceiptTemplate", "AllergenList"]);
+    expect(after.forOthers.every((wait) => wait.who[0]?.displayName === "Mia")).toBe(true);
+    expect(after.listForOthers).toBeNull();
   });
   it("a lone Owner never waits for nobody: they are asked for the tick", async () => {
     const w = world();

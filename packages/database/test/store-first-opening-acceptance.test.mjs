@@ -25,6 +25,8 @@ import {
 import {
   createStoreOpeningDeps,
   loadOpeningFacts,
+  openingAnswersInput,
+  openingApproveInput,
   openingConfirmationFromFacts,
   openingWaitsFromFacts,
   runStoreOpening,
@@ -528,7 +530,6 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
             storeSetup: [],
             allergenList: [],
           });
-          assert.equal(facts.live.goLive, true);
           assert.equal(facts.live.storeTaxConfigurationReference, null);
           const opening = await (await fetcher("/merchant/store/opening-list")).json();
           assert.deepEqual(
@@ -539,14 +540,10 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
           // No tax rates yet: what the Owner typed is saved and nothing else is written, so no
           // code and no approval is asked for what could not be published.
           const before = await counts(opened.scope.storeReference);
-          const waiting = await runStoreOpening(deps, {
-            details,
-            answers,
-            confirmed: null,
-            approveAlone: false,
-            approveOthers: false,
-            approvers: facts.approvers,
-          });
+          // What the page sends: nothing to approve alone and no setting to change, while blocked.
+          const blocked = openingAnswersInput(facts, details, answers, null);
+          assert.deepEqual([blocked.approveAlone, blocked.turnOnSoleOperator], [false, false]);
+          const waiting = await runStoreOpening(deps, blocked);
           assert.deepEqual(waiting, { kind: "DetailsSaved", missing: ["TaxRates"] });
           const saved = await counts(opened.scope.storeReference);
           assert.equal(saved.references, before.references + 2);
@@ -571,17 +568,25 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
           assert.notEqual(confirmed, null);
           let answered = answers,
             ticked = confirmed;
-          const press = () =>
-            runStoreOpening(deps, {
+          // The page's own press: from what it read, the one tick approves alone and turns the
+          // Brand's setting on, because nobody else holds any of these approvals.
+          const pressed = async (tick) => {
+            const input = openingAnswersInput(
+              await loadOpeningFacts(deps),
               details,
-              answers: answered,
-              confirmed: ticked,
-              approveAlone: true,
-              approveOthers: false,
-              approvers: facts.approvers,
-            });
+              answered,
+              tick,
+            );
+            return { input, outcome: await runStoreOpening(deps, input) };
+          };
+          const press = async () => (await pressed(ticked)).outcome;
           // No second factor yet: stopped at the first approval, with everything else kept.
-          const stopped = await press();
+          const first = await pressed(ticked);
+          assert.deepEqual(
+            [first.input.approveAlone, first.input.turnOnSoleOperator],
+            [true, true],
+          );
+          const stopped = first.outcome;
           assert.deepEqual(
             [stopped.kind, stopped.step, stopped.code],
             ["Stopped", "ReceiptTemplate", "SoleOperatorNeedsVerification"],
@@ -598,14 +603,7 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
             purposeCode: "ORGANIZATION_SOLE_OPERATOR_SETTING",
           });
           // A stale tick: the Owner read other hours than the record says. No approval is sent.
-          const stale = await runStoreOpening(deps, {
-            details,
-            answers,
-            confirmed: { ...confirmed, businessDayStart: "05:00:00" },
-            approveAlone: true,
-            approveOthers: false,
-            approvers: facts.approvers,
-          });
+          const stale = (await pressed({ ...confirmed, businessDayStart: "05:00:00" })).outcome;
           assert.equal(stale.kind, "ConfirmAgain", JSON.stringify(stale));
           assert.equal(await setupPublished(opened), false);
           assert.equal(
@@ -621,8 +619,7 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
           // one made from the corrected setup, and that is what they approve.
           answered = { ...answers, hours: { ...answers.hours, preparationMinutes: "20" } };
           ticked = openingConfirmationFromFacts(await loadOpeningFacts(deps), details, answered);
-          const pressed = await press();
-          assert.deepEqual(pressed, { kind: "Published", waits: [] });
+          assert.deepEqual(await press(), { kind: "Published", waits: [] });
           assert.equal(await setupPublished(opened), true);
           // What was answered is what runs: the hours and order types, tips on for them.
           const published = (await loadOpeningFacts(deps)).live.current;
@@ -699,13 +696,14 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
             "STORE_SETUP_PUBLICATION_SOLE_OPERATOR",
             "STORE_SETUP_PUBLICATION",
           ]);
-          // Everything once, even after the earlier stops; pressing again writes nothing.
+          // Everything once, even after the earlier stops; pressing again writes nothing, and says
+          // it was published already.
           const finished = await counts(opened.scope.storeReference);
           assert.equal(finished.references, 2);
           assert.equal(finished.payments, 1);
           assert.equal(finished.artifacts, 2);
           assert.equal(finished.templates, 1);
-          assert.deepEqual((await press()).kind, "Published");
+          assert.deepEqual(await press(), { kind: "AlreadyPublished" });
           assert.deepEqual(await counts(opened.scope.storeReference), finished);
         });
       }
@@ -726,23 +724,24 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
         };
         const firstJournals = journalsFor(),
           secondJournals = journalsFor();
-        const press = (person, journals, input) =>
+        /** One press on the page, built as the page builds it from what it read. */
+        const press = (person, journals, inputOf) =>
           opened.listening(person, async (fetcher) => {
             const deps = depsFor(person, opened, store, journals, fetcher);
             const facts = await loadOpeningFacts(deps);
+            const input = inputOf(facts);
             return {
               facts,
-              outcome: await runStoreOpening(deps, { ...input, approvers: facts.approvers }),
+              input,
+              outcome: await runStoreOpening(deps, input),
               after: openingWaitsFromFacts(await loadOpeningFacts(deps)),
             };
           });
-        const sent = await press(first, firstJournals, {
-          details,
-          answers,
-          confirmed: null,
-          approveAlone: false,
-          approveOthers: false,
-        });
+        const sent = await press(first, firstJournals, (facts) =>
+          openingAnswersInput(facts, details, answers, null),
+        );
+        // Someone else approves here: no tick, no code, and the Brand's setting is left alone.
+        assert.deepEqual([sent.input.approveAlone, sent.input.turnOnSoleOperator], [false, false]);
         // The second Owner is named before anything is sent, whatever the setting says.
         assert.equal(sent.facts.approvers.receiptTemplate.length, 1);
         assert.equal(sent.facts.approvers.storeSetup.length, 1);
@@ -756,12 +755,11 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
           sent.after.forOthers.map((wait) => wait.what),
           ["ReceiptTemplate"],
         );
-        const approved = await press(second, secondJournals, {
-          details: null,
-          answers: null,
-          confirmed: null,
-          approveAlone: false,
-          approveOthers: true,
+        const approved = await press(second, secondJournals, openingApproveInput);
+        assert.deepEqual(approved.input.approve, {
+          gates: ["ReceiptTemplate"],
+          configuration: null,
+          carryOn: true,
         });
         // On the second Owner's page it waited for them; their press approved and carried on.
         assert.deepEqual(approved.facts.approvers.storeSetup.length, 1);
@@ -772,13 +770,8 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
           ["StoreSetup"],
         );
         assert.equal(await setupPublished(opened), false);
-        const finished = await press(first, firstJournals, {
-          details: null,
-          answers: null,
-          confirmed: null,
-          approveAlone: false,
-          approveOthers: true,
-        });
+        const finished = await press(first, firstJournals, openingApproveInput);
+        assert.deepEqual(finished.input.approve.gates, ["StoreSetup"]);
         assert.deepEqual(finished.outcome, { kind: "Published", waits: [] });
         assert.equal(await setupPublished(opened), true);
         const published = await admin.query(
