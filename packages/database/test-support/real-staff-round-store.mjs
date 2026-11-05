@@ -618,7 +618,12 @@ async function listRealMenu({
   // for the Owner's later changes; `atCommit` holds a step of a listing just before its COMMIT.
   const authoring = new Client(context.clientConfig);
   await authoring.connect();
-  const hooks = { atCommit: null };
+  const hooks = { atCommit: null, onStatement: null };
+  const send = authoring.query.bind(authoring);
+  authoring.query = (...call) => {
+    hooks.onStatement?.(call[0], call[1]);
+    return send(...call);
+  };
   try {
     const persistence = {
       now: () => new Date().toISOString(),

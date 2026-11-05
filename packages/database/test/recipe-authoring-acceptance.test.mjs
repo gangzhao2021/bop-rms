@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { setImmediate } from "node:timers";
 import pg from "pg";
 import { it } from "vitest";
 import {
@@ -770,6 +771,150 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
         "Applied",
       );
 
+      // DEC-MERCHANT-LOCK-SCOPE: two managers at once. A path that reads under the Recipe fence and
+      // then writes it takes it exclusive first, or two of them would each hold it shared and
+      // deadlock on the write. The second command is brought to the fence while the first is past
+      // it; each runs on its own connection, as the restricted role.
+      const overlapping = async (first, second) => {
+        const clients = [new Client(context.clientConfig), new Client(context.clientConfig)];
+        await Promise.all(clients.map((client) => client.connect()));
+        const isFence = (sql, values) =>
+          String(sql).includes("pg_advisory_xact_lock") &&
+          String(values?.[0]).startsWith("RecipeCatalogReferenceV1:");
+        let firstPast, secondIssued;
+        const firstAtFence = new Promise((resolve) => (firstPast = resolve));
+        const secondAtFence = new Promise((resolve) => (secondIssued = resolve));
+        const sides = [
+          {
+            query: async (sql, values) => {
+              const result = await clients[0].query(sql, values);
+              if (isFence(sql, values)) {
+                firstPast();
+                await secondAtFence;
+              }
+              return result;
+            },
+          },
+          {
+            query: async (sql, values) => {
+              if (!isFence(sql, values)) return clients[1].query(sql, values);
+              await firstAtFence;
+              const taking = clients[1].query(sql, values);
+              let settled = false;
+              void taking.finally(() => (settled = true));
+              // The first goes on once this one holds the fence or is queued for it.
+              for (let tries = 0; tries < 400 && !settled; tries += 1) {
+                const { rows } = await admin.query(
+                  "SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted",
+                  [clients[1].processID],
+                );
+                if (rows.length > 0) break;
+                await new Promise((resolve) => setImmediate(resolve));
+              }
+              secondIssued();
+              return taking;
+            },
+          },
+        ];
+        const run = async (client, side, work) => {
+          await client.query("BEGIN");
+          try {
+            await client.query("SET LOCAL ROLE " + role);
+            await client.query("SET LOCAL lock_timeout='5s'");
+            const value = await work(side);
+            await client.query("COMMIT");
+            return value;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          }
+        };
+        try {
+          return await Promise.all([
+            run(clients[0], sides[0], first),
+            run(clients[1], sides[1], second),
+          ]);
+        } finally {
+          await Promise.all(clients.map((client) => client.end()));
+        }
+      };
+      const [archiveOne, archiveTwo] = [id(210), id(211)];
+      await save({ recipeReference: archiveOne, draft: draft({ code: "ARCHIVE-ONE" }) });
+      await save({ recipeReference: archiveTwo, draft: draft({ code: "ARCHIVE-TWO" }) });
+      const archive = (recipeReference) => (t) =>
+        archiveRecipe(t, scope, {
+          actorReference: owner,
+          at: clock(),
+          nextReference: next,
+          operationReference: next(),
+          recipeReference,
+          expectedAggregateVersion: 1,
+          auditReference: next(),
+        });
+      assert.deepEqual(
+        (await overlapping(archive(archiveOne), archive(archiveTwo))).map((done) => done.status),
+        ["Applied", "Applied"],
+        "two archives in one Brand both finish",
+      );
+      const [readyOne, readyTwo] = [id(212), id(213)];
+      for (const [recipeReference, code] of [
+        [readyOne, "PREP-ONE"],
+        [readyTwo, "PREP-TWO"],
+      ]) {
+        await save({ recipeReference, draft: draft({ code }) });
+        const review = (actor, kind, subject) =>
+          tx(async (t) => {
+            const now = await loadRecipe(t, scope, recipeReference, clock());
+            return recordRecipeReview(t, scope, {
+              actorReference: actor,
+              at: clock(),
+              nextReference: next,
+              reviewReference: next(),
+              recipeReference,
+              versionReference: now.versionReference,
+              subject,
+              kind,
+              decision: "Approved",
+              comment: null,
+              auditReference: next(),
+            });
+          });
+        await review(costReviewer, "Cost", "Recipe");
+        await review(safetyReviewer, "FoodSafety", "Recipe");
+        await tx((t) =>
+          publishRecipe(t, scope, {
+            actorReference: owner,
+            at: clock(),
+            nextReference: next,
+            operationReference: next(),
+            recipeReference,
+            expectedAggregateVersion: 1,
+            facts: initial.recipeFacts,
+            reviewersAuthorized: async () => true,
+            auditReference: next(),
+          }),
+        );
+        await review(costReviewer, "Cost", "Preparation");
+        await review(safetyReviewer, "FoodSafety", "Preparation");
+      }
+      const publishPreparation = (recipeReference) => (t) =>
+        publishRecipePreparation(t, scope, {
+          actorReference: owner,
+          at: clock(),
+          nextReference: next,
+          operationReference: next(),
+          recipeReference,
+          reviewersAuthorized: async () => true,
+          auditReference: next(),
+        });
+      assert.deepEqual(
+        (await overlapping(publishPreparation(readyOne), publishPreparation(readyTwo))).map(
+          (done) => done.status,
+        ),
+        ["Applied", "Applied"],
+        "two preparation publishes in one Brand both finish",
+      );
+
       // A Store-specific recipe overrides the Brand one there and can be removed again.
       assert.equal(
         (
@@ -813,12 +958,12 @@ it("authors, reviews, publishes and binds recipes that orders and kitchen ticket
         "SELECT action_code,count(*)::int n FROM platform_audit.audit_record WHERE action_code LIKE 'RECIPE_%' GROUP BY 1 ORDER BY 1",
       );
       assert.deepEqual(Object.fromEntries(audit.rows.map((row) => [row.action_code, row.n])), {
-        RECIPE_ARCHIVE: 1,
-        RECIPE_CREATEDRAFT: 2,
-        RECIPE_PREPARATION_PUBLISHED: 2,
-        RECIPE_PUBLISH: 2,
+        RECIPE_ARCHIVE: 3,
+        RECIPE_CREATEDRAFT: 6,
+        RECIPE_PREPARATION_PUBLISHED: 4,
+        RECIPE_PUBLISH: 4,
         RECIPE_REPLACEDRAFT: 1,
-        RECIPE_REVIEW_RECORDED: 10,
+        RECIPE_REVIEW_RECORDED: 18,
         RECIPE_SKU_BOUND: 3,
         RECIPE_SKU_UNBOUND: 1,
       });
