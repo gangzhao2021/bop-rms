@@ -52,6 +52,8 @@ export interface DiningRound {
   readonly waitingReason?: DiningWaitingReason;
   /** v15 2026-10-29: the round is only the per-head tea staff added (absent: not). */
   readonly tea?: true;
+  /** WP-2423 item 8b: every item of the round is a charge, not a dish (absent: not). */
+  readonly charge?: true;
   readonly items: readonly {
     readonly displayName: string;
     readonly quantity: number;
@@ -128,8 +130,15 @@ export interface DiningSessionView {
     readonly paid: DiningMoney;
     readonly refunded: DiningMoney;
     readonly refundPending: DiningMoney;
-    /** WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill (staff's; guests don't add it). */
-    readonly teaCharge?: { readonly perGuest: DiningMoney; readonly guests: number };
+    /**
+     * WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill (staff's; guests don't add it); item 8b:
+     * the Store's own name for it, when sent.
+     */
+    readonly teaCharge?: {
+      readonly perGuest: DiningMoney;
+      readonly guests: number;
+      readonly name?: string;
+    };
     readonly due: DiningMoney;
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
     readonly tableTip?: DiningMoney;
@@ -276,10 +285,12 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     const waiting =
       value !== null && typeof value === "object" && Object.hasOwn(value, "waitingReason");
     const tea = value !== null && typeof value === "object" && Object.hasOwn(value, "tea");
+    const charge = value !== null && typeof value === "object" && Object.hasOwn(value, "charge");
     const round = record(value, [
       ...(priced ? ["subtotal", "tax"] : []),
       ...(waiting ? ["waitingReason"] : []),
       ...(tea ? ["tea"] : []),
+      ...(charge ? ["charge"] : []),
       "roundNumber",
       "orderedBy",
       "submittedAt",
@@ -371,6 +382,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
           }
         : {}),
       ...(tea ? { tea: round.tea === true ? (true as const) : invalid() } : {}),
+      ...(charge ? { charge: round.charge === true ? (true as const) : invalid() } : {}),
       items,
       ...(breakdown === null ? {} : breakdown),
       itemsTotal,
@@ -449,11 +461,16 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
         : {}),
       ...(withTea
         ? (() => {
-            const tea = record(raw.teaCharge, ["perGuest", "guests"]);
+            const named =
+              raw.teaCharge !== null &&
+              typeof raw.teaCharge === "object" &&
+              Object.hasOwn(raw.teaCharge, "name");
+            const tea = record(raw.teaCharge, ["perGuest", "guests", ...(named ? ["name"] : [])]);
             return {
               teaCharge: Object.freeze({
                 perGuest: money(tea.perGuest),
                 guests: count(tea.guests, 1),
+                ...(named ? { name: text(tea.name) } : {}),
               }),
             };
           })()

@@ -194,6 +194,163 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     expect(html).not.toMatch(/\bStaff\b(?! entered)|card_machine|StoreCardMachine/u);
   });
 
+  describe("WP-2423 item 8b: a charge reads as a charge", () => {
+    const again = {
+      sellableReference: "018f7710-0000-7000-8000-000000000001",
+      optionSelections: [],
+    };
+    const chargeItem = (displayName: string) => ({
+      displayName,
+      quantity: 4,
+      servedQuantity: 0,
+      cancelled: false,
+      lineTotal: cad("800"),
+    });
+    const html = (value: DiningSessionView) =>
+      render({ status: "ready", view: value, refreshing: false });
+    const onlyRound = (overrides: Partial<DiningRound>) =>
+      html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              orderedBy: "Staff",
+              charge: true,
+              status: "Queued",
+              payment: "OnTableBill",
+              items: [chargeItem("Corkage")],
+              itemsTotal: cad("800"),
+              ...overrides,
+            }),
+          ],
+        }),
+      );
+
+    it("a charge round reads as a charge", () => {
+      const page = onlyRound({ payment: "Paid" });
+      expect(page).toContain("Round 1 · Other charge");
+      expect(page).toContain("Added at");
+      expect(page).not.toContain("Ordered at");
+      expect(page).not.toContain("Entered by staff");
+      // Nothing about a kitchen, and no "served 0 of 4" for a fee.
+      expect(page).not.toContain("<dt>Status</dt>");
+      expect(page).not.toContain("Served");
+      expect(page).not.toContain("Order again");
+      // Money still adds up.
+      expect(page).toContain("Corkage");
+      expect(page).toContain("Round total");
+      expect(page).toContain("<dt>Payment</dt>");
+    });
+
+    it("a per-person charge says what it is on its own card, once", () => {
+      const page = html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              orderedBy: "Staff",
+              charge: true,
+              tea: true,
+              status: "Queued",
+              payment: "OnTableBill",
+              items: [chargeItem("Sauce bar")],
+              itemsTotal: cad("800"),
+            }),
+          ],
+          summary: {
+            paid: cad("0"),
+            refunded: cad("0"),
+            refundPending: cad("0"),
+            due: cad("800"),
+            teaCharge: { perGuest: cad("200"), guests: 4, name: "Sauce bar" },
+          },
+        }),
+      );
+      expect(page).toContain("Round 1 · Per-person charge");
+      const sentence = "Sauce bar $2.00 per person · 4 at this table (added by staff).";
+      expect(page.split(sentence)).toHaveLength(2);
+      const card = page.slice(page.indexOf("<article"), page.indexOf("</article>"));
+      expect(card).toContain(sentence);
+    });
+
+    it("the per-person sentence stays with the total when no card is only that charge", () => {
+      const page = html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [round({ orderedBy: "Staff", payment: "OnTableBill", status: "Queued" })],
+          summary: {
+            paid: cad("0"),
+            refunded: cad("0"),
+            refundPending: cad("0"),
+            due: cad("800"),
+            teaCharge: { perGuest: cad("200"), guests: 4, name: "Sauce bar" },
+          },
+        }),
+      );
+      expect(page.slice(page.indexOf("Table total"))).toContain("Sauce bar $2.00 per person");
+    });
+
+    it("a charge a guest ordered from the menu is not called added by staff", () => {
+      const page = onlyRound({ orderedBy: "You" });
+      expect(page).toContain("Round 1 · Ordered by you");
+      expect(page).toContain("Ordered at");
+      expect(page).toContain("<dt>Status</dt>");
+      expect(page).not.toContain("Other charge");
+      expect(page).not.toContain("Added at");
+    });
+
+    it("a dish beside a charge keeps its button", () => {
+      const page = html(
+        view({
+          rounds: [
+            round({
+              items: [{ ...chargeItem("Corkage") }, { ...chargeItem("Ramen"), orderAgain: again }],
+            }),
+          ],
+        }),
+      );
+      expect(page.split("Order again")).toHaveLength(2);
+      expect(page).toContain("Order one more Ramen");
+    });
+
+    it("a charge staff took off folds into one line with charges’ words", () => {
+      const page = html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              orderedBy: "Staff",
+              charge: true,
+              status: "StoreCancelled",
+              payment: "NotCharged",
+            }),
+            round({
+              roundNumber: 2,
+              orderedBy: "Staff",
+              charge: true,
+              status: "StoreCancelled",
+              payment: "NotCharged",
+            }),
+          ],
+        }),
+      );
+      expect(page).toContain("Staff took off 2 charges. They aren’t charged.");
+      expect(page).not.toContain("<article");
+    });
+
+    it("a staff charge waiting for payment names the card machine, never the kitchen", () => {
+      const page = onlyRound({
+        status: "AwaitingPayment",
+        payment: "Awaiting",
+        cancelsAt: "2026-10-13T19:00:00.000Z",
+      });
+      const card = page.slice(page.indexOf("<article"), page.indexOf("</article>"));
+      expect(card).toContain("Pay a staff member on the card machine.");
+      expect(card).not.toContain("kitchen");
+      expect(card).toContain("it is cancelled and nobody is charged");
+    });
+  });
+
   it("WP-2423 Q26: says which dish the kitchen is making again and that it will come to the table", () => {
     const ramen = round().items[0];
     if (ramen === undefined) throw new Error("fixture");

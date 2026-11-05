@@ -144,9 +144,18 @@ function adjustments(total: DiningMoney, subtotal: DiningMoney, tax: DiningMoney
   return rest === 0n ? null : formatMoney(rest, total.currencyCode);
 }
 
-/** v15 2026-10-29: a tea round staff took off a table's unpaid bill (never charged). */
-const teaTakenOff = (round: DiningRound) =>
-  round.tea === true && round.status === "StoreCancelled" && round.payment === "NotCharged";
+/**
+ * WP-2423 item 8b: a round of only charges staff entered (a per-person charge, corkage): a real bill
+ * lists it as a charge, not as a dish going through the kitchen. A guest who ordered such an item from
+ * the menu keeps the ordinary round: who ordered it and where it is.
+ */
+const staffCharge = (round: DiningRound) => round.charge === true && round.orderedBy === "Staff";
+
+/** v15 2026-10-29: a charge round staff took off a table's unpaid bill (never charged). */
+const chargeTakenOff = (round: DiningRound) =>
+  (round.charge === true || round.tea === true) &&
+  round.status === "StoreCancelled" &&
+  round.payment === "NotCharged";
 
 function RoundNote({ round }: { readonly round: DiningRound }) {
   if (round.status === "PaymentFailed")
@@ -204,13 +213,16 @@ function RoundNote({ round }: { readonly round: DiningRound }) {
 function AwaitingPaymentNote({ round }: { readonly round: DiningRound }) {
   return (
     <p className={round.cancelsAt ? "order-status__warning" : undefined}>
-      {round.orderedBy === "You"
-        ? t("Finish paying for this round so the kitchen can start it.")
-        : round.orderedBy === "Staff"
-          ? t(
-              "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.",
-            )
-          : t("The kitchen starts this round once it is paid.")}
+      {staffCharge(round)
+        ? // A charge doesn't go to a kitchen.
+          t("Pay a staff member on the card machine.")
+        : round.orderedBy === "You"
+          ? t("Finish paying for this round so the kitchen can start it.")
+          : round.orderedBy === "Staff"
+            ? t(
+                "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.",
+              )
+            : t("The kitchen starts this round once it is paid.")}
       {/* WP-2423 item 5: a round nobody started paying for is cancelled when its time ends. */}
       {round.cancelsAt
         ? t(" If it isn't paid by {value1}, it is cancelled and nobody is charged.", {
@@ -294,10 +306,13 @@ function RoundCard({
   againStatus,
   menu = null,
   collectOrderNumber = null,
+  note = null,
 }: {
   readonly round: DiningRound;
   /** A guest started this table, so nobody brings a finished dish over: it is called by number. */
   readonly collectOrderNumber?: string | null;
+  /** WP-2423 item 8b: says what the charge is, on the card guests will ask about. */
+  readonly note?: ReactNode;
   /** WP-2423 item 8 ⑥ part 4: the published menu, for a combo's chosen dishes and allergens. */
   readonly menu?: MenuView | null;
   /** Absent when the table can't add dishes now (checking out, paid or closed). */
@@ -306,29 +321,38 @@ function RoundCard({
   readonly againStatus?: { readonly key: string; readonly node: ReactNode } | undefined;
 }) {
   const headingId = `dining-round-${round.roundNumber}`;
+  const charge = staffCharge(round);
   return (
     <article className="order-status__card order-status__batch" aria-labelledby={headingId}>
       <h3 id={headingId}>
-        {t("Round")} {round.roundNumber} · {orderedByText[round.orderedBy]}
+        {t("Round")} {round.roundNumber} ·{" "}
+        {!charge
+          ? orderedByText[round.orderedBy]
+          : round.tea === true
+            ? t("Per-person charge")
+            : t("Other charge")}
       </h3>
       <dl className="dining-session__round-facts">
         <div>
-          <dt>{t("Ordered at")}</dt>
+          <dt>{charge ? t("Added at") : t("Ordered at")}</dt>
           <dd>{roundTime(round.submittedAt)}</dd>
         </div>
-        <div>
-          <dt>{t("Status")}</dt>
-          <dd>
-            {round.status === "Ready" && collectOrderNumber !== null
-              ? t("Ready · collect order {number} at the counter", { number: collectOrderNumber })
-              : statusText[round.status]}
-          </dd>
-        </div>
+        {charge ? null : (
+          <div>
+            <dt>{t("Status")}</dt>
+            <dd>
+              {round.status === "Ready" && collectOrderNumber !== null
+                ? t("Ready · collect order {number} at the counter", { number: collectOrderNumber })
+                : statusText[round.status]}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>{t("Payment")}</dt>
           <dd>{paymentText[round.payment]}</dd>
         </div>
       </dl>
+      {note}
       <RoundNote round={round} />
       <ul>
         {round.items.map((item, index) => (
@@ -352,7 +376,7 @@ function RoundCard({
                     })
                   : t("Being remade · we'll bring it to your table shortly")}
               </span>
-            ) : round.payment === "Paid" ? (
+            ) : round.payment === "Paid" && !charge ? (
               <span>
                 {t("Served")} {item.servedQuantity} {t("of")} {item.quantity}
               </span>
@@ -399,6 +423,34 @@ function RoundCard({
     </article>
   );
 }
+
+/** WP-2423 item 8 ⑦ 4b-3: the per-head charge, set by staff from the number of guests. */
+function PerPersonChargeNote({ view }: { readonly view: DiningSessionView }) {
+  const charge = view.summary?.teaCharge;
+  if (charge === undefined) return null;
+  return (
+    <p className="dining-session__tea" role="note">
+      {t("{name} {price} per person · {count} at this table (added by staff).", {
+        // The Store's own name for it (an older answer has none).
+        name: charge.name ?? t("Per-person charge"),
+        price: money(charge.perGuest),
+        count: String(charge.guests),
+      })}
+    </p>
+  );
+}
+
+/**
+ * The one card that says what the per-person charge is: the charge's own, newest first. Null when no
+ * card is only that charge (it was entered with dishes): the table total says it then.
+ */
+const perPersonChargeRound = (view: DiningSessionView) =>
+  view.summary?.teaCharge === undefined
+    ? null
+    : ([...view.rounds]
+        .reverse()
+        .find((round) => round.tea === true && staffCharge(round) && !chargeTakenOff(round)) ??
+      null);
 
 function TableSummary({ view }: { readonly view: DiningSessionView }) {
   const payLater = view.paymentTiming === "PayLater";
@@ -498,15 +550,7 @@ function TableSummary({ view }: { readonly view: DiningSessionView }) {
           </div>
         ) : null}
       </dl>
-      {summary.teaCharge !== undefined ? (
-        // WP-2423 item 8 ⑦ 4b-3: the per-head tea, set by staff from the number of guests.
-        <p className="dining-session__tea" role="note">
-          {t("Tea {price} per person · {count} at this table (added by staff).", {
-            price: money(summary.teaCharge.perGuest),
-            count: String(summary.teaCharge.guests),
-          })}
-        </p>
-      ) : null}
+      {perPersonChargeRound(view) === null ? <PerPersonChargeNote view={view} /> : null}
       <p>
         {summary.ordered === undefined
           ? ""
@@ -945,24 +989,29 @@ export function DiningSessionScreen({
       {view && view.rounds.length > 0 ? (
         <section className="order-status__batches" aria-labelledby="dining-rounds-heading">
           <h2 id="dining-rounds-heading">{t("Rounds")}</h2>
-          {/* v15 2026-10-29: tea rounds staff took off (the tea followed the guests) are kept on
-              the record but shown to guests as one line. */}
+          {/* v15 2026-10-29: charges staff took off (the tea followed the guests) are kept on the
+              record but shown to guests as one line. */}
           {((count) =>
             count === 0 ? null : (
               <p className="dining-session__tea-adjusted">
-                {t("Tea adjusted by staff: {count} tea rounds taken off, not charged.", {
+                {t("Staff took off {count} charges. They aren’t charged.", {
                   count: String(count),
                 })}
               </p>
-            ))(view.rounds.filter(teaTakenOff).length)}
+            ))(view.rounds.filter(chargeTakenOff).length)}
           {view.rounds
-            .filter((round) => !teaTakenOff(round))
+            .filter((round) => !chargeTakenOff(round))
             .map((round) => (
               <RoundCard
                 key={round.roundNumber}
                 round={round}
                 menu={menu}
                 collectOrderNumber={view.startedByGuest === true ? view.orderNumber : null}
+                note={
+                  perPersonChargeRound(view)?.roundNumber === round.roundNumber ? (
+                    <PerPersonChargeNote view={view} />
+                  ) : null
+                }
                 againStatus={
                   again === null
                     ? undefined

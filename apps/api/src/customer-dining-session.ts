@@ -110,6 +110,7 @@ export class CustomerDiningSessionHandler {
             storeCancellationReason: round.storeCancellationReason,
             ...(round.waitingReason ? { waitingReason: round.waitingReason } : {}),
             ...(round.tea === true ? { tea: true } : {}),
+            ...(round.charge === true ? { charge: true } : {}),
             items: round.items.map((item) => ({
               displayName: item.displayName,
               quantity: item.quantity,
@@ -160,6 +161,7 @@ export class CustomerDiningSessionHandler {
                         teaCharge: {
                           perGuest: money(view.summary.teaCharge.perGuest),
                           guests: view.summary.teaCharge.guests,
+                          name: view.summary.teaCharge.name,
                         },
                       }),
                   ...(view.summary.pointsUsed === undefined

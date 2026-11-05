@@ -513,6 +513,45 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
       );
       await listAll();
 
+      // WP-2423 item 8b: the guest's table page tells a charge from a dish beside it: the real
+      // declaration above says so, the dish saved with its allergens declared doesn't.
+      const plainDish = await saveDish("Wonton soup (TEST)", "馄饨汤", "700");
+      await allergens.command({
+        ...session,
+        body: {
+          action: "DeclareDish",
+          operationReference: op(),
+          skuReference: plainDish.skuReference,
+          allergens: [],
+        },
+      });
+      const declaredCharges = await asApi(async (tx) => {
+        const charges = await listDeclaredChargeSkus(tx, { brandReference, storeReference }, [
+          tea,
+          plainDish.skuReference,
+        ]);
+        // The Store stays selected: a later Store-scoped read in the same transaction sees its rows.
+        const { rows } = await tx.query(
+          "SELECT count(*)::int n FROM rms_pricing.tax_configuration WHERE store_id=$1",
+          [storeReference],
+        );
+        return { charges, storeRows: rows[0].n };
+      });
+      assert.deepEqual([...declaredCharges.charges], [tea]);
+      assert.equal(declaredCharges.storeRows, 1, "the Store is still selected");
+      assert.deepEqual(
+        [
+          ...(await asApi((tx) =>
+            listDeclaredChargeSkus(tx, { brandReference, storeReference }, []),
+          )),
+        ],
+        [],
+      );
+      await assert.rejects(
+        asApi((tx) => listDeclaredChargeSkus(tx, { brandReference, storeReference }, ["x"])),
+        /RECIPE_DECLARED_CHARGES_INPUT_INVALID/u,
+      );
+
       // 3. A tea choice, named once; the tea check accepts it; the Store's tea is set to it.
       assert.deepEqual(
         (await choices()).filter((item) => item.sellableReference === tea),
@@ -652,6 +691,34 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
           ),
         ),
         "STORE_FEATURES_TEA_USES_STOCK",
+      );
+
+      // 7. WP-2423 item 8b: a charge later given a real recipe is a dish again, so a guest can
+      // order it again; while it has none it stays a charge.
+      assert.deepEqual(
+        [
+          ...(await asApi((tx) =>
+            listDeclaredChargeSkus(tx, { brandReference, storeReference }, [tea]),
+          )),
+        ],
+        [tea],
+      );
+      await admin.query("SET session_replication_role = replica");
+      try {
+        await admin.query(
+          "INSERT INTO rms_recipe.recipe_scope_binding(recipe_scope_binding_id,recipe_version_id,recipe_id,brand_id,sku_id,store_id,effective_from) VALUES($1,$2,$3,$4,$5,NULL,now()-interval '1 minute')",
+          [id(0x903), id(0x904), id(0x905), brandReference, tea],
+        );
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+      assert.deepEqual(
+        [
+          ...(await asApi((tx) =>
+            listDeclaredChargeSkus(tx, { brandReference, storeReference }, [tea]),
+          )),
+        ],
+        [],
       );
     } finally {
       await admin.end();

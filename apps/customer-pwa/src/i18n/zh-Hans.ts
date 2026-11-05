@@ -1223,8 +1223,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Enter an amount in dollars.": "请输入金额（加元）。",
   "A tip can be at most the bill before tax ({amount}).": "小费最多为税前账单金额（{amount}）。",
   "Choose a tip to continue": "请选择小费后继续",
-  "Tea {price} per person · {count} at this table (added by staff).":
-    "茶位 每位 {price} · 本桌 {count} 位（由店员按人数加上）。",
+  "{name} {price} per person · {count} at this table (added by staff).":
+    "{name} 每位 {price} · 本桌 {count} 位（由店员按人数加上）。",
+  "Per-person charge": "按人数收费",
+  "Other charge": "其他费用",
+  "Added at": "添加时间",
+  "Pay a staff member on the card machine.": "请向店员用刷卡机付款。",
   "The restaurant has just stopped taking tips. Check the bill and pay it without a tip.":
     "餐厅刚刚停止收小费。请核对账单，不加小费付款。",
   "The tip choices just changed. Choose a tip again to pay.":
@@ -1325,8 +1329,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Back to your table": "回到本桌",
   "Back to the menu": "回到菜单",
   "Staff took this round off the bill. It is not charged.": "店员已从账单去掉这一轮，不收费。",
-  "Tea adjusted by staff: {count} tea rounds taken off, not charged.":
-    "茶位已由店员调整：撤下 {count} 轮茶位，不收费。",
+  "Staff took off {count} charges. They aren’t charged.": "店员撤下了 {count} 项收费，不收费。",
   "Your table moved to table {table}": "您这桌已换到 {table} 桌",
   "Your table was merged into table {table}": "你们这桌已并到 {table} 桌",
   "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.":

@@ -1154,6 +1154,40 @@ it("runs a multi-round dine-in table through unpaid-round cancellation, cart tim
           "sellableReference",
         ]);
       }
+      // WP-2423 item 8b: a pay-first table's page never depends on which lines are charges. With
+      // that read failing for real (the transaction aborts until the savepoint is rolled back) the
+      // table still reads, and every dish keeps what its allergen line and "Order again" need.
+      const failingCharges = transactions(api);
+      const hostTableWithoutCharges = await createCustomerDiningSessionRead({
+        scope,
+        transactions: {
+          run: (work, snapshot) =>
+            failingCharges.run((tx) => {
+              const failing = Object.create(tx);
+              failing.query = (sql, values) =>
+                String(sql).includes("staff_declared_allergen_source")
+                  ? tx.query("SELECT 1/0")
+                  : tx.query(sql, values);
+              return work(failing);
+            }, snapshot),
+        },
+        credentials: guest.identity.session.credentials,
+        diningScope: ownerScope,
+        paymentScope,
+        itemRefundScope: {
+          tenantReference: tenant,
+          providerAccountReference: provider,
+          environment: "Test",
+        },
+        now,
+        binding: guestBinding,
+      }).read({
+        sessionCredential: guest.sessionCredential,
+        csrfCredential: guest.csrfCredential,
+      });
+      assert.deepEqual(hostTableWithoutCharges.rounds, hostTable.rounds);
+      assert.deepEqual(hostTableWithoutCharges.summary, hostTable.summary);
+      for (const round of hostTable.rounds) assert.equal(round.charge, undefined);
       const otherTable = await tableOf(tableGuestP);
       assert.deepEqual(
         roundsOf(otherTable),

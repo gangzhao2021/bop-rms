@@ -69,6 +69,31 @@ describe("WP-2423 Q8 dining session client", () => {
     }
   });
 
+  it("WP-2423 item 8b: decodes a charge round and the charge's name; absence stays fine", () => {
+    const p = payload();
+    const charged = structuredClone(p) as unknown as {
+      session: {
+        rounds: Record<string, unknown>[];
+        summary: { teaCharge?: unknown };
+      };
+    };
+    (charged.session.rounds[0] as Record<string, unknown>).charge = true;
+    charged.session.summary.teaCharge = {
+      perGuest: cad("200"),
+      guests: 4,
+      name: "Sauce bar",
+    };
+    const view = parseDiningSessionView(charged);
+    expect(view.rounds[0]?.charge).toBe(true);
+    expect(view.summary?.teaCharge?.name).toBe("Sauce bar");
+    expect(parseDiningSessionView(p).rounds[0]).not.toHaveProperty("charge");
+    (charged.session.rounds[0] as Record<string, unknown>).charge = false;
+    expect(() => parseDiningSessionView(charged)).toThrow();
+    (charged.session.rounds[0] as Record<string, unknown>).charge = true;
+    charged.session.summary.teaCharge = { perGuest: cad("200"), guests: 4, name: "<b>" };
+    expect(() => parseDiningSessionView(charged)).toThrow();
+  });
+
   it("v15 2026-10-29: decodes a round that is only the tea, and nothing but true", () => {
     const p = payload();
     const tea = structuredClone(p) as unknown as { session: { rounds: Record<string, unknown>[] } };

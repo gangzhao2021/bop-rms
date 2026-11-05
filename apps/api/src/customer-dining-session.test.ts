@@ -182,6 +182,33 @@ it("WP-2423 D5: sends item prices before tax and the round and table subtotal an
   expect(body.session.summary.due).toEqual(money("0"));
 });
 
+it("WP-2423 item 8b: says a round is a charge and what the Store calls its per-head item", async () => {
+  const charged = view();
+  const round = charged.rounds[0];
+  if (round === undefined || charged.summary === null) throw new Error("fixture");
+  const f = await setup();
+  f.read.mockResolvedValue({
+    ...charged,
+    rounds: [{ ...round, charge: true }],
+    summary: {
+      ...charged.summary,
+      teaCharge: { perGuest: cad(200n), guests: 4, name: "Sauce bar" },
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    session: {
+      rounds: Record<string, unknown>[];
+      summary: { teaCharge: unknown };
+    };
+  };
+  expect(body.session.rounds[0]?.charge).toBe(true);
+  expect(body.session.summary.teaCharge).toEqual({
+    perGuest: { amountMinor: "200", currencyCode: "CAD" },
+    guests: 4,
+    name: "Sauce bar",
+  });
+});
+
 it("WP-2423 Q26: tells the table which dish the kitchen is making again, and only that dish", async () => {
   const f = await setup();
   const remade = view();

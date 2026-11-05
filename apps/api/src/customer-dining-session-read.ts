@@ -1,6 +1,7 @@
 import type { ConsumerTransaction } from "@bop/eventing";
 import { loadDiningTeaChargeSetting } from "@rms/dining";
 import { listOrderSkuLines } from "@rms/ordering";
+import { listDeclaredChargeSkus } from "@rms/recipe";
 import {
   GuestSessionError,
   GuestSessionService,
@@ -157,6 +158,12 @@ export interface CustomerDiningSessionFacts {
     readonly teaItems?: ReadonlySet<string>;
     /** v15 2026-10-29: every order item that is the per-head tea, taken off or not. */
     readonly teaLines?: ReadonlySet<string>;
+    /**
+     * WP-2423 item 8b: the order items that are a charge, not a dish a guest can order: the Store's
+     * per-head item, or anything staff declared "a charge, no stock ingredients". Never offered
+     * again; a round of only these says so.
+     */
+    readonly chargeLines?: ReadonlySet<string>;
     readonly staffCancellations: ReadonlyMap<
       string,
       {
@@ -251,6 +258,8 @@ export interface CustomerDiningSessionView {
     readonly waitingReason?: OrderRoundHoldReason | null;
     /** v15 2026-10-29: present (true) when the round is only the per-head tea staff added. */
     readonly tea?: true;
+    /** WP-2423 item 8b: present (true) when every item of the round is a charge, not a dish. */
+    readonly charge?: true;
     readonly items: readonly {
       readonly displayName: string;
       readonly quantity: number;
@@ -284,8 +293,15 @@ export interface CustomerDiningSessionView {
     readonly takenOff?: CustomerMoney;
     /** v15 2026-11-02: the bill's tax rounding (DEC-TAX-WHOLE-RECEIPT), which can be negative. */
     readonly taxRounding?: CustomerMoney;
-    /** WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill: what one guest's tea costs, and how many. */
-    readonly teaCharge?: { readonly perGuest: CustomerMoney; readonly guests: number };
+    /**
+     * WP-2423 item 8 ⑦ 4b-3: the per-head tea on the bill: what one guest's tea costs, and how many;
+     * item 8b: the Store's own name for it.
+     */
+    readonly teaCharge?: {
+      readonly perGuest: CustomerMoney;
+      readonly guests: number;
+      readonly name: string;
+    };
     /** DEC-DINE-IN-PAY-LATER: the tip and cash rounding of the table's one payment, once paid. */
     readonly tableTip?: CustomerMoney;
     readonly cashRounding?: CustomerMoney;
@@ -399,7 +415,11 @@ export function composeCustomerDiningSession(
         price: prices?.get(item.orderItemReference),
         phase: delivery.phase,
         beingRemade: !cancelled && order.remakes?.has(item.orderItemReference) === true,
-        orderAgain: order.orderAgain?.get(item.orderItemReference),
+        // WP-2423 item 8b: a line is offered again only if it is a dish a guest can order.
+        orderAgain:
+          order.chargeLines?.has(item.orderItemReference) === true
+            ? undefined
+            : order.orderAgain?.get(item.orderItemReference),
         notCharged: itemCancellation(item.orderItemReference)?.notCharged === true,
       });
     });
@@ -511,6 +531,9 @@ export function composeCustomerDiningSession(
       ...(batch.items.every((item) => order.teaLines?.has(item.orderItemReference) === true)
         ? { tea: true as const }
         : {}),
+      ...(batch.items.every((item) => order.chargeLines?.has(item.orderItemReference) === true)
+        ? { charge: true as const }
+        : {}),
       items: Object.freeze(
         items.map((item) =>
           Object.freeze({
@@ -603,6 +626,7 @@ export function composeCustomerDiningSession(
           teaCharge: Object.freeze({
             perGuest: money(before.subtotal.amountMinor / BigInt(priced.quantity)),
             guests,
+            name: priced.displayName,
           }),
         };
       })(),
@@ -995,6 +1019,8 @@ function postgresDependencies(
         let chosenNames: Map<string, string> | undefined;
         // WP-2423 item 8 ③ (decision 13): what "Order again" adds, by Order item.
         let orderAgain: Map<string, CustomerDiningOrderAgain> | undefined;
+        // WP-2423 item 8b: which menu item each Order item is, to tell a charge from a dish.
+        let orderedSellables: Map<string, string> | undefined;
         if (await stillAuthorized()) {
           const shown = new Map(
             status.order.batches.flatMap((batch) =>
@@ -1018,6 +1044,9 @@ function postgresDependencies(
                   optionSelections: price.optionSelections,
                 }),
               ]),
+            );
+            orderedSellables = new Map(
+              found.map((price) => [price.orderItemReference, price.sellableReference]),
             );
             if (displayLocale !== undefined)
               chosenNames = new Map(
@@ -1124,26 +1153,49 @@ function postgresDependencies(
         // payment with its own tip and cash rounding, added up below).
         const [splitPlan] =
           tableStore !== null ? await tableStore.listSplitPlans(transaction, [orderReference]) : [];
+        // WP-2423 item 8b: which lines are a charge. A convenience: it has its own savepoint, so a
+        // failure here never takes the table page down at any table. Whatever was read before the
+        // failure still counts (the cart still refuses the per-head item from a guest).
+        let teaSellable: string | null = null;
+        let declaredCharges: ReadonlySet<string> = new Set();
+        try {
+          await transaction.query("SAVEPOINT customer_dining_charges", []);
+          teaSellable = (
+            await loadDiningTeaChargeSetting(
+              transaction as unknown as Parameters<typeof loadDiningTeaChargeSetting>[0],
+              options.diningScope as Parameters<typeof loadDiningTeaChargeSetting>[1],
+            )
+          ).teaSellableReference;
+          declaredCharges = await listDeclaredChargeSkus(
+            transaction as unknown as Parameters<typeof listDeclaredChargeSkus>[0],
+            scope,
+            [...new Set(orderedSellables?.values() ?? [])],
+          );
+          await transaction.query("RELEASE SAVEPOINT customer_dining_charges", []);
+        } catch {
+          await transaction.query("ROLLBACK TO SAVEPOINT customer_dining_charges", []);
+          await transaction.query("RELEASE SAVEPOINT customer_dining_charges", []);
+        }
         // WP-2423 item 8 ⑦ 4b-3: the table's per-head tea (a table that pays at the end).
-        const teaSetting =
-          paymentTiming === "PayLater" && options.diningScope !== undefined
-            ? await loadDiningTeaChargeSetting(
-                transaction as unknown as Parameters<typeof loadDiningTeaChargeSetting>[0],
-                options.diningScope as Parameters<typeof loadDiningTeaChargeSetting>[1],
-              )
-            : null;
-        const teaSkuLines = teaSetting?.teaSellableReference
-          ? (
-              await listOrderSkuLines(transaction as never, options.diningScope as never, {
-                orderReference: String(orderReference),
-                sellableReference: teaSetting.teaSellableReference,
-              })
-            ).lines
-          : [];
+        const teaSkuLines =
+          paymentTiming === "PayLater" && teaSellable !== null
+            ? (
+                await listOrderSkuLines(transaction as never, options.diningScope as never, {
+                  orderReference: String(orderReference),
+                  sellableReference: teaSellable,
+                })
+              ).lines
+            : [];
         const teaItems = new Set(
           teaSkuLines.filter((line) => !line.takenOff).map((line) => line.orderItemReference),
         );
         const teaLines = new Set(teaSkuLines.map((line) => line.orderItemReference));
+        const chargeLines = new Set([
+          ...teaLines,
+          ...[...(orderedSellables ?? [])]
+            .filter(([, sellable]) => sellable === teaSellable || declaredCharges.has(sellable))
+            .map(([orderItem]) => orderItem),
+        ]);
         const splitPaid =
           splitPlan !== undefined &&
           splitPlan.mode !== "Whole" &&
@@ -1182,6 +1234,7 @@ function postgresDependencies(
           heldRounds,
           ...(teaItems.size === 0 ? {} : { teaItems }),
           ...(teaLines.size === 0 ? {} : { teaLines }),
+          ...(chargeLines.size === 0 ? {} : { chargeLines }),
           splitParts:
             splitPlan === undefined || splitPlan.mode === "Whole" || splitPaid
               ? null
@@ -1300,6 +1353,7 @@ export function mergeBillOrderFacts(
     new Set(all.flatMap((facts) => [...(pick(facts) ?? new Set<V>())]));
   const teaItems = sets((facts) => facts.teaItems),
     teaLines = sets((facts) => facts.teaLines),
+    chargeLines = sets((facts) => facts.chargeLines),
     orderAgain = maps((facts) => facts.orderAgain),
     itemPrices = maps((facts) => facts.itemPrices);
   return {
@@ -1317,6 +1371,7 @@ export function mergeBillOrderFacts(
     heldRounds: maps((facts) => facts.heldRounds),
     ...(teaItems.size === 0 ? {} : { teaItems }),
     ...(teaLines.size === 0 ? {} : { teaLines }),
+    ...(chargeLines.size === 0 ? {} : { chargeLines }),
     unpaidCancellations: sets((facts) => facts.unpaidCancellations),
     staffCancellations: maps((facts) => facts.staffCancellations),
     itemCancellations: all.flatMap((facts) => facts.itemCancellations),

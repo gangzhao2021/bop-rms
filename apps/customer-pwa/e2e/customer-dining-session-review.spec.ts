@@ -272,17 +272,103 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
         schemaVersion: 1,
         session: {
           ...session.session,
-          summary: { ...session.session.summary, teaCharge: { perGuest: cad("150"), guests: 4 } },
+          summary: {
+            ...session.session.summary,
+            teaCharge: { perGuest: cad("150"), guests: 4, name: "Sauce bar" },
+          },
         },
       },
     }));
     const summary = page.getByRole("main").getByRole("region", { name: "Table total" });
+    // The Store's own name for it, whatever it is; beside the total when no card is only that charge.
     await expect(summary.getByRole("note")).toHaveText(
-      "Tea $1.50 per person · 4 at this table (added by staff).",
+      "Sauce bar $1.50 per person · 4 at this table (added by staff).",
     );
     await expectNoInternalText(page);
     await page.setViewportSize({ width: 320, height: 844 });
     await expectNoHorizontalOverflow(page);
+  });
+
+  // WP-2423 item 8b, hotpot: the sauce bar fee read as a dish, with 再来一份 and a kitchen status.
+  test("a charge round reads as a charge, and a dish beside it keeps Order again", async ({
+    page,
+  }) => {
+    const [round1] = session.session.rounds;
+    if (round1 === undefined) throw new Error("fixture");
+    const again = { sellableReference: id(50), optionSelections: [] };
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: [
+            {
+              ...round1,
+              roundNumber: 1,
+              orderedBy: "Staff",
+              tea: true,
+              charge: true,
+              status: "Queued",
+              payment: "OnTableBill",
+              items: [
+                {
+                  displayName: "Sauce bar",
+                  quantity: 4,
+                  servedQuantity: 0,
+                  cancelled: false,
+                  lineTotal: cad("600"),
+                },
+              ],
+              itemsTotal: cad("600"),
+            },
+            {
+              ...round1,
+              roundNumber: 2,
+              orderedBy: "You",
+              status: "Queued",
+              payment: "OnTableBill",
+              items: [
+                {
+                  displayName: "Synthetic ramen",
+                  quantity: 1,
+                  servedQuantity: 0,
+                  cancelled: false,
+                  lineTotal: cad("1500"),
+                  orderAgain: again,
+                },
+              ],
+              itemsTotal: cad("1500"),
+            },
+          ],
+          summary: {
+            ...session.session.summary,
+            teaCharge: { perGuest: cad("150"), guests: 4, name: "Sauce bar" },
+          },
+        },
+      },
+    }));
+    const main = page.getByRole("main");
+    const charge = main.getByRole("article", { name: "Round 1 · Per-person charge" });
+    await expect(charge).toBeVisible();
+    await expect(charge).toContainText("Added at");
+    await expect(charge).not.toContainText("Status");
+    await expect(charge).not.toContainText("Served");
+    await expect(charge.getByRole("button", { name: /Order/u })).toHaveCount(0);
+    await expect(charge.getByRole("note")).toHaveText(
+      "Sauce bar $1.50 per person · 4 at this table (added by staff).",
+    );
+    // One copy of that sentence: it moved from the total to the charge's own card.
+    await expect(main.getByRole("region", { name: "Table total" }).getByRole("note")).toHaveCount(
+      0,
+    );
+    await expect(
+      main
+        .getByRole("article", { name: /^Round 2 /u })
+        .getByRole("button", { name: "Order one more Synthetic ramen" }),
+    ).toBeVisible();
+    await expectNoInternalText(page);
   });
 
   test("v15 2026-10-29: a round taken off a table's unpaid bill says it is not charged", async ({
@@ -306,13 +392,14 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expect(main).not.toContainText("refunded");
   });
 
-  test("v15 2026-10-29: the tea rounds staff took off show as one line", async ({ page }) => {
+  test("v15 2026-10-29: the charge rounds staff took off show as one line", async ({ page }) => {
     const [round1] = session.session.rounds;
     if (round1 === undefined) throw new Error("fixture");
     const teaRound = (roundNumber: number, taken: boolean) => ({
       ...round1,
       roundNumber,
       tea: true,
+      charge: true,
       orderedBy: "Staff",
       status: taken ? "StoreCancelled" : "Queued",
       payment: taken ? "NotCharged" : "OnTableBill",
@@ -334,8 +421,8 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
       },
     }));
     const main = page.getByRole("main");
-    await expect(main).toContainText("Tea adjusted by staff: 2 tea rounds taken off, not charged.");
-    // The rounds taken off are not listed one by one; the tea still charged is.
+    await expect(main).toContainText("Staff took off 2 charges. They aren’t charged.");
+    // The rounds taken off are not listed one by one; the charge still on the bill is.
     await expect(main.getByRole("article", { name: /^Round 2 /u })).toHaveCount(0);
     await expect(main.getByRole("article", { name: /^Round 3 /u })).toHaveCount(0);
     await expect(main.getByRole("article", { name: /^Round 4 /u })).toHaveCount(1);

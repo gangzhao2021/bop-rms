@@ -593,6 +593,72 @@ describe("WP-2423 item 8 ③ decision 13: order a dish again", () => {
     const plain = composeCustomerDiningSession(facts()).rounds[0]?.items[0];
     expect(plain).not.toHaveProperty("orderAgain");
   });
+
+  // WP-2423 item 8b, hotpot: 再来一份 on the sauce bar fee, which the guest cart then refuses.
+  it("a charge line is never offered again and its round says it is a charge", () => {
+    const again = (n: number) => ({ sellableReference: id(n), optionSelections: [] });
+    const view = composeCustomerDiningSession(
+      facts({
+        batches: [
+          // Only a charge: the round reads as one.
+          { orderBatchReference: id(30), submittedAt: at, items: [item(31, "Sauce bar", 4, 800n)] },
+          // A dish beside a charge: the round stays a dish's, and the dish keeps its button.
+          {
+            orderBatchReference: id(40),
+            submittedAt: at,
+            items: [item(41, "Corkage", 1, 1500n), item(42, "Ramen", 1, 1500n)],
+          },
+        ],
+        authorship: new Map([
+          [id(30), false],
+          [id(40), false],
+        ]),
+        delivery: new Map([
+          [id(31), { phase: "Submitted" as never, deliveredQuantity: 0 }],
+          [id(41), { phase: "Submitted" as never, deliveredQuantity: 0 }],
+          [id(42), { phase: "Submitted" as never, deliveredQuantity: 0 }],
+        ]),
+        paymentDeadlines: new Map(),
+        orderAgain: new Map([
+          [id(31), again(50)],
+          [id(41), again(51)],
+          [id(42), again(52)],
+        ]),
+        chargeLines: new Set([id(31), id(41)]),
+      }),
+    );
+    expect(view.rounds[0]?.charge).toBe(true);
+    expect(view.rounds[0]?.items[0]).not.toHaveProperty("orderAgain");
+    expect(view.rounds[1]).not.toHaveProperty("charge");
+    expect(view.rounds[1]?.items[0]).not.toHaveProperty("orderAgain");
+    expect(view.rounds[1]?.items[1]?.orderAgain).toEqual(again(52));
+  });
+
+  // The menu's "already ordered" hint and a combo's dishes and allergens come from orderAgain, so a
+  // failed read of which lines are charges must not take those away.
+  it("a failed charge read keeps combo dishes and table counts", () => {
+    const again = { sellableReference: id(50), optionSelections: [] };
+    const view = composeCustomerDiningSession(
+      facts({
+        batches: [
+          { orderBatchReference: id(30), submittedAt: at, items: [item(31, "Combo", 1, 2880n)] },
+        ],
+        authorship: new Map([[id(30), true]]),
+        delivery: new Map([[id(31), { phase: "Submitted" as never, deliveredQuantity: 0 }]]),
+        paymentDeadlines: new Map(),
+        orderAgain: new Map([[id(31), again]]),
+      }),
+    );
+    expect(view.rounds[0]?.items[0]?.orderAgain).toEqual(again);
+    expect(view.rounds[0]).not.toHaveProperty("charge");
+  });
+
+  it("a merged table's charges stay charges on the table's bill", () => {
+    const merged = mergeBillOrderFacts(facts({ chargeLines: new Set([id(31)]) }).order as Order, [
+      facts({ chargeLines: new Set([id(41)]) }).order as Order,
+    ]);
+    expect([...(merged.chargeLines ?? [])].sort()).toEqual([id(31), id(41)]);
+  });
 });
 
 describe("WP-2423 D5 item prices before tax at the table", () => {
@@ -668,7 +734,8 @@ describe("WP-2423 D5 item prices before tax at the table", () => {
     const view = composeCustomerDiningSession(
       facts({ ...threeRounds, itemPrices: prices, teaItems: tea }),
     );
-    expect(view.summary?.teaCharge).toEqual({ perGuest: cad(796n), guests: 1 });
+    // The note carries the Store's own name for the charge (item 8b): never just "tea".
+    expect(view.summary?.teaCharge).toEqual({ perGuest: cad(796n), guests: 1, name: "Gyoza" });
     // A round that is only the tea (taken off or not) says so; the guest page folds those
     // taken off into one line.
     const marked = composeCustomerDiningSession(
