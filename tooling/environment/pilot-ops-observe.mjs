@@ -456,13 +456,21 @@ export async function readBusinessSignals({
     if (
       typeof dependencies.isSettlementCovered === "function" &&
       (await dependencies.isSettlementCovered()) === false
-    )
+    ) {
+      // A closed day that could not be read is not "none yet": "unreadable" keeps what it said.
+      const closed =
+        opened === true
+          ? await part(
+              "closedDay",
+              async () => (await dependencies.readClosedBusinessDay(resources)) === true,
+            )
+          : opened;
       return {
         settlementExceptions: null,
         settlementCovered: false,
-        closedBusinessDay:
-          opened === true && (await dependencies.readClosedBusinessDay(resources)) === true,
+        closedBusinessDay: closed === true || closed === "unreadable" ? closed : false,
       };
+    }
     const status = await dependencies.readSettlementStatus({ resources, installation });
     const problems = status.days.filter(
       (day) =>

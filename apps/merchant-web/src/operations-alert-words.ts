@@ -295,6 +295,7 @@ function checkSource(english: string): string {
     "the check of the store's order rules": t("the check of the store's order rules"),
     "the check for payment differences": t("the check for payment differences"),
     "the day-end settlement check": t("the day-end settlement check"),
+    "the check for closed business days": t("the check for closed business days"),
   };
   return lookup(words, english);
 }

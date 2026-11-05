@@ -662,6 +662,8 @@ export async function seedJourneyStorePublication({
   validUntil = new Date(Date.parse(publishedAt) + 2 * 86400000).toISOString(),
   // Open all day every day (test only), for a read that happens at whatever time the test runs.
   allWeek = false,
+  // Why the configuration was published; INTERNAL_TEST_STORE_SETUP is the TEST tool's first one.
+  reasonCode = "PILOT_CONFIGURATION",
 }) {
   const id = (n) =>
     n === 90
@@ -740,7 +742,7 @@ export async function seedJourneyStorePublication({
     effective_from: at,
     effective_until: null,
     supersedes_configuration_reference: null,
-    reason_code: "PILOT_CONFIGURATION",
+    reason_code: reasonCode,
     authored_by_reference: id(10),
     approved_by_reference: id(11),
     approval_evidence_reference: id(12),

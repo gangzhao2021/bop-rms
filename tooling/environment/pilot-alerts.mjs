@@ -637,6 +637,7 @@ const SOURCE_NAMES = Object.freeze({
   workflow: "the check of the store's order rules",
   reconciliation: "the check for payment differences",
   settlement: "the day-end settlement check",
+  closedDay: "the check for closed business days",
 });
 
 const PROBE_KEYS = Object.freeze({
@@ -937,6 +938,7 @@ const HELD_WHILE_UNREADABLE = Object.freeze({
   pickupCapacity: ["pickup.capacity_horizon"],
   reconciliation: ["reconciliation.differences"],
   settlement: ["settlement.exceptions", "settlement.not_covered"],
+  closedDay: ["settlement.not_covered"],
 });
 
 /** The name a Store's own background work goes by on its board. */
@@ -962,6 +964,14 @@ function storeAttention(attention, store) {
   if (shared || whole) services.add(STORE_BACKGROUND);
   return services.size === 0 ? null : { services: [...services].sort(), sharedHost };
 }
+/**
+ * Clean-up chores no guest, cook or server notices while they fail. On a restaurant's Home they
+ * are for today, not Urgent: an owner who calls BOP at 8 p.m. about one learns to ignore Urgent.
+ * BOP hears them as before.
+ */
+const STORE_CHORES = new Set(["contactRetention", "webhookEvidenceRetention"]);
+const onlyChores = (services) =>
+  services.every((service) => STORE_CHORES.has(String(service).split(":")[1]));
 
 /**
  * The last day before ordering at this Store would stop: its own validity or the installation's
@@ -1003,7 +1013,8 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
   if (noReport && observations.plannedUpdate !== true) unreadable.push("supervisor");
   if (!noReport) {
     const attention = storeAttention(supervisor.attention, observations.store);
-    if (attention !== null) raise("service.attention", attention);
+    if (attention !== null)
+      raise("service.attention", attention, onlyChores(attention.services) ? "warning" : undefined);
   }
   const business = observations.business;
   evaluateBusinessConditions(business, {
@@ -1014,6 +1025,7 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
   });
   if (business?.settlementCovered === false && business.closedBusinessDay === true)
     raise("settlement.not_covered");
+  else if (business?.closedBusinessDay === "unreadable") unreadable.push("closedDay");
   evaluateInstallationValidity(observations.installation, observations.now, {
     raise,
     unreadable,

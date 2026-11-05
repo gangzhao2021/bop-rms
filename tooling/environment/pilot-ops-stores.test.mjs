@@ -87,7 +87,7 @@ function businessOf(facts, closes) {
         },
         readOwnerPublishedSetup: async () => answer(current().opened),
         isSettlementCovered: async () => answer(current().covered),
-        readClosedBusinessDay: async () => current().closedDay,
+        readClosedBusinessDay: async () => answer(current().closedDay),
         readReceiptTemplate: async () => answer(current().receipt),
         readQuoteTaxConfiguration: async () => answer(current().quoteTax),
         readHeldStockOrders: async () =>
@@ -553,6 +553,31 @@ describe("one part of a Store's read failing leaves the rest standing", () => {
       "settlement.not_covered",
     ]);
     expect(failedChecks(logs).map((entry) => entry.check)).toEqual(["settlement"]);
+  });
+  it("a closed business day that cannot be read is not 'none yet': BOP still hears there is no settlement", async () => {
+    const error = refused();
+    const facts = { tea: fact({ covered: false, closedDay: true }) };
+    const { directory, cycle, logs, report } = await monitorsFor(facts);
+    await cycle(0);
+    expect(keysOf(await boardOf(directory, "tea"))).toEqual(["settlement.not_covered"]);
+    facts.tea.closedDay = error;
+    for (const minute of [1, 3, 5, 6]) await cycle(minute);
+    const board = await boardOf(directory, "tea");
+    expect(keysOf(board)).toEqual(["monitor.source", "settlement.not_covered"]);
+    expect(board.active.find((item) => item.key === "monitor.source").summary).toContain(
+      "the check for closed business days",
+    );
+    expect(failedChecks(logs)).toEqual([
+      { event: "store_check_failed", store: "tea", check: "closedDay" },
+    ]);
+    expect(report).toHaveBeenCalledWith("PILOT_OPS_STORE_READ_UNAVAILABLE", error, {
+      store: "stores/tea",
+      step: "closedDay",
+    });
+    // Read again: once there is an answer, the board says only what it says.
+    facts.tea.closedDay = false;
+    for (const minute of [7, 8, 10, 12]) await cycle(minute);
+    expect((await boardOf(directory, "tea")).active).toEqual([]);
   });
   it("a payment difference already raised stays while its read cannot run, and the rest still rises", async () => {
     const error = refused();

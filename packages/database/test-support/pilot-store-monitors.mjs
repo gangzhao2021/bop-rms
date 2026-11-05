@@ -42,6 +42,13 @@ export async function exercisePilotStoreMonitors(context) {
     brandReference: id(0xc012),
     storeReference: id(0xc013),
   };
+  // A merchant whose only configuration is the TEST tool's first one: its Owner has not opened.
+  const unopened = {
+    name: "unopened",
+    tenantReference: id(0xc021),
+    brandReference: id(0xc022),
+    storeReference: id(0xc023),
+  };
   const asOwner = async (of, work) => {
     await admin.query(
       "SELECT set_config('bop.tenant_id',$1,false),set_config('bop.brand_id',$2,false),set_config('bop.store_id',$3,false)",
@@ -58,6 +65,17 @@ export async function exercisePilotStoreMonitors(context) {
       businessDayStart: "04:00:00",
       prefix: "01a9f100",
       validUntil: new Date(Date.now() + 86400_000).toISOString(),
+    }),
+  );
+  await asOwner(unopened, () =>
+    seedJourneyStorePublication({
+      client: admin,
+      scope: unopened,
+      publishedAt: new Date(Date.now() - 3600_000).toISOString(),
+      businessDayStart: "04:00:00",
+      prefix: "01a9f200",
+      validUntil: new Date(Date.now() + 86400_000).toISOString(),
+      reasonCode: "INTERNAL_TEST_STORE_SETUP",
     }),
   );
   let reference = 0xc100;
@@ -162,44 +180,45 @@ export async function exercisePilotStoreMonitors(context) {
   const reported = [];
   const loaded = [];
   const coverage = new Map();
+  const loadStore = async (storeDirectory) => {
+    loaded.push(path.relative(directory, storeDirectory));
+    const of = [...stores, unopened].find((each) => each.name === path.basename(storeDirectory));
+    assert.ok(of, "a Store's reads load from that Store's own directory");
+    const installation = {
+      database: "isolated",
+      loadProfile: async () => ({
+        environment: "InternalTest",
+        database: "isolated",
+        binding: resourcesOf(of).publicProfile.binding,
+      }),
+      loadDailySettlementCoverage: async () => coverage.get(of.name),
+    };
+    const dependencies = await composeBusinessDependencies({
+      directory: storeDirectory,
+      installation,
+      store: true,
+    });
+    return {
+      resources: resourcesOf(of),
+      installation,
+      dependencies: {
+        ...dependencies,
+        // The owner read of the published tax configuration, with the pilot's file policy stood
+        // in for: that file only carries test evidence, which this read never looks at.
+        readQuoteTaxConfiguration: (current) =>
+          readInternalQuoteTaxReadiness(current, async () => ({
+            taxConfiguration: { configurationReference: id(0xc0ff) },
+          })),
+      },
+    };
+  };
   const monitors = createStoreMonitors({
     runtimeDirectory: directory,
     log: async (entry) => logs.push(entry),
     report: (event, error, where) => reported.push({ event, error, ...where }),
     // This run steps through minutes by the instants it passes, however long each read takes.
     clock: () => 0,
-    load: async (storeDirectory) => {
-      loaded.push(path.relative(directory, storeDirectory));
-      const of = stores.find((each) => each.name === path.basename(storeDirectory));
-      assert.ok(of, "a Store's reads load from that Store's own directory");
-      const installation = {
-        database: "isolated",
-        loadProfile: async () => ({
-          environment: "InternalTest",
-          database: "isolated",
-          binding: resourcesOf(of).publicProfile.binding,
-        }),
-        loadDailySettlementCoverage: async () => coverage.get(of.name),
-      };
-      const dependencies = await composeBusinessDependencies({
-        directory: storeDirectory,
-        installation,
-        store: true,
-      });
-      return {
-        resources: resourcesOf(of),
-        installation,
-        dependencies: {
-          ...dependencies,
-          // The owner read of the published tax configuration, with the pilot's file policy stood
-          // in for: that file only carries test evidence, which this read never looks at.
-          readQuoteTaxConfiguration: (current) =>
-            readInternalQuoteTaxReadiness(current, async () => ({
-              taxConfiguration: { configurationReference: id(0xc0ff) },
-            })),
-        },
-      };
-    },
+    load: loadStore,
   });
   const healthy = { maintenance: false, reportAgeMs: 1000, attention: [] };
   const probes = { api: { ok: true }, customer: { ok: true }, merchant: { ok: true } };
@@ -214,6 +233,13 @@ export async function exercisePilotStoreMonitors(context) {
     await run(T0);
     assert.deepEqual(loaded.sort(), ["stores/first", "stores/never", "stores/second"]);
     const bySummary = (board, key) => board.active.find((item) => item.key === key)?.summary;
+    const sqlStateOf = (error) => {
+      for (let at = error; at !== undefined && at !== null; at = at.cause) {
+        const found = at.diagnostic?.sqlState ?? at[Symbol.for("bop.database.failure")]?.sqlState;
+        if (typeof found === "string") return found;
+      }
+      return null;
+    };
 
     // Each Store's own money facts, and nobody else's.
     const firstBoard = await boardOf("first");
@@ -230,23 +256,23 @@ export async function exercisePilotStoreMonitors(context) {
 
     // Every read really ran under the rendered grants: a refused one reads as unreadable, and
     // "Some checks could not run" follows. The second merchant's configuration is real.
-    const signals = await (async () => {
-      const { readBusinessSignals } =
-        await import("../../../tooling/environment/pilot-ops-observe.mjs");
+    const { readBusinessSignals } =
+      await import("../../../tooling/environment/pilot-ops-observe.mjs");
+    const signalsOf = async (of, change = {}) => {
       const dependencies = await composeBusinessDependencies({
-        directory: path.join(directory, "stores", "first"),
+        directory: path.join(directory, "stores", of.name),
         installation: {
           database: "isolated",
           loadProfile: async () => ({
             environment: "InternalTest",
             database: "isolated",
-            binding: resourcesOf(first).publicProfile.binding,
+            binding: resourcesOf(of).publicProfile.binding,
           }),
         },
         store: true,
       });
       return readBusinessSignals({
-        resources: resourcesOf(first),
+        resources: resourcesOf(of),
         installation: {},
         now: Date.now(),
         dependencies: {
@@ -255,9 +281,11 @@ export async function exercisePilotStoreMonitors(context) {
             readInternalQuoteTaxReadiness(current, async () => ({
               taxConfiguration: { configurationReference: id(0xc0ff) },
             })),
+          ...change,
         },
       });
-    })();
+    };
+    const signals = await signalsOf(first);
     for (const field of ["receiptTemplate", "quoteTax", "heldStock", "pickupCapacity"])
       assert.notEqual(signals[field], "unreadable", field);
     assert.equal(signals.settlementCovered, false);
@@ -284,6 +312,17 @@ export async function exercisePilotStoreMonitors(context) {
       ).readClosedBusinessDay(resourcesOf(of));
     assert.equal(await closedDay(second), true);
     assert.equal(await closedDay(never), false);
+    // Refused, as by a grant a migration left out, it is no "none yet": it fails with the code, so
+    // the monitor says the check could not run and keeps telling BOP there is no settlement.
+    await admin.query(`REVOKE SELECT ON rms_store.store_configuration_version FROM ${api}`);
+    const refusedDay = await closedDay(second).then(
+      () => null,
+      (error) => error,
+    );
+    await admin.query(`GRANT SELECT ON rms_store.store_configuration_version TO ${api}`);
+    assert.notEqual(refusedDay, null, "a refused closed-day read is not 'no closed day'");
+    assert.equal(sqlStateOf(refusedDay), "42501");
+    assert.equal(await closedDay(second), true);
 
     // What the merchant's Home reads: its own board through the real reader and projection.
     const home = projectOperationsAlertBoard(
@@ -311,6 +350,81 @@ export async function exercisePilotStoreMonitors(context) {
     assert.equal(bySummary(await boardOf("second"), "payment.updates"), undefined);
     assert.match(bySummary(await boardOf("first"), "payment.updates"), /^2 updates /u);
 
+    // Before its Owner publishes, a merchant on the TEST tool's first configuration is not checked
+    // for receipts, pricing or pickup times: the real gate, under the role, says not opened. Run on
+    // a timeline of its own, well past the 5 minutes "Some checks could not run" takes: without the
+    // gate those reads would run on settings it has not finished, and that row would rise.
+    const openedOf = async (of) =>
+      (
+        await composeBusinessDependencies({
+          directory: path.join(directory, "stores", of.name),
+          installation: { database: "isolated", loadProfile: async () => null },
+          store: true,
+        })
+      ).readOwnerPublishedSetup(resourcesOf(of));
+    assert.equal(await openedOf(unopened), false);
+    assert.equal(await openedOf(second), true);
+    assert.equal(await openedOf(first), true);
+    const aside = await mkdtemp(path.join(tmpdir(), "store-monitors-unopened-"));
+    try {
+      await chmod(aside, 0o700);
+      await mkdir(path.join(aside, "stores", "unopened"), { recursive: true, mode: 0o700 });
+      await writeFile(
+        path.join(aside, "stores", "unopened", "internal-test-profile.json"),
+        JSON.stringify({ binding: { validUntil: "2027-11-26T02:26:31.000Z" } }),
+      );
+      await writeFile(
+        path.join(aside, "stores.json"),
+        JSON.stringify({ schemaVersion: 1, stores: ["stores/unopened"] }),
+      );
+      const alone = createStoreMonitors({
+        runtimeDirectory: aside,
+        log: async (entry) => logs.push({ ...entry, aside: true }),
+        report: (event, error, where) => reported.push({ event, error, ...where, aside: true }),
+        clock: () => 0,
+        load: loadStore,
+      });
+      for (let minute = 0; minute <= 6; minute += 1)
+        await alone.run({
+          now: T0 + minute * 60_000,
+          probes,
+          supervisor: healthy,
+          maintenance: null,
+          config: null,
+        });
+      const quiet = JSON.parse(
+        await readFile(path.join(aside, "stores", "unopened", "ops", "alert-board.json"), "utf8"),
+      );
+      // What the gate holds back: receipts, pricing and pickup times are neither read nor raised.
+      // (Its stock check runs whatever the gate says; this seed has no live-gate evidence for it.)
+      const gated = ["receipts", "quoteTax", "pickupCapacity"];
+      assert.deepEqual(
+        logs
+          .filter((entry) => entry.aside === true && entry.event === "store_check_failed")
+          .map((entry) => entry.check)
+          .filter((check) => gated.includes(check)),
+        [],
+        "nothing read before its Owner has opened",
+      );
+      const readiness = [
+        "receipts.template",
+        "pricing.tax_configuration",
+        "pickup.capacity_horizon",
+      ];
+      assert.deepEqual(
+        quiet.active.map((item) => item.key).filter((key) => readiness.includes(key)),
+        [],
+      );
+      for (const source of [
+        "the receipt template check",
+        "the check that orders can be priced",
+        "the check for pickup times",
+      ])
+        assert.ok(!JSON.stringify(quiet.active).includes(source), source);
+    } finally {
+      await rm(aside, { recursive: true, force: true });
+    }
+
     // A refused read is unreadable, never all good, and the raised alert stays on the board.
     await admin.query(`REVOKE SELECT ON platform_eventing.dead_letter_item FROM ${api}`);
     for (const minute of [4, 5, 6, 7, 8, 9, 10]) await run(T0 + minute * 60_000);
@@ -322,13 +436,6 @@ export async function exercisePilotStoreMonitors(context) {
 
     // One check's read refused, as by a grant a migration left out: the merchant is told nothing,
     // so BOP can find which check it was and the real code.
-    const sqlStateOf = (error) => {
-      for (let at = error; at !== undefined && at !== null; at = at.cause) {
-        const found = at.diagnostic?.sqlState ?? at[Symbol.for("bop.database.failure")]?.sqlState;
-        if (typeof found === "string") return found;
-      }
-      return null;
-    };
     await admin.query(`REVOKE SELECT ON rms_inventory.stock_reservation_version FROM ${api}`);
     await run(T0 + 11 * 60_000);
     await run(T0 + 12 * 60_000);

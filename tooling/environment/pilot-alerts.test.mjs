@@ -1367,6 +1367,52 @@ describe("a Store's own conditions", () => {
     expect(differences.get("monitor.source").params.sources).toEqual([
       "the check for payment differences",
     ]);
+    // A closed day that could not be read is not "none yet": no settlement stays told to BOP.
+    const closedDay = held({
+      settlementExceptions: null,
+      settlementCovered: false,
+      closedBusinessDay: "unreadable",
+    });
+    expect(keys(closedDay)).toEqual(["monitor.source", "settlement.not_covered"]);
+    expect(closedDay.get("monitor.source").params.sources).toEqual([
+      "the check for closed business days",
+    ]);
+    const none = held({
+      settlementExceptions: null,
+      settlementCovered: false,
+      closedBusinessDay: false,
+    });
+    expect(keys(none)).toEqual([]);
+  });
+  it("background chores no guest notices are for today on a Store's board, not Urgent", () => {
+    const flagged = (...attention) =>
+      evaluateStoreConditions(
+        store({ supervisor: { maintenance: false, reportAgeMs: 1000, attention } }),
+      ).get("service.attention").severity;
+    expect(flagged("stores/tea:business-worker:contactRetention")).toBe("warning");
+    expect(
+      flagged(
+        "stores/tea:business-worker:contactRetention",
+        "stores/tea:business-worker:webhookEvidenceRetention",
+      ),
+    ).toBe("warning");
+    // Anything guests or staff would notice keeps it Urgent.
+    expect(
+      flagged("stores/tea:business-worker:contactRetention", "stores/tea:business-worker:events"),
+    ).toBe("critical");
+    expect(flagged("stores/tea")).toBe("critical");
+    expect(flagged("store-workers")).toBe("critical");
+    // BOP's own board is unchanged.
+    expect(
+      evaluateAlertConditions({
+        ...healthy(),
+        supervisor: {
+          maintenance: false,
+          reportAgeMs: 1000,
+          attention: ["business-worker:contactRetention"],
+        },
+      }).get("service.attention").severity,
+    ).toBe("critical");
   });
   it("sends BOP only what is that Store's own", () => {
     const item = (key, params = {}) => ({

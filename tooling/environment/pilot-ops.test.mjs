@@ -815,8 +815,34 @@ describe("WP-2423 Q13 observations", () => {
       receiptTemplate: "unreadable",
       quoteTax: "unreadable",
       pickupCapacity: "unreadable",
-      closedBusinessDay: false,
+      // Nor a guess that no day has closed: that would clear what BOP was told.
+      closedBusinessDay: "unreadable",
     });
+    // The closed-day read itself refused: unreadable as well (named "closedDay" on a Store's board).
+    const reportCheck = vi.fn();
+    const refusedDay = Object.assign(Error("permission denied"), { code: "42501" });
+    expect(
+      (
+        await readBusinessSignals({
+          resources,
+          installation: {},
+          now,
+          reportCheck,
+          dependencies: {
+            createReconciliationExceptions: () => async () => ({
+              items: [],
+              nextAfterExceptionReference: null,
+            }),
+            readOwnerPublishedSetup: async () => true,
+            isSettlementCovered: async () => false,
+            readClosedBusinessDay: async () => {
+              throw refusedDay;
+            },
+          },
+        })
+      ).closedBusinessDay,
+    ).toBe("unreadable");
+    expect(reportCheck.mock.calls).toEqual([["closedDay", refusedDay]]);
     const after = await read({ readOwnerPublishedSetup: async () => true });
     expect(after).toMatchObject({
       receiptTemplate: { ready: false, reason: "TemplateNotProven" },

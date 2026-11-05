@@ -135,6 +135,7 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
         "the check of the store's order rules",
         "the check for payment differences",
         "the day-end settlement check",
+        "the check for closed business days",
       ],
     },
   ],
