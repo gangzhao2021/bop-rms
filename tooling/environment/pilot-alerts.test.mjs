@@ -1152,6 +1152,63 @@ describe("a Store's own conditions", () => {
     );
     expect(sent.every((entry) => entry.store === "tea")).toBe(true);
   });
+  // Two decisions each alert needs on a Store's board. Written out: a new key in the catalog fails
+  // here until someone has made them, rather than silently never reaching BOP or clearing unread.
+  it("every alert of the catalog is decided: whether BOP hears it for a Store, and whether it stays unread", () => {
+    const decisions = {
+      "entry.api": { sent: false, stays: false },
+      "entry.customer": { sent: false, stays: false },
+      "entry.merchant": { sent: false, stays: false },
+      "supervisor.silent": { sent: false, stays: false },
+      "service.attention": { sent: true, stays: true },
+      "payment.updates": { sent: true, stays: true },
+      "updates.retrying": { sent: true, stays: true },
+      "receipts.template": { sent: true, stays: true },
+      "pricing.tax_configuration": { sent: true, stays: true },
+      "orders.held_stock": { sent: true, stays: true },
+      "pickup.capacity_horizon": { sent: true, stays: true },
+      "reconciliation.differences": { sent: true, stays: true },
+      "settlement.exceptions": { sent: true, stays: true },
+      "settlement.not_covered": { sent: true, stays: true },
+      "stores.attention": { sent: false, stays: false },
+      "backup.failed": { sent: false, stays: false },
+      "backup.stale": { sent: false, stays: false },
+      "backup.restore_check": { sent: false, stays: false },
+      "backup.offsite": { sent: false, stays: false },
+      "certificate.expiring": { sent: false, stays: false },
+      "installation.validity": { sent: true, stays: false },
+      "ordering.ending": { sent: false, stays: true },
+      "disk.low": { sent: false, stays: false },
+      "monitor.source": { sent: true, stays: true },
+      "channel.delivery": { sent: false, stays: false },
+    };
+    expect(Object.keys(decisions).sort()).toEqual([...ALERT_KEYS].sort());
+    const raisedBefore = (key) => ({
+      alerts: {
+        [key]: {
+          raisedAt: new Date(T0 - MIN).toISOString(),
+          severity: "warning",
+          params: { endsAt: new Date(T0 + MIN).toISOString() },
+        },
+      },
+    });
+    for (const [key, decided] of Object.entries(decisions)) {
+      const sent = storeOutboundNotifications(
+        [{ id: key, kind: "raised", key, severity: "warning", params: {}, at: "x" }],
+        "tea",
+      );
+      const stays = evaluateStoreConditions(
+        store({
+          supervisor: "unreadable",
+          business: "unreadable",
+          installation: "unreadable",
+          certificate: "unreadable",
+          previous: raisedBefore(key),
+        }),
+      ).has(key);
+      expect({ sent: sent.length === 1, stays }, key).toEqual(decided);
+    }
+  });
   it("names the Store on each line and in a single alert's subject, and only a Store's name", () => {
     const base = { kind: "raised", key: "payment.updates", severity: "critical", at: "x" };
     const params = { count: 1, oldestAgeMs: MIN };

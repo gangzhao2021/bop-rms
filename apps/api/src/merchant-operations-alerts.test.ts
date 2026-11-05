@@ -250,6 +250,45 @@ describe("a merchant's projection of its own board", () => {
       expiresAt: "2026-10-15T08:13:00.000Z",
     });
   });
+  // Who reads each alert is a decision. Written out, not derived from the list under test: a new key
+  // in the monitor's catalog fails here until someone has made it, rather than silently vanishing.
+  it("every alert of the monitor's catalog is decided: a merchant's, or BOP's only", async () => {
+    const merchantReads = [
+      "entry.api",
+      "entry.customer",
+      "entry.merchant",
+      "service.attention",
+      "payment.updates",
+      "updates.retrying",
+      "receipts.template",
+      "pricing.tax_configuration",
+      "orders.held_stock",
+      "pickup.capacity_horizon",
+      "reconciliation.differences",
+      "settlement.exceptions",
+      "ordering.ending",
+    ];
+    const bopOnly = [
+      "supervisor.silent",
+      "backup.failed",
+      "backup.stale",
+      "backup.restore_check",
+      "backup.offsite",
+      "certificate.expiring",
+      "installation.validity",
+      "disk.low",
+      "monitor.source",
+      "channel.delivery",
+      "settlement.not_covered",
+      "stores.attention",
+    ];
+    const { ALERT_KEYS } = (await import(
+      /* @vite-ignore */ new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url)
+        .href
+    )) as { ALERT_KEYS: readonly string[] };
+    expect([...merchantReads, ...bopOnly].sort()).toEqual([...ALERT_KEYS].sort());
+    expect([...merchantOperationsAlertKeys].sort()).toEqual([...merchantReads].sort());
+  });
   it("says since when some of its checks could not run, without naming them", () => {
     const incomplete = {
       ...board(),
