@@ -3,7 +3,6 @@ import { t } from "./i18n/i18n.js";
 import type { CurrentOrderQueue, StaffCancellationReason } from "./current-order-queue-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
-  staffCancelBody,
   staffCancellationReasonLabel,
   staffCancellationReasonsFor,
   staffCancelOutcome,
@@ -58,7 +57,13 @@ export function CantMakeRefundAction({
         redirect: "error",
         cache: "no-store",
         headers: { "content-type": "application/json", "x-bop-csrf": csrf },
-        body: JSON.stringify(staffCancelBody(order, batch, intent.current)),
+        body: JSON.stringify({
+          orderReference: order.orderReference,
+          orderBatchReference: batch.orderBatchReference,
+          expectedOrderVersion: intent.current.expectedOrderVersion,
+          operationReference: intent.current.operationReference,
+          reasonCode: intent.current.reasonCode,
+        }),
       });
       let error: string | null = null;
       if (!response.ok) {

@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { t } from "./i18n/i18n.js";
 import {
   createServiceControlClient,
   serviceOperationReference,
   type ServiceControlState,
 } from "./service-control-client.js";
+import { PaidOrderWatchContext } from "./PaidOrderAlarm.js";
 import { storeTime } from "./StoreTime.js";
 
 const choices = [15, 30, 60] as const;
 
 /**
  * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the busy-night brake where staff work, on Orders and the
- * kitchen board. Shown to whoever may pause ordering (the read answers no to anyone else); it uses
- * the Store's own pause, so every other page and guests see the same thing.
+ * kitchen board, at a Store sending paid orders straight to the kitchen (others see nothing new).
+ * Shown to whoever may pause ordering (the read answers no to anyone else); it uses the Store's own
+ * pause, so every other page and guests see the same thing.
  */
 export function PauseOrderingControl({
   csrf,
@@ -23,6 +25,8 @@ export function PauseOrderingControl({
   readonly storeReference: string;
   readonly fetcher?: typeof fetch | undefined;
 }) {
+  const watch = useContext(PaidOrderWatchContext);
+  const offered = watch?.on === true;
   const client = useMemo(() => createServiceControlClient(fetcher ?? fetch), [fetcher]);
   const [view, setView] = useState<ServiceControlState | null>(null);
   const [asking, setAsking] = useState(false);
@@ -30,14 +34,15 @@ export function PauseOrderingControl({
   const [failed, setFailed] = useState(false);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
+    if (!offered) return;
     const controller = new AbortController();
     client
       .load(storeReference, controller.signal)
       .then(setView)
       .catch(() => setView(null));
     return () => controller.abort();
-  }, [client, storeReference, revision]);
-  if (view === null) return null;
+  }, [client, offered, storeReference, revision]);
+  if (!offered || view === null) return null;
   const run = async (command: Parameters<typeof client.execute>[0]) => {
     setBusy(true);
     setFailed(false);

@@ -268,6 +268,10 @@ const dineIn = {
       acceptanceStatus: "Accepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
+      acceptedAutomaticallyAt: at(10),
+      canCantMake: true,
+      notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: true,
       canCancelItems: true,
       canCancelUnpaid: false,
@@ -289,6 +293,10 @@ const dineIn = {
       canRequestAcceptance: true,
       // The paid round waiting for staff: Orders and Home warn after 5 and 10 minutes.
       awaitingAcceptanceSince: at(14),
+      // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
+      acceptedAutomaticallyAt: at(10),
+      canCantMake: true,
+      notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
       canCancelUnpaid: false,
@@ -308,6 +316,10 @@ const dineIn = {
       acceptanceStatus: "NotAccepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
+      acceptedAutomaticallyAt: at(10),
+      canCantMake: true,
+      notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
       canCancelUnpaid: true,
@@ -327,6 +339,10 @@ const dineIn = {
       acceptanceStatus: "Cancelled",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
+      acceptedAutomaticallyAt: at(10),
+      canCantMake: true,
+      notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
       canCancelUnpaid: false,
@@ -405,6 +421,10 @@ const heldPickup = {
       acceptanceStatus: "NotAccepted",
       canRequestAcceptance: true,
       awaitingAcceptanceSince: null,
+      // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
+      acceptedAutomaticallyAt: at(10),
+      canCantMake: true,
+      notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
       canCancelUnpaid: false,
@@ -479,6 +499,10 @@ const earlierCounterPickup = {
       acceptanceStatus: "Accepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
+      acceptedAutomaticallyAt: at(10),
+      canCantMake: true,
+      notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
       canCancelUnpaid: false,
@@ -494,12 +518,30 @@ const earlierCounterPickup = {
     },
   ],
 } satisfies QueueItem;
+// DEC-PAID-ORDER-AUTO-ACCEPT: sent only at a Store that uses it; the type wants it always.
+const paidOrderWatch = {
+  on: true,
+  settingVersion: 1,
+  lastKitchenStepAt: at(5),
+  cantMakeRefunds: 0,
+  canTurnOff: false,
+  waiting: [
+    {
+      orderNumber: "21",
+      orderType: "Pickup" as const,
+      acceptedAt: at(1),
+      reachedKitchen: true,
+      refundAt: at(31),
+    },
+  ],
+};
 const queueView = {
   items: [earlierCounterPickup, dineIn, heldPickup],
   nextAfterOrderReference: null,
   lines: null,
   pickupContact: null,
   paymentPosition: null,
+  paidOrderWatch,
 } satisfies Queue;
 const line = (n: number, batch: string, canCancel: boolean) => ({
   orderItemReference: id(0x7000 + n),
@@ -535,6 +577,7 @@ const detailView = {
   } as Queue["lines"],
   pickupContact: null,
   paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
+  paidOrderWatch,
 } satisfies Queue;
 const pickupDetailView = {
   items: [heldPickup],
@@ -560,6 +603,7 @@ const pickupDetailView = {
     detailsVersion: 1,
   },
   paymentPosition: null,
+  paidOrderWatch,
 } satisfies Queue;
 
 type KitchenList = Extract<Output<"kitchenQuery">, { items: unknown }>;
@@ -659,6 +703,7 @@ const kitchenView = {
       movedFromTableLabel: null,
       mergedFromTableLabel: null,
       acceptBy: at(40),
+      notSent: { reason: "KitchenScreenOff", itemCount: 2 },
     },
     {
       orderNumber: "T7-13",
@@ -667,8 +712,10 @@ const kitchenView = {
       movedFromTableLabel: null,
       mergedFromTableLabel: null,
       acceptBy: null,
+      notSent: { reason: "HasAlcohol", itemCount: 1 },
     },
   ],
+  paidOrderWatch: { ...paidOrderWatch, canAcceptOrders: false },
   items: [kitchenItem(1, "Queued"), kitchenItem(2, "Completed")],
   nextCursor: null,
 } satisfies KitchenList;

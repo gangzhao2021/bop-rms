@@ -39,17 +39,16 @@ function harness(input: {
   failSetting?: unknown;
 }) {
   const statements: string[] = [];
-  const tx = {
-    query: vi.fn(async (sql: string) => {
-      statements.push(sql);
-      if (sql.includes("order_auto_acceptance_setting") && input.failSetting !== undefined)
-        throw input.failSetting;
-      return {
-        rows: sql.includes("order_auto_acceptance_setting") ? input.settingRows : [],
-        rowCount: 0,
-      };
-    }),
-  };
+  const query = vi.fn(async (sql: string) => {
+    statements.push(sql);
+    if (sql.includes("order_auto_acceptance_setting") && input.failSetting !== undefined)
+      throw input.failSetting;
+    return {
+      rows: sql.includes("order_auto_acceptance_setting") ? input.settingRows : [],
+      rowCount: 0,
+    };
+  });
+  const tx = { query } as never;
   const report = vi.fn();
   const readOperating = vi.fn(input.readOperating ?? (async () => null));
   const evaluator = createOrderAutoAcceptanceEvaluator({
@@ -67,7 +66,7 @@ function harness(input: {
     audit: { retentionPolicyCode: "FINANCIAL_COMPLIANCE", retentionPolicyVersion: 1 },
     report,
   });
-  return { evaluator, tx, statements, report, readOperating };
+  return { evaluator, tx, query, statements, report, readOperating };
 }
 const on = [
   {
@@ -90,7 +89,7 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT evaluator", () => {
   it("only a successful payment is looked at", async () => {
     const f = harness({ settingRows: on });
     expect(await f.evaluator.prepare(f.tx, { ...event, eventType: "PaymentFailed" })).toBeNull();
-    expect(f.tx.query).not.toHaveBeenCalled();
+    expect(f.query).not.toHaveBeenCalled();
   });
 
   it("reads the Store's status in a savepoint it always rolls back, with a short lock wait", async () => {

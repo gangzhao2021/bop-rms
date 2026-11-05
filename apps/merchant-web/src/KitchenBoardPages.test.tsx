@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { KitchenBoardView } from "./kitchen-board.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";

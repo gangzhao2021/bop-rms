@@ -435,3 +435,94 @@ test("@production the owner applies the full-service setup, turns a module back 
     tierPercents: [12, 18, 20],
   });
 });
+
+test("@production the owner sends paid orders straight to the kitchen, and back", async ({ page }) => {
+  await session(page);
+  let current = {
+    version: 0,
+    templateCode: null as string | null,
+    modules: { counterOrder: true, pickup: true, inventory: true, loyalty: false, alcohol: false },
+    changedAt: null as string | null,
+    services: {
+      version: 0,
+      staffCall: false,
+      chaseDish: false,
+      askPartySize: false,
+      changedAt: null as string | null,
+    },
+    teaCharge: {
+      version: 0,
+      teaSellableReference: null as string | null,
+      changedAt: null as string | null,
+    },
+    teaChoices: [],
+    tips: {
+      version: 0,
+      enabled: true,
+      tierPercents: [10, 15, 18],
+      changedAt: null as string | null,
+      offInStoreSetup: false,
+    },
+    autoAccept: {
+      version: 0,
+      pickup: false,
+      dineIn: false,
+      changedAt: null as string | null,
+    },
+    canChange: true,
+  };
+  const commands: Record<string, unknown>[] = [];
+  let conflict = false;
+  await page.route("**/merchant/store/features", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    commands.push(body);
+    if (body.action === "ChangeAutoAccept") {
+      if (conflict) {
+        conflict = false;
+        return route.fulfill({ headers, status: 409, json: { error: "store_features_changed" } });
+      }
+      current = {
+        ...current,
+        autoAccept: {
+          version: current.autoAccept.version + 1,
+          pickup: body.pickup === true,
+          dineIn: body.dineIn === true,
+          changedAt: "2026-11-05T15:00:00.000Z",
+        },
+      };
+    }
+    return route.fulfill({ headers, json: current });
+  });
+  await page.route("**/merchant/commerce/kitchen-sections/command", (route) =>
+    route.fulfill({ headers, json: { version: 0, sections: [] } }),
+  );
+  await page.goto("/app/organization/stores/" + store + "/capabilities");
+  const box = page.getByRole("checkbox", { name: /Send paid orders straight to the kitchen/u });
+  // Off until the owner turns it on; the row says what it means in two sentences.
+  await expect(box).not.toBeChecked();
+  await expect(page.getByText(/Nobody needs to watch Orders/u)).toBeVisible();
+  await expect(page.getByText(/Keep the kitchen screen on with sound/u)).toBeVisible();
+  const save = page.getByRole("button", { name: "Save paid orders" });
+  await expect(save).toBeDisabled();
+  await box.check();
+  await save.click();
+  await expect(page.getByText("Saved. Paid orders now go straight to the kitchen.")).toBeVisible();
+  expect(commands.at(-1)).toMatchObject({
+    action: "ChangeAutoAccept",
+    expectedVersion: 0,
+    pickup: true,
+    dineIn: true,
+  });
+  await expect(box).toBeChecked();
+  await expectNoInternalText(page);
+  // Someone else changed it in between: said, and asked again.
+  conflict = true;
+  await box.uncheck();
+  await save.click();
+  await expect(page.getByText(/Someone else changed these settings/u)).toBeVisible();
+  // And back off, against the version on screen.
+  await box.uncheck();
+  await save.click();
+  await expect(page.getByText("Saved. Paid orders wait for Accept on Orders again.")).toBeVisible();
+  expect(commands.at(-1)).toMatchObject({ pickup: false, dineIn: false, expectedVersion: 1 });
+});

@@ -491,6 +491,33 @@ receipts while signed in to another Store. A failure confined to one Store (its 
 tablet, its card machine) is handled by that Store alone; the other Stores keep trading normally.
 An Area Manager covering several Stores is the incident lead only for the Store they are in.
 
+### Stores that send paid orders straight to the kitchen
+
+Only where the Owner turned on "Send paid orders straight to the kitchen" on Store features
+([DEC-PAID-ORDER-AUTO-ACCEPT](../spec/design/paid-order-auto-accept.md)). Nobody presses Accept, so
+what staff do when something fails is different:
+
+- **Who can do what:** the Owner, Store Manager, Area Manager and Front of House can turn it off on
+  Orders or Tables ("Paid orders go straight to the kitchen · Turn off") and use "Pause ordering" on
+  Orders and the kitchen board. Only the Owner turns it on. Kitchen staff can do neither: they ask
+  someone at the counter.
+- **Kitchen tablet dead, Orders still working:** new paid orders stop going to the kitchen within 3
+  minutes of the last board read and wait on Orders, saying "Kitchen screen was off". Orders already
+  sent show one warning on every screen ("The kitchen hasn't touched anything…"). Open the board on
+  another device, or work from Orders on paper and turn the switch off.
+- **Store network down:** orders stop being sent within 3 minutes. Orders paid on mobile data wait on
+  Orders and follow the outage hold below. When screens return, make what is on the kitchen list or
+  tap "Can't make it · refund".
+- **Out of something:** on Orders, "Can't make it · refund" gives the full amount, tip included, back
+  to the card, while the kitchen has not started it. Anyone who can accept can do it; it is recorded
+  in their name and listed on the manager's Home. After the kitchen started, it is an ordinary refund
+  or item cancellation by a manager.
+- **A pickup nobody touched:** 30 minutes after it was sent it closes and refunds by itself, with
+  warnings at 5 minutes, 2 minutes and 30 seconds on every screen. Any kitchen step stops it. A table
+  round is never refunded by itself: it stays until someone acts.
+- **"did not reach the kitchen":** the order was accepted but its ticket never arrived. Make it from
+  the order details on Orders, or tap "Can't make it · refund", then tell the operator.
+
 ### Roles during an outage
 
 - **Incident lead**: the Store Manager or Owner on shift. Only they can pause online ordering

@@ -924,23 +924,19 @@ export function installMerchantOrderRoutes(
     }
     void options
       .orderCantMake({ sessionCookie, csrf, command: request.body })
-      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
-      .catch((error: unknown) => {
-        const code = error instanceof StaffOrderCancellationError ? error.code : null;
-        if (code === null) {
-          denied(response);
-          return;
-        }
-        const status =
-          code === "ORDER_CANCELLATION_INPUT_INVALID"
-            ? 400
-            : code === "ORDER_CANCELLATION_PERMISSION_DENIED"
-              ? 403
-              : code === "ORDER_CANCELLATION_UNAVAILABLE"
-                ? 503
-                : 409;
-        response.status(status).set("Cache-Control", NO_STORE).json({ error: code.toLowerCase() });
-      });
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({
+          status: result.status,
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          cancelledAt: result.cancelledAt,
+          refundStatus: result.refundStatus,
+          refundMethod: result.refundMethod,
+          refundAmountMinor: result.refundAmountMinor,
+        });
+      })
+      .catch((error: unknown) => staffCancellationError(response, error));
   });
   // DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause turns automatic sending off from Orders or Tables.
   router.post("/orders/auto-accept/off", sameOriginMutation(options), (request, response) => {

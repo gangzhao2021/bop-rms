@@ -150,22 +150,35 @@ export function paidOrderAlarm(watch: PaidOrderWatch | null, now: number): PaidO
 
 export function paidOrderAlarmLines(alarm: PaidOrderAlarm): readonly string[] {
   return [
-    ...(alarm.silent > 0
-      ? [
-          t(
-            "The kitchen hasn't touched anything for {minutes} min and {count} paid orders are waiting · check the kitchen screen",
-            { minutes: alarm.minutes, count: alarm.silent },
-          ),
-        ]
-      : []),
-    ...(alarm.notReached > 0
-      ? [
-          t(
-            "{count} paid orders did not reach the kitchen · make them from the order details, or tap Can't make it for a full refund",
-            { count: alarm.notReached },
-          ),
-        ]
-      : []),
+    ...(alarm.silent === 0
+      ? []
+      : alarm.silent === 1
+        ? [
+            t(
+              "The kitchen hasn't touched anything for {minutes} min and 1 paid order is waiting · check the kitchen screen",
+              { minutes: alarm.minutes },
+            ),
+          ]
+        : [
+            t(
+              "The kitchen hasn't touched anything for {minutes} min and {count} paid orders are waiting · check the kitchen screen",
+              { minutes: alarm.minutes, count: alarm.silent },
+            ),
+          ]),
+    ...(alarm.notReached === 0
+      ? []
+      : alarm.notReached === 1
+        ? [
+            t(
+              "1 paid order did not reach the kitchen · make it from the order details, or tap Can't make it for a full refund",
+            ),
+          ]
+        : [
+            t(
+              "{count} paid orders did not reach the kitchen · make them from the order details, or tap Can't make it for a full refund",
+              { count: alarm.notReached },
+            ),
+          ]),
   ];
 }
 

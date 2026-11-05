@@ -7576,4 +7576,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "过去 24 小时点“做不了”退款：{count}",
   "Order {orderNumber} will be refunded automatically {when} unless the kitchen starts it.":
     "{orderNumber} 号单将在{when}自动退款，除非后厨开始做。",
+  "The kitchen hasn't touched anything for {minutes} min and 1 paid order is waiting · check the kitchen screen":
+    "后厨已经 {minutes} 分钟没动过，有 1 张已付款的单在等 · 看一下后厨屏幕",
+  "1 paid order did not reach the kitchen · make it from the order details, or tap Can't make it for a full refund":
+    "1 张已付款的单没到后厨 · 按订单详情来做，或点“做不了”全额退款",
 });

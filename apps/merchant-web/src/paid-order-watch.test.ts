@@ -116,7 +116,7 @@ describe("what staff are told", () => {
   ])("%s reads as staff words", (reason, count) => {
     const text = notSentReasonText(reason, count);
     expect(text.length).toBeGreaterThan(5);
-    expect(findInternalText(text)).toEqual([]);
+    expect(findInternalText([text])).toEqual([]);
     expect(text).not.toContain(reason);
   });
 
