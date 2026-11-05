@@ -82,6 +82,11 @@ export interface MenuSellable {
     readonly outcomes: readonly (readonly MenuAllergenItem[])[];
     readonly sets: readonly (readonly number[])[];
   };
+  /**
+   * WP-2423 item 12: what each dish of a combo part declares by itself. A dish missing here (or an
+   * older menu) says nothing, and the guest is told to ask staff.
+   */
+  readonly allergensByOption?: Readonly<Record<string, readonly MenuAllergenItem[]>>;
   readonly optionRules: readonly MenuOptionRule[];
 }
 

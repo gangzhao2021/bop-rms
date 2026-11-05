@@ -1734,7 +1734,8 @@ export function SellableConfigurator({
 /** WP-2423 item 8 ⑥ part 4: one combo dish's allergens, in a few words (never a free-from claim). */
 export function dishAllergenText(allergens: readonly MenuAllergenItem[] | null): string {
   if (allergens === null) return t("Ask staff about allergens");
-  if (allergens.length === 0) return t("No listed allergens declared");
+  // Not hidden when empty: silence would read as safe. Never a free-from claim.
+  if (allergens.length === 0) return t("No allergens listed");
   const contains = allergens.filter((item) => item.classification === "Contains");
   const may = allergens.filter((item) => item.classification !== "Contains");
   return [

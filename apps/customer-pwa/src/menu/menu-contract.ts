@@ -288,12 +288,14 @@ function optionRule(value: unknown): MenuOptionRule {
 function allergenDisclosure(value: unknown, language: MenuLanguage) {
   const hasChoices =
     value !== null && typeof value === "object" && Object.hasOwn(value, "byChoice");
+  const hasOwn = value !== null && typeof value === "object" && Object.hasOwn(value, "byOption");
   const raw = exact(value, [
     "registryVersionReference",
     "items",
     "allergenFreeClaim",
     "assistanceCode",
     ...(hasChoices ? ["byChoice"] : []),
+    ...(hasOwn ? ["byOption"] : []),
   ]);
   reference(raw.registryVersionReference);
   if (
@@ -318,7 +320,11 @@ function allergenDisclosure(value: unknown, language: MenuLanguage) {
       return Object.freeze({ name, classification: entry.classification });
     }),
   );
-  return { items, byChoice: hasChoices ? allergensByChoice(raw.byChoice, names) : undefined };
+  return {
+    items,
+    byChoice: hasChoices ? allergensByChoice(raw.byChoice, names) : undefined,
+    byOption: hasOwn ? allergensByOption(raw.byOption, names) : undefined,
+  };
 }
 
 /**
@@ -381,6 +387,35 @@ function allergensByChoice(value: unknown, names: ReadonlyMap<string, string>) {
     }),
   );
   return Object.freeze({ options, outcomes, sets });
+}
+
+/** WP-2423 item 12: what each dish of a combo part declares, named as in the item's disclosure. */
+function allergensByOption(value: unknown, names: ReadonlyMap<string, string>) {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new TypeError("allergen options invalid");
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(value).map(([option, items]: [string, unknown]) => {
+        if (!Array.isArray(items)) throw new TypeError("allergen options invalid");
+        return [
+          reference(option),
+          Object.freeze(
+            items.map((item) => {
+              const entry = exact(item, ["code", "classification"]);
+              const name = typeof entry.code === "string" ? names.get(entry.code) : undefined;
+              if (
+                name === undefined ||
+                (entry.classification !== "Contains" &&
+                  entry.classification !== "CrossContactPossible")
+              )
+                throw new TypeError("allergen options invalid");
+              return Object.freeze({ name, classification: entry.classification });
+            }),
+          ),
+        ] as const;
+      }),
+    ),
+  );
 }
 
 function sellable(value: unknown, language: MenuLanguage): MenuSellable {
@@ -481,6 +516,7 @@ function sellable(value: unknown, language: MenuLanguage): MenuSellable {
       return {
         allergens: disclosure.items,
         ...(disclosure.byChoice === undefined ? {} : { allergensByChoice: disclosure.byChoice }),
+        ...(disclosure.byOption === undefined ? {} : { allergensByOption: disclosure.byOption }),
       };
     })(),
     optionRules,

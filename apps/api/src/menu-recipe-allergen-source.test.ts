@@ -4,6 +4,7 @@ import { RecipeReviewGapError } from "@rms/recipe";
 import {
   createMenuRecipeAllergenSource,
   createCompleteMenuRecipeAllergenSource,
+  optionOwnEvidence,
 } from "./menu-recipe-allergen-source.js";
 
 const fixtures = vi.hoisted(() => ({
@@ -269,4 +270,51 @@ it("names the ingredient without an allergen declaration", async () => {
   await expect(complete().resolve(tx, completeInput())).rejects.toMatchObject({
     gap: { missing: "AllergenDeclaration", ingredientReference: id(2), optionReference: null },
   });
+});
+
+it("WP-2423 item 12: a choice's own evidence is what its recipe change brings in", () => {
+  const rule = (changes: unknown[]) => ({ changes }) as never;
+  const ingredient = (extra: object) => ({ ...requirement(), ...extra, allergens: [] });
+  // An added dish with its declaration and the allergens that declaration lists.
+  expect(
+    optionOwnEvidence(
+      rule([
+        {
+          action: "Add",
+          ingredient: {
+            ...requirement(),
+            allergenDeclarationReference: id(7),
+            allergens: [{ evidenceReference: id(4), allergenReference: id(5), verified: true }],
+          },
+        },
+      ]),
+    ),
+  ).toEqual([id(4), id(7)].sort());
+  // A declaration that lists no allergens is still a statement about the dish.
+  expect(
+    optionOwnEvidence(
+      rule([{ action: "Add", ingredient: ingredient({ allergenDeclarationReference: id(7) }) }]),
+    ),
+  ).toEqual([id(7)]);
+  // A replacement brings its ingredient in; a removal brings nothing.
+  expect(
+    optionOwnEvidence(
+      rule([
+        { action: "Remove", requirementReference: id(9) },
+        {
+          action: "Replace",
+          requirementReference: id(10),
+          ingredient: ingredient({ allergenDeclarationReference: id(8) }),
+        },
+      ]),
+    ),
+  ).toEqual([id(8)]);
+  expect(optionOwnEvidence(rule([{ action: "Remove", requirementReference: id(9) }]))).toEqual([]);
+  expect(optionOwnEvidence(rule([]))).toEqual([]);
+  // A sub-recipe's evidence belongs to the whole graph: nothing is stated for the choice alone.
+  expect(
+    optionOwnEvidence(
+      rule([{ action: "Add", ingredient: ingredient({ sourceKind: "SubRecipe" }) }]),
+    ),
+  ).toBeNull();
 });

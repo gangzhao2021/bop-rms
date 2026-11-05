@@ -21,6 +21,7 @@ import {
   guestUnreadableItems,
   parseMenuFound,
 } from "../../../apps/customer-pwa/src/menu/menu-contract.ts";
+import { allergensForChoice } from "../../../apps/customer-pwa/src/menu/menu-families.ts";
 import {
   createPostgresKitchenRoutingConfigurationStore,
   KitchenChaseTooSoonError,
@@ -873,6 +874,14 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       );
       const wontonChoice = choices.find((c) => c.dish === wonton).option;
       const sourChoice = choices.find((c) => c.dish === sour).option;
+      const riceChoice = choices.find((c) => c.dish === rice).option;
+      // WP-2423 item 12: each dish says what it declares by itself, from its own recipe change,
+      // whatever the other part offers.
+      assert.deepEqual(guestCombo.allergensByOption, {
+        [sourChoice]: [{ name: "Peanuts", classification: "Contains" }],
+        [wontonChoice]: [{ name: "Wheat", classification: "Contains" }],
+        [riceChoice]: [],
+      });
       const binding = (
         await admin.query(
           "SELECT b.binding_id::text binding FROM rms_catalog.product_option_binding b WHERE b.brand_id=$1 AND b.product_id=$2 AND b.option_set_id=$3 LIMIT 1",
@@ -1018,6 +1027,28 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
         amount: "29.80",
         currency: "CAD",
       });
+      const guestItem = async (reference) =>
+        parseMenuFound(
+          await guestMenu(),
+          {
+            publicStoreReference: publicStore,
+            channel: "DineIn",
+            locale: "en-CA",
+            brandDisplayName: "TEST",
+            storeDisplayName: "TEST",
+          },
+          "en",
+        )
+          .sections.flatMap((section) => section.sellables)
+          .find((item) => item.sellableReference === reference);
+      // The added dish declares no allergens, and the other part's dishes aren't its own.
+      const noodlesChoice = (
+        await admin.query(
+          "SELECT option_id::text option FROM rms_catalog.bundle_combo_choice WHERE brand_id=$1 AND dish_sku_id=$2 ORDER BY option_id DESC LIMIT 1",
+          [brandReference, noodles],
+        )
+      ).rows[0].option;
+      assert.deepEqual((await guestItem(saved.skuReference)).allergensByOption[noodlesChoice], []);
 
       // 5. Another Brand sees none of it.
       await admin.query("BEGIN");
@@ -1402,6 +1433,61 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           .every((row) => row.covered),
         true,
       );
+
+      // 7. WP-2423 item 12, as the dessert shop's combo: the other part offers one dish, which has
+      // an allergen. Every combination then contains it, and it still isn't the first dish's own;
+      // only the sum of the whole selection names it.
+      const dessert = await dishes.command({
+        ...session,
+        body: comboBody({
+          name: "Rice and soup (TEST)",
+          nameZh: "饭配汤",
+          slots: [
+            {
+              code: null,
+              name: "Main",
+              nameZh: "主食",
+              minimum: 1,
+              maximum: 1,
+              dishes: [{ skuReference: rice, upgradeMinor: "0" }],
+            },
+            {
+              code: null,
+              name: "Soup",
+              nameZh: "汤",
+              minimum: 1,
+              maximum: 1,
+              dishes: [{ skuReference: sour, upgradeMinor: "0" }],
+            },
+          ],
+        }),
+      });
+      await dishes.command({
+        ...session,
+        body: { action: "ListAll", operationReference: op(), menuReference },
+      });
+      const dessertItem = await guestItem(dessert.skuReference);
+      const dessertChoice = async (dish) =>
+        (
+          await admin.query(
+            "SELECT c.option_id::text option FROM rms_catalog.bundle_combo_choice c WHERE c.brand_id=$1 AND c.dish_sku_id=$2 AND c.option_id = ANY($3::uuid[])",
+            [
+              brandReference,
+              dish,
+              dessertItem.optionRules.flatMap((rule) =>
+                rule.options.map((option) => option.optionReference),
+              ),
+            ],
+          )
+        ).rows[0].option;
+      const [riceInDessert, sourInDessert] = [await dessertChoice(rice), await dessertChoice(sour)];
+      assert.deepEqual(dessertItem.allergensByOption, {
+        [riceInDessert]: [],
+        [sourInDessert]: [{ name: "Peanuts", classification: "Contains" }],
+      });
+      assert.deepEqual(allergensForChoice(dessertItem, [riceInDessert, sourInDessert]), [
+        { name: "Peanuts", classification: "Contains" },
+      ]);
     } finally {
       await admin.end();
     }

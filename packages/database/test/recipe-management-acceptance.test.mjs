@@ -1321,6 +1321,7 @@ async function prove(context) {
     // configuration is the union already shown); products with options carry `byChoice`.
     const reviewedDisclosure = prepared.record.content.sections[0].sellables[0].allergenDisclosure;
     assert.equal(reviewedDisclosure.byChoice, undefined);
+    assert.equal(reviewedDisclosure.byOption, undefined);
     assert.equal(allergenDisclosureForChoice(reviewedDisclosure, []), null);
     assert.match(prepared.record.dependencyDigest, /^sha256:[a-f0-9]{64}$/);
     assert.equal(prepared.validation.snapshotDigest, prepared.record.snapshotDigest);

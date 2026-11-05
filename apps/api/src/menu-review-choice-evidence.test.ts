@@ -1,6 +1,10 @@
+import { canonicalizeRfc8785 } from "@bop/audit";
 import { allergenDisclosureForChoice, validateMenuAllergenProvenance } from "@rms/catalog";
 import { expect, it } from "vitest";
-import { compactMenuChoiceEvidence } from "./menu-review-preparation-source.js";
+import {
+  compactMenuChoiceEvidence,
+  publishableOptionOwnEvidence,
+} from "./menu-review-preparation-source.js";
 
 const id = (n: number) => `018f7700-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-10-23T12:00:00.000Z";
@@ -93,4 +97,42 @@ it("WP-2423 ⑪: compacts each reviewed set of chosen options so the menu disclo
     "TREE_NUTS:CrossContactPossible",
   ]);
   expect(shown([id(99)])).toBeUndefined();
+});
+
+it("WP-2423 item 12: a choice's own evidence reads the same however the recipe changes were read", () => {
+  const [first, second, third, fourth] = [id(61), id(62), id(63), id(64)];
+  const pinned = new Set([id(70), id(71), id(72)]);
+  const one = publishableOptionOwnEvidence(
+    new Map<string, ReadonlySet<string> | null>([
+      [second, new Set([id(71), id(70)])],
+      [first, new Set([id(72)])],
+    ]),
+    pinned,
+  );
+  const other = publishableOptionOwnEvidence(
+    new Map<string, ReadonlySet<string> | null>([
+      [first, new Set([id(72)])],
+      [second, new Set([id(70), id(71)])],
+    ]),
+    pinned,
+  );
+  // The provenance feeds the dependency digest compared when the review is approved: any other
+  // order would make listing fail now and then with a version conflict.
+  expect(canonicalizeRfc8785(one)).toBe(canonicalizeRfc8785(other));
+  expect(Object.keys(one ?? {})).toEqual([first, second]);
+  expect(one?.[second]).toEqual([id(70), id(71)]);
+  // No statement about a choice: no recipe change, a sub-recipe, or evidence nothing pinned.
+  expect(
+    publishableOptionOwnEvidence(
+      new Map<string, ReadonlySet<string> | null>([
+        [first, new Set()],
+        [second, null],
+        [third, new Set([id(99)])],
+        [fourth, new Set([id(70)])],
+      ]),
+      pinned,
+    ),
+  ).toEqual({ [fourth]: [id(70)] });
+  // None at all leaves the path as it was: an item with only such choices doesn't change.
+  expect(publishableOptionOwnEvidence(new Map(), pinned)).toBeNull();
 });

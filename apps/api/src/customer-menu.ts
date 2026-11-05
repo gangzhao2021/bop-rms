@@ -184,6 +184,9 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
             ...(sellable.allergenDisclosure.byChoice === undefined
               ? {}
               : { byChoice: sellable.allergenDisclosure.byChoice }),
+            ...(sellable.allergenDisclosure.byOption === undefined
+              ? {}
+              : { byOption: sellable.allergenDisclosure.byOption }),
           },
           displayPrice:
             sellable.displayPrice.status === "Available"

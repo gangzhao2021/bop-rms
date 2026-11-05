@@ -102,6 +102,19 @@ export interface CustomerMenuSellableDto {
       }[])[];
       readonly sets: readonly (readonly number[])[];
     };
+    /**
+     * WP-2423 item 12: what each dish of a combo part declares by itself (names as in `items`).
+     * A dish missing here says nothing; absent for older menus and for items that aren't combos.
+     */
+    readonly byOption?: Readonly<
+      Record<
+        string,
+        readonly {
+          readonly code: CatalogCode;
+          readonly classification: "Contains" | "CrossContactPossible";
+        }[]
+      >
+    >;
   };
   /** The Store's current base price before options and tax; the final Quote stays authoritative. */
   readonly displayPrice:

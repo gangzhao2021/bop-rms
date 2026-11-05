@@ -1315,7 +1315,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "It is not charged until it goes to the kitchen.": "送厨房之前不计入账单。",
   "Choose {part}": "请选择{part}",
   "Ask staff about allergens": "过敏原请询问店员",
-  "No listed allergens declared": "未申报所列过敏原",
+  "No allergens listed": "未标注过敏原",
   "Ask staff about allergens in your choices.": "所选菜品的过敏原请询问店员。",
   "Your choices: no listed allergens declared.": "所选菜品：未申报所列过敏原。",
   "Your choices: {allergens}.": "所选菜品：{allergens}。",

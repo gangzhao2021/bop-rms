@@ -10,6 +10,7 @@ import {
 import {
   createPostgresRecipeReviewSource,
   RecipeReviewGapError,
+  type RecipeModifierRule,
   type RecipeReviewInput,
 } from "@rms/recipe";
 
@@ -173,6 +174,25 @@ function matchEvidence(expected: ReadonlyMap<string, ExpectedEvidence>, allergen
       );
   }
 }
+/**
+ * WP-2423 item 12: the evidence of what this choice's own recipe change brings in. A dish's line on
+ * the guest's menu says what that dish declares, never what the rest of the combo adds. Null when
+ * it brings in a sub-recipe: its evidence belongs to the whole graph, so nothing is stated for the
+ * choice alone (the guest is told to ask staff, never given a guess).
+ */
+export function optionOwnEvidence(rule: RecipeModifierRule): readonly string[] | null {
+  const references = new Set<string>();
+  for (const change of rule.changes) {
+    if (change.action === "Remove") continue;
+    if (change.ingredient.sourceKind !== "InventoryItem") return null;
+    if (change.ingredient.allergenDeclarationReference !== undefined)
+      references.add(change.ingredient.allergenDeclarationReference);
+    for (const assertion of change.ingredient.allergens)
+      references.add(assertion.evidenceReference);
+  }
+  return Object.freeze([...references].sort());
+}
+
 const configurationDigest = (recipe: ReviewedRecipe, allergens: ReviewFacts) =>
   "sha256:" +
   sha256Hex(canonicalizeRfc8785({ recipeSourceDigest: recipe.sourceDigest, allergens }));

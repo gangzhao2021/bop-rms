@@ -24,6 +24,7 @@ import {
 import {
   createCompleteMenuRecipeAllergenSource,
   MenuRecipeAllergenError,
+  optionOwnEvidence,
   reviewStopReason,
 } from "./menu-recipe-allergen-source.js";
 
@@ -288,6 +289,9 @@ export function createMenuReviewPreparationSource(options: {
           const optionReferences = new Map<string, Set<string>>();
           // WP-2423 ⑪: evidence per distinct set of chosen options (every Store and channel).
           const choiceEvidence = new Map<string, { options: string[]; evidence: Set<string> }>();
+          // WP-2423 item 12: what each choice's own recipe change brings in, across every Store,
+          // channel and quantity; null once any of them can't be stated for the choice alone.
+          const ownEvidence = new Map<string, Set<string> | null>();
           const resolveAt = async (
             store: string,
             channel: (typeof optionSource.channels)[number],
@@ -358,6 +362,13 @@ export function createMenuReviewPreparationSource(options: {
                 for (const reference of configuration.evidenceReferences) union.add(reference);
                 optionReferences.set(selection.optionReference, union);
               }
+              for (const rule of configuration.recipe.modifierRules) {
+                const option = rule.selection.optionReference;
+                const own = optionOwnEvidence(rule);
+                const prior = ownEvidence.get(option);
+                if (own === null || prior === null) ownEvidence.set(option, null);
+                else ownEvidence.set(option, new Set([...(prior ?? []), ...own]));
+              }
             }
             recipeDependencies.push({
               sellableReference: product.sellableReference,
@@ -366,6 +377,7 @@ export function createMenuReviewPreparationSource(options: {
               sourceDigest: resolved.sourceDigest,
             });
           }
+          const ownEvidenceToPublish = publishableOptionOwnEvidence(ownEvidence, allReferences);
           paths.push({
             sellableReference: product.sellableReference,
             productVersionReference: product.productVersionReference,
@@ -384,6 +396,7 @@ export function createMenuReviewPreparationSource(options: {
             ...(optionReferences.size === 0 || changesNothing
               ? {}
               : { choiceEvidence: compactMenuChoiceEvidence(choiceEvidence) }),
+            ...(ownEvidenceToPublish === null ? {} : { optionOwnEvidence: ownEvidenceToPublish }),
           });
           sellables.push({ ...product, optionRules, ...presentationOf(product) });
         }
@@ -521,6 +534,29 @@ export function createMenuReviewDependencyBindingSource(
       }
     },
   });
+}
+
+/**
+ * WP-2423 item 12: what each choice's own recipe change brings in, ready for the review's provenance.
+ * Only choices with a statement are published: no recipe change, a sub-recipe (null), or evidence no
+ * reviewed configuration pinned say nothing about the choice, so the guest is told to ask staff. Keys
+ * and lists are in one order, because the provenance feeds the dependency digest that is recomputed
+ * and compared when the review is approved. Null when no choice has a statement.
+ */
+export function publishableOptionOwnEvidence(
+  ownEvidence: ReadonlyMap<string, ReadonlySet<string> | null>,
+  pinned: ReadonlySet<string>,
+) {
+  const published = [...ownEvidence]
+    .flatMap(([option, references]) =>
+      references === null ||
+      references.size === 0 ||
+      [...references].some((reference) => !pinned.has(reference))
+        ? []
+        : [[option, Object.freeze([...references].sort().map(parseCatalogReference))] as const],
+    )
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return published.length === 0 ? null : Object.freeze(Object.fromEntries(published));
 }
 
 /**

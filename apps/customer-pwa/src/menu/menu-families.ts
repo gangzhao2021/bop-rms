@@ -189,31 +189,17 @@ export function isCombo(sellable: MenuSellable): boolean {
 }
 
 /**
- * The allergens of one dish of a combo part, from the published combinations: what every
- * combination with that dish contains. Exact whenever the other parts offer a dish without an
- * allergen; otherwise it may also name an allergen every combination contains. null when the
- * menu does not say.
+ * WP-2423 item 12: what one dish of a combo part declares by itself, as published; null when the
+ * menu doesn't say (the guest asks staff). Never derived from whole-combo combinations: a line beside
+ * a dish must be right in both directions for a guest with an allergy, and the combinations can
+ * neither tell a dish from the other part's only dish nor keep a "may contain" another dish
+ * "contains". The sum of the whole selection stays `allergensForChoice`.
  */
 export function comboDishAllergens(
   sellable: MenuSellable,
   optionReference: string,
 ): readonly MenuAllergenItem[] | null {
-  const choices = sellable.allergensByChoice;
-  if (choices === undefined) return null;
-  const index = choices.options.indexOf(optionReference);
-  if (index < 0) return null;
-  const outcomes = choices.sets
-    .filter((set) => set.slice(1).includes(index))
-    .map((set) => choices.outcomes[set[0] as number]);
-  if (outcomes.length === 0 || outcomes.some((outcome) => outcome === undefined)) return null;
-  const [first, ...rest] = outcomes as (readonly MenuAllergenItem[])[];
-  return (first ?? []).filter((item) =>
-    rest.every((outcome) =>
-      outcome.some(
-        (other) => other.name === item.name && other.classification === item.classification,
-      ),
-    ),
-  );
+  return sellable.allergensByOption?.[optionReference] ?? null;
 }
 
 /** The first combo part still to choose in, by name (null when every part is chosen). */

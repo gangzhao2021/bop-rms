@@ -55,6 +55,12 @@ export interface MenuAllergenPath {
   readonly optionEvidenceReferences: Readonly<Record<string, readonly CatalogReference[]>>;
   /** Absent on reviews made before per-choice disclosure. */
   readonly choiceEvidence?: MenuAllergenChoiceEvidence;
+  /**
+   * WP-2423 item 12: what each choice's own recipe change brings in (`optionEvidenceReferences` is
+   * the union of every configuration with it, so it also holds what the other parts add). Only
+   * choices with a statement appear. Absent on earlier reviews and when no choice has one.
+   */
+  readonly optionOwnEvidence?: Readonly<Record<string, readonly CatalogReference[]>>;
 }
 export interface MenuAllergenProvenanceSnapshot {
   readonly brandReference: CatalogReference;
@@ -94,6 +100,12 @@ export interface SellableAllergenDisclosure {
   readonly assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED";
   /** Absent on menus reviewed before per-choice disclosure, or for items without options. */
   readonly byChoice?: AllergenChoiceDisclosure;
+  /**
+   * WP-2423 item 12: what each choice declares by itself, whatever else is chosen. An option missing
+   * here says nothing about that choice; an empty list says its declarations list none of the
+   * registry's allergens (never a free-from claim). Names are those of the same code in `items`.
+   */
+  readonly byOption?: Readonly<Record<string, readonly AllergenChoiceItem[]>>;
 }
 export interface MenuAllergenValidationResult {
   readonly validation: PublishingValidationEvidence;
@@ -287,6 +299,37 @@ function parseChoiceDisclosure(
   });
 }
 
+function parseOptionDisclosure(
+  value: Readonly<Record<string, readonly AllergenChoiceItem[]>>,
+  codes: ReadonlySet<string>,
+): Readonly<Record<string, readonly AllergenChoiceItem[]>> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) blocked();
+  const options = Object.entries(value);
+  if (options.length < 1) blocked();
+  return Object.freeze(
+    Object.fromEntries(
+      options.map(([option, items]) => {
+        if (!Array.isArray(items)) blocked();
+        const parsed = Object.freeze(
+          items.map((item) => {
+            if (
+              item === null ||
+              typeof item !== "object" ||
+              (item.classification !== "Contains" && item.classification !== "CrossContactPossible")
+            )
+              blocked();
+            const code = parseCatalogCode(item.code);
+            if (!codes.has(code)) blocked();
+            return Object.freeze({ code, classification: item.classification });
+          }),
+        );
+        if (!unique(parsed.map((item) => item.code))) blocked();
+        return [parseCatalogReference(option), parsed] as const;
+      }),
+    ),
+  );
+}
+
 /**
  * WP-2423 ⑪: what the item contains with exactly these chosen options (quantities do not
  * matter), as reviewed for the published menu; null when the menu has no per-choice disclosure
@@ -356,6 +399,11 @@ export function parseSellableAllergenDisclosure(
       ? {}
       : {
           byChoice: parseChoiceDisclosure(value.byChoice, new Set(items.map((item) => item.code))),
+        }),
+    ...(value.byOption === undefined
+      ? {}
+      : {
+          byOption: parseOptionDisclosure(value.byOption, new Set(items.map((item) => item.code))),
         }),
   });
 }
@@ -489,12 +537,55 @@ export function validateMenuAllergenProvenance(input: {
         ),
       });
     }
+    let byOption: Record<string, readonly AllergenChoiceItem[]> | undefined;
+    if (path.optionOwnEvidence !== undefined) {
+      const own = path.optionOwnEvidence;
+      if (own === null || typeof own !== "object" || Array.isArray(own)) blocked();
+      const entries = Object.entries(own);
+      if (entries.length < 1) blocked();
+      byOption = {};
+      for (const [option, references] of entries) {
+        const optionReference = parseCatalogReference(option);
+        if (
+          path.optionEvidenceReferences[optionReference] === undefined ||
+          !Array.isArray(references) ||
+          references.length < 1 ||
+          !unique(references)
+        )
+          blocked();
+        const found = new Map<CatalogReference, Exclude<AllergenClassification, "Unverified">>();
+        for (const reference of references) {
+          const parsed = parseCatalogReference(reference);
+          if (!allReferences.has(parsed)) blocked();
+          const source = evidenceByReference.get(parsed);
+          if (source === undefined) return blocked();
+          for (const assertion of source.assertions)
+            found.set(
+              assertion.allergenReference,
+              strongest(
+                found.get(assertion.allergenReference),
+                assertion.classification as Exclude<AllergenClassification, "Unverified">,
+              ),
+            );
+        }
+        byOption[optionReference] = Object.freeze(
+          [...found.entries()]
+            .map(([allergenReference, classification]) => {
+              const entry = registryByReference.get(allergenReference);
+              if (entry === undefined) return blocked();
+              return Object.freeze({ code: entry.code, classification });
+            })
+            .sort((left, right) => left.code.localeCompare(right.code)),
+        );
+      }
+    }
     disclosures[sellableReference] = Object.freeze({
       registryVersionReference,
       items: Object.freeze(items),
       allergenFreeClaim: false,
       assistanceCode: "ALLERGEN_ASSISTANCE_REQUIRED",
       ...(byChoice === undefined ? {} : { byChoice }),
+      ...(byOption === undefined ? {} : { byOption: Object.freeze(byOption) }),
     });
   }
   if (snapshot.paths.length < 1) blocked();

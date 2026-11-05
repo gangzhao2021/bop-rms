@@ -41,6 +41,7 @@ const combo: MenuSellable = {
       [1, 1, 2],
     ],
   },
+  allergensByOption: { [sour]: [peanut], [wonton]: [wheat], [rice]: [] },
   optionRules: [
     part("汤", [option(sour, "酸辣汤"), option(wonton, "馄饨汤")]),
     part("主食", [option(rice, "炒饭")]),
@@ -60,9 +61,51 @@ describe("combos for guests (WP-2423 item 8 ⑥ part 4)", () => {
     expect(comboDishAllergens(combo, sour)).toEqual([peanut]);
     expect(comboDishAllergens(combo, wonton)).toEqual([wheat]);
     expect(comboDishAllergens(combo, rice)).toEqual([]);
-    const withoutChoices: MenuSellable = { ...combo };
-    delete (withoutChoices as { allergensByChoice?: unknown }).allergensByChoice;
-    expect(comboDishAllergens(withoutChoices, sour)).toBeNull();
+  });
+
+  // WP-2423 item 12, dessert shop: 陈皮红豆沙 + 鸡蛋仔 published egg, milk and wheat, shown as the
+  // red bean soup's own.
+  it("a dish does not show the allergens of the other part’s only dish", () => {
+    const egg = { name: "Egg", classification: "Contains" as const };
+    const dessert: MenuSellable = {
+      ...combo,
+      allergensByChoice: { options: [sour, rice], outcomes: [[egg]], sets: [[0, 0, 1]] },
+      allergensByOption: { [sour]: [], [rice]: [egg] },
+      optionRules: [
+        part("甜品", [option(sour, "陈皮红豆沙")]),
+        part("点心", [option(rice, "鸡蛋仔")]),
+      ],
+    };
+    expect(comboDishAllergens(dessert, sour)).toEqual([]);
+    expect(comboDishAllergens(dessert, rice)).toEqual([egg]);
+  });
+
+  it("a dish keeps its may-contain when another part contains the same allergen", () => {
+    const mayMilk = { name: "Milk", classification: "CrossContactPossible" as const };
+    const milk = { name: "Milk", classification: "Contains" as const };
+    const mixed: MenuSellable = {
+      ...combo,
+      // Rice may contain milk; with the sour soup the sum is "contains", with the wonton "may".
+      allergensByChoice: {
+        options: [sour, wonton, rice],
+        outcomes: [[milk], [mayMilk]],
+        sets: [
+          [0, 0, 2],
+          [1, 1, 2],
+        ],
+      },
+      allergensByOption: { [sour]: [milk], [wonton]: [], [rice]: [mayMilk] },
+    };
+    expect(comboDishAllergens(mixed, rice)).toEqual([mayMilk]);
+  });
+
+  it("with no published fact it asks staff, never derives from combinations", () => {
+    const older: MenuSellable = { ...combo };
+    delete (older as { allergensByOption?: unknown }).allergensByOption;
+    expect(older.allergensByChoice).toBeDefined();
+    expect(comboDishAllergens(older, sour)).toBeNull();
+    const unstated: MenuSellable = { ...combo, allergensByOption: { [rice]: [] } };
+    expect(comboDishAllergens(unstated, sour)).toBeNull();
   });
 
   it("names the part still to choose in, until every part is chosen", () => {

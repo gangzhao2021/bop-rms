@@ -543,6 +543,61 @@ it("WP-2423 4.5: names each option group and shows what each option adds at the 
   ).toMatchObject({ status: "Unavailable", reason: "PRICE_NOT_SET" });
 });
 
+it("WP-2423 item 12: sends what each dish declares only for a combo's parts", async () => {
+  const base = projection();
+  const [section] = base.snapshot.sections;
+  const [latte] = section?.sellables ?? [];
+  if (section === undefined || latte === undefined) throw new Error("fixture");
+  const byOption = {
+    [id(14)]: [{ code: "MILK" as never, classification: "Contains" as const }],
+  };
+  const menu: PublishedMenuProjection = {
+    ...base,
+    snapshot: {
+      ...base.snapshot,
+      sections: [
+        {
+          ...section,
+          sellables: [{ ...latte, allergenDisclosure: { ...latte.allergenDisclosure, byOption } }],
+        },
+      ],
+    },
+  };
+  const query = (comboChoices: ReadonlySet<string> | undefined) =>
+    createCustomerMenuQueryService({
+      stores: {
+        resolvePublic: async () => ({
+          brandReference: id(3) as never,
+          storeReference: id(7) as never,
+          status: "Active",
+        }),
+      },
+      projections: { loadCandidates: async () => [menu] },
+      storeFacts: {
+        load: async () =>
+          new Map([
+            [
+              id(10),
+              {
+                availability: "Available" as const,
+                price: null,
+                ...(comboChoices === undefined ? {} : { comboChoices }),
+              },
+            ],
+          ]),
+      },
+    }).getPublishedMenu(input());
+  const disclosureOf = async (comboChoices: ReadonlySet<string> | undefined) => {
+    const result = await query(comboChoices);
+    if (result.status !== "Found") throw new Error("menu");
+    return result.menu.sections[0]?.sellables[0]?.allergenDisclosure;
+  };
+  expect((await disclosureOf(new Set([id(14)])))?.byOption).toEqual(byOption);
+  // A drink's choices aren't sent to guests, so milk tea menus don't grow.
+  expect(await disclosureOf(undefined)).not.toHaveProperty("byOption");
+  expect(await disclosureOf(new Set([id(99)]))).not.toHaveProperty("byOption");
+});
+
 it("WP-2423 Q12: gives the Store's facts each shown item as normally ordered", async () => {
   const value = projection();
   const requested: Parameters<NonNullable<CustomerMenuQueryPorts["storeFacts"]>["load"]>[0][] = [];

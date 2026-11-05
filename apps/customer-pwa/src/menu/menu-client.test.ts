@@ -322,6 +322,39 @@ describe("Customer Menu client", () => {
       ).resolves.toEqual({ kind: "Unavailable" });
   });
 
+  it("WP-2423 item 12: reads what each combo dish declares; a bad entry refuses only that item", async () => {
+    const withOwn = (byOption: unknown) => {
+      const body = found();
+      const sellable = body.menu.sections[0]?.sellables[0];
+      if (!sellable) throw new Error("fixture");
+      Object.assign(sellable.allergenDisclosure, { byOption });
+      return body;
+    };
+    const load = (byOption: unknown) =>
+      createCustomerMenuClient(context, {
+        fetch: async () => response(200, withOwn(byOption)),
+        online: () => true,
+      }).load();
+    const result = await load({
+      [references.option]: [{ code: "MILK", classification: "Contains" }],
+      [references.menu]: [],
+    });
+    if (result.kind !== "Found") throw new Error("expected a menu");
+    expect(result.menu.sections[0]?.sellables[0]?.allergensByOption).toEqual({
+      [references.option]: [{ name: "Milk", classification: "Contains" }],
+      [references.menu]: [],
+    });
+    for (const invalid of [
+      { [references.option]: [{ code: "PEANUT", classification: "Contains" }] },
+      { [references.option]: [{ code: "MILK", classification: "Unverified" }] },
+      { [references.option]: [{ code: "MILK", classification: "Contains", extra: true }] },
+      { [references.option]: "MILK" },
+      { "not-a-reference": [] },
+      [],
+    ])
+      await expect(load(invalid)).resolves.toEqual({ kind: "Unavailable" });
+  });
+
   it("Owner 2026-10-23: names priority allergens in Chinese while Chinese is chosen", async () => {
     const { LanguageRoot } = await import("../i18n/i18n.js");
     const { renderToStaticMarkup } = await import("react-dom/server");

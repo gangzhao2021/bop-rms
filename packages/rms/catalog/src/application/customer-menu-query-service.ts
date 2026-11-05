@@ -180,13 +180,39 @@ function optionPrice(
       fact === null || fact.optionPrices === undefined ? "PRICING_NOT_INTEGRATED" : "PRICE_NOT_SET",
   };
 }
+type PublishedSellable =
+  PublishedMenuProjection["snapshot"]["sections"][number]["sellables"][number];
+/** WP-2423 item 8 ⑥ part 4: a rule whose every choice stands for a dish of a combo. */
+function comboPartRule(
+  rule: PublishedSellable["optionRules"][number],
+  fact: CustomerMenuStoreFact | null,
+): boolean {
+  return (
+    fact?.comboChoices !== undefined &&
+    rule.options.length > 0 &&
+    rule.options.every((option) => fact.comboChoices?.has(option.optionReference))
+  );
+}
 function publicSellable(
-  item: PublishedMenuProjection["snapshot"]["sections"][number]["sellables"][number],
+  item: PublishedSellable,
   locale: string,
   defaultLocale: string,
   channelCode: string,
   fact: CustomerMenuStoreFact | null,
 ): CustomerMenuSellableDto {
+  const offeredRules = item.optionRules.filter(
+    (rule) =>
+      rule.semanticsVersion !== 2 || rule.channelCodes?.some((channel) => channel === channelCode),
+  );
+  // WP-2423 item 12: only a combo's dishes show their own allergens; other choices aren't sent.
+  const comboDishes = new Set(
+    offeredRules
+      .filter((rule) => comboPartRule(rule, fact))
+      .flatMap((rule) => rule.options.map((option) => String(option.optionReference))),
+  );
+  const byOption = Object.entries(item.allergenDisclosure.byOption ?? {}).filter(([option]) =>
+    comboDishes.has(option),
+  );
   return Object.freeze({
     sellableReference: item.sellableReference,
     productVersionReference: item.productVersionReference,
@@ -196,43 +222,33 @@ function publicSellable(
     availability: fact?.availability === "SoldOut" ? "SoldOut" : "Available",
     ...(fact?.alcohol === undefined ? {} : { alcohol: fact.alcohol }),
     optionRules: Object.freeze(
-      item.optionRules
-        .filter(
-          (rule) =>
-            rule.semanticsVersion !== 2 ||
-            rule.channelCodes?.some((channel) => channel === channelCode),
-        )
-        .map((rule) =>
-          Object.freeze({
-            ...rule,
-            name:
-              rule.localizedNames === undefined
-                ? null
-                : (rule.localizedNames[locale] ?? rule.localizedNames[defaultLocale] ?? null),
-            ...(fact?.comboChoices !== undefined &&
-            rule.options.length > 0 &&
-            rule.options.every((option) => fact.comboChoices?.has(option.optionReference))
-              ? { comboPart: true as const }
-              : {}),
-            options: Object.freeze(
-              rule.options.map((option) =>
-                Object.freeze({
-                  optionReference: option.optionReference,
-                  name: localized(option.localizedNames, locale, defaultLocale),
-                  maximumQuantity: option.maximumQuantity,
-                  conflictOptionReferences: option.conflictOptionReferences,
-                  selectedByDefault: option.selectedByDefault,
-                  ...(rule.semanticsVersion === 2
-                    ? { defaultQuantity: Number(option.defaultQuantity) }
-                    : {}),
-                  incrementalPrice: Object.freeze(
-                    optionPrice(fact, rule.bindingReference, option.optionReference),
-                  ),
-                }),
-              ),
+      offeredRules.map((rule) =>
+        Object.freeze({
+          ...rule,
+          name:
+            rule.localizedNames === undefined
+              ? null
+              : (rule.localizedNames[locale] ?? rule.localizedNames[defaultLocale] ?? null),
+          ...(comboPartRule(rule, fact) ? { comboPart: true as const } : {}),
+          options: Object.freeze(
+            rule.options.map((option) =>
+              Object.freeze({
+                optionReference: option.optionReference,
+                name: localized(option.localizedNames, locale, defaultLocale),
+                maximumQuantity: option.maximumQuantity,
+                conflictOptionReferences: option.conflictOptionReferences,
+                selectedByDefault: option.selectedByDefault,
+                ...(rule.semanticsVersion === 2
+                  ? { defaultQuantity: Number(option.defaultQuantity) }
+                  : {}),
+                incrementalPrice: Object.freeze(
+                  optionPrice(fact, rule.bindingReference, option.optionReference),
+                ),
+              }),
             ),
-          }),
-        ),
+          ),
+        }),
+      ),
     ),
     description:
       item.presentation === undefined
@@ -256,6 +272,7 @@ function publicSellable(
       ...(item.allergenDisclosure.byChoice === undefined
         ? {}
         : { byChoice: item.allergenDisclosure.byChoice }),
+      ...(byOption.length === 0 ? {} : { byOption: Object.freeze(Object.fromEntries(byOption)) }),
     }),
     displayPrice: Object.freeze(
       fact === null

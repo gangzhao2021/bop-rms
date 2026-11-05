@@ -4,7 +4,7 @@
   "projection": {
     "name": "catalog_published_menu_v1",
     "version": 1,
-    "asOfUtc": "2026-10-29T06:12:46.692Z",
+    "asOfUtc": "2026-11-05T05:32:11.448Z",
     "sourceCheckpoint": "019a0005-0000-7324-b336-5ab00b124d26",
     "sourceAggregateVersion": 2,
     "freshnessStatus": "Fresh",
@@ -16,7 +16,7 @@
     "publicStoreReference": "01909a7f-0000-7000-8000-000000002329",
     "channelCode": "CUSTOMER_PWA",
     "orderTypeCode": "DINE_IN",
-    "effectiveAt": "2026-10-29T06:12:46.709Z"
+    "effectiveAt": "2026-11-05T05:32:11.470Z"
   },
   "menu": {
     "menuReference": "01909a7f-0000-7000-8000-0000000001f3",
@@ -24,7 +24,7 @@
     "releaseReference": "019a0005-0000-78be-a56e-600aeb76ba04",
     "locale": "en-CA",
     "name": "TEST menu",
-    "effectiveFrom": "2026-10-29T06:12:46.634Z",
+    "effectiveFrom": "2026-11-05T05:32:11.365Z",
     "effectiveUntil": null,
     "sections": [
       {
@@ -287,6 +287,21 @@
                   [0, 0, 2],
                   [1, 1, 2]
                 ]
+              },
+              "byOption": {
+                "019a0005-0000-700e-a139-836bc0a21948": [
+                  {
+                    "code": "WHEAT",
+                    "classification": "Contains"
+                  }
+                ],
+                "019a0005-0000-7e03-a5da-cb60a05f5747": [
+                  {
+                    "code": "PEANUT",
+                    "classification": "Contains"
+                  }
+                ],
+                "019a0005-0000-7ff1-b281-5f098033e70c": []
               }
             },
             "displayPrice": {

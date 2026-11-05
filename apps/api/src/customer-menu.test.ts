@@ -272,6 +272,41 @@ describe("WP-1026 Customer Menu REST API", () => {
     expect(JSON.stringify(body)).not.toContain("raw-key");
   });
 
+  it("WP-2423 item 12: passes on what each combo dish declares", async () => {
+    const catalog = new MutablePort();
+    const value = found();
+    if (value.status !== "Found") throw new Error("fixture");
+    const sellable = value.menu.sections[0]?.sellables[0];
+    if (sellable === undefined) throw new Error("fixture");
+    const byOption = {
+      "018f7500-0000-7000-8000-00000000000b": [
+        { code: "MILK" as never, classification: "Contains" as const },
+      ],
+    };
+    catalog.result = {
+      ...value,
+      menu: {
+        ...value.menu,
+        sections: [
+          {
+            ...value.menu.sections[0],
+            sellables: [
+              {
+                ...sellable,
+                allergenDisclosure: { ...sellable.allergenDisclosure, byOption },
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const response = await fetch(url(await listen(catalog)));
+    const body = (await response.json()) as {
+      menu: { sections: { sellables: { allergenDisclosure: unknown }[] }[] };
+    };
+    expect(body.menu.sections[0]?.sellables[0]?.allergenDisclosure).toMatchObject({ byOption });
+  });
+
   it("serializes an allowlisted DTO and drops unexpected internal adapter fields", async () => {
     const catalog = new MutablePort();
     catalog.result = { ...found(), internalDatabaseFact: "raw-secret" };
