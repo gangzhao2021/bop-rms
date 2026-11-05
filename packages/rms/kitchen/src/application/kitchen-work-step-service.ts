@@ -32,7 +32,6 @@ function invalid(): never {
   throw new KitchenWorkLifecycleError("KITCHEN_WORK_INPUT_INVALID");
 }
 
-const databaseConflict = new Set(["40001", "40P01", "55P03", "57014"]);
 const databaseCode = (error: unknown) =>
   error !== null && typeof error === "object"
     ? (Object.getOwnPropertyDescriptor(error, "code")?.value as unknown)
@@ -75,16 +74,38 @@ const earlier = (left: string, right: string) => Date.parse(left) < Date.parse(r
  */
 export async function runKitchenWorkStepChunk(
   ports: KitchenWorkStepPorts,
-  input: {
-    readonly transaction: ConsumerTransaction;
-    readonly step: KitchenWorkStepKind;
-    readonly correlationReference: string;
-    /** Every ticket of the whole tap: a tap is one card, so they must share one Order. */
-    readonly tapTickets: readonly string[];
-    /** One ticket's lines. */
-    readonly lines: readonly KitchenWorkStepLine[];
-  },
-): Promise<{ readonly occurredAt: string; readonly lines: readonly KitchenWorkStepLineResult[] }> {
+  input: KitchenWorkStepChunk,
+): Promise<KitchenWorkStepChunkResult> {
+  try {
+    return await runChunk(ports, input);
+  } catch (error) {
+    if (error instanceof KitchenWorkLifecycleError) throw error;
+    // A database failure keeps its SQLSTATE: the transaction runner reads a conflict as "rerun".
+    const code = databaseCode(error);
+    if (typeof code === "string" && /^[0-9A-Z]{5}$/u.test(code)) throw error;
+    // Anything else is "busy, try again", never a refusal of the cook's permission.
+    throw new KitchenWorkLifecycleError("KITCHEN_WORK_DEPENDENCY_UNAVAILABLE");
+  }
+}
+
+interface KitchenWorkStepChunk {
+  readonly transaction: ConsumerTransaction;
+  readonly step: KitchenWorkStepKind;
+  readonly correlationReference: string;
+  /** Every ticket of the whole tap: a tap is one card, so they must share one Order. */
+  readonly tapTickets: readonly string[];
+  /** One ticket's lines. */
+  readonly lines: readonly KitchenWorkStepLine[];
+}
+interface KitchenWorkStepChunkResult {
+  readonly occurredAt: string;
+  readonly lines: readonly KitchenWorkStepLineResult[];
+}
+
+async function runChunk(
+  ports: KitchenWorkStepPorts,
+  input: KitchenWorkStepChunk,
+): Promise<KitchenWorkStepChunkResult> {
   const { transaction: tx, step, correlationReference, lines } = input;
   const scope = { brandReference: ports.brandReference, storeReference: ports.storeReference };
   const ticketReference = lines[0]?.ticketReference;
@@ -114,18 +135,8 @@ export async function runKitchenWorkStepChunk(
 
   // The Order's fence and row lock stay held to the end of the transaction. A source that no longer
   // stands is a refusal staff can act on, never "busy, try again" forever.
-  await tx.query("SAVEPOINT kitchen_step_source", []);
-  let sourceHolds: boolean;
-  try {
-    sourceHolds = await ports.validateTicketSource(tx, ticketReference);
-    await tx.query("RELEASE SAVEPOINT kitchen_step_source", []);
-  } catch (error) {
-    if (databaseConflict.has(String(databaseCode(error)))) throw error;
-    await tx.query("ROLLBACK TO SAVEPOINT kitchen_step_source", []);
-    await tx.query("RELEASE SAVEPOINT kitchen_step_source", []);
-    sourceHolds = false;
-  }
-  if (!sourceHolds) return refusedAll("OrderChanged", ports.now());
+  if ((await ports.validateTicketSource(tx, ticketReference)) !== true)
+    return refusedAll("OrderChanged", ports.now());
 
   const locked = await lockKitchenWorkStepTicket(tx, scope, ticketReference);
   if (locked === null) return refusedAll("NotFound", ports.now());

@@ -315,6 +315,7 @@ export async function createKitchenStepFixture(context, prefix) {
     validateTicketSource = async () => true,
     comboChoices = async () => new Map(),
     onChunk,
+    now = () => new Date().toISOString(),
   }) => {
     const body = parseKitchenWorkStepBody({
       step,
@@ -347,7 +348,7 @@ export async function createKitchenStepFixture(context, prefix) {
             ...lifecycle,
             ...scope,
             actorReference: actor,
-            now: () => new Date().toISOString(),
+            now,
             guard: async () => true,
             validateTicketSource,
             comboChoices,

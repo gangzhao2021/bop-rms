@@ -35,6 +35,7 @@ import {
 } from "../../rms/kitchen/src/index.ts";
 import {
   comboChoiceProducts,
+  comboDishesWithoutSection,
   comboPartsByOrderItem,
   markDiningComboPartServed,
   markKitchenComboPartDone,
@@ -1285,6 +1286,19 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       assert.deepEqual(
         otherStore.filter((name) => name !== null),
         [],
+      );
+      // The owner is told which of the combo's dishes have no section (they show on every section's
+      // screen): the marked dish is off the list, the unmarked one is on it under its Chinese name.
+      const withoutSection = await asStore((tx) =>
+        comboDishesWithoutSection(tx, diningScope, "en-CA"),
+      );
+      assert.equal(
+        withoutSection.find((dish) => dish.productReference === productOf.get(chosen[1]))?.name,
+        "炒饭",
+      );
+      assert.equal(
+        withoutSection.some((dish) => dish.productReference === productOf.get(chosen[0])),
+        false,
       );
       // A read that does not ask keeps the five keys a tablet on the previous page reads strictly.
       assert.deepEqual(Object.keys((await parts())[0]).sort(), [

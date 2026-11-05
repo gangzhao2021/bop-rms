@@ -133,6 +133,7 @@ function createKitchenSource(resources) {
    * of the transaction, as before.
    */
   const ticketSourceHolds = async (transaction, ticketReference) => {
+    if (!active()) return null;
     const closed = await listClosedKitchenTickets(transaction, scope, [ticketReference]);
     if (closed.size > 0) return null;
     const original = await creation.resolveByTicket({ transaction, ticketReference });
@@ -185,7 +186,19 @@ export function createInternalKitchenStep(resources, persistence, authentication
     persistence,
     authentication,
     lifecycle,
-    validateTicketSource: async (transaction, ticketReference) =>
-      (await ticketSourceHolds(transaction, ticketReference)) !== null,
+    validateTicketSource: async (transaction, ticketReference) => {
+      try {
+        return (await ticketSourceHolds(transaction, ticketReference)) !== null;
+      } catch (error) {
+        // The Order moved on since this work was issued: a refusal staff can act on. Anything else
+        // (a lock wait, a lost connection) stays "busy, try again".
+        if (
+          error?.code === "ORDER_KITCHEN_SOURCE_CONFLICT" ||
+          error?.code === "ORDER_KITCHEN_SOURCE_NOTHING_TO_PREPARE"
+        )
+          return false;
+        throw error;
+      }
+    },
   });
 }

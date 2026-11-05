@@ -4,6 +4,8 @@ import {
   kitchenWorkStepMaxLines,
   kitchenWorkStepNotAttempted,
   parseKitchenWorkStepBody,
+  runKitchenWorkStepChunk,
+  type KitchenWorkStepPorts,
 } from "../index.js";
 
 const id = (n: number) => "01909985-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -84,5 +86,45 @@ describe("DEC-KITCHEN-ONE-TAP chunks", () => {
       ticketVersion: null,
       workItemStatus: null,
     });
+  });
+});
+
+describe("DEC-KITCHEN-ONE-TAP what a failure inside a chunk reads as", () => {
+  const ports = {
+    brandReference: id(1),
+    storeReference: id(2),
+    actorReference: id(3),
+    now: () => "2026-11-05T12:00:00.000Z",
+    guard: async () => true,
+    validateTicketSource: async () => true,
+    comboChoices: async () => new Map<string, string>(),
+  } as unknown as KitchenWorkStepPorts;
+  const failing = (error: unknown) => ({
+    transaction: {
+      query: async () => {
+        throw error;
+      },
+    },
+    step: "Finish" as const,
+    correlationReference: id(4),
+    tapTickets: [id(900)],
+    lines: [line(1)],
+  });
+  it("keeps a database conflict's code, so the run can be repeated", async () => {
+    const conflict = Object.assign(new Error("lock"), { code: "55P03" });
+    await expect(runKitchenWorkStepChunk(ports, failing(conflict) as never)).rejects.toBe(conflict);
+  });
+  it("never reads anything else as a refusal of permission", async () => {
+    await expect(
+      runKitchenWorkStepChunk(ports, failing(new Error("synthetic")) as never),
+    ).rejects.toMatchObject({ code: "KITCHEN_WORK_DEPENDENCY_UNAVAILABLE" });
+  });
+  it("refuses a chunk naming a line of another ticket", async () => {
+    await expect(
+      runKitchenWorkStepChunk(ports, {
+        ...failing(new Error("not reached")),
+        lines: [line(1, 900), line(2, 901)],
+      } as never),
+    ).rejects.toMatchObject({ code: "KITCHEN_WORK_INPUT_INVALID" });
   });
 });

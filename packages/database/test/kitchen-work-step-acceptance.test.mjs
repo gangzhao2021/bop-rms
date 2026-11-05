@@ -457,13 +457,20 @@ it("a 20-dish finish lets another Store command through", async () => {
         waits.push(performance.now() - startedAt);
       }
     })();
+    let sourceChecks = 0;
     const reply = await f.tap({
       step: "Finish",
       actor: f.id(0x700),
       lines: linesOf(round),
       onChunk: (chunk) => chunks.push(chunk),
+      validateTicketSource: async () => {
+        sourceChecks += 1;
+        return true;
+      },
     });
     tapping = false;
+    // The Order's fence once per transaction, not once per step of every line.
+    assert.equal(sourceChecks, chunks.length);
     await other;
     assert.equal(reply.lines.filter((line) => line.outcome === "Finished").length, 20);
     assert.deepEqual(
@@ -871,5 +878,50 @@ it("a combo of only not-prepared dishes makes no kitchen work and does not hold 
       listKitchenNotPreparedOrderItems(tx, f.scope, receipt.orderReference),
     );
     assert.deepEqual([...notPrepared], [comboLine]);
+  });
+});
+
+it("one issued ticket's source is read alone, under the pilot role", async () => {
+  await withFixture("wp2423_ks_oneticket", async (f) => {
+    const { createPostgresKitchenTicketStore } = await import("../../rms/kitchen/src/index.ts");
+    const round = await f.createTicket({ lines: 2 });
+    const store = createPostgresKitchenTicketStore({
+      ...f.scope,
+      ...f.validation,
+      authorize: async () => true,
+      validateCurrentSource: async () => false,
+    });
+    const found = await f.as((transaction) =>
+      store.resolveByTicket({ transaction, ticketReference: round.ticket }),
+    );
+    assert.equal(found.status, "Resolved");
+    assert.equal(found.effect.ticket.ticketReference, round.ticket);
+    assert.equal(found.effect.ticket.workItems.length, 2);
+    assert.equal(
+      (
+        await f.as((transaction) =>
+          store.resolveByTicket({ transaction, ticketReference: f.next() }),
+        )
+      ).status,
+      "NotFound",
+    );
+  });
+});
+
+it("a tap recorded by a clock behind the ticket's last change is not lost", async () => {
+  await withFixture("wp2423_ks_clock", async (f) => {
+    const round = await f.createTicket({ lines: 2 });
+    const [first, second] = linesOf(round);
+    const firstTap = await f.tap({ step: "Finish", actor: f.id(0x700), lines: [first] });
+    // A second process whose clock reads an hour behind: never earlier than the fact it follows.
+    const behind = new Date(Date.parse(firstTap.occurredAt) - 3_600_000).toISOString();
+    const late = await f.tap({
+      step: "Finish",
+      actor: f.id(0x701),
+      lines: [second],
+      now: () => behind,
+    });
+    assert.equal(late.lines[0].outcome, "Finished");
+    assert.equal(late.occurredAt, firstTap.occurredAt);
   });
 });
