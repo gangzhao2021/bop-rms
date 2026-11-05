@@ -1,3 +1,4 @@
+import { setImmediate as yieldToWaitingWork } from "node:timers/promises";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseRecipeDigest, parseRecipeReference } from "../../domain/recipe.js";
@@ -567,7 +568,13 @@ export function createPostgresRecipeReviewSource(options: {
           return snapshot;
         };
         const results = [];
+        // This loop is CPU in the one process all guests and staff enter through: let them in.
+        let working = Date.now();
         for (const configuration of configurations) {
+          if (Date.now() - working >= 15) {
+            await yieldToWaitingWork();
+            working = Date.now();
+          }
           const selections = parseSelections(configuration);
           const applied: RecipeModifierRule[] = [];
           for (const selection of selections) applied.push(await ruleFor(selection));

@@ -269,7 +269,14 @@ function createBoundary(input: ZonedBoundary, timeZone: string): ZonedBoundary {
   });
 }
 
+/**
+ * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a period this function produced and froze cannot have changed, so
+ * it is returned as it is (a menu review validated the same period thousands of times). Anything
+ * else, a spread copy included, is new and fully validated.
+ */
+const validatedPeriods = new WeakSet<object>();
 export function createEffectivePeriod(input: EffectivePeriod): EffectivePeriod {
+  if (input !== null && typeof input === "object" && validatedPeriods.has(input)) return input;
   exact(input, ["timeZone", "effectiveFrom", "effectiveUntil"], "EFFECTIVE_PERIOD_TIME_INVALID");
   if (typeof input.timeZone !== "string" || input.timeZone.length < 1)
     fail("EFFECTIVE_PERIOD_TIME_INVALID");
@@ -281,7 +288,13 @@ export function createEffectivePeriod(input: EffectivePeriod): EffectivePeriod {
     Date.parse(effectiveUntil.instant) <= Date.parse(effectiveFrom.instant)
   )
     fail("EFFECTIVE_PERIOD_TIME_INVALID");
-  return Object.freeze({ timeZone: input.timeZone, effectiveFrom, effectiveUntil });
+  const validated: EffectivePeriod = Object.freeze({
+    timeZone: input.timeZone,
+    effectiveFrom,
+    effectiveUntil,
+  });
+  validatedPeriods.add(validated);
+  return validated;
 }
 
 export function createEffectiveConfigurationVersion(

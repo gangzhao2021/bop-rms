@@ -10,7 +10,7 @@ import {
   MenuReviewStoppedError,
 } from "./menu-recipe-allergen-source.js";
 import { createMenuReviewCreationSource } from "./menu-review-creation-source.js";
-import { sha256Hex } from "@bop/audit";
+import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import {
   CatalogError,
   createMenuPublicationService,
@@ -322,33 +322,40 @@ export function createMerchantMenuPublicationCommand(options: {
             current.configurationDigest !== binding.configurationDigest
           )
             return fail("CATALOG_VERSION_CONFLICT");
-          const reviewed = await createMenuReviewDependencyBindingSource({
-            brandReference: brand,
-            budget: { maximumConfigurations: 10000, maximumSearchSteps: 1000000 },
-            authorize: async (_tx, input) =>
-              input.actorReference === scope.actorReference &&
-              input.menuReference === command.menuReference &&
-              (await permission()) !== null,
-          })
-            .resolve(tx, {
-              actorReference: scope.actorReference,
-              menuReference: command.menuReference,
-              menuVersionReference: command.menuVersionReference,
-              snapshotDigest: command.snapshotDigest,
-              observedAt: command.requestedAt,
-              // Only a temporary current validation; no new evidence is persisted here.
-              validationEvidenceReference: binding.lifecycleReference,
-            })
-            .catch(async (error) => {
-              if (!(await permission())) return fail("CATALOG_PERMISSION_DENIED");
-              if (error instanceof MenuReviewDependencyChangedError)
-                return fail("CATALOG_VERSION_CONFLICT");
-              if (error instanceof MenuRecipeAllergenError && error.gap !== null)
-                throw new MenuReviewGapError(error.gap);
-              if (error instanceof MenuRecipeAllergenError)
-                throw new MenuReviewStoppedError(error.reason, error.skuReference);
-              return fail("CATALOG_DEPENDENCY_UNAVAILABLE");
-            });
+          // WP-2423 DEC-MERCHANT-LOCK-SCOPE: a review this transaction just prepared and recorded,
+          // under the fences it still holds, is the current one. Reading it all again held the
+          // merchant's Publishing write fence for seconds. A retried Submit (AlreadyCreated), and
+          // Approve and Publish, review the menu again: that is the accepted review rule.
+          const reviewed =
+            created?.status === "Created"
+              ? created.record
+              : await createMenuReviewDependencyBindingSource({
+                  brandReference: brand,
+                  budget: { maximumConfigurations: 10000, maximumSearchSteps: 1000000 },
+                  authorize: async (_tx, input) =>
+                    input.actorReference === scope.actorReference &&
+                    input.menuReference === command.menuReference &&
+                    (await permission()) !== null,
+                })
+                  .resolve(tx, {
+                    actorReference: scope.actorReference,
+                    menuReference: command.menuReference,
+                    menuVersionReference: command.menuVersionReference,
+                    snapshotDigest: command.snapshotDigest,
+                    observedAt: command.requestedAt,
+                    // Only a temporary current validation; no new evidence is persisted here.
+                    validationEvidenceReference: binding.lifecycleReference,
+                  })
+                  .catch(async (error) => {
+                    if (!(await permission())) return fail("CATALOG_PERMISSION_DENIED");
+                    if (error instanceof MenuReviewDependencyChangedError)
+                      return fail("CATALOG_VERSION_CONFLICT");
+                    if (error instanceof MenuRecipeAllergenError && error.gap !== null)
+                      throw new MenuReviewGapError(error.gap);
+                    if (error instanceof MenuRecipeAllergenError)
+                      throw new MenuReviewStoppedError(error.reason, error.skuReference);
+                    return fail("CATALOG_DEPENDENCY_UNAVAILABLE");
+                  });
           if (
             reviewed.lifecycleReference !== binding.lifecycleReference ||
             reviewed.configurationDigest !== binding.configurationDigest
@@ -441,7 +448,8 @@ export function createMerchantMenuPublicationCommand(options: {
           command: MenuPublicationCommand,
         ) => {
           if (!(await permission())) return fail("CATALOG_PERMISSION_DENIED");
-          const key = JSON.stringify(command);
+          // The service hands back a parsed copy whose fields are in another order: by value.
+          const key = canonicalizeRfc8785(command);
           let pending = evidenceCache.get(key);
           if (!pending) {
             pending = loadEvidence(tx, command);

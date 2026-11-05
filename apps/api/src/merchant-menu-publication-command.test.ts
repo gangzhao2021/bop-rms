@@ -14,6 +14,8 @@ const state = vi.hoisted(() => ({
   scope: null as unknown,
   binding: null as unknown,
   validation: null as unknown,
+  createdStatus: "AlreadyCreated",
+  reorderCommand: false,
 }));
 vi.mock("./merchant-brand-scope.js", () => ({
   createMerchantBrandScope: () => async () => state.scope,
@@ -43,7 +45,10 @@ vi.mock("./menu-review-creation-source.js", () => ({
       if (!(await options.authorize(tx, { ...input, storeReference: null, owner: "Publishing" })))
         throw Object.assign(new Error("synthetic denied"), { code: "CATALOG_PERMISSION_DENIED" });
       state.createdInput = input;
-      return { status: "AlreadyCreated", record: { ...(state.binding as object), createdAt: at } };
+      return {
+        status: state.createdStatus,
+        record: { ...(state.binding as object), createdAt: at },
+      };
     },
   }),
 }));
@@ -65,6 +70,11 @@ vi.mock("@rms/catalog", async (importOriginal) => ({
       state.executed = command;
       await ports.evidence.validation(command);
       await ports.evidence.validation(command);
+      // The real service hands back a parsed copy whose fields are in another order.
+      if (state.reorderCommand)
+        await ports.evidence.validation(
+          Object.fromEntries(Object.entries(command).reverse()) as never,
+        );
       return {
         status: "Applied",
         record: { lifecycle: { version: 2, state: "Approved" }, release: null },
@@ -90,6 +100,8 @@ beforeEach(() => {
     configurationDigest: digest,
   };
   state.validation = { evidenceReference: id(5) };
+  state.createdStatus = "AlreadyCreated";
+  state.reorderCommand = false;
   state.scope = {
     tenantReference: id(6),
     actorReference: id(7),
@@ -163,6 +175,13 @@ it("reuses evidence only within the transaction while checking permission again"
   expect(state.evidenceReads).toBe(2);
 });
 
+it("treats a reordered copy of one command as the same evidence", async () => {
+  state.reorderCommand = true;
+  await handler()(request("Publish"));
+  expect(state.dependencyReads).toBe(1);
+  expect(state.evidenceReads).toBe(1);
+});
+
 const reviewRequest = () => ({
   sessionCookie: "synthetic-cookie",
   csrf: "synthetic-csrf",
@@ -194,6 +213,15 @@ it("creates review using server identity and submits its original snapshot and t
     requestedAt: at,
     expectedVersion: 1,
   });
+});
+it("reviews a menu once when Submit just prepared it, and again when it is retried", async () => {
+  state.createdStatus = "Created";
+  await handler(true)(reviewRequest());
+  expect(state.dependencyReads).toBe(0);
+  expect(state.evidenceReads).toBe(1);
+  state.createdStatus = "AlreadyCreated";
+  await handler(true)(reviewRequest());
+  expect(state.dependencyReads).toBe(1);
 });
 it("requires explicit review configuration and rejects client authority or versions", async () => {
   await expect(handler()(reviewRequest())).rejects.toMatchObject({

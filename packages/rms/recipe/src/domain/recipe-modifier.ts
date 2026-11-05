@@ -77,11 +77,15 @@ export function parseRecipeOptionSelection(value: unknown): RecipeOptionSelectio
     quantity: raw.quantity as number,
   });
 }
+/** A rule this parser produced and froze, with the exact base it was validated against. */
+const validatedRules = new WeakMap<object, RecipeSnapshot>();
 export function parseRecipeModifierRule(
   value: unknown,
   baseInput: RecipeSnapshot,
 ): RecipeModifierRule {
   const base = createRecipeSnapshot(baseInput);
+  if (value !== null && typeof value === "object" && validatedRules.get(value) === base)
+    return value as RecipeModifierRule;
   const raw = closed(value, [
     "ruleReference",
     "ruleVersionReference",
@@ -127,7 +131,7 @@ export function parseRecipeModifierRule(
           ingredient,
         });
   });
-  return Object.freeze({
+  const validated: RecipeModifierRule = Object.freeze({
     ruleReference: parseRecipeReference(raw.ruleReference),
     ruleVersionReference: parseRecipeReference(raw.ruleVersionReference),
     ruleDigest: parseRecipeDigest(raw.ruleDigest),
@@ -136,6 +140,8 @@ export function parseRecipeModifierRule(
     selection: parseRecipeOptionSelection(raw.selection),
     changes: Object.freeze(changes),
   });
+  validatedRules.set(validated, base);
+  return validated;
 }
 function key(s: RecipeOptionSelection): string {
   const binding = parseRecipeReference(s.bindingReference),

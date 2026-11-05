@@ -319,6 +319,20 @@ describe("effective period time contract", () => {
     }
   });
 
+  it("returns what it produced and froze as it is; a spread copy is validated again", () => {
+    const first = period();
+    expect(createEffectivePeriod(first)).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    const copy = createEffectivePeriod({ ...first });
+    expect(copy).not.toBe(first);
+    expect(copy).toEqual(first);
+    expect(() =>
+      createEffectivePeriod({
+        ...first,
+        effectiveUntil: first.effectiveFrom,
+      }),
+    ).toThrow(EffectivePeriodContractError);
+  });
   it("rejects invalid zones, offset mismatch, and DST gaps", () => {
     for (const input of [
       {

@@ -146,7 +146,19 @@ function allergen(value: unknown): AllergenEvidence {
     verified: raw.verified,
   });
 }
+/**
+ * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a menu review applies each option rule to thousands of choice
+ * combinations, and each step validates the same frozen values again (8 of a tea menu's 14 busy
+ * seconds, in the one process all guests and staff enter through). What a validator produced and
+ * froze cannot have changed, so it is returned as it is. Anything else, a spread copy included, is
+ * new and fully validated. The output is byte-identical, so digests and reviews in flight stay valid.
+ */
+const validatedIngredients = new WeakSet<object>();
+const validatedSteps = new WeakSet<object>();
+const validatedSnapshots = new WeakSet<object>();
 function ingredient(value: unknown): IngredientRequirement {
+  if (value !== null && typeof value === "object" && validatedIngredients.has(value))
+    return value as IngredientRequirement;
   const declared =
     value !== null &&
     typeof value === "object" &&
@@ -187,7 +199,7 @@ function ingredient(value: unknown): IngredientRequirement {
       ))
   )
     return fail("RECIPE_INPUT_INVALID");
-  return Object.freeze({
+  const validated: IngredientRequirement = Object.freeze({
     requirementReference: parseRecipeReference(raw.requirementReference),
     sourceKind: raw.sourceKind,
     sourceReference: parseRecipeReference(raw.sourceReference),
@@ -206,8 +218,12 @@ function ingredient(value: unknown): IngredientRequirement {
         }
       : {}),
   });
+  validatedIngredients.add(validated);
+  return validated;
 }
 function step(value: unknown): PreparationStep {
+  if (value !== null && typeof value === "object" && validatedSteps.has(value))
+    return value as PreparationStep;
   const raw = plain(value, [
     "stepReference",
     "sequenceGroup",
@@ -223,16 +239,19 @@ function step(value: unknown): PreparationStep {
     (raw.durationSeconds as number) > 86400
   )
     return fail("RECIPE_INPUT_INVALID");
-  return Object.freeze({
+  const validated: PreparationStep = Object.freeze({
     stepReference: parseRecipeReference(raw.stepReference),
     sequenceGroup: raw.sequenceGroup as number,
     instructionCode: parseRecipeCode(raw.instructionCode),
     durationSeconds: raw.durationSeconds as number,
     capabilityCode: parseRecipeCode(raw.capabilityCode),
   });
+  validatedSteps.add(validated);
+  return validated;
 }
 
 export function createRecipeSnapshot(input: RecipeSnapshot): RecipeSnapshot {
+  if (input !== null && typeof input === "object" && validatedSnapshots.has(input)) return input;
   const raw = plain(input, [
     "recipeReference",
     "versionReference",
@@ -289,7 +308,7 @@ export function createRecipeSnapshot(input: RecipeSnapshot): RecipeSnapshot {
   } catch {
     return fail("RECIPE_INPUT_INVALID");
   }
-  return Object.freeze({
+  const validated: RecipeSnapshot = Object.freeze({
     recipeReference: parseRecipeReference(raw.recipeReference),
     versionReference: parseRecipeReference(raw.versionReference),
     brandReference: parseRecipeReference(raw.brandReference),
@@ -314,6 +333,8 @@ export function createRecipeSnapshot(input: RecipeSnapshot): RecipeSnapshot {
       raw.invalidationReasonCode === null ? null : parseRecipeCode(raw.invalidationReasonCode),
     createdAt: instant(raw.createdAt),
   });
+  validatedSnapshots.add(validated);
+  return validated;
 }
 
 function divideHalfUp(numerator: bigint, denominator: bigint) {
