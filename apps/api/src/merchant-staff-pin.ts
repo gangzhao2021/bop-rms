@@ -256,6 +256,14 @@ export function createMerchantStaffPin(options: {
   }
 
   return Object.freeze({
+    /** The Store this registered, unrevoked tablet belongs to, whichever Store answers. */
+    async storeOfDevice(deviceCookie: unknown): Promise<string | null> {
+      if (deviceHash(deviceCookie) === null) return null;
+      return run(async (tx) => {
+        const device = await tablet(tx, deviceCookie);
+        return device === null ? null : String(device.storeReference);
+      });
+    },
     /** Whether this browser holds a registered, unrevoked Store tablet cookie. */
     async isRegisteredDevice(deviceCookie: unknown): Promise<boolean> {
       if (deviceHash(deviceCookie) === null) return false;

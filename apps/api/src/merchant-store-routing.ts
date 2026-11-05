@@ -3,6 +3,7 @@ import { parseStoreReference } from "@bop/tenant";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { cookie } from "./merchant-bff-http.js";
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
+import { storeDeviceCookieName } from "./merchant-staff-pin-http.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 /**
@@ -44,17 +45,23 @@ export function createMerchantSessionStoreResolver(
 const BRAND_STORE_READ =
   /^\/reports\/stores\/([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/tonight(?:\?.*)?$/u;
 
+const STAFF_SWITCH = /^\/staff-switch(?:[/?].*)?$/u;
+
 /**
  * One installation, several Stores: each Store has its own staff composition (its own Store facts,
  * Provider account, queues). A request goes to the composition of the Store its Session is bound
  * to; without a Session (sign-in, sign-out, bootstrap of a signed-out browser) to the installation's
  * first Store, which answers exactly as a single-Store installation does. A Session bound to a
  * Store this installation does not serve gets no data.
+ *
+ * DEC-MULTI-MERCHANT-ONE-INSTALLATION: a registered tablet belongs to its Store. Its lock screen and
+ * PIN sign-in always go to that Store, and without a Session so does everything else it asks.
  */
 export function createMerchantStoreRouting(options: {
   readonly primaryStoreReference: string;
   readonly routers: ReadonlyMap<string, RequestHandler>;
   readonly resolve: (sessionCookie: unknown) => Promise<string | null>;
+  readonly resolveDevice?: (deviceCookie: unknown) => Promise<string | null>;
   readonly onUnexpected?: (error: unknown) => void;
 }): RequestHandler {
   const primary = options.routers.get(options.primaryStoreReference);
@@ -75,8 +82,13 @@ export function createMerchantStoreRouting(options: {
       router(request, response, next);
       return;
     }
-    options
-      .resolve(cookie(request, "__Host-bop-merchant"))
+    const device = () =>
+      options.resolveDevice?.(cookie(request, storeDeviceCookieName)) ?? Promise.resolve(null);
+    const session = () => options.resolve(cookie(request, "__Host-bop-merchant"));
+    (STAFF_SWITCH.test(request.url)
+      ? device().then(async (store) => store ?? (await session()))
+      : session().then(async (store) => store ?? (await device()))
+    )
       .then((store) => {
         if (store === null) return primary(request, response, next);
         const router = options.routers.get(store);

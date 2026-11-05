@@ -10,7 +10,7 @@ const router = (name: string): RequestHandler & { readonly label: string } =>
     }) as RequestHandler,
     { label: name },
   );
-function call(handler: RequestHandler, cookie?: string, url = "/session") {
+function call(handler: RequestHandler, cookie?: string, url = "/session", device?: string) {
   const sent: { status: number; body: unknown; headers: Record<string, string> } = {
     status: 200,
     body: undefined,
@@ -31,7 +31,16 @@ function call(handler: RequestHandler, cookie?: string, url = "/session") {
   } as unknown as Response;
   const request = {
     url,
-    rawHeaders: cookie === undefined ? [] : ["Cookie", "__Host-bop-merchant=" + cookie],
+    rawHeaders:
+      cookie === undefined && device === undefined
+        ? []
+        : [
+            "Cookie",
+            [
+              ...(cookie === undefined ? [] : ["__Host-bop-merchant=" + cookie]),
+              ...(device === undefined ? [] : ["__Host-bop-store-device=" + device]),
+            ].join("; "),
+          ],
   } as unknown as Request;
   return new Promise<typeof sent>((done) => {
     const original = response.json.bind(response);
@@ -100,6 +109,33 @@ describe("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: staff requests go to their Ses
     });
     expect(onUnexpected).toHaveBeenCalledOnce();
   });
+  it("a registered tablet's lock screen goes to its Store; signed out, so does the rest", async () => {
+    const handler = createMerchantStoreRouting({
+      primaryStoreReference: store(1),
+      routers: new Map([
+        [store(1), router("first")],
+        [store(2), router("second")],
+        [store(3), router("third")],
+      ]),
+      resolve: async (cookie) => (cookie === "at-third" ? store(3) : null),
+      resolveDevice: async (cookie) => (cookie === "tablet-2" ? store(2) : null),
+    });
+    const served = async (session?: string, url?: string, device?: string) =>
+      (await call(handler, session, url, device)).body;
+    // Signed out on the tablet: its Store, for the lock screen, the PIN and everything else.
+    expect(await served(undefined, "/staff-switch", "tablet-2")).toEqual({ served: "second" });
+    expect(await served(undefined, "/staff-switch/unlock", "tablet-2")).toEqual({
+      served: "second",
+    });
+    expect(await served(undefined, "/session", "tablet-2")).toEqual({ served: "second" });
+    // Someone signed in on it still works at the Store they chose, until the lock screen.
+    expect(await served("at-third", "/session", "tablet-2")).toEqual({ served: "third" });
+    expect(await served("at-third", "/staff-switch", "tablet-2")).toEqual({ served: "second" });
+    // An unregistered or revoked tablet is an ordinary browser.
+    expect(await served(undefined, "/staff-switch", "unknown")).toEqual({ served: "first" });
+    expect(await served("at-third", "/staff-switch", "unknown")).toEqual({ served: "third" });
+  });
+
   it("refuses a routing table without its first Store", () => {
     expect(() =>
       createMerchantStoreRouting({

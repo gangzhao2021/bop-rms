@@ -415,6 +415,9 @@ export async function startInternalCustomerServer({
         primaryStoreReference: resources.scope.storeReference,
         routers,
         resolve: createMerchantSessionStoreResolver(merchant.persistence),
+        ...(merchant.bff.staffPin === undefined
+          ? {}
+          : { resolveDevice: merchant.bff.staffPin.storeOfDevice }),
         onUnexpected: () => console.error("PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE"),
       });
     }
