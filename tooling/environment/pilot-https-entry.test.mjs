@@ -118,6 +118,7 @@ it("preserves configured refund roles, provider and Pickup workstation without g
   });
   expect(typeof reconcile.mock.calls[0][0].refreshOrderReceiptObservations).toBe("function");
   expect(pickup.mock.calls[0][3].workstation).toBe(merchantConfig.workstation);
+  expect(typeof dependencies.onUnexpectedFailure).toBe("function");
   expect(Object.keys(dependencies).sort()).toEqual(
     [
       "cancellationRefundProvider",
@@ -157,6 +158,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "productImageDirectory",
       // DEC-PILOT-MAINTENANCE-PAGE: exact origin/host of the staff pages (hosting.json).
       "publicOrigin",
+      // WP-2423 item 10: a merchant request that failed for a reason that is not a refusal.
+      "onUnexpectedFailure",
     ].sort(),
   );
   expect(dependencies.publicOrigin).toBe("https://127.0.0.1:4443");
