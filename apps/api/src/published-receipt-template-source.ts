@@ -32,7 +32,10 @@ export type ReceiptTemplateReadiness =
   | Readonly<{ ready: false; reason: ReceiptTemplateUnavailableReason; cause?: unknown }>;
 
 const unavailable = (code: DigitalReceiptError["code"], cause?: unknown): never => {
-  throw Object.assign(new DigitalReceiptError(code), cause === undefined ? {} : { cause });
+  const error = new DigitalReceiptError(code);
+  // As a native Error's cause: never serialized with the error.
+  if (cause !== undefined) Object.defineProperty(error, "cause", { value: cause });
+  throw error;
 };
 const ownerReadWindowMs = 5000;
 

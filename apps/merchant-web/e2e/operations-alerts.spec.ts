@@ -623,7 +623,19 @@ test("@production A merchant's Home says nothing about a monitor it cannot start
   await expect(needs.getByText("Ordering at this Store is about to stop")).toBeVisible();
   await expect(needs.getByText("stops in 23 hours", { exact: false })).toBeVisible();
   await expect(needs.getByText("Urgent", { exact: true })).toBeVisible();
-  await expect(needs.getByRole("link", { name: "Call BOP support: (416) 555-0100" })).toBeVisible();
+  const callNow = needs.getByRole("link", { name: "Call BOP support: (416) 555-0100" });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(callNow).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/home-merchant-ordering-ending-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expectNoInternalText(page);
 
   // The monitor stops with that on the board: staff must not charge that guest again.
