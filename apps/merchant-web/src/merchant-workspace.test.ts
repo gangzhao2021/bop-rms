@@ -213,6 +213,16 @@ describe("Merchant workspace client boundary", () => {
     }
   });
 
+  it("WP-2423 item 10: a session the server cannot read is said at once, without the busy wait", async () => {
+    const broken = vi.fn<typeof fetch>(
+      async () => new Response('{"error":"merchant_workspace_unavailable"}', { status: 503 }),
+    );
+    await expect(createMerchantWorkspaceClient(broken).bootstrap()).rejects.toThrow(
+      "MERCHANT_WORKSPACE_UNAVAILABLE",
+    );
+    expect(broken).toHaveBeenCalledTimes(1);
+  });
+
   it("WP-2423: a PIN sign-in refusal is told apart from any other refused Store switch", async () => {
     const csrf = "C".repeat(43);
     const refused = vi

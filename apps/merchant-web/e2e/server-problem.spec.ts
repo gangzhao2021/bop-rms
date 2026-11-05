@@ -184,12 +184,21 @@ test("@production a table action the server failed goes again as the same reques
   expect(starts[1]).toBe(starts[0]);
 });
 
-test("@production Orders says what to do when the server fails", async ({ page }) => {
+test("@production Orders says what to do when the server fails, and comes back by itself", async ({
+  page,
+}) => {
   await session(page, ordersNavigation);
-  await page.route("**/merchant/orders", (route) => route.fulfill(retryLater));
+  let down = true;
+  await page.route("**/merchant/orders", (route) =>
+    down
+      ? route.fulfill(retryLater)
+      : route.fulfill({ headers, json: { items: [], nextAfterOrderReference: null } }),
+  );
   await page.goto("/operations/orders");
   await expect(page.getByText(words)).toBeVisible();
   await expectNoBlame(page);
+  down = false;
+  await expect(page.getByText(words)).toHaveCount(0, { timeout: 15_000 });
 });
 
 test("@production the Kitchen board says what to do when the server fails", async ({ page }) => {

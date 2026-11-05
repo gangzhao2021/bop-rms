@@ -2689,6 +2689,31 @@ export function CurrentOrderQueuePage({
       background.current = null;
     };
   }, [ready, live, after, orderReference, client]);
+  // WP-2423 item 10: the first read failed on our side, and the panel says this screen keeps trying.
+  // Each try is quiet: the panel stays until a read works. A new failure is a new state, so the next
+  // try is armed by this effect again.
+  useEffect(() => {
+    if (state.kind !== "ServerProblem" || !live) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void readCurrentOrders(client, after, orderReference, controller.signal)
+        .then((next) => {
+          if (controller.signal.aborted) return;
+          setState({ kind: "Ready", ...next });
+          setUpdatedAt(Date.now());
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted)
+            setState({
+              kind: error instanceof CurrentOrderQueueError ? error.code : "Unavailable",
+            });
+        });
+    }, ORDER_REFRESH_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [state, live, after, orderReference, client]);
   // WP-2423 Q1: chime for orders that arrived since the previous read and once when an order
   // enters its last five minutes, when the operator turned sound on.
   useEffect(() => {
