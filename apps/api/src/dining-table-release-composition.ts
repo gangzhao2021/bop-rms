@@ -16,7 +16,10 @@ const fail = (): never => {
 };
 export function createDiningTableReleaseComposition(options: {
   scope: { tenantReference: string; brandReference: string; storeReference: string };
-  actorReference: string;
+  /** The staff member who closed the table; null: the System (a guest-started table). */
+  actorReference: string | null;
+  /** Where the close came from; staff: the merchant site. */
+  sourceChannel?: "MERCHANT_WEB" | "SYSTEM" | "CUSTOMER_PWA";
   authorize(): Promise<boolean>;
   newReference(): string;
   retentionPolicyCode: string;
@@ -81,14 +84,17 @@ export function createDiningTableReleaseComposition(options: {
           auditId: options.newReference(),
           brandId: options.scope.brandReference,
           storeId: options.scope.storeReference,
-          actor: { type: "User", reference: parseDiningReference(options.actorReference) },
+          actor:
+            options.actorReference === null
+              ? { type: "System" }
+              : { type: "User", reference: parseDiningReference(options.actorReference) },
           actionCode: "DINING_TABLE_RELEASED",
           targetType: "DiningTable",
           targetId: table.tableReference,
           reasonCode: "CLOSED_SESSION_RELEASE",
           correlationId: query.operationReference,
           occurredAt: query.observedAt,
-          sourceChannel: "MERCHANT_WEB",
+          sourceChannel: options.sourceChannel ?? "MERCHANT_WEB",
           dataClassification: "Restricted",
           retentionPolicyCode: options.retentionPolicyCode,
           retentionPolicyVersion: options.retentionPolicyVersion,

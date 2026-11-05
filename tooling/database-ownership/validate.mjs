@@ -2938,6 +2938,14 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_round_hold_setting",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-qr-join-store.ts";
+        // WP-2423 DEC-DINING-GUEST-TABLE-START: exact scoped guest start store.
+        const acceptedDiningGuestTableStartAsset =
+          module.packageName === "@rms/dining" &&
+          module.manifest.ownedDatabase?.schema === "rms_dining" &&
+          ["dining_table", "dining_session", "dining_session_guest_start"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/dining-guest-table-start-store.ts";
         // WP-2402: exact scoped Host-transfer store; normal SQL/driver checks still apply.
         const acceptedDiningHostTransferAsset =
           module.packageName === "@rms/dining" &&
@@ -3954,6 +3962,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningHostTransferAsset &&
           !acceptedDiningGuestInvitationAsset &&
           !acceptedDiningQrJoinAsset &&
+          !acceptedDiningGuestTableStartAsset &&
           !acceptedDiningStaffCallAsset &&
           !acceptedDiningPaymentTimingAsset &&
           !acceptedOrderPayLaterConfirmationAsset &&

@@ -172,6 +172,8 @@ export async function createInternalCounterOrder(
     pickupQrToken: loadPickupQrToken,
     entry: createPersistentCustomerEntryComposition({
       ...entry.persistent,
+      // Staff entering a round aren't a new phone: nobody is asked who they are with.
+      guestTables: undefined,
       // The counter's guest enters while online ordering is paused (see counterEntryOperatingReader).
       sources: async (tx, input) => {
         const sources = await entry.persistent.sources(tx, input);
@@ -536,6 +538,8 @@ async function createInternalStaffDiningRound(
     },
     entry: createPersistentCustomerEntryComposition({
       ...entry.persistent,
+      // Staff entering a round aren't a new phone: nobody is asked who they are with.
+      guestTables: undefined,
       // A paper round is entered after an outage even once the Store has closed; the staff
       // command's own rule decides (see counterEntryOperatingReader).
       sources: async (tx, input) => {

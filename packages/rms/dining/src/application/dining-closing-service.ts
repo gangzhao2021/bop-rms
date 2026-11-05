@@ -25,6 +25,7 @@ import {
   finalizeDiningClosing,
   unresolvedDiningOrders,
 } from "../domain/dining-closing.js";
+import { guestTableCloseReasons } from "../domain/dining-guest-table-start.js";
 import type {
   DiningClosingAuthorityEvidence,
   DiningClosingPorts,
@@ -51,21 +52,24 @@ function authority(
   if (value === null) throw new DiningClosingError("DINING_CLOSING_PERMISSION_DENIED");
   const expectedAction = `DINING_SESSION_CLOSING_${operation.toUpperCase()}`;
   try {
-    if (value.kind !== "Staff" && value.kind !== "Host") throw new Error("denied");
+    if (value.kind !== "Staff" && value.kind !== "Host" && value.kind !== "System")
+      throw new Error("denied");
     exactObject(
       value,
       value.kind === "Staff"
         ? ["kind", "tenantContext", "permission", "audit"]
-        : [
-            "kind",
-            "guestSessionReference",
-            "participantReference",
-            "diningSessionReference",
-            "storeReference",
-            "status",
-            "observedAt",
-            "audit",
-          ],
+        : value.kind === "System"
+          ? ["kind", "diningSessionReference", "storeReference", "observedAt", "audit"]
+          : [
+              "kind",
+              "guestSessionReference",
+              "participantReference",
+              "diningSessionReference",
+              "storeReference",
+              "status",
+              "observedAt",
+              "audit",
+            ],
     );
     const audit = validateAuditRecord(value.audit, Date.parse(observedAt));
     let actorReference: string | null;
@@ -84,6 +88,20 @@ function authority(
       )
         throw new Error("denied");
       actorReference = context.actor.actorReference;
+    } else if (value.kind === "System") {
+      // WP-2423 DEC-DINING-GUEST-TABLE-START: only these two reasons, only as the System. It can
+      // begin and finalize a table; bringing one back to ordering stays with staff.
+      if (
+        operation === "Cancel" ||
+        value.diningSessionReference !== session.diningSessionReference ||
+        value.storeReference !== session.storeReference ||
+        value.observedAt !== observedAt ||
+        audit.actor.type !== "System" ||
+        !(guestTableCloseReasons as readonly string[]).includes(String(audit.reasonCode)) ||
+        audit.dataClassification !== "Restricted"
+      )
+        throw new Error("denied");
+      actorReference = null;
     } else {
       if (
         value.status !== "CurrentHost" ||

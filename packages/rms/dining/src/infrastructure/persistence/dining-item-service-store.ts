@@ -6,6 +6,7 @@ import {
   validateDiningItemServiceAppend,
   type DiningItemServiceRecord,
 } from "../../domain/dining-item-service-record.js";
+import { guestTableCloseReasons } from "../../domain/dining-guest-table-start.js";
 import type { DiningTableTransaction, DiningTableStoreScope } from "./dining-table-store.js";
 
 export class DiningItemServiceStoreError extends Error {
@@ -148,8 +149,12 @@ export function createPostgresDiningItemServiceStore(options: {
           audit.auditId !== record.auditReference ||
           audit.brandId !== scope.brandReference ||
           audit.storeId !== scope.storeReference ||
-          audit.actor.type !== "User" ||
-          audit.actor.reference !== record.actorReference ||
+          // Staff serve as themselves; the System records a finished dish as handed over only when
+          // it closes a guest-started table (DEC-DINING-GUEST-TABLE-START).
+          !(audit.actor.type === "User"
+            ? audit.actor.reference === record.actorReference
+            : audit.actor.type === "System" &&
+              (guestTableCloseReasons as readonly string[]).includes(String(audit.reasonCode))) ||
           audit.actionCode !== "DINING_ITEM_SERVED" ||
           audit.targetType !== "OrderItem" ||
           audit.targetId !== record.orderItemReference ||

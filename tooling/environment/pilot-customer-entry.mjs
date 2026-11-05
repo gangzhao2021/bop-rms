@@ -2,10 +2,13 @@ import { Buffer } from "node:buffer";
 import { createInternalDiningBinding } from "./pilot-dining-binding.mjs";
 import { createInternalDiningJoinRequestContext } from "./pilot-dining-join.mjs";
 import { createCustomerDiningSessionBinding } from "../../apps/api/dist/customer-dining-binding-composition.js";
+import { createDiningGuestTableClose } from "../../apps/api/dist/dining-guest-table-close.js";
 import {
   createPostgresDiningGuestBindingStore,
+  createPostgresDiningGuestTableStartStore,
   createPostgresDiningQrJoinStore,
 } from "../../packages/rms/dining/src/index.ts";
+import { createPilotGuestTableClose } from "./pilot-guest-table-close.mjs";
 export async function createInternalCustomerEntry(
   resources,
   {
@@ -13,6 +16,7 @@ export async function createInternalCustomerEntry(
     createInternalDiningEntries,
     createInternalDiningSession,
     createInternalMerchantSession,
+    providerAccountReference,
   },
 ) {
   const pickup = await createInternalPickupEntry(resources),
@@ -58,8 +62,18 @@ export async function createInternalCustomerEntry(
     credentials: resources.credentials.sessions,
     binding: binding(resources.transactions),
   };
+  // WP-2423 DEC-DINING-GUEST-TABLE-START: the owners' rule behind "are you with these guests?", and
+  // the System's close when a new phone says it isn't.
+  let guestTablesOnce = null;
+  const guestTables = () =>
+    (guestTablesOnce ??= createPilotGuestTableClose(
+      resources,
+      { providerAccountReference },
+      { createDiningGuestTableClose },
+    ));
   const persistent = {
     ...pickup.entry.persistent,
+    guestTables: { asksNewParty: (tx, table) => guestTables().asksNewParty(tx, table) },
     sources: async (tx, input) => {
       // A hint selects a verifier, never authority. The selected owner verifies the complete signed QR.
       if (typeof input.qrToken !== "string" || input.qrToken.length > 4096)
@@ -114,6 +128,33 @@ export async function createInternalCustomerEntry(
                 retentionPolicyVersion: 1,
               }),
             }).issue({ ...input, operationReference: resources.credentials.reference() }),
+          // A free table a guest may start; it commits before the issue above runs again.
+          startIfFree: (input) =>
+            createPostgresDiningGuestTableStartStore(resources.transactions, {
+              scope: owner.scope,
+              credentials: owner.credentials,
+              pepperVersion: 1,
+              now: resources.now,
+              newReference: resources.credentials.reference,
+              retentionPolicyCode: "AUDIT_DEFAULT",
+              retentionPolicyVersion: 1,
+              takingDineIn: async (tx, at) => {
+                const current = await resources
+                  .operatingReader(tx)
+                  .readCurrent({
+                    ...resources.scope,
+                    publicStoreReference: resources.publicProfile.binding.publicStoreReference,
+                    evaluatedAt: at,
+                  })
+                  .catch(() => null);
+                return (
+                  current !== null &&
+                  current.state === "Open" &&
+                  current.availableServiceModes.includes("DineIn")
+                );
+              },
+            }).startIfFree(input),
+          closeForNewParty: (input) => guestTables().closeForNewParty(input.tableReference),
         },
       },
       binding: bindingOptions,

@@ -68,6 +68,7 @@ const moduleManifestInput =
         "dining_round_hold_setting",
         "dining_service_setting",
         "dining_session_party_size",
+        "dining_session_guest_start",
         "dining_tea_charge_setting",
         "dining_session_tea_override",
         "dining_staff_call",

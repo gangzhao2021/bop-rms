@@ -15,6 +15,7 @@ import {
   createDiningSessionService,
   parseDiningIdentityAdmission,
   parseDiningReference,
+  type DiningGuestTableStartResult,
   type DiningQrJoinIssueResult,
   type DiningSessionPorts,
   type QrTableContextEvidence,
@@ -56,6 +57,19 @@ export interface CustomerDiningJoinCompositionOptions {
       },
       authorize: () => Promise<boolean>,
     ): Promise<DiningQrJoinIssueResult>;
+    /**
+     * WP-2423 DEC-DINING-GUEST-TABLE-START: the table turned out not to be open; a guest may start
+     * it where the Store allows. Commits on its own, because the next issue re-reads the table on
+     * another connection.
+     */
+    startIfFree?(input: {
+      readonly guestSessionReference: string;
+      readonly tableReference: string;
+    }): Promise<DiningGuestTableStartResult>;
+    /** The guest said they aren't with the people at this table: the System closes it if it may. */
+    closeForNewParty?(input: {
+      readonly tableReference: string;
+    }): Promise<{ readonly status: "Closed" | "Held" }>;
   };
   readonly now: () => unknown;
 }
@@ -80,6 +94,17 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
     admission: { consume: async () => null },
     now,
   });
+  const turns = new Map<string, Promise<unknown>>();
+  const inTurn = async <T>(key: string, work: () => Promise<T>): Promise<T> => {
+    const mine = (turns.get(key) ?? Promise.resolve()).then(work, work);
+    const tail = mine.catch(() => undefined);
+    turns.set(key, tail);
+    try {
+      return await mine;
+    } finally {
+      if (turns.get(key) === tail) turns.delete(key);
+    }
+  };
   return Object.freeze({
     async join(input: unknown, request: CustomerDiningJoinRequestContext) {
       try {
@@ -88,9 +113,16 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
         const raw = readClosedRecord(
           input,
           byQr
-            ? ["sessionCredential", "csrfCredential", "operationReference"]
+            ? [
+                "sessionCredential",
+                "csrfCredential",
+                "operationReference",
+                ...(Object.hasOwn(input as object, "newParty") ? ["newParty"] : []),
+              ]
             : ["sessionCredential", "csrfCredential", "joinCredential", "operationReference"],
         );
+        if (raw.newParty !== undefined && raw.newParty !== true) return unavailable();
+        const newParty = raw.newParty === true;
         const sessionCredential = parseGuestRawCredential(raw.sessionCredential);
         const csrfCredential = parseGuestRawCredential(raw.csrfCredential);
         const operationReference = parseGuestOperationReference(raw.operationReference);
@@ -133,7 +165,20 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
             ),
           );
         const initial = await authorize(observedAt);
-        await contextFor(initial, observedAt);
+        // A phone reading the table just as another phone of its party starts it reads with an
+        // instant before that start; a fresh instant answers it (bounded).
+        const freshly = async <T>(work: (instant: CanonicalInstant) => Promise<T>): Promise<T> => {
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              return await work(now());
+            } catch {
+              // Tried again below; a lasting failure answers on the last try.
+            }
+          }
+          return work(now());
+        };
+        if (byQr) await freshly((instant) => contextFor(initial, instant));
+        else await contextFor(initial, observedAt);
         const current = async (guestReference: string, instant: CanonicalInstant) => {
           if (guestReference !== initial.sessionReference) return unavailable();
           const session = await authorize(instant);
@@ -180,33 +225,81 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
           });
         let result: Awaited<ReturnType<typeof joinWith>> | null = null;
         if (byQr && qr !== undefined) {
-          // Another phone scanning at the same moment replaces the code just issued; the join
-          // then refuses it without writing anything, so issue again (bounded).
-          for (let attempt = 0; attempt < 3; attempt += 1) {
-            const at = now();
-            const evidence = await current(initial.sessionReference, at);
-            const issued = await qr.issue(
-              {
-                guestSessionReference: String(initial.sessionReference),
-                tableReference: String(parseDiningReference(evidence.context.tableReference)),
-                observedAt: String(at),
-              },
-              async () => {
-                try {
-                  const again = await current(initial.sessionReference, now());
-                  return again.context.tableReference === evidence.context.tableReference;
-                } catch {
-                  return false;
-                }
-              },
-            );
-            if (issued.status === "Refused")
-              return Object.freeze({ status: "Refused" as const, reason: issued.reason });
-            result = await joinWith(String(issued.joinCredential));
-            if (!(result.status === "DiningJoinRefused" && result.reason === "CodeNotAccepted"))
-              break;
-          }
+          const table = await freshly((instant) => current(initial.sessionReference, instant));
+          // Phones of one party scan together, and each QR join replaces the code the last one was
+          // issued: one at a time per table, so they don't spend each other's attempts or the
+          // table's join budget. The retries below are what's left for a second process.
+          const refusal = await inTurn(String(table.context.tableReference), async () => {
+            // Another phone scanning at the same moment replaces the code just issued; the join
+            // then refuses it without writing anything, so issue again (bounded).
+            let closedForNewParty = false;
+            const attempts = 6;
+            for (let attempt = 0; attempt < attempts; attempt += 1) {
+              // Fresh on every attempt: a start commits with its own instant under the table's
+              // lock, and an earlier instant here could precede it.
+              const at = now();
+              const evidence = await freshly((instant) =>
+                current(initial.sessionReference, instant),
+              );
+              const tableReference = String(parseDiningReference(evidence.context.tableReference));
+              if (newParty && !closedForNewParty && qr.closeForNewParty !== undefined) {
+                const closed = await qr.closeForNewParty({ tableReference });
+                if (closed.status !== "Closed") return "TableInUse" as const;
+                closedForNewParty = true;
+              }
+              const issued = await qr.issue(
+                {
+                  guestSessionReference: String(initial.sessionReference),
+                  tableReference,
+                  observedAt: String(at),
+                },
+                async () => {
+                  try {
+                    const again = await freshly((instant) =>
+                      current(initial.sessionReference, instant),
+                    );
+                    return again.context.tableReference === evidence.context.tableReference;
+                  } catch {
+                    return false;
+                  }
+                },
+              );
+              // No table open: a guest may start it where the Store allows, then this repeats. An
+              // open table never comes here, so an ordinary join costs nothing extra at any Store.
+              if (
+                issued.status === "Refused" &&
+                issued.reason === "NotOpen" &&
+                qr.startIfFree !== undefined
+              ) {
+                const started = await qr.startIfFree({
+                  guestSessionReference: String(initial.sessionReference),
+                  tableReference,
+                });
+                if (started.status === "Started" || started.status === "AlreadyOpen") continue;
+                if (started.status === "Busy") return "TooManyJoins" as const;
+                if (started.status === "BeingCleaned") return "BeingCleaned" as const;
+              }
+              if (issued.status === "Refused") return issued.reason;
+              // A join that lost a race wrote nothing, and its next attempt reads the new versions.
+              try {
+                result = await joinWith(String(issued.joinCredential));
+              } catch (error) {
+                if (attempt === attempts - 1) throw error;
+                continue;
+              }
+              if (
+                !(result.status === "DiningJoinRefused" && result.reason === "CodeNotAccepted") &&
+                result.status !== "DiningJoinUnavailable"
+              )
+                break;
+            }
+            return null;
+          });
+          if (refusal !== null)
+            return Object.freeze({ status: "Refused" as const, reason: refusal });
         } else result = await joinWith(raw.joinCredential as string);
+        // Assigned inside the turn above, which TypeScript can't follow.
+        result = result as Awaited<ReturnType<typeof joinWith>> | null;
         if (result === null) return unavailable();
         // A definitive Dining refusal wrote nothing; the Guest needs a new code, not a retry.
         if (result.status === "DiningJoinRefused")

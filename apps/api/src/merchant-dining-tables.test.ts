@@ -23,6 +23,7 @@ vi.mock("@rms/ordering", async (original) => ({
     listAwaitingPaymentByTables: mock.awaiting,
   })),
   listStoreDiningSessionOrders: mock.sessionOrders,
+  listStoreDiningSessionOrderActivity: async () => new Map(),
   listStoreUnpaidGuestDiningRounds: mock.unpaidGuestRounds,
   listStorePaidDiningRoundsAwaitingAcceptance: mock.paidAwaitingAcceptance,
   createPostgresOrderRoundStaffHoldStore: vi.fn(() => ({ listWaiting: mock.waitingRounds })),
@@ -44,6 +45,19 @@ const timing = vi.hoisted(() => ({
   store: "PayFirst" as "PayFirst" | "PayLater",
   sessions: new Map<string, "PayFirst" | "PayLater">(),
 }));
+const guestStart = vi.hoisted(() => ({
+  on: false,
+  started: new Map<string, { startedAt: string }>(),
+  activity: new Map<
+    string,
+    {
+      lastPhoneJoinedAt: string | null;
+      lastServedAt: string | null;
+      openStaffCall: boolean;
+      phase: string;
+    }
+  >(),
+}));
 vi.mock("@rms/dining", async (original) => ({
   ...(await original<typeof import("@rms/dining")>()),
   createPostgresDiningTableStore: mock.store,
@@ -51,6 +65,17 @@ vi.mock("@rms/dining", async (original) => ({
   createPostgresDiningTableQrStore: vi.fn(() => ({ loadLatestForTables: mock.codes })),
   // WP-2423 item 8 ⑨: no party was merged into these tables.
   listDiningSessionMergesInto: async () => new Map(),
+  // DEC-DINING-GUEST-TABLE-START: the tests below add a guest-started table where they need one.
+  listDiningGuestStartedSessions: async () => guestStart.started,
+  loadDiningGuestTableActivity: async () => guestStart.activity,
+  loadDiningServiceSetting: async () => ({
+    version: guestStart.on ? 2 : 0,
+    staffCall: false,
+    chaseDish: false,
+    askPartySize: false,
+    guestTableStart: guestStart.on,
+    changedAt: null,
+  }),
   createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
   loadDiningSessionsPhones: mock.phones,
   // DEC-DINE-IN-PAY-LATER: the Store opens tables pay first; no open table was opened otherwise.
@@ -767,4 +792,102 @@ it("WP-2423 item 8 ⑤: a round waiting for staff needs action (not awaiting pay
   ]);
   // Joined in the last 3 minutes and still at the table (phone 3 was taken off it).
   expect(table?.newPhones).toEqual([{ phoneNumber: 2, joinedAt: "2026-09-25T11:58:00.000Z" }]);
+});
+
+it("DEC-DINING-GUEST-TABLE-START: says which table a guest started and when it frees itself, and adds nothing to any other", async () => {
+  const f = setup();
+  guestStart.on = true;
+  const startedAt = "2026-09-25T11:55:00.000Z";
+  guestStart.started = new Map([[id(5), { startedAt }]]);
+  guestStart.activity = new Map([
+    [
+      id(5),
+      { lastPhoneJoinedAt: startedAt, lastServedAt: null, openStaffCall: false, phase: "Active" },
+    ],
+  ]);
+  mock.list.mockResolvedValue({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T4",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: id(5),
+      },
+      {
+        tableReference: id(6),
+        stableLabel: "T6",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "TemporarilyBlocked",
+        blockReasonCode: "CLEANING",
+        aggregateVersion: 3,
+        activeDiningSessionReference: null,
+        observedAt: startedAt,
+      },
+    ],
+    nextAfterTableReference: null,
+  });
+  mock.loadSessions.mockResolvedValue([
+    {
+      diningSessionReference: id(5),
+      brandReference: id(2),
+      storeReference: id(3),
+      phase: "Active",
+      version: 3,
+      startedAt,
+    },
+  ]);
+  // Phones joining a guest-started table are what every normal party does: nothing to check.
+  mock.phones.mockResolvedValue(
+    new Map([
+      [
+        id(5),
+        [
+          {
+            participantReference: id(90),
+            phoneNumber: 1,
+            joinedAt: startedAt,
+            left: false,
+            removed: false,
+          },
+        ],
+      ],
+    ]),
+  );
+  try {
+    const view = (await f.read(f.input)) as unknown as {
+      guestTableStart?: { version: number; canTurnOff: boolean };
+      items: readonly {
+        guestStart?: { closesByItselfAt: string | null };
+        blockedSince?: string;
+        newPhones: readonly unknown[];
+      }[];
+    };
+    expect(view.guestTableStart).toEqual({ version: 2, canTurnOff: true });
+    expect(view.items[0]?.guestStart?.closesByItselfAt).toBe(
+      new Date(Date.parse(startedAt) + 20 * 60_000).toISOString(),
+    );
+    expect(view.items[0]?.newPhones).toEqual([]);
+    expect(view.items[1]?.guestStart).toBeUndefined();
+    expect(view.items[1]?.blockedSince).toBe(startedAt);
+  } finally {
+    guestStart.on = false;
+    guestStart.started = new Map();
+    guestStart.activity = new Map();
+  }
+});
+
+it("DEC-DINING-GUEST-TABLE-START: a Store that never used it reads exactly as before", async () => {
+  const f = setup();
+  const view = await f.read(f.input);
+  expect(Object.hasOwn(view, "guestTableStart")).toBe(false);
+  for (const item of view.items) {
+    expect(Object.hasOwn(item, "guestStart")).toBe(false);
+    expect(Object.hasOwn(item, "blockedSince")).toBe(false);
+  }
 });

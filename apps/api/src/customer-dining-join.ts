@@ -18,6 +18,8 @@ export interface CustomerDiningJoinPort {
       readonly csrfCredential: string;
       /** Absent for a QR join. */
       readonly joinCredential?: string;
+      /** DEC-DINING-GUEST-TABLE-START: this phone said it isn't with the people at this table. */
+      readonly newParty?: true;
     },
     context: CustomerDiningJoinRequestContext,
   ): Promise<unknown>;
@@ -74,6 +76,16 @@ const refusals = {
     status: 429,
     code: "dining_join_table_busy",
     messageKey: "customer.dining.join_table_busy",
+  },
+  BeingCleaned: {
+    status: 409,
+    code: "dining_join_table_being_cleaned",
+    messageKey: "customer.dining.join_table_being_cleaned",
+  },
+  TableInUse: {
+    status: 409,
+    code: "dining_join_table_in_use",
+    messageKey: "customer.dining.join_table_in_use",
   },
 } as const;
 function refusal(value: unknown) {
@@ -157,6 +169,7 @@ export class CustomerDiningJoinHandler {
       let sessionCredential: string;
       let csrfCredential: string;
       let joinCredential: string | null;
+      let newParty = false;
       try {
         if (
           request.method !== "POST" ||
@@ -174,7 +187,17 @@ export class CustomerDiningJoinHandler {
         if (current === null || current === csrfCredential) throw new Error("invalid credentials");
         sessionCredential = current;
         if (byQr) {
-          readClosedRecord(request.body, []);
+          const body = readClosedRecord(
+            request.body,
+            request.body !== null &&
+              typeof request.body === "object" &&
+              Object.hasOwn(request.body, "newParty")
+              ? ["newParty"]
+              : [],
+          );
+          if (body.newParty !== undefined && body.newParty !== true)
+            throw new Error("invalid body");
+          newParty = body.newParty === true;
           joinCredential = null;
         } else
           joinCredential = credential(
@@ -190,7 +213,12 @@ export class CustomerDiningJoinHandler {
           throw new Error("missing request context");
         const value = await this.#port.join(
           joinCredential === null
-            ? { operationReference, sessionCredential, csrfCredential }
+            ? {
+                operationReference,
+                sessionCredential,
+                csrfCredential,
+                ...(newParty ? { newParty: true as const } : {}),
+              }
             : { operationReference, sessionCredential, csrfCredential, joinCredential },
           context,
         );

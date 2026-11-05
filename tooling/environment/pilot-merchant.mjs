@@ -75,6 +75,7 @@ import {
 } from "../../apps/api/dist/merchant-dining-table-checkout.js";
 import { createMerchantDiningTableClosePlan } from "../../apps/api/dist/merchant-dining-table-close-plan.js";
 import { createMerchantDiningOrderCloseCommand } from "../../apps/api/dist/merchant-dining-order-close-command.js";
+import { createMerchantGuestTableStartOff } from "../../apps/api/dist/merchant-dining-guest-table-start.js";
 import { createMerchantDiningUnpaidDeparture } from "../../apps/api/dist/merchant-dining-unpaid-departure.js";
 import { createMerchantDiningUnpaidItemRemoval } from "../../apps/api/dist/merchant-dining-unpaid-item-removal.js";
 import { createMerchantDiningItemComp } from "../../apps/api/dist/merchant-dining-item-comp.js";
@@ -1088,6 +1089,11 @@ export async function createInternalMerchant(
     persistence,
     authentication: service,
   });
+  // DEC-DINING-GUEST-TABLE-START: whoever may pause ordering stops guests starting tables.
+  const guestTableStartOff = createMerchantGuestTableStartOff({
+    persistence,
+    authentication: service,
+  });
   // DEC-DINE-IN-PAY-LATER: a pay-later table's bill and its one payment (card machine or cash).
   const diningTableBill = createMerchantDiningTableBillRead({
     persistence,
@@ -1748,6 +1754,7 @@ export async function createInternalMerchant(
       diningStaffCallAnswer,
       diningPaymentTimingRead,
       diningPaymentTimingChange,
+      guestTableStartOff,
       diningTableBill,
       diningTableSettle,
       diningTableSplit,

@@ -1,6 +1,6 @@
 import { parseCanonicalInstant } from "@bop/tenant";
 import { createPostgresGuestSessionEntryStore } from "@bop/identity";
-import { loadDiningTableOpen } from "@rms/dining";
+import { loadDiningGuestTableStart, loadDiningTableOpen } from "@rms/dining";
 import {
   createCustomerEntryComposition,
   type CustomerEntryCompositionOptions,
@@ -10,6 +10,7 @@ import type {
   CustomerEntryNotAccepting,
   CustomerEntryServiceNotOffered,
   CustomerEntryTableNotOpen,
+  CustomerEntryTableOffer,
   CustomerEntryPort,
   CustomerEntryPortInput,
 } from "./customer-entry.js";
@@ -32,6 +33,8 @@ export interface PersistentCustomerEntryOptions {
   profile: PersistentPublicStoreProfileOptions;
   transactions: { run<T>(work: (tx: Transaction) => Promise<T>): Promise<T> };
   session: Omit<CustomerEntryCompositionOptions["session"], "store">;
+  /** WP-2423 DEC-DINING-GUEST-TABLE-START: the owners' facts behind "are you with these guests?". */
+  guestTables?: { asksNewParty(tx: Transaction, tableReference: string): Promise<boolean> };
   /** All returned owner ports must use this transaction and retain current fences.
    * The binding is request-scoped; credentials are the shared configured provider.
    */
@@ -48,6 +51,8 @@ export interface PersistentCustomerEntryOptions {
       }
   >;
 }
+const guestStartOffer = (decision: { readonly kind: "MayStart" | "BeingCleaned" | "No" }) =>
+  decision.kind;
 export function createPersistentCustomerEntryComposition(
   options: PersistentCustomerEntryOptions,
 ): CustomerEntryPort {
@@ -64,6 +69,7 @@ export function createPersistentCustomerEntryComposition(
         | CustomerEntryNotAccepting
         | CustomerEntryServiceNotOffered
         | CustomerEntryTableNotOpen
+        | CustomerEntryTableOffer
         | null = null;
       let retired: RetiredTableQrError | null = null;
       try {
@@ -74,6 +80,15 @@ export function createPersistentCustomerEntryComposition(
             throw error;
           });
           const qr = sources.qr;
+          const readOnly = async <T>(work: () => Promise<T>): Promise<T> => {
+            await tx.query("SAVEPOINT customer_entry_table_open", []);
+            try {
+              return await work();
+            } finally {
+              await tx.query("ROLLBACK TO SAVEPOINT customer_entry_table_open", []);
+              await tx.query("RELEASE SAVEPOINT customer_entry_table_open", []);
+            }
+          };
           const result = await createCustomerEntryComposition({
             ...sources,
             qr: {
@@ -102,21 +117,38 @@ export function createPersistentCustomerEntryComposition(
             // under a savepoint that is always rolled back (read only; it also restores the scope
             // settings the read sets, and a failed read leaves the entry usable).
             table: {
-              async isOpen(where) {
-                await tx.query("SAVEPOINT customer_entry_table_open", []);
-                try {
-                  return await loadDiningTableOpen(tx as never, scope, where.tableReference);
-                } finally {
-                  await tx.query("ROLLBACK TO SAVEPOINT customer_entry_table_open", []);
-                  await tx.query("RELEASE SAVEPOINT customer_entry_table_open", []);
-                }
-              },
+              isOpen: (where) =>
+                readOnly(() => loadDiningTableOpen(tx as never, scope, where.tableReference)),
+              guestStart: (where) =>
+                readOnly(async () =>
+                  guestStartOffer(
+                    await loadDiningGuestTableStart(
+                      tx as never,
+                      scope,
+                      where.tableReference,
+                      where.at,
+                    ),
+                  ),
+                ),
+              ...(options.guestTables === undefined
+                ? {}
+                : {
+                    asksNewParty: (where: { tableReference: string }) =>
+                      readOnly(() =>
+                        (
+                          options.guestTables as NonNullable<typeof options.guestTables>
+                        ).asksNewParty(tx, where.tableReference),
+                      ),
+                  }),
             },
           }).establish(input);
           if (
             result.status === "NotAccepting" ||
             result.status === "ServiceNotOffered" ||
-            result.status === "TableNotOpen"
+            result.status === "TableNotOpen" ||
+            result.status === "TableMayStart" ||
+            result.status === "TableBeingCleaned" ||
+            result.status === "TableAskNewParty"
           )
             notAccepting = result;
           if (result.status !== "Established") throw new Error("CUSTOMER_ENTRY_ROLLBACK");

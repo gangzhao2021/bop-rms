@@ -121,7 +121,8 @@ export function installMerchantStoreSetupRoutes(
               ? 403
               : error.code === "STORE_FEATURES_CHANGED" ||
                   error.code === "STORE_FEATURES_TEA_USES_STOCK" ||
-                  error.code === "STORE_FEATURES_TEA_NOT_LISTED"
+                  error.code === "STORE_FEATURES_TEA_NOT_LISTED" ||
+                  error.code === "STORE_FEATURES_GUEST_START_NEEDS_PAY_FIRST"
                 ? 409
                 : 503;
         response

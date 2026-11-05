@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresPublishedMenuQueryStore,
@@ -9,6 +10,8 @@ import { skuRecipeUsesStock } from "@rms/recipe";
 import {
   changeDiningServiceSetting,
   changeDiningTeaChargeSetting,
+  createPostgresDiningPaymentTimingStore,
+  DiningGuestTableStartNeedsPayFirstError,
   DiningSessionError,
   loadDiningServiceSetting,
   loadDiningTeaChargeSetting,
@@ -52,6 +55,8 @@ export type MerchantStoreFeaturesErrorCode =
   | "STORE_FEATURES_TEA_USES_STOCK"
   /** WP-2423 item 8 ⑦ (v15 2026-10-29): the tea item is not on the Store's listed dine-in menu. */
   | "STORE_FEATURES_TEA_NOT_LISTED"
+  /** DEC-DINING-GUEST-TABLE-START: guests start tables only where they pay each round first. */
+  | "STORE_FEATURES_GUEST_START_NEEDS_PAY_FIRST"
   | "STORE_FEATURES_UNAVAILABLE";
 export class MerchantStoreFeaturesError extends Error {
   constructor(readonly code: MerchantStoreFeaturesErrorCode) {
@@ -127,8 +132,18 @@ export interface StoreFeaturesView {
     readonly chaseDish: boolean;
     /** Owner decision 2: staff record how many guests when opening a table. */
     readonly askPartySize: boolean;
+    /**
+     * DEC-DINING-GUEST-TABLE-START: guests start a free table by scanning. Sent only when on or once
+     * set, so a screen still open from before keeps working at a Store that never used it.
+     */
+    readonly guestTableStart?: boolean;
     readonly changedAt: string | null;
   };
+  /**
+   * Whether this Store's guests pay each round first, as guests starting tables needs. Sent only to
+   * a page that can use it. Dining's own setting.
+   */
+  readonly guestTableStartAllowed?: boolean;
   /**
    * Owner decision 2 (4b-2): the menu item charged per guest at tables that pay at the end, or
    * none (Dining's own setting).
@@ -200,6 +215,7 @@ export function createMerchantStoreFeatures(options: {
       staffCall: boolean;
       chaseDish: boolean;
       askPartySize?: boolean;
+      guestTableStart?: boolean;
     } = null;
     let teaChange: null | {
       operationReference: string;
@@ -242,11 +258,13 @@ export function createMerchantStoreFeatures(options: {
           "chaseDish",
           // Absent (an older page): kept as it is.
           ...(Object.hasOwn(input.command as object, "askPartySize") ? ["askPartySize"] : []),
+          ...(Object.hasOwn(input.command as object, "guestTableStart") ? ["guestTableStart"] : []),
         ]);
         if (
           typeof raw.staffCall !== "boolean" ||
           typeof raw.chaseDish !== "boolean" ||
           (raw.askPartySize !== undefined && typeof raw.askPartySize !== "boolean") ||
+          (raw.guestTableStart !== undefined && typeof raw.guestTableStart !== "boolean") ||
           !Number.isSafeInteger(raw.expectedVersion) ||
           Number(raw.expectedVersion) < 0
         )
@@ -257,6 +275,9 @@ export function createMerchantStoreFeatures(options: {
           staffCall: raw.staffCall,
           chaseDish: raw.chaseDish,
           ...(typeof raw.askPartySize === "boolean" ? { askPartySize: raw.askPartySize } : {}),
+          ...(typeof raw.guestTableStart === "boolean"
+            ? { guestTableStart: raw.guestTableStart }
+            : {}),
         };
       } else if (action === "ChangeTeaCharge") {
         const raw = readClosedRecord(input.command, [
@@ -474,6 +495,11 @@ export function createMerchantStoreFeatures(options: {
                     actorReference: String(current.actorReference),
                     observedAt: new Date(Date.parse(options.now())).toISOString(),
                   });
+            const timing = await createPostgresDiningPaymentTimingStore({
+              scope,
+              hashIntent: (value) => createHash("sha256").update(value).digest("hex"),
+              equals: (a, b) => a === b,
+            }).load(tx as never, () => authority.guard());
             return storeFeaturesView(
               setting,
               services,
@@ -483,12 +509,15 @@ export function createMerchantStoreFeatures(options: {
               teaChoices,
               autoAccept,
               true,
+              timing.paymentTiming === "PayFirst",
             );
           },
         ),
       );
     } catch (error) {
       if (error instanceof MerchantStoreFeaturesError) throw error;
+      if (error instanceof DiningGuestTableStartNeedsPayFirstError)
+        throw new MerchantStoreFeaturesError("STORE_FEATURES_GUEST_START_NEEDS_PAY_FIRST");
       if (
         error instanceof StoreFeatureSettingConflictError ||
         error instanceof StoreTipSettingConflictError ||
@@ -511,6 +540,7 @@ function storeFeaturesView(
   teaChoices: StoreFeaturesView["teaChoices"],
   autoAccept: OrderAutoAcceptanceSetting,
   canChange: boolean,
+  guestTableStartAllowed: boolean,
 ): StoreFeaturesView {
   return Object.freeze({
     version: setting.version,
@@ -528,8 +558,10 @@ function storeFeaturesView(
       staffCall: services.staffCall,
       chaseDish: services.chaseDish,
       askPartySize: services.askPartySize,
+      ...(services.guestTableStart ? { guestTableStart: true } : {}),
       changedAt: services.changedAt,
     }),
+    guestTableStartAllowed,
     teaCharge: Object.freeze({
       version: teaCharge.version,
       teaSellableReference: teaCharge.teaSellableReference,

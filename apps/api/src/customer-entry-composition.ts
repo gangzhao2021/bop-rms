@@ -82,6 +82,22 @@ export interface CustomerEntryTableReader {
     readonly storeReference: string;
     readonly tableReference: string;
   }): Promise<boolean>;
+  /**
+   * WP-2423 DEC-DINING-GUEST-TABLE-START: at a free table, what a guest may do by scanning it. Absent
+   * or failed: nothing new (the table isn't open, as before).
+   */
+  guestStart?(input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly tableReference: string;
+    readonly at: string;
+  }): Promise<"MayStart" | "BeingCleaned" | "No">;
+  /** At an open table a guest started: whether this phone is asked if it is with those guests. */
+  asksNewParty?(input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly tableReference: string;
+  }): Promise<boolean>;
 }
 
 const unavailable = Object.freeze({ status: "EntryUnavailable" } as const);
@@ -214,16 +230,41 @@ export function createCustomerEntryComposition(
             .isOpen({ ...scope, tableReference: String(tableReference) })
             .catch(() => undefined);
         }
+        const publicContext = {
+          brandDisplayName: profile.profile.brandDisplayName,
+          storeDisplayName: profile.profile.storeDisplayName,
+          publicStoreReference: String(qr.context.publicStoreReference),
+          locale: String(qr.context.locale),
+        };
         // Nobody can join or order at a table no party is seated at: start no visit (an earlier
         // one on this browser, e.g. of a guest whose table was just settled, stays as it is).
-        if (tableOpen === false)
-          return Object.freeze({
-            status: "TableNotOpen" as const,
-            brandDisplayName: profile.profile.brandDisplayName,
-            storeDisplayName: profile.profile.storeDisplayName,
-            publicStoreReference: String(qr.context.publicStoreReference),
-            locale: String(qr.context.locale),
-          });
+        // WP-2423 DEC-DINING-GUEST-TABLE-START: where guests start tables a scan alone still starts
+        // nothing; only the guest's tap on Start ("Start" or "NewParty") goes on to a visit.
+        if (tableOpen === false) {
+          const offer = await (
+            options.table?.guestStart?.({
+              ...scope,
+              tableReference: String(tableReference),
+              at: requestedAt,
+            }) ?? Promise.resolve("No" as const)
+          ).catch(() => "No" as const);
+          if (offer === "BeingCleaned")
+            return Object.freeze({ status: "TableBeingCleaned" as const, ...publicContext });
+          if (offer === "No")
+            return Object.freeze({ status: "TableNotOpen" as const, ...publicContext });
+          if (input.intent !== "Start" && input.intent !== "NewParty")
+            return Object.freeze({ status: "TableMayStart" as const, ...publicContext });
+        } else if (
+          tableOpen === true &&
+          input.intent === undefined &&
+          (await (
+            options.table?.asksNewParty?.({
+              ...scope,
+              tableReference: String(tableReference),
+            }) ?? Promise.resolve(false)
+          ).catch(() => false))
+        )
+          return Object.freeze({ status: "TableAskNewParty" as const, ...publicContext });
 
         const admitted = parseGuestAdmissionEvidence(
           await options.admission.consume(

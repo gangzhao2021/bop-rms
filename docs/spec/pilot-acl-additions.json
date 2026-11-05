@@ -6011,6 +6011,24 @@
       "privilege": "UPDATE",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: when a kitchen board was last read at this Store: one row per Store, an instant only, at most one write a minute"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_guest_start",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINING-GUEST-TABLE-START: a guest starting a free table at a Store that turned the switch on is recorded, and the worker and Tables read it"
+    },
+    {
+      "type": "table",
+      "schema": "rms_dining",
+      "object": "dining_session_guest_start",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINING-GUEST-TABLE-START: a guest starting a free table at a Store that turned the switch on is recorded, and the worker and Tables read it"
     }
   ]
 }

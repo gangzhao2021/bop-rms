@@ -66,6 +66,7 @@ async function composeWorker() {
       createInternalWebhookEvidenceRetentionWorkload: workload,
       createInternalPickupCapacityScheduleWorkload: workload,
       createInternalTableOnlineRefundWorkload: workload,
+      createInternalGuestTableCloseWorkload: workload,
     },
   );
   return { worker, contexts };

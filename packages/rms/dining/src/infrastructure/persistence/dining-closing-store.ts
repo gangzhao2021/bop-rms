@@ -13,6 +13,7 @@ import {
   type DiningSession,
 } from "../../contracts/dining-session.js";
 import { captureSessionData } from "../../application/dining-session-snapshot.js";
+import { guestTableCloseReasons } from "../../domain/dining-guest-table-start.js";
 import type {
   DiningClosingHashPort,
   DiningClosingStorePort,
@@ -204,7 +205,12 @@ export function createPostgresDiningClosingStore(
           audit.actionCode !== `DINING_SESSION_CLOSING_${accepted.record.action.toUpperCase()}` ||
           audit.actor.type === "Service" ||
           (audit.actor.type === "System" &&
-            (audit.sourceChannel !== "CUSTOMER_PWA" ||
+            // A guest host, or the System closing a guest-started table for its two reasons.
+            ((audit.sourceChannel !== "CUSTOMER_PWA" &&
+              !(
+                audit.sourceChannel === "SYSTEM" &&
+                (guestTableCloseReasons as readonly string[]).includes(String(audit.reasonCode))
+              )) ||
               audit.dataClassification !== "Restricted" ||
               Object.keys(audit.beforeSummary ?? {}).length !== 0 ||
               Object.keys(audit.afterSummary ?? {}).length !== 0))

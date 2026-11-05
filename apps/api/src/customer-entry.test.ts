@@ -472,6 +472,49 @@ describe("WP-1004 Customer-entry contract", () => {
     expect((await post(await listen(customerEntry(port)))).status).toBe(503);
   });
 
+  it.each([
+    ["TableMayStart", "entry_table_may_start", "customer.entry.table_may_start", "StartTable"],
+    [
+      "TableBeingCleaned",
+      "entry_table_being_cleaned",
+      "customer.entry.table_being_cleaned",
+      "AskStaff",
+    ],
+    [
+      "TableAskNewParty",
+      "entry_table_ask_new_party",
+      "customer.entry.table_ask_new_party",
+      "AnswerNewParty",
+    ],
+  ])(
+    "DEC-DINING-GUEST-TABLE-START: %s starts no visit (no cookie) and answers with its own code",
+    async (status, code, messageKey, action) => {
+      const port = new MutablePort();
+      port.result = {
+        status,
+        brandDisplayName: "BOP Kitchen",
+        storeDisplayName: "Synthetic Market Store",
+        publicStoreReference: STORE_REFERENCE,
+        locale: "en-CA",
+      } as never;
+      const response = await post(await listen(customerEntry(port)));
+      expect(response.status).toBe(409);
+      expect(response.headers.get("set-cookie")).toBeNull();
+      expect(await response.json()).toEqual({
+        schemaVersion: 1,
+        code,
+        messageKey,
+        recovery: { action, storeSelection: "Hidden" },
+        store: {
+          brandDisplayName: "BOP Kitchen",
+          storeDisplayName: "Synthetic Market Store",
+          publicStoreReference: STORE_REFERENCE,
+          locale: "en-CA",
+        },
+      });
+    },
+  );
+
   it("WP-2423 Q11: tells a guest with a replaced or turned-off table code to ask staff, with no cookie", async () => {
     const port = new MutablePort();
     for (const [reason, messageKey] of [

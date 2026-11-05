@@ -1,4 +1,5 @@
 /** Merchant BFF public contract: the workspace snapshot, navigation, Session service and router options. */
+import type { createMerchantGuestTableStartOff } from "./merchant-dining-guest-table-start.js";
 import type { createMerchantStoreOpening } from "./merchant-store-opening.js";
 import type {
   createMerchantDiningStaffCallAnswer,
@@ -665,6 +666,8 @@ export interface MerchantBffRouterOptions {
   /** WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing. */
   readonly diningPaymentTimingRead?: ReturnType<typeof createMerchantDiningPaymentTimingRead>;
   readonly diningPaymentTimingChange?: ReturnType<typeof createMerchantDiningPaymentTimingChange>;
+  /** DEC-DINING-GUEST-TABLE-START: stop guests starting tables, from Tables. */
+  readonly guestTableStartOff?: ReturnType<typeof createMerchantGuestTableStartOff>;
   /** WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's bill and its one payment. */
   readonly diningTableBill?: ReturnType<typeof createMerchantDiningTableBillRead>;
   readonly diningTableSettle?: ReturnType<typeof createMerchantDiningTableSettle>;

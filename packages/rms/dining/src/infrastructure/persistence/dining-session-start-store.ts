@@ -5,6 +5,7 @@ import {
   parseDiningSession,
 } from "../../contracts/dining-session.js";
 import { assignStartedDiningSession, createDiningTable } from "../../domain/dining-table.js";
+import { guestTableStartAuditReason } from "../../domain/dining-guest-table-start.js";
 import { parseStaffStartRecord } from "../../application/dining-staff-record.js";
 import {
   captureSessionData,
@@ -249,8 +250,13 @@ export function createPostgresDiningSessionStartStore(
         if (
           audit.brandId !== brand ||
           audit.storeId !== store ||
-          audit.actor.type !== "User" ||
-          audit.actor.reference !== record.session.startedByActorReference ||
+          // Staff open a table as themselves; a guest's start is the System's, on that one reason
+          // (DEC-DINING-GUEST-TABLE-START), and nothing else starts a table without a staff member.
+          !(audit.actor.type === "User"
+            ? audit.actor.reference === record.session.startedByActorReference
+            : audit.actor.type === "System" &&
+              audit.reasonCode === guestTableStartAuditReason &&
+              audit.sourceChannel === "CUSTOMER_PWA") ||
           audit.actionCode !== "DINING_SESSION_START" ||
           audit.targetType !== "DiningTable" ||
           audit.targetId !== record.session.tableReference ||

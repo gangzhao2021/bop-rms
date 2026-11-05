@@ -21,6 +21,7 @@ function fixture() {
               pickupPaymentExpiry: cycle,
               diningCheckoutExpiry: cycle,
               tableOnlineRefund: cycle,
+              guestTableClose: cycle,
               contactRetention: cycle,
               webhookEvidenceRetention: cycle,
               pickupCapacitySchedule: cycle,

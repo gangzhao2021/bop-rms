@@ -6,13 +6,19 @@ import {
   createPostgresDiningSessionReadStore,
   createPostgresDiningTableQrStore,
   createPostgresDiningTableStore,
+  decideGuestTableQuietClose,
+  guestTableManyPhones,
+  listDiningGuestStartedSessions,
   listDiningSessionMergesInto,
+  loadDiningGuestTableActivity,
+  loadDiningServiceSetting,
   parseDiningInstant,
   parseDiningReference,
 } from "@rms/dining";
 import {
   createPostgresOrderRoundStaffHoldStore,
   createPostgresStaffDiningRoundEntryStore,
+  listStoreDiningSessionOrderActivity,
   listStoreDiningSessionOrders,
   listStorePaidDiningRoundsAwaitingAcceptance,
   listStoreUnpaidGuestDiningRounds,
@@ -39,9 +45,11 @@ const tablePageActions = Object.freeze([
   "ordering.order.cancel",
   // WP-2423 item 8 ①: "Guests left without paying" (a write-off) is offered to managers only.
   "ordering.order.write_off",
+  // DEC-DINING-GUEST-TABLE-START: stopping guests starting tables, from this page.
+  "operations.ordering.pause",
 ]);
 
-/** WP-2423 item 8 ⑤ decision 3: a phone that joined in the last 10 minutes is pointed out. */
+/** WP-2423 item 8 ⑤ decision 3: a phone that joined in the last 3 minutes is pointed out. */
 const newPhoneMinutes = 3;
 
 export function createMerchantDiningTables(options: {
@@ -102,6 +110,7 @@ export function createMerchantDiningTables(options: {
               canTransferHost: decisions.get("dining.host.transfer")?.effect === "Allow",
               canCancelUnpaidRounds: decisions.get("ordering.order.cancel")?.effect === "Allow",
               canWriteOff: decisions.get("ordering.order.write_off")?.effect === "Allow",
+              canStopGuestStarts: decisions.get("operations.ordering.pause")?.effect === "Allow",
             });
           },
           recheck: async ({ current }) => (await current.allowed()) === true,
@@ -115,6 +124,7 @@ export function createMerchantDiningTables(options: {
             canTransferHost,
             canCancelUnpaidRounds,
             canWriteOff,
+            canStopGuestStarts,
           } = authority.scope;
           const authorize = () => authority.guard();
           const store = createPostgresDiningTableStore(
@@ -394,18 +404,69 @@ export function createMerchantDiningTables(options: {
             ownerScope,
             activeReferences.map((reference) => String(reference)),
           );
+          // DEC-DINING-GUEST-TABLE-START: which open tables a guest started, and the warning before
+          // one frees itself. Sent only for those tables; one read for the page.
+          const guestStarted = await listDiningGuestStartedSessions(
+            tx as never,
+            ownerScope,
+            activeReferences,
+          );
+          const guestServices = await loadDiningServiceSetting(tx as never, ownerScope);
+          const guestActivity = await loadDiningGuestTableActivity(tx as never, ownerScope, [
+            ...guestStarted.keys(),
+          ]);
+          const guestOrderActivity = await listStoreDiningSessionOrderActivity(
+            tx as unknown as Parameters<typeof listStoreDiningSessionOrderActivity>[0],
+            scoped,
+            [...guestStarted.keys()],
+            new Date(joinedAt).toISOString(),
+          );
+          const guestStart = new Map<string, { closesByItselfAt: string | null }>();
+          for (const [session, started] of guestStarted) {
+            const dining = guestActivity.get(session);
+            const ordering = guestOrderActivity.get(session);
+            guestStart.set(session, {
+              closesByItselfAt: decideGuestTableQuietClose(
+                {
+                  startedAt: started.startedAt,
+                  activity: [
+                    dining?.lastPhoneJoinedAt ?? null,
+                    dining?.lastServedAt ?? null,
+                    ordering?.lastRoundAt ?? null,
+                    ordering?.lastCartChangeAt ?? null,
+                  ],
+                  cartHasItems: ordering?.cartHasItems === true,
+                  openStaffCall: dining?.openStaffCall === true,
+                  merged: (mergesInto.get(session)?.length ?? 0) > 0,
+                  order: sessionOrders.has(session)
+                    ? { unfinishedItems: 0, blockers: [], readyItems: 0 }
+                    : null,
+                },
+                new Date(joinedAt).toISOString(),
+              ).closesAt,
+            });
+          }
           for (const session of activeReferences) {
+            const phones = (phonesBySession.get(String(session)) ?? []).filter(
+              (phone) => !phone.left,
+            );
+            const window = guestStarted.has(String(session))
+              ? guestTableManyPhones.windowMinutes
+              : newPhoneMinutes;
+            const recent = phones.filter(
+              (phone) => joinedAt - Date.parse(phone.joinedAt) < window * 60_000,
+            );
             newPhones.set(
               String(session),
-              (phonesBySession.get(String(session)) ?? [])
-                .filter(
-                  (phone) =>
-                    !phone.left && joinedAt - Date.parse(phone.joinedAt) < newPhoneMinutes * 60_000,
-                )
-                .map((phone) => ({
-                  phoneNumber: phone.phoneNumber,
-                  joinedAt: String(phone.joinedAt),
-                })),
+              // Guests started this table: nobody seated a party to compare a phone with, so only
+              // an unusual number of phones is worth a person's look.
+              (guestStarted.has(String(session)) && recent.length < guestTableManyPhones.phones
+                ? []
+                : recent
+              ).map((phone) => ({
+                phoneNumber: phone.phoneNumber,
+                joinedAt: String(phone.joinedAt),
+              })),
             );
           }
           // WP-2423 Q28 DEC-DINING-STAFF-CALL: the open call of each open session (one read).
@@ -430,6 +491,15 @@ export function createMerchantDiningTables(options: {
             canTransferHost,
             canCancelUnpaidRounds,
             canWriteOff,
+            // DEC-DINING-GUEST-TABLE-START: sent only while on, with the version to turn it off.
+            ...(guestServices.guestTableStart
+              ? {
+                  guestTableStart: Object.freeze({
+                    version: guestServices.version,
+                    canTurnOff: canStopGuestStarts,
+                  }),
+                }
+              : {}),
             items: Object.freeze(
               page.items.map((table) =>
                 Object.freeze({
@@ -528,6 +598,24 @@ export function createMerchantDiningTables(options: {
                       .slice(0, 20)
                       .map((payBy) => Object.freeze({ payBy })),
                   ),
+                  // A guest started this table; only on such a table, so any other screen still
+                  // open from before reads the same row it always did.
+                  ...(table.activeDiningSessionReference !== null &&
+                  guestStart.has(String(table.activeDiningSessionReference))
+                    ? {
+                        guestStart: Object.freeze(
+                          guestStart.get(String(table.activeDiningSessionReference)) ?? {
+                            closesByItselfAt: null,
+                          },
+                        ),
+                      }
+                    : {}),
+                  // How long a table has waited for cleaning, where guests can then start it.
+                  ...(guestServices.guestTableStart &&
+                  table.operationalState === "TemporarilyBlocked" &&
+                  table.blockReasonCode === "CLEANING"
+                    ? { blockedSince: table.observedAt }
+                    : {}),
                 }),
               ),
             ),

@@ -946,6 +946,36 @@ const databaseAccessManifestInput = {
         "packages/rms/ordering/src/infrastructure/persistence/order-payment-acceptance-wait-store.ts",
     },
     {
+      id: "dining-session-order-activity.read.cart",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "cart" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
+    },
+    {
+      id: "dining-session-order-activity.read.cart_line",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "cart_line" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
+    },
+    {
+      id: "dining-session-order-activity.read.order_batch",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_batch" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
+    },
+    {
       id: "staff-cancellation.read.merchant-order-index",
       operation: "read",
       mechanism: "repository",

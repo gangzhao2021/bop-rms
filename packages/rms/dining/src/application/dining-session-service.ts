@@ -250,6 +250,85 @@ async function sessionAsync<T>(action: () => Promise<T>): Promise<T> {
   }
 }
 
+export type DiningSessionStartCredentials = DiningSessionPorts["credentials"];
+
+/**
+ * The first state of a table's Session: the Session and its first one-time code. Staff opening a
+ * table and a guest starting a free table (DEC-DINING-GUEST-TABLE-START) build the same record; for
+ * a guest the code is never shown, because the guest's own join replaces it.
+ */
+export function buildDiningSessionStartRecord(input: {
+  readonly credentials: DiningSessionStartCredentials;
+  readonly pepperVersion: number;
+  readonly brandReference: string;
+  readonly storeReference: string;
+  readonly tableReference: string;
+  readonly assignmentVersion: number;
+  readonly actorReference: string;
+  readonly operationReference: string;
+  readonly joinKind: DiningJoinCapabilityKind;
+  readonly requestedAt: string;
+}) {
+  const { credentials, joinKind } = input;
+  const requestedAt = parseDiningInstant(input.requestedAt);
+  const diningSessionReference = sessionPort(() =>
+    parseDiningReference(credentials.generateReference("DiningSession")),
+  );
+  const joinCredential = sessionPort(() =>
+    rawCredential(joinKind, credentials.generateJoinCredential(joinKind)),
+  );
+  const capability = sessionPort(() =>
+    parseDiningJoinCapability({
+      capabilityReference: parsePublicCapabilityReference(
+        credentials.generateReference("JoinCapability"),
+      ),
+      purpose: "DiningJoin",
+      kind: joinKind,
+      storeReference: parsePublicCapabilityScopeReference(input.storeReference),
+      tableReference: parsePublicCapabilityScopeReference(input.tableReference),
+      diningSessionReference: parsePublicCapabilityScopeReference(diningSessionReference),
+      selectorHash: credentials.hashJoinCredential(joinKind, joinCredential),
+      pepperVersion: input.pepperVersion,
+      assignmentVersion: input.assignmentVersion,
+      generation: 1,
+      status: "Active",
+      version: 1,
+      issuedAt: requestedAt,
+      expiresAt: plus(requestedAt, fifteenMinutes),
+      consumedAt: null,
+      revokedAt: null,
+    }),
+  );
+  const session = parseDiningSession({
+    diningSessionReference,
+    brandReference: input.brandReference,
+    storeReference: input.storeReference,
+    tableReference: input.tableReference,
+    tableAssignmentVersion: input.assignmentVersion,
+    phase: "Active",
+    version: 1,
+    startedByActorReference: input.actorReference,
+    startedAt: requestedAt,
+    hostParticipantReference: null,
+  });
+  const intent = sessionPort(() =>
+    parseDiningHash(
+      credentials.hashOperationIntent(
+        `Start:${input.tableReference}:${input.assignmentVersion}:${joinKind}`,
+      ),
+    ),
+  );
+  return Object.freeze({
+    record: Object.freeze({
+      session,
+      capability,
+      operationReference: parseDiningReference(input.operationReference),
+      operationIntentHash: intent,
+    }),
+    joinCredential,
+  });
+}
+
 export function createDiningSessionService(ports: DiningSessionPorts) {
   if (!Number.isSafeInteger(ports.pepperVersion) || ports.pepperVersion < 1) {
     throw new DiningSessionError("DINING_SESSION_INPUT_INVALID");
@@ -554,51 +633,17 @@ export function createDiningSessionService(ports: DiningSessionPorts) {
       ) {
         throw new DiningSessionError("DINING_SESSION_UNAVAILABLE");
       }
-      const diningSessionReference = sessionPort(() =>
-        parseDiningReference(ports.credentials.generateReference("DiningSession")),
-      );
-      const joinCredential = sessionPort(() =>
-        rawCredential(joinKind, ports.credentials.generateJoinCredential(joinKind)),
-      );
-      const capability = sessionPort(() =>
-        parseDiningJoinCapability({
-          capabilityReference: parsePublicCapabilityReference(
-            ports.credentials.generateReference("JoinCapability"),
-          ),
-          purpose: "DiningJoin",
-          kind: joinKind,
-          storeReference: parsePublicCapabilityScopeReference(staff.table.storeReference),
-          tableReference: parsePublicCapabilityScopeReference(staff.table.tableReference),
-          diningSessionReference: parsePublicCapabilityScopeReference(diningSessionReference),
-          selectorHash: ports.credentials.hashJoinCredential(joinKind, joinCredential),
-          pepperVersion: ports.pepperVersion,
-          assignmentVersion: staff.table.assignmentVersion,
-          generation: 1,
-          status: "Active",
-          version: 1,
-          issuedAt: requestedAt,
-          expiresAt: plus(requestedAt, fifteenMinutes),
-          consumedAt: null,
-          revokedAt: null,
-        }),
-      );
-      const session = parseDiningSession({
-        diningSessionReference,
+      const { record: generated, joinCredential } = buildDiningSessionStartRecord({
+        credentials: ports.credentials,
+        pepperVersion: ports.pepperVersion,
         brandReference: staff.table.brandReference,
         storeReference: staff.table.storeReference,
         tableReference: staff.table.tableReference,
-        tableAssignmentVersion: staff.table.assignmentVersion,
-        phase: "Active",
-        version: 1,
-        startedByActorReference: staff.actorReference,
-        startedAt: requestedAt,
-        hostParticipantReference: null,
-      });
-      const generated = Object.freeze({
-        session,
-        capability,
+        assignmentVersion: staff.table.assignmentVersion,
+        actorReference: staff.actorReference,
         operationReference,
-        operationIntentHash: intent,
+        joinKind,
+        requestedAt,
       });
       const persistedValue = await sessionAsync(() =>
         ports.store.start({

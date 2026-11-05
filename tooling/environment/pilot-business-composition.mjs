@@ -26,6 +26,7 @@ import { createPilotPaymentProvider as createInternalSimulatedProvider } from ".
 import { createInternalKitchenQueue } from "./pilot-kitchen-queue.mjs";
 import { createInternalDiningCheckoutExpiryWorkload } from "./pilot-dining-checkout-expiry.mjs";
 import { createInternalTableOnlineRefundWorkload } from "./pilot-table-online-refund.mjs";
+import { createInternalGuestTableCloseWorkload } from "./pilot-guest-table-close.mjs";
 import { createInternalCartExpiryWorkload } from "./pilot-cart-expiry.mjs";
 import { createInternalPaidWithoutFulfillableInventoryWorkload } from "./pilot-paid-without-fulfillable-inventory.mjs";
 import { createInternalPickupPaymentExpiryWorkload } from "./pilot-pickup-payment-expiry.mjs";
@@ -66,6 +67,7 @@ const factories = {
   createInternalKitchenQueue,
   createInternalDiningCheckoutExpiryWorkload,
   createInternalTableOnlineRefundWorkload,
+  createInternalGuestTableCloseWorkload,
   createInternalCartExpiryWorkload,
   createInternalPaidWithoutFulfillableInventoryWorkload,
   createInternalPickupPaymentExpiryWorkload,
@@ -205,6 +207,9 @@ export function composeConfiguredBusinessWorker({
         f.createInternalTableOnlineRefundWorkload(r, observer, {
           createSimulatedProvider: provider,
         }),
+      // WP-2423 DEC-DINING-GUEST-TABLE-START: the System frees guest-started tables.
+      createInternalGuestTableCloseWorkload: (r, observer) =>
+        f.createInternalGuestTableCloseWorkload(r, observer, account),
       // WP-2423 Q10: always on; daily removal of checkout contacts past the 30-day retention.
       createInternalContactRetentionWorkload: (r, observer) =>
         f.createInternalContactRetentionWorkload(r, observer),

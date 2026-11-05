@@ -40,7 +40,7 @@ export function parseDiningTableReleaseCommand(value: unknown) {
     return fail();
   }
 }
-/** Exact versioned release history; persisted only with current staff authority. */
+/** Exact versioned release history; persisted only with current staff or System authority. */
 export function parseDiningTableReleaseRecord(value: unknown, hashes: Hashes) {
   try {
     const raw = exactObject(captureSessionData(value), [
@@ -75,7 +75,9 @@ export function parseDiningTableReleaseRecord(value: unknown, hashes: Hashes) {
       session.version !== command.expectedSessionVersion ||
       beforeTable.aggregateVersion !== command.expectedTableVersion ||
       canonicalizeRfc8785(expected) !== canonicalizeRfc8785(afterTable) ||
-      audit.actor.type !== "User" ||
+      // Staff close a table as themselves; the System closes only a guest-started one (the Session
+      // record it releases was closed under those rules), from the worker or for the next guest.
+      (audit.actor.type !== "User" && audit.actor.type !== "System") ||
       audit.brandId !== beforeTable.brandReference ||
       audit.storeId !== beforeTable.storeReference ||
       audit.targetType !== "DiningTable" ||
@@ -83,7 +85,9 @@ export function parseDiningTableReleaseRecord(value: unknown, hashes: Hashes) {
       audit.actionCode !== "DINING_TABLE_RELEASED" ||
       audit.correlationId !== command.operationReference ||
       audit.occurredAt !== command.observedAt ||
-      audit.sourceChannel !== "MERCHANT_WEB" ||
+      (audit.actor.type === "User"
+        ? audit.sourceChannel !== "MERCHANT_WEB"
+        : audit.sourceChannel !== "SYSTEM" && audit.sourceChannel !== "CUSTOMER_PWA") ||
       audit.dataClassification !== "Restricted"
     )
       return fail();

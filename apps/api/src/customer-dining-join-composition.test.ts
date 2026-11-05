@@ -226,7 +226,7 @@ describe("WP-2423 item 8 ⑤ QR join composition", () => {
       status: "Refused",
       reason: "CodeNotAccepted",
     });
-    expect(always).toHaveBeenCalledTimes(3);
+    expect(always).toHaveBeenCalledTimes(6);
   });
   it("passes a table refusal through without joining, and needs the QR port", async () => {
     const f = fixture();
@@ -533,5 +533,115 @@ describe("current-authorized Dining Join composition", () => {
     expect(error).toMatchObject(unavailable);
     expect(error).not.toHaveProperty("cause");
     expect(JSON.stringify(error)).not.toContain(f.input.joinCredential);
+  });
+});
+
+describe("DEC-DINING-GUEST-TABLE-START: a guest starts a free table", () => {
+  const qrInput = (f: ReturnType<typeof fixture>) => ({
+    sessionCredential: f.input.sessionCredential,
+    csrfCredential: f.input.csrfCredential,
+    operationReference: f.input.operationReference,
+  });
+  const issuedAfter = (f: ReturnType<typeof fixture>, refusals: number) => {
+    let calls = 0;
+    return vi.fn(async () => {
+      calls += 1;
+      if (calls <= refusals) return { status: "Refused" as const, reason: "NotOpen" as const };
+      return {
+        status: "Issued" as const,
+        diningSessionReference: id(20),
+        joinCredential: f.input.joinCredential as never,
+      };
+    });
+  };
+  it("an open table never asks: an ordinary QR join costs no extra step at any Store", async () => {
+    const f = fixture();
+    const startIfFree = vi.fn(async () => ({ status: "NotApplicable" as const }));
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      qr: { issue: issuedAfter(f, 0), startIfFree },
+    });
+    expect((await composition.join(qrInput(f), f.request)).status).toBe("Joined");
+    expect(startIfFree).not.toHaveBeenCalled();
+  });
+  it("a free table is started, committed, and only then issued, with a fresh instant", async () => {
+    const f = fixture();
+    const order: string[] = [];
+    const seen: string[] = [];
+    const issued = issuedAfter(f, 1);
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      qr: {
+        issue: async (input, authorize) => {
+          order.push("issue");
+          seen.push(input.observedAt);
+          f.tick(seen.length * 2);
+          return issued(input, authorize);
+        },
+        startIfFree: async () => {
+          order.push("start");
+          return { status: "Started", diningSessionReference: id(20) };
+        },
+      },
+    });
+    expect((await composition.join(qrInput(f), f.request)).status).toBe("Joined");
+    expect(order).toEqual(["issue", "start", "issue"]);
+    expect(seen[1]).not.toEqual(seen[0]);
+  });
+  it("another phone starting it first is no failure: this phone joins them", async () => {
+    const f = fixture();
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      qr: {
+        issue: issuedAfter(f, 1),
+        startIfFree: async () => ({ status: "AlreadyOpen" }),
+      },
+    });
+    expect((await composition.join(qrInput(f), f.request)).status).toBe("Joined");
+  });
+  it.each([
+    ["NotApplicable", "NotOpen"],
+    ["Busy", "TooManyJoins"],
+    ["BeingCleaned", "BeingCleaned"],
+  ] as const)("%s refuses as %s, nothing joined", async (status, reason) => {
+    const f = fixture();
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      qr: {
+        issue: issuedAfter(f, 1),
+        startIfFree: async () => ({ status }),
+      },
+    });
+    expect(await composition.join(qrInput(f), f.request)).toEqual({ status: "Refused", reason });
+    expect(f.store.join).not.toHaveBeenCalled();
+  });
+  it("a new party closes the table first, and is refused when the rule says no", async () => {
+    const f = fixture();
+    const closeForNewParty = vi.fn(async () => ({ status: "Closed" as const }));
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      qr: {
+        issue: issuedAfter(f, 1),
+        startIfFree: async () => ({ status: "Started", diningSessionReference: id(20) }),
+        closeForNewParty,
+      },
+    });
+    expect((await composition.join({ ...qrInput(f), newParty: true }, f.request)).status).toBe(
+      "Joined",
+    );
+    expect(closeForNewParty).toHaveBeenCalledTimes(1);
+    const g = fixture(100);
+    const refused = createCustomerDiningJoinComposition({
+      ...g.options,
+      qr: {
+        issue: issuedAfter(g, 0),
+        closeForNewParty: async () => ({ status: "Held" as const }),
+      },
+    });
+    expect(await refused.join({ ...qrInput(g), newParty: true }, g.request)).toEqual({
+      status: "Refused",
+      reason: "TableInUse",
+    });
+    expect(g.store.join).not.toHaveBeenCalled();
   });
 });

@@ -40,6 +40,7 @@ export async function createInternalWorker(resources, observers = {}, options = 
   const {
     createInternalDiningCheckoutExpiryWorkload,
     createInternalTableOnlineRefundWorkload,
+    createInternalGuestTableCloseWorkload,
     createInternalCartExpiryWorkload,
     createInternalPaidOutcome,
     createInternalWorkerServices,
@@ -147,6 +148,8 @@ export async function createInternalWorker(resources, observers = {}, options = 
         observers.pickupCapacitySchedule,
       ),
       createInternalTableOnlineRefundWorkload(resources, observers.tableOnlineRefund),
+      // WP-2423 DEC-DINING-GUEST-TABLE-START: always on, so a started table is never orphaned.
+      createInternalGuestTableCloseWorkload(resources, observers.guestTableClose),
       ...(options.cartExpiry === true ? [createInternalCartExpiryWorkload(resources)] : []),
       ...(options.diningCheckoutExpiry === true
         ? [createInternalDiningCheckoutExpiryWorkload(resources, observers.diningCheckoutExpiry)]

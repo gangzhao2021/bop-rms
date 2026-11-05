@@ -139,6 +139,7 @@ export function createMerchantDiningPaymentTimingChange(options: {
             },
             () => authority.guard(),
           );
+          // The page says what stands in the way ("Turn off guests starting tables first").
           return Object.freeze({ status: result.status, timing: view(result.timing) });
         },
       ),

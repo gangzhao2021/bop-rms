@@ -335,6 +335,7 @@ export { createPostgresOrderBatchIdentitySource } from "./infrastructure/persist
 export {
   createPostgresDiningSessionOrderLookup,
   listStoreDiningSessionOrders,
+  listStoreDiningSessionOrderActivity,
 } from "./infrastructure/persistence/dining-session-order-lookup.js";
 
 export {

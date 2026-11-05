@@ -91,3 +91,66 @@ export async function listStoreDiningSessionOrders(
     ),
   );
 }
+
+/**
+ * WP-2423 DEC-DINING-GUEST-TABLE-START: when each session's guests last ordered or changed a cart,
+ * and whether a live cart holds something now. One read for a page of tables. Caller authorizes and
+ * owns the transaction.
+ */
+export async function listStoreDiningSessionOrderActivity(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  diningSessionReferences: readonly string[],
+  observedAtInput: string,
+): Promise<
+  ReadonlyMap<
+    string,
+    {
+      readonly lastRoundAt: string | null;
+      readonly lastCartChangeAt: string | null;
+      readonly cartHasItems: boolean;
+    }
+  >
+> {
+  const found = new Map<
+    string,
+    {
+      readonly lastRoundAt: string | null;
+      readonly lastCartChangeAt: string | null;
+      readonly cartHasItems: boolean;
+    }
+  >();
+  if (diningSessionReferences.length === 0) return found;
+  if (diningSessionReferences.length > 100)
+    throw new Error("DINING_SESSION_ORDER_LOOKUP_UNAVAILABLE");
+  const sessions = diningSessionReferences.map((reference) => parseOrderingReference(reference));
+  const brand = parseOrderingReference(scope.brandReference);
+  const store = parseOrderingReference(scope.storeReference);
+  const observedAt = parseOrderingInstant(observedAtInput);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const instant = (column: string) =>
+    `to_char(${column} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+  const rows = (
+    await transaction.query(
+      `SELECT s.session_id::text session_id,
+ (SELECT ${instant("max(b.submitted_at)")} FROM rms_ordering.order_header h JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.brand_id=h.brand_id AND b.store_id=h.store_id WHERE h.brand_id=$1 AND h.store_id=$2 AND h.dining_session_id=s.session_id) last_round,
+ (SELECT ${instant("max(c.updated_at)")} FROM rms_ordering.cart c WHERE c.brand_id=$1 AND c.store_id=$2 AND c.dining_session_id=s.session_id) last_cart,
+ EXISTS (SELECT 1 FROM rms_ordering.cart c JOIN rms_ordering.cart_line l ON l.cart_id=c.cart_id AND l.brand_id=c.brand_id AND l.store_id=c.store_id WHERE c.brand_id=$1 AND c.store_id=$2 AND c.dining_session_id=s.session_id AND c.lifecycle_status='Active' AND c.idle_expires_at>$4::timestamptz AND c.absolute_expires_at>$4::timestamptz) cart_has_items
+ FROM unnest($3::uuid[]) s(session_id)`,
+      [brand, store, sessions, observedAt],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  for (const row of rows)
+    found.set(
+      parseOrderingReference(row.session_id),
+      Object.freeze({
+        lastRoundAt: row.last_round === null ? null : parseOrderingInstant(row.last_round),
+        lastCartChangeAt: row.last_cart === null ? null : parseOrderingInstant(row.last_cart),
+        cartHasItems: row.cart_has_items === true,
+      }),
+    );
+  return found;
+}

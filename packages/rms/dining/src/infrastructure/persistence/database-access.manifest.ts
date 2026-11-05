@@ -12,6 +12,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 DEC-DINING-GUEST-TABLE-START: a free table a guest started by scanning its code.
+      table: "dining_session_guest_start",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/dining" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑦ decision 2: tea charged for other than the guests, with the reason.
       table: "dining_session_tea_override",
       classification: "append-only-record",
@@ -309,6 +318,26 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@rms/dining" },
       readPattern: null,
       source: "packages/rms/dining/src/infrastructure/persistence/dining-qr-join-store.ts",
+    },
+    {
+      id: "guest-table-start.read.dining_session_guest_start",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_session_guest_start" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/dining/src/infrastructure/persistence/dining-guest-table-start-store.ts",
+    },
+    {
+      id: "guest-table-start.write.dining_session_guest_start",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_dining", table: "dining_session_guest_start" },
+      principal: { kind: "module", id: "@rms/dining" },
+      readPattern: null,
+      source:
+        "packages/rms/dining/src/infrastructure/persistence/dining-guest-table-start-store.ts",
     },
     {
       id: "service-setting.read.dining_service_setting",

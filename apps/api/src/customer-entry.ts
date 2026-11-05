@@ -26,7 +26,13 @@ export interface CustomerEntryPortInput {
   readonly operationReference: string;
   readonly qrToken: string;
   readonly requestedAt: string;
+  /**
+   * WP-2423 DEC-DINING-GUEST-TABLE-START: what the guest tapped after a first scan answered with a
+   * choice: start this free table, join the people here, or start after them. Absent: a scan.
+   */
+  readonly intent?: CustomerEntryIntent;
 }
+export type CustomerEntryIntent = "Start" | "Join" | "NewParty";
 
 export interface CustomerEntryEstablished {
   readonly status: "Established";
@@ -41,7 +47,8 @@ export interface CustomerEntryEstablished {
   readonly contextExpiresAt: string;
   /**
    * Coordinator 2026-10-30: at a table, whether a party is seated there now (staff seat guests
-   * before they can join and order); absent for pickup or when it can't be read.
+   * before they can join and order, or the guest is starting it); absent for pickup or when it
+   * can't be read.
    */
   readonly tableOpen?: boolean;
   readonly sessionCredential: GuestRawCredential;
@@ -92,6 +99,18 @@ export interface CustomerEntryTableNotOpen {
   readonly locale: string;
 }
 
+/**
+ * WP-2423 DEC-DINING-GUEST-TABLE-START: a scan at a Store where guests start tables, answered with
+ * no Session (an earlier visit on this browser keeps its receipt): this free table can be started,
+ * it is waiting for cleaning, or this phone is asked if it is with the guests already here.
+ */
+export type CustomerEntryTableOffer = Omit<CustomerEntryTableNotOpen, "status"> &
+  (
+    | { readonly status: "TableMayStart" }
+    | { readonly status: "TableBeingCleaned" }
+    | { readonly status: "TableAskNewParty" }
+  );
+
 /** WP-2423 Q11: a genuine table code that staff replaced or turned off; no Session is issued. */
 export interface CustomerEntryQrRetired {
   readonly status: "QrRetired";
@@ -103,6 +122,7 @@ export type CustomerEntryPortResult =
   | CustomerEntryNotAccepting
   | CustomerEntryServiceNotOffered
   | CustomerEntryTableNotOpen
+  | CustomerEntryTableOffer
   | CustomerEntryQrRetired
   | { readonly status: "InvalidRequest" }
   | { readonly status: "EntryUnavailable" };
@@ -217,17 +237,29 @@ function validCompactFraming(value: string): boolean {
   return bytes.length === 64 && bytes.toString("base64url") === signature;
 }
 
-function parseBody(value: unknown): string {
-  const body = closedRecord(value, ["qrToken"]);
+function parseBody(value: unknown): {
+  readonly qrToken: string;
+  readonly intent: CustomerEntryIntent | undefined;
+} {
+  const body = closedRecord(
+    value,
+    value !== null && typeof value === "object" && Object.hasOwn(value, "intent")
+      ? ["qrToken", "intent"]
+      : ["qrToken"],
+  );
   if (
     typeof body.qrToken !== "string" ||
     body.qrToken.length < 1 ||
     body.qrToken.length > 2048 ||
-    !validCompactFraming(body.qrToken)
+    !validCompactFraming(body.qrToken) ||
+    (body.intent !== undefined &&
+      body.intent !== "Start" &&
+      body.intent !== "Join" &&
+      body.intent !== "NewParty")
   ) {
     throw new TypeError("invalid entry request");
   }
-  return body.qrToken;
+  return { qrToken: body.qrToken, intent: body.intent as CustomerEntryIntent | undefined };
 }
 
 function parseOrigin(value: string): string {
@@ -387,6 +419,7 @@ function parsePortResult(
   | CustomerEntryNotAccepting
   | CustomerEntryServiceNotOffered
   | CustomerEntryTableNotOpen
+  | CustomerEntryTableOffer
   | CustomerEntryEstablished {
   const statusRecord =
     typeof value === "object" && value !== null
@@ -409,7 +442,12 @@ function parsePortResult(
       throw new TypeError("invalid retired result");
     return Object.freeze({ status: "QrRetired", reason: raw.reason });
   }
-  if (status === "TableNotOpen") {
+  if (
+    status === "TableNotOpen" ||
+    status === "TableMayStart" ||
+    status === "TableBeingCleaned" ||
+    status === "TableAskNewParty"
+  ) {
     const raw = closedRecord(value, [
       "status",
       "brandDisplayName",
@@ -428,7 +466,7 @@ function parsePortResult(
     if (typeof raw.locale !== "string" || !localePattern.test(raw.locale))
       throw new TypeError("invalid table-not-open result");
     return Object.freeze({
-      status: "TableNotOpen",
+      status,
       brandDisplayName: label(raw.brandDisplayName),
       storeDisplayName: label(raw.storeDisplayName),
       publicStoreReference: parseUuidV7(raw.publicStoreReference),
@@ -572,8 +610,9 @@ export class CustomerEntryHandler {
       }
 
       let qrToken: string;
+      let intent: CustomerEntryIntent | undefined;
       try {
-        qrToken = parseBody(request.body);
+        ({ qrToken, intent } = parseBody(request.body));
       } catch {
         sendError(response, "entry_request_invalid");
         return;
@@ -624,6 +663,7 @@ export class CustomerEntryHandler {
               operationReference,
               qrToken,
               requestedAt,
+              ...(intent === undefined ? {} : { intent }),
             }),
           ),
           requestedAt,
@@ -656,6 +696,43 @@ export class CustomerEntryHandler {
             code: "entry_table_not_open",
             messageKey: "customer.entry.table_not_open",
             recovery: { action: "AskStaff", storeSelection: "Hidden" },
+            store: {
+              brandDisplayName: result.brandDisplayName,
+              storeDisplayName: result.storeDisplayName,
+              publicStoreReference: result.publicStoreReference,
+              locale: result.locale,
+            },
+          });
+          return;
+        }
+        // WP-2423 DEC-DINING-GUEST-TABLE-START: a choice for the guest; no visit is started yet.
+        if (
+          result.status === "TableMayStart" ||
+          result.status === "TableBeingCleaned" ||
+          result.status === "TableAskNewParty"
+        ) {
+          const offer = {
+            TableMayStart: [
+              "entry_table_may_start",
+              "customer.entry.table_may_start",
+              "StartTable",
+            ],
+            TableBeingCleaned: [
+              "entry_table_being_cleaned",
+              "customer.entry.table_being_cleaned",
+              "AskStaff",
+            ],
+            TableAskNewParty: [
+              "entry_table_ask_new_party",
+              "customer.entry.table_ask_new_party",
+              "AnswerNewParty",
+            ],
+          }[result.status];
+          response.status(409).json({
+            schemaVersion: 1,
+            code: offer[0],
+            messageKey: offer[1],
+            recovery: { action: offer[2], storeSelection: "Hidden" },
             store: {
               brandDisplayName: result.brandDisplayName,
               storeDisplayName: result.storeDisplayName,

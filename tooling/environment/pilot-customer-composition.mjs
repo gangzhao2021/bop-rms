@@ -119,6 +119,7 @@ export function composeCustomerDependencies(directory, installation, config, hos
           loadCredentials: diningCredentials.createInternalDiningCredentials,
         }),
       createInternalMerchantSession: merchant,
+      providerAccountReference: config.providerAccountReference,
     });
   const cart = (r) => createInternalTestCart(r, config.cart);
   const confirmation = (r) => createInternalOrderConfirmation(r, account);

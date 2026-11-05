@@ -1,4 +1,5 @@
 /** Merchant BFF routes: dining sessions, tables, table QR, order progress, serving and closing. Registered by createMerchantBffRouter (merchant-bff.ts). */
+import { GuestTableStartOffError } from "./merchant-dining-guest-table-start.js";
 import { cookie, denied, exactHeader, NO_STORE, sameOriginMutation } from "./merchant-bff-http.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
@@ -741,6 +742,35 @@ export function installMerchantDiningRoutes(
       .diningPaymentTimingChange({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch(() => denied(response));
+  });
+
+  // WP-2423 DEC-DINING-GUEST-TABLE-START: whoever may pause ordering stops guests starting tables.
+  router.post("/dining/guest-table-start/off", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.guestTableStartOff) {
+      response.status(503).json({ error: "guest_table_start_unavailable" });
+      return;
+    }
+    void options
+      .guestTableStartOff({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        const code = error instanceof GuestTableStartOffError ? error.code : "Denied";
+        if (code === "Changed") response.status(409).json({ error: "guest_table_start_changed" });
+        else if (code === "Unavailable")
+          response.status(503).json({ error: "guest_table_start_unavailable" });
+        else denied(response);
+      });
   });
 
   // WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's bill, and its one payment (card machine or

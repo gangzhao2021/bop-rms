@@ -99,6 +99,7 @@ export class CustomerDiningSessionHandler {
           orderNumber: view.orderNumber,
           checkedAt: view.checkedAt,
           paymentTiming: view.paymentTiming,
+          ...(view.startedByGuest === true ? { startedByGuest: true } : {}),
           rounds: view.rounds.map((round) => ({
             roundNumber: round.roundNumber,
             orderedBy: round.orderedBy,

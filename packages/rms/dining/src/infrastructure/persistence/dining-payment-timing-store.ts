@@ -17,7 +17,9 @@ import type { DiningTableStoreScope, DiningTableTransaction } from "./dining-tab
 export type StoreDiningPaymentTimingResult =
   | { readonly status: "Changed" | "AlreadyChanged"; readonly timing: StoreDiningPaymentTiming }
   /** Someone changed it since the staff member read it: nothing was written. */
-  | { readonly status: "Conflict"; readonly timing: StoreDiningPaymentTiming };
+  | { readonly status: "Conflict"; readonly timing: StoreDiningPaymentTiming }
+  /** Guests start tables here, which needs pay first: turn that off first; nothing was written. */
+  | { readonly status: "GuestTableStartOn"; readonly timing: StoreDiningPaymentTiming };
 
 const fail = (): never => {
   throw new DiningSessionError("DINING_SESSION_DEPENDENCY_UNAVAILABLE");
@@ -117,6 +119,9 @@ export function createPostgresDiningPaymentTimingStore(options: {
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
         `StoreDiningPaymentTiming:${brand}:${store}`,
       ]);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        `DiningServiceSetting:${brand}:${store}`,
+      ]);
       const prior = rows(
         await tx.query(
           "SELECT intent_hash AS intent,version FROM rms_dining.store_dining_payment_timing WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND operation_id=$4",
@@ -134,6 +139,16 @@ export function createPostgresDiningPaymentTimingStore(options: {
       } else if (latest.paymentTiming === command.paymentTiming && latest.version > 0) {
         // Choosing what is already set records nothing new.
         result = Object.freeze({ status: "AlreadyChanged" as const, timing: latest });
+      } else if (
+        command.paymentTiming === "PayLater" &&
+        rows(
+          await tx.query(
+            "SELECT guest_table_start FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+            [brand, store],
+          ),
+        )[0]?.guest_table_start === true
+      ) {
+        result = Object.freeze({ status: "GuestTableStartOn" as const, timing: latest });
       } else {
         changed(
           await tx.query(

@@ -1,32 +1,23 @@
-import { createDiningExceptionTaskComposition } from "./dining-exception-task-composition.js";
 import { markDiningTableNeedsCleaning } from "./dining-table-needs-cleaning.js";
 import { createDiningTableReleaseComposition } from "./dining-table-release-composition.js";
-import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
   DiningClosingError,
-  createDiningClosingService,
-  createPostgresDiningClosingStore,
-  createPostgresDiningClosingFence,
+  listDiningGuestStartedSessions,
+  loadDiningServiceSetting,
   parseDiningReference,
-  parseDiningHash,
   parsePositiveDiningVersion,
 } from "@rms/dining";
-import {
-  createPostgresStaffOrderCancellationReader,
-  listStoreDiningSessionOrders,
-} from "@rms/ordering";
-import { createPostgresDiningTableSettlementStore } from "@rms/payment";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import {
   withMerchantTransactionAuthorization,
   type MerchantTransactionAuthority,
 } from "./merchant-transaction-authorization.js";
 import {
-  createDiningSettledSessionEvidence,
-  createDiningSessionClosingEvidence,
-} from "./dining-settled-session-evidence.js";
+  DiningCheckoutAlreadyPaidError,
+  runDiningSessionClosing,
+} from "./dining-session-closing-run.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 const fail = (): never => {
@@ -36,26 +27,20 @@ const fail = (): never => {
 const denied = (): never => {
   throw new DiningClosingError("DINING_CLOSING_PERMISSION_DENIED");
 };
-const changed = (): never => {
-  throw new DiningClosingError("DINING_CLOSING_VERSION_CONFLICT");
-};
-/**
- * DEC-DINE-IN-PAY-LATER (rule 3): checkout is cancelled (back to ordering) only while nothing has
- * been paid or written off for the table — a paid table pays once, and its payment never changes.
- */
-export class DiningCheckoutAlreadyPaidError extends Error {
-  /** S4: "GUEST_PAYING" — a guest is paying the whole table on their phone right now. */
-  constructor(
-    readonly code:
-      | "DINING_CHECKOUT_ALREADY_PAID"
-      | "DINING_CHECKOUT_GUEST_PAYING" = "DINING_CHECKOUT_ALREADY_PAID",
-  ) {
-    super(code);
-    this.name = "DiningCheckoutAlreadyPaidError";
-  }
-}
+export { DiningCheckoutAlreadyPaidError };
 /** The Task actions an unpaid-order exception Task can need while a table closes. */
 const taskActions = ["task.create", "task.assign"] as const;
+
+/** A table a guest started, at a Store whose switch is on now. */
+async function guestStartedAtSwitchOnStore(
+  tx: ConsumerTransaction,
+  scope: { tenantReference: string; brandReference: string; storeReference: string },
+  diningSessionReference: string,
+): Promise<boolean> {
+  if (!(await listDiningGuestStartedSessions(tx, scope, [diningSessionReference])).size)
+    return false;
+  return (await loadDiningServiceSetting(tx, scope)).guestTableStart;
+}
 
 export function createMerchantDiningClosingCommand(options: {
   persistence: PersistentMerchantBffOptions;
@@ -79,7 +64,7 @@ export function createMerchantDiningClosingCommand(options: {
     if (raw.action !== "Begin" && raw.action !== "Cancel" && raw.action !== "Finalize")
       return fail();
     const command = {
-      action: raw.action,
+      action: raw.action as "Begin" | "Cancel" | "Finalize",
       diningSessionReference: parseDiningReference(raw.diningSessionReference),
       operationReference: parseDiningReference(raw.operationReference),
       expectedSessionVersion: parsePositiveDiningVersion(raw.expectedSessionVersion),
@@ -162,13 +147,6 @@ export function createMerchantDiningClosingCommand(options: {
           return { rows: rows as readonly Row[], rowCount: rowCount as number | null };
         },
       };
-      const hashes = {
-        hashIntent: (value: string) =>
-          parseDiningHash(createHash("sha256").update(value).digest("hex")),
-        equals: (a: string, b: string) => a === b,
-      };
-      const runner = { run: <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(tx) };
-      const store = createPostgresDiningClosingStore(runner, scope, hashes);
       const observedAt = String(current.context.resolvedAt);
       const release = createDiningTableReleaseComposition({
         scope,
@@ -178,222 +156,77 @@ export function createMerchantDiningClosingCommand(options: {
         retentionPolicyCode: options.retentionPolicyCode,
         retentionPolicyVersion: options.retentionPolicyVersion,
       });
-      const releaseClosedTable = async (version: number) => {
-        await release(tx, {
-          diningSessionReference: command.diningSessionReference,
-          operationReference: command.operationReference,
-          expectedSessionVersion: version,
-          observedAt,
-        });
-        // Handoff §25.3: the freed table waits for cleaning before it is seated again.
-        await markDiningTableNeedsCleaning(tx, {
-          scope,
-          actorReference: String(current.actorReference),
-          tableReference: String(session.tableReference),
-          operationReference: options.newReference(),
-          correlationReference: command.operationReference,
-          observedAt,
-          retentionPolicyCode: options.retentionPolicyCode,
-          retentionPolicyVersion: options.retentionPolicyVersion,
-          newReference: options.newReference,
-          authorize: guard,
-        });
-      };
-      const fence = createPostgresDiningClosingFence({ scope, authorize: guard });
-      const session = await fence(tx, {
-        diningSessionReference: command.diningSessionReference,
+      return runDiningSessionClosing({
+        transaction: tx,
+        scope,
+        command,
         observedAt,
-      });
-      const prior = await store.readReceipt(command.operationReference, guard);
-      if (prior) {
-        if (
-          prior.record.action !== command.action ||
-          prior.record.session.diningSessionReference !== command.diningSessionReference ||
-          prior.expectedVersion !== command.expectedSessionVersion ||
-          prior.occurredAt > observedAt ||
-          prior.record.session.version > session.version
-        )
-          return fail();
-        if (command.action === "Finalize") await releaseClosedTable(prior.record.session.version);
-        return Object.freeze({
-          status: "AlreadyApplied" as const,
-          phase: prior.record.session.phase,
-          sessionVersion: prior.record.session.version,
-        });
-      }
-      if (session.version !== command.expectedSessionVersion) return changed();
-      // Cancel is reversible only once proven here: nothing paid or written off for the table.
-      let reversible = false;
-      if (command.action === "Cancel") {
-        // Back to ordering only while the table has paid nothing and was not written off.
-        const order = (
-          await listStoreDiningSessionOrders(
-            tx,
-            { brandReference: scope.brandReference, storeReference: scope.storeReference },
-            [String(command.diningSessionReference)],
-          )
-        ).get(String(command.diningSessionReference));
-        if (order !== undefined) {
-          const payments = createPostgresDiningTableSettlementStore({
-            scope: { ...scope, tenantReference: String(scope.tenantReference) },
-            authorize: async (_tx, value) => value.orderReference === order && (await guard()),
+        providerAccountReference: options.providerAccountReference,
+        environment: options.environment,
+        guard,
+        newReference: options.newReference,
+        release: async (session, version) => {
+          await release(tx, {
+            diningSessionReference: command.diningSessionReference,
+            operationReference: command.operationReference,
+            expectedSessionVersion: version,
+            observedAt,
           });
-          if (
-            (await payments.listByOrders(tx, [order])).length > 0 ||
-            (await payments.listWriteOffsByOrders(tx, [order])).length > 0
-          )
-            throw new DiningCheckoutAlreadyPaidError();
-          if (
-            (await payments.listOnlinePaymentsByOrders(tx, [order])).some(
-              (attempt) => attempt.outcome === null,
-            )
-          )
-            throw new DiningCheckoutAlreadyPaidError("DINING_CHECKOUT_GUEST_PAYING");
-        }
-        reversible = true;
-      }
-      const authorizeAndFence = async () => {
-        const again = await fence(tx, {
-          diningSessionReference: command.diningSessionReference,
-          observedAt,
-        });
-        return (
-          again.version === session.version &&
-          again.tableAssignmentVersion === session.tableAssignmentVersion
-        );
-      };
-      const evidence = (
-        options.exceptionTaskPolicy === undefined
-          ? createDiningSettledSessionEvidence
-          : createDiningSessionClosingEvidence
-      )({
-        ...scope,
-        diningScope: scope,
-        paymentScope: {
-          ...scope,
-          providerAccountReference: options.providerAccountReference,
-          environment: options.environment,
+          // WP-2423 DEC-DINING-GUEST-TABLE-START: at a Store where guests start tables, closing one
+          // a guest started ends as the System's close does: no step nobody would take at 8 pm.
+          if (await guestStartedAtSwitchOnStore(tx, scope, command.diningSessionReference)) return;
+          // Handoff §25.3: the freed table waits for cleaning before it is seated again.
+          await markDiningTableNeedsCleaning(tx, {
+            scope,
+            actorReference: String(current.actorReference),
+            tableReference: String(session.tableReference),
+            operationReference: options.newReference(),
+            correlationReference: command.operationReference,
+            observedAt,
+            retentionPolicyCode: options.retentionPolicyCode,
+            retentionPolicyVersion: options.retentionPolicyVersion,
+            newReference: options.newReference,
+            authorize: guard,
+          });
         },
-        authorize: guard,
-        authorizeKitchen: guard,
-        authorizeDining: guard,
-        authorizeAndFence,
-        // WP-2423 item 2: an Order whose every round was cancelled is closed with the table too.
-        includeCancelled: true,
-      });
-      let resolvedEvidence: Awaited<ReturnType<typeof evidence.load>> | null = null;
-      // DEC-TABLE-CLOSE-GUESTS-LEFT: a table whose rounds were closed out because the guests left
-      // is recorded as closed for that reason, not as guests who finished. Ordering owner reads.
-      let closingReason: Promise<"GUEST_LEFT" | "CUSTOMER_FINISHED"> | null = null;
-      const reasonFor = () =>
-        (closingReason ??= (async () => {
-          const owner = {
-            brandReference: scope.brandReference,
-            storeReference: scope.storeReference,
-          };
-          const order = (
-            await listStoreDiningSessionOrders(tx, owner, [String(command.diningSessionReference)])
-          ).get(String(command.diningSessionReference));
-          if (order === undefined) return "CUSTOMER_FINISHED";
-          const cancellations = await createPostgresStaffOrderCancellationReader(
-            owner,
-          ).listByOrders(tx, [order]);
-          return cancellations.some((record) => record.reasonCode === "GUEST_LEFT")
-            ? "GUEST_LEFT"
-            : "CUSTOMER_FINISHED";
-        })());
-      const service = createDiningClosingService({
-        store,
-        hashes,
-        authorization: {
-          authorize: async (request) => {
-            // The permission decided for this run at its start (re-checked before the reply).
-            if (
-              !(await guard()) ||
-              request.session.diningSessionReference !== command.diningSessionReference
-            )
-              return null;
-            return {
-              kind: "Staff",
-              tenantContext: current.context,
-              permission: closePermission,
-              audit: {
-                auditId: options.newReference(),
-                brandId: scope.brandReference,
-                storeId: scope.storeReference,
-                actor: { type: "User", reference: current.actorReference },
-                actionCode: `DINING_SESSION_CLOSING_${request.operation.toUpperCase()}`,
-                targetType: "DiningSession",
-                targetId: command.diningSessionReference,
-                reasonCode: await reasonFor(),
-                correlationId: command.operationReference,
-                occurredAt: request.observedAt,
-                sourceChannel: "MERCHANT_WEB",
-                dataClassification: "Restricted",
-                retentionPolicyCode: options.retentionPolicyCode,
-                retentionPolicyVersion: options.retentionPolicyVersion,
-              },
-            };
+        // The permission decided for this run at its start (re-checked before the reply).
+        authority: async (request, reason) => ({
+          kind: "Staff",
+          tenantContext: current.context,
+          permission: closePermission,
+          audit: {
+            auditId: options.newReference(),
+            brandId: scope.brandReference,
+            storeId: scope.storeReference,
+            actor: { type: "User", reference: current.actorReference },
+            actionCode: `DINING_SESSION_CLOSING_${request.operation.toUpperCase()}`,
+            targetType: "DiningSession",
+            targetId: command.diningSessionReference,
+            reasonCode: reason,
+            correlationId: command.operationReference,
+            occurredAt: request.observedAt,
+            sourceChannel: "MERCHANT_WEB",
+            dataClassification: "Restricted",
+            retentionPolicyCode: options.retentionPolicyCode,
+            retentionPolicyVersion: options.retentionPolicyVersion,
           },
-        },
-        closureEvidence: {
-          resolve: async (query) => {
-            resolvedEvidence = await evidence.load(
-              tx,
-              {
-                diningSessionReference: query.diningSessionReference,
-                observedAt: query.observedAt,
+        }),
+        ...(options.exceptionTaskPolicy === undefined
+          ? {}
+          : {
+              tasks: {
+                policy: options.exceptionTaskPolicy,
+                actorReference: String(current.actorReference),
+                // Decided for this run at its start; re-checked in full before the reply.
+                authorizeTask: async (request: { action: unknown }) => {
+                  const action = String(request.action);
+                  const decision = tasks.get(action);
+                  if (!decision || !(await guard())) return fail();
+                  usedTasks.add(action);
+                  return decision;
+                },
               },
-              session.version,
-            );
-            return resolvedEvidence;
-          },
-        },
-        reversibility: {
-          evaluate: async () => (reversible && (await guard()) ? "Reversible" : "Unavailable"),
-        },
-        tasks: {
-          ensure: async (taskInput) => {
-            if (!resolvedEvidence || options.exceptionTaskPolicy === undefined) return fail();
-            return createDiningExceptionTaskComposition({
-              transaction: tx,
-              scope,
-              actorReference: String(current.actorReference),
-              correlationReference: command.operationReference,
-              observedAt,
-              evidence: resolvedEvidence,
-              policy: options.exceptionTaskPolicy,
-              hashes,
-              newReference: options.newReference,
-              authorizeAndFence: async () => (await guard()) && (await authorizeAndFence()),
-              // Decided for this run at its start; re-checked in full before the reply.
-              authorizeTask: async (request) => {
-                const action = String(request.action);
-                const decision = tasks.get(action);
-                if (!decision || !(await guard())) return fail();
-                usedTasks.add(action);
-                return decision;
-              },
-            }).ensure(taskInput);
-          },
-        },
-      });
-      const request = {
-        diningSessionReference: command.diningSessionReference,
-        operationReference: command.operationReference,
-        expectedSessionVersion: command.expectedSessionVersion,
-        requestedAt: observedAt,
-      };
-      const result = await (command.action === "Begin"
-        ? service.begin(request)
-        : command.action === "Cancel"
-          ? service.cancel(request)
-          : service.finalize(request));
-      if (command.action === "Finalize") await releaseClosedTable(result.session.version);
-      return Object.freeze({
-        status: result.status,
-        phase: result.session.phase,
-        sessionVersion: result.session.version,
+            }),
       });
     }
   };

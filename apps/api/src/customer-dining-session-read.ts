@@ -13,6 +13,7 @@ import {
 import { createHash } from "node:crypto";
 import {
   createPostgresDiningPaymentTimingStore,
+  listDiningGuestStartedSessions,
   listDiningSessionTableLabels,
   listDiningSessionMergedInto,
   loadDiningParticipantMove,
@@ -89,6 +90,8 @@ export interface CustomerDiningSessionFacts {
   readonly checkedAt: string;
   /** DEC-DINE-IN-PAY-LATER: how this table pays, as it was opened (absent: pay first). */
   readonly paymentTiming?: "PayFirst" | "PayLater";
+  /** DEC-DINING-GUEST-TABLE-START: a guest started this table; nobody brings the dishes over. */
+  readonly startedByGuest?: true;
   readonly order: null | {
     readonly orderNumber: string;
     readonly batches: readonly {
@@ -229,6 +232,8 @@ export interface CustomerDiningSessionView {
   readonly checkedAt: string;
   /** DEC-DINE-IN-PAY-LATER: PayLater — rounds go to the kitchen when sent; the table pays at the end. */
   readonly paymentTiming: "PayFirst" | "PayLater";
+  /** DEC-DINING-GUEST-TABLE-START: sent only for a table a guest started. */
+  readonly startedByGuest?: true;
   readonly rounds: readonly {
     readonly roundNumber: number;
     /** WP-2423 Q7 slice 2: "Staff" for a round staff entered for the table. */
@@ -340,6 +345,7 @@ export function composeCustomerDiningSession(
       orderNumber: null,
       checkedAt: facts.checkedAt,
       paymentTiming: facts.paymentTiming ?? "PayFirst",
+      ...(facts.startedByGuest === true ? { startedByGuest: true as const } : {}),
       rounds: Object.freeze([]),
       summary: null,
     });
@@ -541,6 +547,7 @@ export function composeCustomerDiningSession(
     orderNumber: order.orderNumber,
     checkedAt: facts.checkedAt,
     paymentTiming: facts.paymentTiming ?? "PayFirst",
+    ...(facts.startedByGuest === true ? { startedByGuest: true as const } : {}),
     rounds: Object.freeze(rounds),
     summary: Object.freeze({
       // DEC-DINE-IN-PAY-LATER: what the table's one payment added to its dishes, so the guest's
@@ -742,7 +749,15 @@ function postgresDependencies(
                 equals: (a, b) => a === b,
               }).loadSessionTimings(transaction, [diningSessionReference])
             ).get(diningSessionReference) ?? "PayFirst");
-      const timing = paymentTiming === undefined ? {} : { paymentTiming };
+      const guestStarted =
+        options.diningScope !== undefined &&
+        (await listDiningGuestStartedSessions(transaction, options.diningScope, [
+          diningSessionReference,
+        ]).then((found) => found.has(diningSessionReference)));
+      const timing = {
+        ...(paymentTiming === undefined ? {} : { paymentTiming }),
+        ...(guestStarted ? { startedByGuest: true as const } : {}),
+      };
       const orderReference = await createPostgresDiningSessionOrderLookup({
         ...scope,
         authorize: async (_tx, query) =>

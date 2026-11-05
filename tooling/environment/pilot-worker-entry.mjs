@@ -53,6 +53,7 @@ export async function startPilotBusinessWorker({
           directory,
           "business-table-online-refund",
         ),
+        guestTableClose: createPilotWorkloadHealthObserver(directory, "business-guest-table-close"),
         contactRetention: createPilotWorkloadHealthObserver(
           directory,
           "business-contact-retention",

@@ -193,12 +193,16 @@ export function createPostgresDiningQrJoinStore(
       const operation = parseDiningReference(input.operationReference);
       const guestSession = parseDiningReference(input.guestSessionReference);
       const table = parseDiningReference(input.tableReference);
-      const observedAt = parseDiningInstant(input.observedAt);
+      const requestedAt = parseDiningInstant(input.observedAt);
       return guard(() =>
         runner.run(async (tx) => {
           await authorized(tx);
           await context(tx);
           await lockTable(tx, table);
+          // Under the table's lock, so a code another phone was issued a moment ago is never later
+          // than this one (phones of one party scan together).
+          const now = parseDiningInstant(options.now());
+          const observedAt = now > requestedAt ? now : requestedAt;
           const current = rows(
             await tx.query(
               "SELECT session_id, phase FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 AND phase IN ('Active','Closing') ORDER BY (session_snapshot->>'startedAt') DESC LIMIT 1",
@@ -673,7 +677,18 @@ export interface DiningServiceSetting {
   readonly chaseDish: boolean;
   /** Owner decision 2 (2000_122): staff record how many guests when opening a table. */
   readonly askPartySize: boolean;
+  /** DEC-DINING-GUEST-TABLE-START (2000_173): guests start a free table by scanning, pay first. */
+  readonly guestTableStart: boolean;
   readonly changedAt: string | null;
+}
+
+/** Guests can't start tables at a Store where they pay at the end; nothing was recorded. */
+export class DiningGuestTableStartNeedsPayFirstError extends Error {
+  readonly code = "DINING_GUEST_TABLE_START_NEEDS_PAY_FIRST";
+  constructor() {
+    super("guest table start needs pay first");
+    this.name = "DiningGuestTableStartNeedsPayFirstError";
+  }
 }
 
 /** The Store's current switches, in the caller's transaction. */
@@ -689,7 +704,7 @@ export async function loadDiningServiceSetting(
   ]);
   const found = rows(
     await tx.query(
-      "SELECT version,staff_call,chase_dish,ask_party_size,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
+      "SELECT version,staff_call,chase_dish,ask_party_size,guest_table_start,to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS occurred_at FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 ORDER BY version DESC LIMIT 1",
       [brand, store],
     ),
   )[0];
@@ -699,6 +714,7 @@ export async function loadDiningServiceSetting(
       staffCall: false,
       chaseDish: false,
       askPartySize: false,
+      guestTableStart: false,
       changedAt: null,
     });
   const version = Number(found.version);
@@ -707,7 +723,8 @@ export async function loadDiningServiceSetting(
     version < 1 ||
     typeof found.staff_call !== "boolean" ||
     typeof found.chase_dish !== "boolean" ||
-    typeof found.ask_party_size !== "boolean"
+    typeof found.ask_party_size !== "boolean" ||
+    typeof found.guest_table_start !== "boolean"
   )
     return fail();
   return Object.freeze({
@@ -715,6 +732,7 @@ export async function loadDiningServiceSetting(
     staffCall: found.staff_call,
     chaseDish: found.chase_dish,
     askPartySize: found.ask_party_size,
+    guestTableStart: found.guest_table_start,
     changedAt: parseDiningInstant(found.occurred_at),
   });
 }
@@ -733,6 +751,8 @@ export async function changeDiningServiceSetting(
     readonly chaseDish: boolean;
     /** Absent: kept as it is. */
     readonly askPartySize?: boolean;
+    /** Absent: kept as it is. */
+    readonly guestTableStart?: boolean;
     readonly actorReference: string;
     readonly observedAt: string;
   },
@@ -745,12 +765,16 @@ export async function changeDiningServiceSetting(
     brand,
     store,
   ]);
+  // The database triggers take the same locks in this order (pay first only, both directions).
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    `StoreDiningPaymentTiming:${brand}:${store}`,
+  ]);
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
     `DiningServiceSetting:${brand}:${store}`,
   ]);
   const prior = rows(
     await tx.query(
-      "SELECT staff_call,chase_dish,ask_party_size FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
+      "SELECT staff_call,chase_dish,ask_party_size,guest_table_start FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",
       [brand, store, operation],
     ),
   )[0];
@@ -758,7 +782,8 @@ export async function changeDiningServiceSetting(
     if (
       prior.staff_call !== input.staffCall ||
       prior.chase_dish !== input.chaseDish ||
-      (input.askPartySize !== undefined && prior.ask_party_size !== input.askPartySize)
+      (input.askPartySize !== undefined && prior.ask_party_size !== input.askPartySize) ||
+      (input.guestTableStart !== undefined && prior.guest_table_start !== input.guestTableStart)
     )
       throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
     return loadDiningServiceSetting(tx, scopeInput);
@@ -767,15 +792,26 @@ export async function changeDiningServiceSetting(
   if (current.version !== input.expectedVersion)
     throw new DiningSessionError("DINING_SESSION_IDEMPOTENCY_CONFLICT");
   const askPartySize = input.askPartySize ?? current.askPartySize;
+  const guestTableStart = input.guestTableStart ?? current.guestTableStart;
   if (
     current.staffCall === input.staffCall &&
     current.chaseDish === input.chaseDish &&
-    current.askPartySize === askPartySize
+    current.askPartySize === askPartySize &&
+    current.guestTableStart === guestTableStart
   )
     return current;
+  if (guestTableStart) {
+    const timing = rows(
+      await tx.query(
+        "SELECT payment_timing FROM rms_dining.store_dining_payment_timing WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 ORDER BY version DESC LIMIT 1",
+        [tenant, brand, store],
+      ),
+    )[0];
+    if (timing?.payment_timing === "PayLater") throw new DiningGuestTableStartNeedsPayFirstError();
+  }
   changed(
     await tx.query(
-      "INSERT INTO rms_dining.dining_service_setting (tenant_id,brand_id,store_id,version,operation_id,staff_call,chase_dish,actor_id,occurred_at,ask_party_size) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+      "INSERT INTO rms_dining.dining_service_setting (tenant_id,brand_id,store_id,version,operation_id,staff_call,chase_dish,actor_id,occurred_at,ask_party_size,guest_table_start) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
       [
         tenant,
         brand,
@@ -787,6 +823,7 @@ export async function changeDiningServiceSetting(
         parseDiningReference(input.actorReference),
         parseDiningInstant(input.observedAt),
         askPartySize,
+        guestTableStart,
       ],
     ),
   );

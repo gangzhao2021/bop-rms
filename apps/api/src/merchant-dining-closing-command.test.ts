@@ -25,6 +25,8 @@ const mock = vi.hoisted(() => ({
   ports: vi.fn(),
   release: vi.fn(),
   sessionOrders: vi.fn(),
+  guestStarted: vi.fn(),
+  guestSetting: vi.fn(),
   cancellations: vi.fn(),
   taskComposition: vi.fn(),
   evidence: vi.fn(),
@@ -43,12 +45,16 @@ vi.mock("@rms/dining", async (original) => ({
     mock.ports(ports);
     return { begin: mock.begin, finalize: mock.finalize };
   },
+  listDiningGuestStartedSessions: (...input: unknown[]) => mock.guestStarted(...input),
+  loadDiningServiceSetting: (...input: unknown[]) => mock.guestSetting(...input),
 }));
 import { createMerchantDiningClosingCommand } from "./merchant-dining-closing-command.js";
 const id = (n: number) => "0190fad7-0000-7000-8000-" + String(n).padStart(12, "0"),
   at = "2026-09-20T00:00:00.000Z";
 beforeEach(() => vi.resetAllMocks());
 function setup() {
+  mock.guestStarted.mockResolvedValue(new Map());
+  mock.guestSetting.mockResolvedValue({ guestTableStart: false });
   const allowed = vi.fn(async () => true),
     // The run's single current-fact read at the start (close and Task permissions together).
     authorizeActions = vi.fn(
@@ -320,6 +326,21 @@ it("releases table only after Finalize with the resulting session version", asyn
   expect(mock.release.mock.invocationCallOrder[0]).toBeLessThan(
     mock.needsCleaning.mock.invocationCallOrder[0] ?? 0,
   );
+});
+it("DEC-DINING-GUEST-TABLE-START: a guest-started table closed by hand waits for no cleaning step while the switch is on", async () => {
+  const closes = async (on: boolean, started: boolean) => {
+    const f = setup();
+    f.input.command.action = "Finalize";
+    mock.guestStarted.mockResolvedValue(new Map(started ? [[id(5), { startedAt: at }]] : []));
+    mock.guestSetting.mockResolvedValue({ guestTableStart: on });
+    mock.needsCleaning.mockClear();
+    await f.handler(f.input);
+    return mock.needsCleaning.mock.calls.length;
+  };
+  expect(await closes(true, true)).toBe(0);
+  // Staff-opened, or the switch since turned off: exactly as it always was.
+  expect(await closes(true, false)).toBe(1);
+  expect(await closes(false, true)).toBe(1);
 });
 it("fails the outer command if table release fails", async () => {
   const f = setup();
