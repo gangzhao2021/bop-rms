@@ -255,18 +255,31 @@ export async function createInternalMerchantSession(
     now: clock,
     currentActor,
     onSessionCreated: async (tx, record) => {
-      const sessionScope = kitchenStores.get(record.session.sessionReference) ?? scope;
+      const worksAt = (store) =>
+        isActiveStoreMember(tx, {
+          brandReference: store.brandReference,
+          storeReference: store.storeReference,
+          actorReference: record.session.actor.actorReference,
+          at: record.session.createdAt,
+        });
+      const chosen = kitchenStores.get(record.session.sessionReference);
       if (
-        sessionScope !== scope &&
-        (record.session.policy.code !== "NamedKdsOperator" ||
-          !(await isActiveStoreMember(tx, {
-            brandReference: sessionScope.brandReference,
-            storeReference: sessionScope.storeReference,
-            actorReference: record.session.actor.actorReference,
-            at: record.session.createdAt,
-          })))
+        chosen !== undefined &&
+        chosen !== scope &&
+        (record.session.policy.code !== "NamedKdsOperator" || !(await worksAt(chosen)))
       )
         return denied();
+      // DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: the first Store they work at, their own merchant's.
+      let sessionScope = chosen ?? scope;
+      if (chosen === undefined && !(await worksAt(scope))) {
+        sessionScope = null;
+        for (const served of servedStoresOf(resources))
+          if (await worksAt(served)) {
+            sessionScope = served;
+            break;
+          }
+        if (sessionScope === null) return denied();
+      }
       await selection.write(tx, record.session, sessionScope, clock());
       const finalize = finalizers.get(record.session.sessionReference);
       if (finalize !== undefined) await finalize(tx, record.session);

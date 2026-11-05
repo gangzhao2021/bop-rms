@@ -387,3 +387,16 @@ it("v15 2026-11-01: with one Store the page offers one kitchen display start, as
   const session = await setup().create();
   expect(await session.kitchenDisplayChoices()).toEqual([]);
 });
+
+it("DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: a person of another merchant signs in to their own Store", async () => {
+  const f = setup(),
+    other = { tenantReference: id(91), brandReference: id(92), storeReference: id(93) };
+  f.resources.servedStores = [other];
+  const session = await f.create();
+  seam.members = new Set([id(4) + " " + other.storeReference]);
+  await session.issue("author");
+  expect(seam.selections.at(-1).scope).toEqual(other);
+  // Someone who works nowhere here gets no session.
+  seam.members = new Set();
+  await expect(session.issue("author")).rejects.toThrow();
+});
