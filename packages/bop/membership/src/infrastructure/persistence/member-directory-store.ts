@@ -460,6 +460,34 @@ export async function assignMemberToStore(
 }
 
 /**
+ * WP-2423 DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: a new merchant's first person: their Membership
+ * (Active, the merchant's opening as its relationship evidence) and their place at the first Store.
+ * In the caller's transaction, under the new Store's scope. Their roles follow by their own command.
+ */
+export async function addFirstMerchantOwner(
+  tx: MemberDirectoryTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly membershipReference: string;
+    readonly storeAssignmentReference: string;
+    readonly openingReference: string;
+    readonly at: string;
+  },
+): Promise<void> {
+  const membership = String(parseMembershipReference(input.membershipReference));
+  await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  await tx.query(
+    `INSERT INTO bop_membership.membership(membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,
+       effective_from,effective_until,version,created_at,updated_at)
+     VALUES($1,$2,$3,$4,'Active',$5,NULL,1,$5,$5)`,
+    [membership, input.actorReference, input.brandReference, input.openingReference, input.at],
+  );
+  await assignMemberToStore(tx, input);
+}
+
+/**
  * WP-2423 DEC-COGNITO-STORE-STAFF: the invited person signed in for the first time; their
  * Membership becomes Active with the accepted invitation as its workforce relationship evidence.
  * A Membership that is already Active (a retried sign-in) is left as it is.

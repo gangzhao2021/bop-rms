@@ -171,6 +171,15 @@ const databaseAccessManifestInput = {
       source: "packages/bop/tenant/src/infrastructure/persistence/store-opening-store.ts",
     },
     {
+      id: "merchant-opening.write.brand",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "brand" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: null,
+      source: "packages/bop/tenant/src/infrastructure/persistence/store-opening-store.ts",
+    },
+    {
       id: "store-opening.write.store",
       operation: "write",
       mechanism: "repository",

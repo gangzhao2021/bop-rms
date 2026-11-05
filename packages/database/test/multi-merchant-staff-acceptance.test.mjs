@@ -12,6 +12,11 @@ import {
   createServedStoreTarget,
   servedStoresOf,
 } from "../../../tooling/environment/pilot-served-stores.mjs";
+import {
+  MerchantOpeningError,
+  merchantOpeningReferences,
+  recordMerchantOpening,
+} from "../../../apps/api/dist/merchant-opening.js";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 
 const id = (n) => "018fb000-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -171,6 +176,152 @@ it("a merchant's staff sign in to their own merchant and never reach another's S
     } finally {
       session?.poolCheck.stop();
       await fake.close?.();
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: a new merchant from nothing, as the restricted API role:
+ * Brand, first Store, Owner's place, audit and an opening that names no earlier Store.
+ */
+it("opens a merchant from nothing; a retry finds it, another merchant's code is refused", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_merchant_open" }, async (context) => {
+    const admin = new pg.Client(context.clientConfig);
+    await admin.connect();
+    const api = "wp2423_mo_" + context.runId,
+      worker = "wp2423_mo_w_" + context.runId;
+    try {
+      for (const name of [api, worker])
+        await admin.query(
+          "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+        );
+      const root = new URL("../../../docs/spec/", import.meta.url);
+      const matrices = await Promise.all(
+        ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+          JSON.parse(await readFile(new URL(file, root), "utf8")),
+        ),
+      );
+      await admin.query(renderPilotAclSql(matrices, { api, worker }));
+      const owner = id(31),
+        operator = id(32),
+        operation = id(33),
+        at = new Date().toISOString();
+      const command = {
+        operationReference: operation,
+        ownerActorReference: owner,
+        brandCode: "NEW_MERCHANT",
+        brandName: "New Merchant – not production",
+        storeCode: "MAIN",
+        storeName: "New Merchant Main – not production",
+        timeZone: "America/Vancouver",
+        locale: "en-CA",
+      };
+      const open = async (input) => {
+        await admin.query("BEGIN");
+        try {
+          await admin.query("SET LOCAL ROLE " + api);
+          const result = await recordMerchantOpening(admin, {
+            command: input,
+            openedByActorReference: operator,
+            sourceChannel: "DEPLOYMENT",
+            openedAt: at,
+          });
+          await admin.query("COMMIT");
+          return result;
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+      };
+      const refs = merchantOpeningReferences(operation);
+      const first = await open(command);
+      assert.equal(first.status, "Opened");
+      assert.equal(first.storeReference, refs.storeReference);
+      // A retry finds its own result and writes nothing.
+      assert.equal((await open(command)).status, "AlreadyOpened");
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int n FROM bop_tenant.brand WHERE code='NEW_MERCHANT'",
+          )
+        ).rows[0].n,
+        1,
+      );
+      await assert.rejects(open({ ...command, brandName: "Something else" }), (error) => {
+        assert.ok(error instanceof MerchantOpeningError);
+        assert.equal(error.code, "Conflict");
+        return true;
+      });
+      // Another merchant's code answers CodeTaken, and nothing of the attempt remains.
+      const other = id(34);
+      await assert.rejects(open({ ...command, operationReference: other }), (error) => {
+        assert.ok(error instanceof MerchantOpeningError);
+        assert.equal(error.code, "CodeTaken");
+        return true;
+      });
+      const stray = merchantOpeningReferences(other);
+      assert.equal(
+        (
+          await admin.query("SELECT count(*)::int n FROM bop_tenant.store WHERE store_id=$1", [
+            stray.storeReference,
+          ])
+        ).rows[0].n,
+        0,
+      );
+      const one = async (sql, values) => (await admin.query(sql, values)).rows[0];
+      const brand = await one(
+        "SELECT lifecycle,default_locale FROM bop_tenant.brand WHERE brand_id=$1",
+        [refs.brandReference],
+      );
+      assert.deepEqual(brand, { lifecycle: "Active", default_locale: "en-CA" });
+      const store = await one(
+        "SELECT lifecycle,time_zone FROM bop_tenant.store WHERE store_id=$1",
+        [refs.storeReference],
+      );
+      assert.deepEqual(store, { lifecycle: "Active", time_zone: "America/Vancouver" });
+      const opening = await one(
+        "SELECT opened_from_store_id,actor_id::text actor FROM bop_tenant.store_opening WHERE store_id=$1",
+        [refs.storeReference],
+      );
+      assert.deepEqual(opening, { opened_from_store_id: null, actor: owner });
+      const member = await one(
+        "SELECT m.lifecycle,s.store_id::text store FROM bop_membership.membership m JOIN bop_membership.store_assignment s ON s.membership_id=m.membership_id WHERE m.actor_id=$1",
+        [owner],
+      );
+      assert.deepEqual(member, { lifecycle: "Active", store: refs.storeReference });
+      const audits = (
+        await admin.query(
+          "SELECT action_code,actor_reference::text actor FROM platform_audit.audit_record WHERE correlation_id=$1 ORDER BY action_code",
+          [operation],
+        )
+      ).rows;
+      assert.deepEqual(audits, [
+        { action_code: "BRAND_CREATED", actor: operator },
+        { action_code: "STORE_OPENED", actor: operator },
+      ]);
+      // The owner is a member of the new merchant, seen through its scope and no other.
+      await admin.query("BEGIN");
+      await admin.query("SET LOCAL ROLE " + api);
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [id(40), id(41)],
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*)::int n FROM bop_tenant.store")).rows[0].n,
+        0,
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*)::int n FROM bop_tenant.store_opening")).rows[0].n,
+        0,
+      );
+      assert.equal(
+        (await admin.query("SELECT count(*)::int n FROM bop_membership.membership")).rows[0].n,
+        0,
+      );
+      await admin.query("ROLLBACK");
+    } finally {
+      await admin.query("ROLLBACK").catch(() => undefined);
       await admin.end();
     }
   });

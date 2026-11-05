@@ -183,3 +183,135 @@ export async function openStore(
     return done(Object.freeze({ status: "Opened" as const, storeReference: store }));
   }
 }
+
+/**
+ * WP-2423 DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: a new merchant: its Brand (Active) and first Store
+ * (organisation Active; customers order only once its configuration and go-live check are published)
+ * in the caller's transaction, whose authority the caller resolved, then the caller's `withinBrand`
+ * and `withinStore` work and the opening record, which names no earlier Store. The new Store's
+ * identity is the request's opening reference, so a retry finds its own result. The Brand's code is
+ * unique across merchants: another merchant's answers CodeTaken and tells nothing else.
+ * Leaves the new Store's scope set.
+ */
+export interface MerchantOpeningRequest {
+  readonly openingReference: string;
+  readonly brandReference: string;
+  readonly actorReference: string;
+  readonly membershipReference: string;
+  readonly storeAssignmentReference: string;
+  readonly auditReference: string;
+  readonly brandCode: string;
+  readonly brandName: string;
+  readonly code: string;
+  readonly displayName: string;
+  readonly timeZone: string;
+  readonly locale: string;
+  readonly openedAt: string;
+}
+export async function openMerchant(
+  tx: StoreOpeningTransaction,
+  input: MerchantOpeningRequest,
+  work: {
+    readonly withinBrand: (tx: StoreOpeningTransaction) => Promise<void>;
+    readonly withinStore: (tx: StoreOpeningTransaction) => Promise<void>;
+  },
+): Promise<{ readonly status: "Opened" | "AlreadyOpened"; readonly storeReference: string }> {
+  const brandName =
+    typeof input.brandName === "string" ? input.brandName.replace(/\s+/gu, " ").trim() : "";
+  const brandCode = typeof input.brandCode === "string" ? input.brandCode.trim().toUpperCase() : "";
+  if (
+    brandName.length < 1 ||
+    brandName.length > 160 ||
+    /[\p{Cc}\p{Cf}]/u.test(brandName) ||
+    !/^[A-Z][A-Z0-9_-]{0,62}$/u.test(brandCode)
+  )
+    return invalid();
+  // The Store's fields are checked as any opening's; there is no earlier Store to name.
+  const request = parseStoreOpeningRequest({
+    ...input,
+    openedFromStoreReference: input.brandReference,
+  });
+  const store = request.openingReference,
+    brand = request.brandReference;
+  const digest =
+    "sha256:" +
+    createHash("sha256")
+      .update(
+        JSON.stringify([
+          brand,
+          request.actorReference,
+          brandCode,
+          brandName,
+          request.code,
+          request.displayName,
+          request.timeZone,
+          request.locale,
+        ]),
+      )
+      .digest("hex");
+  const scope = (storeId: string) =>
+    tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      brand,
+      storeId,
+    ]);
+  await scope(store);
+  const [prior] = (
+    await tx.query(
+      "SELECT intent_digest FROM bop_tenant.store_opening WHERE brand_id=$1 AND opening_id=$2",
+      [brand, store],
+    )
+  ).rows;
+  if (prior !== undefined) {
+    if (prior.intent_digest !== digest) throw new StoreOpeningError("Conflict");
+    return Object.freeze({ status: "AlreadyOpened" as const, storeReference: store });
+  }
+  // A Brand's own row is read and written with no Store selected.
+  await scope("");
+  try {
+    await tx.query("SAVEPOINT merchant_opening_code", []);
+    await tx.query(
+      "INSERT INTO bop_tenant.brand (brand_id,code,display_name,default_locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,$3,$4,'CAD','Active',1,$5,$5)",
+      [brand, brandCode, brandName, request.locale, request.openedAt],
+    );
+    await tx.query("RELEASE SAVEPOINT merchant_opening_code", []);
+  } catch (error) {
+    await tx.query("ROLLBACK TO SAVEPOINT merchant_opening_code", []);
+    const constraint = (error as { constraint?: unknown }).constraint;
+    if (constraint === "brand_code_key") throw new StoreOpeningError("CodeTaken");
+    if (constraint === "brand_pkey") throw new StoreOpeningError("Conflict");
+    throw error;
+  }
+  await work.withinBrand(tx);
+  await scope(store);
+  await tx.query(
+    "INSERT INTO bop_tenant.store (store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'CAD','Active',1,$7,$7)",
+    [
+      store,
+      brand,
+      request.code,
+      request.displayName,
+      request.timeZone,
+      request.locale,
+      request.openedAt,
+    ],
+  );
+  await work.withinStore(tx);
+  await tx.query(
+    "INSERT INTO bop_tenant.store_opening (opening_id,brand_id,store_id,opened_from_store_id,actor_id,membership_id,store_assignment_id,code,display_name,time_zone,locale,intent_digest,audit_id,opened_at) VALUES ($1,$2,$1,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+    [
+      store,
+      brand,
+      request.actorReference,
+      request.membershipReference,
+      request.storeAssignmentReference,
+      request.code,
+      request.displayName,
+      request.timeZone,
+      request.locale,
+      digest,
+      request.auditReference,
+      request.openedAt,
+    ],
+  );
+  return Object.freeze({ status: "Opened" as const, storeReference: store });
+}
