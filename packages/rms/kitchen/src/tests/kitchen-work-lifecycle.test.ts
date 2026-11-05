@@ -825,16 +825,17 @@ describe("Kitchen work lifecycle service", () => {
     expect(blocked.effect()).toBeNull();
     expect(blocked.now).not.toHaveBeenCalled();
 
-    const wrongOwnerSource = source("Start");
-    const wrongOwner = harness({
-      command: parseKitchenWorkLifecycleCommand({ ...start, actorReference: refs.expoActor }),
-      source: wrongOwnerSource,
+    // DEC-KITCHEN-ONE-TAP: another named cook may start what the first took; each operation keeps
+    // its own actor.
+    const secondCook = parseKitchenWorkLifecycleCommand({
+      ...start,
+      actorReference: refs.expoActor,
     });
-    await expect(
-      wrongOwner.service.execute(
-        parseKitchenWorkLifecycleCommand({ ...start, actorReference: refs.expoActor }),
-      ),
-    ).rejects.toEqual(expectCode("KITCHEN_WORK_PRECONDITION_FAILED"));
+    const handover = harness({ command: secondCook, source: source("Start") });
+    await expect(handover.service.execute(secondCook)).resolves.toMatchObject({
+      outcome: "Started",
+    });
+    expect(handover.effect()?.operation.actorReference).toBe(refs.expoActor);
   });
 
   it("publishes progress only for a partial delta and Completed only at full quantity", async () => {

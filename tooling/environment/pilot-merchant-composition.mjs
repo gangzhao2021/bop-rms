@@ -4,7 +4,10 @@ import { createInternalRefundSend } from "./pilot-refund-send.mjs";
 import { createInternalRefundPreparation } from "./pilot-refund-preparation.mjs";
 import { createInternalMerchantDining } from "./pilot-merchant-dining.mjs";
 import { createInternalMerchantPickup } from "./pilot-merchant-pickup.mjs";
-import { createInternalKitchenCommand } from "./pilot-kitchen-command.mjs";
+import {
+  createInternalKitchenCommand,
+  createInternalKitchenStep,
+} from "./pilot-kitchen-command.mjs";
 import { createInternalMerchantAcceptance } from "./pilot-merchant-acceptance.mjs";
 import { createInternalMerchantSession } from "./pilot-merchant-session.mjs";
 import { createInternalMerchantCognitoSession } from "./pilot-merchant-cognito-session.mjs";
@@ -31,6 +34,7 @@ const factories = {
   createInternalMerchantDining,
   createInternalMerchantPickup,
   createInternalKitchenCommand,
+  createInternalKitchenStep,
   createInternalMerchantAcceptance,
   createInternalMerchantSession,
   createInternalMerchantCognitoSession,
@@ -242,6 +246,7 @@ export function composeMerchantDependencies(
     createInternalDiningCredentials: dining.createInternalDiningCredentials,
     createInternalMerchantDining: f.createInternalMerchantDining,
     createInternalKitchenCommand: f.createInternalKitchenCommand,
+    createInternalKitchenStep: f.createInternalKitchenStep,
     createInternalMerchantPickup: (r, merchant, confirmation = null) =>
       f.createInternalMerchantPickup(r, merchant, confirmation, {
         createProof: customer.createInternalPickupProof,

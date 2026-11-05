@@ -183,6 +183,7 @@ export async function createInternalMerchant(
     createInternalMerchantDining,
     createInternalMerchantPickup,
     createInternalKitchenCommand,
+    createInternalKitchenStep,
     createInternalMerchantAcceptance,
     createInternalMerchantSession,
     createInternalMerchantProduct,
@@ -1162,6 +1163,7 @@ export async function createInternalMerchant(
     transactions: persistence.transactions,
     now: resources.now,
   });
+  const kitchenStep = createInternalKitchenStep(resources, persistence, service);
   const kitchenQuery = storePresence.wrap(
     presenceScope,
     kitchenScreenPresence.wrap(
@@ -1417,6 +1419,7 @@ export async function createInternalMerchant(
     orderQueue,
     kitchenQuery,
     kitchenCommand,
+    kitchenStep,
     kitchenRelease,
     pickupQuery,
     pickupProof,
@@ -1773,6 +1776,7 @@ export async function createInternalMerchant(
       orderQueue,
       kitchenQuery,
       kitchenCommand,
+      kitchenStep,
       kitchenRelease,
       kitchenRework,
       kitchenStaleClose,

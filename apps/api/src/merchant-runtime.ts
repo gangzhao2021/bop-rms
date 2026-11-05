@@ -55,6 +55,7 @@ import { createMerchantPickupHandoff } from "./merchant-pickup-handoff.js";
 import { createMerchantPickupIdentityCheck } from "./merchant-pickup-identity-check.js";
 import { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
 import { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
+import { createMerchantKitchenStep } from "./merchant-kitchen-step.js";
 import { createMerchantKitchenRework } from "./merchant-kitchen-rework.js";
 import { createMerchantKitchenStaleClose } from "./merchant-kitchen-stale-close.js";
 import { createMerchantProductDraftCommand } from "./merchant-product-draft-command.js";
@@ -120,6 +121,11 @@ export interface MerchantRuntimeOptions {
   };
   readonly kitchenCommand?: Omit<
     Parameters<typeof createMerchantKitchenCommand>[0],
+    "persistence" | "authentication"
+  >;
+  /** DEC-KITCHEN-ONE-TAP: one tap on the kitchen board. */
+  readonly kitchenStep?: Omit<
+    Parameters<typeof createMerchantKitchenStep>[0],
     "persistence" | "authentication"
   >;
   /** WP-2423 Q26: Kitchen remakes (Handoff Section 26.6). */
@@ -427,6 +433,15 @@ export function createMerchantRuntime(options: MerchantRuntimeOptions): Merchant
       : {
           kitchenCommand: createMerchantKitchenCommand({
             ...options.kitchenCommand,
+            persistence: options.persistence,
+            authentication: service,
+          }),
+        }),
+    ...(options.kitchenStep === undefined
+      ? {}
+      : {
+          kitchenStep: createMerchantKitchenStep({
+            ...options.kitchenStep,
             persistence: options.persistence,
             authentication: service,
           }),

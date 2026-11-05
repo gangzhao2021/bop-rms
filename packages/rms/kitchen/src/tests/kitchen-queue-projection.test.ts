@@ -1021,18 +1021,17 @@ describe("Kitchen queue projection domain", () => {
 
   it("rejects broken lifecycle ownership, chronology and globally reused proof identities", () => {
     const accepted = lifecycleEvent("KitchenWorkAccepted");
-    const wrongOperatorStart = lifecycleEvent("KitchenWorkStarted", { actorReference: id(81) });
-    expectCode(
-      () =>
-        parseKitchenQueueLifecycleIncrementalSourceFeed(
-          lifecycleSourceFeed({
-            events: [accepted, wrongOperatorStart],
-            includeReady: false,
-          }),
-          sha256,
-        ),
-      "KITCHEN_QUEUE_INPUT_INVALID",
-    );
+    // DEC-KITCHEN-ONE-TAP: a second named cook may start what the first took (a handover).
+    const secondOperatorStart = lifecycleEvent("KitchenWorkStarted", { actorReference: id(81) });
+    expect(
+      parseKitchenQueueLifecycleIncrementalSourceFeed(
+        lifecycleSourceFeed({
+          events: [accepted, secondOperatorStart],
+          includeReady: false,
+        }),
+        sha256,
+      ).proofBundles[0],
+    ).toMatchObject({ operationCount: 2 });
     for (const identityOverrides of [
       { auditReferences: [id(80)] },
       { auditReferences: [id(2)] },
@@ -1053,22 +1052,21 @@ describe("Kitchen queue projection domain", () => {
       );
     }
 
-    expectCode(
-      () =>
-        parseKitchenQueueLifecycleIncrementalSourceFeed(
-          lifecycleSourceFeed({
-            events: [
-              accepted,
-              lifecycleEvent("KitchenWorkStarted"),
-              lifecycleEvent("KitchenItemProgressRecorded"),
-              lifecycleEvent("KitchenItemCompleted", { actorReference: id(81) }),
-            ],
-            includeReady: false,
-          }),
-          sha256,
-        ),
-      "KITCHEN_QUEUE_INPUT_INVALID",
-    );
+    // ... and finish what another cook started; the projection takes who did what from each fact.
+    expect(
+      parseKitchenQueueLifecycleIncrementalSourceFeed(
+        lifecycleSourceFeed({
+          events: [
+            accepted,
+            lifecycleEvent("KitchenWorkStarted"),
+            lifecycleEvent("KitchenItemProgressRecorded"),
+            lifecycleEvent("KitchenItemCompleted", { actorReference: id(81) }),
+          ],
+          includeReady: false,
+        }),
+        sha256,
+      ).proofBundles[0],
+    ).toMatchObject({ operationCount: 4 });
 
     expectCode(
       () =>

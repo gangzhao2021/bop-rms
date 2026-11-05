@@ -54,6 +54,113 @@ export async function listKitchenComboPartsDone(
   );
 }
 
+/** One chosen dish of a combo as the kitchen takes it. */
+export interface KitchenComboDish {
+  readonly optionReference: string;
+  readonly productReference: string;
+  /**
+   * The dish was marked "not prepared by the kitchen" when its work reached the kitchen (a bottled
+   * drink): it is never a kitchen step, never holds up its combo, and the server may hand it over.
+   * DEC-STORE-FEATURES decision 2: a later change of the mark never moves work already issued.
+   */
+  readonly notPrepared: boolean;
+  /** When the kitchen marked it done; null: not yet. */
+  readonly doneAt: string | null;
+}
+
+/**
+ * DEC-KITCHEN-ONE-TAP / combos by section: the one place that says what a combo's chosen dishes are
+ * for the kitchen, read by the board, the table panel, the part-served command and the kitchen step,
+ * so they cannot disagree. `productOfOption` is the Catalog's combo record for the options asked
+ * about (a line's other options are not dishes). The mark is read as of the work item's creation; a
+ * line the kitchen decided not to prepare at all has every dish not prepared, and a round the kitchen
+ * has not reached yet has none.
+ */
+export async function listKitchenComboDishes(
+  tx: ComboPartTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  input: {
+    readonly items: readonly {
+      readonly orderItemReference: string;
+      readonly optionReferences: readonly string[];
+    }[];
+    readonly productOfOption: ReadonlyMap<string, string>;
+  },
+): Promise<ReadonlyMap<string, readonly KitchenComboDish[]>> {
+  const combos = input.items.filter((item) =>
+    item.optionReferences.some((option) => input.productOfOption.has(option)),
+  );
+  if (combos.length === 0) return new Map();
+  const brand = reference(scope.brandReference);
+  const store = reference(scope.storeReference);
+  const lines = combos.map((item) => reference(item.orderItemReference));
+  const products = [
+    ...new Set(
+      combos.flatMap((item) =>
+        item.optionReferences.flatMap((option) => {
+          const product = input.productOfOption.get(option);
+          return product === undefined ? [] : [reference(product)];
+        }),
+      ),
+    ),
+  ];
+  const marks = await tx.query<{ line: string; product: string; not_prepared: boolean | null }>(
+    `SELECT w.order_item_id::text AS line,m.product::text AS product,
+       (SELECT n.not_prepared FROM rms_kitchen.kitchen_not_prepared_product n
+         WHERE n.brand_id=w.brand_id AND n.store_id=w.store_id AND n.product_id=m.product AND n.occurred_at<=w.created_at
+         ORDER BY n.version DESC LIMIT 1) AS not_prepared
+       FROM rms_kitchen.kitchen_work_item w CROSS JOIN unnest($3::uuid[]) AS m(product)
+      WHERE w.brand_id=$1 AND w.store_id=$2 AND w.order_item_id=ANY($4::uuid[])`,
+    [brand, store, products, lines],
+  );
+  const hasWork = new Set(marks.rows.map((row) => row.line));
+  const marked = new Set(
+    marks.rows
+      .filter((row) => row.not_prepared === true)
+      .map((row) => row.line + ":" + row.product),
+  );
+  const withoutWork = lines.filter((line) => !hasWork.has(line));
+  const wholeLineNotPrepared = new Set(
+    withoutWork.length === 0
+      ? []
+      : (
+          await tx.query<{ line: string }>(
+            `SELECT line::text AS line FROM rms_kitchen.kitchen_batch_preparation_decision d,
+               unnest(d.not_prepared_order_item_ids) AS line
+              WHERE d.brand_id=$1 AND d.store_id=$2 AND line=ANY($3::uuid[])`,
+            [brand, store, withoutWork],
+          )
+        ).rows.map((row) => row.line),
+  );
+  const done = new Map(
+    (await listKitchenComboPartsDone(tx, scope, { orderItemReferences: lines })).map((row) => [
+      row.orderItemReference + ":" + row.optionReference,
+      row.doneAt,
+    ]),
+  );
+  return new Map(
+    combos.map((item) => [
+      item.orderItemReference,
+      Object.freeze(
+        item.optionReferences.flatMap((option) => {
+          const product = input.productOfOption.get(option);
+          if (product === undefined) return [];
+          return [
+            Object.freeze({
+              optionReference: option,
+              productReference: product,
+              notPrepared:
+                wholeLineNotPrepared.has(item.orderItemReference) ||
+                marked.has(item.orderItemReference + ":" + product),
+              doneAt: done.get(item.orderItemReference + ":" + option) ?? null,
+            }),
+          ];
+        }),
+      ),
+    ]),
+  );
+}
+
 /**
  * Marks one chosen dish of a combo done (once; a retry of the same operation is a no-op). The
  * database refuses a dish the work item does not have, or a cancelled work item.

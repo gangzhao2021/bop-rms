@@ -165,6 +165,12 @@ export function createPostgresKitchenWorkLifecycleStore(
       tx: ConsumerTransaction,
       command: KitchenWorkLifecycleCommand,
     ) => Promise<boolean>;
+    /**
+     * DEC-KITCHEN-ONE-TAP: one chunk of a tap, under the ticket's row lock, decodes each ticket's
+     * history once and appends what it commits (a record costs about half a millisecond to decode,
+     * and a Store-wide audit lock is held meanwhile). The caller owns the map and its rollback.
+     */
+    readonly decodedHistory?: Map<string, KitchenWorkLifecycleEffect[]>;
   },
 ): KitchenWorkLifecyclePorts["repository"] {
   const brand = parseKitchenTicketReference(options.brandReference);
@@ -241,12 +247,16 @@ export function createPostgresKitchenWorkLifecycleStore(
           "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 ORDER BY order_item_id,kitchen_work_item_id FOR NO KEY UPDATE",
         [brand, store, c.ticketReference],
       );
-      const records = await tx.query(
-        selectRecord +
-          "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 AND idempotency_key IS NOT NULL ORDER BY result_ticket_version",
-        [brand, store, c.ticketReference],
-      );
-      const history = records.rows.map(original);
+      let history = options.decodedHistory?.get(c.ticketReference);
+      if (history === undefined) {
+        const records = await tx.query(
+          selectRecord +
+            "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 AND idempotency_key IS NOT NULL ORDER BY result_ticket_version",
+          [brand, store, c.ticketReference],
+        );
+        history = records.rows.map(original);
+        options.decodedHistory?.set(c.ticketReference, history);
+      }
       if (history.some((effect) => effect.operation.ticketReference !== c.ticketReference))
         return unavailable();
       // WP-2423 Q6: a staff cancellation is the last fact of each cancelled item.
@@ -432,6 +442,152 @@ export function createPostgresKitchenWorkLifecycleStore(
           }),
       });
     },
-    commit: writer,
+    async commit(input) {
+      const result = await writer(input);
+      if (result.status === "Committed") {
+        const committed = result.effect as KitchenWorkLifecycleEffect;
+        options.decodedHistory?.get(committed.operation.ticketReference)?.push(committed);
+      }
+      return result;
+    },
+  };
+}
+
+/** DEC-KITCHEN-ONE-TAP: one ticket's recorded operations, decoded, oldest first. */
+export async function loadKitchenWorkStepHistory(
+  tx: ConsumerTransaction,
+  options: KitchenWorkLifecycleEffectValidationPorts & {
+    readonly brandReference: string;
+    readonly storeReference: string;
+  },
+  ticketReference: string,
+): Promise<KitchenWorkLifecycleEffect[]> {
+  const brand = parseKitchenTicketReference(options.brandReference);
+  const store = parseKitchenTicketReference(options.storeReference);
+  const ticket = parseKitchenTicketReference(ticketReference);
+  const records = await tx.query(
+    "SELECT kitchen_work_lifecycle_operation_id,idempotency_key,effect_digest,effect_record_json::text AS record " +
+      "FROM rms_kitchen.kitchen_work_lifecycle_operation WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 " +
+      "AND idempotency_key IS NOT NULL ORDER BY result_ticket_version",
+    [brand, store, ticket],
+  );
+  return records.rows.map((row) => {
+    const effect = decodeKitchenWorkLifecycleRecord(row.record, options);
+    if (
+      effect.command.brandReference !== brand ||
+      effect.command.storeReference !== store ||
+      effect.operation.ticketReference !== ticket ||
+      effect.operation.operationReference !== row.kitchen_work_lifecycle_operation_id ||
+      effect.operation.idempotencyKey !== row.idempotency_key ||
+      effect.effectDigest !== row.effect_digest
+    )
+      return unavailable();
+    return effect;
+  });
+}
+
+/**
+ * DEC-KITCHEN-ONE-TAP: what a kitchen step needs before it takes any lock: each ticket's Order
+ * (immutable once issued) and the choices on its work items. Reads only; the caller's Ordering
+ * fence comes next, then Kitchen locks.
+ */
+export async function readKitchenWorkStepTickets(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  ticketReferences: readonly string[],
+): Promise<
+  ReadonlyMap<
+    string,
+    {
+      readonly orderReference: string;
+      readonly items: ReadonlyMap<string, readonly string[]>;
+    }
+  >
+> {
+  const brand = parseKitchenTicketReference(scope.brandReference);
+  const store = parseKitchenTicketReference(scope.storeReference);
+  const tickets = [...new Set(ticketReferences.map((value) => parseKitchenTicketReference(value)))];
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const { rows } = await tx.query(
+    "SELECT t.kitchen_ticket_id::text AS ticket,t.order_id::text AS order_reference,w.kitchen_work_item_id::text AS item," +
+      "w.selected_options_json AS options FROM rms_kitchen.kitchen_ticket t LEFT JOIN rms_kitchen.kitchen_work_item w " +
+      "ON w.brand_id=t.brand_id AND w.store_id=t.store_id AND w.kitchen_ticket_id=t.kitchen_ticket_id " +
+      "WHERE t.brand_id=$1 AND t.store_id=$2 AND t.kitchen_ticket_id=ANY($3::uuid[])",
+    [brand, store, tickets],
+  );
+  const found = new Map<string, { orderReference: string; items: Map<string, string[]> }>();
+  for (const row of rows) {
+    const ticket = String(row.ticket);
+    const entry = found.get(ticket) ?? {
+      orderReference: String(row.order_reference),
+      items: new Map<string, string[]>(),
+    };
+    found.set(ticket, entry);
+    if (row.item !== null)
+      entry.items.set(
+        String(row.item),
+        (Array.isArray(row.options) ? row.options : []).map((option: unknown) =>
+          String((option as { optionReference?: unknown }).optionReference),
+        ),
+      );
+  }
+  return found;
+}
+
+/**
+ * DEC-KITCHEN-ONE-TAP: locks one ticket (after the Ordering fence, as every Kitchen writer does) and
+ * reads what a step follows: its version and last change, and each work item's current state. Two
+ * screens on one ticket serialize here. Null when the ticket is not at this Store.
+ */
+export async function lockKitchenWorkStepTicket(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  ticketReference: string,
+): Promise<{
+  readonly version: string;
+  readonly status: string;
+  readonly updatedAt: string;
+  readonly items: readonly {
+    readonly workItemReference: string;
+    readonly orderItemReference: string;
+    readonly version: string;
+    readonly status: string;
+    readonly requiredQuantity: number;
+    readonly completedQuantity: number;
+  }[];
+} | null> {
+  const brand = parseKitchenTicketReference(scope.brandReference);
+  const store = parseKitchenTicketReference(scope.storeReference);
+  const ticket = parseKitchenTicketReference(ticketReference);
+  const locked = await tx.query(
+    "SELECT aggregate_version::text AS version,status,updated_at FROM rms_kitchen.kitchen_ticket " +
+      "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 FOR NO KEY UPDATE",
+    [brand, store, ticket],
+  );
+  const row = locked.rows[0];
+  if (row === undefined) return null;
+  const updatedAt = row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at;
+  if (typeof updatedAt !== "string") return unavailable();
+  const items = await tx.query(
+    "SELECT kitchen_work_item_id::text AS item,order_item_id::text AS line,version::text AS version,status," +
+      "required_quantity,completed_quantity FROM rms_kitchen.kitchen_work_item " +
+      "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3 ORDER BY kitchen_work_item_id",
+    [brand, store, ticket],
+  );
+  return {
+    version: String(row.version),
+    status: String(row.status),
+    updatedAt: new Date(Date.parse(updatedAt)).toISOString(),
+    items: items.rows.map((item) => ({
+      workItemReference: String(item.item),
+      orderItemReference: String(item.line),
+      version: String(item.version),
+      status: String(item.status),
+      requiredQuantity: Number(item.required_quantity),
+      completedQuantity: Number(item.completed_quantity),
+    })),
   };
 }

@@ -112,6 +112,7 @@ import type { createMerchantStoreReceiptProfile } from "./merchant-store-receipt
 import type { createMerchantStorePublicProfile } from "./merchant-store-public-profile.js";
 import type { createMerchantKitchenQuery } from "./merchant-kitchen-query.js";
 import type { createMerchantKitchenCommand } from "./merchant-kitchen-command.js";
+import type { createMerchantKitchenStep } from "./merchant-kitchen-step.js";
 import type { createMerchantKitchenRelease } from "./merchant-kitchen-release.js";
 import type { createMerchantKitchenRework } from "./merchant-kitchen-rework.js";
 import type { createMerchantKitchenStaleClose } from "./merchant-kitchen-stale-close.js";
@@ -554,6 +555,8 @@ export interface MerchantBffRouterOptions {
   readonly storePublicProfile?: ReturnType<typeof createMerchantStorePublicProfile>;
   readonly kitchenQuery?: ReturnType<typeof createMerchantKitchenQuery>;
   readonly kitchenCommand?: ReturnType<typeof createMerchantKitchenCommand>;
+  /** DEC-KITCHEN-ONE-TAP: one tap on the kitchen board, following current state. */
+  readonly kitchenStep?: ReturnType<typeof createMerchantKitchenStep>;
   readonly kitchenRelease?: ReturnType<typeof createMerchantKitchenRelease>;
   /** WP-2423 Q26 (Handoff Section 26.6): remake a finished dish from the Kitchen board. */
   readonly kitchenRework?: ReturnType<typeof createMerchantKitchenRework>;

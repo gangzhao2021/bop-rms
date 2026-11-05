@@ -1776,7 +1776,6 @@ function reconcileLifecycleTicket(
     let expectedStatus: KitchenQueueWorkItemStatus = "Queued";
     let expectedCompletedQuantity = 0;
     let expectedAcceptedAt: KitchenInstant | null = null;
-    let acceptingActorReference: KitchenReference | null = null;
     let priorFactAt: KitchenInstant = item.workItemCreatedAt;
     for (const proof of eventProofs) {
       if (
@@ -1788,19 +1787,12 @@ function reconcileLifecycleTicket(
       if (proof.eventType === "KitchenWorkAccepted") {
         if (expectedAcceptedAt !== null) return invalid();
         expectedAcceptedAt = proof.occurredAt;
-        acceptingActorReference = proof.actor.actorReference;
       } else if (proof.eventType === "KitchenWorkStarted") {
-        if (
-          expectedAcceptedAt === null ||
-          expectedStatus !== "Queued" ||
-          proof.actor.actorReference !== acceptingActorReference
-        )
-          return invalid();
+        if (expectedAcceptedAt === null || expectedStatus !== "Queued") return invalid();
         expectedStatus = "In Progress";
       } else {
         if (
           expectedStatus !== "In Progress" ||
-          proof.actor.actorReference !== acceptingActorReference ||
           proof.quantityDelta === null ||
           proof.completedQuantity === null ||
           proof.requiredQuantity !== item.requiredQuantity ||

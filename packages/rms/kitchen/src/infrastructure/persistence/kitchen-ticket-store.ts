@@ -47,7 +47,16 @@ export function createPostgresKitchenTicketStore(
       effect: KitchenTicketCreationEffect,
     ) => Promise<boolean>;
   },
-): KitchenTicketCreationPorts["repository"] {
+): KitchenTicketCreationPorts["repository"] & {
+  /**
+   * DEC-KITCHEN-ONE-TAP: one issued ticket as it was created, for a kitchen step's current-source
+   * check, instead of reading every ticket of the Store's last day for each step.
+   */
+  resolveByTicket(input: {
+    readonly transaction: ConsumerTransaction;
+    readonly ticketReference: string;
+  }): Promise<Resolution>;
+} {
   const brand = parseKitchenTicketReference(options.brandReference);
   const store = parseKitchenTicketReference(options.storeReference);
 
@@ -257,6 +266,33 @@ export function createPostgresKitchenTicketStore(
   }
 
   return Object.freeze({
+    async resolveByTicket(input) {
+      try {
+        const ticket = parseKitchenTicketReference(input.ticketReference);
+        await input.transaction.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [brand, store],
+        );
+        const { rows } = await input.transaction.query(
+          "SELECT creation_record_json::text AS record,effect_digest FROM rms_kitchen.kitchen_creation_record " +
+            "WHERE brand_id=$1 AND store_id=$2 AND kitchen_ticket_id=$3",
+          [brand, store, ticket],
+        );
+        const row = rows[0];
+        if (row === undefined) return { status: "NotFound" as const };
+        const effect = decodeKitchenTicketCreationRecord(row.record, options);
+        if (
+          effect.ticket.brandReference !== brand ||
+          effect.ticket.storeReference !== store ||
+          effect.ticket.ticketReference !== ticket ||
+          effect.effectDigest !== row.effect_digest
+        )
+          return unavailable();
+        return { status: "Resolved" as const, effect };
+      } catch {
+        return unavailable();
+      }
+    },
     async resolveBySemanticKeys(input) {
       try {
         const key = identity(input);

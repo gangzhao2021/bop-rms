@@ -396,6 +396,27 @@ export {
 } from "./domain/station-routing-configuration.js";
 
 export { createPostgresKitchenWorkLifecycleStore } from "./infrastructure/persistence/kitchen-work-lifecycle-store.js";
+export {
+  chunkKitchenWorkStepLines,
+  kitchenWorkStepChunkLines,
+  kitchenWorkStepKinds,
+  kitchenWorkStepMaxLines,
+  kitchenWorkStepMaxOptions,
+  kitchenWorkStepNotAttempted,
+  parseKitchenWorkStepBody,
+  type KitchenWorkStepBody,
+  type KitchenWorkStepKind,
+  type KitchenWorkStepLine,
+  type KitchenWorkStepLineResult,
+  type KitchenWorkStepOutcome,
+  type KitchenWorkStepRefusal,
+  type KitchenWorkStepReply,
+} from "./contracts/kitchen-work-step.js";
+export {
+  kitchenWorkStepReplyHead,
+  runKitchenWorkStepChunk,
+  type KitchenWorkStepPorts,
+} from "./application/kitchen-work-step-service.js";
 
 export {
   createPostgresKitchenCustomerStatusReader,

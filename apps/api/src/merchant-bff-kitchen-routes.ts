@@ -122,6 +122,43 @@ export function installMerchantKitchenRoutes(
       });
   });
 
+  // DEC-KITCHEN-ONE-TAP: one tap on the board. Same session, CSRF and failure mapping as /kitchen/work.
+  router.post("/kitchen/step", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.kitchenStep) {
+      response.status(503).json({ error: "kitchen_step_unavailable" });
+      return;
+    }
+    void options
+      .kitchenStep({ sessionCookie, csrf, body: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        if (!(error instanceof KitchenWorkLifecycleError)) {
+          if (!kitchenDatabaseRetryLater(response, error)) denied(response);
+          return;
+        }
+        const status = {
+          KITCHEN_WORK_INPUT_INVALID: 400,
+          KITCHEN_WORK_PERMISSION_DENIED: 403,
+          KITCHEN_WORK_NOT_FOUND: 404,
+          KITCHEN_WORK_VERSION_CONFLICT: 409,
+          KITCHEN_WORK_PRECONDITION_FAILED: 422,
+          KITCHEN_WORK_DEPENDENCY_UNAVAILABLE: 503,
+        }[error.code];
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: error.code });
+      });
+  });
+
   // WP-2423 Q26 (Handoff Section 26.6): Kitchen remakes. Errors carry a code only.
   const kitchenReworkFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof KitchenReworkError)) {

@@ -1519,7 +1519,6 @@ function validatePredecessors(
   if (
     started !== null &&
     (accepted === null ||
-      started.actorReference !== accepted.actorReference ||
       started.resultTicketVersion <= accepted.resultTicketVersion ||
       started.resultTicketVersion > source.ticketVersion ||
       started.resultWorkItemVersion <= accepted.resultWorkItemVersion ||
@@ -1535,19 +1534,15 @@ function validatePredecessors(
   }
   if (accepted === null || accepted.actionCode !== "KITCHEN_WORK_ITEM_ACCEPTED")
     return precondition();
+  // DEC-KITCHEN-ONE-TAP: who did what stays per operation; any named cook may take the next step
+  // (shift handover, a second tablet), under the same session and permission rules.
   if (command.action === "StartKitchenWorkItem") {
-    if (accepted.actorReference !== command.actorReference) return precondition();
     if (accepted.resultWorkItemVersion !== source.target.workItemVersion) return dependency();
     if (started !== null) return precondition();
     return;
   }
   if (command.action === "CompleteKitchenWorkItem") {
-    if (
-      accepted.actorReference !== command.actorReference ||
-      started === null ||
-      started.actionCode !== "KITCHEN_WORK_ITEM_STARTED" ||
-      started.actorReference !== command.actorReference
-    )
+    if (started === null || started.actionCode !== "KITCHEN_WORK_ITEM_STARTED")
       return precondition();
     return;
   }

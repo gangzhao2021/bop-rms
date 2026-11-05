@@ -1,6 +1,11 @@
 import { listBrandSkuChoices, listBundleComboRecords } from "@rms/catalog";
 import { listDiningComboPartsServed, recordDiningComboPartServed } from "@rms/dining";
-import { listKitchenComboPartsDone, recordKitchenComboPartDone } from "@rms/kitchen";
+import {
+  listKitchenComboDishes,
+  loadKitchenProductSections,
+  loadKitchenSections,
+  recordKitchenComboPartDone,
+} from "@rms/kitchen";
 import { chineseOf } from "./merchant-chinese-text.js";
 
 /**
@@ -18,6 +23,8 @@ export interface ComboPart {
   readonly name: string;
   readonly done: boolean;
   readonly served: boolean;
+  /** The kitchen read only: the dish's kitchen section by name now; null: no section. */
+  readonly kitchenSection?: string | null;
 }
 interface Tx {
   query(
@@ -40,9 +47,39 @@ const restoreStore = (tx: Tx, scope: Scope) =>
   ]);
 
 /**
+ * DEC-KITCHEN-ONE-TAP: which dish (product) each of these options stands for, from the Catalog's
+ * combo record; options that are not dishes of a combo are left out. Foreign owner reads, so a
+ * kitchen step asks before it takes any Kitchen lock.
+ */
+export async function comboChoiceProducts(
+  tx: Tx,
+  scope: Scope,
+  optionReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  const records = await listBundleComboRecords(tx as never, scope);
+  const dishOf = new Map(records.choices.map((c) => [c.optionReference, c.dishSkuReference]));
+  const asked = optionReferences.filter((option) => dishOf.has(option));
+  if (asked.length === 0) {
+    await restoreStore(tx, scope);
+    return new Map();
+  }
+  const skus = new Map(
+    (await listBrandSkuChoices(tx as never, scope)).map((sku) => [sku.skuReference, sku]),
+  );
+  await restoreStore(tx, scope);
+  return new Map(
+    asked.flatMap((option) => {
+      const sku = skus.get(dishOf.get(option) ?? "");
+      return sku === undefined ? [] : [[option, sku.productReference] as const];
+    }),
+  );
+}
+
+/**
  * The combo parts of these order lines (lines that are not combos are left out): the chosen
- * dishes in the order chosen, each with whether the kitchen marked it done and (with a tenant)
- * whether it was served.
+ * dishes in the order chosen, each with whether the kitchen is finished with it and (with a tenant)
+ * whether it was served. A dish the kitchen does not prepare (Kitchen's own rule, as the work
+ * reached it) reads done: it never holds up its combo and the server may hand it over.
  */
 export async function comboPartsByOrderItem(
   tx: Tx,
@@ -52,6 +89,10 @@ export async function comboPartsByOrderItem(
     readonly orderItemReference: string;
     readonly optionReferences: readonly string[];
   }[],
+  options: {
+    /** The kitchen read also asks for each dish's section (by the dish's own mark, now). */
+    readonly withSections?: boolean;
+  } = {},
 ): Promise<ReadonlyMap<string, readonly ComboPart[]>> {
   const records = await listBundleComboRecords(tx as never, scope);
   const dishOf = new Map(records.choices.map((c) => [c.optionReference, c.dishSkuReference]));
@@ -66,12 +107,17 @@ export async function comboPartsByOrderItem(
     (await listBrandSkuChoices(tx as never, scope)).map((sku) => [sku.skuReference, sku]),
   );
   await restoreStore(tx, scope);
-  const orderItems = combos.map((item) => item.orderItemReference);
-  const done = new Set(
-    (await listKitchenComboPartsDone(tx as never, scope, { orderItemReferences: orderItems })).map(
-      (row) => row.orderItemReference + ":" + row.optionReference,
-    ),
+  const productOfOption = new Map(
+    [...dishOf].flatMap(([option, dish]) => {
+      const product = skus.get(dish)?.productReference;
+      return product === undefined ? [] : [[option, product] as const];
+    }),
   );
+  const dishes = await listKitchenComboDishes(tx as never, scope, {
+    items: combos,
+    productOfOption,
+  });
+  const orderItems = combos.map((item) => item.orderItemReference);
   const served = new Set(
     scope.tenantReference === undefined
       ? []
@@ -83,22 +129,42 @@ export async function comboPartsByOrderItem(
           )
         ).map((row) => row.orderItemReference + ":" + row.optionReference),
   );
+  const sectionOf = new Map<string, string | null>();
+  if (options.withSections === true) {
+    const products = [
+      ...new Set([...dishes.values()].flatMap((list) => list.map((dish) => dish.productReference))),
+    ];
+    const names = new Map(
+      (await loadKitchenSections(tx as never, scope)).sections.map((section) => [
+        section.sectionReference,
+        section.name,
+      ]),
+    );
+    for (const [product, mark] of await loadKitchenProductSections(tx as never, scope, products))
+      sectionOf.set(
+        product,
+        mark.sectionReference === null ? null : (names.get(mark.sectionReference) ?? null),
+      );
+  }
   // A combo whose dishes cannot be named is left out (shown and served as one line).
   return new Map(
     combos.flatMap((item) => {
+      const list = dishes.get(item.orderItemReference) ?? [];
       const parts = Object.freeze(
-        item.optionReferences.flatMap((option) => {
-          const sku = skus.get(dishOf.get(option) ?? "");
+        list.flatMap((dish) => {
+          const sku = skus.get(dishOf.get(dish.optionReference) ?? "");
           if (sku === undefined) return [];
           const names = sku.productLocalizedNames;
-          const key = item.orderItemReference + ":" + option;
           return [
             Object.freeze({
-              optionReference: option,
+              optionReference: dish.optionReference,
               nameZh: chineseOf(names),
               name: names[locale] ?? names["en-CA"] ?? Object.values(names)[0] ?? sku.skuCode,
-              done: done.has(key),
-              served: served.has(key),
+              done: dish.doneAt !== null || dish.notPrepared,
+              served: served.has(item.orderItemReference + ":" + dish.optionReference),
+              ...(options.withSections === true
+                ? { kitchenSection: sectionOf.get(dish.productReference) ?? null }
+                : {}),
             }),
           ];
         }),

@@ -10,6 +10,8 @@ export function installMerchantBffBodyParsers(
   options: MerchantBffRouterOptions,
 ): void {
   const ordinaryJson = express.json({ limit: "8kb", strict: true });
+  // DEC-KITCHEN-ONE-TAP: a tap of 50 dishes, each naming up to 20 chosen dishes of a combo.
+  const kitchenStepJson = express.json({ limit: 65_536, strict: true });
   const storeSetupJson = express.json({ limit: 2_097_152, strict: true });
   const storeSetupReferenceJson = express.json({ limit: 32_768, strict: true });
   const draftBytes = new WeakMap<object, number>();
@@ -50,6 +52,24 @@ export function installMerchantBffBodyParsers(
           .status(large ? 413 : 400)
           .set("Cache-Control", NO_STORE)
           .json({ error: "store_configuration_ordinary_invalid" });
+      });
+      return;
+    }
+    if (request.method === "POST" && request.path === "/kitchen/step") {
+      kitchenStepJson(request, response, (error?: unknown) => {
+        if (!error) {
+          next();
+          return;
+        }
+        const large =
+          typeof error === "object" &&
+          error !== null &&
+          "type" in error &&
+          error.type === "entity.too.large";
+        response
+          .status(large ? 413 : 400)
+          .set("Cache-Control", NO_STORE)
+          .json({ error: "kitchen_step_invalid" });
       });
       return;
     }

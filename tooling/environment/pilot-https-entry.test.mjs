@@ -138,6 +138,7 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "createInternalDiningCredentials",
       "createInternalMerchantDining",
       "createInternalKitchenCommand",
+      "createInternalKitchenStep",
       "createInternalMerchantPickup",
       "createInternalMerchantAcceptance",
       "createInternalMerchantSession",
