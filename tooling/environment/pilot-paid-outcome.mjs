@@ -8,6 +8,8 @@ import { createHash } from "node:crypto";
 import { createOrderPaidContextSource } from "../../apps/api/dist/order-paid-context-source.js";
 import { createOrderPaidOutcomeSource } from "../../apps/api/dist/order-paid-outcome-source.js";
 import { createOrderAcceptanceHoldEvaluator } from "../../apps/api/dist/order-acceptance-hold-evaluator.js";
+import { createOrderAutoAcceptanceEvaluator } from "../../apps/api/dist/order-auto-acceptance-evaluator.js";
+import { reportUnexpected } from "./pilot-unexpected.mjs";
 import { evaluateIntactReservationPaymentRule } from "../../packages/rms/inventory/src/index.ts";
 import {
   createOrderPaymentOutcomeConsumerService,
@@ -27,6 +29,8 @@ export async function createInternalPaidOutcome(
     loadAdditionalWorkflow,
     providerAccountReference,
     actorReference,
+    // The pilot prices every Order with Quote v2; isolated acceptances seed v1 Orders (test only).
+    quoteVersion = 2,
   },
 ) {
   const saved = await loadPickupWorkflow();
@@ -76,7 +80,7 @@ export async function createInternalPaidOutcome(
   const additionalContext = createAdditionalOrderPaidContextSource({
     ...paymentOptions,
     tenantReference: scope.tenantReference,
-    quoteVersion: 2,
+    quoteVersion,
     authorizeOrder: async (_tx, value) => sameScope(value),
     authorizeInventory: async () => active(),
   });
@@ -88,7 +92,7 @@ export async function createInternalPaidOutcome(
       environment: pilotProviderEnvironment(),
     },
     tenantReference: scope.tenantReference,
-    quoteVersion: 2,
+    quoteVersion,
     now: resources.now,
     authorize: async (_tx, event) =>
       event.tenantId === scope.brandReference && event.storeId === scope.storeReference && active(),
@@ -121,6 +125,36 @@ export async function createInternalPaidOutcome(
       return "NotApplicable";
     return holdEvaluator.evaluate(tx, event);
   };
+  // WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: at a Store with the switch on, a paid order nothing needs a
+  // person for is accepted here, in this System transaction, through the staff command's runtime;
+  // the consumer below then confirms it. Anything else takes the ordinary path, unchanged.
+  const autoAcceptance = createOrderAutoAcceptanceEvaluator({
+    scope,
+    authorize: async () => active(),
+    reference,
+    now: resources.now,
+    workflowActorReference: actorReference,
+    quoteVersion,
+    captured,
+    context,
+    additionalContext,
+    workflow: (kind) => {
+      const workflow = kind === "Pickup" ? saved.workflow : dining.workflow;
+      return {
+        purposeCode: workflow.purposeCode,
+        workflowVersionReference: workflow.payment.workflowVersionReference,
+      };
+    },
+    readOperating: async (tx, at) =>
+      (await resources.operatingReader?.(tx).readCurrent({
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        publicStoreReference: resources.publicProfile.binding.publicStoreReference,
+        evaluatedAt: at,
+      })) ?? null,
+    audit: { retentionPolicyCode: "FINANCIAL_COMPLIANCE", retentionPolicyVersion: 1 },
+    report: (code, error) => reportUnexpected(code, error),
+  });
   function service() {
     let observedAt;
     const initialSource = createOrderPaidOutcomeSource({
@@ -196,7 +230,7 @@ export async function createInternalPaidOutcome(
         const workflow = additionalConfig.workflow;
         return createAdditionalOrderPaidOutcomeSource({
           context: { resolve: async () => current },
-          quoteVersion: 2,
+          quoteVersion,
           sha256: hash,
           release: {
             action: "ReleasePaidOrder",
@@ -339,7 +373,9 @@ export async function createInternalPaidOutcome(
   return {
     registrations: service().registrations,
     consume: async (tx, event) => {
+      const prepared = await autoAcceptance.prepare(tx, event);
       await evaluateHold(tx, event);
+      await autoAcceptance.apply(tx, event, prepared);
       return service().consume(tx, event);
     },
     listUnresolved: (tx, limit, after = null) => service().listUnresolved(tx, limit, after),
@@ -353,7 +389,9 @@ export async function createInternalPaidOutcome(
         event.storeId !== scope.storeReference
       )
         throw new Error("INTERNAL_PAID_WAIT_EVENT_UNAVAILABLE");
+      const prepared = await autoAcceptance.prepare(tx, event);
       await evaluateHold(tx, event);
+      await autoAcceptance.apply(tx, event, prepared);
       return service().resumePending(tx, event);
     },
   };

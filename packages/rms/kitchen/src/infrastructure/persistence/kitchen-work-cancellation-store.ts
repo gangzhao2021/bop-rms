@@ -794,3 +794,71 @@ export async function listStoreStartedKitchenBatches(
     return unavailable();
   }
 }
+
+/**
+ * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: whether the kitchen has touched each of these batches. Absent
+ * from the map: no ticket and no preparation decision, so it never reached the kitchen. A touch is
+ * any kitchen step (accept, start, or a status past Queued/Held), a round the kitchen does not make,
+ * a closed ticket, or every line cancelled: nothing there is waiting for a cook.
+ */
+export async function listStoreKitchenBatchTouches(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderBatchReferences: readonly string[],
+): Promise<ReadonlyMap<string, "Touched" | "Waiting">> {
+  const brand = guarded(() => parseKitchenTicketReference(scope.brandReference));
+  const store = guarded(() => parseKitchenTicketReference(scope.storeReference));
+  if (!Array.isArray(orderBatchReferences) || orderBatchReferences.length > 200)
+    return unavailable();
+  const batches = guarded(() =>
+    [...new Set(orderBatchReferences)].map((value) => parseKitchenTicketReference(value)),
+  );
+  if (batches.length === 0) return new Map();
+  try {
+    const result = await tx.query(
+      "SELECT t.order_batch_id::text AS batch,(t.status<>'Open' OR bool_and(w.status='Cancelled') " +
+        "OR bool_or(w.status NOT IN ('Queued','Held','Cancelled')) OR EXISTS (SELECT 1 FROM rms_kitchen.kitchen_work_lifecycle_operation o " +
+        "WHERE o.brand_id=t.brand_id AND o.store_id=t.store_id AND o.kitchen_ticket_id=t.kitchen_ticket_id)) AS touched " +
+        "FROM rms_kitchen.kitchen_ticket t JOIN rms_kitchen.kitchen_work_item w ON w.brand_id=t.brand_id AND w.store_id=t.store_id " +
+        "AND w.kitchen_ticket_id=t.kitchen_ticket_id WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_batch_id=ANY($3::uuid[]) " +
+        "GROUP BY t.order_batch_id,t.status,t.brand_id,t.store_id,t.kitchen_ticket_id " +
+        "UNION ALL SELECT d.order_batch_id::text,d.all_not_prepared FROM rms_kitchen.kitchen_batch_preparation_decision d " +
+        "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_batch_id=ANY($3::uuid[])",
+      [brand, store, batches],
+    );
+    const touches = new Map<string, "Touched" | "Waiting">();
+    for (const row of result.rows as readonly { batch: string; touched: unknown }[]) {
+      const batch = parseKitchenTicketReference(row.batch);
+      touches.set(
+        batch,
+        row.touched === true || touches.get(batch) === "Touched" ? "Touched" : "Waiting",
+      );
+    }
+    return touches;
+  } catch {
+    return unavailable();
+  }
+}
+
+/** When the kitchen last recorded any step at this Store (null: none in the last day). */
+export async function loadStoreLastKitchenStepAt(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  observedAt: string,
+): Promise<string | null> {
+  const brand = guarded(() => parseKitchenTicketReference(scope.brandReference));
+  const store = guarded(() => parseKitchenTicketReference(scope.storeReference));
+  const at = guarded(() => parseKitchenTicketInstant(observedAt));
+  try {
+    const row = (
+      await tx.query(
+        "SELECT occurred_at FROM rms_kitchen.kitchen_work_lifecycle_operation WHERE brand_id=$1 AND store_id=$2 " +
+          "AND occurred_at<=$3::timestamptz AND occurred_at>$3::timestamptz - interval '1 day' ORDER BY occurred_at DESC LIMIT 1",
+        [brand, store, at],
+      )
+    ).rows[0] as { occurred_at: unknown } | undefined;
+    return row === undefined ? null : instantText(row.occurred_at);
+  } catch {
+    return unavailable();
+  }
+}

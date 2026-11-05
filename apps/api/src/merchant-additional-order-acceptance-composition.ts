@@ -28,6 +28,7 @@ export function createMerchantAdditionalOrderAcceptanceComposition(
 ) {
   const scope = Object.freeze({ ...options.scope });
   const acceptance = Object.freeze({ ...options.acceptance });
+  const recordAs = options.recordAs ?? "User";
   return Object.freeze({
     async commit(input: {
       transaction: ConsumerTransaction;
@@ -36,7 +37,7 @@ export function createMerchantAdditionalOrderAcceptanceComposition(
     }) {
       const record = parseOrderAcceptanceRecord(input.record);
       const authorize = (transaction: ConsumerTransaction, candidate: typeof record) =>
-        candidate.actorType === "User" &&
+        candidate.actorType === recordAs &&
         candidate.purposeCode === acceptance.purposeCode &&
         candidate.permissionCode === acceptance.permissionCode
           ? options.authorize(transaction, candidate)
@@ -66,7 +67,7 @@ export function createMerchantAdditionalOrderAcceptanceComposition(
             execution.orderVersion !== candidate.expectedOrderVersion ||
             candidate.sourceDigest !==
               options.sha256(encodeAdditionalDiningBatchSnapshot(execution.snapshot)) ||
-            candidate.actorReference === null
+            (recordAs === "User" && candidate.actorReference === null)
           )
             return false;
           const evaluated = await createPostgresWorkflowDefinitionStore(
@@ -75,7 +76,10 @@ export function createMerchantAdditionalOrderAcceptanceComposition(
           ).evaluatePublishedAction(
             {
               ...scope,
-              actorReference: candidate.actorReference,
+              actorReference:
+                recordAs === "System" && options.actorReference !== undefined
+                  ? options.actorReference
+                  : (candidate.actorReference as string),
               resourceReference: candidate.orderReference,
               resourceVersion: execution.orderVersion,
               purposeCode: acceptance.purposeCode,

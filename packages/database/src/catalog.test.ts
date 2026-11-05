@@ -807,6 +807,9 @@ describe("migration catalog", () => {
       "2000_165_create_permission_brand_fence",
       "2000_166_create_membership_brand_fence",
       "2000_167_create_recipe_bounded_fence",
+      "2000_170_create_order_auto_acceptance_setting",
+      "2000_171_create_kitchen_screen_presence",
+      "2000_172_alter_staff_cancellation_cant_make",
       "2000_180_create_brand_guest_intake",
       "2000_181_alter_platform_support_merchant_pause",
     ]);

@@ -229,7 +229,11 @@ export function createPostgresAsapCapacityStore(
           audit.reasonCode !==
             (record.state === "Consumed" ? "ORDER_ACCEPTED" : "AUTHORIZED_CHECKOUT_CAPACITY") ||
           audit.occurredAt !== at ||
-          audit.sourceChannel !== (record.state === "Consumed" ? "MERCHANT_WEB" : "CUSTOMER_PWA") ||
+          // A staff Accept, or the worker's automatic acceptance (DEC-PAID-ORDER-AUTO-ACCEPT).
+          !(record.state === "Consumed"
+            ? ["MERCHANT_WEB", "EVENT_CONSUMER"]
+            : ["CUSTOMER_PWA"]
+          ).includes(audit.sourceChannel) ||
           audit.dataClassification !== "Restricted"
         )
           return fail("ASAP_CAPACITY_INVALID");
@@ -316,6 +320,8 @@ export async function consumeAcceptedAsapCapacity(
     readonly correlationReference: string;
     readonly retentionPolicyCode: string;
     readonly retentionPolicyVersion: number;
+    /** Where the acceptance came from (a System acceptance does not claim the merchant web). */
+    readonly sourceChannel?: string;
   },
 ): Promise<"Consumed" | "AlreadyConsumed" | "NotConsumable"> {
   const savepoint = "fulfillment_asap_consume";
@@ -364,7 +370,7 @@ export async function consumeAcceptedAsapCapacity(
           reasonCode: "ORDER_ACCEPTED",
           correlationId: input.correlationReference,
           occurredAt: observedAt,
-          sourceChannel: "MERCHANT_WEB",
+          sourceChannel: input.sourceChannel ?? "MERCHANT_WEB",
           dataClassification: "Restricted",
           retentionPolicyCode: input.retentionPolicyCode,
           retentionPolicyVersion: input.retentionPolicyVersion,

@@ -167,6 +167,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: when a kitchen board was last read (an instant only).
+      table: "kitchen_screen_presence",
+      classification: "technical-control-record",
+      writeOwner: { kind: "module", id: "@rms/kitchen" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "operational",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       // WP-2423 item 8 ⑦ DEC-STORE-FEATURES: a server chased a dish (append-only).
       table: "kitchen_work_chase",
       classification: "append-only-record",

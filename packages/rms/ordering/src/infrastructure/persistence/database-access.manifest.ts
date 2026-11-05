@@ -207,6 +207,24 @@ const databaseAccessManifestInput = {
     },
 
     {
+      // WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the Store's switch, versioned with who and when.
+      table: "order_auto_acceptance_setting",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      // WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: why a paid batch was not sent, or what sent it.
+      table: "order_auto_acceptance_decision",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/ordering" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "order_acceptance_hold",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/ordering" },
@@ -1199,6 +1217,42 @@ const databaseAccessManifestInput = {
         "packages/rms/ordering/src/infrastructure/persistence/order-payment-disposition-store.ts",
     },
 
+    {
+      id: "order-auto-acceptance.read.order_auto_acceptance_setting",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_auto_acceptance_setting" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-auto-acceptance-store.ts",
+    },
+    {
+      id: "order-auto-acceptance.write.order_auto_acceptance_setting",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_auto_acceptance_setting" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-auto-acceptance-store.ts",
+    },
+    {
+      id: "order-auto-acceptance.read.order_auto_acceptance_decision",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_auto_acceptance_decision" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-auto-acceptance-store.ts",
+    },
+    {
+      id: "order-auto-acceptance.write.order_auto_acceptance_decision",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "order_auto_acceptance_decision" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: null,
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-auto-acceptance-store.ts",
+    },
     {
       id: "order-acceptance-hold.read.order_acceptance_hold",
       operation: "read",

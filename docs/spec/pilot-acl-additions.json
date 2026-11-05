@@ -5948,6 +5948,69 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 13 ② (Owner 2026-11-05 \"就按这个做\"): the platform pauses a merchant's new guests and each Store's entry reads it"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_auto_acceptance_setting",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the Store's switch for sending paid orders straight to the kitchen, versioned with who and when (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_auto_acceptance_decision",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: why a paid batch was not sent automatically, written only when the reason changes, and which switch version sent one (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_auto_acceptance_setting",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the Store's switch for sending paid orders straight to the kitchen, versioned with who and when (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_ordering",
+      "object": "order_auto_acceptance_decision",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: why a paid batch was not sent automatically, written only when the reason changes, and which switch version sent one (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_screen_presence",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: when a kitchen board was last read at this Store: one row per Store, an instant only, at most one write a minute"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_screen_presence",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: when a kitchen board was last read at this Store: one row per Store, an instant only, at most one write a minute"
+    },
+    {
+      "type": "table",
+      "schema": "rms_kitchen",
+      "object": "kitchen_screen_presence",
+      "column": null,
+      "privilege": "UPDATE",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: when a kitchen board was last read at this Store: one row per Store, an instant only, at most one write a minute"
     }
   ]
 }

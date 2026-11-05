@@ -3625,6 +3625,20 @@ async function scanUnsupported(root, module, diagnostics) {
             "order_payment_disposition_record",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/order-acceptance-hold-store.ts";
+        // WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT admits only the switch and decision adapter (append-only).
+        const acceptedOrderAutoAcceptanceAsset =
+          module.packageName === "@rms/ordering" &&
+          module.manifest.ownedDatabase?.schema === "rms_ordering" &&
+          ["order_auto_acceptance_setting", "order_auto_acceptance_decision"].every((table) =>
+            module.manifest.ownedDatabase?.tables?.includes(table),
+          ) &&
+          moduleRelative === "src/infrastructure/persistence/order-auto-acceptance-store.ts";
+        // WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT admits only the kitchen board's last-read instant.
+        const acceptedKitchenScreenPresenceAsset =
+          module.packageName === "@rms/kitchen" &&
+          module.manifest.ownedDatabase?.schema === "rms_kitchen" &&
+          module.manifest.ownedDatabase?.tables?.includes("kitchen_screen_presence") &&
+          moduleRelative === "src/infrastructure/persistence/kitchen-screen-presence-store.ts";
         // WP-2423 Q9-G1 admits only the Store presence adapter (bounded staff activity periods).
         const acceptedStorePresenceAsset =
           module.packageName === "@rms/store" &&
@@ -3927,6 +3941,8 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedDiningTableQrAsset &&
           !acceptedOrderAcceptanceHoldAsset &&
           !acceptedStorePresenceAsset &&
+          !acceptedOrderAutoAcceptanceAsset &&
+          !acceptedKitchenScreenPresenceAsset &&
           !acceptedStoreReceiptProfileAsset &&
           !acceptedDiningSessionStartAsset &&
           !acceptedDiningJoinRegenerationAsset &&

@@ -25,13 +25,22 @@ const unavailable = (): never => {
 export function createMerchantPaidOrderAcceptance(
   options: Omit<Composition, "validateEligibility"> & {
     authorizeActor(transaction: ConsumerTransaction): Promise<boolean>;
+    /**
+     * Who the workflow evaluates. A person, who is also recorded as the acceptor; with
+     * `recordAs: "System"` the worker's own actor, and the record names no person.
+     */
     actorReference: string;
+    /** WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the same rules and writes for a System acceptance. */
+    recordAs?: "User" | "System";
+    /** Where the acceptance came from (Fulfillment's capacity audit). */
+    sourceChannel?: string;
     workflowVersionReference: string;
     reasonCode: string;
     context: ReturnType<typeof createOrderPaidContextSource>;
   },
 ) {
   const actorReference = parseOrderingReference(options.actorReference);
+  const recordAs = options.recordAs ?? "User";
   const workflowVersionReference = parseOrderingReference(options.workflowVersionReference);
   const scope = Object.freeze({ ...options.scope });
   const acceptance = Object.freeze({ ...options.acceptance });
@@ -165,8 +174,8 @@ export function createMerchantPaidOrderAcceptance(
         acceptedOrderVersion: expected + 1,
         brandReference: scope.brandReference,
         storeReference: scope.storeReference,
-        actorType: "User" as const,
-        actorReference,
+        actorType: recordAs,
+        actorReference: recordAs === "System" ? null : actorReference,
         purposeCode: acceptance.purposeCode,
         permissionCode: acceptance.permissionCode,
         reasonCode: options.reasonCode,
@@ -271,6 +280,7 @@ export function createMerchantPaidOrderAcceptance(
             correlationReference: String(committed.record.operationReference),
             retentionPolicyCode,
             retentionPolicyVersion,
+            ...(options.sourceChannel === undefined ? {} : { sourceChannel: options.sourceChannel }),
           },
         );
       }

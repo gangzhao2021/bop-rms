@@ -26,13 +26,17 @@ const unavailable = (): never => {
 export function createMerchantPaidAdditionalOrderAcceptance(
   options: Omit<Composition, "validateEligibility" | "sha256"> & {
     authorizeActor(transaction: ConsumerTransaction): Promise<boolean>;
+    /** Who the workflow evaluates; with `recordAs: "System"` the record names no person. */
     actorReference: string;
+    /** WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the same rules and writes for a System acceptance. */
+    recordAs?: "User" | "System";
     workflowVersionReference: string;
     reasonCode: string;
     context: ReturnType<typeof createAdditionalOrderPaidContextSource>;
   },
 ) {
   const actorReference = parseOrderingReference(options.actorReference);
+  const recordAs = options.recordAs ?? "User";
   const workflowVersionReference = parseOrderingReference(options.workflowVersionReference);
   const scope = Object.freeze({ ...options.scope });
   const acceptance = Object.freeze({ ...options.acceptance });
@@ -144,8 +148,8 @@ export function createMerchantPaidAdditionalOrderAcceptance(
         acceptedOrderVersion: expected + 1,
         brandReference: scope.brandReference,
         storeReference: scope.storeReference,
-        actorType: "User" as const,
-        actorReference,
+        actorType: recordAs,
+        actorReference: recordAs === "System" ? null : actorReference,
         purposeCode: acceptance.purposeCode,
         permissionCode: acceptance.permissionCode,
         reasonCode: options.reasonCode,

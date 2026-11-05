@@ -19,6 +19,9 @@ export function createMerchantOrderAcceptanceComposition(options: {
   gates: Evaluation["gates"];
   authorize: WriterOptions["authorize"];
   audit: WriterOptions["audit"];
+  /** Who the workflow evaluates; with `recordAs: "System"` the record names no person. */
+  actorReference?: string;
+  recordAs?: "User" | "System";
   validateEligibility(
     transaction: ConsumerTransaction,
     record: Parameters<WriterOptions["validateCurrentSource"]>[1],
@@ -27,6 +30,7 @@ export function createMerchantOrderAcceptanceComposition(options: {
 }) {
   const scope = Object.freeze({ ...options.scope });
   const acceptance = Object.freeze({ ...options.acceptance });
+  const recordAs = options.recordAs ?? "User";
   return Object.freeze({
     async commit(input: {
       transaction: ConsumerTransaction;
@@ -38,7 +42,7 @@ export function createMerchantOrderAcceptanceComposition(options: {
         brandReference: scope.brandReference,
         storeReference: scope.storeReference,
         authorize: async (transaction, candidate) =>
-          candidate.actorType === "User" &&
+          candidate.actorType === recordAs &&
           candidate.purposeCode === acceptance.purposeCode &&
           candidate.permissionCode === acceptance.permissionCode &&
           (await options.authorize(transaction, candidate)) === true,
@@ -73,7 +77,7 @@ export function createMerchantOrderAcceptanceComposition(options: {
                 !order.order.batches.some(
                   (batch) => batch.orderBatchReference === candidate.orderBatchReference,
                 ) ||
-                candidate.actorReference === null
+                (recordAs === "User" && candidate.actorReference === null)
               )
                 return false;
               const evaluated = await evaluateOrderAcceptanceWorkflow({
@@ -87,7 +91,10 @@ export function createMerchantOrderAcceptanceComposition(options: {
                   tenantReference: scope.tenantReference,
                   brandReference: scope.brandReference,
                   storeReference: scope.storeReference,
-                  actorReference: candidate.actorReference,
+                  actorReference:
+                    recordAs === "System" && options.actorReference !== undefined
+                      ? options.actorReference
+                      : (candidate.actorReference as string),
                   resourceReference: candidate.orderReference,
                   resourceVersion: candidate.expectedOrderVersion,
                   purposeCode: acceptance.purposeCode,

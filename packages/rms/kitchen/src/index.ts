@@ -313,8 +313,15 @@ export {
 export {
   createPostgresKitchenBatchCancellation,
   listStoreKitchenOrderItemStates,
+  listStoreKitchenBatchTouches,
   listStoreStartedKitchenBatches,
+  loadStoreLastKitchenStepAt,
 } from "./infrastructure/persistence/kitchen-work-cancellation-store.js";
+export {
+  kitchenScreenPresenceWriteIntervalMs,
+  loadKitchenScreenSeenAt,
+  recordKitchenScreenPresence,
+} from "./infrastructure/persistence/kitchen-screen-presence-store.js";
 export type {
   KitchenOrderItemReadyResult,
   KitchenWorkLifecycleActionCode,

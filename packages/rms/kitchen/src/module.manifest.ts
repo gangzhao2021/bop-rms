@@ -82,6 +82,7 @@ const moduleManifestInput =
         "kitchen_work_cancellation",
         "kitchen_combo_part_done",
         "kitchen_work_chase",
+        "kitchen_screen_presence",
         "kitchen_not_prepared_product",
         "kitchen_section_list",
         "kitchen_product_section",

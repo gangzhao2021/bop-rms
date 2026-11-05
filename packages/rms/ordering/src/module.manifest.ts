@@ -85,6 +85,8 @@ const moduleManifestInput =
         "order_round_staff_hold",
         "order_round_staff_hold_release",
         "order_acceptance_hold",
+        "order_auto_acceptance_setting",
+        "order_auto_acceptance_decision",
         "order_acceptance_hold_resolution",
         "checkout_session_record",
         "checkout_details_record",

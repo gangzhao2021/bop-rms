@@ -31,8 +31,8 @@ const hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
  * `submitter` (DEC-DINING-ANY-PARTICIPANT-SUBMIT) is another seated guest's Guest session who
  * submits and pays this round; the Cart lines keep the fixture guest as the one who added them.
  */
-export function journeyRound({ at, prefix, submitter = null, party = null }) {
-  const f = orderWriteFixture({ at, dineIn: true });
+export function journeyRound({ at, prefix, submitter = null, party = null, dineIn = true }) {
+  const f = orderWriteFixture({ at, dineIn });
   const record = f.request.record,
     batch = record.order.batches[0],
     evidence = f.request.checkoutValidationEvidence;

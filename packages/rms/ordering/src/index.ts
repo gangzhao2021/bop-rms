@@ -476,6 +476,32 @@ export {
   createPostgresOrderAcceptanceHoldStore,
   listStoreOrderAcceptanceHolds,
 } from "./infrastructure/persistence/order-acceptance-hold-store.js";
+export {
+  changeOrderAutoAcceptanceSetting,
+  listStoreOpenAutoAcceptedBatches,
+  listStoreOrderAutoAcceptanceFacts,
+  loadOrderAutoAcceptanceSetting,
+  loadOrderAutoAcceptanceSkip,
+  OrderAutoAcceptanceSettingConflictError,
+  recordOrderAutoAcceptanceAccepted,
+  recordOrderAutoAcceptanceSkip,
+  type OpenAutoAcceptedBatch,
+  type OrderAutoAcceptanceBatchFact,
+  type OrderAutoAcceptanceSetting,
+} from "./infrastructure/persistence/order-auto-acceptance-store.js";
+export {
+  decideOrderAutoAcceptance,
+  orderAutoAcceptanceFailureIsQuiet,
+  orderAutoAcceptanceKitchenScreenMs,
+  orderAutoAcceptanceMaximumItems,
+  orderAutoAcceptancePaidWindowMs,
+  orderAutoAcceptedPickupRefundAfterMs,
+  orderAutoAcceptedPickupRefundAt,
+  type OrderAutoAcceptanceDecision,
+  type OrderAutoAcceptanceFacts,
+  type OrderAutoAcceptanceSkipReason,
+  type OrderAutoAcceptanceSwitch,
+} from "./domain/order-auto-acceptance.js";
 // WP-2423 Q14: the priced items of the Store's Orders behind the Store sales reports.
 export * from "./infrastructure/persistence/store-sales-order-source.js";
 
