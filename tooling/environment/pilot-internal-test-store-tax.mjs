@@ -189,7 +189,8 @@ export async function createInternalTestStoreTax(
 ) {
   if (environment !== "InternalTest") return unavailable("internal-test-only");
   const binding = installationProfile?.binding;
-  const storeReference = storeProfile?.binding?.storeReference;
+  const own = storeProfile?.binding;
+  const storeReference = own?.storeReference;
   if (
     ![
       binding?.tenantReference,
@@ -200,8 +201,9 @@ export async function createInternalTestStoreTax(
       evidence?.operationReference,
     ].every((value) => typeof value === "string" && UUID_V7.test(value)) ||
     storeReference === binding.storeReference ||
-    storeProfile.binding.brandReference !== binding.brandReference ||
-    storeProfile.binding.tenantReference !== binding.tenantReference ||
+    // DEC-MULTI-MERCHANT-ONE-INSTALLATION: the Store's Brand may be another merchant's.
+    !UUID_V7.test(storeProfile.binding.brandReference ?? "") ||
+    !UUID_V7.test(storeProfile.binding.tenantReference ?? "") ||
     !IDENTIFIER.test(role) ||
     !IDENTIFIER.test(readRole) ||
     typeof nextReference !== "function" ||
@@ -222,13 +224,13 @@ export async function createInternalTestStoreTax(
     const tx = { query: (sql, values = []) => client.query(sql, [...values]) };
     await tx.query(
       "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
-      [binding.tenantReference, binding.brandReference, storeReference],
+      [own.tenantReference, own.brandReference, storeReference],
     );
     // The TEST Store as opened in the product.
     const [store] = (
       await tx.query(
         "SELECT s.display_name,s.lifecycle FROM bop_tenant.store s JOIN bop_tenant.store_opening o ON o.brand_id=s.brand_id AND o.store_id=s.store_id WHERE s.brand_id=$1 AND s.store_id=$2",
-        [binding.brandReference, storeReference],
+        [own.brandReference, storeReference],
       )
     ).rows;
     if (store === undefined) unavailable("store-not-opened-in-product");
@@ -239,7 +241,7 @@ export async function createInternalTestStoreTax(
     const [address] = (
       await tx.query(
         "SELECT snapshot_json->'content'->>'countryCode' country,snapshot_json->'content'->>'regionCode' region FROM rms_store.store_setup_reference_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND reference_kind='Address' ORDER BY revision DESC LIMIT 1",
-        [binding.tenantReference, binding.brandReference, storeReference],
+        [own.tenantReference, own.brandReference, storeReference],
       )
     ).rows;
     if (address === undefined) unavailable("store-address-not-set-in-store-setup");
@@ -254,7 +256,8 @@ export async function createInternalTestStoreTax(
       result = await createInternalTestStoreTaxConfiguration(
         tx,
         {
-          brandReference: binding.brandReference,
+          brandReference: own.brandReference,
+          sourceBrandReference: binding.brandReference,
           sourceStoreReference: binding.storeReference,
           sourceConfigurationReference: source.taxConfiguration.configurationReference,
           target: target.taxConfiguration,

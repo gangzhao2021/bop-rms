@@ -15,6 +15,10 @@ import {
  * test-environment-only shortcut (coordinator 2026-10-30). After the Owner opened a TEST Store on
  * the Stores page ("… – not production"):
  *
+ *   merchant  — WP-2423 DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: instead of the Stores page, a new
+ *               merchant from nothing: its Brand, first Store, Owner, one tax class and one empty
+ *               menu (database, one transaction, as the services' role). The other commands then
+ *               take `--merchant <the same --operation>`. Prints the new merchant's references;
  *   setup     — its first published configuration and synthetic launch gate (database, one
  *               audited transaction; `--dry-run` rolls it back);
  *   tax       — after `directory`, and once its address is set in Store setup: its own synthetic
@@ -56,7 +60,21 @@ function uuidV7(now = Date.now()) {
   return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${hex.slice(0, 3)}-${variant}${hex.slice(4, 7)}-${hex.slice(7, 19)}`;
 }
 const flags = {
+  merchant: {
+    "--database": "expectedDatabaseName",
+    "--migration-env": "envFile",
+    "--operation": "operationReference",
+    "--owner": "ownerActorReference",
+    "--operator": "operatorActorReference",
+    "--brand-code": "brandCode",
+    "--brand-name": "brandName",
+    "--store-code": "storeCode",
+    "--store-name": "storeName",
+    "--time-zone": "timeZone",
+    "--locale": "locale",
+  },
   setup: {
+    "--merchant": "merchantOperation",
     "--database": "expectedDatabaseName",
     "--migration-env": "envFile",
     "--store": "storeReference",
@@ -66,6 +84,7 @@ const flags = {
     "--approval": "approval",
   },
   "stock-site": {
+    "--merchant": "merchantOperation",
     "--database": "expectedDatabaseName",
     "--migration-env": "envFile",
     "--store": "storeReference",
@@ -84,6 +103,7 @@ const flags = {
     "--approval": "approval",
   },
   tax: {
+    "--merchant": "merchantOperation",
     "--database": "expectedDatabaseName",
     "--migration-env": "envFile",
     "--store": "storeReference",
@@ -93,11 +113,13 @@ const flags = {
     "--approval": "approval",
   },
   directory: {
+    "--merchant": "merchantOperation",
     "--database": "expectedDatabaseName",
     "--migration-env": "envFile",
     "--store": "storeReference",
     "--name": "name",
     "--stock-site": "stockSiteReference",
+    "--owner": "ownerActorReference",
   },
   settlement: { "--database": "expectedDatabaseName", "--migration-env": "envFile" },
   provider: {},
@@ -111,7 +133,14 @@ const flags = {
   },
 };
 /** Flags a command may leave out: `directory` reads the Store's own default stock site. */
-const optionalFlags = new Set(["directory:stockSiteReference"]);
+const optionalFlags = new Set([
+  "directory:stockSiteReference",
+  "setup:merchantOperation",
+  "stock-site:merchantOperation",
+  "tax:merchantOperation",
+  "directory:merchantOperation",
+  "directory:ownerActorReference",
+]);
 export function parseStoreOpenArguments(args) {
   const [command, directory, ...rest] = args;
   const known = flags[command];
@@ -150,6 +179,75 @@ export function parseStoreOpenArguments(args) {
   return Object.freeze(options);
 }
 
+/** The new merchant's references, derived from its opening operation as it derived them. */
+async function merchantOf(options) {
+  if (options.merchantOperation === undefined) return undefined;
+  const { merchantOpeningReferences } = await import("../../apps/api/dist/merchant-opening.js");
+  return merchantOpeningReferences(options.merchantOperation);
+}
+const withMerchant = (binding, merchant) =>
+  merchant === undefined
+    ? binding
+    : {
+        ...binding,
+        tenantReference: merchant.tenantReference,
+        brandReference: merchant.brandReference,
+      };
+
+/** A new merchant, in one transaction as the services' role. A rerun finds its own result. */
+async function merchant(options) {
+  const database = await import("./pilot-internal-test-renew-database.mjs");
+  const opening = await import("../../apps/api/dist/merchant-opening.js");
+  const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
+  const installation = await read("installation.json"),
+    profile = await read("internal-test-profile.json");
+  if (installation.environment !== "InternalTest" || profile.environment !== "InternalTest")
+    unavailable("not-internal-test");
+  if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
+  if (!/not production/u.test(options.brandName) || !/not production/u.test(options.storeName))
+    unavailable("merchant-not-labelled-test");
+  if (options.ownerActorReference === options.operatorActorReference)
+    unavailable("owner-is-operator");
+  const client = await database.connectRenewalDatabase(
+    options.envFile,
+    options.expectedDatabaseName,
+  );
+  try {
+    const command = {
+      operationReference: options.operationReference,
+      ownerActorReference: options.ownerActorReference,
+      brandCode: options.brandCode,
+      brandName: options.brandName,
+      storeCode: options.storeCode,
+      storeName: options.storeName,
+      timeZone: options.timeZone,
+      locale: options.locale,
+    };
+    const openedAt = new Date().toISOString();
+    await client.query("BEGIN");
+    try {
+      await client.query(`SET LOCAL ROLE "${installation.roles.api}"`);
+      const result = await opening.recordMerchantOpening(client, {
+        command,
+        openedByActorReference: options.operatorActorReference,
+        sourceChannel: "DEPLOYMENT",
+        openedAt,
+      });
+      if (result.status === "Opened")
+        await opening.recordMerchantFirstContent(client, { command, openedAt });
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      if (error instanceof opening.MerchantOpeningError)
+        unavailable("merchant-" + error.code.toLowerCase());
+      throw error;
+    }
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
 async function setup(options) {
   const database = await import("./pilot-internal-test-renew-database.mjs");
   const store = await import("./pilot-internal-test-store-setup.mjs");
@@ -164,6 +262,7 @@ async function setup(options) {
     options.expectedDatabaseName,
   );
   try {
+    const target = await merchantOf(options);
     const setupRole = store.storeSetupRoleName(options.expectedDatabaseName);
     for (const sql of store.renderStoreSetupRoleSql(setupRole)) await client.query(sql);
     return await store.setUpInternalTestStore(client, {
@@ -172,6 +271,14 @@ async function setup(options) {
       setupRole,
       readRole: installation.roles.api,
       binding: profile.binding,
+      ...(target === undefined
+        ? {}
+        : {
+            merchant: {
+              tenantReference: target.tenantReference,
+              brandReference: target.brandReference,
+            },
+          }),
       sourceStoreReference: profile.binding.storeReference,
       targetStoreReference: options.storeReference,
       approverActorReference: options.approverActorReference,
@@ -211,7 +318,7 @@ async function stockSite(options) {
       environment: profile.environment,
       database: options.expectedDatabaseName,
       role,
-      binding: profile.binding,
+      binding: withMerchant(profile.binding, await merchantOf(options)),
       storeReference: options.storeReference,
       approverActorReference: options.approverActorReference,
       now: () => new Date().toISOString(),
@@ -382,17 +489,30 @@ async function directory(options) {
     options.envFile,
     options.expectedDatabaseName,
   );
+  const target = await merchantOf(options);
   let own;
   try {
     own = await site.readStoreDefaultStockSite(client, {
       role: installation.roles.api,
-      binding: profile.binding,
+      binding: withMerchant(profile.binding, target),
       storeReference: options.storeReference,
     });
   } finally {
     await client.end().catch(() => undefined);
   }
-  return issueStoreDirectoryWithOwnSite(options, own);
+  return issueStoreDirectoryWithOwnSite(
+    options,
+    own,
+    issueInternalTestStoreDirectory,
+    target && {
+      ...target,
+      owner: {
+        selector: "owner-" + options.name,
+        actorReference: options.ownerActorReference,
+        validUntil: profile.binding.validUntil,
+      },
+    },
+  );
 }
 
 /**
@@ -403,6 +523,7 @@ export function issueStoreDirectoryWithOwnSite(
   options,
   own,
   issue = issueInternalTestStoreDirectory,
+  merchantFiles,
 ) {
   if (own === null) unavailable("stock-site-missing-run-stock-site-first");
   if (options.stockSiteReference !== undefined && options.stockSiteReference !== own)
@@ -414,6 +535,7 @@ export function issueStoreDirectoryWithOwnSite(
     // The Store's own identities derive from the Store: a rerun gives the same ones.
     operationReference: options.storeReference,
     stockSiteReference: own,
+    ...(merchantFiles === undefined ? {} : { merchant: merchantFiles }),
   });
 }
 
@@ -620,21 +742,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const options = parseStoreOpenArguments(process.argv.slice(2));
     if (process.env.NODE_ENV !== "development") unavailable("not-development-mode");
     const result =
-      options.command === "setup"
-        ? await setup(options)
-        : options.command === "settlement"
-          ? await settlement(options)
-          : options.command === "renew"
-            ? await renew(options)
-            : options.command === "stock-site"
-              ? await stockSite(options)
-              : options.command === "tax"
-                ? await storeTax(options)
-                : options.command === "kitchen"
-                  ? await kitchen(options)
-                  : options.command === "provider"
-                    ? await provisionStoreSimulator(options.directory)
-                    : await directory(options);
+      options.command === "merchant"
+        ? await merchant(options)
+        : options.command === "setup"
+          ? await setup(options)
+          : options.command === "settlement"
+            ? await settlement(options)
+            : options.command === "renew"
+              ? await renew(options)
+              : options.command === "stock-site"
+                ? await stockSite(options)
+                : options.command === "tax"
+                  ? await storeTax(options)
+                  : options.command === "kitchen"
+                    ? await kitchen(options)
+                    : options.command === "provider"
+                      ? await provisionStoreSimulator(options.directory)
+                      : await directory(options);
     console.log(JSON.stringify(result));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";

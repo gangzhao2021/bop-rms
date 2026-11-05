@@ -143,6 +143,8 @@ export async function setUpInternalTestStore(
     setupRole,
     readRole,
     binding,
+    /** DEC-MULTI-MERCHANT-ONE-INSTALLATION: the new merchant's Tenant and Brand (absent: the installation's). */
+    merchant,
     sourceStoreReference,
     targetStoreReference,
     approverActorReference,
@@ -172,8 +174,9 @@ export async function setUpInternalTestStore(
     Date.parse(binding.validUntil) > Date.parse(at) + 30 * 86_400_000
   )
     return unavailable("input-invalid");
-  const brand = binding.brandReference,
-    tenant = binding.tenantReference;
+  const brand = merchant?.brandReference ?? binding.brandReference,
+    tenant = merchant?.tenantReference ?? binding.tenantReference,
+    sourceBrand = binding.brandReference;
   const tx = { query: (sql, values = []) => client.query(sql, [...values]) };
   const scope = (store) =>
     tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
@@ -209,10 +212,13 @@ export async function setUpInternalTestStore(
         unavailable("store-already-set-up");
     // The source Store's configuration in force (its own publication proof), read as the services.
     await client.query(`SET LOCAL ROLE "${readRole}"`);
-    await scope(sourceStoreReference);
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      sourceBrand,
+      sourceStoreReference,
+    ]);
     const [sourceStore] = (
       await tx.query("SELECT time_zone FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2", [
-        brand,
+        sourceBrand,
         sourceStoreReference,
       ])
     ).rows;
@@ -220,7 +226,11 @@ export async function setUpInternalTestStore(
     const source = (
       await readPublishedStoreConfiguration(
         operatingOf(
-          { tenantReference: tenant, brandReference: brand, storeReference: sourceStoreReference },
+          {
+            tenantReference: binding.tenantReference,
+            brandReference: sourceBrand,
+            storeReference: sourceStoreReference,
+          },
           String(sourceStore.time_zone),
           binding,
         ),

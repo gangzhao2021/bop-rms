@@ -318,3 +318,59 @@ it("v15 2026-10-31: the issued Store directory loads through the real installati
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it("DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: a new merchant's first Store names nothing of the installation's merchant", () => {
+  const menu = "0190fa20-0000-7000-8000-000000000001",
+    taxClass = "0190fa20-0000-7000-8000-000000000100";
+  const source = files();
+  source["internal-test-menu.json"] = {
+    ...source["internal-test-menu.json"],
+    menuReference: menu,
+    taxClassificationReference: taxClass,
+    productReference: "0190fa20-0000-7000-8000-000000000028",
+  };
+  source["internal-test-workflow-Pickup.json"] = { scope: { ...binding } };
+  source["internal-test-merchant.json"] = { scope: { ...binding }, actors: [] };
+  const merchant = {
+    tenantReference: ref(101),
+    brandReference: ref(102),
+    menuReference: ref(103),
+    taxClassificationReference: ref(104),
+    owner: {
+      selector: "owner-x",
+      actorReference: ref(105),
+      validUntil: "2026-11-26T02:26:31.598Z",
+    },
+  };
+  const derived = deriveInternalTestStoreFiles(source, {
+    storeReference: store2,
+    operationReference: operation,
+    stockSiteReference: site2,
+    merchant,
+  });
+  const text = JSON.stringify(derived);
+  for (const theirs of [
+    binding.tenantReference,
+    binding.brandReference,
+    store1,
+    menu,
+    taxClass,
+    sku,
+  ])
+    expect(text).not.toContain(theirs);
+  expect(derived["internal-test-profile.json"].binding).toMatchObject({
+    tenantReference: ref(101),
+    brandReference: ref(102),
+    storeReference: store2,
+  });
+  expect(derived["internal-test-menu.json"]).toMatchObject({
+    menuReference: ref(103),
+    taxClassificationReference: ref(104),
+  });
+  // Its own workflow releases are installed for it; its staff are its own.
+  expect(derived["internal-test-workflow-Pickup.json"]).toBeUndefined();
+  expect(derived["internal-test-merchant.json"]).toMatchObject({
+    scope: { brandReference: ref(102), storeReference: store2 },
+    actors: [merchant.owner],
+  });
+});

@@ -10,7 +10,9 @@ const seam = vi.hoisted(() => ({
 }));
 vi.mock("../../packages/bop/membership/src/index.ts", () => ({
   async isActiveStoreMember(_tx, scope) {
-    return seam.members.has(scope.actorReference + " " + scope.storeReference);
+    return (
+      seam.members === null || seam.members.has(scope.actorReference + " " + scope.storeReference)
+    );
   },
 }));
 vi.mock("../../packages/bop/tenant/src/index.ts", () => ({
@@ -94,7 +96,8 @@ beforeEach(() => {
   seam.created = [];
   seam.selections = [];
   seam.kdsStarts = [];
-  seam.members = new Set();
+  // Everyone configured works at the Store unless a test says otherwise.
+  seam.members = null;
 });
 afterEach(() => vi.unstubAllEnvs());
 function setup(multiple = true) {

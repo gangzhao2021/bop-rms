@@ -191,7 +191,7 @@ export async function createInternalMerchantSession(
       recentMfaAt: null,
     });
   };
-  const validateAssociation = async (_tx, session, selected, at = clock()) => {
+  const validateAssociation = async (tx, session, selected, at = clock()) => {
     try {
       const entries = await roster(),
         entry = entries.find((value) => value.actorReference === session.actor.actorReference);
@@ -199,9 +199,16 @@ export async function createInternalMerchantSession(
         entry !== undefined &&
         instant(at) < entry.validUntil &&
         instant(clock()) < entry.validUntil &&
-        // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: any Store this installation serves (the Store
-        // assignment itself is checked by the merchant BFF against the person's membership).
-        servedStoreFor(resources, selected) !== null
+        // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: any Store this installation serves;
+        // DEC-MULTI-MERCHANT-ONE-INSTALLATION: where they work, so a person of another merchant
+        // signs in to their own merchant's Store. The merchant BFF checks the rest.
+        servedStoreFor(resources, selected) !== null &&
+        (await isActiveStoreMember(tx, {
+          brandReference: selected.brandReference,
+          storeReference: selected.storeReference,
+          actorReference: session.actor.actorReference,
+          at: instant(at),
+        }))
       );
     } catch {
       return false;

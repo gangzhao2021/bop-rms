@@ -101,6 +101,16 @@ export const storeSecretFiles = Object.freeze({
     "internal-test-staff-totp.json",
   ]),
 });
+/** A new merchant's own: never derived from the installation's. */
+const merchantOwnFiles = new Set([
+  "internal-test-merchant.json",
+  "internal-test-workflow-Pickup.json",
+  "internal-test-workflow-DineIn.json",
+  "internal-test-workflow-AdditionalRelease.json",
+  "cancellation-workflow-draft-result.json",
+]);
+/** A new merchant's keys are its own, created for it (`pilot-qr`, `pilot-dining`), never copied. */
+const merchantOwnKeys = new Set(["internal-test-dining-key", "internal-test-qr-key.pem"]);
 /** Files that name one Store's dining tables; the new Store has none until staff add them. */
 const isTableFile = (name) => /^internal-test-dining-table.*\.json$/u.test(name);
 /** Historical copies and records the new Store never had. */
@@ -135,7 +145,7 @@ export function storeDirectoryReference(operationReference, label) {
 /** Pure: the new Store's JSON files from the installation's (parsed). */
 export function deriveInternalTestStoreFiles(
   files,
-  { storeReference, operationReference, stockSiteReference },
+  { storeReference, operationReference, stockSiteReference, merchant },
 ) {
   const profile = files["internal-test-profile.json"];
   const installation = files["installation.json"];
@@ -156,6 +166,28 @@ export function deriveInternalTestStoreFiles(
   )
     return refuse("stock-site-required");
   const primary = profile.binding.storeReference;
+  // DEC-MULTI-MERCHANT-ONE-INSTALLATION: a new merchant's first Store: its own Tenant and Brand, tax
+  // class and menu wherever the installation's appear, and its own identities for what it sells.
+  const merchantValue = new Map(
+    merchant === undefined
+      ? []
+      : [
+          [profile.binding.tenantReference, merchant.tenantReference],
+          [profile.binding.brandReference, merchant.brandReference],
+          [files["internal-test-menu.json"]?.menuReference, merchant.menuReference],
+          [
+            files["internal-test-menu.json"]?.taxClassificationReference,
+            merchant.taxClassificationReference,
+          ],
+        ],
+  );
+  const merchantFields =
+    merchant === undefined
+      ? {}
+      : {
+          "internal-test-menu.json": ["generationReference", "skuReference", "productReference"],
+          "internal-test-inventory.json": ["recipeReference"],
+        };
   const derived = new Map();
   const own = (field, value) => {
     const key = field + ":" + value;
@@ -169,6 +201,7 @@ export function deriveInternalTestStoreFiles(
         Object.entries(value).map(([key, entry]) => [key, rewrite(entry, key, fields)]),
       );
     if (value === primary) return storeReference;
+    if (merchantValue.has(value)) return merchantValue.get(value);
     if (typeof value === "string" && UUID_V7.test(value) && fields.includes(field))
       return own(field, value);
     return value;
@@ -180,10 +213,15 @@ export function deriveInternalTestStoreFiles(
       !configuration.includes(name) ||
       isTableFile(name) ||
       isHistory(name) ||
-      isOwnSettlementCoverage(name)
+      isOwnSettlementCoverage(name) ||
+      // Its own workflow releases and staff are written for it (`workflow-release-install`, below).
+      (merchant !== undefined && merchantOwnFiles.has(name))
     )
       continue;
-    const next = rewrite(value, "", storeOwnReferenceFields[name] ?? []);
+    const next = rewrite(value, "", [
+      ...(storeOwnReferenceFields[name] ?? []),
+      ...(merchantFields[name] ?? []),
+    ]);
     if (name === "customer-runtime.json" && Array.isArray(next.diningTableFiles))
       next.diningTableFiles = [];
     result[name] = next;
@@ -194,6 +232,18 @@ export function deriveInternalTestStoreFiles(
   const queue = result["internal-test-task-queue.json"];
   if (queue?.exceptionTaskPolicy && queue.queueReference)
     queue.exceptionTaskPolicy.managerQueueReference = queue.queueReference;
+  if (merchant !== undefined)
+    result["internal-test-merchant.json"] = {
+      schemaVersion: 2,
+      environment: "InternalTest",
+      database: profile.database,
+      scope: {
+        tenantReference: merchant.tenantReference,
+        brandReference: merchant.brandReference,
+        storeReference,
+      },
+      actors: [merchant.owner],
+    };
   return Object.freeze(result);
 }
 
@@ -207,6 +257,7 @@ export async function issueInternalTestStoreDirectory({
   storeReference,
   operationReference,
   stockSiteReference,
+  merchant,
 }) {
   if (!NAME.test(name)) return refuse("name-invalid");
   const present = new Set(
@@ -231,6 +282,7 @@ export async function issueInternalTestStoreDirectory({
     storeReference,
     operationReference,
     stockSiteReference,
+    ...(merchant === undefined ? {} : { merchant }),
   });
   const listPath = join(directory, "stores.json");
   let list = { schemaVersion: 1, stores: [] };
@@ -261,6 +313,7 @@ export async function issueInternalTestStoreDirectory({
     return refuse("directory-exists");
   }
   for (const file of copies) {
+    if (merchant !== undefined && merchantOwnKeys.has(file)) continue;
     await writeFile(join(target, file), await readFile(join(directory, file)), { mode: 0o600 });
     await chmod(join(target, file), 0o600);
   }
@@ -283,10 +336,37 @@ export async function issueInternalTestStoreDirectory({
   // had no tables, and the Store's reconciliation worker could not start). Before the Store is
   // listed, so a Store whose simulator cannot be created is never served.
   await provisionStoreSimulator(target);
+  if (merchant !== undefined) await provisionMerchantOwn(directory, target, merchant);
   const next = { schemaVersion: 1, stores: [...list.stores, relative] };
   await writeFile(listPath + ".next", JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
   await rename(listPath + ".next", listPath);
   return Object.freeze({ directory: relative, files: names.length + copies.length + 1 });
+}
+
+/**
+ * A new merchant's own table and pickup signing keys, through their own initialisers, and its Owner
+ * on the installation's TEST-ONLY staff page (a signed-out sign-in is answered by the installation's
+ * first Store, which sends them to their own merchant).
+ */
+async function provisionMerchantOwn(directory, target, merchant) {
+  const { createInternalDiningCredentialLoaders } = await import("./pilot-dining-credentials.mjs");
+  const { createInternalQrLoaders } = await import("./pilot-qr.mjs");
+  const profile = JSON.parse(await readFile(join(target, "internal-test-profile.json"), "utf8"));
+  const common = { loadProfile: async () => profile, expectedDatabaseName: profile.database };
+  await createInternalDiningCredentialLoaders({
+    path: join(target, "internal-test-dining-key"),
+  }).provisionInternalDiningCredentials();
+  await createInternalQrLoaders({
+    ...common,
+    file: join(target, "internal-test-qr-key.pem"),
+  }).provisionInternalQr();
+  const file = join(directory, "internal-test-merchant.json");
+  const staff = JSON.parse(await readFile(file, "utf8"));
+  if (!staff.actors.some((entry) => entry.selector === merchant.owner.selector)) {
+    const nextStaff = { ...staff, actors: [...staff.actors, merchant.owner] };
+    await writeFile(file + ".next", JSON.stringify(nextStaff, null, 2) + "\n", { mode: 0o600 });
+    await rename(file + ".next", file);
+  }
 }
 
 /**

@@ -15,6 +15,7 @@ import {
 import {
   MerchantOpeningError,
   merchantOpeningReferences,
+  recordMerchantFirstContent,
   recordMerchantOpening,
 } from "../../../apps/api/dist/merchant-opening.js";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -300,6 +301,29 @@ it("opens a merchant from nothing; a retry finds it, another merchant's code is 
         { action_code: "BRAND_CREATED", actor: operator },
         { action_code: "STORE_OPENED", actor: operator },
       ]);
+      // Its first content: one tax class and one empty menu, under its Owner.
+      await admin.query("BEGIN");
+      await admin.query("SET LOCAL ROLE " + api);
+      const content = await recordMerchantFirstContent(admin, { command, openedAt: at });
+      await admin.query("COMMIT");
+      assert.equal(content.menuReference, refs.menuReference);
+      assert.equal(
+        (
+          await one("SELECT brand_id::text b FROM rms_catalog.menu WHERE menu_id=$1", [
+            refs.menuReference,
+          ])
+        ).b,
+        refs.brandReference,
+      );
+      assert.equal(
+        (
+          await one(
+            "SELECT count(*)::int n FROM rms_catalog.product_tax_classification_registry_record WHERE brand_id=$1",
+            [refs.brandReference],
+          )
+        ).n,
+        1,
+      );
       // The owner is a member of the new merchant, seen through its scope and no other.
       await admin.query("BEGIN");
       await admin.query("SET LOCAL ROLE " + api);

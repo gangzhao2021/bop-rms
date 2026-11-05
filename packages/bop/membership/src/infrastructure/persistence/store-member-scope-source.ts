@@ -64,10 +64,14 @@ export async function isActiveStoreMember(
     readonly at: string;
   },
 ): Promise<boolean> {
-  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
-    scope.brandReference,
-    scope.storeReference,
-  ]);
+  // DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: checked for any served Store, in the caller's
+  // transaction; the caller's own Store scope is put back after.
+  const [prior] = (
+    await tx.query(
+      "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store,set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [scope.brandReference, scope.storeReference],
+    )
+  ).rows as readonly { readonly brand?: string | null; readonly store?: string | null }[];
   const result = await tx.query(
     `SELECT 1 FROM bop_membership.membership m JOIN bop_membership.store_assignment s
        ON s.membership_id=m.membership_id AND s.actor_id=m.actor_id AND s.brand_id=m.brand_id
@@ -78,6 +82,10 @@ export async function isActiveStoreMember(
      LIMIT 1`,
     [scope.actorReference, scope.brandReference, scope.storeReference, scope.at],
   );
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    prior?.brand ?? "",
+    prior?.store ?? "",
+  ]);
   return result.rows.length === 1;
 }
 

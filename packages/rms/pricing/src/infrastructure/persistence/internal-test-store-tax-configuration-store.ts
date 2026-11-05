@@ -88,6 +88,8 @@ export interface InternalTestStoreTaxSnapshot {
 }
 export interface InternalTestStoreTaxInput {
   readonly brandReference: string;
+  /** DEC-MULTI-MERCHANT-ONE-INSTALLATION: the source Store's Brand, when another merchant's. */
+  readonly sourceBrandReference?: string;
   readonly sourceStoreReference: string;
   readonly sourceConfigurationReference: string;
   readonly target: InternalTestStoreTaxSnapshot;
@@ -110,9 +112,9 @@ export type InternalTestStoreTaxResult = Readonly<{
 }>;
 
 /** What a rule means, without its identity: equal for the source and the target. */
-const meaning = (rule: Record<string, unknown>) =>
+const meaning = (rule: Record<string, unknown>, classification = rule.taxClassificationReference) =>
   JSON.stringify([
-    String(rule.taxClassificationReference),
+    String(classification),
     String(rule.orderType),
     String(rule.chargeType),
     String(rule.taxComponentCode),
@@ -198,8 +200,12 @@ export async function createInternalTestStoreTaxConfiguration(
       store,
     ]);
 
+  const sourceBrand = input.sourceBrandReference ?? input.brandReference;
   // The source: the installation Store's synthetic configuration, as its current version says.
-  await scope(input.sourceStoreReference);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    sourceBrand,
+    input.sourceStoreReference,
+  ]);
   const source = (
     await tx.query(
       `SELECT b.stable_code,b.aggregate_version::int aggregate_version,v.tax_configuration_version_id::text id,
@@ -211,19 +217,14 @@ export async function createInternalTestStoreTaxConfiguration(
          ON v.tax_configuration_version_id=b.current_version_id AND v.tax_configuration_id=b.tax_configuration_id
          AND v.brand_id=b.brand_id AND v.store_id=b.store_id
        WHERE b.brand_id=$1 AND b.store_id=$2 AND b.tax_configuration_id=$3`,
-      [input.brandReference, input.sourceStoreReference, input.sourceConfigurationReference],
+      [sourceBrand, input.sourceStoreReference, input.sourceConfigurationReference],
     )
   ).rows[0];
   const sourceRules =
     source === undefined
       ? []
-      : (
-          await tx.query(ruleRead, [
-            input.brandReference,
-            input.sourceStoreReference,
-            String(source.id),
-          ])
-        ).rows;
+      : (await tx.query(ruleRead, [sourceBrand, input.sourceStoreReference, String(source.id)]))
+          .rows;
   if (
     source === undefined ||
     typeof source.stable_code !== "string" ||
@@ -250,7 +251,19 @@ export async function createInternalTestStoreTaxConfiguration(
     source.currency_metadata_version !== t.currencyMetadata.metadataVersion ||
     source.currency_metadata_version_id !== t.currencyMetadata.metadataVersionReference ||
     source.currency_metadata_digest !== t.currencyMetadata.metadataDigest ||
-    [...sourceRules.map(meaning)].sort().join("\n") !==
+    [
+      ...sourceRules.map((rule) =>
+        // Another merchant has its own tax class: the same rule on that class.
+        meaning(
+          rule,
+          sourceBrand === input.brandReference
+            ? rule.taxClassificationReference
+            : t.rules[0]?.taxClassificationReference,
+        ),
+      ),
+    ]
+      .sort()
+      .join("\n") !==
       [...t.rules.map((rule) => meaning(rule as unknown as Record<string, unknown>))]
         .sort()
         .join("\n")
