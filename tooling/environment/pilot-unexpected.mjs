@@ -22,7 +22,9 @@ const diagnosticOf = (error) => {
   const found = {};
   let at = error;
   for (let depth = 0; depth < 4 && at !== null && typeof at === "object"; depth += 1) {
-    for (const holder of [at.diagnostic, at[databaseFailure]]) {
+    // The first statement that failed comes first: what follows it in an aborted transaction
+    // (a scope restored in a finally block) only ever says 25P02.
+    for (const holder of [at[databaseFailure], at.diagnostic]) {
       if (holder === null || typeof holder !== "object") continue;
       if (found.sqlState === undefined && sqlStatePattern.test(holder.sqlState ?? ""))
         found.sqlState = holder.sqlState;
@@ -119,7 +121,8 @@ export function createMerchantRequestReporter({ store, now = Date.now } = {}) {
   const windows = new Map();
   return (route, error) => {
     if (error !== null && typeof error === "object" && alreadyLogged.has(error)) return;
-    const key = `${route} ${codeOf(error).code}`;
+    const { sqlState, table, constraint } = diagnosticOf(error);
+    const key = `${route} ${codeOf(error).code} ${sqlState} ${table} ${constraint}`;
     const at = now();
     const window = windows.get(key);
     if (window !== undefined && at - window.since < reportingWindowMs) {

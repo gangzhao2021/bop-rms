@@ -80,13 +80,20 @@ function transientSqlState(sqlState: unknown): boolean {
   return typeof sqlState === "string" && (sqlState === "57014" || sqlState.startsWith("08"));
 }
 
+/**
+ * The SQLSTATE of the statement that failed first: what follows it in an aborted transaction (a
+ * scope restored in a finally block) only ever says 25P02.
+ */
+function failedStatementState(error: unknown): unknown {
+  const first = own(error, databaseFailureKey) as { sqlState?: unknown } | undefined;
+  return first?.sqlState ?? (own(error, "diagnostic") as { sqlState?: unknown } | null)?.sqlState;
+}
+
 export function merchantFailureKind(error: unknown): MerchantFailureKind {
   const code = merchantFailureCode(error);
   if (code === null) return "Unexpected";
   if (code === "TENANT_DATABASE_TRANSACTION_FAILED")
-    return transientSqlState((own(error, "diagnostic") as { sqlState?: unknown } | null)?.sqlState)
-      ? "RetryLater"
-      : "Unexpected";
+    return transientSqlState(failedStatementState(error)) ? "RetryLater" : "Unexpected";
   if (retryCodes.has(code)) return "RetryLater";
   if (namesRefusal(code)) {
     // Decided after a query of its own transaction failed: nothing was read to decide it with.
