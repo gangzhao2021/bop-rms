@@ -668,7 +668,7 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
 
 | Failure                       | What staff see                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | What customers see                                                                                                                                                                                                                                                                    |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Store network down            | `Orders`: "Orders could not be refreshed. Showing the last update; retrying automatically." (the last list stays). Kitchen board: the last tickets stay on screen, read-only: "Read-only until reconnected — Offline — showing the last update from HH:MM. Actions are paused until the connection returns. Trying again automatically." Accept/Start/Complete/Mark ready are disabled; the board retries by itself (5 s, then up to every 30 s) and returns to normal on its own. `Pickup` and `Tables` keep their last list the same way with handoff and table actions paused. | Guests on mobile data **can still order and pay online**; the store cannot see those orders. Guests on store Wi-Fi see "You are offline. Transaction and identity actions are unavailable."                                                                                           |
+| Store network down            | `Orders`: "Orders could not be refreshed. Showing the last update; retrying automatically." (the last list stays). Kitchen board: the last tickets stay on screen, read-only: "Read-only until reconnected — Offline — showing the last update from HH:MM. Actions are paused until the connection returns. Trying again automatically." Start, Finished and Mark ready are greyed out; the board retries by itself (5 s, then up to every 30 s) and returns to normal on its own. `Pickup` and `Tables` keep their last list the same way with handoff and table actions paused. | Guests on mobile data **can still order and pay online**; the store cannot see those orders. Guests on store Wi-Fi see "You are offline. Transaction and identity actions are unavailable."                                                                                           |
 | Pilot host down               | Same as above on every device, including on mobile data; Kitchen shows the same read-only board, worded "Connection lost — showing the last update from HH:MM …". `Exceptions`: "Data may be out of date".                                                                                                                                                                                                                                                                                                                                                                        | Pages fail to load or show "Try again"; scanning a table code cannot start a visit. A guest whose payment was in progress may see "Payment confirmation pending. Do not submit another payment." or "Payment result unknown".                                                         |
 | Payment Provider down         | Nothing on screen; guests tell you ("my phone can't start the payment"). A round whose payment failed stays unpaid on its table ("Awaiting payment"). From the second guest, assume it is system-wide and tell the manager.                                                                                                                                                                                                                                                                                                                                                       | The phone says "We couldn't start your payment" and that the order hasn't been charged, offers Try again, and points to the table page when the dishes are already saved there. Pilot today uses simulated online payments; the real Provider behaviour is an external gate (P2/Q22). |
 | Card machine down             | Nothing in the product.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Counter and paper orders cannot be paid.                                                                                                                                                                                                                                              |
@@ -714,7 +714,8 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
    again; nothing was lost. No paper needed unless no device is available. A device signed in with
    the ordinary staff sign-in ("Enter as …", for the counter or office) shows `Kitchen` as
    "View only on this screen"; press "Start kitchen display here" (it signs that staff member out)
-   and choose "Start kitchen display as …" so Accept, Start and Mark ready work on that device.
+   and choose "Start kitchen display as …" so Finished and Start work on that device. Reload every
+   kitchen tablet after a deploy: a page left open keeps the previous steps until it reloads.
 7. **Host down**: call the pilot operator. Operator restarts the pilot (v15:
    `PILOT_UID=… PILOT_GID=… PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 PILOT_OFFSITE_DIR=<off-site folder> docker compose -f compose.pilot.yaml up -d pilot`,
    then confirm `/ready` returns 200; details in
@@ -859,8 +860,8 @@ never goes to the kitchen`; save, and press `List it`. Do not hide it: guests ne
 - Tickets already on the board when it went down disappear from the screen. Before switching to
   paper, the counter reads the last `Orders` list (it stays on screen) and writes a slip for each
   accepted, unfinished order, marked "online order N".
-- When the board returns, older online orders are still there; the kitchen marks them `Mark ready`
-  as it finishes them as usual. Do not remake an online order that a paper slip already covers.
+- When the board returns, older online orders are still there; the kitchen presses `Finished` on
+  them as it finishes them as usual. Do not remake an online order that a paper slip already covers.
 - **Merging tables** (WP-2423 item 8 ⑨): to seat one party with another, open the first table on
   `Tables` and use `Merge into…` to choose the other table (both must pay at the end, still be
   ordering, and have nothing paid or split yet; a table that hasn't ordered can only be merged
@@ -885,7 +886,17 @@ never goes to the kitchen`; save, and press `List it`. Do not hide it: guests ne
   on that device; it counts the orders waiting in the other sections. Without the
   board, the counter writes the section beside each dish on the slip and hands the slip to that
   section first. A screen left on one section shows only that section: switch it back to
-  `All sections` if one screen has to cover the whole kitchen.
+  `All sections` if one screen has to cover the whole kitchen. A combo's dishes go to their own
+  sections; a combo dish with no section shows on every section's screen until someone finishes it,
+  and `Kitchen sections` lists those dishes so the owner can mark them.
+- **Steps on the board** (DEC-KITCHEN-ONE-TAP): each dish has its own `Finished`; `Start cooking` is
+  optional: it tells guests and servers the dish is being made and closes the cancel window. A tap
+  waits 5 seconds and `Undo` takes it back with nothing recorded. After that use `Recently finished`, `Remake`, `Not ready yet` (within
+  two minutes). A combo's dish finished by mistake while the combo is still open cannot be taken back:
+  make it anyway and tell the server. A dish struck through with "Cancelled · don't make it" is off
+  the order: stop. If the connection drops, taps not yet sent come back and the board says so: tap
+  them again once it recovers; nothing is sent later on its own. Past 3 minutes in the kitchen, a
+  cancel screen warns the dish may already be cooking: ask the kitchen first.
 
 ### 5. Recovery (when screens load again)
 
@@ -894,8 +905,8 @@ Do these in order, before resuming online ordering.
 1. **Decide orders paid during the outage first** (within 15 minutes of screens coming back): `Orders`
    shows "Paid during an outage — decide" with the number of held orders; press `Show these orders`
    (or filter Order status "Paid during an outage — decide"). Each shows "decide within N min". For
-   each one: if the kitchen made it from a paper slip or can make it now, press `Accept` (then mark
-   it ready in Kitchen and handed over in Pickup if it was already handed over); if it cannot be
+   each one: if the kitchen made it from a paper slip or can make it now, press `Accept` (then press
+   `Finished` in Kitchen and mark it handed over in Pickup if it was already handed over); if it cannot be
    made or the customer is gone, a manager or owner presses `Refund instead` → `Refund order`. The
    customer is refunded in full to their original payment method and their order page says "The
    store couldn't accept your order, so your payment was refunded to your original payment method."
@@ -1073,7 +1084,7 @@ STORE OUTAGE CHECKLIST                       keep at the counter
 [ ] 11 Pickup slips: Counter order. Dine-in slips: Tables > Take order for
        table (same table), before closing it. Tick "Recorded after an outage",
        paid-at time from slip, same items + tip; To charge = slip total.
-       Then Mark ready (Kitchen) and hand over (Pickup) / served (on the order).
+       Then Finished (Kitchen) and hand over (Pickup) / served (on the order).
 [ ] 12 Orders: "Expired · refunded" in the outage period -> lead follows up.
 [ ] 13 Refund any duplicate on the card machine, then record it.
 [ ] 11a Pay-at-the-end tables, one at a time: paper rounds -> Serve all ->
