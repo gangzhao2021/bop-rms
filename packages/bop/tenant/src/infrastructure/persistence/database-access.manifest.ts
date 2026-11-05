@@ -118,6 +118,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 item 13 ②: the platform pausing a merchant's new guests (append-only).
+      table: "brand_guest_intake",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@bop/tenant" },
+      allowedReadPatterns: ["owner-repository", "public-query-contract"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "brand_store_membership_record",
       classification: "relationship-assignment",
       writeOwner: { kind: "module", id: "@bop/tenant" },
@@ -501,6 +510,24 @@ const databaseAccessManifestInput = {
       principal: { kind: "module", id: "@bop/tenant" },
       readPattern: null,
       source: "packages/bop/tenant/src/infrastructure/persistence/sole-operator-setting-store.ts",
+    },
+    {
+      id: "brand-guest-intake.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "brand_guest_intake" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: "owner-repository",
+      source: "packages/bop/tenant/src/infrastructure/persistence/brand-guest-intake-store.ts",
+    },
+    {
+      id: "brand-guest-intake.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "bop_tenant", table: "brand_guest_intake" },
+      principal: { kind: "module", id: "@bop/tenant" },
+      readPattern: null,
+      source: "packages/bop/tenant/src/infrastructure/persistence/brand-guest-intake-store.ts",
     },
   ],
 } as const;

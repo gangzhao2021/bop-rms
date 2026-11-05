@@ -5930,6 +5930,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 13 DEC-MULTI-MERCHANT-ONE-INSTALLATION A6 (Owner 2026-11-04 \"按你建议做\"): opening a new merchant writes its Brand"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "brand_guest_intake",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 13 ② (Owner 2026-11-05 \"就按这个做\"): the platform pauses a merchant's new guests and each Store's entry reads it"
+    },
+    {
+      "type": "table",
+      "schema": "bop_tenant",
+      "object": "brand_guest_intake",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 item 13 ② (Owner 2026-11-05 \"就按这个做\"): the platform pauses a merchant's new guests and each Store's entry reads it"
     }
   ]
 }

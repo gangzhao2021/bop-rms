@@ -6,6 +6,7 @@ import { createKitchenGatedOperatingStatusReader } from "./store-kitchen-open-ga
 import { createConfiguredPublicStoreResolution } from "./public-store-resolution.js";
 import type { CustomerEntryOperatingReader } from "./customer-entry-composition.js";
 import { guestServiceModes } from "./merchant-store-features.js";
+import { readBrandGuestIntake } from "@bop/tenant";
 type Resolution = Parameters<typeof createConfiguredPublicStoreResolution>[0];
 type Operating = Parameters<typeof createPostgresPublishedStoreOperatingStatusReader>[0];
 /** Retains current public resolution and published Store authority in the caller's
@@ -66,18 +67,30 @@ export function createPersistentEntryOperatingReader(options: {
           status.evaluatedAt !== request.evaluatedAt
         )
           return null;
+        // WP-2423 item 13 ② (Owner 2026-11-05): a merchant the platform paused starts no new visit;
+        // guests already in one and staff carry on (their paths do not read this).
+        const paused =
+          (
+            await readBrandGuestIntake(
+              options.transaction as Parameters<typeof readBrandGuestIntake>[0],
+              brandReference,
+            )
+          ).state === "Paused";
         return Object.freeze({
           brandReference,
           storeReference,
           evaluatedAt: status.evaluatedAt,
-          state: status.state,
-          availableServiceModes: status.availableServiceModes,
+          state: paused ? ("Closed" as const) : status.state,
+          availableServiceModes: paused
+            ? (Object.freeze([]) as typeof status.availableServiceModes)
+            : status.availableServiceModes,
           todayHours: status.todayHours,
           localTime: String(status.localTime),
           localDate: String(status.localDate),
           upcomingHours: status.upcomingHours,
           servicesTurnedOff: status.servicesTurnedOff,
           ...("kitchenNotSetUp" in status ? { notReadyForOrders: true } : {}),
+          ...(paused ? { newGuestsPaused: true } : {}),
         });
       } catch {
         return null;

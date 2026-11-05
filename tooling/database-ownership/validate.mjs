@@ -3261,6 +3261,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_store" &&
           module.manifest.ownedDatabase?.tables?.includes("store_configuration_version") &&
           moduleRelative === "src/infrastructure/persistence/owner-published-setup-source.ts";
+        // WP-2423 item 13 ②: the platform pausing a merchant's new guests.
+        const acceptedBrandGuestIntakeAsset =
+          module.packageName === "@bop/tenant" &&
+          module.manifest.ownedDatabase?.schema === "bop_tenant" &&
+          module.manifest.ownedDatabase?.tables?.includes("brand_guest_intake") &&
+          moduleRelative === "src/infrastructure/persistence/brand-guest-intake-store.ts";
         // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: opening another Store.
         const acceptedStoreOpeningAsset =
           module.packageName === "@bop/tenant" &&
@@ -3990,6 +3996,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedBrandStoreIdsAsset &&
           !acceptedStoreOpeningAsset &&
           !acceptedOwnerPublishedSetupAsset &&
+          !acceptedBrandGuestIntakeAsset &&
           !acceptedStoreRoleProvisioningAsset &&
           !acceptedBrandRoleProvisioningAsset &&
           !acceptedRoleAdministrationAsset &&

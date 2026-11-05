@@ -56,3 +56,4 @@ export * from "./infrastructure/persistence/platform-brand-template-reference-so
 // WP-2423 Q19 (DEC-SOLE-OPERATOR-APPROVAL): Brand sole-operator setting and its public read.
 export * from "./contracts/sole-operator-approval.js";
 export * from "./infrastructure/persistence/sole-operator-setting-store.js";
+export * from "./infrastructure/persistence/brand-guest-intake-store.js";

@@ -798,6 +798,8 @@ describe("migration catalog", () => {
       "2000_154_create_dining_table_split_part_item",
       "2000_155_alter_store_opening_first_store",
       "2000_156_alter_product_frozen_commit_guard",
+      "2000_180_create_brand_guest_intake",
+      "2000_181_alter_platform_support_merchant_pause",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
@@ -2020,6 +2022,8 @@ describe("migration catalog", () => {
       // WP-2423 取舍 15: platform support, and PUBLIC's rights removed once the gate caught them.
       ["2000_143_create_platform_support_access", "@bop/permission", "bop_permission"],
       ["2000_144_alter_platform_support_public_revoke", "@bop/permission", "bop_permission"],
+      // WP-2423 item 13 ②: pausing a merchant's new guests is a support permission of its own.
+      ["2000_181_alter_platform_support_merchant_pause", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

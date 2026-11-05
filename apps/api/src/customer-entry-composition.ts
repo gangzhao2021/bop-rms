@@ -56,6 +56,8 @@ export interface CustomerEntryOperatingReader {
         servicesTurnedOff?: readonly "Pickup"[];
         /** WP-2423 item 11: this Store isn't ready to take orders yet (not a closing time). */
         notReadyForOrders?: boolean;
+        /** WP-2423 item 13 ②: the platform paused this merchant's new guests. */
+        newGuestsPaused?: boolean;
       })
     | null
   >;

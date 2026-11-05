@@ -9,7 +9,11 @@ export interface PlatformSupportTransaction {
     values: readonly unknown[],
   ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
 }
-export type PlatformSupportAction = "platform.support.view" | "platform.support.change";
+export type PlatformSupportAction =
+  | "platform.support.view"
+  | "platform.support.change"
+  // WP-2423 item 13 ② (Owner 2026-11-05): pause and resume a merchant's new guests.
+  | "platform.merchant.pause";
 export interface PlatformSupportPerson {
   readonly actorReference: string;
   readonly displayName: string;

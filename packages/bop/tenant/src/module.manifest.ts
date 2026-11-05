@@ -27,6 +27,7 @@ const moduleManifestInput = {
       "platform_brand_template_operation",
       "brand_store_membership_record",
       "brand_sole_operator_setting",
+      "brand_guest_intake",
       "brand_store_topology_draft_revision",
       "brand_store_topology_draft_operation",
       "store",
