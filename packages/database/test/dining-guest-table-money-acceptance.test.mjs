@@ -16,6 +16,7 @@ import {
   createDiningGuestBindingQuery,
   createPostgresDiningGuestBindingStore,
   createPostgresDiningGuestTableStartStore,
+  createPostgresDiningPaymentTimingStore,
   loadDiningGuestTableStart,
 } from "../../rms/dining/src/index.ts";
 import { createPostgresReceiptOrderSource } from "../../rms/ordering/src/index.ts";
@@ -26,6 +27,7 @@ import { createCustomerReceiptRead } from "../../../apps/api/src/customer-receip
 import { createDiningOrderCloseConfiguration } from "../../../apps/api/src/dining-order-close-configuration.ts";
 import { createMerchantDiningClosingCommand } from "../../../apps/api/src/merchant-dining-closing-command.ts";
 import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/merchant-dining-order-close-command.ts";
+import { createMerchantGuestTableStartOff } from "../../../apps/api/src/merchant-dining-guest-table-start.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
@@ -34,6 +36,7 @@ import { createMerchantMfaStepUp } from "../../../apps/api/src/merchant-mfa-step
 import { createMerchantOrdinaryRefundCommand } from "../../../apps/api/src/merchant-ordinary-refund-command.ts";
 import { createMerchantOrdinaryRefundRequest } from "../../../apps/api/src/merchant-ordinary-refund-request.ts";
 import { createMerchantOrdinaryRefundSendCommand } from "../../../apps/api/src/merchant-ordinary-refund-send-command.ts";
+import { createMerchantStoreFeatures } from "../../../apps/api/src/merchant-store-features.ts";
 import { createMerchantWorkforcePermissionSource } from "../../../apps/api/src/merchant-workforce-authority-source.ts";
 import { createOriginalReceiptIssuance } from "../../../apps/api/src/original-receipt-issuance.ts";
 import { createPersistentMerchantSettlement } from "../../../apps/api/src/persistent-merchant-settlement.ts";
@@ -45,11 +48,13 @@ import { seedAdditionalDiningGuest } from "../test-support/additional-dining-gue
 import { seedJourneyStorePublication } from "../test-support/dine-in-journey-seed.mjs";
 import {
   closer,
+  digest,
   finishKitchen,
   fresh,
   id,
   minutes,
   provider,
+  scope,
   seedPaidGuestTable,
   setup,
 } from "../test-support/dining-guest-table-fixture.mjs";
@@ -1037,6 +1042,103 @@ it("a refund on its way holds a guest-started table; once the money is back the 
       vi.unstubAllEnvs();
       signedIn.cookies = new Set();
       signedIn.scopeFor = null;
+      await admin.end();
+    }
+  });
+}, 300_000);
+
+it("the owner turns it on on Store features, never at a pay-later Store; whoever may pause turns it off, not on", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_gm_switch" }, async (context) => {
+    const { admin, transactions } = await setup(context);
+    vi.stubEnv("NODE_ENV", "development");
+    try {
+      const signedInAs = (actor, permission, prefixes) =>
+        seedMerchantAcceptanceSession({
+          admin,
+          runner: transactions(),
+          scope,
+          actor,
+          at: now(),
+          extraPermissions: [permission],
+          referencePrefix: prefixes[0],
+          sessionReferencePrefix: prefixes[1],
+        });
+      const boss = await signedInAs(id(0x703), "organization.manage", ["01909962", "01909961"]);
+      const manager = await signedInAs(id(0x704), "operations.ordering.pause", [
+        "01909964",
+        "01909963",
+      ]);
+      const as = (who) => ({ sessionCookie: who.sessionCookie, csrf: who.csrf });
+      const features = (who) => (command) =>
+        createMerchantStoreFeatures({
+          persistence: { ...who.persistence, transactions: transactions(), now },
+          authentication: who.authentication,
+          now,
+        })({ ...as(who), command });
+      const turnOff = (who) => (expectedVersion) =>
+        createMerchantGuestTableStartOff({
+          persistence: { ...who.persistence, transactions: transactions(), now },
+          authentication: who.authentication,
+        })({ ...as(who), command: { operationReference: fresh(), expectedVersion } });
+      const change = (who, expectedVersion, guestTableStart) =>
+        features(who)({
+          action: "ChangeServices",
+          operationReference: fresh(),
+          expectedVersion,
+          staffCall: false,
+          chaseDish: false,
+          guestTableStart,
+        });
+      const latest = async () =>
+        (
+          await admin.query(
+            "SELECT version::int AS version,guest_table_start AS on,actor_id::text AS actor FROM rms_dining.dining_service_setting ORDER BY version DESC LIMIT 1",
+          )
+        ).rows[0] ?? null;
+
+      const before = await features(boss)({ action: "Read" });
+      assert.equal(before.guestTableStartAllowed, true);
+      assert.equal(Object.hasOwn(before.services, "guestTableStart"), false);
+      // Someone who may only pause can't turn it on.
+      await assert.rejects(change(manager, before.services.version, true));
+      assert.equal(await latest(), null);
+      // The owner can, and the version says who.
+      const on = await change(boss, before.services.version, true);
+      assert.equal(on.services.guestTableStart, true);
+      assert.deepEqual(await latest(), { version: 1, on: true, actor: id(0x703) });
+      // Turning it off takes the pause permission, and the version says who again.
+      await assert.rejects(turnOff(boss)(1), { code: "Denied" });
+      await assert.rejects(turnOff(manager)(99), { code: "Changed" });
+      await turnOff(manager)(1);
+      assert.deepEqual(await latest(), { version: 2, on: false, actor: id(0x704) });
+
+      // A Store that takes payment at the end can't have it, whoever asks.
+      const moved = await transactions().run((tx) =>
+        createPostgresDiningPaymentTimingStore({
+          scope,
+          hashIntent: digest,
+          equals: (a, b) => a === b,
+        }).change(
+          tx,
+          {
+            operationReference: fresh(),
+            paymentTiming: "PayLater",
+            expectedVersion: 0,
+            actorReference: id(0x703),
+            observedAt: now(),
+          },
+          async () => true,
+        ),
+      );
+      assert.equal(moved.status, "Changed");
+      const payLater = await features(boss)({ action: "Read" });
+      assert.equal(payLater.guestTableStartAllowed, false);
+      await assert.rejects(change(boss, payLater.services.version, true), {
+        code: "STORE_FEATURES_GUEST_START_NEEDS_PAY_FIRST",
+      });
+      assert.deepEqual(await latest(), { version: 2, on: false, actor: id(0x704) });
+    } finally {
+      vi.unstubAllEnvs();
       await admin.end();
     }
   });
