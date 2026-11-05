@@ -109,7 +109,11 @@ export function createStoreMonitors({
       }),
     ]).finally(() => clearTimeout(timer));
   };
-  async function runStore(name, monitor, { now, probes, supervisor, maintenance, config }) {
+  async function runStore(
+    name,
+    monitor,
+    { now, probes, supervisor, certificate, maintenance, config },
+  ) {
     const ops = await ensureOpsDirectory(monitor.directory);
     const stateFile = path.join(ops, ALERT_STATE_FILE);
     const previous = await readStoreState(stateFile, log, name);
@@ -118,6 +122,7 @@ export function createStoreMonitors({
       store: name,
       probes,
       supervisor,
+      certificate,
       business: await observeWithinLimit(monitor, now),
       installation: await observeValidity(monitor.directory),
       previous: previous.alert,

@@ -1020,13 +1020,66 @@ describe("a Store's own conditions", () => {
         evaluateStoreConditions(
           store({
             backup: { lastSuccessAt: null },
-            certificate: { validTo: new Date(T0).toISOString() },
+            certificate: { validTo: new Date(T0 + 36 * 3600_000).toISOString() },
             disks: [{ name: "runtime", freeBytes: 1, totalBytes: 100 }],
             channels: [{ kind: "email", failingSince: new Date(T0 - 40 * MIN).toISOString() }],
           }),
         ),
       ),
     ).toEqual([]);
+  });
+  it("warns a merchant only in the last day before ordering would stop, whichever would stop it", () => {
+    const hours = (value) => new Date(T0 + value * 3600_000).toISOString();
+    const ending = (change) => evaluateStoreConditions(store(change)).get("ordering.ending");
+    // Two weeks to a day out, the renewal is BOP's to do and says nothing to the merchant.
+    expect(ending({ installation: { validUntil: hours(25) } })).toBe(undefined);
+    expect(evaluateStoreConditions(store({ installation: { validUntil: hours(25) } })).size).toBe(
+      1,
+    );
+    expect(ending({ certificate: { validTo: hours(25) } })).toBe(undefined);
+    // With a day left BOP has evidently not renewed it.
+    expect(ending({ installation: { validUntil: hours(23) } })).toEqual({
+      severity: "critical",
+      params: { endsAt: hours(23), remainingMs: 23 * 3600_000 },
+    });
+    expect(ending({ certificate: { validTo: hours(23) } }).params.remainingMs).toBe(23 * 3600_000);
+    // One row, the sooner of the two.
+    expect(
+      ending({
+        installation: { validUntil: hours(20) },
+        certificate: { validTo: hours(2) },
+      }).params.remainingMs,
+    ).toBe(2 * 3600_000);
+    // Stopped already: still said, in the words that are true then.
+    const stopped = ending({ installation: { validUntil: hours(-1) } });
+    expect(renderAlert("ordering.ending", stopped.params).title).toBe(
+      "Ordering at this Store has stopped",
+    );
+    // Neither known: nothing to say about it (BOP hears the reads failed).
+    expect(ending({ installation: "unreadable", certificate: "unreadable" })).toBe(undefined);
+    expect(ending({ installation: null, certificate: null })).toBe(undefined);
+    // Never at the root, whose Owner has the renewal in hand.
+    const o = healthy();
+    o.installation = { validUntil: hours(23) };
+    expect(keys(evaluateAlertConditions(o))).toEqual(["installation.validity"]);
+  });
+  it("keeps that warning, counting down, while the read behind it cannot run", () => {
+    const hours = (value) => new Date(T0 + value * 3600_000).toISOString();
+    const previous = {
+      alerts: {
+        "ordering.ending": {
+          raisedAt: hours(-1),
+          severity: "critical",
+          params: { endsAt: hours(5), remainingMs: 6 * 3600_000 },
+        },
+      },
+    };
+    const held = (change) =>
+      evaluateStoreConditions(store({ previous, ...change })).get("ordering.ending");
+    expect(held({ installation: "unreadable" }).params.remainingMs).toBe(5 * 3600_000);
+    expect(held({ certificate: "unreadable" }).params.remainingMs).toBe(5 * 3600_000);
+    // Renewed and readable: gone, whatever it said before.
+    expect(held({ certificate: null })).toBe(undefined);
   });
   it("gives the same answer as the root for the same business signals", () => {
     const business = {

@@ -162,6 +162,7 @@ export async function runMonitorCycle({ now, state, config, io }) {
     now,
     probes: probes.probes,
     supervisor: observations.supervisor,
+    certificate: observations.certificate,
     maintenance,
   });
   const advanced = advanceAlertState(state.alert, conditions, now, undefined, {

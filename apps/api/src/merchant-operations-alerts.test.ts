@@ -264,6 +264,60 @@ describe("a merchant's projection of its own board", () => {
     expect(installation.active.map((item) => item.key)).toEqual(["monitor.source"]);
     expect(installation.checksIncomplete).toBe(false);
   });
+  it("a merchant reads of the end of its ordering only in the last day, from the monitor's own catalog", async () => {
+    const catalog = (await import(
+      /* @vite-ignore */ new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url)
+        .href
+    )) as {
+      advanceAlertState(state: unknown, conditions: unknown, now: number): { state: unknown };
+      buildAlertBoard(state: unknown, options: unknown): unknown;
+      emptyAlertState(): unknown;
+      evaluateStoreConditions(observations: unknown): unknown;
+    };
+    const now = Date.parse(at);
+    const home = (hoursLeft: number) => {
+      const observations = {
+        now,
+        store: "tea",
+        probes: {},
+        supervisor: { maintenance: false, reportAgeMs: 0, attention: [] },
+        business: {
+          stuckUpdates: { count: 0, oldestAgeMs: 0 },
+          retryingUpdates: { count: 0, oldestAgeMs: 0 },
+          reconciliationDifferences: { count: 0, oldestAgeMs: 0 },
+          settlementExceptions: { count: 0, oldestAgeMs: 0 },
+        },
+        installation: { validUntil: new Date(now + hoursLeft * 3600_000).toISOString() },
+      };
+      const { state } = catalog.advanceAlertState(
+        catalog.emptyAlertState(),
+        catalog.evaluateStoreConditions(observations),
+        now,
+      );
+      return projectOperationsAlertBoard(
+        catalog.buildAlertBoard(state, {
+          observedAt: at,
+          channels: { email: false, webhooks: 0, heartbeat: false },
+          backup: null,
+          audience: "Merchant",
+        }),
+        at,
+        { audience: "Merchant" },
+      );
+    };
+    // BOP has the renewal in hand, as far as anyone can tell: nothing to alarm a restaurant with.
+    expect(home(25).active).toEqual([]);
+    expect(home(24 * 13).active).toEqual([]);
+    const [row, ...others] = home(23).active;
+    expect(others).toEqual([]);
+    expect(row).toMatchObject({
+      key: "ordering.ending",
+      severity: "critical",
+      title: "Ordering at this Store is about to stop",
+      action:
+        "Ordering at this Store stops in 23 hours unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.",
+    });
+  });
   it("still refuses a board that is not one, whatever the audience", () => {
     const value = everything();
     Object.assign(value.active[0] as object, { phone: "555-0100" });

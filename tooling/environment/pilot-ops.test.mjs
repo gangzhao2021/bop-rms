@@ -249,6 +249,7 @@ describe("WP-2423 Q13 monitor cycle", () => {
         reportAgeMs: 1000,
         attention: ["stores/tea:business-worker:events"],
       },
+      certificate: { validTo: "2026-12-01T00:00:00.000Z" },
       maintenance: null,
     });
     // With no other Store composed, the very same state, board and log lines.

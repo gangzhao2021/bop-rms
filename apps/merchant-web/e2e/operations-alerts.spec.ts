@@ -601,6 +601,30 @@ test("@production A merchant's Home says nothing about a monitor it cannot start
   await page.setViewportSize({ width: 1440, height: 900 });
   await expectNoInternalText(page);
 
+  // A day before ordering would stop, because BOP has not renewed: how long, what to do, who to call.
+  board = {
+    ...merchantBoard,
+    active: [
+      {
+        key: "ordering.ending",
+        severity: "critical",
+        title: "Ordering at this Store is about to stop",
+        summary:
+          "When it stops, guests cannot order and staff cannot use the store screens. Only BOP support can renew it.",
+        action:
+          "Ordering at this Store stops in 23 hours unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.",
+        raisedAt: "2026-10-15T15:56:00.000Z",
+      },
+    ],
+    support: { phone: "+14165550100", testOnly: false },
+  };
+  await card.getByRole("button", { name: "Check again" }).click();
+  await expect(needs.getByText("Ordering at this Store is about to stop")).toBeVisible();
+  await expect(needs.getByText("stops in 23 hours", { exact: false })).toBeVisible();
+  await expect(needs.getByText("Urgent", { exact: true })).toBeVisible();
+  await expect(needs.getByRole("link", { name: "Call BOP support: (416) 555-0100" })).toBeVisible();
+  await expectNoInternalText(page);
+
   // The monitor stops with that on the board: staff must not charge that guest again.
   board = { ...merchantBoard, monitor: "Silent", active: [stuckUpdates] };
   await card.getByRole("button", { name: "Check again" }).click();

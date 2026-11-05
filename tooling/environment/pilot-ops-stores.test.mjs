@@ -483,6 +483,74 @@ describe("what the installation shares with every Store", () => {
   });
 });
 
+// AGENTS.md "Warn before timeouts": the renewal is BOP's, but staff must not learn from guests.
+describe("a merchant hears before ordering stops", () => {
+  const inHours = (hours) => new Date(T0 + hours * 3600_000).toISOString();
+  const orderingEnding = (board) => board.active.find((item) => item.key === "ordering.ending");
+  const renew = (directory, name, validUntil) =>
+    fs.writeFile(
+      path.join(directory, "stores", name, "internal-test-profile.json"),
+      JSON.stringify({ binding: { validUntil } }),
+    );
+  it("25 hours left is only BOP's, 23 hours left is on the merchant's board", async () => {
+    const early = await monitorsFor({ tea: fact() }, { validUntil: inHours(25) });
+    await early.cycle(0);
+    expect(keysOf(await boardOf(early.directory, "tea"))).toEqual(["installation.validity"]);
+    const late = await monitorsFor({ tea: fact() }, { validUntil: inHours(23) });
+    await late.cycle(0);
+    const board = await boardOf(late.directory, "tea");
+    expect(keysOf(board)).toEqual(["installation.validity", "ordering.ending"]);
+    expect(orderingEnding(board).severity).toBe("critical");
+    expect(orderingEnding(board).action).toBe(
+      "Ordering at this Store stops in 23 hours unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.",
+    );
+    // BOP has been told since two weeks out: this row is for the merchant and sends nothing more.
+    expect(late.monitors.pending().map((item) => item.key)).toEqual(["installation.validity"]);
+  });
+  it("counts down, and clears once BOP renews", async () => {
+    const { directory, cycle } = await monitorsFor({ tea: fact() }, { validUntil: inHours(1) });
+    await cycle(0);
+    expect(orderingEnding(await boardOf(directory, "tea")).action).toContain("stops in 1 hour ");
+    await cycle(50);
+    expect(orderingEnding(await boardOf(directory, "tea")).action).toContain("stops in 10 minutes");
+    await renew(directory, "tea", inHours(24 * 30));
+    await cycle(51);
+    await cycle(53);
+    expect((await boardOf(directory, "tea")).active).toEqual([]);
+    expect((await boardOf(directory, "tea")).recentlyCleared.map((item) => item.title)).toEqual([
+      "The store's ordering setup expires soon",
+      "Ordering at this Store is about to stop",
+    ]);
+  });
+  it("past the end it says ordering has stopped", async () => {
+    const { directory, cycle } = await monitorsFor({ tea: fact() }, { validUntil: inHours(-1) });
+    await cycle(0);
+    const row = orderingEnding(await boardOf(directory, "tea"));
+    expect(row.title).toBe("Ordering at this Store has stopped");
+    expect(row.action).toBe(
+      "Call BOP support now. Keep taking orders on your own POS or on paper, and take payment on the card machine.",
+    );
+  });
+  it("the certificate is covered the same way, from what the root cycle saw", async () => {
+    const { directory, cycle } = await monitorsFor({ tea: fact(), hotpot: fact() });
+    await cycle(0, { certificate: { validTo: inHours(25) } });
+    expect((await boardOf(directory, "tea")).active).toEqual([]);
+    await cycle(1, { certificate: { validTo: inHours(23) } });
+    for (const name of ["tea", "hotpot"]) {
+      const board = await boardOf(directory, name);
+      expect(keysOf(board)).toEqual(["ordering.ending"]);
+      expect(orderingEnding(board).action).toContain("stops in 22 hours");
+    }
+  });
+  it("a profile that can no longer be read does not take the warning away", async () => {
+    const { directory, cycle } = await monitorsFor({ tea: fact() }, { validUntil: inHours(5) });
+    await cycle(0);
+    await fs.rm(path.join(directory, "stores", "tea", "internal-test-profile.json"));
+    for (const minute of [60, 62, 64]) await cycle(minute);
+    expect(orderingEnding(await boardOf(directory, "tea")).action).toContain("stops in 3 hours");
+  });
+});
+
 /** The whole monitor: the root cycle, its channels, and the Stores beside it. */
 function rootCycle({ directory, monitors, send, probe = async () => ({ ok: true }) }) {
   let state = { schemaVersion: 1, alert: emptyAlertState(), probes: {}, channels: {} };

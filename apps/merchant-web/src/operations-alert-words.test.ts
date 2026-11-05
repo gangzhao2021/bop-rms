@@ -102,6 +102,13 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
   "backup.offsite": [{}],
   "certificate.expiring": [{ remainingMs: -1 }, { remainingMs: 6 * DAY }],
   "installation.validity": [{ remainingMs: -1 }, { remainingMs: 13 * DAY }],
+  "ordering.ending": [
+    { remainingMs: -1 },
+    { remainingMs: 30_000 },
+    { remainingMs: 45 * MIN },
+    { remainingMs: 60 * MIN },
+    { remainingMs: 23 * 60 * MIN },
+  ],
   "disk.low": [
     {
       disks: [
@@ -271,6 +278,11 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     expect(own("service.attention", { services: ["store-background"] })).toContain(
       "需要 BOP 技术支持重启",
     );
+    // The last day before ordering stops: how long, who to call, and how to keep serving.
+    expect(own("ordering.ending", { remainingMs: 23 * 60 * MIN })).toBe(
+      "这家店的点单服务还有23小时就会停止，除非 BOP 技术支持完成续期。请马上联系 BOP 技术支持。如果停了，继续用店里自己的收银机或纸单点单，用刷卡机收款。",
+    );
+    expect(own("ordering.ending", { remainingMs: 30_000 })).toContain("还有不到一分钟就会停止");
   });
   it("a cleared order-rules row never reads as all clear, in Chinese either", () => {
     setLanguageForTest("zh-Hans");

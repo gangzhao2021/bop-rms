@@ -7507,8 +7507,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "BOP support: record this Store's first closed business day so its day-end settlement starts.":
     "BOP 技术支持：记录这家店第一个已结束的营业日，让它的日结开始运行。",
   "Some Stores need BOP support": "有门店需要 BOP 技术支持处理",
-  "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are not told about this.":
-    "BOP 技术支持：运行状态检查，查清这些门店的检查为什么没有运行，并补上缺少的设置。这些门店的老板不会收到这条提醒。",
+  "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are told only when ordering is a day from stopping.":
+    "BOP 技术支持：运行状态检查，查清这些门店的检查为什么没有运行，并补上缺少的设置。只有点单服务不到一天就要停止时，这些门店的老板才会收到提醒。",
+  "Ordering at this Store is about to stop": "这家店的点单服务快要停止了",
+  "Ordering at this Store has stopped": "这家店的点单服务已经停止",
+  "Ordering at this Store stops in {duration} unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.":
+    "这家店的点单服务还有{duration}就会停止，除非 BOP 技术支持完成续期。请马上联系 BOP 技术支持。如果停了，继续用店里自己的收银机或纸单点单，用刷卡机收款。",
+  "Call BOP support now. Keep taking orders on your own POS or on paper, and take payment on the card machine.":
+    "请马上联系 BOP 技术支持。继续用店里自己的收银机或纸单点单，用刷卡机收款。",
+  "When it stops, guests cannot order and staff cannot use the store screens. Only BOP support can renew it.":
+    "停止后，客人无法点单，员工也无法使用门店页面。只有 BOP 技术支持能续期。",
+  "Guests cannot order and staff cannot use the store screens until BOP support renews it.":
+    "在 BOP 技术支持完成续期之前，客人无法点单，员工也无法使用门店页面。",
   "Not being checked: {names}.": "没有在检查：{names}。",
   "Some checks could not run: {names}.": "部分检查无法运行：{names}。",
   "Closed business days with no day-end settlement: {names}.": "营业日已结束但没有日结：{names}。",

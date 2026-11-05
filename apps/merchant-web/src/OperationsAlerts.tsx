@@ -125,6 +125,8 @@ export function alertTitle(title: string): string {
     "Secure connection certificate expires soon": t("Secure connection certificate expires soon"),
     "The store's ordering setup has expired": t("The store's ordering setup has expired"),
     "The store's ordering setup expires soon": t("The store's ordering setup expires soon"),
+    "Ordering at this Store is about to stop": t("Ordering at this Store is about to stop"),
+    "Ordering at this Store has stopped": t("Ordering at this Store has stopped"),
     "Payment differences need checking": t("Payment differences need checking"),
     "Day-end settlement has open problems": t("Day-end settlement has open problems"),
     "Last night's backup failed": t("Last night's backup failed"),

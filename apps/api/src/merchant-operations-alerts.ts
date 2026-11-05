@@ -34,6 +34,7 @@ export const operationsAlertKeys = Object.freeze([
   "backup.offsite",
   "certificate.expiring",
   "installation.validity",
+  "ordering.ending",
   "disk.low",
   "monitor.source",
   "channel.delivery",
@@ -46,7 +47,9 @@ export type OperationsAlertKey = (typeof operationsAlertKeys)[number];
  * DEC-PILOT-ALERTS-BACKUP correction 2: who reads this Store's Home. Installation: whoever runs the
  * installation, who is told everything about it. Merchant: a restaurant on the installation, who is
  * told their own Store's problems and the outages that stop their guests or staff, and nothing they
- * cannot act on (the monitor, backups, the certificate, disks, channels, renewal: BOP's to fix).
+ * cannot act on (the monitor, backups, the certificate, disks, channels, renewal: BOP's to fix),
+ * until ordering is a day from stopping because BOP has not renewed: then they must not learn it
+ * from guests.
  */
 export type OperationsAlertAudience = "Installation" | "Merchant";
 export const merchantOperationsAlertKeys: ReadonlySet<OperationsAlertKey> = new Set([
@@ -62,6 +65,7 @@ export const merchantOperationsAlertKeys: ReadonlySet<OperationsAlertKey> = new 
   "pickup.capacity_horizon",
   "reconciliation.differences",
   "settlement.exceptions",
+  "ordering.ending",
 ]);
 
 export interface OperationsAlertView {

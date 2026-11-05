@@ -456,7 +456,7 @@ export const ALERT_CATALOG = Object.freeze({
         .map(([field, label]) => `${label}: ${storeNames(p[field])}.`)
         .join(" ") || "A Store needs checking.",
     action: () =>
-      "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are not told about this.",
+      "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are told only when ordering is a day from stopping.",
     runbook: "alert-stores-attention",
   },
   "backup.failed": {
@@ -534,6 +534,26 @@ export const ALERT_CATALOG = Object.freeze({
       "Approve a new end date and ask BOP support to renew it during a planned update before it expires.",
     runbook: "alert-installation-validity",
   },
+  // AGENTS.md "Warn before timeouts": renewing is BOP's, and for two weeks only BOP hears of it
+  // (installation.validity, certificate.expiring). With a day left BOP has evidently not renewed,
+  // and the people who will otherwise learn it from guests are told what is coming on their Home.
+  "ordering.ending": {
+    severity: "critical",
+    raiseAfterMs: 0,
+    title: (p) =>
+      p.remainingMs <= 0
+        ? "Ordering at this Store has stopped"
+        : "Ordering at this Store is about to stop",
+    summary: (p) =>
+      p.remainingMs <= 0
+        ? "Guests cannot order and staff cannot use the store screens until BOP support renews it."
+        : "When it stops, guests cannot order and staff cannot use the store screens. Only BOP support can renew it.",
+    action: (p) =>
+      p.remainingMs <= 0
+        ? "Call BOP support now. Keep taking orders on your own POS or on paper, and take payment on the card machine."
+        : `Ordering at this Store stops in ${formatDuration(p.remainingMs)} unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.`,
+    runbook: "alert-ordering-ending",
+  },
   "disk.low": {
     severity: "warning",
     raiseAfterMs: 0,
@@ -591,6 +611,7 @@ export const DEFAULT_THRESHOLDS = Object.freeze({
   certificateCriticalMs: 2 * 24 * HOUR,
   installationWarnMs: 14 * 24 * HOUR,
   installationCriticalMs: 3 * 24 * HOUR,
+  orderingEndingWarnMs: 24 * HOUR,
   diskWarnPercent: 15,
   diskWarnBytes: 5 * 1024 ** 3,
   diskCriticalPercent: 5,
@@ -892,10 +913,29 @@ function storeAttention(attention, store) {
 }
 
 /**
+ * The last day before ordering at this Store would stop: its own validity or the installation's
+ * certificate, whichever ends first. One row: its readers care that it stops, not which. A read
+ * that could not run leaves what it last said, counting down: no read is not an all-clear.
+ */
+function evaluateOrderingEnding(observations, raise, thresholds) {
+  const { installation, certificate, now, previous } = observations;
+  const ends = [installation?.validUntil, certificate?.validTo];
+  if (installation === "unreadable" || certificate === "unreadable")
+    ends.push(previous?.alerts?.["ordering.ending"]?.params?.endsAt);
+  const soonest = Math.min(...ends.map((at) => Date.parse(at)).filter(Number.isFinite));
+  if (soonest - now <= thresholds.orderingEndingWarnMs)
+    raise("ordering.ending", {
+      endsAt: new Date(soonest).toISOString(),
+      remainingMs: soonest - now,
+    });
+}
+
+/**
  * One Store's conditions on its own board: the outages that stop its guests or staff (the entry
  * probes are the installation's), its own background work, its own business signals and its own
  * validity. `previous` is its alert state, so an alert already raised is not cleared by a read that
- * could not run. Backups, certificate, disks and channels stay on the root board.
+ * could not run. Backups, certificate, disks and channels stay on the root board; the certificate
+ * reaches a Store only in its last day, as "ordering.ending".
  */
 export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRESHOLDS) {
   const conditions = new Map();
@@ -928,6 +968,7 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
     unreadable,
     thresholds,
   });
+  evaluateOrderingEnding(observations, raise, thresholds);
   const previous = observations.previous?.alerts ?? {};
   for (const source of noReport ? [...unreadable, "supervisor"] : unreadable)
     for (const key of HELD_WHILE_UNREADABLE[source] ?? []) {

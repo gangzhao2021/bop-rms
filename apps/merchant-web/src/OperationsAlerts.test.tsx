@@ -455,6 +455,29 @@ describe("a merchant's own Store on the Home", () => {
       parseOperationsAlertView({ ...view(), support: { phone: "javascript:x", testOnly: false } }),
     ).toThrow("OPERATIONS_ALERTS_UNAVAILABLE");
   });
+  it("says ordering is about to stop with how long, how to keep serving and who to call", () => {
+    const home = rows(
+      merchant({
+        active: [
+          {
+            key: "ordering.ending",
+            severity: "critical",
+            title: "Ordering at this Store is about to stop",
+            summary:
+              "When it stops, guests cannot order and staff cannot use the store screens. Only BOP support can renew it.",
+            action:
+              "Ordering at this Store stops in 23 hours unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.",
+            raisedAt: "2026-10-15T11:56:00.000Z",
+          },
+        ],
+        support: { phone: "+14165550100", testOnly: false },
+      }),
+    );
+    expect(home).toContain("Urgent");
+    expect(home).toContain("stops in 23 hours");
+    expect(home).toContain("on your own POS or on paper");
+    expect(home).toContain('href="tel:+14165550100"');
+  });
   it("links a row to the page that settles it", () => {
     const home = rows(
       merchant({

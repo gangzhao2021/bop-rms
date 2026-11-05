@@ -10,6 +10,17 @@ const lookup = (words: Readonly<Record<string, string>>, english: string): strin
   Object.hasOwn(words, english) ? (words[english] as string) : english;
 
 export function alertAction(english: string): string {
+  // English is the monitor's own text, word for word.
+  if (currentLanguage() === "en") return english;
+  const [, left] =
+    /^Ordering at this Store stops in (.+) unless BOP support renews it\. Call BOP support now\. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine\.$/u.exec(
+      english,
+    ) ?? [];
+  if (left !== undefined)
+    return t(
+      "Ordering at this Store stops in {duration} unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.",
+      { duration: duration(left) },
+    );
   const words: Readonly<Record<string, string>> = {
     "Follow the store outage procedure (pause online ordering, take paper orders). Ask BOP support to check the store system and restart it.":
       t(
@@ -135,14 +146,18 @@ export function alertAction(english: string): string {
       t(
         "Some background work has stopped. Check Orders and Exceptions for waiting work; BOP support has to restart it.",
       ),
+    "Call BOP support now. Keep taking orders on your own POS or on paper, and take payment on the card machine.":
+      t(
+        "Call BOP support now. Keep taking orders on your own POS or on paper, and take payment on the card machine.",
+      ),
     // What only BOP can act on.
     "BOP support: record this Store's first closed business day so its day-end settlement starts.":
       t(
         "BOP support: record this Store's first closed business day so its day-end settlement starts.",
       ),
-    "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are not told about this.":
+    "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are told only when ordering is a day from stopping.":
       t(
-        "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are not told about this.",
+        "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are told only when ordering is a day from stopping.",
       ),
   };
   return lookup(words, english);
@@ -550,6 +565,13 @@ export function alertSummary(english: string): string {
     "Guests cannot order and staff cannot use the store screens until it is renewed.": t(
       "Guests cannot order and staff cannot use the store screens until it is renewed.",
     ),
+    "Guests cannot order and staff cannot use the store screens until BOP support renews it.": t(
+      "Guests cannot order and staff cannot use the store screens until BOP support renews it.",
+    ),
+    "When it stops, guests cannot order and staff cannot use the store screens. Only BOP support can renew it.":
+      t(
+        "When it stops, guests cannot order and staff cannot use the store screens. Only BOP support can renew it.",
+      ),
     "This Store has a closed business day but no day-end settlement, so its payments are not being compared with the payment provider.":
       t(
         "This Store has a closed business day but no day-end settlement, so its payments are not being compared with the payment provider.",
