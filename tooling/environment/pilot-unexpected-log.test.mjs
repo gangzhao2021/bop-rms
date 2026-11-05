@@ -250,6 +250,20 @@ describe("a merchant request that failed for a reason that is not a refusal (WP-
     expect(lines()[3]).toMatchObject({ route: "/orders", suppressed: 99 });
   });
 
+  it("the routing read that every request asks first says so under its own event", () => {
+    const lines = logged();
+    const reporter = createMerchantRequestReporter({
+      event: "PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE",
+    });
+    for (let n = 0; n < 50; n += 1) reporter("/store-routing", missingGrant());
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]).toMatchObject({
+      event: "PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE",
+      route: "/store-routing",
+      sqlState: "42501",
+    });
+  });
+
   it("names the Store only from a served Store's directory", () => {
     expect(storeOfDirectory("/app/.local/pilot-v15/stores/tea")).toBe("stores/tea");
     expect(storeOfDirectory("/app/.local/pilot-v15/stores/tea/")).toBe("stores/tea");

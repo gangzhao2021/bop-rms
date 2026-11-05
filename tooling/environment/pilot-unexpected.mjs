@@ -117,7 +117,11 @@ export function reportUnexpected(event, error, context = {}) {
  */
 const reportingWindowMs = 60_000;
 const reportingKeysMaximum = 512;
-export function createMerchantRequestReporter({ store, now = Date.now } = {}) {
+export function createMerchantRequestReporter({
+  store,
+  now = Date.now,
+  event = "MERCHANT_REQUEST_UNEXPECTED",
+} = {}) {
   const windows = new Map();
   return (route, error) => {
     if (error !== null && typeof error === "object" && alreadyLogged.has(error)) return;
@@ -131,7 +135,7 @@ export function createMerchantRequestReporter({ store, now = Date.now } = {}) {
     }
     if (windows.size >= reportingKeysMaximum) windows.clear();
     windows.set(key, { since: at, suppressed: 0 });
-    reportUnexpected("MERCHANT_REQUEST_UNEXPECTED", error, {
+    reportUnexpected(event, error, {
       route,
       ...(store === undefined ? {} : { store }),
       suppressed: window?.suppressed ?? 0,

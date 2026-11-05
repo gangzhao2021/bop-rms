@@ -25,6 +25,7 @@ import { createCustomerSessionPaymentHandoff } from "../../apps/api/dist/custome
 import { createPostgresPaymentIntentCreationStore } from "../../packages/rms/payment/src/index.ts";
 import { isStripeProvider } from "./pilot-stripe-provider.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
+import { createMerchantRequestReporter } from "./pilot-unexpected.mjs";
 import { createServer } from "node:https";
 import { request } from "node:http";
 import { readFile, lstat } from "node:fs/promises";
@@ -410,6 +411,9 @@ export async function startInternalCustomerServer({
         })),
       });
       // A request goes to the composition of the Store its Session is bound to (server-side).
+      const reportRouting = createMerchantRequestReporter({
+        event: "PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE",
+      });
       staffRoutes = createMerchantStoreRouting({
         primaryStoreReference: resources.scope.storeReference,
         routers,
@@ -417,8 +421,8 @@ export async function startInternalCustomerServer({
         ...(merchant.bff.staffPin === undefined
           ? {}
           : { resolveDevice: merchant.bff.staffPin.storeOfDevice }),
-        onUnexpected: (error) =>
-          reportUnexpected("PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE", error),
+        // Every request asks this first, so a broken read is one line a minute, not one per poll.
+        onUnexpected: (error) => reportRouting("/store-routing", error),
       });
     }
     // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY staff sign-in page is not served when staff

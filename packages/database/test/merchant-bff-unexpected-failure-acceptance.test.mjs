@@ -330,6 +330,23 @@ it("WP-2423 item 10: a read PostgreSQL refuses answers try again and is logged, 
         assert.equal(line.sqlState, "42501");
         assert.equal(line.table, "allergen_registry_version");
       });
+      lines.take();
+
+      // A sign-in that has ended is a refusal on each of them, whatever rewrite it passes through:
+      // these people are sent to sign in again, not told to try again for ever.
+      await admin.query(
+        "UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason='Logout',revoked_at=$1,version=version+1",
+        [new Date().toISOString()],
+      );
+      for (const [path, body] of [
+        ["/dining/tables", query],
+        ["/supply/items/query", itemsQuery],
+        ["/compliance/allergens/query", catalogQuery],
+      ]) {
+        const ended = await app.post(path, session, body);
+        assert.equal(ended.status, 403, path + JSON.stringify(ended.body));
+      }
+      assert.deepEqual(lines.take(), []);
     } finally {
       await new Promise((resolve) => (listening ? listening.close(resolve) : resolve()));
       await harness?.pool.end();
