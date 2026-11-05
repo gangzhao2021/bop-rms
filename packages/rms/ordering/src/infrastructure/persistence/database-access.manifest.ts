@@ -952,8 +952,7 @@ const databaseAccessManifestInput = {
       target: { schema: "rms_ordering", table: "cart" },
       principal: { kind: "module", id: "@rms/ordering" },
       readPattern: "owner-repository",
-      source:
-        "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
+      source: "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
     },
     {
       id: "dining-session-order-activity.read.cart_line",
@@ -962,8 +961,7 @@ const databaseAccessManifestInput = {
       target: { schema: "rms_ordering", table: "cart_line" },
       principal: { kind: "module", id: "@rms/ordering" },
       readPattern: "owner-repository",
-      source:
-        "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
+      source: "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
     },
     {
       id: "dining-session-order-activity.read.order_batch",
@@ -972,8 +970,7 @@ const databaseAccessManifestInput = {
       target: { schema: "rms_ordering", table: "order_batch" },
       principal: { kind: "module", id: "@rms/ordering" },
       readPattern: "owner-repository",
-      source:
-        "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
+      source: "packages/rms/ordering/src/infrastructure/persistence/dining-session-order-lookup.ts",
     },
     {
       id: "staff-cancellation.read.merchant-order-index",

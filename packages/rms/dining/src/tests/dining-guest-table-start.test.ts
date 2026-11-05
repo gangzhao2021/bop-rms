@@ -52,7 +52,9 @@ describe("DEC-DINING-GUEST-TABLE-START: who may start a table", () => {
       { kind: "MayStart", clearsCleaning: true },
     ],
   ])("%s", (_name, changes, expected) => {
-    expect(decideGuestTableStart({ ...free, ...changes }, now)).toEqual(expected);
+    expect(decideGuestTableStart({ ...free, ...changes } as GuestTableStartFacts, now)).toEqual(
+      expected,
+    );
   });
 });
 

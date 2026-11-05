@@ -572,11 +572,11 @@ describe("DEC-DINING-GUEST-TABLE-START: a guest starts a free table", () => {
     const composition = createCustomerDiningJoinComposition({
       ...f.options,
       qr: {
-        issue: async (input, authorize) => {
+        issue: async (input) => {
           order.push("issue");
           seen.push(input.observedAt);
           f.tick(seen.length * 2);
-          return issued(input, authorize);
+          return issued();
         },
         startIfFree: async () => {
           order.push("start");

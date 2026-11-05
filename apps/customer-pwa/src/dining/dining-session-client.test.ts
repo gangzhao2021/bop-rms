@@ -278,3 +278,23 @@ describe("WP-2423 item 8 ⑤ a round waiting for staff", () => {
     expect(() => parseDiningSessionView(p)).toThrow();
   });
 });
+
+describe("DEC-DINING-GUEST-TABLE-START: the table view", () => {
+  const session = (changes: object) => ({
+    schemaVersion: 1,
+    session: {
+      tableLabel: "T1",
+      orderNumber: null,
+      checkedAt: "2026-11-05T12:00:00.000Z",
+      paymentTiming: "PayFirst",
+      rounds: [],
+      summary: null,
+      ...changes,
+    },
+  });
+  it("says a guest started this table only when it did, and reads a table without the key", () => {
+    expect(parseDiningSessionView(session({})).startedByGuest).toBeUndefined();
+    expect(parseDiningSessionView(session({ startedByGuest: true })).startedByGuest).toBe(true);
+    expect(() => parseDiningSessionView(session({ startedByGuest: "yes" }))).toThrow();
+  });
+});

@@ -211,7 +211,7 @@ function fixture(
   options: {
     phase?: DiningSession["phase"];
     version?: number;
-    authority?: "Host" | "Staff" | "Denied" | "WrongHost";
+    authority?: "Host" | "Staff" | "Denied" | "WrongHost" | "System" | "SystemOtherReason";
     reversibility?: "Reversible" | "Irreversible" | "Indeterminate" | "Unavailable";
     closure?: ReturnType<typeof closure>;
     badTask?: boolean;
@@ -245,6 +245,22 @@ function fixture(
             audit: audit(input.operation, ids.actor),
           } as never;
         }
+        if (options.authority === "System" || options.authority === "SystemOtherReason")
+          return {
+            kind: "System",
+            diningSessionReference: ids.session,
+            storeReference: ids.store,
+            observedAt: input.observedAt,
+            audit: {
+              ...audit(input.operation),
+              occurredAt: input.observedAt,
+              actor: { type: "System" },
+              reasonCode:
+                options.authority === "System" ? "GUEST_TABLE_QUIET" : "CUSTOMER_FINISHED",
+              sourceChannel: "SYSTEM",
+              dataClassification: "Restricted",
+            },
+          } as never;
         return {
           kind: "Host",
           guestSessionReference: ids.guest,
@@ -323,6 +339,22 @@ function command(operationReference: string, expectedSessionVersion: number) {
     requestedAt: at,
   };
 }
+
+describe("DEC-DINING-GUEST-TABLE-START: the System closing a table", () => {
+  it("may begin and finalize on its two reasons, with nothing else changed", async () => {
+    const f = fixture({ authority: "System" });
+    const result = await f.service.begin(command(id(71), 2));
+    expect(result.session.phase).toBe("Closing");
+  });
+  it("may not on any other reason, and never brings a table back to ordering", async () => {
+    await expect(
+      fixture({ authority: "SystemOtherReason" }).service.begin(command(id(71), 2)),
+    ).rejects.toMatchObject({ code: "DINING_CLOSING_PERMISSION_DENIED" });
+    await expect(
+      fixture({ authority: "System" }).service.cancel(command(id(72), 2)),
+    ).rejects.toMatchObject({ code: "DINING_CLOSING_PERMISSION_DENIED" });
+  });
+});
 
 describe("Dining Closing phase and authority", () => {
   it("admits new Batch only while Active and locks immediately on begin", async () => {

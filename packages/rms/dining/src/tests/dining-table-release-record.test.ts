@@ -154,3 +154,17 @@ it("rejects hash substitution and System actor", () => {
     ),
   ).toThrow();
 });
+
+it("DEC-DINING-GUEST-TABLE-START: the System's release is recorded from the System, never as staff from the merchant site", () => {
+  const f = fixture();
+  for (const sourceChannel of ["SYSTEM", "CUSTOMER_PWA"])
+    expect(
+      parseDiningTableReleaseRecord(
+        { ...f, audit: { ...f.audit, actor: { type: "System" }, sourceChannel } },
+        hashes,
+      ).audit.actor.type,
+    ).toBe("System");
+  expect(() =>
+    parseDiningTableReleaseRecord({ ...f, audit: { ...f.audit, sourceChannel: "SYSTEM" } }, hashes),
+  ).toThrow();
+});

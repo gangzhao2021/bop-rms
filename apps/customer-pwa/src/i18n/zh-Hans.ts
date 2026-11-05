@@ -268,8 +268,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table can’t be started just now. Pick another table or ask staff. Your choices are kept here.":
     "这张桌暂时不能开始。请换一张桌或找店员。您选的内容还在这里。",
   "Nothing in your cart yet": "购物车还是空的",
-  "Add a dish from the menu and this table starts for you.":
-    "从菜单加一道菜，就会开始用这张桌。",
+  "Add a dish from the menu and this table starts for you.": "从菜单加一道菜，就会开始用这张桌。",
   "Add a dish from the menu to start.": "从菜单加一道菜就可以开始。",
   "Ready · Order {number}": "做好了 · {number} 号",
   "This table isn’t open yet": "这桌还没开台",

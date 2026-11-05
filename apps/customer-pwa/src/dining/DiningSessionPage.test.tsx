@@ -629,3 +629,27 @@ it("Owner 2026-11-03: a receipt shows what went back", () => {
   expect(html).toContain("Refunded");
   expect(html).toContain("$3.00");
 });
+
+describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
+  const readyRound = (changes: Partial<DiningSessionView>) => {
+    const base = view(changes);
+    return render({
+      status: "ready",
+      view: {
+        ...base,
+        rounds: base.rounds.map((entry) => ({ ...entry, status: "Ready" as const })),
+      },
+      refreshing: false,
+    });
+  };
+  it("says a finished dish is ready by its number: nobody is bringing it over", () => {
+    const html = readyRound({ startedByGuest: true, orderNumber: "12" });
+    expect(html).toContain("Ready · Order 12");
+    expect(html).not.toContain("on its way to your table");
+  });
+  it("a staff-opened table reads as it always did", () => {
+    const html = readyRound({ orderNumber: "12" });
+    expect(html).toContain("on its way to your table");
+    expect(html).not.toContain("Ready · Order");
+  });
+});

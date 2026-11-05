@@ -46,9 +46,7 @@ export interface DiningClosingSystemEvidence {
 }
 
 export type DiningClosingAuthorityEvidence =
-  | DiningClosingStaffEvidence
-  | DiningClosingHostEvidence
-  | DiningClosingSystemEvidence;
+  DiningClosingStaffEvidence | DiningClosingHostEvidence | DiningClosingSystemEvidence;
 
 export interface DiningClosingAuthorizationPort {
   authorize(input: {
