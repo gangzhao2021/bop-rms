@@ -7491,6 +7491,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Store system: not checked yet": "门店系统：还没有检查",
   "Store system: last checked {observedAt}": "门店系统：最近检查 {observedAt}",
   " · as of {observedAt}": " · 截至 {observedAt}",
+  " · Some checks last ran {observedAt}": " · 部分检查最近一次运行于 {observedAt}",
   "Call BOP support: {value}": "致电 BOP 技术支持：{value}",
   "(test number)": "（测试号码）",
   "Keep taking orders on your own POS or on paper, and take payment on the card machine. Ask BOP support to check the store system.":
@@ -7663,6 +7664,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "the check of the store's order rules": "门店订单规则的检查",
   "the check for payment differences": "支付差异检查",
   "the day-end settlement check": "日结检查",
+  "the check for closed business days": "已结束营业日的检查",
   "Email alerts": "邮件",
   "Phone alerts": "电话或消息",
   "Another alert channel": "某个提醒渠道",

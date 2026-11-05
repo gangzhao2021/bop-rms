@@ -314,7 +314,8 @@ export function createOperationsAlertsClient(fetcher: typeof fetch = fetch) {
 export type OperationsAlertsRead =
   | { readonly kind: "Loading" }
   | { readonly kind: "Ready"; readonly value: OperationsAlertView }
-  | { readonly kind: "Unavailable" }
+  /** `support`: who to call, from the last read that worked (this one names BOP support too). */
+  | { readonly kind: "Unavailable"; readonly support?: OperationsAlertView["support"] }
   /** The role does not handle store system alerts (403): the card is not shown at all. */
   | { readonly kind: "NotPermitted" };
 
@@ -373,6 +374,7 @@ export function systemAttentionItems(
           href: null,
           action: t("Check again"),
           retry: "system",
+          ...(read.support === undefined || read.support === null ? {} : { call: read.support }),
         },
       ],
     };
@@ -409,11 +411,18 @@ export function systemAttentionItems(
       ],
       later: [],
     };
-  const lastChecked = view.checksIncompleteSince ?? view.observedAt;
-  const asOf =
-    view.monitor === "Silent" && lastChecked !== null
-      ? t(" · as of {observedAt}", { observedAt: at(lastChecked) })
-      : "";
+  // On a board gone quiet, when each row was last known true: never before its own "Since". A row
+  // found after some checks stopped was still being read when the board was last written; one from
+  // before may come from a check that stopped then.
+  const asOf = (item: OperationsAlert) => {
+    if (view.monitor !== "Silent" || view.observedAt === null) return "";
+    const known =
+      view.checksIncompleteSince !== null &&
+      Date.parse(item.raisedAt) <= Date.parse(view.checksIncompleteSince)
+        ? view.checksIncompleteSince
+        : view.observedAt;
+    return t(" · as of {observedAt}", { observedAt: at(known) });
+  };
   const row = (item: OperationsAlert): AttentionItem => {
     const page = ALERT_PAGES[item.key];
     return {
@@ -423,7 +432,7 @@ export function systemAttentionItems(
       detailLabel: t("What to do:"),
       detail: alertAction(item.action),
       more: alertSummary(item.summary),
-      since: t("Since {raisedAt}", { raisedAt: at(item.raisedAt) }) + asOf,
+      since: t("Since {raisedAt}", { raisedAt: at(item.raisedAt) }) + asOf(item),
       state: item.severity === "critical" ? t("Urgent") : t("Today"),
       tone: item.severity === "critical" ? "danger" : "warning",
       href: page?.href ?? null,
@@ -567,13 +576,15 @@ export function StoreSystemLine({
               )}
               {view.observedAt === null
                 ? ""
-                : t(" · Last checked {observedAt}", {
-                    // Checks that stopped running may have stopped days ago: with the date.
-                    observedAt:
-                      view.checksIncompleteSince === null
-                        ? storeTime(view.observedAt, timeZone)
-                        : at(view.checksIncompleteSince),
-                  })}
+                : view.checksIncompleteSince === null
+                  ? t(" · Last checked {observedAt}", {
+                      observedAt: storeTime(view.observedAt, timeZone),
+                    })
+                  : // Beside rows found today, "last checked" days ago would contradict them: only
+                    // some checks stopped, maybe days ago, so with the date.
+                    t(" · Some checks last ran {observedAt}", {
+                      observedAt: at(view.checksIncompleteSince),
+                    })}
             </span>
           )}
         </p>
@@ -624,6 +635,8 @@ export function useOperationsAlerts(fetcher?: typeof fetch) {
   const [busy, setBusy] = useState(false);
   const active = useRef<AbortController | null>(null);
   const stopped = useRef(false);
+  // The number to call when the alerts themselves cannot be read is the one the last read carried.
+  const support = useRef<OperationsAlertView["support"]>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const load = useCallback(async () => {
     if (stopped.current) return;
@@ -633,7 +646,10 @@ export function useOperationsAlerts(fetcher?: typeof fetch) {
     setBusy(true);
     try {
       const value = await client.load(controller.signal);
-      if (!controller.signal.aborted) setRead({ kind: "Ready", value });
+      if (!controller.signal.aborted) {
+        support.current = value.support;
+        setRead({ kind: "Ready", value });
+      }
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof Error && error.message === OPERATIONS_ALERTS_NOT_PERMITTED) {
@@ -641,7 +657,7 @@ export function useOperationsAlerts(fetcher?: typeof fetch) {
         if (timer.current !== null) clearInterval(timer.current);
         timer.current = null;
         setRead({ kind: "NotPermitted" });
-      } else setRead({ kind: "Unavailable" });
+      } else setRead({ kind: "Unavailable", support: support.current });
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }

@@ -172,6 +172,17 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     expect(line({ kind: "Unavailable" })).not.toContain("all good");
     expect(line({ kind: "Loading" })).toContain("Checking the store system");
   });
+  it("a read that failed still offers the number the last good read carried", () => {
+    // Its words say "ask BOP support": with a number known, the row says how.
+    const unread = rows({
+      kind: "Unavailable",
+      support: { phone: "+14165550100", testOnly: true },
+    });
+    expect(unread).toContain('href="tel:+14165550100"');
+    expect(unread).toContain("(test number)");
+    expect(rows({ kind: "Unavailable" })).not.toContain("tel:");
+    expect(rows({ kind: "Unavailable", support: null })).not.toContain("tel:");
+  });
   it("shows recently resolved problems, newest first", () => {
     const html = line({
       kind: "Ready",
@@ -402,6 +413,32 @@ describe("a merchant's own Store on the Home", () => {
       ).urgent,
     ).toEqual([]);
   });
+  it("on a board gone quiet no row is 'as of' earlier than its own 'Since'", () => {
+    // Some checks stopped at 5:05 AM; the monitor last wrote at 8:00 AM.
+    const incomplete = "2026-10-15T09:05:00.000Z";
+    const before = { ...stuck, raisedAt: "2026-10-15T08:00:00.000Z" };
+    const after = { ...critical, raisedAt: "2026-10-15T11:00:00.000Z" };
+    const { urgent } = systemAttentionItems(
+      merchant({ monitor: "Silent", active: [before, after], checksIncompleteSince: incomplete }),
+      "America/Toronto",
+    );
+    const since = Object.fromEntries(urgent.map((item) => [item.title, item.since]));
+    // Found before the checks stopped: it may come from one of them, so as of when they stopped.
+    expect(since["Order or payment updates are stuck"]).toBe(
+      "Since Oct 15, 2026, 4:00 AM · as of Oct 15, 2026, 5:05 AM",
+    );
+    // Found at 7:00 AM: its own read still ran, until the board was last written.
+    expect(since["Customer ordering page is not loading"]).toBe(
+      "Since Oct 15, 2026, 7:00 AM · as of Oct 15, 2026, 8:00 AM",
+    );
+    // A board still being written says no "as of" at all.
+    expect(
+      systemAttentionItems(
+        merchant({ active: [after], checksIncompleteSince: incomplete }),
+        "America/Toronto",
+      ).urgent[0]?.since,
+    ).toBe("Since Oct 15, 2026, 7:00 AM");
+  });
   it("says what it knows in the quiet line, without backups or alert channels", () => {
     const fine = line(merchant());
     expect(fine).toContain("Store system: all good");
@@ -427,7 +464,9 @@ describe("a merchant's own Store on the Home", () => {
     // With a row to show the line points at it, and still does not vouch for a minute ago.
     const both = line(merchant({ active: [stuck], checksIncompleteSince: since }));
     expect(both).toContain("Store system: needs attention");
-    expect(both).toContain("Last checked Oct 15, 2026, 5:05 AM");
+    // Only some checks stopped, beside a row found later: "last checked" would contradict it.
+    expect(both).toContain("Some checks last ran Oct 15, 2026, 5:05 AM");
+    expect(both).not.toContain("Last checked");
     expect(both).not.toContain("08:00");
     expect(line(merchant({ active: [stuck] }))).toContain("Store system: needs attention");
     expect(line(merchant({ monitor: "Silent", active: [stuck] }))).toContain(
