@@ -1112,16 +1112,29 @@ test("@production a listing in progress shows as such, also after a reload, unti
     }),
   );
 
+  const stockCommands: Record<string, unknown>[] = [];
+  await page.route("**/merchant/commerce/availability/command", (route) => {
+    stockCommands.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ headers, json: { status: "Applied" } });
+  });
+
   await page.goto("/app/commerce/menus");
   await page.getByRole("button", { name: "List it" }).click();
   await expect(
-    page.getByText("Listing… Prices, choices and the menu go live together", { exact: false }),
+    page.getByText("Listing… New prices and choices go live first", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
+  // WP-2423: the kitchen runs out while the menu is listing: staff mark it at once, one iPad or not.
+  await page.getByRole("button", { name: "Sold out today" }).first().click();
+  await expect(page.getByText("is sold out for today.", { exact: false })).toBeVisible();
+  expect(stockCommands.map((command) => command.action)).toEqual(["SoldOut"]);
+  await expect(
+    page.getByText("Listing… New prices and choices go live first", { exact: false }),
+  ).toBeVisible();
   // A reload during the listing still shows it in progress, with no second "List it".
   await page.reload();
   await expect(
-    page.getByText("Listing… Prices, choices and the menu go live together", { exact: false }),
+    page.getByText("Listing… New prices and choices go live first", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
   await expect(

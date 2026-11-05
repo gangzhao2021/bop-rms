@@ -102,6 +102,10 @@ export function OneStoreMenuPage({
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<ReadonlySet<MenuFilter>>(new Set());
   const [busy, setBusy] = useState(false);
+  // "List it" has its own state: the kitchen shouts "out of brisket" while a menu is listing, and
+  // sold out and back in stock take effect at once, listing or not.
+  const [listingBusy, setListingBusy] = useState(false);
+  const blocked = busy || listingBusy;
   // The dish open in its editor (one at a time; "new" for a new dish).
   const [editing, setEditing] = useState<string | null>(null);
   const [newSection, setNewSection] = useState<{ name: string; nameZh: string } | null>(null);
@@ -173,7 +177,7 @@ export function OneStoreMenuPage({
   });
   // While a listing started before a reload (or the server shows one part-way) is in progress,
   // read the menu again every few seconds until it is listed.
-  const polling = (listingSince !== null || (view !== null && listingUnderway(view))) && !busy;
+  const polling = (listingSince !== null || (view !== null && listingUnderway(view))) && !blocked;
   useEffect(() => {
     if (!polling) return;
     const timer = setInterval(() => {
@@ -188,19 +192,19 @@ export function OneStoreMenuPage({
     return () => clearInterval(timer);
   }, [polling, menuReference, reload]);
   useEffect(() => {
-    if (busy && listingSince !== null) {
+    if (listingBusy && listingSince !== null) {
       const timer = setInterval(() => setClock(Date.now()), 1000);
       return () => clearInterval(timer);
     }
     return undefined;
-  }, [busy, listingSince]);
+  }, [listingBusy, listingSince]);
   useEffect(() => {
     // Finished elsewhere (the server says listed): stop showing progress.
-    if (view !== null && listingSince !== null && !busy && !listingPending(view)) {
+    if (view !== null && listingSince !== null && !listingBusy && !listingPending(view)) {
       setListingSince(null);
       writeListingMarker(menuReference, null);
     }
-  }, [view, listingSince, busy, menuReference]);
+  }, [view, listingSince, listingBusy, menuReference]);
   const shown = useMemo(() => filterRows(rows, search, filters), [rows, search, filters]);
   const unplaced = useMemo(
     () => (view === null || stock === null ? [] : dishesNotOnMenu(view, stock.items)),
@@ -224,7 +228,7 @@ export function OneStoreMenuPage({
       </WorkspacePage>
     );
   const underway = listingUnderway(view);
-  const listingInProgress = listingSince !== null || (busy && listing !== null);
+  const listingInProgress = listingSince !== null || (listingBusy && listing !== null);
   const narrowing = search.trim() !== "" || filters.size > 0;
   const reordering = !narrowing && view.permissions.mayEdit;
   const changedOrder = orderKey(rows) !== saved;
@@ -258,7 +262,7 @@ export function OneStoreMenuPage({
     }
   };
   const saveOrder = async (done = t("New order saved. Guests see it when the menu is listed.")) => {
-    if (client.command === undefined || busy) return;
+    if (client.command === undefined || blocked) return;
     setBusy(true);
     setProblem(null);
     try {
@@ -301,8 +305,8 @@ export function OneStoreMenuPage({
     view.permissions.maySubmit && view.permissions.mayApprove && view.permissions.mayPublish;
   // WP-2423 item 8 ⑥ part 2: "List it" — the menu as saved takes effect for guests, no review.
   const listMenu = async () => {
-    if (client.command === undefined || busy) return;
-    setBusy(true);
+    if (client.command === undefined || blocked) return;
+    setListingBusy(true);
     setProblem(null);
     const started = Date.now();
     setListingSince(started);
@@ -338,14 +342,14 @@ export function OneStoreMenuPage({
       );
       reload();
     } finally {
-      setBusy(false);
+      setListingBusy(false);
     }
   };
   const permissions = stock.permissions;
   const choices = view.allergenChoices ?? [];
   const mayEditDishes = mayList && client.oneStore !== undefined;
   const addSection = async () => {
-    if (client.command === undefined || busy || newSection === null || !newSection.name.trim())
+    if (client.command === undefined || blocked || newSection === null || !newSection.name.trim())
       return;
     setBusy(true);
     setProblem(null);
@@ -472,7 +476,7 @@ export function OneStoreMenuPage({
         <button
           key="hide"
           type="button"
-          disabled={busy}
+          disabled={blocked}
           onClick={() =>
             void availabilityCommand(
               // Hide and show act on the whole dish: every size.
@@ -580,7 +584,7 @@ export function OneStoreMenuPage({
           <>
             <button
               type="button"
-              disabled={busy || index === 0}
+              disabled={blocked || index === 0}
               aria-label={t("Move {item} up", { item: dish.name || dish.nameZh })}
               onClick={() =>
                 setRows((current) =>
@@ -596,7 +600,7 @@ export function OneStoreMenuPage({
             </button>
             <button
               type="button"
-              disabled={busy || index === count - 1}
+              disabled={blocked || index === count - 1}
               aria-label={t("Move {item} down", { item: dish.name || dish.nameZh })}
               onClick={() =>
                 setRows((current) =>
@@ -670,7 +674,7 @@ export function OneStoreMenuPage({
               </p>
               <button
                 type="button"
-                disabled={busy}
+                disabled={blocked}
                 onClick={() =>
                   void saveOrder(
                     t("This Store is added to the menu. List it to show it to guests here."),
@@ -780,10 +784,10 @@ export function OneStoreMenuPage({
             </label>
           </div>
           <div className="dish-editor__actions">
-            <button type="submit" className="one-menu__primary" disabled={busy}>
+            <button type="submit" className="one-menu__primary" disabled={blocked}>
               {t("Add section")}
             </button>
-            <button type="button" disabled={busy} onClick={() => setNewSection(null)}>
+            <button type="button" disabled={blocked} onClick={() => setNewSection(null)}>
               {t("Close")}
             </button>
           </div>
@@ -837,7 +841,7 @@ export function OneStoreMenuPage({
         <div className="one-menu__pending" role="status">
           <p>
             {t(
-              "Listing… Prices, choices and the menu go live together; this can take up to a minute. Guests see the changes when it finishes.",
+              "Listing… New prices and choices go live first, then the menu, within these seconds; this can take up to a minute. Guests keep ordering throughout.",
             )}{" "}
             {listingSince !== null
               ? t("{seconds} s", {
@@ -864,12 +868,12 @@ export function OneStoreMenuPage({
               <button
                 type="button"
                 className="one-menu__primary"
-                disabled={busy}
+                disabled={blocked}
                 onClick={() => void saveOrder()}
               >
                 {t("Save order")}
               </button>
-              <button type="button" disabled={busy} onClick={reload}>
+              <button type="button" disabled={blocked} onClick={reload}>
                 {t("Undo")}
               </button>
             </div>
@@ -878,7 +882,7 @@ export function OneStoreMenuPage({
               <button
                 type="button"
                 className="one-menu__primary"
-                disabled={busy}
+                disabled={blocked}
                 onClick={() => void listMenu()}
               >
                 {underway ? t("Continue listing") : t("List it")}

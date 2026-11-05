@@ -6500,8 +6500,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sizes of {item}": "{item} 的规格",
   "Back in stock: {item}": "恢复供应：{item}",
   "Sold out today: {item}": "今日售罄：{item}",
-  "Listing… Prices, choices and the menu go live together; this can take up to a minute. Guests see the changes when it finishes.":
-    "正在上架… 价格、加价和菜单会一起生效，可能需要一分钟。完成后客人才看到改动。",
+  "Listing… New prices and choices go live first, then the menu, within these seconds; this can take up to a minute. Guests keep ordering throughout.":
+    "正在上架… 新价格和加价先生效，菜单随后生效，就在这几秒内，最多可能需要一分钟。客人可以一直点单。",
   "{seconds} s": "{seconds} 秒",
   "A listing is under way or stopped part-way. Guests still see the menu as it was. If nothing changes in a minute, continue it.":
     "上架正在进行或中途停止。客人仍看到原来的菜单。如果一分钟后仍没有变化，请继续上架。",
@@ -6646,23 +6646,28 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The item set before (no longer on the menu)": "之前设的项目（已不在菜单上）",
   "Save tea charge": "保存茶位设置",
   "Reading this table…": "正在读取这张桌…",
-  "Tea for {count} instead of {guests} guests: {reason}":
-    "按 {count} 位收茶位（人数 {guests}）：{reason}",
+  "{item} for {count} instead of {guests} guests: {reason}":
+    "{item}按 {count} 位收（人数 {guests}）：{reason}",
+  "guest declined it": "客人不要",
+  "Change {item} count": "修改{item}数量",
+  "{item} to charge": "{item}收几位",
+  "Guest declined it": "客人不要",
+  "Save {item} count": "保存{item}数量",
+  "Match {item} to the guests": "按人数调整{item}",
+  "Per-head charge": "按人收费项目",
+  "{item} on the bill isn't confirmed: this device is offline. Match it once it's back.":
+    "账单上的{item}未确认：这台设备已离线，恢复后请按人数调整。",
+  "{item} on the bill isn't confirmed: the system is busy. Try again in a moment.":
+    "账单上的{item}未确认：系统正忙，请稍后再试。",
   "child not charged": "小孩不收",
-  "guest declined tea": "客人不要茶",
   "other reason": "其他原因",
-  "Change tea count": "修改茶位数量",
-  "Tea to charge": "收几位茶位",
   Why: "原因",
   "Child not charged": "小孩不收",
-  "Guest declined tea": "客人不要茶",
-  "Save tea count": "保存茶位数量",
-  "Tea on the bill: {charged} · guests: {expected}": "账单上的茶位：{charged} · 人数：{expected}",
-  "Tea on the bill: {charged}": "账单上的茶位：{charged}",
-  "Match the tea to the guests": "按人数调整茶位",
-  "Fewer guests than tea on the bill: a manager takes the extra tea off (it is recorded who and why).":
-    "人数比账单上的茶位少：请店长把多的茶位去掉（会记录是谁、为什么）。",
-  "The tea wasn't changed. Check the connection and try again.": "茶位没有改，请检查网络后再试。",
+  "{item} on the bill: {charged} · guests: {expected}":
+    "账单上的{item}：{charged} · 人数：{expected}",
+  "{item} on the bill: {charged}": "账单上的{item}：{charged}",
+  "Fewer guests than {item} on the bill: a manager takes the extra off (it is recorded who and why).":
+    "人数比账单上的{item}少：请店长把多的去掉（会记录是谁、为什么）。",
   "Whether the kitchen prepares this dish could not be read.": "读不到这道菜是否经后厨。",
   "This wasn't saved. It has been read again: check it and try again.":
     "没有保存，已重新读取，请核对后再试。",
@@ -6671,12 +6676,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not prepared by the kitchen": "不经后厨",
   "This dish does not appear on the kitchen board; it counts as served once ordered and never holds up checkout. For example bottled drinks or the tea charge.":
     "这道菜不进后厨看板，下单就算已上，不挡结账。比如瓶装饮料、茶位。",
-  "The number of guests could not be read. Check the connection.": "读不到人数，请检查网络。",
+  "The number of guests could not be read: this device is offline.": "读不到人数：这台设备已离线。",
+  "The number of guests could not be read: the system is busy.": "读不到人数：系统正忙。",
   "Someone else changed the number of guests. It has been read again: check it.":
     "别人刚改过人数，已重新读取，请核对。",
   "This table is closed, so the number of guests can't change.": "这张桌已经关闭，人数不能再改。",
-  "The number of guests wasn't saved. Check the connection and save again.":
-    "人数没有保存，请检查网络后再保存。",
+  "The number of guests wasn't saved: this device is offline. Save again.":
+    "人数没有保存：这台设备已离线，请再保存一次。",
+  "The number of guests wasn't saved: the system is busy. Save again.":
+    "人数没有保存：系统正忙，请再保存一次。",
   "Guests at this table": "这桌的人数",
   "Your access doesn't allow this. Ask a manager.": "你的权限不能做这件事，请找店长。",
   "How many guests at table {table}?": "{table} 桌几位？",
@@ -6769,7 +6777,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "One of the tables is checking out. Merge before checking out.":
     "其中一桌正在结账。请在结账前并桌。",
   "You don't have permission to merge tables.": "你没有并桌的权限。",
-  "The merge wasn't confirmed. Check the connection and retry.": "并桌没有确认。请检查网络后重试。",
+  "The merge wasn't confirmed: this device is offline. Retry.":
+    "并桌没有确认：这台设备已离线，请重试。",
+  "The merge wasn't confirmed: the system is busy. Retry.": "并桌没有确认：系统正忙，请重试。",
   "Merge this party into another table": "把这桌客人并到另一桌",
   "Merging isn't available: {reason}.": "现在不能并桌：{reason}。",
   "Merge into…": "并到…",

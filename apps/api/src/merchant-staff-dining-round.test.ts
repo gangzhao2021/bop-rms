@@ -367,11 +367,62 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
       },
     };
     const { send, pipeline } = setup(undefined, payLater);
-    await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_IN_PROGRESS" });
+    // WP-2423 DEC-MERCHANT-LOCK-SCOPE: the round exists, so it is sent there and then.
+    await expect(send()).resolves.toMatchObject({ status: "Placed", payLater: true });
+    expect(payLater.confirmed).toEqual([id(22)]);
     const again = await send();
     expect(again).toMatchObject({ status: "AlreadyPlaced", payLater: true, totalMinor: "2260" });
-    expect(payLater.confirmed).toEqual([id(22)]);
     expect(pipeline.submitPayLater).toHaveBeenCalledTimes(1);
+  });
+
+  it("DEC-DINE-IN-PAY-LATER: still cut off when it is read again: the same command sends it", async () => {
+    let cuts = 2;
+    const payLater = {
+      sessions: new Set([id(31)]),
+      confirmed: [] as string[],
+      confirm: async () => {
+        if (cuts > 0) {
+          cuts -= 1;
+          throw new Error("connection lost");
+        }
+      },
+    };
+    const { send, pipeline } = setup(undefined, payLater);
+    await expect(send()).rejects.toMatchObject({ code: "STAFF_ROUND_IN_PROGRESS" });
+    await expect(send()).resolves.toMatchObject({ status: "AlreadyPlaced", payLater: true });
+    expect(pipeline.submitPayLater).toHaveBeenCalledTimes(1);
+  });
+
+  it("WP-2423: a step that failed with no round behind it takes the items back, and says so", async () => {
+    const f = setup();
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    f.pipeline.preparePayment.mockRejectedValueOnce(new Error("lock timeout"));
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    await expect(f.send()).rejects.toMatchObject({ code: "STAFF_ROUND_UNAVAILABLE" });
+    expect(removeItems).toHaveBeenCalledTimes(1);
+  });
+
+  it("WP-2423: a round that went through just as its step failed stands, and nothing is removed twice", async () => {
+    const f = setup();
+    f.pipeline.addItem.mockResolvedValue({
+      status: "Applied",
+      cartVersion: 4,
+      lines: [{ cartItemReference: id(40), quantity: 2 }],
+    } as never);
+    const real = f.pipeline.preparePayment.getMockImplementation();
+    f.pipeline.preparePayment.mockImplementationOnce(async (credentials, input) => {
+      await real?.(credentials, input);
+      throw new Error("reply lost");
+    });
+    const removeItems = vi.fn(async () => "Removed" as const);
+    Object.assign(f.pipeline, { removeItems });
+    await expect(f.send()).resolves.toMatchObject({ status: "Placed" });
+    expect(removeItems).not.toHaveBeenCalled();
   });
 
   it("DEC-DINE-IN-PAY-LATER: a pay-first table still answers what to charge", async () => {

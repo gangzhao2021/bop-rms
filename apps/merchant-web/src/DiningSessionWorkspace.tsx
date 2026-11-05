@@ -41,7 +41,7 @@ import { newOperationReference } from "./operation-reference.js";
 import { TableSessionClose } from "./TableSessionClose.js";
 import { LastOrdersNotice } from "./LastOrdersNotice.js";
 import { TableCheckout } from "./TableCheckout.js";
-import { TablePartySize, createTablePartySizeClient } from "./TablePartySize.js";
+import { TablePartySize, TableTeaCheck, createTablePartySizeClient } from "./TablePartySize.js";
 import { TableMove } from "./TableMove.js";
 import { TableMerge } from "./TableMerge.js";
 import { TableBillTotal } from "./TableBillTotal.js";
@@ -1351,6 +1351,8 @@ function TablePanel({
   const hasOrder = Boolean(table.session?.orderReference);
   // WP-2423 item 8 ⑤ decision 4: which phone sent each round, from the table's phone list.
   const [roundPhones, setRoundPhones] = useState<ReadonlyMap<string, number | null>>(new Map());
+  // The per-head charge is shown in two places on the panel; a change in one reads the other again.
+  const [teaRevision, setTeaRevision] = useState(0);
   return (
     <>
       <header className="table-panel__head">
@@ -1470,6 +1472,20 @@ function TablePanel({
           refreshKey={refreshKey + ":" + String(checkoutRevision)}
         />
       ) : null}
+      {seated &&
+      hasOrder &&
+      canOperateTables &&
+      table.paymentTiming === "PayLater" &&
+      table.currentDiningSessionReference !== null ? (
+        <TableTeaCheck
+          key={"tea:" + table.currentDiningSessionReference}
+          diningSessionReference={table.currentDiningSessionReference}
+          csrf={csrf}
+          locked={locked}
+          revision={teaRevision}
+          onChanged={() => setTeaRevision((value) => value + 1)}
+        />
+      ) : null}
       {seated && table.paymentTiming === "PayLater" && table.session ? (
         // DEC-DINE-IN-PAY-LATER: the table pays once at the end, here (servers too, v18).
         <TableCheckout
@@ -1571,6 +1587,8 @@ function TablePanel({
             tableLabel={table.stableLabel}
             csrf={csrf}
             locked={locked}
+            teaRevision={teaRevision}
+            onTeaChanged={() => setTeaRevision((value) => value + 1)}
             onRecorded={(size) => {
               if (table.currentDiningSessionReference !== null)
                 onPartySize?.(table.currentDiningSessionReference, size);

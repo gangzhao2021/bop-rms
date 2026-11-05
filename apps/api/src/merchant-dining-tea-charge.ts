@@ -12,7 +12,10 @@ import {
   type DiningTeaOverrideReason,
 } from "@rms/dining";
 import { listOrderBillOrders, listOrderSkuLines } from "@rms/ordering";
+import { loadSkuStaffNames } from "@rms/catalog";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
+import { staffContentName } from "./staff-content-locale.js";
+import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import { readDiningTableBill, scopeOf } from "./merchant-dining-table-checkout.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -63,6 +66,11 @@ export interface DiningTeaChargeView {
   readonly overrideVersion: number;
   /** Why it didn't match, when a step was refused. */
   readonly problem: "NeedsManager" | "Unavailable" | null;
+  /**
+   * The item the Store charges per head, in the staff member's language: a hotpot's sauce is not
+   * tea. null: the Store has none, or its name can't be read.
+   */
+  readonly itemName: string | null;
 }
 
 type Step = (input: {
@@ -144,6 +152,13 @@ export function createMerchantDiningTeaCharge(options: {
             diningSessionReference,
           );
           const override = await loadDiningTeaOverride(runner, scope, diningSessionReference);
+          const names =
+            setting.teaSellableReference === null
+              ? null
+              : await loadSkuStaffNames(tx as never, {
+                  brandReference: scope.brandReference,
+                  skuReference: setting.teaSellableReference,
+                });
           // A count set for an earlier party size no longer holds: tea follows the guests again.
           const holds =
             override !== null && party !== undefined && override.partySizeVersion === party.version
@@ -191,11 +206,22 @@ export function createMerchantDiningTeaCharge(options: {
             override: holds,
             overrideVersion: override?.version ?? 0,
             expected: holds !== null ? holds.teaQuantity : (party?.partySize ?? null),
+            itemName:
+              names === null
+                ? null
+                : staffContentName(names.productLocalizedNames, names.defaultLocale) || null,
             scope,
           });
         },
       ),
     );
+  /**
+   * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a read changes nothing, so a lock timeout reads again: up to
+   * three tries, about 6 s when each waits out its 2 s. Only reads: a step of a sync is never
+   * repeated here, because the staff round it runs has already recorded who entered it.
+   */
+  const readCurrent = (sessionCookie: unknown, diningSessionReference: string) =>
+    retryTransactionConflict(() => read(sessionCookie, diningSessionReference), { attempts: 3 });
   const viewOf = (
     state: Awaited<ReturnType<typeof read>>,
     problem: DiningTeaChargeView["problem"] = null,
@@ -227,6 +253,7 @@ export function createMerchantDiningTeaCharge(options: {
             }),
       overrideVersion: state.overrideVersion,
       problem,
+      itemName: state.itemName,
     });
   };
   return async (input: {
@@ -292,7 +319,7 @@ export function createMerchantDiningTeaCharge(options: {
       return fail("DINING_TEA_CHARGE_INPUT_INVALID");
     }
     try {
-      let state = await read(input.sessionCookie, command.session);
+      let state = await readCurrent(input.sessionCookie, command.session);
       if (command.action === "Read") return viewOf(state);
       if (command.action === "SetTeaCount") {
         // The count is for the party size now recorded (none recorded: nothing to set it for).
@@ -333,7 +360,7 @@ export function createMerchantDiningTeaCharge(options: {
           ),
         );
         void actor;
-        state = await read(input.sessionCookie, command.session);
+        state = await readCurrent(input.sessionCookie, command.session);
       }
       const base = command.operation as string;
       const target = state.expected;
@@ -374,7 +401,7 @@ export function createMerchantDiningTeaCharge(options: {
           }),
         );
         if (!done) break;
-        state = await read(input.sessionCookie, command.session);
+        state = await readCurrent(input.sessionCookie, command.session);
         charged = state.open.reduce((sum, item) => sum + item.quantity, 0);
       }
       // More guests (or what a removed line held beyond the guests): add the difference.
@@ -399,7 +426,7 @@ export function createMerchantDiningTeaCharge(options: {
             },
           }),
         );
-      return viewOf(await read(input.sessionCookie, command.session), problem);
+      return viewOf(await readCurrent(input.sessionCookie, command.session), problem);
     } catch (error) {
       if (error instanceof MerchantDiningTeaChargeError) throw error;
       throw new MerchantDiningTeaChargeError("DINING_TEA_CHARGE_UNAVAILABLE");

@@ -177,3 +177,42 @@ export async function listBrandSkuChoices(
     }),
   );
 }
+
+/**
+ * One SKU's names for a staff screen, read beside the caller's other facts in its transaction (the
+ * caller authorizes and has the Brand selected). null: the Brand has no such SKU.
+ */
+export async function loadSkuStaffNames(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  scope: { readonly brandReference: string; readonly skuReference: string },
+): Promise<{
+  readonly productLocalizedNames: Readonly<Record<string, string>>;
+  readonly defaultLocale: string;
+} | null> {
+  // These rows are the Brand's: they are read with no Store selected, and the caller's put back.
+  const selected = (await tx.query("SELECT current_setting('bop.store_id',true) AS store", []))
+    .rows[0]?.store;
+  await tx.query("SELECT set_config('bop.store_id','',true)", []);
+  const row = (
+    await tx.query(
+      `SELECT v.localized_names_json product_names,v.default_locale
+       FROM rms_catalog.sku s
+       JOIN rms_catalog.product_version v ON v.product_version_id=s.product_version_id AND v.product_id=s.product_id AND v.brand_id=s.brand_id
+       WHERE s.brand_id=$1 AND s.sku_id=$2`,
+      [parseCatalogReference(scope.brandReference), parseCatalogReference(scope.skuReference)],
+    )
+  ).rows[0];
+  await tx.query("SELECT set_config('bop.store_id',$1,true)", [
+    typeof selected === "string" ? selected : "",
+  ]);
+  if (row === undefined) return null;
+  return Object.freeze({
+    productLocalizedNames: (row.product_names ?? {}) as Readonly<Record<string, string>>,
+    defaultLocale: String(row.default_locale),
+  });
+}

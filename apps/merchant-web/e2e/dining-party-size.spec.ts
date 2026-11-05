@@ -119,7 +119,13 @@ test("@production staff record how many guests sit at a table and change it", as
   });
   // WP-2423 item 8 ⑦ 4b-2: the tea follows the guests recorded (the server adds or takes it off).
   const teaSent: Record<string, unknown>[] = [];
-  let tea = { status: "NoPartySize", charged: 0, expected: null as number | null, problem: null };
+  let tea = {
+    status: "NoPartySize",
+    charged: 0,
+    expected: null as number | null,
+    problem: null,
+    itemName: "Tea",
+  };
   await page.route("**/merchant/dining/tea-charge", (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     teaSent.push(body);
@@ -129,6 +135,7 @@ test("@production staff record how many guests sit at a table and change it", as
         charged: party.partySize === 6 ? 4 : (party.partySize ?? 0),
         expected: party.partySize,
         problem: null,
+        itemName: "Tea",
       };
     return route.fulfill({ headers, json: tea });
   });

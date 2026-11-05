@@ -80,6 +80,7 @@ export async function createInternalCounterOrder(
     expectedDatabaseName,
     diningClosing,
     issueRefundReceipt,
+    decorateStaffRoundPipeline,
   },
 ) {
   const saved = await loadPickupWorkflow();
@@ -279,6 +280,7 @@ export async function createInternalCounterOrder(
           loadDiningWorkflow,
           expectedDatabaseName,
           diningClosing,
+          decorateStaffRoundPipeline,
         });
   return {
     counterMenu: createMerchantCounterMenu({
@@ -382,6 +384,7 @@ async function createInternalStaffDiningRound(
     loadDiningWorkflow,
     expectedDatabaseName,
     diningClosing,
+    decorateStaffRoundPipeline,
   },
 ) {
   const saved = await loadDiningWorkflow();
@@ -484,7 +487,7 @@ async function createInternalStaffDiningRound(
       return null;
     }
   };
-  const pipeline = createStaffTableGuestPipeline({
+  const built = createStaffTableGuestPipeline({
     takesOrder: async (input) =>
       // Staff open tables and send rounds after last orders too (recorded as their action).
       (input.recordedAfterOutage && (await operatingNow()).kitchenNotSetUp !== true) ||
@@ -565,6 +568,8 @@ async function createInternalStaffDiningRound(
     nextReference: reference,
     now,
   });
+  // Acceptance tests interrupt one step of a real round; nothing else passes this.
+  const pipeline = decorateStaffRoundPipeline?.(built) ?? built;
   const payLater = (selected) => {
     if (
       selected.tenantReference !== tenantReference ||

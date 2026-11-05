@@ -572,6 +572,7 @@ export function createMerchantStaffDiningRound(options: {
      */
     let roundMayExist = false;
     let removeRoundItems: (() => Promise<"Removed" | "Kept">) | null = null;
+    let settleAfterFailure: (() => Promise<StaffDiningRoundResult>) | null = null;
     try {
       // A retry of the same staff command returns the round it created, never a second one.
       const prior = await inScope(async (tx, scope, allowed) => {
@@ -738,6 +739,29 @@ export function createMerchantStaffDiningRound(options: {
             : "Kept";
         if (removed === "Removed") startedTable = tableStarted;
         await abandonStartedTable();
+        return removed;
+      };
+      /**
+       * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a step from the checkout on failed, so the round may exist.
+       * The owner's records say whether it does. If it does, it stands. If not, its items come back
+       * out of the table's Cart, so sending again is not refused for them and they are never sent
+       * twice; taking them out waits for any submission still holding that Cart, so the records
+       * are read once more before staff are told nothing was sent.
+       */
+      const roundExists = () =>
+        inScope(
+          async (tx, scope, allowed) =>
+            (await entries(scope, allowed).loadBatch(
+              tx,
+              String(entry.record.guestSessionReference),
+            )) !== null,
+        );
+      settleAfterFailure = async () => {
+        if (await roundExists()) return finished("Placed", entry.record);
+        const removed = await withdraw();
+        if (await roundExists()) return finished("Placed", entry.record);
+        // Items that could not be taken out prove nothing: the same command is sent again.
+        return fail(removed === "Removed" ? "STAFF_ROUND_UNAVAILABLE" : "STAFF_ROUND_IN_PROGRESS");
       };
       const quoted = await options.pipeline.quote(credentials, {
         operationReference: options.nextReference(),
@@ -841,8 +865,10 @@ export function createMerchantStaffDiningRound(options: {
       // WP-2423: failed before its checkout, so nothing was ordered: the round's items leave the
       // table's Cart, so sending it again (a new attempt) is not refused for them.
       const remove = roundMayExist ? null : removeRoundItems;
-      removeRoundItems = null;
-      if (remove !== null) await remove();
+      if (remove !== null) {
+        removeRoundItems = null;
+        await remove();
+      }
       await abandonStartedTable();
       if (error instanceof StaffDiningRoundError) throw error;
       if (
@@ -858,6 +884,19 @@ export function createMerchantStaffDiningRound(options: {
         options.onUnexpected?.(error);
       } catch {
         // Reporting never changes the answer.
+      }
+      if (roundMayExist && settleAfterFailure !== null) {
+        try {
+          return await settleAfterFailure();
+        } catch (settling) {
+          if (
+            settling instanceof StaffDiningRoundError &&
+            (settling.code === "STAFF_ROUND_UNAVAILABLE" ||
+              settling.code === "STAFF_ROUND_IN_PROGRESS")
+          )
+            throw settling;
+          // Where it stands can't be read now: the same command is sent again to recover it.
+        }
       }
       // WP-2423: a definite "could not send" only while nothing can exist yet; once the checkout
       // started the round may exist, so the same command is sent again to recover it.

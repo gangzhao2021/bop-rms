@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
 /**
@@ -30,7 +30,8 @@ const table = (n: number, label: string, overrides: Record<string, unknown> = {}
   ...overrides,
 });
 
-test("@production staff merge a table's party into another seated table", async ({ page }) => {
+/** The whole of a merge's screen, with what the per-head charge answers after it. */
+async function stubMerge(page: Page, teaAnswer: (route: Route) => Promise<void>) {
   const scope = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
@@ -124,18 +125,7 @@ test("@production staff merge a table's party into another seated table", async 
   const tea: Record<string, unknown>[] = [];
   await page.route("**/merchant/dining/tea-charge", (route) => {
     tea.push(route.request().postDataJSON() as Record<string, unknown>);
-    return route.fulfill({
-      headers,
-      json: {
-        status: "NoTeaCharge",
-        charged: 0,
-        expected: null,
-        guests: null,
-        override: null,
-        overrideVersion: 0,
-        problem: null,
-      },
-    });
+    return teaAnswer(route);
   });
   // The merged bill (T7's and T6's rounds), as the staff bill read gives it.
   await page.route("**/merchant/dining/table-bill", (route) =>
@@ -208,6 +198,24 @@ test("@production staff merge a table's party into another seated table", async 
       },
     });
   });
+  return { sent, tea };
+}
+
+test("@production staff merge a table's party into another seated table", async ({ page }) => {
+  const { sent, tea } = await stubMerge(page, (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        status: "NoTeaCharge",
+        charged: 0,
+        expected: null,
+        guests: null,
+        override: null,
+        overrideVersion: 0,
+        problem: null,
+      },
+    }),
+  );
   await page.goto("/operations/dining");
   await page.getByRole("button", { name: "Select T6", exact: true }).click();
   const panel = page.getByRole("region", { name: "Merge this party into another table" });
@@ -266,3 +274,66 @@ test("@production staff merge a table's party into another seated table", async 
   await expect(whole).toContainText("$31.51");
   await expectNoInternalText(page, ["Mark unavailable"]);
 });
+
+// WP-2423 DEC-MERCHANT-LOCK-SCOPE: the per-head charge is money, so a merge is never announced as
+// all done while it isn't confirmed. It says so; the table the party joined offers the way to match.
+for (const [name, answer, said] of [
+  [
+    "the system is busy",
+    (route: Route) =>
+      route.request().postDataJSON().action === "Sync"
+        ? route.fulfill({ headers, status: 503, json: { error: "unavailable" } })
+        : route.fulfill({
+            headers,
+            json: {
+              status: "Mismatch",
+              charged: 3,
+              expected: 5,
+              guests: 5,
+              override: null,
+              overrideVersion: 0,
+              problem: null,
+              itemName: "Sauce (TEST)",
+            },
+          }),
+    "Per-head charge on the bill isn't confirmed: the system is busy.",
+  ],
+  [
+    "the charge doesn't match",
+    (route: Route) =>
+      route.fulfill({
+        headers,
+        json: {
+          status: "Mismatch",
+          charged: 3,
+          expected: 5,
+          guests: 5,
+          override: null,
+          overrideVersion: 0,
+          problem: "Unavailable",
+          itemName: "Sauce (TEST)",
+        },
+      }),
+    "Sauce (TEST) on the bill isn't confirmed: the system is busy.",
+  ],
+] as const) {
+  test(`@production a merge says the charge isn't confirmed when ${name}`, async ({ page }) => {
+    await stubMerge(page, answer);
+    await page.goto("/operations/dining");
+    await page.getByRole("button", { name: "Select T6", exact: true }).click();
+    await page.locator("details.table-panel__manage").evaluate((node) => {
+      (node as HTMLDetailsElement).open = true;
+    });
+    const panel = page.getByRole("region", { name: "Merge this party into another table" });
+    await panel.getByRole("combobox", { name: "Merge into…" }).selectOption({ label: "T7" });
+    await panel.getByRole("button", { name: "Merge into table T7" }).click();
+    await expect(page.getByText(said, { exact: false }).first()).toBeVisible();
+    // T7 opens with the charge above its payment, and the way to match it.
+    await expect(
+      page
+        .locator(".table-panel__tea-check")
+        .getByRole("button", { name: "Match Sauce (TEST) to the guests" }),
+    ).toBeVisible();
+    await expectNoInternalText(page, ["Mark unavailable"]);
+  });
+}

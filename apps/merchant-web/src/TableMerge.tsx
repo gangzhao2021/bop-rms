@@ -2,7 +2,14 @@ import { useRef, useState } from "react";
 import { t, saidTable } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import type { StaffDiningTable } from "./dining-session-client.js";
-import { createTableTeaClient, type TableTeaClient } from "./TablePartySize.js";
+import {
+  createTableTeaClient,
+  TablePartySizeError,
+  teaNotConfirmed,
+  type TableTeaClient,
+  type TableTeaFailure,
+  type TableTeaView,
+} from "./TablePartySize.js";
 
 export type TableMergeProblem =
   | "Denied"
@@ -14,6 +21,9 @@ export type TableMergeProblem =
   | "TargetNotOrdered"
   | "UnsentCart"
   | "TooManyGuests"
+  /** The request never left this device. */
+  | "Offline"
+  /** The system answered it is busy. */
   | "Unavailable";
 export class TableMergeError extends Error {
   constructor(readonly code: TableMergeProblem) {
@@ -64,7 +74,7 @@ export function createTableMergeClient(fetcher: typeof fetch = fetch): TableMerg
           body: JSON.stringify({ action: "Merge", ...command }),
         });
       } catch {
-        throw new TableMergeError("Unavailable");
+        throw new TableMergeError("Offline");
       }
       if (response.status === 401 || response.status === 403) throw new TableMergeError("Denied");
       const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
@@ -173,26 +183,39 @@ export function TableMerge({
         expectedTargetTableVersion: chosen.aggregateVersion,
       });
       operation.current = null;
-      // The tea follows the guests now at the table (the same sync as a party size change).
-      await tea(csrf, {
-        action: "Sync",
-        diningSessionReference: merged.diningSessionReference,
-        operationReference: newOperationReference(),
-      }).catch(() => null);
+      // The tea follows the guests now at the table (the same sync as a party size change). It is
+      // money, so a merge is never announced as all done while it is not confirmed; the table the
+      // party joined opens with the way to match it, above its payment.
+      let followed: TableTeaView | null = null;
+      let failure: TableTeaFailure | null = null;
+      try {
+        followed = await tea(csrf, {
+          action: "Sync",
+          diningSessionReference: merged.diningSessionReference,
+          operationReference: newOperationReference(),
+        });
+      } catch (error) {
+        failure =
+          error instanceof TablePartySizeError && error.code === "Offline"
+            ? "Offline"
+            : "Unavailable";
+      }
+      if (failure === null && followed?.status === "Mismatch") failure = "Unavailable";
+      const announced = t(
+        "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
+        {
+          table: saidTable(merged.tableLabel),
+          from: merged.fromTableLabel,
+          count: String(merged.partySize),
+        },
+      );
       onMerged(
-        t(
-          "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
-          {
-            table: saidTable(merged.tableLabel),
-            from: merged.fromTableLabel,
-            count: String(merged.partySize),
-          },
-        ),
+        failure === null ? announced : announced + " " + teaNotConfirmed(followed, failure),
         chosen.tableReference,
       );
     } catch (error) {
       const code = error instanceof TableMergeError ? error.code : "Unavailable";
-      if (code !== "Unavailable") operation.current = null;
+      if (code !== "Unavailable" && code !== "Offline") operation.current = null;
       setProblem(
         code === "PaymentStarted"
           ? t("Something on one of the bills was paid or split. Those tables can't be merged.")
@@ -212,7 +235,9 @@ export function TableMerge({
                       ? t("You don't have permission to merge tables.")
                       : code === "Changed" || code === "NotSeated"
                         ? t("The tables changed meanwhile. They are read again: check and retry.")
-                        : t("The merge wasn't confirmed. Check the connection and retry."),
+                        : code === "Offline"
+                          ? t("The merge wasn't confirmed: this device is offline. Retry.")
+                          : t("The merge wasn't confirmed: the system is busy. Retry."),
       );
       if (code === "Changed" || code === "NotSeated") onMerged("", null);
     } finally {
