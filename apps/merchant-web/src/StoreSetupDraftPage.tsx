@@ -60,6 +60,7 @@ const StoreFirstOpeningPanel = lazyPage(
   () => import("./StoreFirstOpeningPanel.js"),
   "StoreFirstOpeningPanel",
 );
+type OpeningPublished = import("./StoreFirstOpeningPanel.js").OpeningPublished;
 const steps = [
   t("Identity"),
   t("Address and timezone"),
@@ -377,20 +378,21 @@ export function StoreSetupHeader({
 function FirstStoreFold({
   active,
   panel,
+  status,
   sections,
-  forcedOpen,
   children,
 }: {
   readonly active: boolean;
   readonly panel: ReactNode;
+  /** What the step-by-step settings have to say about themselves: it belongs with them. */
+  readonly status: ReactNode;
   readonly sections: ReactNode;
-  readonly forcedOpen: boolean;
   readonly children: ReactNode;
 }) {
   const { hash } = useLocation();
   const [opened, setOpened] = useState(false);
   if (!active) return <>{children}</>;
-  const open = opened || forcedOpen || (hash !== "" && hash !== "#store-opening");
+  const open = opened || (hash !== "" && hash !== "#store-opening");
   return (
     <>
       {panel}
@@ -404,6 +406,7 @@ function FirstStoreFold({
         <summary>{t("All settings, step by step")}</summary>
         {open ? (
           <>
+            {status}
             {sections}
             {children}
           </>
@@ -565,11 +568,14 @@ export function StoreSetupDraftPage({
       const original = journal.current ?? journalFactory(view.scope),
         cursor = await original.load();
       if (!current(token, request.signal)) return;
-      if (pending && !cursor) throw new StoreSetupClientError("Unavailable");
+      // A save this page was holding was settled elsewhere (a first opening's run, another tab):
+      // what the server says now is what stands.
+      const settledElsewhere = pending !== null && cursor === null;
       journal.current = original;
       savedScope.current = view.scope;
       setPending(cursor);
-      if (discard || !dirty) apply(view);
+      if (settledElsewhere) setNotice("");
+      if (discard || !dirty || settledElsewhere) apply(view);
       else {
         setWorkspace(view);
         if (baseline && !sameRoot(baseline, view)) setError("Conflict");
@@ -658,8 +664,14 @@ export function StoreSetupDraftPage({
   const recover = async () => {
     if (running.current || busy || !online || !pending || !journal.current) return;
     const activeJournal = journal.current,
-      original = pending,
-      { request, token } = begin();
+      original = pending;
+    // Settled elsewhere since this page read it: nothing is left to recover, only to read again.
+    if ((await activeJournal.load()) === null) {
+      setPending(null);
+      await refresh(true);
+      return;
+    }
+    const { request, token } = begin();
     try {
       const { receipt, workspace: fresh } = await recoverStoreSetupDraft({
         client,
@@ -737,8 +749,7 @@ export function StoreSetupDraftPage({
   // Owner. Someone who can't read the setup is not asked anything.
   const [opening, setOpening] = useState<"Loading" | "First" | "Established" | "Failed">("Loading"),
     [openingRead, setOpeningRead] = useState(0),
-    [publishedNote, setPublishedNote] = useState<string | null>(null),
-    [noFirstConfiguration, setNoFirstConfiguration] = useState(false);
+    [publishedNote, setPublishedNote] = useState<string | null>(null);
   useEffect(() => {
     const request = new AbortController();
     setOpening("Loading");
@@ -757,8 +768,45 @@ export function StoreSetupDraftPage({
     profileSync.current = sync;
   }, []);
   const profilePublished = useCallback(() => profileSync.current?.(), []);
-  const onNoFirstConfiguration = useCallback(() => setNoFirstConfiguration(true), []);
+  const latestRefresh = useRef(refresh);
+  useEffect(() => {
+    latestRefresh.current = refresh;
+  });
+  const openingPublished = useCallback((result: OpeningPublished) => {
+    setPublishedNote(
+      result.kind === "AlreadyPublished"
+        ? t(
+            "This store's setup was already published, on another device or by another Owner, so what was on that page was not saved. Check the live settings below and change them here if you need to.",
+          )
+        : result.waits.length > 0
+          ? t("Your store setup is published. The allergen list still needs approval.")
+          : t("Your store setup is published."),
+    );
+    setOpening("Established");
+    void latestRefresh.current(true);
+  }, []);
   const firstStore = workspace !== null && id === storeReference && opening !== "Established";
+  // On a first Store these are about the steps under the fold (a save pending, a read that failed);
+  // the one page says what concerns it. Above it they would read as something being wrong with it.
+  const stepsStatus = (
+    <>
+      {error && !ownerOnly && (
+        <p id="setup-validation-error" role="alert">
+          {messages[error]}
+        </p>
+      )}
+      {notice && <p role="status">{notice}</p>}
+      {busy && <p role="status">{t("Checking current Store settings…")}</p>}
+      {pending && (
+        <section className="store-setup-recovery" aria-label={t("Original save recovery")}>
+          <p>{t("An earlier save has not been cleared. A new save is blocked.")}</p>
+          <button type="button" disabled={busy || !online} onClick={() => void recover()}>
+            {t("Recover original save")}
+          </button>
+        </section>
+      )}
+    </>
+  );
   return (
     <AppFrame
       className="store-setup-draft-page"
@@ -794,25 +842,11 @@ export function StoreSetupDraftPage({
           {t("Offline. Your local edits are retained. Reconnect and refresh before saving.")}
         </p>
       )}
-      {error && !ownerOnly && (
-        <p id="setup-validation-error" role="alert">
-          {messages[error]}
-        </p>
-      )}
-      {notice && <p role="status">{notice}</p>}
-      {busy && <p role="status">{t("Checking current Store settings…")}</p>}
-      {pending && (
-        <section className="store-setup-recovery" aria-label={t("Original save recovery")}>
-          <p>{t("An earlier save has not been cleared. A new save is blocked.")}</p>
-          <button type="button" disabled={busy || !online} onClick={() => void recover()}>
-            {t("Recover original save")}
-          </button>
-        </section>
-      )}
+      {firstStore ? null : stepsStatus}
       {workspace && (
         <FirstStoreFold
           active={firstStore}
-          forcedOpen={noFirstConfiguration}
+          status={stepsStatus}
           sections={
             <StoreProfilePublishedContext.Provider value={profilePublished}>
               {children}
@@ -839,18 +873,7 @@ export function StoreSetupDraftPage({
                   locale={workspace.store.locale}
                   csrf={csrf}
                   onChanged={() => void refresh()}
-                  onPublished={(result) => {
-                    setPublishedNote(
-                      result.waits.length > 0
-                        ? t(
-                            "Your store setup is published. The allergen list still needs approval.",
-                          )
-                        : t("Your store setup is published."),
-                    );
-                    setOpening("Established");
-                    void refresh(true);
-                  }}
-                  onNoFirstConfiguration={onNoFirstConfiguration}
+                  onPublished={openingPublished}
                   registerProfileSync={registerProfileSync}
                 />
               </Suspense>

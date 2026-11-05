@@ -61,6 +61,11 @@ export function openingSteps(facts: OpeningFacts, storeReference: string): reado
       label: t("Allergen list approved"),
       href: "/app/compliance/allergens",
       done: facts.allergenList,
+      // Publishing the Store's setup does it when the Owner approves alone, and otherwise it comes
+      // right after: until then this row must not send anyone to approve a list nobody else can.
+      ...(store === false && facts.allergenList === false
+        ? { waiting: t("After your store setup") }
+        : {}),
     },
     {
       key: "menuListed",
@@ -124,7 +129,10 @@ async function loadOpeningFacts(csrf: string, fetcher: typeof fetch): Promise<Op
 
 export function OpeningListView({ steps }: { readonly steps: readonly OpeningStep[] }) {
   if (steps.length === 0 || steps.every((step) => step.done)) return null;
-  const next = steps.find((step) => !step.done && step.waiting === undefined);
+  // What is next is the first row not done. If that is not the Owner's to do yet, nothing is: the
+  // Store's own page has told them nothing else is needed from them now.
+  const first = steps.find((step) => !step.done);
+  const next = first?.waiting === undefined ? first : undefined;
   return (
     <section className="opening-list" aria-labelledby="opening-list-heading">
       <h2 id="opening-list-heading">{t("Getting ready to open")}</h2>

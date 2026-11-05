@@ -1,5 +1,6 @@
 import { allergenName, listSeparator, serviceModeText, t } from "./i18n/i18n.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router";
 import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { canonicalPublicationValue as canonical } from "./product-publication-command-client-v2.js";
 import { languageName } from "./staff-text.js";
@@ -11,12 +12,17 @@ import {
   loadOpeningFacts,
   openingAnswerProblems,
   openingAnswersFromRecords,
+  openingAnswersInput,
+  openingApprovalPlan,
+  openingApproveInput,
   openingConfirmationFromFacts,
   openingContentOf,
   openingMissing,
   openingPeriodEndsNextDay,
+  openingSentSummary,
   openingWaitsFromFacts,
   runStoreOpening,
+  sendOpeningBack,
   syncOpeningReferences,
   type OpeningAnswers,
   type OpeningApprover,
@@ -26,7 +32,6 @@ import {
   type OpeningGate,
   type OpeningHours,
   type OpeningHoursProblem,
-  type OpeningMissing,
   type OpeningPeriod,
   type OpeningServiceMode,
   type OpeningStep,
@@ -94,10 +99,7 @@ const listOf = (items: readonly string[]) =>
       });
 const peopleOf = (waits: readonly OpeningWait[]) =>
   listOf([...new Set(waits.flatMap((wait) => wait.who.map(nameOf)))]);
-const missingWords = (missing: OpeningMissing): string =>
-  missing === "TaxRates"
-    ? t("Waiting for BOP support to set your tax rates.")
-    : t("Waiting for BOP support to approve this store to open.");
+const allergensHref = "/app/compliance/allergens";
 const problemWords = (problem: OpeningHoursProblem): string =>
   problem === "NoServiceMode"
     ? t("Choose dine-in, pickup or both.")
@@ -175,15 +177,15 @@ function OpeningSummary({
   addressText,
   offerTips,
   tierPercents,
-  allergens,
+  allergenRow,
 }: {
   readonly heading: string;
   readonly confirmation: OpeningConfirmation;
   readonly addressText: string;
   readonly offerTips: boolean;
   readonly tierPercents: readonly number[];
-  /** The list's names; null when the Brand already has one, undefined when the brand owner does. */
-  readonly allergens: readonly string[] | null | undefined;
+  /** The list, and who approves it, as this page says it to this person. */
+  readonly allergenRow: ReactNode;
 }) {
   const rows: readonly (readonly [string, ReactNode])[] = [
     [
@@ -252,14 +254,7 @@ function OpeningSummary({
           [t("Pickup orders"), t("Up to 20 orders an hour. Ask BOP support to change it.")],
         ] as const)
       : []),
-    [
-      t("Allergen list"),
-      allergens === undefined
-        ? t("Your brand owner approves this list.")
-        : allergens === null
-          ? t("Already approved.")
-          : allergens.join(listSeparator()),
-    ],
+    [t("Allergen list"), allergenRow],
     [t("Takes effect"), t("As soon as it is published, with no end date.")],
   ];
   return (
@@ -352,14 +347,47 @@ function PeriodsEditor({
 }
 function OpeningHoursEditor({
   hours,
+  problems,
   disabled,
   onChange,
 }: {
   readonly hours: OpeningHours;
+  readonly problems: readonly OpeningHoursProblem[];
   readonly disabled: boolean;
   readonly onChange: (hours: OpeningHours) => void;
 }) {
   const names = weekdays();
+  // An empty box is asked for by the list under the button; what can't be read is said here.
+  const minutes = (
+    id: string,
+    label: string,
+    value: string,
+    problem: "LastOrders" | "Preparation",
+    change: (next: string) => void,
+  ) => {
+    const wrong = value.trim() !== "" && problems.includes(problem);
+    return (
+      <label>
+        {label}
+        <input
+          inputMode="numeric"
+          value={value}
+          disabled={disabled}
+          aria-invalid={wrong ? true : undefined}
+          aria-describedby={wrong ? id : undefined}
+          onChange={(event) => change(event.currentTarget.value)}
+        />
+        {wrong ? (
+          <span id={id} className="store-opening__error store-opening__line">
+            {problemWords(problem)}
+          </span>
+        ) : null}
+      </label>
+    );
+  };
+  const noDay = problems.includes("NoOpenDay") ? (
+    <p className="store-opening__error">{problemWords("NoOpenDay")}</p>
+  ) : null;
   const setDay = (index: number, change: Partial<OpeningHours["days"][number]>) =>
     onChange({
       ...hours,
@@ -415,6 +443,7 @@ function OpeningHoursEditor({
                 {name}
               </label>
             ))}
+            {noDay}
           </fieldset>
         </>
       ) : (
@@ -445,31 +474,29 @@ function OpeningHoursEditor({
               </div>
             );
           })}
+          {noDay}
         </div>
       )}
+      {problems.some((problem) => problem === "SameTimes" || problem === "PeriodsOverlap") ? (
+        <p className="store-opening__error">
+          {problemWords(problems.includes("SameTimes") ? "SameTimes" : "PeriodsOverlap")}
+        </p>
+      ) : null}
       <div className="store-opening__row">
-        <label>
-          {t("Last orders (minutes before closing)")}
-          <input
-            inputMode="numeric"
-            value={hours.lastOrdersMinutes}
-            disabled={disabled}
-            onChange={(event) =>
-              onChange({ ...hours, lastOrdersMinutes: event.currentTarget.value })
-            }
-          />
-        </label>
-        <label>
-          {t("Preparation time (minutes)")}
-          <input
-            inputMode="numeric"
-            value={hours.preparationMinutes}
-            disabled={disabled}
-            onChange={(event) =>
-              onChange({ ...hours, preparationMinutes: event.currentTarget.value })
-            }
-          />
-        </label>
+        {minutes(
+          "store-opening-last-orders-error",
+          t("Last orders (minutes before closing)"),
+          hours.lastOrdersMinutes,
+          "LastOrders",
+          (lastOrdersMinutes) => onChange({ ...hours, lastOrdersMinutes }),
+        )}
+        {minutes(
+          "store-opening-preparation-error",
+          t("Preparation time (minutes)"),
+          hours.preparationMinutes,
+          "Preparation",
+          (preparationMinutes) => onChange({ ...hours, preparationMinutes }),
+        )}
       </div>
     </fieldset>
   );
@@ -572,6 +599,12 @@ function stopWords(outcome: Extract<StoreOpeningOutcome, { kind: "Stopped" }>): 
   }
 }
 
+/** The Store is published, by this press or already when it began. */
+export type OpeningPublished = Extract<
+  StoreOpeningOutcome,
+  { readonly kind: "Published" | "AlreadyPublished" }
+>;
+const testAllergenTemplate = "CA_PRIORITY_TEST";
 export function StoreFirstOpeningPanel({
   scope,
   locale,
@@ -579,7 +612,6 @@ export function StoreFirstOpeningPanel({
   fetcher,
   onChanged,
   onPublished,
-  onNoFirstConfiguration,
   registerProfileSync,
 }: {
   readonly scope: StoreSetupScope;
@@ -588,9 +620,8 @@ export function StoreFirstOpeningPanel({
   readonly fetcher?: typeof fetch;
   /** What is saved moved on: the folded settings read again. */
   readonly onChanged: () => void;
-  readonly onPublished: (outcome: Extract<StoreOpeningOutcome, { kind: "Published" }>) => void;
-  /** A Store with no configuration to start from: only the step-by-step settings can go on. */
-  readonly onNoFirstConfiguration: () => void;
+  /** Published, by this press or by anyone since this page last read: this page is over. */
+  readonly onPublished: (outcome: OpeningPublished) => void;
   /** The folded name-and-address panel published: Store setup's own records follow it. */
   readonly registerProfileSync: (sync: (() => void) | null) => void;
 }) {
@@ -611,7 +642,11 @@ export function StoreFirstOpeningPanel({
   const [progress, setProgress] = useState<OpeningStep | null>(null);
   const [running, setRunning] = useState(false);
   const [outcome, setOutcome] = useState<StoreOpeningOutcome | null>(null);
+  const [pressed, setPressed] = useState<"Answers" | "Approve" | null>(null);
   const [saved, setSaved] = useState(false);
+  // Back on the form after something was sent, to correct it.
+  const [changing, setChanging] = useState(false);
+  const [sendBack, setSendBack] = useState<"Closed" | "Asking" | "Failed">("Closed");
   const openCode = useRef<(() => void) | null>(null);
   const afterCode = useRef<(() => void) | null>(null);
   const read = useCallback(
@@ -621,6 +656,11 @@ export function StoreFirstOpeningPanel({
       try {
         const next = await loadOpeningFacts(current);
         if (current.signal.aborted) return;
+        // Published since this page last read, on another device or by the other Owner.
+        if (next.live.current?.setupBasis !== undefined) {
+          onPublished(Object.freeze({ kind: "Published", waits: Object.freeze([]) }));
+          return;
+        }
         setFacts(next);
         if (fill === "All" || (fill === "Untouched" && !touched.current)) {
           setDetails(detailsFrom(next));
@@ -638,14 +678,13 @@ export function StoreFirstOpeningPanel({
         }
         setVerifiedUntil((held) => held ?? next.soleOperator?.verifiedUntil ?? null);
         setState("Ready");
-        if (next.live.current === null) onNoFirstConfiguration();
       } catch {
         // Once the page is up a failed read changes nothing on it: what was typed stays, and the
         // next press reads again.
         if (!current.signal.aborted) setState((old) => (old === "Ready" ? old : "Failed"));
       }
     },
-    [onNoFirstConfiguration],
+    [onPublished],
   );
   const scopeKey = canonical(scope);
   useEffect(() => {
@@ -726,6 +765,12 @@ export function StoreFirstOpeningPanel({
     return (
       <section id="store-opening" className="store-opening">
         <p role="alert">{t("This didn't load. Try again.")}</p>
+        {/* The Store's settings can't be read at all once its approval to open has run out. */}
+        <p>
+          {t(
+            "If it still doesn't load, tell BOP support: they may need to renew this store's approval to open.",
+          )}
+        </p>
         <button
           type="button"
           className="store-opening__primary"
@@ -738,36 +783,11 @@ export function StoreFirstOpeningPanel({
         </button>
       </section>
     );
-  if (facts.live.current === null)
-    return (
-      <section id="store-opening" className="store-opening">
-        <p role="note">
-          {t(
-            "BOP support has not installed this store's first settings yet, so the short way is not available. The step-by-step settings below still work.",
-          )}
-        </p>
-      </section>
-    );
 
-  const missing = openingMissing(facts.live);
-  const { forYou, forOthers } = openingWaitsFromFacts(facts);
-  // Who decides what: a gate nobody else holds is this Owner's alone, and takes the tick.
-  const aloneFor = {
-    receiptTemplate: facts.approvers.receiptTemplate.length === 0,
-    storeSetup: facts.approvers.storeSetup.length === 0,
-    allergenList:
-      facts.approvers.allergenList.length === 0 &&
-      facts.allergens?.permissions.mayManageRegistry === true,
-  };
-  const aloneGates: readonly OpeningGate[] = [
-    ...(aloneFor.receiptTemplate ? (["ReceiptTemplate"] as const) : []),
-    ...(aloneFor.allergenList ? (["AllergenList"] as const) : []),
-    ...(aloneFor.storeSetup ? (["StoreSetup"] as const) : []),
-  ];
-  const approvesAlone = aloneGates.length > 0;
-  const soleOperatorOff = facts.soleOperator?.state !== "On";
-  // Sole operator is the Brand Owner's to turn on; anyone else can only ask them.
-  const needsBrandOwner = approvesAlone && facts.soleOperator === null;
+  const missing = openingMissing(facts.live, facts.workspace.scope.actorReference);
+  const waits = openingWaitsFromFacts(facts);
+  // Who decides what, and what a press does about it: the same answer the press works from.
+  const plan = openingApprovalPlan(facts);
   const detailsValid =
     Object.keys(profileErrors).length === 0 && Object.keys(receiptErrors).length === 0;
   const answered = problems.length === 0;
@@ -778,15 +798,7 @@ export function StoreFirstOpeningPanel({
       : null;
   const ticked = confirmation !== null && tickedFor === canonical(confirmation);
   const verified = verifiedUntil !== null && Date.parse(verifiedUntil) > Date.now();
-  const needsCode = !saveOnly && approvesAlone;
-  const allergenNames =
-    facts.allergens === null
-      ? undefined
-      : facts.allergens.registry !== null
-        ? null
-        : facts.allergens.registryTemplate.allergens.map((entry) =>
-            allergenName(entry.code, entry.name),
-          );
+  const needsCode = !saveOnly && plan.approveAlone;
   const addressText = [
     details.addressLines.filter((line) => line.trim() !== "").join(", "),
     details.locality,
@@ -796,18 +808,22 @@ export function StoreFirstOpeningPanel({
     .filter((part) => part !== "")
     .join(", ");
 
-  const start = async (input: Parameters<typeof runStoreOpening>[1]) => {
+  const start = async (
+    input: Parameters<typeof runStoreOpening>[1],
+    press: "Answers" | "Approve",
+  ) => {
     const current = deps.current;
     if (current === null || running) return;
     setRunning(true);
     setOutcome(null);
     setSaved(false);
+    setPressed(press);
     const result = await runStoreOpening(current, input, setProgress);
     setRunning(false);
     setProgress(null);
     if (current.signal.aborted) return;
     onChanged();
-    if (result.kind === "Published") {
+    if (result.kind === "Published" || result.kind === "AlreadyPublished") {
       onPublished(result);
       return;
     }
@@ -818,63 +834,99 @@ export function StoreFirstOpeningPanel({
     if (result.kind === "Stopped" && result.code === "SoleOperatorNeedsVerification")
       setVerifiedUntil(null);
     // All saved: the page shows it as the server keeps it. Otherwise what was typed stays on the page.
-    if (result.kind === "Waiting" || (result.kind === "DetailsSaved" && problems.length === 0))
+    if (result.kind === "Waiting" || (result.kind === "DetailsSaved" && problems.length === 0)) {
       touched.current = false;
+      setChanging(false);
+    }
     await read("Untouched");
   };
   const pressAnswers = () => {
-    const input = {
-      details,
-      answers,
-      confirmed: confirmation,
-      approveAlone: needsCode,
-      approveOthers: false,
-      approvers: facts.approvers,
-    };
+    const input = openingAnswersInput(facts, details, answers, confirmation);
     if (needsCode && !verified) {
-      afterCode.current = () => void start(input);
+      afterCode.current = () => void start(input, "Answers");
       openCode.current?.();
       return;
     }
-    void start(input);
+    void start(input, "Answers");
   };
-  const pressApprove = () =>
-    void start({
-      details: null,
-      answers: null,
-      confirmed: null,
-      approveAlone: false,
-      approveOthers: true,
-      approvers: facts.approvers,
-    });
+  const pressApprove = () => void start(openingApproveInput(facts), "Approve");
+  const pressSendBack = () => {
+    const current = deps.current;
+    if (current === null || running) return;
+    setRunning(true);
+    void sendOpeningBack(current)
+      .then(
+        () => {
+          touched.current = false;
+          setSendBack("Closed");
+        },
+        () => setSendBack("Failed"),
+      )
+      .finally(() => {
+        setRunning(false);
+        onChanged();
+        void read("Untouched");
+      });
+  };
 
+  const listWho = (waits.listForOthers ?? plan.others.find((wait) => wait.what === "AllergenList"))
+    ?.who;
+  const allergenRow = () => {
+    const list = facts.allergens;
+    if (list === null) return t("Your brand owner approves this list.");
+    if (list.registry !== null) return t("Already approved.");
+    const note = waits.listForYou
+      ? t("Someone else recorded this list. It is waiting for your approval on Allergens.")
+      : plan.allergenListLater
+        ? t("You approve this list on Allergens, after your store setup is published.")
+        : listWho !== undefined && !waits.forYou.includes("AllergenList")
+          ? t("{people} approves this list.", {
+              people: peopleOf([{ what: "AllergenList", who: listWho }]),
+            })
+          : null;
+    return (
+      <>
+        <span className="store-opening__line">
+          {list.registryTemplate.allergens
+            .map((entry) => allergenName(entry.code, entry.name))
+            .join(listSeparator())}
+        </span>
+        {list.registryTemplate.template === testAllergenTemplate ? (
+          <span className="store-opening__line">
+            {t(
+              "This is a test list based on Health Canada's priority allergens. Check it against current Health Canada guidance before real customers rely on it.",
+            )}
+          </span>
+        ) : null}
+        {note === null ? null : <span className="store-opening__line">{note}</span>}
+      </>
+    );
+  };
   const waitingLine =
-    forOthers.length > 0
+    waits.forOthers.length > 0
       ? t("Waiting for {people} to approve {what}. They open Store setup and press Approve.", {
-          people: peopleOf(forOthers),
-          what: listOf(forOthers.map((wait) => gateWords(wait.what))),
+          people: peopleOf(waits.forOthers),
+          what: listOf(waits.forOthers.map((wait) => gateWords(wait.what))),
         })
       : null;
-  const recordedAnswers: Pick<OpeningAnswers, "serviceModes" | "hours"> | null = (() => {
-    // What the other Owner saved, for whoever reads it next.
-    const content = openingContentOf(facts);
-    return content.weeklySchedule.state === "Configured" &&
-      content.enabledServiceModes.state === "Configured"
-      ? openingAnswersFromRecords(content, null)
-      : null;
-  })();
-  const recordedSummary =
-    recordedAnswers === null
-      ? null
-      : openingConfirmationFromFacts(facts, detailsFrom(facts), recordedAnswers);
+  // Nothing else waits on the list: said, with the way on still there.
+  const listLine =
+    waits.listForOthers !== null ? (
+      <p className="store-opening__hint">
+        {t("The allergen list is waiting for {people}. They approve it on Allergens.", {
+          people: peopleOf([waits.listForOthers]),
+        })}
+      </p>
+    ) : null;
+  const sent = openingSentSummary(facts);
   const summaryOf = (heading: string, value: OpeningConfirmation, shownAddress: string) => (
     <OpeningSummary
       heading={heading}
       confirmation={value}
       addressText={shownAddress}
-      offerTips={answers.offerTips}
+      offerTips={saveOnly || !changing ? facts.features.tips.enabled : answers.offerTips}
       tierPercents={facts.features.tips.tierPercents}
-      allergens={allergenNames}
+      allergenRow={allergenRow()}
     />
   );
   const profileAddress = (() => {
@@ -885,6 +937,7 @@ export function StoreFirstOpeningPanel({
           .filter((part) => part !== "")
           .join(", ");
   })();
+  const tickShown = needsCode;
   const status = (
     <>
       {running && progress !== null ? (
@@ -901,25 +954,32 @@ export function StoreFirstOpeningPanel({
       ) : null}
       {outcome?.kind === "ConfirmAgain" ? (
         <p role="alert">
-          {t("Something changed since you checked this list. Read it again and tick the box.")}
+          {tickShown && pressed === "Answers"
+            ? t("Something changed since you checked this list. Read it again and tick the box.")
+            : t("Something changed since you read this. Read it again, then press the button.")}
         </p>
       ) : null}
     </>
   );
+  // A press of the answers that stopped stays on what was typed, with Continue.
+  const stoppedAnswers = outcome?.kind === "Stopped" && pressed === "Answers";
+  const backToForm = () => {
+    setOutcome(null);
+    setChanging(true);
+  };
 
-  if (forYou.length > 0)
+  if (waits.forYou.length > 0 && !changing && !stoppedAnswers)
     return (
       <section id="store-opening" className="store-opening" aria-labelledby="store-opening-heading">
         <h3 id="store-opening-heading">{t("Open your store")}</h3>
         <p className="store-opening__lead">
-          {t("Waiting for you: {what}.", { what: listOf(forYou.map(gateWords)) })}{" "}
+          {t("Waiting for you: {what}.", { what: listOf(waits.forYou.map(gateWords)) })}{" "}
           {t(
-            "The other Owner answered these. Check them; pressing Approve records it as approved by you.",
+            "These were sent for your approval. Check them; pressing Approve records it as approved by you.",
           )}
         </p>
-        {recordedSummary === null
-          ? null
-          : summaryOf(t("What you are approving"), recordedSummary, profileAddress)}
+        {waitingLine === null ? null : <p>{waitingLine}</p>}
+        {sent === null ? null : summaryOf(t("What you are approving"), sent, profileAddress)}
         {status}
         <div className="store-opening__actions">
           <button
@@ -930,17 +990,62 @@ export function StoreFirstOpeningPanel({
           >
             {running ? t("Working…") : t("Approve and continue")}
           </button>
+          {!waits.forYou.includes("StoreSetup") ? (
+            <button
+              type="button"
+              className="store-opening__text-button"
+              disabled={running}
+              onClick={backToForm}
+            >
+              {t("Change the answers")}
+            </button>
+          ) : sendBack === "Closed" ? (
+            <button
+              type="button"
+              className="store-opening__text-button"
+              disabled={running}
+              onClick={() => setSendBack("Asking")}
+            >
+              {t("Send it back")}
+            </button>
+          ) : (
+            <div className="store-opening__actions" role="group" aria-label={t("Send it back")}>
+              {sendBack === "Failed" ? (
+                <p role="alert">{t("This wasn't sent back. Try again.")}</p>
+              ) : null}
+              <p>
+                {t(
+                  "Send this back? It stays in the history and can't be approved or published. The answers then open here, to change and send again.",
+                )}
+              </p>
+              <button
+                type="button"
+                className="store-opening__text-button"
+                disabled={running}
+                onClick={pressSendBack}
+              >
+                {t("Send it back now")}
+              </button>
+              <button
+                type="button"
+                className="store-opening__text-button"
+                disabled={running}
+                onClick={() => setSendBack("Closed")}
+              >
+                {t("Keep it")}
+              </button>
+            </div>
+          )}
         </div>
       </section>
     );
-  if (waitingLine !== null)
+  if (waitingLine !== null && !changing && !stoppedAnswers)
     return (
       <section id="store-opening" className="store-opening" aria-labelledby="store-opening-heading">
         <h3 id="store-opening-heading">{t("Open your store")}</h3>
         <p className="store-opening__lead">{waitingLine}</p>
-        {recordedSummary === null
-          ? null
-          : summaryOf(t("What was sent"), recordedSummary, profileAddress)}
+        {listLine}
+        {sent === null ? null : summaryOf(t("What was sent"), sent, profileAddress)}
         {status}
         <div className="store-opening__actions">
           <button
@@ -950,6 +1055,14 @@ export function StoreFirstOpeningPanel({
             onClick={() => void read("Untouched")}
           >
             {t("Check again")}
+          </button>
+          <button
+            type="button"
+            className="store-opening__text-button"
+            disabled={running}
+            onClick={backToForm}
+          >
+            {t("Change my answers")}
           </button>
         </div>
       </section>
@@ -1001,34 +1114,68 @@ export function StoreFirstOpeningPanel({
       </div>
     );
   };
-  const blockers = [
-    ...(detailsValid ? [] : [t("your store's name, address, phone and business name")]),
-    ...(answers.serviceModes.length === 0 ? [t("dine-in, pickup or both")] : []),
-    ...(problems.some((problem) => problem !== "NoServiceMode") ? [t("your opening hours")] : []),
-    ...(!saveOnly && !needsBrandOwner && approvesAlone && !ticked ? [t("the box above")] : []),
+  // Named one by one: a faded button with no reason stops a new Owner on the first screen.
+  const detailBlockers = [
+    ...(Object.keys(profileErrors).some((key) => key.startsWith("name-"))
+      ? [t("the store name")]
+      : []),
+    ...(profileErrors["line-0"] !== undefined || profileErrors["line-1"] !== undefined
+      ? [t("the street address")]
+      : []),
+    ...(profileErrors.locality === undefined ? [] : [t("the city or town")]),
+    ...(profileErrors.regionCode === undefined ? [] : [t("the province or territory")]),
+    ...(profileErrors.postalCode === undefined ? [] : [t("the postal code")]),
+    ...(profileErrors.phone === undefined ? [] : [t("the store phone number")]),
+    ...(receiptErrors.businessName === undefined ? [] : [t("the business name on receipts")]),
+    ...(receiptErrors.gstHstNumber === undefined ? [] : [t("the GST/HST number")]),
+    ...(receiptErrors.qstNumber === undefined ? [] : [t("the QST number")]),
+    ...(receiptErrors.pstNumber === undefined ? [] : [t("the PST number")]),
   ];
-  const canPress = saveOnly
-    ? Object.keys(profileErrors).length === 0 && Object.keys(receiptErrors).length === 0
-    : blockers.length === 0 && !needsBrandOwner;
-  const othersNamed = peopleOf(
-    (["ReceiptTemplate", "StoreSetup", "AllergenList"] as const).flatMap((what) => {
-      const who =
-        what === "ReceiptTemplate"
-          ? facts.approvers.receiptTemplate
-          : what === "StoreSetup"
-            ? facts.approvers.storeSetup
-            : facts.approvers.allergenList;
-      return who.length > 0 ? [{ what, who }] : [];
-    }),
-  );
+  // Saving needs only the details: half an answer about hours stays on the page until it is finished.
+  const blockers = saveOnly
+    ? detailBlockers
+    : [
+        ...detailBlockers,
+        ...(answers.serviceModes.length === 0 ? [t("dine-in, pickup or both")] : []),
+        ...(problems.includes("NoOpenDay") ? [t("the days you open")] : []),
+        ...(problems.includes("TimeMissing") ? [t("when you open and close")] : []),
+        ...(problems.includes("SameTimes") || problems.includes("PeriodsOverlap")
+          ? [t("your opening hours")]
+          : []),
+        ...(problems.includes("LastOrders") ? [t("last orders")] : []),
+        ...(problems.includes("Preparation") ? [t("preparation time")] : []),
+        ...(needsCode && !ticked ? [t("the box above")] : []),
+      ];
+  const canPress = blockers.length === 0 && (saveOnly || !plan.needsBrandOwner);
+  const storeOthers = peopleOf(plan.others.filter((wait) => wait.what !== "AllergenList"));
   return (
     <section id="store-opening" className="store-opening" aria-labelledby="store-opening-heading">
       <h3 id="store-opening-heading">{t("Open your store")}</h3>
       <p className="store-opening__lead">
-        {t(
-          "Answer these once and press the button at the end. Guests can order after that, once your menu is listed and your tables have codes.",
-        )}
+        {changing
+          ? t("Change what needs changing, then save. Whoever approves it sees the new answers.")
+          : t(
+              "Answer these once and press the button at the end. Guests can order after that, once your menu is listed and your tables have codes.",
+            )}
       </p>
+      {waits.ranOut ? (
+        <p role="note">
+          {t(
+            "What was sent earlier ran out: it has to be approved and published within 14 days. Check these and press the button to send it again.",
+          )}
+        </p>
+      ) : null}
+      {waits.sentBack ? (
+        <p role="note">{t("This was sent back. Change what needs changing and send it again.")}</p>
+      ) : null}
+      {waits.beforeAnswers.length > 0 ? (
+        <p role="note">
+          {t(
+            "Someone sent {what} for your approval. Answer these first; you can then approve it on this page.",
+            { what: listOf(waits.beforeAnswers.map(gateWords)) },
+          )}
+        </p>
+      ) : null}
       <form
         noValidate
         onSubmit={(event) => {
@@ -1182,14 +1329,10 @@ export function StoreFirstOpeningPanel({
         </fieldset>
         <OpeningHoursEditor
           hours={answers.hours}
+          problems={problems}
           disabled={running}
           onChange={(hours) => edit.answers({ hours })}
         />
-        {problems.some((problem) => problem === "SameTimes" || problem === "PeriodsOverlap") ? (
-          <p className="store-opening__error">
-            {problemWords(problems.includes("SameTimes") ? "SameTimes" : "PeriodsOverlap")}
-          </p>
-        ) : null}
         <fieldset className="store-opening__part" disabled={running}>
           <legend>{t("Tips")}</legend>
           <label className="store-opening__tick">
@@ -1215,32 +1358,68 @@ export function StoreFirstOpeningPanel({
         </fieldset>
         {saveOnly ? (
           <section className="store-opening__waiting" aria-label={t("What you are waiting for")}>
-            {missing.map((entry) => (
-              <p key={entry} role="status">
-                {missingWords(entry)}{" "}
-                {saved || facts.profile.current !== null
-                  ? t("Come back here once they have: nothing else is needed from you now.")
-                  : t("Save your details first: they need your province.")}
-              </p>
-            ))}
+            {missing.map((entry) =>
+              entry === "TaxRates" ? (
+                <p key={entry} role="status">
+                  {t("Waiting for BOP support to set your tax rates.")}{" "}
+                  {saved || facts.profile.current !== null
+                    ? t("Come back here once they have: nothing else is needed from you now.")
+                    : t("Save your details first: they need your province.")}
+                </p>
+              ) : (
+                <p key={entry} role="status">
+                  {t(
+                    "Someone else's change to this store's hours is still waiting. It has to be approved or declined before this can go further.",
+                  )}{" "}
+                  <Link to={`/app/organization/stores/${scope.storeReference}/service`}>
+                    {t("Decide it on Hours & ordering")}
+                  </Link>
+                </p>
+              ),
+            )}
           </section>
         ) : null}
         {confirmation === null
           ? null
           : summaryOf(t("What you are approving"), confirmation, addressText)}
-        {needsBrandOwner && !saveOnly ? (
+        {plan.needsBrandOwner && !saveOnly ? (
           <p role="note">
             {t("Only the brand owner can approve these alone. Ask them to open this page.")}
           </p>
         ) : null}
-        {!saveOnly && othersNamed !== "" ? (
+        {!saveOnly && storeOthers !== "" ? (
           <p className="store-opening__hint">
             {t("{people} also approves here, so they check what you send before it is published.", {
-              people: othersNamed,
+              people: storeOthers,
             })}
           </p>
         ) : null}
-        {!saveOnly && approvesAlone && !needsBrandOwner ? (
+        {!saveOnly && plan.allergenListLater ? (
+          <p className="store-opening__hint">
+            {t(
+              "Only you hold allergen list approval, so it does not go to anyone with this. You approve it after your store setup is published.",
+            )}{" "}
+            <Link to={allergensHref}>{t("Open Allergens")}</Link>
+          </p>
+        ) : null}
+        {waits.listForYou ? (
+          <p className="store-opening__hint">
+            {t("The allergen list is waiting for your approval.")}{" "}
+            <Link to={allergensHref}>{t("Approve it on Allergens")}</Link>
+          </p>
+        ) : null}
+        {listLine}
+        {!saveOnly &&
+        waits.listForOthers === null &&
+        listWho !== undefined &&
+        storeOthers === "" ? (
+          <p className="store-opening__hint">
+            {t("{people} approves the allergen list, on Allergens. It does not hold this up.", {
+              people: peopleOf([{ what: "AllergenList", who: listWho }]),
+            })}
+          </p>
+        ) : null}
+        {needsCode ? (
           <label className="store-opening__tick">
             <input
               type="checkbox"
@@ -1255,14 +1434,14 @@ export function StoreFirstOpeningPanel({
               }
             />
             <span>
-              {othersNamed !== ""
+              {plan.turnsOnSoleOperator
                 ? t(
-                    "Only I can approve {what} here. I checked it and approve it on my own; it needs my code and is recorded as approved by me alone.",
-                    { what: listOf(aloneGates.map(gateWords)) },
+                    "I run this business on my own and approve the above. This turns on approving on my own for the whole business: wherever nobody else holds the approval, I approve my own prices, menus, recipes, allergen lists, Store setup and larger refunds. Each needs my code and is recorded as approved by me alone. If I add a second owner, they approve instead.",
                   )
-                : soleOperatorOff
+                : plan.others.length > 0
                   ? t(
-                      "I run this business on my own and approve the above. I will approve my own prices, menus, recipes, allergen lists, Store setup and larger refunds; each needs my code and is recorded as approved by me alone. If I add a second owner, they approve instead.",
+                      "Only I can approve {what} here. I checked it and approve it on my own; it needs my code and is recorded as approved by me alone.",
+                      { what: listOf(plan.alone.map(gateWords)) },
                     )
                   : t(
                       "I checked the above and approve it on my own. Each is recorded as approved by me alone.",
@@ -1280,18 +1459,34 @@ export function StoreFirstOpeningPanel({
           >
             {running
               ? t("Working…")
-              : saveOnly
-                ? t("Save my details")
-                : outcome?.kind === "Stopped"
-                  ? t("Continue")
-                  : approvesAlone
-                    ? t("Publish my store setup")
-                    : t("Send for approval")}
+              : changing
+                ? t("Save my changes")
+                : saveOnly
+                  ? t("Save my details")
+                  : outcome?.kind === "Stopped"
+                    ? t("Continue")
+                    : plan.publishes
+                      ? t("Publish my store setup")
+                      : t("Send for approval")}
           </button>
-          {blockers.length > 0 && !saveOnly ? (
+          {blockers.length > 0 ? (
             <p id="store-opening-blockers" className="store-opening__hint">
               {t("Still to do: {items}.", { items: blockers.join(listSeparator()) })}
             </p>
+          ) : null}
+          {changing ? (
+            <button
+              type="button"
+              className="store-opening__text-button"
+              disabled={running}
+              onClick={() => {
+                touched.current = false;
+                setChanging(false);
+                void read("All");
+              }}
+            >
+              {t("Keep what was sent")}
+            </button>
           ) : null}
         </div>
       </form>
@@ -1300,7 +1495,7 @@ export function StoreFirstOpeningPanel({
         <StepUpVerification
           mode="dialog"
           openRef={openCode}
-          purpose={soleOperatorOff ? "SoleOperatorSetting" : "SoleOperatorApproval"}
+          purpose={plan.turnsOnSoleOperator ? "SoleOperatorSetting" : "SoleOperatorApproval"}
           csrf={csrf}
           verifiedUntil={verifiedUntil}
           loadServerStatus={false}
@@ -1314,9 +1509,6 @@ export function StoreFirstOpeningPanel({
           }}
         />
       ) : null}
-      {problems.includes("TimeMissing") || problems.length === 0 ? null : (
-        <span className="store-opening__sr">{problems.map(problemWords).join(" ")}</span>
-      )}
     </section>
   );
 }

@@ -89,28 +89,24 @@ export async function readPublishedStoreConfiguration(
   return proof;
 }
 
-/** Whether the Store's go-live check holds at `at`, read in the caller's transaction. */
-async function storeGoLiveHolds(operating, tx, { published, at, authorize }) {
-  if (published.configuration.liveGateEvidenceReference === null) return false;
-  try {
-    await createPostgresCurrentLiveGateSource({
-      tenantReference: operating.tenantReference,
-      brandReference: operating.brandReference,
-      storeReference: operating.storeReference,
-      decisionEvidenceReference: published.configuration.liveGateEvidenceReference,
-      requiredRequirementCodes: operating.requiredLiveGateRequirementCodes,
-      authorize,
-    })(tx, at);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** The publication facts and checks of one configuration, read in the caller's transaction. */
 export async function storeConfigurationPublicationChecks(operating, tx, input) {
   const { configuration, published, at, authorize } = input;
-  const goLive = await storeGoLiveHolds(operating, tx, { published, at, authorize });
+  let goLive = false;
+  if (published.configuration.liveGateEvidenceReference !== null)
+    try {
+      await createPostgresCurrentLiveGateSource({
+        tenantReference: operating.tenantReference,
+        brandReference: operating.brandReference,
+        storeReference: operating.storeReference,
+        decisionEvidenceReference: published.configuration.liveGateEvidenceReference,
+        requiredRequirementCodes: operating.requiredLiveGateRequirementCodes,
+        authorize,
+      })(tx, at);
+      goLive = true;
+    } catch {
+      goLive = false;
+    }
   const tax = await currentStoreTaxConfigurationReference(
     tx,
     { brandReference: operating.brandReference, storeReference: operating.storeReference },
@@ -345,13 +341,6 @@ export async function createInternalStoreConfigurationOrdinary(
               resources.now(),
             )
           )?.configurationReference ?? null,
-        // WP-2423 item 14: said on a first opening before its Owner is asked for anything.
-        storeGoLive: async () =>
-          storeGoLiveHolds(operating, tx, {
-            published: await readPublished(tx),
-            at: resources.now(),
-            authorize,
-          }),
         publicationChecks: async (configuration) => {
           const at = resources.now();
           return storeConfigurationPublicationChecks(operating, tx, {

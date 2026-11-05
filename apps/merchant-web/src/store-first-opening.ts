@@ -63,7 +63,11 @@ import {
   SoleOperatorClientError,
   type SoleOperatorView,
 } from "./sole-operator-client.js";
-import type { StoreConfigurationSnapshot } from "./store-configuration-client.js";
+import {
+  withdrawStoreConfiguration,
+  type StoreConfigurationDeclineReason,
+  type StoreConfigurationSnapshot,
+} from "./store-configuration-client.js";
 import { createStoreConfigurationOrdinaryClient } from "./store-configuration-ordinary-client.js";
 import {
   createStoreConfigurationPendingJournal,
@@ -74,6 +78,7 @@ import {
 import {
   buildStoreConfigurationCommand,
   executeStoreConfigurationOriginal,
+  publicationWindowMs,
   recoverStoreConfigurationOriginal,
   storeSetupCreatedFromSaved,
 } from "./StoreConfigurationOrdinaryPanel.js";
@@ -597,6 +602,13 @@ export interface StoreOpeningDeps {
   readonly published: ReturnType<typeof createReceiptTemplatePublishedClient>;
   readonly configuration: ReturnType<typeof createStoreConfigurationOrdinaryClient>;
   readonly configurationJournal: StoreConfigurationPendingJournal;
+  /** Withdraws this person's own version, or declines someone else's. */
+  readonly withdrawConfiguration: (input: {
+    readonly configurationReference: string;
+    readonly configurationVersion: number;
+    readonly auditReference: string;
+    readonly declineReason?: StoreConfigurationDeclineReason;
+  }) => Promise<unknown>;
   readonly kitchen: ReturnType<typeof createStoreKitchenSetupClient>;
   readonly profile: ReturnType<typeof createStorePublicProfileClient>;
   readonly receipts: ReturnType<typeof createStoreReceiptProfileClient>;
@@ -633,7 +645,7 @@ export function createStoreOpeningDeps(input: {
   const fetcher = input.fetcher ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const journals = input.journals ?? {};
   const clients = { csrf, fetcher };
-  return Object.freeze({
+  return Object.freeze<StoreOpeningDeps>({
     scope,
     csrf,
     signal,
@@ -666,6 +678,7 @@ export function createStoreOpeningDeps(input: {
     configuration: createStoreConfigurationOrdinaryClient(fetcher),
     configurationJournal:
       journals.configurationJournal ?? createStoreConfigurationPendingJournal(scope),
+    withdrawConfiguration: (command) => withdrawStoreConfiguration(command, csrf, fetcher),
     kitchen: createStoreKitchenSetupClient(clients),
     profile: createStorePublicProfileClient(clients),
     receipts: createStoreReceiptProfileClient(clients),
@@ -702,9 +715,12 @@ export interface OpeningWait {
   /** Who can approve it, by name; empty only when it waits for the person pressing. */
   readonly who: readonly OpeningApprover[];
 }
-export type OpeningMissing = "TaxRates" | "GoLive";
+/** What stands in the way of sending anything: BOP support's tax rates; someone else's open change. */
+export type OpeningMissing = "TaxRates" | "OtherChange";
 export type StoreOpeningOutcome =
   | { readonly kind: "Published"; readonly waits: readonly OpeningWait[] }
+  /** It already was, when this press began: nothing from the page was written. */
+  | { readonly kind: "AlreadyPublished" }
   | { readonly kind: "DetailsSaved"; readonly missing: readonly OpeningMissing[] }
   | { readonly kind: "Waiting"; readonly waits: readonly OpeningWait[] }
   | { readonly kind: "ConfirmAgain" }
@@ -714,6 +730,14 @@ export type StoreOpeningOutcome =
       readonly code: OpeningStopCode;
       readonly failedChecks?: readonly StoreConfigurationPublicationCheckCode[];
     };
+/** "Approve": exactly what the page showed as waiting for this person. */
+export interface OpeningApprovalRequest {
+  readonly gates: readonly OpeningGate[];
+  /** The version shown, when the store setup is among them: a newer one is read again first. */
+  readonly configuration: string | null;
+  /** Afterwards the press goes on to what follows, because someone else approves that. */
+  readonly carryOn: boolean;
+}
 export interface StoreOpeningInput {
   /** What the Owner typed; null when only approving what another Owner sent (nothing typed here). */
   readonly details: OpeningDetails | null;
@@ -721,8 +745,10 @@ export interface StoreOpeningInput {
   /** What the Owner ticked, when they approve alone (with `approveAlone`). */
   readonly confirmed: OpeningConfirmation | null;
   readonly approveAlone: boolean;
-  /** Pressed "Approve" for what another Owner sent. */
-  readonly approveOthers: boolean;
+  /** The tick said in full that this turns the Brand's setting on (`openingApprovalPlan`). */
+  readonly turnOnSoleOperator: boolean;
+  /** Pressed "Approve": these are approved first, before any of the presser's own steps. */
+  readonly approve: OpeningApprovalRequest | null;
   readonly approvers: OpeningApprovers;
 }
 class OpeningStop extends Error {
@@ -1037,12 +1063,41 @@ const answersChange =
         }),
   });
 
+const openStates: ReadonlySet<string> = new Set(["Draft", "PendingApproval", "Approved"]);
+/** Past its 14 days a version made from Store setup takes no further step: the server refuses it. */
+export const openingVersionRanOut = (
+  version: Pick<StoreConfigurationSnapshot, "setupBasis" | "createdAt">,
+  observedAt: string,
+) =>
+  version.setupBasis !== undefined &&
+  Date.parse(version.createdAt) + publicationWindowMs <= Date.parse(observedAt);
+type VersionRead = Pick<
+  StoreConfigurationOrdinaryWorkspace,
+  "latest" | "latestWithdrawal" | "observedAt"
+>;
+/** The latest version while it can still take a step: not published, withdrawn or run out. */
+const openVersion = ({ latest, latestWithdrawal, observedAt }: VersionRead) =>
+  latest !== null &&
+  latestWithdrawal === undefined &&
+  openStates.has(latest.lifecycle) &&
+  !openingVersionRanOut(latest, observedAt)
+    ? latest
+    : null;
+/**
+ * What only someone else can settle: nothing is sent for approval until it is. The tax rates are BOP
+ * support's. A change that did not come from Store setup (a Manager's hours, sent on Hours & ordering)
+ * has to be approved or declined there before a configuration can be made over it.
+ */
 export function openingMissing(
-  live: Pick<StoreConfigurationOrdinaryWorkspace, "storeTaxConfigurationReference" | "goLive">,
+  live: VersionRead & Pick<StoreConfigurationOrdinaryWorkspace, "storeTaxConfigurationReference">,
+  actor: string,
 ): readonly OpeningMissing[] {
+  const open = openVersion(live);
   return Object.freeze([
     ...(live.storeTaxConfigurationReference === null ? (["TaxRates"] as const) : []),
-    ...(live.goLive === false ? (["GoLive"] as const) : []),
+    ...(open !== null && open.setupBasis === undefined && open.authoredByReference !== actor
+      ? (["OtherChange"] as const)
+      : []),
   ]);
 }
 
@@ -1190,11 +1245,93 @@ function waitFor(
 ): OpeningWait {
   const who = named.length > 0 ? named : othersFor(input.approvers, what);
   if (who.length > 0) return Object.freeze({ what, who });
-  if (input.approveAlone) throw new OpeningStop("NotBrandOwner");
+  if (input.turnOnSoleOperator) throw new OpeningStop("NotBrandOwner");
+  // Who can approve is not what the page said: it reads again, and asks what now applies.
   throw new ConfirmAgain();
 }
 const waitOnYou = (what: OpeningGate): OpeningWait => Object.freeze({ what, who: [] });
 
+/** The template's state once any request still pending from this browser has been resolved. */
+async function templateAfterRecovery(deps: StoreOpeningDeps): Promise<OpeningTemplateState> {
+  const newTemplate = deps.templateJournal(null);
+  const pendingNew = await newTemplate.load();
+  const common = {
+    client: deps.templates,
+    csrf: deps.csrf,
+    signal: deps.signal,
+    isCurrent: isCurrent(deps),
+  };
+  if (pendingNew !== null)
+    await finishReceiptTemplateDraftOriginal({
+      ...common,
+      journal: newTemplate,
+      cursor: pendingNew,
+    });
+  const state = await readOpeningTemplate(deps);
+  const subject = state.view?.templateReference ?? null;
+  if (subject === null) return state;
+  const draftJournal = deps.templateJournal(subject);
+  const pendingDraft = await draftJournal.load();
+  if (pendingDraft !== null)
+    await finishReceiptTemplateDraftOriginal({
+      ...common,
+      journal: draftJournal,
+      cursor: pendingDraft,
+    });
+  const submitJournal = deps.submitJournal(subject);
+  const pendingSubmit = await submitJournal.load();
+  if (pendingSubmit !== null)
+    await finishReceiptTemplateSubmitOriginal({
+      submitClient: deps.submit,
+      client: deps.templates,
+      journal: submitJournal,
+      csrf: deps.csrf,
+      signal: deps.signal,
+      isCurrent: isCurrent(deps),
+      cursor: pendingSubmit,
+    });
+  const lifecycleJournal = deps.lifecycleJournal(subject);
+  const pendingLifecycle = await lifecycleJournal.load();
+  if (pendingLifecycle !== null)
+    await finishReceiptTemplateLifecycleOriginal({
+      client: deps.templates,
+      submitClient: deps.submit,
+      lifecycleClient: deps.lifecycle,
+      journal: lifecycleJournal,
+      csrf: deps.csrf,
+      signal: deps.signal,
+      isCurrent: isCurrent(deps),
+      cursor: pendingLifecycle,
+    });
+  return pendingDraft !== null || pendingSubmit !== null || pendingLifecycle !== null
+    ? readOpeningTemplate(deps)
+    : state;
+}
+/** The arguments every approve or publish of a template takes. */
+const templateLifecycleStep = (
+  deps: StoreOpeningDeps,
+  view: ReceiptTemplateDraftCurrent,
+  review: ReceiptTemplateReviewCurrent,
+  fields: ReceiptTemplateDraftFields,
+  templateReference: string,
+) => ({
+  client: deps.templates,
+  submitClient: deps.submit,
+  lifecycleClient: deps.lifecycle,
+  journal: deps.lifecycleJournal(templateReference),
+  csrf: deps.csrf,
+  signal: deps.signal,
+  isCurrent: isCurrent(deps),
+  scope: deps.scope,
+  baseline: view,
+  review,
+  fields,
+  onReserved: noOriginal,
+});
+const sentByYou = (deps: StoreOpeningDeps, review: ReceiptTemplateReviewCurrent) =>
+  review.submission !== null &&
+  (deps.scope.actorReference === review.submission.authoredByReference ||
+    deps.scope.actorReference === review.submission.submittedByReference);
 /**
  * The Store's published receipt template: the setup's choice if it is published here, else the one
  * the Store started with, else the standard one, written, sent, approved and published. Null when it
@@ -1227,59 +1364,13 @@ async function ensureReceiptTemplate(
     signal: deps.signal,
   });
   if (installed !== null) return installed.templateReference;
-  const newTemplate = deps.templateJournal(null);
-  const pendingNew = await newTemplate.load();
   const common = {
     client: deps.templates,
     csrf: deps.csrf,
     signal: deps.signal,
     isCurrent: isCurrent(deps),
   };
-  if (pendingNew !== null)
-    await finishReceiptTemplateDraftOriginal({
-      ...common,
-      journal: newTemplate,
-      cursor: pendingNew,
-    });
-  let state = await readOpeningTemplate(deps);
-  const subject = state.view?.templateReference ?? null;
-  if (subject !== null) {
-    const draftJournal = deps.templateJournal(subject);
-    const pendingDraft = await draftJournal.load();
-    if (pendingDraft !== null)
-      await finishReceiptTemplateDraftOriginal({
-        ...common,
-        journal: draftJournal,
-        cursor: pendingDraft,
-      });
-    const submitJournal = deps.submitJournal(subject);
-    const pendingSubmit = await submitJournal.load();
-    if (pendingSubmit !== null)
-      await finishReceiptTemplateSubmitOriginal({
-        submitClient: deps.submit,
-        client: deps.templates,
-        journal: submitJournal,
-        csrf: deps.csrf,
-        signal: deps.signal,
-        isCurrent: isCurrent(deps),
-        cursor: pendingSubmit,
-      });
-    const lifecycleJournal = deps.lifecycleJournal(subject);
-    const pendingLifecycle = await lifecycleJournal.load();
-    if (pendingLifecycle !== null)
-      await finishReceiptTemplateLifecycleOriginal({
-        client: deps.templates,
-        submitClient: deps.submit,
-        lifecycleClient: deps.lifecycle,
-        journal: lifecycleJournal,
-        csrf: deps.csrf,
-        signal: deps.signal,
-        isCurrent: isCurrent(deps),
-        cursor: pendingLifecycle,
-      });
-    if (pendingDraft !== null || pendingSubmit !== null || pendingLifecycle !== null)
-      state = await readOpeningTemplate(deps);
-  }
+  let state = await templateAfterRecovery(deps);
   // A draft nobody can use any more (its checks ran out, or it was retired) starts a new revision.
   const unusable = (review: ReceiptTemplateReviewCurrent | null) =>
     review?.lifecycle?.state === "Archived" ||
@@ -1338,20 +1429,7 @@ async function ensureReceiptTemplate(
       });
       return selected;
     }
-    const lifecycleStep = {
-      client: deps.templates,
-      submitClient: deps.submit,
-      lifecycleClient: deps.lifecycle,
-      journal: deps.lifecycleJournal(templateReference),
-      csrf: deps.csrf,
-      signal: deps.signal,
-      isCurrent: isCurrent(deps),
-      scope: deps.scope,
-      baseline: view,
-      review,
-      fields,
-      onReserved: noOriginal,
-    };
+    const lifecycleStep = templateLifecycleStep(deps, view, review, fields, templateReference);
     if (lifecycle === null) {
       await submitReceiptTemplateDraft({
         submitClient: deps.submit,
@@ -1366,31 +1444,22 @@ async function ensureReceiptTemplate(
         onReserved: noOriginal,
       });
     } else if (lifecycle === "InReview") {
-      const submission = review.submission;
-      const own =
-        submission !== null &&
-        (deps.scope.actorReference === submission.authoredByReference ||
-          deps.scope.actorReference === submission.submittedByReference);
-      if (!own) {
-        if (!input.approveOthers) {
-          waits.push(waitOnYou("ReceiptTemplate"));
-          return null;
-        }
-        await advanceReceiptTemplateLifecycle({ ...lifecycleStep, action: "Approve" });
-      } else {
-        const gate = await deps.templateGate();
-        if (gate?.status !== "Effective" || !input.approveAlone) {
-          waits.push(waitFor(input, "ReceiptTemplate", gate?.otherApprovers ?? []));
-          return null;
-        }
-        if (input.confirmed === null || input.confirmed.receiptLocale !== fields.locale)
-          throw new ConfirmAgain();
-        await advanceReceiptTemplateLifecycle({
-          ...lifecycleStep,
-          action: "Approve",
-          approvalMode: "SoleOperator",
-        });
+      if (!sentByYou(deps, review)) {
+        waits.push(waitOnYou("ReceiptTemplate"));
+        return null;
       }
+      const gate = await deps.templateGate();
+      if (gate?.status !== "Effective" || !input.approveAlone) {
+        waits.push(waitFor(input, "ReceiptTemplate", gate?.otherApprovers ?? []));
+        return null;
+      }
+      if (input.confirmed === null || input.confirmed.receiptLocale !== fields.locale)
+        throw new ConfirmAgain();
+      await advanceReceiptTemplateLifecycle({
+        ...lifecycleStep,
+        action: "Approve",
+        approvalMode: "SoleOperator",
+      });
     } else if (lifecycle === "Approved") {
       await advanceReceiptTemplateLifecycle({ ...lifecycleStep, action: "Publish" });
     } else throw new StoreSetupClientError("Conflict");
@@ -1398,16 +1467,30 @@ async function ensureReceiptTemplate(
   }
   throw new StoreSetupClientError("Conflict");
 }
+const sendAllergenCommand = async (deps: StoreOpeningDeps, command: AllergenCommand) => {
+  if (deps.allergens.command === undefined) throw new StoreSetupClientError("Unavailable");
+  await deps.allergens.command(command);
+};
+const approveAllergenProposal = async (
+  deps: StoreOpeningDeps,
+  proposalReference: string,
+  soleOperator: boolean,
+) => {
+  const key = "allergen-approve:" + proposalReference;
+  await sendAllergenCommand(deps, {
+    action: "ApproveRegistry",
+    operationReference: operationFor(deps, key, soleOperator),
+    proposalReference,
+    ...(soleOperator ? { approvalMode: "SoleOperator" as const } : {}),
+  });
+  deps.operations.delete(key);
+};
 /** The allergen list, recorded and approved; a Brand that has one has nothing to do here. */
 async function ensureAllergenList(
   deps: StoreOpeningDeps,
   input: StoreOpeningInput,
   waits: OpeningWait[],
 ) {
-  const send = async (command: AllergenCommand) => {
-    if (deps.allergens.command === undefined) throw new StoreSetupClientError("Unavailable");
-    await deps.allergens.command(command);
-  };
   const read = async () => parseAllergenListView(await deps.allergens.load(null));
   let view: AllergenListView | null = await read().catch((error: unknown) => {
     // A Store Owner without Brand-level allergen access: the Brand's holders do this.
@@ -1421,12 +1504,25 @@ async function ensureAllergenList(
     if (who.length > 0) waits.push(Object.freeze({ what: "AllergenList" as const, who }));
     return;
   }
+  // Recorded by someone else: this person decides that on Allergens, unless they pressed Approve.
+  if (view.registryProposal !== null && !view.registryProposal.recordedByYou) {
+    waits.push(waitOnYou("AllergenList"));
+    return;
+  }
+  // Nobody else holds its approval and this press does not approve alone: the Brand's setting stays
+  // as it is. Recorded, the list would wait for nobody; the Owner decides it on Allergens.
+  if (
+    !input.approveAlone &&
+    othersFor(input.approvers, "AllergenList").length === 0 &&
+    (view.soleOperator?.otherApprovers.length ?? 0) === 0
+  )
+    return;
   // The list the server offers: the pilot's own, labelled TEST, until a reviewed one exists.
   const offered = view.registryTemplate;
   if (offered.allergens.length === 0) throw new OpeningStop("NoAllergenTemplate");
   if (view.registryProposal === null) {
     const key = "allergen-record";
-    await send({
+    await sendAllergenCommand(deps, {
       action: "RecordRegistry",
       operationReference: operationFor(deps, key, offered.template),
       template: offered.template,
@@ -1437,24 +1533,6 @@ async function ensureAllergenList(
   }
   const proposal = view.registryProposal;
   if (proposal === null) throw new StoreSetupClientError("Conflict");
-  const approve = async (soleOperator: boolean) => {
-    const key = "allergen-approve:" + proposal.proposalReference;
-    await send({
-      action: "ApproveRegistry",
-      operationReference: operationFor(deps, key, soleOperator),
-      proposalReference: proposal.proposalReference,
-      ...(soleOperator ? { approvalMode: "SoleOperator" as const } : {}),
-    });
-    deps.operations.delete(key);
-  };
-  if (!proposal.recordedByYou) {
-    if (!input.approveOthers) {
-      waits.push(waitOnYou("AllergenList"));
-      return;
-    }
-    await approve(false);
-    return;
-  }
   const gate = view.soleOperator;
   if (gate?.status !== "Effective" || !input.approveAlone) {
     waits.push(waitFor(input, "AllergenList", gate?.otherApprovers ?? []));
@@ -1466,9 +1544,8 @@ async function ensureAllergenList(
       canonical(view.registryTemplate.allergens.map((entry) => entry.code))
   )
     throw new ConfirmAgain();
-  await approve(true);
+  await approveAllergenProposal(deps, proposal.proposalReference, true);
 }
-const openStates: ReadonlySet<string> = new Set(["Draft", "PendingApproval", "Approved"]);
 /** What is about to be approved, as the server has it, in the form the Owner ticked. */
 async function confirmationOnRecord(
   deps: StoreOpeningDeps,
@@ -1535,6 +1612,69 @@ export const openingLive = (
     ? {}
     : { storeTaxConfigurationReference: workspace.storeTaxConfigurationReference }),
 });
+async function recoverConfiguration(deps: StoreOpeningDeps) {
+  const pending = await deps.configurationJournal.load();
+  if (pending !== null)
+    await recoverStoreConfigurationOriginal({
+      client: deps.configuration,
+      journal: deps.configurationJournal,
+      cursor: pending,
+      csrf: deps.csrf,
+      signal: deps.signal,
+      isCurrent: isCurrent(deps),
+    });
+}
+async function configurationStep(
+  deps: StoreOpeningDeps,
+  workspace: StoreConfigurationOrdinaryWorkspace,
+  action: "Materialize" | "Submit" | "Approve" | "Publish",
+  saved: StoreSetupSnapshot | null,
+  approvalMode?: "SoleOperator",
+) {
+  const prepared = await deps.configuration.prepare(
+    await buildStoreConfigurationCommand({
+      scope: deps.scope,
+      action,
+      operationReference: serviceOperationReference(),
+      expectedHead: workspace.expectedHead,
+      saved,
+    }),
+    { signal: deps.signal },
+  );
+  await executeStoreConfigurationOriginal({
+    client: deps.configuration,
+    journal: deps.configurationJournal,
+    prepared,
+    csrf: deps.csrf,
+    signal: deps.signal,
+    isCurrent: isCurrent(deps),
+    canDispatch: () => true,
+    onReserved: noOriginal,
+    ...(approvalMode === undefined ? {} : { approvalMode }),
+  });
+}
+/** Someone else's version is declined: it stays in the history and takes no further step. */
+async function declineVersion(
+  deps: StoreOpeningDeps,
+  version: Pick<StoreConfigurationSnapshot, "configurationReference" | "configurationVersion">,
+  declineReason?: StoreConfigurationDeclineReason,
+) {
+  const key = "decline:" + version.configurationReference;
+  await deps.withdrawConfiguration({
+    configurationReference: version.configurationReference,
+    configurationVersion: version.configurationVersion,
+    auditReference: operationFor(deps, key, null),
+    ...(declineReason === undefined ? {} : { declineReason }),
+  });
+  deps.operations.delete(key);
+}
+/** The approver sends back what they were asked to approve, so it can be changed and sent again. */
+export async function sendOpeningBack(deps: StoreOpeningDeps) {
+  const workspace = await deps.configuration.load(deps.scope, { signal: deps.signal });
+  const version = openVersion(workspace);
+  if (version === null) return;
+  await declineVersion(deps, version, "NotRight");
+}
 /** Saves the finished setup, makes the configuration from it, sends, approves and publishes it. */
 async function publishConfiguration(
   deps: StoreOpeningDeps,
@@ -1543,46 +1683,10 @@ async function publishConfiguration(
   chosen: { readonly payment: string; readonly receipt: string },
   waits: OpeningWait[],
 ) {
-  const journal = deps.configurationJournal;
-  const pending = await journal.load();
-  if (pending !== null)
-    await recoverStoreConfigurationOriginal({
-      client: deps.configuration,
-      journal,
-      cursor: pending,
-      csrf: deps.csrf,
-      signal: deps.signal,
-      isCurrent: isCurrent(deps),
-    });
-  const run = async (
-    workspace: StoreConfigurationOrdinaryWorkspace,
-    action: "Materialize" | "Submit" | "Approve" | "Publish",
-    saved: StoreSetupSnapshot | null,
-    approvalMode?: "SoleOperator",
-  ) => {
-    const prepared = await deps.configuration.prepare(
-      await buildStoreConfigurationCommand({
-        scope: deps.scope,
-        action,
-        operationReference: serviceOperationReference(),
-        expectedHead: workspace.expectedHead,
-        saved,
-      }),
-      { signal: deps.signal },
-    );
-    await executeStoreConfigurationOriginal({
-      client: deps.configuration,
-      journal,
-      prepared,
-      csrf: deps.csrf,
-      signal: deps.signal,
-      isCurrent: isCurrent(deps),
-      canDispatch: () => true,
-      onReserved: noOriginal,
-      ...(approvalMode === undefined ? {} : { approvalMode }),
-    });
-  };
-  // Materialize, Submit, Approve, Publish: at most these four, each from what the server says now.
+  const actor = deps.scope.actorReference;
+  await recoverConfiguration(deps);
+  // Materialize, Submit, Approve, Publish: at most these four, each from what the server says now,
+  // and declining a version that ran out.
   for (let attempt = 0; attempt < 6; attempt += 1) {
     await recoverSetupDraft(deps);
     const workspace = await deps.configuration.load(deps.scope, { signal: deps.signal });
@@ -1590,17 +1694,26 @@ async function publishConfiguration(
       current = workspace.current;
     if (current?.setupBasis !== undefined) return;
     if (current === null) throw new StoreSetupClientError("Unavailable");
-    const saved = (await readSetup(deps)).setup.snapshot;
-    const open =
+    // Past its 14 days a version can't go further, and someone else's would stop a new one being
+    // made. The new one goes through the same comparison and the same approval.
+    if (
       latest !== null &&
       workspace.latestWithdrawal === undefined &&
-      openStates.has(latest.lifecycle);
-    if (open && !storeSetupCreatedFromSaved(saved, latest)) {
+      openStates.has(latest.lifecycle) &&
+      openingVersionRanOut(latest, workspace.observedAt) &&
+      latest.authoredByReference !== actor
+    ) {
+      await declineVersion(deps, latest);
+      continue;
+    }
+    const saved = (await readSetup(deps)).setup.snapshot;
+    const open = openVersion(workspace);
+    if (open !== null && !storeSetupCreatedFromSaved(saved, open)) {
       // Someone else's change is open: it is approved and published, or declined, first.
-      if (latest.authoredByReference !== deps.scope.actorReference)
+      if (open.authoredByReference !== actor)
         throw new StoreSetupClientError("OpenChangeByAnother");
     }
-    if (!open || !storeSetupCreatedFromSaved(saved, latest)) {
+    if (open === null || !storeSetupCreatedFromSaved(saved, open)) {
       const fresh = await saveSetup(
         deps,
         (content) => ({
@@ -1619,47 +1732,97 @@ async function publishConfiguration(
       );
       if (fresh.content.weeklySchedule.state !== "Configured")
         throw new OpeningStop("HoursNotAnswered");
-      await run(workspace, "Materialize", fresh);
+      await configurationStep(deps, workspace, "Materialize", fresh);
       continue;
     }
-    if (latest.lifecycle === "Draft") {
-      if (latest.authoredByReference !== deps.scope.actorReference)
-        throw new OpeningStop("AnotherAuthorDraft");
+    if (open.lifecycle === "Draft") {
+      if (open.authoredByReference !== actor) throw new OpeningStop("AnotherAuthorDraft");
       const failed = (workspace.publicationChecks?.checks ?? [])
         .filter((check) => check.outcome === "Fail")
         .map((check) => check.code);
       if (failed.length > 0) throw new OpeningStop("ChecksFailed", failed);
-      await run(workspace, "Submit", saved);
-    } else if (latest.lifecycle === "PendingApproval") {
+      await configurationStep(deps, workspace, "Submit", saved);
+    } else if (open.lifecycle === "PendingApproval") {
       const gate = workspace.soleOperator;
-      const own = gate !== undefined || latest.authoredByReference === deps.scope.actorReference;
-      if (!own) {
-        if (!input.approveOthers) {
-          waits.push(waitOnYou("StoreSetup"));
-          return;
-        }
-        await run(workspace, "Approve", saved);
-      } else {
-        if (gate?.status !== "Effective" || !input.approveAlone) {
-          waits.push(waitFor(input, "StoreSetup", gate?.otherApprovers ?? []));
-          return;
-        }
-        // What was ticked is what is on record, or the approval is not given.
-        if (
-          input.confirmed === null ||
-          !sameConfirmation(
-            await confirmationOnRecord(deps, latest, input.confirmed),
-            input.confirmed,
-          )
-        )
-          throw new ConfirmAgain();
-        await run(workspace, "Approve", saved, "SoleOperator");
+      if (gate === undefined && open.authoredByReference !== actor) {
+        waits.push(waitOnYou("StoreSetup"));
+        return;
       }
-    } else if (latest.lifecycle === "Approved") {
-      await run(workspace, "Publish", saved);
+      if (gate?.status !== "Effective" || !input.approveAlone) {
+        waits.push(waitFor(input, "StoreSetup", gate?.otherApprovers ?? []));
+        return;
+      }
+      // What was ticked is what is on record, or the approval is not given.
+      if (
+        input.confirmed === null ||
+        !sameConfirmation(await confirmationOnRecord(deps, open, input.confirmed), input.confirmed)
+      )
+        throw new ConfirmAgain();
+      await configurationStep(deps, workspace, "Approve", saved, "SoleOperator");
+    } else if (open.lifecycle === "Approved") {
+      await configurationStep(deps, workspace, "Publish", saved);
     } else throw new StoreSetupClientError("Conflict");
   }
   throw new StoreSetupClientError("Conflict");
+}
+
+/** What someone else sent: approved as it stands, and published once it is. Independent approvals. */
+async function approveWhatWaits(
+  deps: StoreOpeningDeps,
+  request: OpeningApprovalRequest,
+  enter: (step: OpeningStep) => void,
+) {
+  if (request.gates.includes("ReceiptTemplate")) {
+    enter("ReceiptTemplate");
+    let state = await templateAfterRecovery(deps);
+    // Approve, then publish: each from what the server says now.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { view, review } = state;
+      if (
+        view === null ||
+        view.snapshot === null ||
+        review?.submission?.versionReference === undefined
+      )
+        break;
+      if (review.submission.versionReference !== view.snapshot.content.versionReference) break;
+      const lifecycle = review.lifecycle?.state ?? null;
+      if (lifecycle !== "Approved" && (lifecycle !== "InReview" || sentByYou(deps, review))) break;
+      const templateReference = view.snapshot.content.templateReference;
+      await advanceReceiptTemplateLifecycle({
+        ...templateLifecycleStep(deps, view, review, savedTemplateFields(view), templateReference),
+        action: lifecycle === "InReview" ? "Approve" : "Publish",
+      });
+      state = await readOpeningTemplate(deps);
+    }
+  }
+  if (request.gates.includes("AllergenList")) {
+    enter("AllergenList");
+    const view = parseAllergenListView(await deps.allergens.load(null));
+    const proposal = view.registryProposal;
+    if (view.registry === null && proposal !== null && !proposal.recordedByYou)
+      await approveAllergenProposal(deps, proposal.proposalReference, false);
+  }
+  if (request.gates.includes("StoreSetup")) {
+    enter("StoreSetup");
+    await recoverConfiguration(deps);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const workspace = await deps.configuration.load(deps.scope, { signal: deps.signal });
+      const open = openVersion(workspace);
+      if (open === null) break;
+      // A newer version than the one read: it is shown first, never approved unseen.
+      if (open.configurationReference !== request.configuration) throw new ConfirmAgain();
+      if (open.lifecycle === "PendingApproval") {
+        if (
+          workspace.soleOperator !== undefined ||
+          open.authoredByReference === deps.scope.actorReference
+        )
+          break;
+        await configurationStep(deps, workspace, "Approve", null);
+      } else if (open.lifecycle === "Approved") {
+        await configurationStep(deps, workspace, "Publish", null);
+      } else break;
+    }
+  }
 }
 
 /** The press: everything the Owner answered, then the rest, in order. Pressing again carries on. */
@@ -1674,7 +1837,22 @@ export async function runStoreOpening(
     onProgress(step);
   };
   const waits: OpeningWait[] = [];
+  const liveNow = () => deps.configuration.load(deps.scope, { signal: deps.signal });
   try {
+    // First, before anything is written: this page may have been open a long time. Once the Store's
+    // setup is published its details, hours and tips are changed on purpose, on the page for that.
+    await recoverConfiguration(deps);
+    if ((await liveNow()).current?.setupBasis !== undefined) {
+      await recoverSetupDraft(deps).catch(() => undefined);
+      return Object.freeze({ kind: "AlreadyPublished" });
+    }
+    if (input.approve !== null) {
+      await approveWhatWaits(deps, input.approve, enter);
+      if ((await liveNow()).current?.setupBasis !== undefined)
+        return Object.freeze({ kind: "Published", waits: Object.freeze([]) });
+      if (!input.approve.carryOn)
+        return Object.freeze({ kind: "Waiting", waits: Object.freeze([]) });
+    }
     let references: { readonly address: string | null; readonly contact: string | null } = {
       address: null,
       contact: null,
@@ -1702,13 +1880,12 @@ export async function runStoreOpening(
       }
     }
     enter("Answers");
-    const live = await deps.configuration.load(deps.scope, { signal: deps.signal });
-    // A prerequisite only BOP support can settle: nothing is sent for approval until it is.
-    const missing = openingMissing(live);
+    // What only someone else can settle: nothing is sent for approval until it is.
+    const missing = openingMissing(await liveNow(), deps.scope.actorReference);
     if (missing.length > 0) return Object.freeze({ kind: "DetailsSaved", missing });
     if (input.answers !== null && openingAnswerProblems(input.answers).length > 0)
       throw new OpeningStop("HoursNotAnswered");
-    if (input.approveAlone) {
+    if (input.turnOnSoleOperator) {
       enter("SoleOperator");
       await turnOnSoleOperator(deps);
     }
@@ -1728,8 +1905,7 @@ export async function runStoreOpening(
     if (receipt === null) return Object.freeze({ kind: "Waiting", waits: Object.freeze(waits) });
     enter("StoreSetup");
     await publishConfiguration(deps, input, references, { payment, receipt }, waits);
-    return (await deps.configuration.load(deps.scope, { signal: deps.signal })).current
-      ?.setupBasis !== undefined
+    return (await liveNow()).current?.setupBasis !== undefined
       ? Object.freeze({ kind: "Published", waits: Object.freeze(waits) })
       : Object.freeze({ kind: "Waiting", waits: Object.freeze(waits) });
   } catch (error) {
@@ -1800,6 +1976,8 @@ export async function loadOpeningFacts(deps: StoreOpeningDeps): Promise<OpeningF
     }),
     readOpeningTemplate(deps),
   ]);
+  // No configuration to start from, in the real composition, fails the read above. Said the same way.
+  if (live.current === null) throw new StoreSetupClientError("Unavailable");
   return Object.freeze({
     workspace,
     live,
@@ -1819,7 +1997,10 @@ export const openingContentOf = (facts: Pick<OpeningFacts, "workspace">): StoreS
 /** What the summary and the approval rest on: the answers, over the setup as it will be saved. */
 export function openingConfirmationFromFacts(
   facts: OpeningFacts,
-  details: OpeningDetails,
+  details: Pick<
+    OpeningDetails,
+    "names" | "addressLines" | "locality" | "regionCode" | "postalCode" | "phone"
+  >,
   answers: Pick<OpeningAnswers, "serviceModes" | "hours">,
 ): OpeningConfirmation | null {
   const current = facts.live.current;
@@ -1853,40 +2034,251 @@ export function openingConfirmationFromFacts(
   }
 }
 /**
+ * What was sent, as it is on record, for whoever reads it next: the version waiting, or the answers
+ * saved. Null when nothing has been answered yet: there is nothing to show, so nothing to approve here.
+ */
+export function openingSentSummary(facts: OpeningFacts): OpeningConfirmation | null {
+  const profile = facts.profile.current;
+  if (profile === null) return null;
+  const details = {
+    names: Object.fromEntries(
+      profile.names.map((entry) => [entry.locale, entry.storeDisplayName] as const),
+    ),
+    addressLines: profile.address.addressLines,
+    locality: profile.address.locality,
+    regionCode: profile.address.regionCode,
+    postalCode: profile.address.postalCode,
+    phone: profile.businessPhone ?? "",
+  };
+  const version = openVersion(facts.live);
+  if (version?.setupBasis !== undefined) {
+    const allergens = facts.allergens;
+    return Object.freeze({
+      name: textKey(defaultName(profile)),
+      address: Object.freeze({
+        lines: Object.freeze(details.addressLines.map(textKey).filter((line) => line !== "")),
+        locality: textKey(details.locality),
+        regionCode: details.regionCode,
+        postalCode: postalKey(details.postalCode),
+      }),
+      phone: phoneKey(details.phone),
+      timeZone: version.timeZone,
+      businessDayStart: version.businessDayStartLocalTime,
+      serviceModes: version.enabledServiceModes,
+      weeklySchedule: version.weeklySchedule,
+      exceptions: version.exceptions,
+      fees: version.setupBasis.feeContexts,
+      capacity: version.capacityConfigurationReference,
+      taxConfiguration: version.taxConfigurationReference,
+      payment: facts.payment.snapshot?.content ?? openingPaymentChannels,
+      receiptLocale: facts.workspace.store.locale,
+      allergens:
+        allergens === null || allergens.registry !== null
+          ? null
+          : allergens.registryTemplate.allergens.map((entry) => entry.code),
+    });
+  }
+  const content = contentOf(facts.workspace);
+  if (
+    content.weeklySchedule.state !== "Configured" ||
+    content.enabledServiceModes.state !== "Configured"
+  )
+    return null;
+  const answers = openingAnswersFromRecords(content, null);
+  return answers === null ? null : openingConfirmationFromFacts(facts, details, answers);
+}
+/**
+ * Who decides what on this opening, from what the page read. The page says it and the press does it:
+ * one answer for both, so what the tick says is what the press sends.
+ *
+ * Approving alone needs the Brand's sole-operator setting on (DEC-SOLE-OPERATOR-APPROVAL: an explicit
+ * request, and it also reaches refunds). So a press changes the setting only when the Store can't be
+ * published any other way (nobody else holds a Store gate), and then the tick says all of it. Where
+ * someone else approves the Store's gates the setting is left as the Brand Owner has it, even if the
+ * allergen list has nobody else: that one is decided separately, on Allergens.
+ */
+export interface OpeningApprovalPlan {
+  /** What only this Owner can approve, and approves with the tick and one code. */
+  readonly alone: readonly OpeningGate[];
+  /** What goes to someone else, named. */
+  readonly others: readonly OpeningWait[];
+  /** The press sends this person's own approvals as given alone. */
+  readonly approveAlone: boolean;
+  /** The press turns on the Brand's setting; the tick must say so in full. */
+  readonly turnsOnSoleOperator: boolean;
+  /** Only the Brand Owner can turn it on, and this is not them. */
+  readonly needsBrandOwner: boolean;
+  /** Nobody else holds the allergen list's approval, and this press leaves it for Allergens. */
+  readonly allergenListLater: boolean;
+  /** The press can end in publication: no Store gate waits for someone else. */
+  readonly publishes: boolean;
+}
+export function openingApprovalPlan(
+  facts: Pick<OpeningFacts, "approvers" | "allergens" | "soleOperator">,
+): OpeningApprovalPlan {
+  const { approvers, allergens, soleOperator } = facts;
+  const storeGates = ["ReceiptTemplate", "StoreSetup"] as const;
+  const storeAlone = storeGates.filter((gate) => othersFor(approvers, gate).length === 0);
+  // The list is this person's while the Brand has none and nobody else has recorded one.
+  const proposal = allergens?.registryProposal ?? null;
+  const listOpen =
+    allergens !== null &&
+    allergens.registry === null &&
+    allergens.permissions.mayManageRegistry &&
+    (proposal === null || proposal.recordedByYou);
+  const listAlone = listOpen && approvers.allergenList.length === 0;
+  const needsBrandOwner = storeAlone.length > 0 && soleOperator === null;
+  const approveAlone =
+    !needsBrandOwner && (storeAlone.length > 0 || (listAlone && soleOperator?.state === "On"));
+  const alone: readonly OpeningGate[] = !approveAlone
+    ? []
+    : [
+        ...(storeAlone.includes("ReceiptTemplate") ? (["ReceiptTemplate"] as const) : []),
+        ...(listAlone ? (["AllergenList"] as const) : []),
+        ...(storeAlone.includes("StoreSetup") ? (["StoreSetup"] as const) : []),
+      ];
+  const named = (what: OpeningGate): readonly OpeningWait[] => {
+    const who = othersFor(approvers, what);
+    return who.length === 0 ? [] : [Object.freeze({ what, who })];
+  };
+  return Object.freeze({
+    alone: Object.freeze(alone),
+    others: Object.freeze([
+      ...named("ReceiptTemplate"),
+      ...(listOpen ? named("AllergenList") : []),
+      ...named("StoreSetup"),
+    ]),
+    approveAlone,
+    turnsOnSoleOperator: approveAlone && soleOperator?.state === "Off",
+    needsBrandOwner,
+    allergenListLater: listAlone && !alone.includes("AllergenList"),
+    publishes: storeAlone.length === storeGates.length,
+  });
+}
+/** The press of the answers form, as the page shows it. */
+export function openingAnswersInput(
+  facts: OpeningFacts,
+  details: OpeningDetails,
+  answers: OpeningAnswers,
+  confirmed: OpeningConfirmation | null,
+): StoreOpeningInput {
+  const plan = openingApprovalPlan(facts);
+  const blocked = openingMissing(facts.live, facts.workspace.scope.actorReference).length > 0;
+  return Object.freeze({
+    details,
+    answers,
+    confirmed,
+    approveAlone: !blocked && plan.approveAlone,
+    turnOnSoleOperator: !blocked && plan.turnsOnSoleOperator,
+    approve: null,
+    approvers: facts.approvers,
+  });
+}
+/** The press of "Approve", as the page shows it: what waits for this person, and nothing typed. */
+export function openingApproveInput(facts: OpeningFacts): StoreOpeningInput {
+  return Object.freeze({
+    details: null,
+    answers: null,
+    confirmed: null,
+    approveAlone: false,
+    turnOnSoleOperator: false,
+    approve: Object.freeze({
+      gates: openingWaitsFromFacts(facts).forYou,
+      configuration: openVersion(facts.live)?.configurationReference ?? null,
+      // Someone else approves what follows, so this press can go on to it. Otherwise it is this
+      // person's alone: back to the page, for the tick and the code.
+      carryOn: !openingApprovalPlan(facts).publishes,
+    }),
+    approvers: facts.approvers,
+  });
+}
+export interface OpeningWaits {
+  /** Approved here, with what was sent shown above the button. */
+  readonly forYou: readonly OpeningGate[];
+  /** This person sent these and the run can't pass them until the people named approve. */
+  readonly forOthers: readonly OpeningWait[];
+  /** The allergen list, recorded, for the people named. Nothing else waits on it. */
+  readonly listForOthers: OpeningWait | null;
+  /** Someone else recorded the allergen list, on its own: it is decided on Allergens. */
+  readonly listForYou: boolean;
+  /** Sent to this person before anyone answered this page: approved here once it is answered. */
+  readonly beforeAnswers: readonly OpeningGate[];
+  /** The version sent has run out; a press makes a new one. */
+  readonly ranOut: boolean;
+  /** Someone sent back what this person's Store setup made. */
+  readonly sentBack: boolean;
+}
+/**
  * What another Owner has sent that waits for this one, and what this one sent that waits for
  * someone else: the page shows either on opening, from server state, on whichever device.
  */
-export function openingWaitsFromFacts(facts: OpeningFacts): {
-  readonly forYou: readonly OpeningGate[];
-  readonly forOthers: readonly OpeningWait[];
-} {
+export function openingWaitsFromFacts(facts: OpeningFacts): OpeningWaits {
   const actor = facts.workspace.scope.actorReference;
-  const forYou: OpeningGate[] = [];
+  const observedAt = facts.live.observedAt;
+  const answered = openingSentSummary(facts) !== null;
   const forOthers: OpeningWait[] = [];
+  const beforeAnswers: OpeningGate[] = [];
   const named = (what: OpeningGate) => {
     const who = othersFor(facts.approvers, what);
-    if (who.length > 0) forOthers.push({ what, who });
+    if (who.length > 0) forOthers.push(Object.freeze({ what, who }));
   };
+  let receiptForYou = false,
+    storeSetupForYou = false;
   const review = facts.template.review;
-  if (review?.lifecycle?.state === "InReview" && review.submission !== null) {
+  if (
+    review?.lifecycle?.state === "InReview" &&
+    review.submission !== null &&
+    // Its checks ran out: a press starts a new revision, nobody can approve this one.
+    Date.parse(review.submission.validationValidUntil) > Date.parse(observedAt)
+  ) {
     const own =
       actor === review.submission.authoredByReference ||
       actor === review.submission.submittedByReference;
     if (own) named("ReceiptTemplate");
-    else forYou.push("ReceiptTemplate");
+    else if (answered) receiptForYou = true;
+    else beforeAnswers.push("ReceiptTemplate");
+  }
+  const version = openVersion(facts.live);
+  // A change that did not come from Store setup is not this page's: it stops the press, by name.
+  if (version?.setupBasis !== undefined && version.lifecycle === "PendingApproval") {
+    if (facts.live.soleOperator !== undefined || version.authoredByReference === actor)
+      named("StoreSetup");
+    else if (answered) storeSetupForYou = true;
+    else beforeAnswers.push("StoreSetup");
   }
   const allergens = facts.allergens;
   const proposal =
     allergens !== null && allergens.registry === null ? allergens.registryProposal : null;
-  if (proposal !== null) {
-    if (proposal.recordedByYou) named("AllergenList");
-    else if (allergens?.permissions.mayManageRegistry === true) forYou.push("AllergenList");
-  }
+  const listSent =
+    proposal !== null &&
+    !proposal.recordedByYou &&
+    allergens?.permissions.mayManageRegistry === true;
+  // On its own a list recorded by someone else takes nothing from this page: the answers still
+  // have to be given here. With something else to approve it goes with that, in the same press.
+  const listHere = listSent && (receiptForYou || storeSetupForYou);
+  const who = othersFor(facts.approvers, "AllergenList");
   const latest = facts.live.latest;
-  if (latest?.lifecycle === "PendingApproval" && facts.live.latestWithdrawal === undefined) {
-    if (facts.live.soleOperator !== undefined || latest.authoredByReference === actor)
-      named("StoreSetup");
-    else forYou.push("StoreSetup");
-  }
-  return Object.freeze({ forYou: Object.freeze(forYou), forOthers: Object.freeze(forOthers) });
+  return Object.freeze({
+    forYou: Object.freeze([
+      ...(receiptForYou ? (["ReceiptTemplate"] as const) : []),
+      ...(listHere ? (["AllergenList"] as const) : []),
+      ...(storeSetupForYou ? (["StoreSetup"] as const) : []),
+    ]),
+    forOthers: Object.freeze(forOthers),
+    listForOthers:
+      proposal?.recordedByYou === true && who.length > 0
+        ? Object.freeze({ what: "AllergenList" as const, who })
+        : null,
+    listForYou: listSent && !listHere,
+    beforeAnswers: Object.freeze(beforeAnswers),
+    ranOut:
+      latest !== null &&
+      facts.live.latestWithdrawal === undefined &&
+      openStates.has(latest.lifecycle) &&
+      openingVersionRanOut(latest, observedAt),
+    sentBack:
+      latest?.setupBasis !== undefined &&
+      facts.live.latestWithdrawal?.kind === "Declined" &&
+      !facts.live.latestWithdrawal.byYou,
+  });
 }

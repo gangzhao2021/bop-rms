@@ -91,9 +91,6 @@ export interface StoreConfigurationOrdinaryWorkspace {
   /** WP-2423 (v15 `8bd902e3` D1): the tax configuration that governs the Store now (the one
    * quotes use), or null when none; absent when not read. */
   readonly storeTaxConfigurationReference?: string | null;
-  /** WP-2423 item 14: whether the Store's go-live check holds now; present only until the Store
-   * has a published configuration from Store setup. */
-  readonly goLive?: boolean;
 }
 /** Every check blocks sending, approval and publication; the screen explains each in plain words. */
 export const storeConfigurationPublicationCheckCodes = [
@@ -441,12 +438,7 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         typeof copy === "object" &&
         Object.hasOwn(copy, "storeTaxConfigurationReference") &&
         (copy as { storeTaxConfigurationReference?: unknown }).storeTaxConfigurationReference !==
-          undefined,
-      hasGoLive =
-        copy !== null &&
-        typeof copy === "object" &&
-        Object.hasOwn(copy, "goLive") &&
-        (copy as { goLive?: unknown }).goLive !== undefined;
+          undefined;
     const r = closed(copy, [
         "profile",
         "scope",
@@ -461,7 +453,6 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         ...(hasSoleOperator ? ["soleOperator"] : []),
         ...(hasWithdrawal ? ["latestWithdrawal"] : []),
         ...(hasTax ? ["storeTaxConfigurationReference"] : []),
-        ...(hasGoLive ? ["goLive"] : []),
       ]),
       scope = parseStoreSetupScope(r.scope),
       selected = parseStoreSetupScope(expectedScope);
@@ -576,7 +567,6 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(tax))
     )
       return fail();
-    if (hasGoLive && typeof r.goLive !== "boolean") return fail();
     if (Date.now() >= Date.parse(validUntil)) return fail("Stale");
     return Object.freeze({
       profile: r.profile,
@@ -592,7 +582,6 @@ export async function parseStoreConfigurationOrdinaryWorkspace(
       ...(soleOperator === null ? {} : { soleOperator }),
       ...(latestWithdrawal === undefined ? {} : { latestWithdrawal }),
       ...(hasTax ? { storeTaxConfigurationReference: tax as string | null } : {}),
-      ...(hasGoLive ? { goLive: r.goLive as boolean } : {}),
     });
   } catch (error) {
     if (error instanceof StoreSetupClientError) throw error;

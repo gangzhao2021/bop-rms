@@ -249,6 +249,15 @@ export function AllergenListPage({
                   )
                 }
               />
+            ) : view.soleOperator?.status === "NotSet" &&
+              view.soleOperator.otherApprovers.length === 0 &&
+              view.registryProposal?.recordedByYou !== false ? (
+              /* WP-2423 item 14: nobody else exists to approve it, so nobody is promised. */
+              <p>
+                {t(
+                  "Only you hold allergen list approval, so nobody else can approve this list. To approve it yourself, the brand owner turns on Sole operator in Store setup; then come back here.",
+                )}
+              </p>
             ) : view.registryProposal === null ? (
               <button
                 type="button"

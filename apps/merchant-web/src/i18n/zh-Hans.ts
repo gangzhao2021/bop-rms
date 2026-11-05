@@ -7157,7 +7157,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Store details and settings": "门店信息和设置",
   "Waiting for BOP support to set your tax rates": "在等 BOP 支持设置税率",
   "Waiting for BOP support to set your tax rates.": "在等 BOP 支持设置您的税率。",
-  "Waiting for BOP support to approve this store to open.": "在等 BOP 支持批准这家店开业。",
   "your store's details": "门店信息",
   "your receipt details": "收据信息",
   "the kitchen line": "后厨线",
@@ -7254,8 +7253,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Enter the store's phone number.": "请填写门店电话。",
   "Loading your store…": "正在读取门店信息…",
   "This didn't load. Try again.": "没有读取成功。请重试。",
-  "BOP support has not installed this store's first settings yet, so the short way is not available. The step-by-step settings below still work.":
-    "BOP 支持还没有安装这家店的初始设置，所以暂时不能用快捷方式。下面的分步设置仍可使用。",
+  "If it still doesn't load, tell BOP support: they may need to renew this store's approval to open.":
+    "如果还是读取不了，请告诉 BOP 支持：可能需要他们续期这家店的开业许可。",
   "Waiting for {people} to approve {what}. They open Store setup and press Approve.":
     "在等{people}批准{what}。请对方打开门店设置并按“批准”。",
   "Working on {step}…": "正在处理{step}…",
@@ -7263,12 +7262,63 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "您核对之后有内容变了。请再看一遍并重新勾选。",
   "Open your store": "开店",
   "Waiting for you: {what}.": "等您处理：{what}。",
-  "The other Owner answered these. Check them; pressing Approve records it as approved by you.":
-    "这些是另一位店主填写的。请核对；按“批准”后记录为由您批准。",
+  "These were sent for your approval. Check them; pressing Approve records it as approved by you.":
+    "这些内容已送交您批准。请核对；按“批准”后记录为由您批准。",
+  "Something changed since you read this. Read it again, then press the button.":
+    "您看过之后有内容变了。请再看一遍，然后按按钮。",
+  "Change the answers": "修改回答",
+  "Change my answers": "修改我的回答",
+  "Change what needs changing, then save. Whoever approves it sees the new answers.":
+    "改好要改的内容后保存。批准的人会看到新的回答。",
+  "Save my changes": "保存我的修改",
+  "Keep what was sent": "保留已送审的内容",
+  "Send it back": "退回",
+  "Send it back now": "确认退回",
+  "Send this back? It stays in the history and can't be approved or published. The answers then open here, to change and send again.":
+    "要退回吗？它会留在历史记录里，不能再批准或发布。回答会在这里重新打开，改好后再次送审。",
+  "This wasn't sent back. Try again.": "没有退回成功。请重试。",
+  "This was sent back. Change what needs changing and send it again.":
+    "这份内容被退回了。改好要改的内容后再次送审。",
+  "What was sent earlier ran out: it has to be approved and published within 14 days. Check these and press the button to send it again.":
+    "之前送审的内容已过期：必须在 14 天内批准并发布。请核对这些回答，然后按按钮再次送审。",
+  "Someone sent {what} for your approval. Answer these first; you can then approve it on this page.":
+    "有人把{what}送交您批准。请先回答这些问题，之后就能在这一页批准。",
+  "Someone else recorded this list. It is waiting for your approval on Allergens.":
+    "这份清单由别人记录，正在“过敏原”页等您批准。",
+  "You approve this list on Allergens, after your store setup is published.":
+    "门店设置发布后，您在“过敏原”页批准这份清单。",
+  "{people} approves this list.": "这份清单由{people}批准。",
+  "This is a test list based on Health Canada's priority allergens. Check it against current Health Canada guidance before real customers rely on it.":
+    "这是一份测试清单，依据加拿大卫生部的重点过敏原。在真实顾客依赖它之前，请对照加拿大卫生部的最新指引核对。",
+  "The allergen list is waiting for {people}. They approve it on Allergens.":
+    "过敏原清单在等{people}批准。对方在“过敏原”页批准。",
+  "The allergen list is waiting for your approval.": "过敏原清单在等您批准。",
+  "Approve it on Allergens": "到“过敏原”页批准",
+  "Open Allergens": "打开“过敏原”页",
+  "Only you hold allergen list approval, so it does not go to anyone with this. You approve it after your store setup is published.":
+    "过敏原清单只有您能批准，所以不会随这次一起送审。门店设置发布后由您批准。",
+  "{people} approves the allergen list, on Allergens. It does not hold this up.":
+    "过敏原清单由{people}在“过敏原”页批准，不影响这次发布。",
+  "Someone else's change to this store's hours is still waiting. It has to be approved or declined before this can go further.":
+    "别人对这家店营业时间的修改还在等待处理。要先批准或驳回，这里才能继续。",
+  "Decide it on Hours & ordering": "到“营业时间与点单”处理",
   "What you are approving": "您要批准的内容",
   "Approve and continue": "批准并继续",
   "What was sent": "已送审的内容",
-  "your store's name, address, phone and business name": "门店名称、地址、电话和商家名称",
+  "the store name": "门店名称",
+  "the street address": "街道地址",
+  "the city or town": "城市",
+  "the province or territory": "省或地区",
+  "the postal code": "邮编",
+  "the store phone number": "门店电话",
+  "the business name on receipts": "收据上的商家名称",
+  "the GST/HST number": "GST/HST 号码",
+  "the QST number": "QST 号码",
+  "the PST number": "PST 号码",
+  "the days you open": "营业的日子",
+  "when you open and close": "开门和打烊时间",
+  "last orders": "最后点单时间",
+  "preparation time": "备餐时间",
   "dine-in, pickup or both": "堂食、自取或两者",
   "your opening hours": "营业时间",
   "the box above": "上面的勾选框",
@@ -7291,8 +7341,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "请先保存您的信息：对方需要知道您所在的省份。",
   "{people} also approves here, so they check what you send before it is published.":
     "{people}也有批准权，所以您送审的内容要由对方核对后才发布。",
-  "I run this business on my own and approve the above. I will approve my own prices, menus, recipes, allergen lists, Store setup and larger refunds; each needs my code and is recorded as approved by me alone. If I add a second owner, they approve instead.":
-    "这家店由我一人经营，我批准以上内容。以后我自己批准价格、菜单、配方、过敏原清单、门店设置和较大金额的退款；每次都要验证码，并记录为由我一人批准。如果我增加第二位店主，就改由对方批准。",
+  "I run this business on my own and approve the above. This turns on approving on my own for the whole business: wherever nobody else holds the approval, I approve my own prices, menus, recipes, allergen lists, Store setup and larger refunds. Each needs my code and is recorded as approved by me alone. If I add a second owner, they approve instead.":
+    "这家店由我一人经营，我批准以上内容。这会为整个品牌打开“自行批准”：凡是没有别人能批准的地方，我自己批准价格、菜单、配方、过敏原清单、门店设置和较大金额的退款。每次都要验证码，并记录为由我一人批准。如果我增加第二位店主，就改由对方批准。",
   "I checked the above and approve it on my own. Each is recorded as approved by me alone.":
     "我已核对以上内容并自行批准。每一项都记录为由我一人批准。",
   "Save my details": "保存我的信息",
@@ -7304,6 +7354,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your store setup is published. The allergen list still needs approval.":
     "门店设置已发布。过敏原清单还需要批准。",
   "Your store setup is published.": "门店设置已发布。",
+  "This store's setup was already published, on another device or by another Owner, so what was on that page was not saved. Check the live settings below and change them here if you need to.":
+    "这家店的设置已经发布过了（在另一台设备上，或由另一位店主发布），所以那一页上的内容没有保存。请看下面的在营设置，需要的话在这里修改。",
+  "After your store setup": "门店设置发布之后",
+  "Only you hold allergen list approval, so nobody else can approve this list. To approve it yourself, the brand owner turns on Sole operator in Store setup; then come back here.":
+    "过敏原清单只有您能批准，所以没有别人能批准这份清单。要自己批准，请品牌负责人先在门店设置里打开“独立经营者”，然后回到这里。",
   "Only I can approve {what} here. I checked it and approve it on my own; it needs my code and is recorded as approved by me alone.":
     "这里只有我能批准{what}。我已核对并自行批准；需要验证码，并记录为由我一人批准。",
   "Approve your allergen list first: open Allergens, approve the list, then list the menu.":

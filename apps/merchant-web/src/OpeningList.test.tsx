@@ -57,9 +57,10 @@ describe("WP-2423 item 13 ③: the Owner's opening list", () => {
   it("says when the next step is BOP support's, not the Owner's", () => {
     const html = render(facts({ setupPublished: false, taxRatesSet: false, menuListed: false }));
     expect(html).toContain("Waiting for BOP support to set your tax rates");
-    // The row asks nothing of the Owner: what is next is the row after it.
+    // The row asks nothing of the Owner, and nothing else is theirs yet: nothing is "next".
     expect(html).not.toContain("setup#store-opening");
-    expect(html.indexOf("Waiting for BOP support")).toBeLessThan(html.indexOf("Do this next"));
+    expect(html).not.toContain("Do this next");
+    expect(html).not.toContain('data-next="true"');
     // Until they have saved their details the row is still theirs: BOP support needs the province.
     for (const key of ["details", "kitchen", "receipts"] as const)
       expect(render(facts({ [key]: false, setupPublished: false, taxRatesSet: false }))).toContain(
@@ -67,6 +68,27 @@ describe("WP-2423 item 13 ③: the Owner's opening list", () => {
       );
     expect(render(facts({ setupPublished: false, taxRatesSet: true }))).toContain(
       "setup#store-opening",
+    );
+  });
+  it("never sends anyone to the allergen list before the store row is done", () => {
+    // While BOP support has the tax rates to set, and while the Owner still has the page to fill.
+    for (const value of [
+      facts({ setupPublished: false, taxRatesSet: false, allergenList: false }),
+      facts({ setupPublished: false, allergenList: false }),
+      facts({ details: false, allergenList: false }),
+    ]) {
+      const html = render(value);
+      expect(html).toContain("After your store setup");
+      expect(html).not.toContain("/app/compliance/allergens");
+    }
+    // The store row done, it is next, wherever it is the Owner's to do.
+    const open = render(facts({ allergenList: false }));
+    expect(open).toContain("/app/compliance/allergens");
+    expect(open).toContain("Do this next");
+    expect(open).not.toContain("After your store setup");
+    // Done already: the row says so, whatever the store row says.
+    expect(render(facts({ setupPublished: false, allergenList: true }))).not.toContain(
+      "After your store setup",
     );
   });
   it("a step that can't be read is neither done nor to do", () => {

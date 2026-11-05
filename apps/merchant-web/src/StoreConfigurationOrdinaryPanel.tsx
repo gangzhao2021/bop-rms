@@ -121,7 +121,7 @@ const checkText: Record<StoreConfigurationPublicationCheckCode, { pass: string; 
 const checksPass = (checks: StoreConfigurationPublicationChecks | undefined) =>
   checks === undefined || checks.checks.every((check) => check.outcome === "Pass");
 /** A configuration created from setup must be approved and published within 14 days. */
-const publicationWindowMs = 14 * 86400000;
+export const publicationWindowMs = 14 * 86400000;
 export function StoreConfigurationPublicationChecklist({
   checks,
 }: {

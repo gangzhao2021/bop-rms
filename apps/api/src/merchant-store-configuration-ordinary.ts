@@ -116,8 +116,6 @@ export interface MerchantStoreConfigurationOrdinaryOptions extends Omit<
     /** WP-2423 (v15 `8bd902e3` D1): the tax configuration currently governing the Store (Pricing
      * owner read in this run's transaction), or null when none or several. */
     readonly storeTaxConfigurationReference?: () => Promise<string | null>;
-    /** WP-2423 item 14: whether the Store's go-live check holds now (the check publication makes). */
-    readonly storeGoLive?: () => Promise<boolean>;
     readonly appendAudit: (
       tx: Parameters<Existing["configure"]>[0],
       input: MerchantStoreConfigurationOrdinaryAuditInput,
@@ -1042,13 +1040,6 @@ export function createMerchantStoreConfigurationOrdinary(
       // v15 `8bd902e3` D1: the Store's tax configuration in force, so the Owner's setup names it.
       const readTax = configuration().storeTaxConfigurationReference;
       const storeTaxConfigurationReference = readTax === undefined ? undefined : await readTax();
-      // WP-2423 item 14: a Store not yet published from Store setup says whether its go-live check
-      // holds, so its Owner is not asked to approve anything that could not be published.
-      const readGoLive = configuration().storeGoLive;
-      const goLive =
-        readGoLive === undefined || published === null || published.setupBasis !== undefined
-          ? undefined
-          : await readGoLive();
       // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: the Owner who created or sent the configuration
       // awaiting approval sees whether they may approve it alone, and why not.
       let soleOperator: Awaited<ReturnType<typeof merchantStoreSoleOperatorGate>> | undefined;
@@ -1099,7 +1090,6 @@ export function createMerchantStoreConfigurationOrdinary(
           ...(storeTaxConfigurationReference === undefined
             ? {}
             : { storeTaxConfigurationReference }),
-          ...(goLive === undefined ? {} : { goLive }),
           ...(withdrawal === null
             ? {}
             : {

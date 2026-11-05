@@ -52,9 +52,6 @@ export interface MerchantStoreConfigurationOrdinaryWorkspace {
    * publication check "Tax" compares a configuration's tax reference with it, and "Use the live
    * Store's settings" carries it (an installed configuration may name an installer reference). */
   readonly storeTaxConfigurationReference?: string | null;
-  /** WP-2423 item 14: whether the Store's go-live check holds now; present only until the Store
-   * has a published configuration from Store setup. */
-  readonly goLive?: boolean;
 }
 export interface MerchantStoreConfigurationSoleOperatorView {
   readonly status: "Effective" | "NotSet" | "OtherApprovers";
@@ -250,11 +247,6 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       Object.hasOwn(value, "storeTaxConfigurationReference") &&
       (value as { storeTaxConfigurationReference?: unknown }).storeTaxConfigurationReference !==
         undefined;
-    const hasGoLive =
-      value !== null &&
-      typeof value === "object" &&
-      Object.hasOwn(value, "goLive") &&
-      (value as { goLive?: unknown }).goLive !== undefined;
     const r = readClosedRecord(value, [
       "profile",
       "scope",
@@ -269,7 +261,6 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
       ...(hasSoleOperator ? ["soleOperator"] : []),
       ...(hasWithdrawal ? ["latestWithdrawal"] : []),
       ...(hasTax ? ["storeTaxConfigurationReference"] : []),
-      ...(hasGoLive ? ["goLive"] : []),
     ]);
     if (
       r.profile !== "StoreConfigurationOrdinaryWorkspaceV1" ||
@@ -389,7 +380,6 @@ export function parseMerchantStoreConfigurationOrdinaryWorkspace(
                 : parseStoreAdministrationReference(r.storeTaxConfigurationReference),
           }
         : {}),
-      ...(hasGoLive ? { goLive: typeof r.goLive === "boolean" ? r.goLive : invalid() } : {}),
     });
   } catch {
     return invalid();

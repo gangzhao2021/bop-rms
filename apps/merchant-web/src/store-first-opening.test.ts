@@ -13,13 +13,19 @@ import {
   loadOpeningFacts,
   openingAnswerProblems,
   openingAnswersFromRecords,
+  openingAnswersInput,
+  openingApprovalPlan,
+  openingApproveInput,
   openingConfirmationFromFacts,
   openingFeeContexts,
   openingMissing,
   openingPeriodEndsNextDay,
+  openingSentSummary,
+  openingVersionRanOut,
   openingWaitsFromFacts,
   openingWeeklySchedule,
   runStoreOpening,
+  sendOpeningBack,
   type OpeningAnswers,
   type OpeningDetails,
   type OpeningWait,
@@ -144,9 +150,14 @@ const memoryJournal = (held: unknown = null) => {
 type World = ReturnType<typeof world>;
 interface WorldOptions {
   readonly taxReference?: string | null;
-  readonly goLive?: boolean;
   readonly gate?: "Effective" | "NotSet" | "OtherApprovers";
   readonly others?: readonly string[];
+  /** Who else holds each approval, when it is not `others` for all three. */
+  readonly approvers?: {
+    readonly receiptTemplate: readonly string[];
+    readonly storeSetup: readonly string[];
+    readonly allergenList: readonly string[];
+  };
   /** The Store's own opening writes that fail once, by name. */
   readonly failOnce?: ReadonlySet<string>;
   readonly profilePublished?: boolean;
@@ -214,7 +225,9 @@ function world(options: WorldOptions = {}) {
     },
     latest: null as null | Record<string, unknown>,
     current: firstConfiguration as Record<string, unknown>,
-    withdrawn: false,
+    latestWithdrawal: undefined as
+      undefined | { kind: "Withdrawn" | "Declined"; withdrawnAt: string; byYou: boolean },
+    declines: [] as unknown[],
     registry: null as null | { entries: readonly unknown[] },
     proposal: null as null | { proposalReference: string; recordedByYou: boolean },
     allergenApprovals: [] as unknown[],
@@ -238,11 +251,36 @@ function world(options: WorldOptions = {}) {
       businessPhone: null,
     };
   const others = (options.others ?? []).map((displayName) => ({ displayName }));
-  const gateNow = (status = options.gate ?? "NotSet") => ({
-    status: state.soleOperator === "On" && status === "NotSet" ? ("Effective" as const) : status,
-    otherApprovers: status === "OtherApprovers" ? others : [],
+  const named = (names: readonly string[]) => names.map((displayName) => ({ displayName }));
+  const approversNow = {
+    receiptTemplate:
+      options.approvers === undefined ? others : named(options.approvers.receiptTemplate),
+    storeSetup: options.approvers === undefined ? others : named(options.approvers.storeSetup),
+    allergenList: options.approvers === undefined ? others : named(options.approvers.allergenList),
+  };
+  const gateOf = (holders: readonly { displayName: string }[]) => ({
+    status:
+      options.gate !== undefined && options.approvers === undefined
+        ? state.soleOperator === "On" && options.gate === "NotSet"
+          ? ("Effective" as const)
+          : options.gate
+        : state.soleOperator !== "On"
+          ? ("NotSet" as const)
+          : holders.length > 0
+            ? ("OtherApprovers" as const)
+            : ("Effective" as const),
+    otherApprovers: holders,
     verifiedUntil: null,
   });
+  const gateNow = () =>
+    options.approvers === undefined
+      ? {
+          ...gateOf(others),
+          otherApprovers: options.gate === "OtherApprovers" ? others : [],
+        }
+      : gateOf(approversNow.storeSetup);
+  const listGateNow = () =>
+    options.approvers === undefined ? gateNow() : gateOf(approversNow.allergenList);
   const setupWorkspace = () => ({
     profile: "StoreSetupWorkspaceV1",
     scope,
@@ -352,7 +390,7 @@ function world(options: WorldOptions = {}) {
       ...(state.taxReference === undefined
         ? {}
         : { storeTaxConfigurationReference: state.taxReference }),
-      ...(options.goLive === undefined ? {} : { goLive: options.goLive }),
+      ...(state.latestWithdrawal === undefined ? {} : { latestWithdrawal: state.latestWithdrawal }),
       ...(pending
         ? {
             publicationChecks: {
@@ -377,7 +415,7 @@ function world(options: WorldOptions = {}) {
     permissions: { mayRead: true, mayDeclare: true, mayManageRegistry: true },
     registry: state.registry,
     registryProposal: state.proposal,
-    soleOperator: gateNow(),
+    soleOperator: listGateNow(),
     registryTemplate: {
       template: "CA_PRIORITY_TEST",
       jurisdictionCode: "CA",
@@ -622,13 +660,30 @@ function world(options: WorldOptions = {}) {
         approvalMode?: string,
       ) => {
         const { action } = value.command;
+        const held = state.latest;
+        const open =
+          held !== null &&
+          state.latestWithdrawal === undefined &&
+          ["Draft", "PendingApproval", "Approved"].includes(String(held.lifecycle));
+        // As the server refuses: someone else's open change, and any step on a version run out.
+        if (action === "Materialize" && open && held.authoredByReference !== scope.actorReference)
+          throw new StoreSetupClientError("OpenChangeByAnother");
+        if (
+          action !== "Materialize" &&
+          held !== null &&
+          held.setupBasis !== undefined &&
+          Date.parse(String(held.createdAt)) + 14 * 86400000 <= Date.now()
+        )
+          throw new StoreSetupClientError("Conflict");
         write(action + "Configuration");
         if (action === "Materialize") {
           const setup = state.setup;
           if (setup === null) throw new StoreSetupClientError("Conflict");
           const content = setup.content as Record<string, { state: string; value?: unknown }>;
+          state.latestWithdrawal = undefined;
           state.latest = {
             ...firstConfiguration,
+            createdAt: new Date().toISOString(),
             configurationReference: reference(),
             configurationVersion: Number((state.latest ?? state.current).configurationVersion) + 1,
             lifecycle: "Draft",
@@ -675,6 +730,18 @@ function world(options: WorldOptions = {}) {
       invalidate: () => undefined,
     },
     configurationJournal: journals.configuration,
+    withdrawConfiguration: async (command: {
+      configurationReference: string;
+      auditReference: string;
+    }) => {
+      write("DeclineConfiguration");
+      state.declines.push(command);
+      state.latestWithdrawal = {
+        kind: state.latest?.authoredByReference === scope.actorReference ? "Withdrawn" : "Declined",
+        withdrawnAt: new Date(Date.now() - 1000).toISOString(),
+        byYou: true,
+      };
+    },
     kitchen: {
       load: async () => ({
         canChange: true,
@@ -770,27 +837,111 @@ function world(options: WorldOptions = {}) {
         }
       },
     },
-    loadApprovers: async () => ({
-      receiptTemplate: others,
-      storeSetup: others,
-      allergenList: others,
-    }),
+    loadApprovers: async () => approversNow,
   } as unknown as StoreOpeningDeps;
   return { deps, state, writes, journals };
 }
-const approvers = (w: World) => w.deps.loadApprovers();
-async function pressAlone(w: World, overrides: Partial<StoreOpeningInput> = {}) {
-  const facts = await loadOpeningFacts(w.deps);
-  return runStoreOpening(w.deps, {
+/** The ordinary button, deciding as the page does from what it read. */
+async function press(
+  w: World,
+  overrides: Partial<StoreOpeningInput> = {},
+  typed: { readonly details: OpeningDetails; readonly answers: OpeningAnswers } = {
     details,
     answers,
-    confirmed: openingConfirmationFromFacts(facts, details, answers),
-    approveAlone: true,
-    approveOthers: false,
-    approvers: facts.approvers,
+  },
+) {
+  const facts = await loadOpeningFacts(w.deps);
+  return runStoreOpening(w.deps, {
+    ...openingAnswersInput(
+      facts,
+      typed.details,
+      typed.answers,
+      openingConfirmationFromFacts(facts, typed.details, typed.answers),
+    ),
     ...overrides,
   });
 }
+const pressAlone = (w: World, overrides: Partial<StoreOpeningInput> = {}) => press(w, overrides);
+/** "Approve", as the page sends it from what it read. */
+async function pressApprove(w: World) {
+  return runStoreOpening(w.deps, openingApproveInput(await loadOpeningFacts(w.deps)));
+}
+/** Another Owner's work, as the server has it, for the waiting views. */
+function sentByAnother(
+  w: World,
+  parts: { template?: boolean; proposal?: boolean; answers?: boolean },
+) {
+  if (parts.template === true) {
+    w.state.template = {
+      templateReference: id(0x40),
+      versionReference: id(0x41),
+      revision: 1,
+      fields: {
+        locale,
+        layoutDefinitionReference: id(0x60),
+        complianceRuleReference: id(0x61),
+        activation: { mode: "Immediate" },
+        effectiveUntil: null,
+      },
+      author: other,
+    };
+    w.state.review = { state: "InReview", version: 2, submittedBy: other, approvedAlone: false };
+  }
+  if (parts.proposal === true)
+    w.state.proposal = { proposalReference: id(0x70), recordedByYou: false };
+  if (parts.answers === true) {
+    w.state.setup = {
+      setupDraftReference: id(0x30),
+      revision: 1,
+      baseConfigurationReference: firstConfiguration.configurationReference,
+      tenantReference: scope.tenantReference,
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      content: parseStoreSetupContent({
+        ...normalizeStoreSetupContentV2(createUnconfiguredStoreSetupContent()),
+        source: { state: "Configured", value: "StoreOverride" },
+        weeklySchedule: { state: "Configured", value: openingWeeklySchedule(answers) },
+        enabledServiceModes: { state: "Configured", value: ["DineIn"] },
+        addressReference: { state: "Configured", value: id(0x31) },
+        contactReference: { state: "Configured", value: id(0x32) },
+        feeContexts: {
+          state: "Configured",
+          value: openingFeeContexts(
+            normalizeStoreSetupContentV2(createUnconfiguredStoreSetupContent()),
+            ["DineIn"],
+          ),
+        },
+      }),
+    };
+    w.state.profile = {
+      version: 1,
+      publishedAt: "2026-11-01T10:00:00.000Z",
+      defaultLocale: locale,
+      names: [{ locale, storeDisplayName: details.names[locale] ?? "" }],
+      address: {
+        addressLines: ["1 King Street West"],
+        locality: "Toronto",
+        regionCode: "ON",
+        postalCode: "M5H 1A1",
+        countryCode: "CA",
+      },
+      businessPhone: "+14165550100",
+    };
+  }
+}
+/** A Manager's hours change on the Store's first configuration, waiting: not from Store setup. */
+const managerHoursChange = (w: World) => {
+  w.state.latest = {
+    ...firstConfiguration,
+    configurationReference: id(0x77),
+    configurationVersion: 2,
+    lifecycle: "PendingApproval",
+    reasonCode: "STORE_HOURS_UPDATE",
+    authoredByReference: other,
+    approvedByReference: null,
+    createdAt: new Date().toISOString(),
+  };
+};
 const everyWrite = [
   "PublishProfile",
   "SaveAddress",
@@ -952,61 +1103,40 @@ describe("WP-2423 item 14: the press", () => {
     ]);
   });
   it("sends no approval or publication write while BOP support has a step to do", async () => {
-    for (const [options, missing] of [
-      [{ taxReference: null }, ["TaxRates"]],
-      [{ goLive: false }, ["GoLive"]],
-      [{ taxReference: null, goLive: false }, ["TaxRates", "GoLive"]],
-    ] as const) {
-      const w = world(options);
-      const facts = await loadOpeningFacts(w.deps);
-      const outcome = await runStoreOpening(w.deps, {
-        details,
-        answers,
-        confirmed: null,
-        approveAlone: false,
-        approveOthers: false,
-        approvers: facts.approvers,
-      });
-      expect(outcome).toEqual({ kind: "DetailsSaved", missing });
-      // What the Owner typed is kept, and only that: BOP support needs the province from it.
-      expect(w.writes).toEqual([
-        "PublishProfile",
-        "SaveAddress",
-        "SaveContact",
-        "SaveReceiptDetails",
-        "SetUpKitchen",
-        "SaveSetup",
-      ]);
-      expect(openingMissing(facts.live)).toEqual(missing);
-    }
+    const w = world({ taxReference: null });
+    const facts = await loadOpeningFacts(w.deps);
+    expect(openingMissing(facts.live, scope.actorReference)).toEqual(["TaxRates"]);
+    // Asked of a lone Owner too: no tick, no code and no setting for what could not be published.
+    const input = openingAnswersInput(facts, details, answers, null);
+    expect(input.approveAlone).toBe(false);
+    expect(input.turnOnSoleOperator).toBe(false);
+    const outcome = await runStoreOpening(w.deps, input);
+    expect(outcome).toEqual({ kind: "DetailsSaved", missing: ["TaxRates"] });
+    // What the Owner typed is kept, and only that: BOP support needs the province from it.
+    expect(w.writes).toEqual([
+      "PublishProfile",
+      "SaveAddress",
+      "SaveContact",
+      "SaveReceiptDetails",
+      "SetUpKitchen",
+      "SaveSetup",
+    ]);
   });
   it("refuses to start from hours nobody answered", async () => {
     const w = world();
     const facts = await loadOpeningFacts(w.deps);
     const unanswered = { ...answers, hours: emptyOpeningHours() };
-    const outcome = await runStoreOpening(w.deps, {
-      details,
-      answers: unanswered,
-      confirmed: null,
-      approveAlone: true,
-      approveOthers: false,
-      approvers: facts.approvers,
-    });
+    const outcome = await runStoreOpening(
+      w.deps,
+      openingAnswersInput(facts, details, unanswered, null),
+    );
     expect(outcome).toMatchObject({ kind: "Stopped", code: "HoursNotAnswered" });
     expect(w.writes).not.toContain("TurnOnSoleOperator");
     expect(w.state.setup?.content).toBeUndefined();
   });
   it("names the other approver and sends no self-approval", async () => {
     const w = world({ gate: "OtherApprovers", others: ["Mia"] });
-    const facts = await loadOpeningFacts(w.deps);
-    const outcome = await runStoreOpening(w.deps, {
-      details,
-      answers,
-      confirmed: null,
-      approveAlone: false,
-      approveOthers: false,
-      approvers: facts.approvers,
-    });
+    const outcome = await press(w);
     expect(outcome.kind).toBe("Waiting");
     const waits = (outcome as { waits: readonly OpeningWait[] }).waits;
     expect(waits.map((wait) => wait.what)).toEqual(["ReceiptTemplate", "AllergenList"]);
@@ -1017,24 +1147,23 @@ describe("WP-2423 item 14: the press", () => {
     expect(w.writes).not.toContain("ApproveRegistry");
     expect(w.writes).not.toContain("TurnOnSoleOperator");
     expect(w.state.templateApprovals).toEqual([]);
-    expect(openingWaitsFromFacts(await loadOpeningFacts(w.deps)).forOthers).toHaveLength(2);
+    const after = openingWaitsFromFacts(await loadOpeningFacts(w.deps));
+    expect(after.forOthers.map((wait) => wait.what)).toEqual(["ReceiptTemplate"]);
+    expect(after.listForOthers?.who).toEqual([{ displayName: "Mia" }]);
   });
   it("a lone Owner never waits for nobody: they are asked for the tick", async () => {
     const w = world();
-    const facts = await loadOpeningFacts(w.deps);
-    const outcome = await runStoreOpening(w.deps, {
-      details,
-      answers,
-      confirmed: null,
-      approveAlone: false,
-      approveOthers: false,
-      approvers: facts.approvers,
-    });
+    const outcome = await press(w, { approveAlone: false, turnOnSoleOperator: false });
     expect(outcome).toEqual({ kind: "ConfirmAgain" });
     expect(w.writes).not.toContain("ApproveTemplate");
-    // Someone who can't turn sole operator on is told it takes the brand owner.
+    // Someone who can't turn sole operator on is told it takes the brand owner, if a page they
+    // read before the setting was theirs to change still asks for it.
     const notOwner = world({ noBrandOwner: true });
-    expect(await pressAlone(notOwner)).toMatchObject({ kind: "Stopped", code: "NotBrandOwner" });
+    expect(openingApprovalPlan(await loadOpeningFacts(notOwner.deps)).needsBrandOwner).toBe(true);
+    expect(await press(notOwner, { approveAlone: true, turnOnSoleOperator: true })).toMatchObject({
+      kind: "Stopped",
+      code: "NotBrandOwner",
+    });
     expect(notOwner.writes).not.toContain("TurnOnSoleOperator");
     expect(notOwner.writes).not.toContain("ApproveTemplate");
   });
@@ -1067,24 +1196,15 @@ describe("WP-2423 item 14: the press", () => {
   });
   it("a corrected address writes a new revision the draft follows, and only then", async () => {
     const w = world();
-    const facts = await loadOpeningFacts(w.deps);
-    const input = {
-      details,
-      answers,
-      confirmed: null,
-      approveAlone: false,
-      approveOthers: false,
-      approvers: facts.approvers,
-    };
     w.state.taxReference = null;
-    await runStoreOpening(w.deps, input);
+    await press(w);
     const first = w.state.address?.reference;
     expect(w.state.address?.revision).toBe(1);
-    await runStoreOpening(w.deps, input);
+    await press(w);
     expect(w.state.address?.reference).toBe(first);
     expect(w.writes.filter((name) => name === "SaveAddress")).toHaveLength(1);
     const corrected = { ...details, regionCode: "BC", locality: "Vancouver" };
-    await runStoreOpening(w.deps, { ...input, details: corrected });
+    await press(w, {}, { details: corrected, answers });
     expect(w.state.address?.revision).toBe(2);
     expect((w.state.address?.content as { regionCode: string }).regionCode).toBe("BC");
     expect(
@@ -1093,59 +1213,16 @@ describe("WP-2423 item 14: the press", () => {
   });
   it("a profile with no phone stops at the contact, named", async () => {
     const w = world({ profilePublished: true });
-    const facts = await loadOpeningFacts(w.deps);
-    const outcome = await runStoreOpening(w.deps, {
-      details: { ...details, phone: "" },
-      answers,
-      confirmed: null,
-      approveAlone: false,
-      approveOthers: false,
-      approvers: facts.approvers,
-    });
+    const outcome = await press(w, {}, { details: { ...details, phone: "" }, answers });
     expect(outcome).toMatchObject({ kind: "Stopped", step: "StoreDetails", code: "NeedsPhone" });
     expect(w.writes).not.toContain("SaveContact");
   });
   it("whoever is waited for is told, and their press approves it and carries on", async () => {
-    const w = world();
-    // Another Owner wrote and sent the receipt, and recorded the allergen list.
-    w.state.template = {
-      templateReference: id(0x40),
-      versionReference: id(0x41),
-      revision: 1,
-      fields: {
-        locale,
-        layoutDefinitionReference: id(0x60),
-        complianceRuleReference: id(0x61),
-        activation: { mode: "Immediate" },
-        effectiveUntil: null,
-      },
-      author: other,
-    };
-    w.state.review = { state: "InReview", version: 2, submittedBy: other, approvedAlone: false };
-    w.state.proposal = { proposalReference: id(0x70), recordedByYou: false };
-    w.state.setup = {
-      setupDraftReference: id(0x30),
-      revision: 1,
-      baseConfigurationReference: firstConfiguration.configurationReference,
-      tenantReference: scope.tenantReference,
-      brandReference: scope.brandReference,
-      storeReference: scope.storeReference,
-      content: parseStoreSetupContent({
-        ...normalizeStoreSetupContentV2(createUnconfiguredStoreSetupContent()),
-        source: { state: "Configured", value: "StoreOverride" },
-        weeklySchedule: { state: "Configured", value: openingWeeklySchedule(answers) },
-        enabledServiceModes: { state: "Configured", value: ["DineIn"] },
-        addressReference: { state: "Configured", value: id(0x31) },
-        contactReference: { state: "Configured", value: id(0x32) },
-        feeContexts: {
-          state: "Configured",
-          value: openingFeeContexts(
-            normalizeStoreSetupContentV2(createUnconfiguredStoreSetupContent()),
-            ["DineIn"],
-          ),
-        },
-      }),
-    };
+    const w = world({
+      approvers: { receiptTemplate: ["Mia"], storeSetup: ["Mia"], allergenList: ["Mia"] },
+    });
+    // Another Owner answered the page, wrote and sent the receipt, and recorded the allergen list.
+    sentByAnother(w, { template: true, proposal: true, answers: true });
     const facts = await loadOpeningFacts(w.deps);
     expect(openingWaitsFromFacts(facts).forYou).toEqual(["ReceiptTemplate", "AllergenList"]);
     // Pressing the ordinary button approves nothing of someone else's.
@@ -1154,20 +1231,14 @@ describe("WP-2423 item 14: the press", () => {
       answers: null,
       confirmed: null,
       approveAlone: false,
-      approveOthers: false,
-      approvers: await approvers(w),
+      turnOnSoleOperator: false,
+      approve: null,
+      approvers: facts.approvers,
     });
     expect(held.kind).toBe("Waiting");
     expect(w.writes).toEqual(["SavePayment"]);
     // "Approve": independent approvals, never marked as given alone, then the rest of the run.
-    const outcome = await runStoreOpening(w.deps, {
-      details: null,
-      answers: null,
-      confirmed: null,
-      approveAlone: false,
-      approveOthers: true,
-      approvers: { receiptTemplate: [], storeSetup: [{ displayName: "Mia" }], allergenList: [] },
-    });
+    const outcome = await pressApprove(w);
     expect(outcome.kind).toBe("Waiting");
     expect((outcome as { waits: readonly OpeningWait[] }).waits).toEqual([
       { what: "StoreSetup", who: [{ displayName: "Mia" }] },
@@ -1193,7 +1264,8 @@ describe("WP-2423 item 14: the press", () => {
       answers,
       confirmed: openingConfirmationFromFacts(facts, details, answers),
       approveAlone: true,
-      approveOthers: false,
+      turnOnSoleOperator: true,
+      approve: null,
       approvers: {
         receiptTemplate: [],
         storeSetup: [],
@@ -1205,6 +1277,436 @@ describe("WP-2423 item 14: the press", () => {
       waits: [{ what: "AllergenList", who: [{ displayName: "Noah" }] }],
     });
     expect(w.writes).not.toContain("RecordRegistry");
+  });
+});
+
+describe("WP-2423 item 14: who decides what, and what a press does about it", () => {
+  const plan = async (w: World) => openingApprovalPlan(await loadOpeningFacts(w.deps));
+  const spouse = { receiptTemplate: ["Mia"], storeSetup: ["Mia"], allergenList: [] };
+  it("a lone Owner approves all three alone, and the press says it turns the setting on", async () => {
+    expect(await plan(world())).toMatchObject({
+      alone: ["ReceiptTemplate", "AllergenList", "StoreSetup"],
+      others: [],
+      approveAlone: true,
+      turnsOnSoleOperator: true,
+      publishes: true,
+      allergenListLater: false,
+    });
+    // Already on: nothing about the setting to say, and nothing to change.
+    expect(await plan(world({ gate: "Effective" }))).toMatchObject({
+      approveAlone: true,
+      turnsOnSoleOperator: false,
+    });
+  });
+  it("a second Owner on the Store role: no tick, no code, and the Brand's setting is left alone", async () => {
+    // What the real read answers: Brand-level holders exclude Store roles, so the list names nobody.
+    const w = world({ approvers: spouse });
+    const shape = await plan(w);
+    expect(shape).toMatchObject({
+      alone: [],
+      approveAlone: false,
+      turnsOnSoleOperator: false,
+      publishes: false,
+      allergenListLater: true,
+    });
+    expect(shape.others.map((wait) => wait.what)).toEqual(["ReceiptTemplate", "StoreSetup"]);
+    const outcome = await press(w);
+    expect(outcome.kind).toBe("Waiting");
+    expect((outcome as { waits: readonly OpeningWait[] }).waits).toEqual([
+      { what: "ReceiptTemplate", who: [{ displayName: "Mia" }] },
+    ]);
+    // Sent for Mia; the setting untouched; the list neither recorded nor marked as approved alone.
+    expect(w.state.soleOperator).toBe("Off");
+    expect(w.writes).not.toContain("TurnOnSoleOperator");
+    expect(w.writes).not.toContain("RecordRegistry");
+    expect(w.writes).not.toContain("ApproveRegistry");
+    expect(w.state.templateApprovals).toEqual([]);
+    // Pressing again leaves it the same, with nothing written twice.
+    const before = w.writes.length;
+    expect((await press(w)).kind).toBe("Waiting");
+    expect(w.writes).toHaveLength(before);
+  });
+  it("the same pair at a Brand that has a list: nothing is asked and nothing is said about it", async () => {
+    const w = world({ approvers: spouse });
+    w.state.registry = { entries: [] };
+    expect(await plan(w)).toMatchObject({
+      alone: [],
+      approveAlone: false,
+      turnsOnSoleOperator: false,
+      allergenListLater: false,
+    });
+    await press(w);
+    expect(w.writes).not.toContain("TurnOnSoleOperator");
+  });
+  it("the same pair with the setting already on: only the list is theirs alone, with the setting unchanged", async () => {
+    const w = world({ approvers: spouse });
+    w.state.soleOperator = "On";
+    expect(await plan(w)).toMatchObject({
+      alone: ["AllergenList"],
+      approveAlone: true,
+      turnsOnSoleOperator: false,
+      publishes: false,
+    });
+    const outcome = await press(w);
+    expect(outcome.kind).toBe("Waiting");
+    expect(w.state.allergenApprovals).toEqual(["SoleOperator"]);
+    expect(w.state.templateApprovals).toEqual([]);
+    expect(w.writes).not.toContain("TurnOnSoleOperator");
+  });
+  it("an Owner and a Menu Manager: the Store can't publish without it, so the press asks in full", async () => {
+    const w = world({ approvers: { receiptTemplate: [], storeSetup: [], allergenList: ["Noah"] } });
+    const shape = await plan(w);
+    expect(shape).toMatchObject({
+      alone: ["ReceiptTemplate", "StoreSetup"],
+      approveAlone: true,
+      turnsOnSoleOperator: true,
+      publishes: true,
+    });
+    expect(shape.others).toEqual([{ what: "AllergenList", who: [{ displayName: "Noah" }] }]);
+    const outcome = await press(w);
+    expect(outcome).toEqual({
+      kind: "Published",
+      waits: [{ what: "AllergenList", who: [{ displayName: "Noah" }] }],
+    });
+    expect(w.state.soleOperator).toBe("On");
+    expect(w.state.allergenApprovals).toEqual([]);
+    expect(w.state.proposal?.recordedByYou).toBe(true);
+    const after = openingWaitsFromFacts(await loadOpeningFacts(w.deps));
+    expect(after.forOthers).toEqual([]);
+  });
+  it("a list the Brand already has is never counted as this Owner's alone", async () => {
+    const lone = world();
+    lone.state.registry = { entries: [] };
+    expect((await plan(lone)).alone).toEqual(["ReceiptTemplate", "StoreSetup"]);
+  });
+  it("what is left waiting on the list never stands in the way of the store", async () => {
+    // A press that stopped at the store setup, with the list recorded and waiting for Noah.
+    const w = world({
+      approvers: { receiptTemplate: [], storeSetup: [], allergenList: ["Noah"] },
+      failOnce: new Set(["SubmitConfiguration"]),
+    });
+    expect(await press(w)).toMatchObject({ kind: "Stopped", step: "StoreSetup" });
+    const waits = openingWaitsFromFacts(await loadOpeningFacts(w.deps));
+    expect(waits.forOthers).toEqual([]);
+    expect(waits.listForOthers?.who).toEqual([{ displayName: "Noah" }]);
+    expect((await press(w)).kind).toBe("Published");
+  });
+});
+
+describe("WP-2423 item 14: Approve acts only on what it names", () => {
+  const twoOwners = { receiptTemplate: ["Mia"], storeSetup: ["Mia"], allergenList: ["Mia"] };
+  it("approves first, whatever BOP support still has to do, and writes nothing of the presser's", async () => {
+    const w = world({ taxReference: null, approvers: twoOwners });
+    sentByAnother(w, { template: true, proposal: true, answers: true });
+    expect(await pressApprove(w)).toEqual({ kind: "DetailsSaved", missing: ["TaxRates"] });
+    expect(w.writes).toEqual(["ApproveTemplate", "PublishTemplate", "ApproveRegistry"]);
+    expect(w.state.templateApprovals).toEqual([undefined]);
+    expect(w.state.allergenApprovals).toEqual([undefined]);
+  });
+  it("a Store whose next approval is this person's alone goes back to the page, for the tick", async () => {
+    const w = world({ approvers: { receiptTemplate: [], storeSetup: [], allergenList: [] } });
+    sentByAnother(w, { template: true, answers: true });
+    const input = openingApproveInput(await loadOpeningFacts(w.deps));
+    expect(input.approve).toMatchObject({ gates: ["ReceiptTemplate"], carryOn: false });
+    expect(await runStoreOpening(w.deps, input)).toEqual({ kind: "Waiting", waits: [] });
+    expect(w.writes).toEqual(["ApproveTemplate", "PublishTemplate"]);
+  });
+  it("what was changed after it was read is shown first, never approved unseen", async () => {
+    const w = world({ approvers: twoOwners });
+    sentByAnother(w, { answers: true });
+    w.state.latest = {
+      ...firstConfiguration,
+      configurationReference: id(0x78),
+      configurationVersion: 2,
+      lifecycle: "PendingApproval",
+      reasonCode: "STORE_SETUP_MATERIALIZATION",
+      authoredByReference: other,
+      approvedByReference: null,
+      createdAt: new Date().toISOString(),
+      setupBasis: {
+        setupDraftReference: id(0x30),
+        sourceRevision: 1,
+        feeContexts: [{ chargeType: "ServiceCharge", state: "Disabled" }],
+      },
+    };
+    const facts = await loadOpeningFacts(w.deps);
+    expect(openingWaitsFromFacts(facts).forYou).toEqual(["StoreSetup"]);
+    const input = openingApproveInput(facts);
+    expect(input.approve?.configuration).toBe(id(0x78));
+    w.state.latest = { ...w.state.latest, configurationReference: id(0x79) };
+    expect(await runStoreOpening(w.deps, input)).toEqual({ kind: "ConfirmAgain" });
+    expect(w.writes).toEqual([]);
+    // Read again, it is approved and published: the last press of a two-Owner opening.
+    expect(await pressApprove(w)).toEqual({ kind: "Published", waits: [] });
+    expect(w.writes).toEqual(["ApproveConfiguration", "PublishConfiguration"]);
+    expect(w.state.configurationApprovals).toEqual([undefined]);
+  });
+  it("nothing answered yet: nothing is approved here, and the form stays, whoever recorded what", async () => {
+    for (const taxReference of [id(25), null]) {
+      const w = world({ taxReference });
+      sentByAnother(w, { proposal: true });
+      const facts = await loadOpeningFacts(w.deps);
+      const waits = openingWaitsFromFacts(facts);
+      expect(waits.forYou).toEqual([]);
+      expect(waits.forOthers).toEqual([]);
+      expect(waits.listForYou).toBe(true);
+      // The list is decided on Allergens; nothing about it is pressed or marked from the form.
+      const outcome = await press(w);
+      expect(w.writes).not.toContain("ApproveRegistry");
+      expect(w.writes).not.toContain("RecordRegistry");
+      if (taxReference === null) {
+        expect(outcome).toEqual({ kind: "DetailsSaved", missing: ["TaxRates"] });
+        expect(w.writes).not.toContain("SavePayment");
+      } else
+        expect(outcome).toEqual({
+          kind: "Published",
+          waits: [{ what: "AllergenList", who: [] }],
+        });
+    }
+    // A receipt someone sent before anyone answered: answer first, then it is approved here.
+    const w = world({ approvers: twoOwners });
+    sentByAnother(w, { template: true });
+    const before = await loadOpeningFacts(w.deps);
+    expect(openingSentSummary(before)).toBeNull();
+    expect(openingWaitsFromFacts(before)).toMatchObject({
+      forYou: [],
+      beforeAnswers: ["ReceiptTemplate"],
+    });
+    expect((await press(w)).kind).toBe("Waiting");
+    expect(w.writes).not.toContain("ApproveTemplate");
+    const after = await loadOpeningFacts(w.deps);
+    expect(openingSentSummary(after)).not.toBeNull();
+    expect(openingWaitsFromFacts(after).forYou).toEqual(["ReceiptTemplate"]);
+  });
+  it("a Manager's hours change is named, not approved here, and stops the press before anything is sent", async () => {
+    for (const taxReference of [id(25), null]) {
+      const w = world({ taxReference });
+      managerHoursChange(w);
+      const facts = await loadOpeningFacts(w.deps);
+      const waits = openingWaitsFromFacts(facts);
+      expect(waits.forYou).toEqual([]);
+      expect(waits.forOthers).toEqual([]);
+      expect(openingMissing(facts.live, scope.actorReference)).toEqual(
+        taxReference === null ? ["TaxRates", "OtherChange"] : ["OtherChange"],
+      );
+      const input = openingAnswersInput(facts, details, answers, null);
+      expect(input.approveAlone).toBe(false);
+      expect(await runStoreOpening(w.deps, input)).toEqual({
+        kind: "DetailsSaved",
+        missing: taxReference === null ? ["TaxRates", "OtherChange"] : ["OtherChange"],
+      });
+      // What they typed is kept; no payment rule, receipt or approval in their name.
+      expect(w.writes).toEqual([
+        "PublishProfile",
+        "SaveAddress",
+        "SaveContact",
+        "SaveReceiptDetails",
+        "SetUpKitchen",
+        "SaveSetup",
+      ]);
+      expect(w.writes).not.toContain("TurnOnSoleOperator");
+    }
+  });
+  it("the approver sends it back: declined, and the answers open again", async () => {
+    const w = world({ approvers: twoOwners });
+    sentByAnother(w, { answers: true });
+    w.state.latest = {
+      ...firstConfiguration,
+      configurationReference: id(0x78),
+      configurationVersion: 2,
+      lifecycle: "PendingApproval",
+      reasonCode: "STORE_SETUP_MATERIALIZATION",
+      authoredByReference: other,
+      approvedByReference: null,
+      createdAt: new Date().toISOString(),
+      setupBasis: {
+        setupDraftReference: id(0x30),
+        sourceRevision: 1,
+        feeContexts: [{ chargeType: "ServiceCharge", state: "Disabled" }],
+      },
+    };
+    await sendOpeningBack(w.deps);
+    expect(w.writes).toEqual(["DeclineConfiguration"]);
+    expect(w.state.declines).toEqual([
+      expect.objectContaining({ configurationReference: id(0x78), declineReason: "NotRight" }),
+    ]);
+    const waits = openingWaitsFromFacts(await loadOpeningFacts(w.deps));
+    expect(waits.forYou).toEqual([]);
+    expect(waits.forOthers).toEqual([]);
+  });
+  it("the page says sent back to whoever made it", async () => {
+    const w = world({ approvers: twoOwners });
+    sentByAnother(w, { answers: true });
+    w.state.latest = {
+      ...firstConfiguration,
+      configurationReference: id(0x78),
+      configurationVersion: 2,
+      lifecycle: "PendingApproval",
+      authoredByReference: scope.actorReference,
+      approvedByReference: null,
+      createdAt: new Date().toISOString(),
+      setupBasis: {
+        setupDraftReference: id(0x30),
+        sourceRevision: 1,
+        feeContexts: [{ chargeType: "ServiceCharge", state: "Disabled" }],
+      },
+    };
+    w.state.latestWithdrawal = {
+      kind: "Declined",
+      withdrawnAt: new Date(Date.now() - 1000).toISOString(),
+      byYou: false,
+    };
+    const waits = openingWaitsFromFacts(await loadOpeningFacts(w.deps));
+    expect(waits).toMatchObject({ sentBack: true, forOthers: [], forYou: [] });
+  });
+});
+
+describe("WP-2423 item 14: a page left open", () => {
+  it("a press after the Store is published writes nothing, and says so", async () => {
+    const w = world();
+    expect((await pressAlone(w)).kind).toBe("Published");
+    const written = [...w.writes];
+    const live = w.state.current;
+    const profile = w.state.profile;
+    const later = {
+      ...answers,
+      hours: { ...answers.hours, everyDay: [{ start: "09:00", end: "22:00" }] },
+      offerTips: false,
+    };
+    const stale = await runStoreOpening(w.deps, {
+      details: { ...details, phone: "(416) 555-0199", businessName: "Another Name Inc." },
+      answers: later,
+      confirmed: null,
+      approveAlone: true,
+      turnOnSoleOperator: true,
+      approve: null,
+      approvers: { receiptTemplate: [], storeSetup: [], allergenList: [] },
+    });
+    expect(stale).toEqual({ kind: "AlreadyPublished" });
+    expect(w.writes).toEqual(written);
+    expect(w.state.current).toBe(live);
+    expect(w.state.profile).toBe(profile);
+    expect(w.state.tips.enabled).toBe(true);
+  });
+  it("an original still pending when it is already published is settled, not left behind", async () => {
+    const w = world();
+    await pressAlone(w);
+    const journal = w.journals.configuration as ReturnType<typeof memoryJournal>;
+    await journal.reserve({ kind: "configuration", action: "Publish", scope });
+    await expect(pressAlone(w)).resolves.toEqual({ kind: "AlreadyPublished" });
+    expect(journal.pending).toBeNull();
+  });
+  it("what was typed is not what stands once it is published, so the read knows too", async () => {
+    const w = world();
+    await pressAlone(w);
+    const facts = await loadOpeningFacts(w.deps);
+    expect(facts.live.current?.setupBasis).toBeDefined();
+  });
+  it("a version past its 14 days is not waited on: the owner's is made again and asked again", async () => {
+    const w = world({ failOnce: new Set(["ApproveConfiguration"]) });
+    expect((await pressAlone(w)).kind).toBe("Stopped");
+    if (w.state.latest === null) throw new Error("expected a version");
+    const first = w.state.latest.configurationReference;
+    w.state.latest = {
+      ...w.state.latest,
+      createdAt: new Date(Date.now() - 15 * 86400000).toISOString(),
+    };
+    const facts = await loadOpeningFacts(w.deps);
+    expect(openingVersionRanOut(w.state.latest as never, facts.live.observedAt)).toBe(true);
+    expect(openingWaitsFromFacts(facts)).toMatchObject({ ranOut: true, forOthers: [], forYou: [] });
+    // Made again from the saved setup, compared and approved again; never the old one.
+    expect(await pressAlone(w)).toEqual({ kind: "Published", waits: [] });
+    expect(w.state.current.configurationReference).not.toBe(first);
+    expect(w.state.configurationApprovals).toEqual(["SoleOperator"]);
+    expect(w.writes.filter((name) => name === "MaterializeConfiguration")).toHaveLength(2);
+    expect(w.writes.filter((name) => name === "DeclineConfiguration")).toHaveLength(0);
+  });
+  it("someone else's past its 14 days is declined first, and the second person still approves", async () => {
+    const w = world({
+      approvers: { receiptTemplate: ["Mia"], storeSetup: ["Mia"], allergenList: ["Mia"] },
+    });
+    w.state.registry = { entries: [] };
+    expect((await press(w)).kind).toBe("Waiting");
+    // Mia approved the receipt; her version waited for this Owner, past its 14 days.
+    w.state.review = {
+      ...(w.state.review as NonNullable<typeof w.state.review>),
+      state: "Published",
+    };
+    w.state.latest = {
+      ...firstConfiguration,
+      configurationReference: id(0x78),
+      configurationVersion: 2,
+      lifecycle: "PendingApproval",
+      reasonCode: "STORE_SETUP_MATERIALIZATION",
+      authoredByReference: other,
+      approvedByReference: null,
+      createdAt: new Date(Date.now() - 15 * 86400000).toISOString(),
+      setupBasis: {
+        setupDraftReference: id(0x30),
+        sourceRevision: 99,
+        feeContexts: [{ chargeType: "ServiceCharge", state: "Disabled" }],
+      },
+    };
+    const facts = await loadOpeningFacts(w.deps);
+    expect(openingWaitsFromFacts(facts)).toMatchObject({ ranOut: true, forYou: [] });
+    const outcome = await press(w);
+    expect(w.writes).toContain("DeclineConfiguration");
+    expect(w.state.declines).toEqual([
+      expect.not.objectContaining({ declineReason: expect.anything() }),
+    ]);
+    expect(outcome.kind).toBe("Waiting");
+    expect((outcome as { waits: readonly OpeningWait[] }).waits).toEqual([
+      { what: "StoreSetup", who: [{ displayName: "Mia" }] },
+    ]);
+    expect(w.writes).not.toContain("ApproveConfiguration");
+  });
+});
+
+describe("WP-2423 item 14: what is approved is said in full", () => {
+  it("the summary of what was sent reads the version waiting, when one is", async () => {
+    const w = world({
+      approvers: { receiptTemplate: ["Mia"], storeSetup: ["Mia"], allergenList: ["Mia"] },
+    });
+    sentByAnother(w, { answers: true });
+    const answered = openingSentSummary(await loadOpeningFacts(w.deps));
+    expect(answered?.weeklySchedule).toEqual(openingWeeklySchedule(answers));
+    expect(answered?.name).toBe("Maple Noodle House");
+    // The version waiting is what is being approved, whatever the draft says since.
+    const other24 = openingWeeklySchedule({
+      ...answers,
+      hours: { ...answers.hours, everyDay: [{ start: "09:00", end: "22:00" }] },
+    });
+    w.state.latest = {
+      ...firstConfiguration,
+      configurationReference: id(0x78),
+      configurationVersion: 2,
+      lifecycle: "PendingApproval",
+      enabledServiceModes: ["Pickup"],
+      weeklySchedule: other24,
+      authoredByReference: other,
+      approvedByReference: null,
+      createdAt: new Date().toISOString(),
+      setupBasis: {
+        setupDraftReference: id(0x30),
+        sourceRevision: 1,
+        feeContexts: [{ chargeType: "ServiceCharge", state: "Disabled" }],
+      },
+    };
+    const sent = openingSentSummary(await loadOpeningFacts(w.deps));
+    expect(sent?.weeklySchedule).toEqual(other24);
+    expect(sent?.serviceModes).toEqual(["Pickup"]);
+  });
+  it("a Store whose configuration can't be read at all fails the read, and says so", async () => {
+    const w = world();
+    (w.deps.configuration as unknown as { load: () => Promise<unknown> }).load = async () => ({
+      profile: "StoreConfigurationOrdinaryWorkspaceV1",
+      scope,
+      latest: null,
+      current: null,
+      original: null,
+      ...window5s(),
+    });
+    await expect(loadOpeningFacts(w.deps)).rejects.toMatchObject({ code: "Unavailable" });
   });
 });
 
