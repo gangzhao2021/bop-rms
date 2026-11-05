@@ -551,10 +551,23 @@ it("with the switch off or never set the scan and the join refuse as today, and 
       assert.equal((await offer()).kind, "MayStart");
       await setSwitch(transactions, false);
       assert.equal((await offer()).kind, "No");
+      // With the switch off nothing takes the row guests and round commits share: a read holding it
+      // FOR SHARE doesn't slow this answer, and it isn't a lock timeout.
+      const holder = new Client(context.clientConfig);
+      await holder.connect();
+      await holder.query("BEGIN");
+      await holder.query(
+        "SELECT table_id FROM rms_dining.dining_table WHERE table_id=$1 FOR SHARE",
+        [id(20)],
+      );
+      const started = Date.now();
       assert.deepEqual(await tap(join, identity.scan(81, 20)), {
         status: "Refused",
         reason: "NotOpen",
       });
+      assert.ok(Date.now() - started < 8000);
+      await holder.query("COMMIT");
+      await holder.end();
       assert.equal(
         await count(admin, "SELECT count(*)::int AS n FROM rms_dining.dining_session"),
         0,
@@ -996,27 +1009,30 @@ async function seedPaidGuestTable(admin, transactions, input) {
     preparationStep: id(n + 24),
     workItems: [id(n + 30), id(n + 31)],
   };
-  await seedJourneyPayment(admin, {
-    scope: journeyScope,
-    providerAccountReference: provider,
-    round: R1,
-    refs,
-    outcome: "Succeeded",
-    requestedAt: time(-minutes(129)),
-    occurredAt: time(-minutes(128)),
-    totalMinor: roundTotal,
-  });
-  await seedJourneyAcceptance(admin, {
-    scope: journeyScope,
-    round: R1,
-    items: items1,
-    refs,
-    staff: id(8),
-    version: 1,
-    previousRevision: r1.submissionReference,
-    acceptedAt: time(-minutes(127)),
-    kitchenAt: time(-minutes(126)),
-  });
+  // "Unpaid": ordered, never paid. "Paying": the guest opened the payment and has no result yet.
+  if (input.stage !== "Unpaid")
+    await seedJourneyPayment(admin, {
+      scope: journeyScope,
+      providerAccountReference: provider,
+      round: R1,
+      refs,
+      outcome: input.stage === "Paying" ? "Open" : "Succeeded",
+      requestedAt: time(-minutes(129)),
+      occurredAt: time(-minutes(128)),
+      totalMinor: roundTotal,
+    });
+  if (input.stage === undefined)
+    await seedJourneyAcceptance(admin, {
+      scope: journeyScope,
+      round: R1,
+      items: items1,
+      refs,
+      staff: id(8),
+      version: 1,
+      previousRevision: r1.submissionReference,
+      acceptedAt: time(-minutes(127)),
+      kitchenAt: time(-minutes(126)),
+    });
   return {
     ownerScope,
     session,
@@ -1653,3 +1669,55 @@ it("the question and the close are refused while a round is unfinished; a party 
     }
   });
 }, 300_000);
+
+it.each(["Unpaid", "Paying"])(
+  "a round %s holds the table: nobody is asked, nothing closes, nothing is written",
+  async (stage) => {
+    await withIsolatedDatabase({ caseId: "wp2423_gs_" + stage.toLowerCase() }, async (context) => {
+      const { admin, transactions, ownerRunner } = await setup(context);
+      try {
+        const base = Date.parse(
+          (
+            await admin.query("SELECT date_trunc('milliseconds',clock_timestamp()) AS at")
+          ).rows[0].at.toISOString(),
+        );
+        const { ownerScope, session, orderReference } = await seedPaidGuestTable(
+          admin,
+          transactions,
+          { base, prefix: "01a00001", refsAt: 0x1000, ownerRunner, stage },
+        );
+        const system = closer(transactions, ownerScope, () => new Date().toISOString());
+        const written = async () =>
+          (
+            await admin.query(
+              "SELECT (SELECT count(*)::int FROM rms_ordering.order_closure_version WHERE order_id=$1) AS closures,(SELECT count(*)::int FROM rms_payment.order_settled_finality WHERE order_id=$1) AS finalities,(SELECT count(*)::int FROM rms_dining.dining_item_service_record WHERE order_id=$1) AS served",
+              [orderReference],
+            )
+          ).rows[0];
+        const nothing = { closures: 0, finalities: 0, served: 0 };
+        assert.equal(await system.asksNewParty(session.tableReference), false);
+        assert.deepEqual(await system.closeQuiet(session.diningSessionReference), {
+          status: "Held",
+          hold: "Unfinished",
+        });
+        assert.deepEqual(await system.closeForNewParty(session.tableReference), {
+          status: "Held",
+          hold: "Unfinished",
+        });
+        assert.equal(await system.runOnce({ limit: 10 }), 0);
+        assert.deepEqual(await written(), nothing);
+        assert.equal(
+          (
+            await admin.query("SELECT phase FROM rms_dining.dining_session WHERE session_id=$1", [
+              session.diningSessionReference,
+            ])
+          ).rows[0].phase,
+          "Active",
+        );
+      } finally {
+        await admin.end();
+      }
+    });
+  },
+  300_000,
+);

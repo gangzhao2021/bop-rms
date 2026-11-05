@@ -66,16 +66,12 @@ vi.mock("@rms/dining", async (original) => ({
   // WP-2423 item 8 ⑨: no party was merged into these tables.
   listDiningSessionMergesInto: async () => new Map(),
   // DEC-DINING-GUEST-TABLE-START: the tests below add a guest-started table where they need one.
-  listDiningGuestStartedSessions: async () => guestStart.started,
-  loadDiningGuestTableActivity: async () => guestStart.activity,
-  loadDiningServiceSetting: async () => ({
-    version: guestStart.on ? 2 : 0,
-    staffCall: false,
-    chaseDish: false,
-    askPartySize: false,
+  loadDiningGuestTableStartPage: async () => ({
     guestTableStart: guestStart.on,
-    changedAt: null,
+    version: guestStart.on ? 2 : 0,
+    started: guestStart.started,
   }),
+  loadDiningGuestTableActivity: async () => guestStart.activity,
   createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
   loadDiningSessionsPhones: mock.phones,
   // DEC-DINE-IN-PAY-LATER: the Store opens tables pay first; no open table was opened otherwise.

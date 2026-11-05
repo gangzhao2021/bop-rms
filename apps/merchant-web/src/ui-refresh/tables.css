@@ -22,6 +22,15 @@
   margin-right: var(--bop-space-2);
   color: var(--bop-color-text-muted);
 }
+@media (max-width: 640px) {
+  /* On its own line here, so no separator starts it. */
+  .dining-floor .dining-floor-summary > .dining-floor-guest-starts {
+    flex-basis: 100%;
+  }
+  .dining-floor .dining-floor-summary > .dining-floor-guest-starts::before {
+    content: none;
+  }
+}
 .workspace-page.dining-floor .dining-floor-guest-starts button {
   min-height: 0;
   padding: 0;

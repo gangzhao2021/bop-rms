@@ -158,6 +158,45 @@ export async function listDiningGuestStartedSessions(
 }
 
 /**
+ * For a page of tables polled every few seconds: whether guests can start tables here now, and which
+ * of these open tables a guest started. One statement, however many tables are open.
+ */
+export async function loadDiningGuestTableStartPage(
+  tx: DiningTableTransaction,
+  scope: Pick<DiningTableStoreScope, "brandReference" | "storeReference">,
+  sessionReferences: readonly string[],
+): Promise<{
+  readonly guestTableStart: boolean;
+  readonly version: number;
+  readonly started: ReadonlyMap<string, { readonly startedAt: string }>;
+}> {
+  const { brand, store } = scoped(scope);
+  const sessions = sessionReferences.map((value) => String(parseDiningReference(value)));
+  await contextOf(tx, brand, store);
+  const page = rows(
+    await tx.query(
+      `SELECT (SELECT jsonb_build_object('version',v.version,'on',v.guest_table_start) FROM rms_dining.dining_service_setting v WHERE v.brand_id=$1 AND v.store_id=$2 ORDER BY v.version DESC LIMIT 1) AS setting,
+ (SELECT coalesce(jsonb_agg(jsonb_build_object('session',g.session_id,'at',${instantSql("g.started_at")})),'[]'::jsonb) FROM rms_dining.dining_session_guest_start g WHERE g.brand_id=$1 AND g.store_id=$2 AND g.session_id=ANY($3::uuid[])) AS started`,
+      [brand, store, sessions],
+    ),
+  )[0];
+  const setting = page?.setting as { version?: unknown; on?: unknown } | null | undefined;
+  const listed = page?.started;
+  if (!Array.isArray(listed) || listed.length > sessions.length) return fail();
+  const started = new Map<string, { readonly startedAt: string }>();
+  for (const row of listed as readonly { session?: unknown; at?: unknown }[])
+    started.set(
+      String(parseDiningReference(row.session)),
+      Object.freeze({ startedAt: String(parseDiningInstant(row.at)) }),
+    );
+  return Object.freeze({
+    guestTableStart: setting?.on === true,
+    version: setting === null || setting === undefined ? 0 : Number(setting.version),
+    started,
+  });
+}
+
+/**
  * The next guest-started tables still open, oldest reference first after `after`, for the System's
  * closing cycle. A cursor walks past tables held by something else, so one stuck table never keeps
  * another from being reached.

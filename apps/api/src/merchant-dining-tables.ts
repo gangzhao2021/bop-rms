@@ -8,10 +8,9 @@ import {
   createPostgresDiningTableStore,
   decideGuestTableQuietClose,
   guestTableManyPhones,
-  listDiningGuestStartedSessions,
   listDiningSessionMergesInto,
   loadDiningGuestTableActivity,
-  loadDiningServiceSetting,
+  loadDiningGuestTableStartPage,
   parseDiningInstant,
   parseDiningReference,
 } from "@rms/dining";
@@ -406,12 +405,12 @@ export function createMerchantDiningTables(options: {
           );
           // DEC-DINING-GUEST-TABLE-START: which open tables a guest started, and the warning before
           // one frees itself. Sent only for those tables; one read for the page.
-          const guestStarted = await listDiningGuestStartedSessions(
+          const guestPage = await loadDiningGuestTableStartPage(
             tx as never,
             ownerScope,
             activeReferences,
           );
-          const guestServices = await loadDiningServiceSetting(tx as never, ownerScope);
+          const guestStarted = guestPage.started;
           const guestActivity = await loadDiningGuestTableActivity(tx as never, ownerScope, [
             ...guestStarted.keys(),
           ]);
@@ -492,10 +491,10 @@ export function createMerchantDiningTables(options: {
             canCancelUnpaidRounds,
             canWriteOff,
             // DEC-DINING-GUEST-TABLE-START: sent only while on, with the version to turn it off.
-            ...(guestServices.guestTableStart
+            ...(guestPage.guestTableStart
               ? {
                   guestTableStart: Object.freeze({
-                    version: guestServices.version,
+                    version: guestPage.version,
                     canTurnOff: canStopGuestStarts,
                   }),
                 }
@@ -611,7 +610,7 @@ export function createMerchantDiningTables(options: {
                       }
                     : {}),
                   // How long a table has waited for cleaning, where guests can then start it.
-                  ...(guestServices.guestTableStart &&
+                  ...(guestPage.guestTableStart &&
                   table.operationalState === "TemporarilyBlocked" &&
                   table.blockReasonCode === "CLEANING"
                     ? { blockedSince: table.observedAt }
