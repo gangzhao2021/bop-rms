@@ -799,6 +799,39 @@ describe("WP-2423 Q13 rate limiting per channel", () => {
     const later = planChannelDelivery(channel, [], T0 + 61 * MIN);
     expect(later.batch).toHaveLength(14);
   });
+  it("keeps the last two messages of an hour for the installation's own items, and a send takes everything waiting", () => {
+    const fromStore = (n) => ({ ...item(n), key: "payment.updates", store: "tea" });
+    let channel;
+    const sentAt = [];
+    for (let n = 0; n < 8; n++) {
+      const plan = planChannelDelivery(channel, [fromStore(n)], T0 + n * MIN);
+      channel = plan.channel;
+      if (plan.batch.length > 0) {
+        sentAt.push(n);
+        channel = recordChannelDelivery(channel, true, T0 + n * MIN);
+      }
+    }
+    // A Store's items stop at four, and wait.
+    expect(sentAt).toEqual([0, 1, 2, 3]);
+    expect(channel.pending.map((entry) => entry.id)).toEqual(["4", "5", "6", "7"]);
+    // The installation's own item goes out at once, with what waited.
+    const own = planChannelDelivery(channel, [item(8)], T0 + 8 * MIN);
+    expect(own.batch.map((entry) => entry.id)).toEqual(["4", "5", "6", "7", "8"]);
+    channel = recordChannelDelivery(own.channel, true, T0 + 8 * MIN);
+    // Another Store item still waits for a slot: one installation message is left this hour.
+    const waiting = planChannelDelivery(channel, [fromStore(9)], T0 + 9 * MIN);
+    expect(waiting.batch).toEqual([]);
+    const last = planChannelDelivery(waiting.channel, [item(10)], T0 + 10 * MIN);
+    expect(last.batch.map((entry) => entry.id)).toEqual(["9", "10"]);
+    channel = recordChannelDelivery(last.channel, true, T0 + 10 * MIN);
+    // The cap itself still holds for everyone.
+    expect(planChannelDelivery(channel, [item(11)], T0 + 11 * MIN).batch).toEqual([]);
+    // A Store sends again once under four remain from the last hour.
+    expect(planChannelDelivery(channel, [fromStore(12)], T0 + 61 * MIN).batch).toEqual([]);
+    expect(
+      planChannelDelivery(channel, [fromStore(12)], T0 + 63 * MIN).batch.map((entry) => entry.id),
+    ).toEqual(["12"]);
+  });
   it("keeps pending items after a failed delivery and records since when the channel fails", () => {
     const plan = planChannelDelivery(undefined, [item(0)], T0);
     const failed = recordChannelDelivery(plan.channel, false, T0);

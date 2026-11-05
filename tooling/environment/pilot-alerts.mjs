@@ -978,6 +978,8 @@ export const DEFAULT_POLICY = Object.freeze({
   clearAfterMs: 2 * MINUTE,
   remindAfterMs: Object.freeze({ critical: 3 * HOUR, warning: 24 * HOUR }),
   maxMessagesPerHour: 6,
+  // The rest of the hour's messages wait for an item of the installation's own.
+  maxStoreMessagesPerHour: 4,
   clearedVisibleMs: 24 * HOUR,
   pendingMaxAgeMs: 24 * HOUR,
 });
@@ -1109,7 +1111,10 @@ export function advanceAlertState(
 /**
  * Per-channel outbound queue with an hourly cap. All pending notifications for a channel are sent
  * as one message; when the cap is reached they wait (and are merged) until a slot frees up, so a
- * flapping host can never send more than `maxMessagesPerHour` messages per channel.
+ * flapping host can never send more than `maxMessagesPerHour` messages per channel. The Stores'
+ * own items stop at `maxStoreMessagesPerHour`: the last slots go only to an item of the
+ * installation's own, so no merchant's routine alerts can hold back the message that says the whole
+ * site is down. That message still takes everything waiting.
  */
 export function planChannelDelivery(channel, notifications, now, policy = DEFAULT_POLICY) {
   const next = globalThis.structuredClone(
@@ -1118,7 +1123,10 @@ export function planChannelDelivery(channel, notifications, now, policy = DEFAUL
   next.pending.push(...notifications);
   next.pending = next.pending.filter((item) => now - Date.parse(item.at) < policy.pendingMaxAgeMs);
   next.sentAt = next.sentAt.filter((at) => now - Date.parse(at) < HOUR);
-  const due = next.pending.length > 0 && next.sentAt.length < policy.maxMessagesPerHour;
+  const limit = next.pending.some((item) => item.store === undefined)
+    ? policy.maxMessagesPerHour
+    : policy.maxStoreMessagesPerHour;
+  const due = next.pending.length > 0 && next.sentAt.length < limit;
   return { channel: next, batch: due ? [...next.pending] : [] };
 }
 /** Every attempt counts toward the hourly cap: a provider that half-delivers (one SMS recipient of

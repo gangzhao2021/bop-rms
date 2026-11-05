@@ -565,19 +565,40 @@ describe("BOP hears one clear message", () => {
     // Sent once: nothing waits any more.
     expect(monitors.pending()).toEqual([]);
   });
-  it("the hourly cap holds with six Stores failing", async () => {
+  it("the hourly cap holds with six Stores failing, and they cannot hold back a site outage", async () => {
     const names = ["tea", "hotpot", "dessert", "demo-2", "merchant-2", "demo-3"];
     const facts = Object.fromEntries(names.map((name) => [name, fact({ dead: 1 })]));
     const { directory, monitors } = await monitorsFor(facts);
     const send = vi.fn(async () => undefined);
-    const root = rootCycle({ directory, monitors, send });
-    // Every Store flaps every 4 minutes, so each has something new to say all hour.
-    for (let minute = 0; minute < 60; minute += 1) {
-      for (const name of names) facts[name].dead = Math.floor(minute / 4) % 2 === 0 ? 1 : 0;
-      await root.run(minute);
-    }
+    let apiDown = false;
+    const root = rootCycle({
+      directory,
+      monitors,
+      send,
+      probe: async (target) => ({ ok: !(apiDown && target.url === "a") }),
+    });
+    const minutes = async (from, to) => {
+      for (let minute = from; minute <= to; minute += 1) {
+        // Every Store flaps every 4 minutes, so each has something new to say all hour.
+        for (const name of names) facts[name].dead = Math.floor(minute / 4) % 2 === 0 ? 1 : 0;
+        apiDown = minute >= 30;
+        await root.run(minute);
+      }
+    };
+    // The Stores' routine alerts have the first four messages of the hour and no more.
+    await minutes(0, 31);
+    expect(send).toHaveBeenCalledTimes(4);
+    // The entry has failed for two minutes: the message saying so leaves in that very cycle, and
+    // takes along what the Stores were waiting to say.
+    await minutes(32, 32);
+    expect(send).toHaveBeenCalledTimes(5);
+    const outage = send.mock.calls[4][0];
+    expect(outage.severity).toBe("critical");
+    expect(outage.text).toMatch(/^Problem \(urgent\): Store system is not responding/mu);
+    expect(outage.text).toMatch(/^tea - /mu);
+    // The hour's limit still holds, whatever else happens in it.
+    await minutes(33, 59);
     expect(send.mock.calls.length).toBeLessThanOrEqual(6);
-    expect(send.mock.calls.length).toBeGreaterThan(1);
     // What waited is merged into the next message, not lost.
     expect(root.boards.length).toBe(60);
     const lastHour = send.mock.calls.map(([message]) => message.text).join("\n");

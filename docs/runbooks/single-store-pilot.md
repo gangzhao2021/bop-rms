@@ -3041,9 +3041,11 @@ Where alerts appear:
 - **`pilot-ops.mjs status`**: each Store's keys, severities and instants.
 - **Log**: `<runtime>/ops/alerts.log` (JSON lines: alert key, severity, delivery result, `store`).
 - **Email and phone/message alerts**: only after the Owner provides accounts (external gate). One
-  channel state and one hourly cap for the whole installation; a Store's own problems name it on
-  their line, and an outage that touches every Store is sent once. A heartbeat or webhook must be on
-  before a real merchant runs below `stores/`: otherwise nobody hears if the monitor stops.
+  channel state and one hourly cap for the whole installation, with the last 2 of the 6 messages
+  kept for the installation's own alerts, so the Stores' routine alerts cannot hold back the message
+  that the whole site is down. A Store's own problems name it on their line, and an outage that
+  touches every Store is sent once. A heartbeat or webhook must be on before a real merchant runs
+  below `stores/`: otherwise nobody hears if the monitor stops.
 
 Noise control: a failed entry probe must last 2 minutes before it alerts; each problem is sent once,
 again only if it gets worse or after a reminder interval (urgent 3 hours, today 24 hours), and
