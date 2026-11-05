@@ -1942,6 +1942,74 @@ Manual refresh is also available. Failed reads hide summary amounts while keepin
 the existing refund intent; browser recovery tests preserve same-request retries.
 Actual existing-order manual refresh shows CAD 11.30 refunded and CAD 0.00 pending.
 
+## Opening a TEST merchant on the internal test installation
+
+**InternalTest only; external gates replaced by labelled test stand-ins** (WP-2423 item 13,
+DEC-MULTI-MERCHANT-ONE-INSTALLATION A6). A real merchant needs Cognito, an independent approver,
+real tax evidence and a Stripe account; this path never stands in for those. Both names must contain
+"not production". In order, one deploy lock at a time; `run` means
+`docker compose -f compose.pilot.yaml run --rm --no-deps -T -e NODE_ENV=development pilot node --import ./tooling/environment/register-workspace-typescript.mjs`
+with `PILOT_UID`, `PILOT_GID`, `PILOT_RUNTIME_DIRECTORY=.local/pilot-v15` and `PILOT_OFFSITE_DIR` set.
+Paths are as the container sees them (`.local/...` is `.local/pilot-runtime/...` on the host).
+
+1. **Three new references** (UUIDv7): the opening operation `$OP`, its Owner `$OWNER` and an operator
+   `$OPERATOR`. Everything else derives from `$OP`, so keep it. Rerunning with the same `$OP` finds
+   the same merchant.
+2. **Open it:** `run tooling/environment/pilot-internal-test-store-open.mjs merchant /app/.local/pilot-v15 --database bop_rms_pilot_v15 --migration-env .local/migrate-v14/migrate-v15.env --operation $OP --owner $OWNER --operator $OPERATOR --brand-code <CODE> --brand-name "<name> - not production" --store-code MAIN --store-name "<name> Main - not production" --time-zone America/Toronto --locale en-CA`.
+   It prints the tenant, Brand, Store, membership and assignment references; the tax class and the
+   empty menu are written with it. Keep the time zone and later the address in Ontario: the tax copy
+   refuses another province.
+3. **Roles,** as for any Store, with the same TEST keys as earlier Stores
+   (`store-roles-v15`, `brand-roles-v15`; key and approver references as in their latest approval
+   file): `store-role-provisioning.mjs prepare` with `--templates owner,store-manager,area-manager,front-of-house,kitchen,inventory-manager --owner-actor $OWNER --owner-membership <membership> --owner-store-assignment <assignment>`, then `sign`, then `apply`; `brand-role-provisioning.mjs prepare` with `--env-file ... --templates brand-owner,recipe-developer,recipe-reviewer --owner-actor $OWNER --owner-membership <membership>`, then `sign`, then `apply`. Write each merchant's plans in its own folder.
+4. **First configuration, stock site and directory,** with
+   `--store <store> --approver $OPERATOR --reason ... --approved-by Owner --approval "<wording>"`
+   on the first two, and `--merchant $OP` on all three: `setup` (`--dry-run` first), `stock-site`,
+   then `directory --merchant $OP --store <store> --name <name> --owner $OWNER`. The directory has
+   the merchant's own table and pickup keys and the Owner's own TEST authenticator, and adds the
+   Owner to the staff page as `owner-<name>`.
+5. **Workflows:** `workflow-release-install.mjs` once each for `UnpaidDineInBatchCancellation` →
+   `cancellation-workflow-draft-result.json`, `OrderFulfillmentPickup` →
+   `internal-test-workflow-Pickup.json`, `OrderFulfillmentDineIn` →
+   `internal-test-workflow-DineIn.json` and `OrderFulfillmentAdditionalRound` →
+   `internal-test-workflow-AdditionalRelease.json`, each with `--output .local/pilot-v15/stores/<name>/<file>`,
+   `--runtime-environment InternalTest`, the merchant's tenant, Brand and Store, the operator and
+   approver of step 3, and a fresh `--operation` and `--approval-evidence`, issued within 15 minutes.
+6. **Restart** in a planned update window (`maintenance start`, `up -d --force-recreate pilot ops`,
+   wait for `/ready`, `maintenance end`). It starts serving; check `supervisor.health.json` shows
+   `stores/<name>:…` running.
+7. **In the product, as the Owner** (`/internal-test/staff`, `owner-<name>`), Store setup
+   (`/app/organization/stores/<store>/setup`), in this order. The order matters:
+   - **Name and address** (top panel), then **Set up one kitchen line**, then **Receipts and privacy**
+     (business name; save).
+   - **Step 2 again:** the wizard has its own address form. Save it and "Use saved address"; the
+     top panel is not enough, and the tax step reads this one. Step 7: contact, save, "Use saved
+     contact". "Save setup draft".
+   - **Tax:** `pilot-internal-test-store-open.mjs tax ... --merchant $OP` with the flags of step 4.
+     Before this the dish form's tax class list is empty and "Save dish" stays disabled.
+   - Step 8 **"Use the live Store's settings"**, after tax; step 1 "This Store"; step 6 "No order
+     limits"; step 5 each fee "Off", payment channels, "Save payment configuration".
+   - **Sole operator on** (below Receipts; reason, then the authenticator code from
+     `stores/<name>/internal-test-staff-totp.json`). A second person is not needed then.
+   - **Receipt template** (step 5): "Save receipt layout", "Save required receipt fields", "Refresh
+     available presets", choose both, "Save template draft"; "Refresh template list", choose draft 1,
+     "Submit template for review", verify, tick, "Approve receipt template on my own", "Publish
+     receipt template"; "Refresh saved templates", choose it, "Check published receipt template",
+     "Use published receipt template", "Save setup draft".
+   - Step 8: "Create configuration from saved setup", "Validate configuration", "Submit
+     configuration for review", verify, tick, "Approve configuration on my own", "Publish Store
+     configuration".
+8. **Menu:** Allergens (`/app/compliance/allergens`): "Record this allergen list for approval", then
+   "Approve this list on my own". Without it listing stops with `Check:NoAllergenList`. Menu: new
+   section, new dish; Edit it, enter the price again (the form shows it empty until listed), answer
+   each allergen and tick the check; "List it".
+9. **Tables:** Table QR codes: "Add a table", "Create code", "Print". The pickup link is on the same
+   page. Tables: "Open table" before guests join.
+
+Guests reach it only by its own table code or pickup link. A request that names no Store gets 404
+`CUSTOMER_STORE_NOT_FOUND`, except the CSRF token and the public payment mode. Kitchen display: start
+it from the staff page, "Start kitchen display at <Store>".
+
 ## Opening a TEST second Store on the internal test installation
 
 **InternalTest only; a test-environment-only shortcut** (DEC-BRAND-MULTI-STORE-ONE-INSTALLATION,
