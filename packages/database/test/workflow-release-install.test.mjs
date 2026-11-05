@@ -1140,6 +1140,40 @@ it("a family that cannot serve the release is refused; an older one still binds;
       );
       assert.deepEqual(stale.refusals, [{ binding: "Pickup", rule: "ExpectedVersionChanged" }]);
       assert.equal(raised(stale).get("orders.workflow").params.state, "PaidPickup");
+      // What the row says about it, under the same role: the guest pays on the version that
+      // resolves, and Accept, which follows the binding, is refused.
+      const actingOn = (expectedVersionReference, action) =>
+        resolver(restricted, healthyBrand).evaluatePublishedAction(
+          {
+            tenantReference: id(1),
+            brandReference: healthyBrand,
+            storeReference: id(3),
+            actorReference: id(40),
+            resourceReference: id(41),
+            resourceVersion: 1,
+            purposeCode: "OrderFulfillment",
+            applicabilityCode: "Pickup",
+            expectedVersionReference,
+            currentState: "Submitted",
+            action,
+            observedAt: new Date(now()).toISOString(),
+          },
+          {
+            authorizeResource: async () => true,
+            authorizeAction: async () => true,
+            evaluateRule: async () => true,
+            authorizeOverride: async () => false,
+          },
+        );
+      const resolving = healthy.Pickup.workflow.payment.workflowVersionReference;
+      assert.equal(
+        (await actingOn(resolving, "CreatePaymentIntent")).transition.action,
+        "CreatePaymentIntent",
+      );
+      await assert.rejects(actingOn(id(999), "Accept"), {
+        code: "WORKFLOW_DEFINITION_UNAVAILABLE",
+        rule: "ExpectedVersionChanged",
+      });
 
       // A cancellation binding from another family: the staff cancel would refuse it.
       const otherFamily = {
