@@ -11,7 +11,10 @@ import { SourceTime } from "./StoreTime.js";
 
 /** What support did, in the Owner's words. A new kind of action still shows, never a code. */
 function logText(entry: StoreSupportLogEntry): string {
-  if (entry.kind === "Viewed") return t("Looked at your Store's details and recent orders");
+  if (entry.kind === "Viewed")
+    return entry.subjectCode === "MerchantOverview"
+      ? t("Looked at whether your Store is ready and when its last order came")
+      : t("Looked at your Store's details and recent orders");
   if (entry.kind === "Changed")
     return entry.subjectCode === "KitchenLine"
       ? t("Set up your kitchen")

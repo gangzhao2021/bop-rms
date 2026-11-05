@@ -281,6 +281,7 @@ export async function exercisePilotPlatformSupport(context) {
     async (send) => {
       assert.equal((await send("support/session")).status, 403);
       assert.equal((await send("support/store/view", { storeReference: store })).status, 403);
+      assert.equal((await send("support/overview", {})).status, 403);
     },
     routes,
   );
@@ -725,6 +726,34 @@ export async function exercisePilotPlatformSupport(context) {
     moneyRoutes,
   );
   assert.equal(await audits(), auditsBefore);
+
+  // WP-2423 item 13 ②: every merchant here, Store by Store, recorded for each Store's Owner. No
+  // guest's name or contact, and no other merchant's Store than those served.
+  await listen(
+    support,
+    async (send) => {
+      const before = await logRows("Viewed");
+      const overview = await send("support/overview", {});
+      assert.equal(overview.status, 200, JSON.stringify(overview.body));
+      assert.equal(overview.body.merchants.length, 1);
+      const [row] = overview.body.merchants[0].stores;
+      assert.equal(row.storeReference, store);
+      assert.equal(row.readable, true);
+      assert.equal(typeof row.menuListed, "boolean");
+      assert.equal(row.kitchenSetUp, true);
+      assert.equal(await logRows("Viewed"), before + 1);
+      assert.deepEqual(Object.keys(row).sort(), [
+        "kitchenSetUp",
+        "lastOrderAt",
+        "menuListed",
+        "name",
+        "readable",
+        "storeReference",
+        "timeZone",
+      ]);
+    },
+    routes,
+  );
 
   // Support ended: at once, nothing.
   await addPerson(2, "Ended", [], until);

@@ -6,6 +6,23 @@ export interface StoreSupportSession {
   readonly canChange: boolean;
   readonly stores: readonly { readonly storeReference: string; readonly name: string }[];
 }
+/** WP-2423 item 13 ②: every merchant here, Store by Store. */
+export interface StoreSupportOverview {
+  readonly observedAt: string;
+  readonly merchants: readonly {
+    readonly brandReference: string;
+    readonly name: string;
+    readonly stores: readonly {
+      readonly storeReference: string;
+      readonly name: string;
+      readonly timeZone: string | null;
+      readonly readable: boolean;
+      readonly menuListed: boolean;
+      readonly kitchenSetUp: boolean;
+      readonly lastOrderAt: string | null;
+    }[];
+  }[];
+}
 export interface StoreSupportView {
   readonly name: string;
   /** The Store's own zone: its times are shown as staff there read them. */
@@ -79,6 +96,7 @@ async function send<T>(path: string, csrf: string | null, body?: unknown): Promi
 }
 export const storeSupportClient = Object.freeze({
   session: () => send<StoreSupportSession>("/merchant/support/session", null),
+  overview: (csrf: string) => send<StoreSupportOverview>("/merchant/support/overview", csrf, {}),
   view: (csrf: string, storeReference: string) =>
     send<StoreSupportView>("/merchant/support/store/view", csrf, { storeReference }),
   command: (

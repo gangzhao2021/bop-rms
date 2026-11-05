@@ -141,6 +141,91 @@ export function createMerchantStoreSupport(options: {
         return mapped(error);
       }
     },
+    /**
+     * WP-2423 item 13 ②: every merchant this installation serves, Store by Store: whether guests
+     * can order yet and when its last order came. Recorded for each Store's Owner like any view.
+     * One Store that can't be read says so; the others still show.
+     */
+    async overview(input: { sessionCookie: unknown; csrf: unknown }) {
+      try {
+        const authenticated = await options.authentication.authorize(input).catch(denied);
+        return await options.persistence.transactions.run(async (transaction) => {
+          const tx = businessTransaction(transaction);
+          const found = await person(
+            tx as never,
+            authenticated.actor.actorReference,
+            "platform.support.view",
+          );
+          const at = now();
+          const merchants = new Map<
+            string,
+            { name: string; stores: Readonly<Record<string, unknown>>[] }
+          >();
+          for (const scope of options.stores()) {
+            await recordStoreSupportAccess(tx as never, scope, {
+              logReference: options.nextReference(),
+              supportActorReference: found.actorReference,
+              kind: "Viewed",
+              subjectCode: "MerchantOverview",
+              occurredAt: at,
+            });
+            const organization = createPostgresMerchantOrganizationSource(tx as never, {
+              ...scope,
+              observedAt: at,
+            });
+            let store: Readonly<Record<string, unknown>>;
+            let brandName = "—";
+            await tx.query("SAVEPOINT support_overview_store", []);
+            try {
+              brandName =
+                (await organization.getBrand(scope.brandReference as never))?.displayName ?? "—";
+              const facts = await storeFacts(tx, scope);
+              const kitchen = await readStoreKitchenLine(tx, scope);
+              const menus = await listBrandMenus(tx as never, scope);
+              const index = await createPostgresMerchantOrderIndex({
+                brandReference: scope.brandReference,
+                storeReference: scope.storeReference,
+                authorize: async () => true,
+              }).list({ transaction: tx, afterOrderReference: null, limit: 1, newestFirst: true });
+              await tx.query("RELEASE SAVEPOINT support_overview_store", []);
+              store = Object.freeze({
+                storeReference: scope.storeReference,
+                name: facts?.displayName ?? "—",
+                timeZone: facts?.timeZone ?? null,
+                readable: true,
+                menuListed: menus.some((menu) => menu.publication?.state === "Published"),
+                kitchenSetUp: kitchen.version > 0,
+                lastOrderAt: index.items[0]?.submittedAt ?? null,
+              });
+            } catch {
+              await tx.query("ROLLBACK TO SAVEPOINT support_overview_store", []);
+              await tx.query("RELEASE SAVEPOINT support_overview_store", []);
+              store = Object.freeze({
+                storeReference: scope.storeReference,
+                name: "—",
+                timeZone: null,
+                readable: false,
+                menuListed: false,
+                kitchenSetUp: false,
+                lastOrderAt: null,
+              });
+            }
+            const merchant = merchants.get(scope.brandReference) ?? { name: brandName, stores: [] };
+            if (merchant.name === "—") merchant.name = brandName;
+            merchant.stores.push(store);
+            merchants.set(scope.brandReference, merchant);
+          }
+          return Object.freeze({
+            observedAt: at,
+            merchants: [...merchants.entries()].map(([brandReference, merchant]) =>
+              Object.freeze({ brandReference, ...merchant }),
+            ),
+          });
+        });
+      } catch (error) {
+        return mapped(error);
+      }
+    },
     /** One Store, read-only, recorded as viewed in this same transaction or not read at all. */
     async view(input: { sessionCookie: unknown; csrf: unknown; storeReference: unknown }) {
       try {

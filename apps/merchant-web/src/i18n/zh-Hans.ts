@@ -6928,6 +6928,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Signed in as {name}. Everything you open is listed for that Store's Owner.":
     "当前登录：{name}。你打开的内容都会列给该店店主看。",
   "Choose a Store": "选择门店",
+  Merchants: "商家",
+  "Looked at whether your Store is ready and when its last order came":
+    "查看了门店是否就绪和最近一单的时间",
+  "We can't read the merchants right now.": "现在读不出商家。",
+  "Last order": "最近一单",
+  "Guests can order": "客人可以下单",
+  "Still setting up: no menu or kitchen": "还在设置：没有菜单和厨房",
+  "Still setting up: no menu listed": "还在设置：菜单没上架",
+  "Still setting up: no kitchen": "还在设置：没有厨房",
   "The Owner allows you to change settings.": "店主允许你更改设置。",
   "The Owner allows you to change settings until": "店主允许你更改设置，截止到",
   "Read-only: the Owner hasn't allowed changes right now.": "只读：店主目前没有允许更改。",

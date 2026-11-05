@@ -3,6 +3,7 @@ import { t } from "./i18n/i18n.js";
 import {
   storeSupportClient,
   StoreSupportClientError,
+  type StoreSupportOverview,
   type StoreSupportSession,
   type StoreSupportView,
 } from "./store-support-client.js";
@@ -42,6 +43,15 @@ const orderPhaseText = (phase: string | null) => {
   }
 };
 
+/** Whether guests can order there yet, in words; never a colour alone. */
+const storeReadiness = (store: StoreSupportOverview["merchants"][number]["stores"][number]) => {
+  if (!store.readable) return t("Can't read this right now");
+  if (!store.menuListed && !store.kitchenSetUp) return t("Still setting up: no menu or kitchen");
+  if (!store.menuListed) return t("Still setting up: no menu listed");
+  if (!store.kitchenSetUp) return t("Still setting up: no kitchen");
+  return t("Guests can order");
+};
+
 export function StoreSupportPage() {
   const [session, setSession] = useState<StoreSupportSession | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "denied" | "unavailable">("loading");
@@ -49,6 +59,16 @@ export function StoreSupportPage() {
   const [view, setView] = useState<StoreSupportView | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [overview, setOverview] = useState<StoreSupportOverview | null>(null);
+  const [overviewFailed, setOverviewFailed] = useState(false);
+  const loadOverview = useCallback(async (csrf: string) => {
+    setOverviewFailed(false);
+    try {
+      setOverview(await storeSupportClient.overview(csrf));
+    } catch {
+      setOverviewFailed(true);
+    }
+  }, []);
   const loadSession = useCallback(async () => {
     try {
       setSession(await storeSupportClient.session());
@@ -64,6 +84,10 @@ export function StoreSupportPage() {
   useEffect(() => {
     void loadSession();
   }, [loadSession]);
+  const csrf = session?.csrf ?? null;
+  useEffect(() => {
+    if (csrf !== null) void loadOverview(csrf);
+  }, [csrf, loadOverview]);
   const open = async (storeReference: string) => {
     if (session === null) return;
     setPicked(storeReference);
@@ -139,6 +163,59 @@ export function StoreSupportPage() {
           name: session.name,
         })}
       </p>
+      <section className="store-support__merchants" aria-labelledby="support-merchants">
+        <h2 id="support-merchants">{t("Merchants")}</h2>
+        {overviewFailed ? (
+          <div role="alert">
+            <p>{t("We can't read the merchants right now.")}</p>
+            <button type="button" onClick={() => void loadOverview(session.csrf)}>
+              {t("Try again")}
+            </button>
+          </div>
+        ) : overview === null ? (
+          <p role="status">{t("Loading…")}</p>
+        ) : (
+          overview.merchants.map((merchant) => (
+            <div key={merchant.brandReference}>
+              <h3>{merchant.name}</h3>
+              <table className="support-access__log">
+                <thead>
+                  <tr>
+                    <th scope="col">{t("Store")}</th>
+                    <th scope="col">{t("Status")}</th>
+                    <th scope="col">{t("Last order")}</th>
+                    <th scope="col">
+                      <span className="visually-hidden">{t("Open")}</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {merchant.stores.map((store) => (
+                    <tr key={store.storeReference}>
+                      <td>{store.name}</td>
+                      <td>{storeReadiness(store)}</td>
+                      <td>
+                        {store.lastOrderAt === null ? (
+                          t("No orders yet")
+                        ) : (
+                          <StoreTimeZoneContext.Provider value={store.timeZone ?? undefined}>
+                            <SourceTime instant={store.lastOrderAt} />
+                          </StoreTimeZoneContext.Provider>
+                        )}
+                      </td>
+                      <td>
+                        <button type="button" onClick={() => void open(store.storeReference)}>
+                          {t("Open")}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))
+        )}
+      </section>
       <label>
         {t("Store")}
         <select

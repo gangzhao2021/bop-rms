@@ -758,6 +758,18 @@ export function installMerchantStoreSetupRoutes(
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => supportFailure(response, error));
   });
+  router.post("/support/overview", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant"),
+      csrf = exactHeader(request, "x-bop-csrf");
+    if (sessionCookie === null || csrf === null || !options.storeSupport) {
+      denied(response);
+      return;
+    }
+    void options.storeSupport
+      .overview({ sessionCookie, csrf })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch((error: unknown) => supportFailure(response, error));
+  });
   router.post("/support/store/view", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
       csrf = exactHeader(request, "x-bop-csrf"),

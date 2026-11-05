@@ -73,6 +73,46 @@ test("@production support picks a Store, reads it masked, and changes only what 
       },
     }),
   );
+  await page.route("**/merchant/support/overview", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        observedAt: "2026-11-04T20:00:00.000Z",
+        merchants: [
+          {
+            brandReference: "brand-a",
+            name: "Training Brand",
+            stores: [
+              {
+                storeReference: store,
+                name: "Training Store",
+                timeZone: "America/Toronto",
+                readable: true,
+                menuListed: true,
+                kitchenSetUp: true,
+                lastOrderAt: "2026-11-04T17:00:00.000Z",
+              },
+            ],
+          },
+          {
+            brandReference: "brand-b",
+            name: "New Merchant",
+            stores: [
+              {
+                storeReference: "other-store",
+                name: "New Merchant Main",
+                timeZone: "America/Toronto",
+                readable: true,
+                menuListed: false,
+                kitchenSetUp: true,
+                lastOrderAt: null,
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
   await page.route("**/merchant/support/store/view", (route) => {
     views += 1;
     return route.fulfill({ headers, json: supportView(allowed, pickup) });
@@ -87,6 +127,14 @@ test("@production support picks a Store, reads it masked, and changes only what 
   await page.goto("/platform/support-cases");
   await expect(page.getByRole("heading", { name: "Platform support" })).toBeVisible();
   await expect(page.getByText("Signed in as TEST Support Sam")).toBeVisible();
+  // WP-2423 item 13 ②: every merchant here at a glance, in words.
+  const merchants = page.getByRole("region", { name: "Merchants" });
+  await expect(merchants.getByRole("heading", { name: "New Merchant" })).toBeVisible();
+  await expect(merchants.getByRole("cell", { name: "Guests can order" })).toBeVisible();
+  await expect(
+    merchants.getByRole("cell", { name: "Still setting up: no menu listed" }),
+  ).toBeVisible();
+  await expect(merchants.getByRole("cell", { name: "No orders yet" })).toBeVisible();
   await page.getByLabel("Store").selectOption(store);
   await expect(
     page.getByText("Read-only: the Owner hasn't allowed changes right now."),
