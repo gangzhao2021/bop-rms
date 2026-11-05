@@ -62,6 +62,47 @@ describe("WP-2423 item 9: the rows about a Store's own orders", () => {
   });
 });
 
+describe("WP-2423 item 9: the words of the Workflow rows", () => {
+  /** The monitor's own catalog: one over-long wording would make the whole board unreadable. */
+  const catalogFile = new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url)
+    .href;
+  it("every one fits what the board accepts", async () => {
+    const { renderAlert } = (await import(/* @vite-ignore */ catalogFile)) as {
+      readonly renderAlert: (
+        key: string,
+        params: unknown,
+      ) => { title: string; summary: string; action: string; runbook: string };
+    };
+    const workflow = [
+      "Orders",
+      "Pickup",
+      "Tables",
+      "PaidOrders",
+      "PaidPickup",
+      "PaidTables",
+      "PickupStore",
+      "TablesStore",
+      "PaidPickupStore",
+      "PaidTablesStore",
+      "FurtherRounds",
+      "PickupNotOffered",
+      "TablesNotOffered",
+    ].map((state) => ["orders.workflow", { state }] as const);
+    for (const [key, params] of [...workflow, ["orders.unpaid_rounds", {}] as const]) {
+      const { title, summary, action, runbook } = renderAlert(key, params);
+      const seen = board();
+      const view = projectOperationsAlertBoard(
+        {
+          ...seen,
+          active: [{ ...seen.active[0], key, title, summary, action, runbook }],
+        },
+        "2026-10-15T08:02:00.000Z",
+      );
+      expect(view.active.map((alert) => alert.key)).toEqual([key]);
+    }
+  });
+});
+
 describe("WP-2423 Q13 operations alert board projection", () => {
   it("projects the closed board and reports a fresh monitor", () => {
     const view = projectOperationsAlertBoard(board(), "2026-10-15T08:02:00.000Z");

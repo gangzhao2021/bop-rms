@@ -272,8 +272,9 @@ describe("WP-2423 Q13 alert rules", () => {
       readable(text);
       expect(text.title).toBe("New orders cannot go through");
       expect(text.summary).toContain("cannot order or pay on their phones");
-      expect(text.action).toContain("on paper");
-      expect(text.action).toContain("card machine");
+      expect(text.action).toContain("Pause all services");
+      expect(text.action).toContain("Tell seated tables to order with staff");
+      expect(text.action).toContain("paper slip, card machine");
       expect(text.action).toContain("until they say it is fixed");
     });
     it("Pickup only: the floor keeps serving dine-in", () => {
@@ -283,42 +284,69 @@ describe("WP-2423 Q13 alert rules", () => {
       readable(text);
       expect(text.title).toBe("Pickup orders cannot go through");
       expect(text.summary).toContain("Dine-in is not affected");
-      expect(text.action).toContain("pickup orders on paper");
-      expect(text.action).toContain("Dine-in carries on as usual");
+      expect(text.action).toContain("Pause pickup");
+      expect(text.action).toContain("New pickup orders: paper slip");
+      expect(text.action).not.toContain("seated tables");
     });
     it("dine-in only: pickup carries on, and later rounds are stopped with the first", () => {
       for (const refusals of [
         [refused("DineIn")],
         [refused("DineIn"), refused("AdditionalRelease")],
+        [refused("DineIn"), stale("AdditionalRelease")],
       ]) {
         const text = say(conditions(refusals));
         readable(text);
         expect(text.title).toBe("Table orders cannot go through");
         expect(text.summary).toContain("Pickup is not affected");
-        expect(text.action).toContain("Pickup carries on as usual");
+        expect(text.action).toContain("Pause dine-in");
+        expect(text.action).toContain("Tell seated tables to order with staff");
       }
     });
-    it("a Store with one order type is never told the other is unaffected", () => {
-      const dineInOnly = say(conditions([refused("DineIn")], ["DineIn"]));
-      expect(dineInOnly.title).toBe("New orders cannot go through");
-      expect(dineInOnly.summary).not.toContain("Pickup");
-      const pickupOnly = say(conditions([refused("Pickup")], ["Pickup"]));
-      expect(pickupOnly.title).toBe("New orders cannot go through");
-      expect(pickupOnly.summary).not.toContain("Dine-in");
-      expect(say(conditions([stale("DineIn")], ["DineIn"])).title).toBe(
-        "Paid orders may not reach the kitchen",
+    it("a Store with one order type hears only about that one, nothing about the other", () => {
+      const state = (refusals, orderTypes) =>
+        conditions(refusals, orderTypes).get("orders.workflow").params.state;
+      const dineIn = ["DineIn"],
+        pickup = ["Pickup"];
+      expect(state([refused("DineIn")], dineIn)).toBe("TablesStore");
+      expect(state([refused("DineIn"), refused("AdditionalRelease")], dineIn)).toBe("TablesStore");
+      expect(state([stale("DineIn")], dineIn)).toBe("PaidTablesStore");
+      expect(state([stale("DineIn"), refused("AdditionalRelease")], dineIn)).toBe(
+        "PaidTablesStore",
       );
+      expect(state([refused("Pickup")], pickup)).toBe("PickupStore");
+      expect(state([stale("Pickup")], pickup)).toBe("PaidPickupStore");
+      for (const refusals of [[refused("DineIn")], [stale("DineIn")]]) {
+        const text = say(conditions(refusals, dineIn));
+        readable(text);
+        expect(text.title).toMatch(/^(Table orders cannot go|Paid table orders may not)/u);
+        expect(`${text.title} ${text.summary} ${text.action}`).not.toMatch(/pickup/iu);
+      }
+      for (const refusals of [[refused("Pickup")], [stale("Pickup")]]) {
+        const text = say(conditions(refusals, pickup));
+        readable(text);
+        expect(text.title).toMatch(/^(Pickup orders cannot go|Paid pickup orders may not)/u);
+        expect(`${text.title} ${text.summary} ${text.action}`).not.toMatch(/dine-in|table/iu);
+      }
     });
-    it("one order type refused while the other is affected too reads as both", () => {
-      expect(say(conditions([refused("Pickup"), refused("AdditionalRelease")])).title).toBe(
-        "New orders cannot go through",
+    it("one order type stopped while guests still pay for another pauses both, and says so", () => {
+      const state = (refusals) => conditions(refusals).get("orders.workflow").params.state;
+      // Tables keep paying for rounds that do not reach the kitchen: nobody may read that the phones
+      // are down, and nobody may be left without the pause.
+      expect(state([refused("Pickup"), stale("DineIn")])).toBe("PaidOrders");
+      expect(state([stale("Pickup"), refused("DineIn")])).toBe("PaidOrders");
+      expect(state([stale("Pickup"), stale("DineIn")])).toBe("PaidOrders");
+      expect(state([stale("Pickup"), stale("AdditionalRelease")])).toBe("PaidOrders");
+      // First rounds go on, so further rounds are still paid for.
+      expect(state([refused("Pickup"), refused("AdditionalRelease")])).toBe("PaidOrders");
+      // Nothing can be paid for at all: the phones really are down.
+      expect(state([refused("Pickup"), refused("DineIn"), stale("AdditionalRelease")])).toBe(
+        "Orders",
       );
-      expect(say(conditions([refused("Pickup"), stale("DineIn")])).title).toBe(
-        "New orders cannot go through",
-      );
-      expect(say(conditions([stale("Pickup"), stale("AdditionalRelease")])).title).toBe(
-        "Paid orders may not reach the kitchen",
-      );
+      const text = say(conditions([refused("Pickup"), stale("DineIn")]));
+      readable(text);
+      expect(text.summary).toContain("Some guests can still order and pay");
+      expect(text.summary).not.toContain("cannot order");
+      expect(text.action).toContain("Pause all services");
     });
     it("a stale binding on every order type: guests still pay, so staff stop it themselves", () => {
       const c = conditions([stale("Pickup"), stale("DineIn"), stale("AdditionalRelease")]);
@@ -326,25 +354,25 @@ describe("WP-2423 Q13 alert rules", () => {
       expect(c.get("orders.workflow").params.state).toBe("PaidOrders");
       const text = say(c);
       readable(text);
-      expect(text.title).toBe("Paid orders may not reach the kitchen");
+      expect(text.title).toContain("Paid orders may not reach the kitchen");
       expect(text.summary).toContain("can still order and pay");
       expect(text.summary).not.toContain("cannot order");
-      expect(text.action).toContain("pause all services");
+      expect(text.action).toContain("Pause all services");
       expect(text.action).toContain("order with staff");
-      expect(text.action).toContain("Do not take a second payment");
+      expect(text.action).toContain("no second payment");
       expect(text.action).toContain("until they say it is fixed");
     });
     it("a stale binding on one order type names that type", () => {
       const pickup = say(conditions([stale("Pickup")]));
       readable(pickup);
-      expect(pickup.title).toBe("Paid pickup orders may not reach the kitchen");
+      expect(pickup.title).toContain("Paid pickup orders may not reach the kitchen");
       expect(pickup.summary).toContain("Dine-in is not affected");
-      expect(pickup.action).toContain("pause pickup");
+      expect(pickup.action).toContain("Pause pickup");
       const tables = say(conditions([stale("DineIn")]));
       readable(tables);
       expect(tables.title).toBe("Paid table orders may not reach the kitchen");
       expect(tables.summary).toContain("Pickup is not affected");
-      expect(tables.action).toContain("pause dine-in");
+      expect(tables.action).toContain("Pause dine-in");
     });
     it("further rounds only: first rounds keep going, and either way of refusing reads the same", () => {
       for (const refusal of [refused("AdditionalRelease"), stale("AdditionalRelease")]) {
@@ -355,8 +383,106 @@ describe("WP-2423 Q13 alert rules", () => {
         expect(text.title).toBe("Paid further rounds may not reach the kitchen");
         expect(text.summary).toContain("First rounds");
         expect(text.action).toContain("order further rounds with staff");
-        expect(text.action).not.toContain("pause");
+        expect(text.action).not.toMatch(/pause/iu);
       }
+    });
+    describe("what the row promises the floor, in every state that stops or may lose an order", () => {
+      /** What each state of the row is about. */
+      const floor = {
+        Orders: { pickup: true, tables: true },
+        Pickup: { pickup: true, tables: false },
+        Tables: { pickup: false, tables: true },
+        PaidOrders: { pickup: true, tables: true },
+        PaidPickup: { pickup: true, tables: false },
+        PaidTables: { pickup: false, tables: true },
+        PickupStore: { pickup: true, tables: false },
+        TablesStore: { pickup: false, tables: true },
+        PaidPickupStore: { pickup: true, tables: false },
+        PaidTablesStore: { pickup: false, tables: true },
+        FurtherRounds: { pickup: false, tables: true },
+      };
+      const words = (state) => renderAlert("orders.workflow", { state });
+      const states = Object.keys(floor);
+
+      it("a guest who already paid is never charged again, in the rows that say guests cannot pay too", () => {
+        for (const state of states) {
+          readable(words(state));
+          expect(words(state).action, state).toContain(
+            "A guest who paid: no second payment; kitchen slip with order number.",
+          );
+        }
+      });
+      it("every sale on the card machine is entered afterwards, and a slip for a paid order never is", () => {
+        for (const state of states) {
+          const { action } = words(state);
+          expect(action, state).toContain("card machine");
+          expect(action, state).toContain("Then enter the paper orders");
+          // Made from a slip, waiting on Orders: it would otherwise be cooked twice, or entered twice.
+          expect(action, state).toContain(
+            "for a slip with an order number, accept that order, mark it ready, do not remake it",
+          );
+        }
+      });
+      it("a pause is long enough and can end early, because it ends by itself with no warning", () => {
+        for (const state of states.filter((name) => name !== "FurtherRounds")) {
+          const { action } = words(state);
+          expect(action, state).toMatch(
+            /^Pause (all services|pickup|dine-in) in Hours & ordering/u,
+          );
+          expect(action, state).toContain("until closing (can resume early)");
+        }
+      });
+      it("guests are told, and seated tables hear from staff because a pause does not reach them", () => {
+        for (const state of ["Orders", "Tables", "TablesStore"]) {
+          expect(words(state).summary, state).toContain(
+            "A pause tells new guests to order with staff",
+          );
+          expect(words(state).summary, state).toContain("does not reach seated tables");
+        }
+        for (const state of ["Pickup", "PickupStore"])
+          expect(words(state).summary, state).toContain("A pause tells guests to order with staff");
+        for (const [state, { tables }] of Object.entries(floor))
+          if (tables && state !== "FurtherRounds")
+            expect(words(state).action, state).toContain("Tell seated tables to order with staff");
+      });
+      it("warns that a paid pickup order refunds itself, and says what to do when it has", () => {
+        for (const [state, { pickup }] of Object.entries(floor)) {
+          const { summary } = words(state);
+          if (!pickup) {
+            expect(summary, state).not.toMatch(/refunded automatically/u);
+            continue;
+          }
+          expect(summary, state).toContain(
+            "A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time)",
+          );
+          expect(summary, state).toContain("with their agreement take payment on the card machine");
+          expect(summary, state).toContain("as a Counter order recorded after an outage");
+          expect(summary, state).toContain("write it on the incident sheet as a loss");
+        }
+        // Where only pickup is at stake, it is in what staff read without opening anything.
+        for (const state of ["Pickup", "PaidPickup", "PickupStore", "PaidPickupStore"])
+          expect(words(state).action, state).toContain("The order refunds itself if not accepted.");
+        for (const state of ["PaidOrders", "PaidPickup", "PaidPickupStore"])
+          expect(words(state).title, state).toContain("may be refunded automatically");
+      });
+      it("words the rows by when a table pays: a table keeps the timing it opened with", () => {
+        const further = words("FurtherRounds").action;
+        expect(further).toContain("Tables that pay before each round order further rounds");
+        expect(further).toContain("Tables that pay at the end carry on as usual");
+        const unpaid = renderAlert("orders.unpaid_rounds", {}).action;
+        expect(unpaid).toContain("Tables that pay before each round: one with an unpaid round");
+        expect(unpaid).toContain("Tables that pay at the end carry on and close once they pay");
+        expect(renderAlert("orders.unpaid_rounds", {}).summary).toContain(
+          "only a round waiting for staff is affected",
+        );
+        // No one at such a table pays per round, and it is still told what happens.
+        for (const state of ["Orders", "Tables", "TablesStore"])
+          expect(words(state).summary, state).toContain(
+            "A table that pays at the end still pays at the end",
+          );
+        for (const state of ["PaidOrders", "PaidTables", "PaidTablesStore"])
+          expect(words(state).summary, state).toMatch(/rounds may not send at all/u);
+      });
     });
     it("an order type the Store does not offer is never an emergency, and BOP still hears", () => {
       // The hotpot has pickup off and a Pickup binding: no paper on a Saturday for a refused family.
@@ -379,7 +505,7 @@ describe("WP-2423 Q13 alert rules", () => {
       }
       // What it does offer still comes first.
       expect(say(conditions([refused("Pickup"), refused("DineIn")], ["DineIn"])).title).toBe(
-        "New orders cannot go through",
+        "Table orders cannot go through",
       );
     });
     it("the cancellation Workflow has its own urgent row, and names what staff cannot do", () => {

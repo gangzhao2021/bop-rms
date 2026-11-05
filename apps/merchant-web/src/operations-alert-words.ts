@@ -54,33 +54,25 @@ export function alertAction(english: string): string {
       t(
         "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.",
       ),
-    "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine. Call BOP support now: they have to fix this. Stay on paper until they say it is fixed, then enter the paper orders.":
+    "Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.":
       t(
-        "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine. Call BOP support now: they have to fix this. Stay on paper until they say it is fixed, then enter the paper orders.",
+        "Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.",
       ),
-    "Take pickup orders on paper (items, name, pickup time) and take payment on the card machine. Dine-in carries on as usual. Call BOP support now: they have to fix this. Stay on paper for pickup until they say it is fixed, then enter the paper orders.":
+    "Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. The order refunds itself if not accepted. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.":
       t(
-        "Take pickup orders on paper (items, name, pickup time) and take payment on the card machine. Dine-in carries on as usual. Call BOP support now: they have to fix this. Stay on paper for pickup until they say it is fixed, then enter the paper orders.",
+        "Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. The order refunds itself if not accepted. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.",
       ),
-    "Take table orders on paper slips (table, round, items) and take payment on the card machine. Pickup carries on as usual. Call BOP support now: they have to fix this. Stay on paper for tables until they say it is fixed, then enter the paper orders.":
+    "Pause dine-in in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New rounds: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.":
       t(
-        "Take table orders on paper slips (table, round, items) and take payment on the card machine. Pickup carries on as usual. Call BOP support now: they have to fix this. Stay on paper for tables until they say it is fixed, then enter the paper orders.",
+        "Pause dine-in in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New rounds: paper slip, card machine. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.",
       ),
-    "In Hours & ordering, pause all services so guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper until they say it is fixed.":
+    "Tables that pay before each round order further rounds with staff: paper slip, card machine. Tables that pay at the end carry on as usual. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.":
       t(
-        "In Hours & ordering, pause all services so guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper until they say it is fixed.",
+        "Tables that pay before each round order further rounds with staff: paper slip, card machine. Tables that pay at the end carry on as usual. A guest who paid: no second payment; kitchen slip with order number. Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.",
       ),
-    "In Hours & ordering, pause pickup so guests stop paying for orders that may not reach the kitchen, and take pickup orders on paper with payment on the card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for pickup until they say it is fixed.":
+    "Tables that pay before each round: one with an unpaid round cannot be closed and that round cannot be cancelled here, so trying again will not help. Seat the next party at another table and note those tables. Tables that pay at the end carry on and close once they pay. Call BOP support now: they have to fix this. Close the noted tables once they say it is fixed.":
       t(
-        "In Hours & ordering, pause pickup so guests stop paying for orders that may not reach the kitchen, and take pickup orders on paper with payment on the card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for pickup until they say it is fixed.",
-      ),
-    "In Hours & ordering, pause dine-in so new guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for tables until they say it is fixed.":
-      t(
-        "In Hours & ordering, pause dine-in so new guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for tables until they say it is fixed.",
-      ),
-    "Ask seated tables to order further rounds with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for further rounds until they say it is fixed.":
-      t(
-        "Ask seated tables to order further rounds with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for further rounds until they say it is fixed.",
+        "Tables that pay before each round: one with an unpaid round cannot be closed and that round cannot be cancelled here, so trying again will not help. Seat the next party at another table and note those tables. Tables that pay at the end carry on and close once they pay. Call BOP support now: they have to fix this. Close the noted tables once they say it is fixed.",
       ),
     "Nothing to do in the store today. Ask BOP support to fix this before you turn pickup on.": t(
       "Nothing to do in the store today. Ask BOP support to fix this before you turn pickup on.",
@@ -88,10 +80,6 @@ export function alertAction(english: string): string {
     "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.": t(
       "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.",
     ),
-    "Tables with an unpaid round cannot be closed and those rounds cannot be cancelled here, so trying again will not help. Seat the next party at another table and keep a note of those tables. Call BOP support now: they have to fix this. Close those tables once they say it is fixed.":
-      t(
-        "Tables with an unpaid round cannot be closed and those rounds cannot be cancelled here, so trying again will not help. Seat the next party at another table and keep a note of those tables. Call BOP support now: they have to fix this. Close those tables once they say it is fixed.",
-      ),
     'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
       t(
         'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
@@ -432,29 +420,49 @@ export function alertSummary(english: string): string {
       t(
         "The tax settings published in Store setup are not the ones this store is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.",
       ),
-    "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.":
+    "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders here. A pause tells new guests to order with staff; it does not reach seated tables. A table that pays at the end still pays at the end. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.":
       t(
-        "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.",
+        "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders here. A pause tells new guests to order with staff; it does not reach seated tables. A table that pays at the end still pays at the end. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.",
       ),
-    "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders on these screens. Dine-in is not affected.":
+    "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders here. A pause tells guests to order with staff. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss. Dine-in is not affected.":
       t(
-        "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders on these screens. Dine-in is not affected.",
+        "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders here. A pause tells guests to order with staff. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss. Dine-in is not affected.",
       ),
-    "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders on these screens. Pickup is not affected.":
+    "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders here. A pause tells new guests to order with staff; it does not reach seated tables. A table that pays at the end still pays at the end. Pickup is not affected.":
       t(
-        "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders on these screens. Pickup is not affected.",
+        "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders here. A pause tells new guests to order with staff; it does not reach seated tables. A table that pays at the end still pays at the end. Pickup is not affected.",
       ),
-    "Guests can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish orders on these screens.":
+    "Some guests can still order and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. At a table that pays at the end, rounds may not send at all. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.":
       t(
-        "Guests can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish orders on these screens.",
+        "Some guests can still order and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. At a table that pays at the end, rounds may not send at all. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.",
       ),
-    "Guests can still order pickup and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish pickup orders on these screens. Dine-in is not affected.":
+    "Guests can still order pickup and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss. Dine-in is not affected.":
       t(
-        "Guests can still order pickup and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish pickup orders on these screens. Dine-in is not affected.",
+        "Guests can still order pickup and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss. Dine-in is not affected.",
       ),
-    "Guests at tables can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish table orders on these screens. Pickup is not affected.":
+    "Guests at tables can still order and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. At a table that pays at the end nobody pays per round: its rounds may not send at all, and it still pays at the end. Pickup is not affected.":
       t(
-        "Guests at tables can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish table orders on these screens. Pickup is not affected.",
+        "Guests at tables can still order and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. At a table that pays at the end nobody pays per round: its rounds may not send at all, and it still pays at the end. Pickup is not affected.",
+      ),
+    "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders here. A pause tells guests to order with staff. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.":
+      t(
+        "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders here. A pause tells guests to order with staff. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.",
+      ),
+    "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders here. A pause tells new guests to order with staff; it does not reach seated tables. A table that pays at the end still pays at the end.":
+      t(
+        "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders here. A pause tells new guests to order with staff; it does not reach seated tables. A table that pays at the end still pays at the end.",
+      ),
+    "Guests can still order pickup and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.":
+      t(
+        "Guests can still order pickup and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.",
+      ),
+    "Guests at tables can still order and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. At a table that pays at the end nobody pays per round: its rounds may not send at all, and it still pays at the end.":
+      t(
+        "Guests at tables can still order and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. At a table that pays at the end nobody pays per round: its rounds may not send at all, and it still pays at the end.",
+      ),
+    "At tables that pay before each round, unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party. At a table that pays at the end, only a round waiting for staff is affected: it can be sent to the kitchen but not cancelled.":
+      t(
+        "At tables that pay before each round, unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party. At a table that pays at the end, only a round waiting for staff is affected: it can be sent to the kitchen but not cancelled.",
       ),
     "Guests at a table who pay round by round can still pay for another round on their phones, but that round may not reach the kitchen. First rounds, and tables that pay at the end, are not affected.":
       t(
@@ -467,10 +475,6 @@ export function alertSummary(english: string): string {
     "This store does not offer dine-in now, so guests and staff are not affected. If dine-in were turned on, table orders would not go through.":
       t(
         "This store does not offer dine-in now, so guests and staff are not affected. If dine-in were turned on, table orders would not go through.",
-      ),
-    "Unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party.":
-      t(
-        "Unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party.",
       ),
     "No successful backup has been recorded for this store yet.": t(
       "No successful backup has been recorded for this store yet.",

@@ -76,62 +76,85 @@ const list = (values) => {
   return items.length <= 3 ? items.join(", ") : `${items.slice(0, 3).join(", ")} and more`;
 };
 
-const PAID_ALREADY =
-  "Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen.";
 /**
- * WP-2423 item 9: an order Workflow the resolver refuses, by what it stops on the floor. A refusal
- * stops that order type for guests and staff. A binding naming another version than the one that
- * resolves does not stop guests: they still order and pay, and what they paid for is then refused
- * at acceptance and paid release, so telling staff the phones are down would be false (the `Paid...`
- * words). A further round is released by its own Workflow, so that one alone reaches only those
- * rounds. Staff stay on paper until BOP support says so, never "until this clears": services hold
- * the binding they loaded when they started, so the row can clear before a fix has reached them.
+ * WP-2423 item 9: what an order Workflow the resolver refuses stops on the floor. A refusal stops that
+ * order type for guests and staff. A binding naming another version than the one that resolves does
+ * not stop guests: they still order and pay, and what they paid for is then refused at acceptance and
+ * paid release, so telling staff the phones are down would be false (the `Paid...` titles and
+ * summaries). A further round is released by its own Workflow, so that one alone reaches only those
+ * rounds. What staff do is the same in both, because a refusal also stops `Accept` for an order paid
+ * before it began. Staff stay on paper until BOP support says so, never "until this clears": services
+ * hold the binding they loaded when they started, so the row can clear before a fix has reached them.
+ *
+ * A paid pickup order is the one thing that does not wait. Its acceptance deadline asks no Workflow
+ * (order-paid-outcome-source), so if nobody can accept it, it is refunded at the deadline. Staff
+ * screens are online, so the outage hold does not apply (DEC-OUTAGE-ACCEPTANCE-HOLD decision 1). The
+ * text says so; whether the hold should cover this too is an Owner decision, in WP-2423.
+ *
+ * The board refuses an action over 400 characters or a summary over 600 (merchant-operations-alerts,
+ * OperationsAlerts): the whole board, so `pilot-alerts.test.mjs` holds these to the limits.
  */
+const PAID_ALREADY = "A guest who paid: no second payment; kitchen slip with order number.";
+const UNTIL_FIXED =
+  "Call BOP support now; stay on paper until they say it is fixed. Then enter the paper orders; for a slip with an order number, accept that order, mark it ready, do not remake it.";
+const PAUSE_ALL = `Pause all services in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New orders: paper slip, card machine. ${PAID_ALREADY} ${UNTIL_FIXED}`;
+const PAUSE_PICKUP = `Pause pickup in Hours & ordering until closing (can resume early). New pickup orders: paper slip, card machine. ${PAID_ALREADY} The order refunds itself if not accepted. ${UNTIL_FIXED}`;
+const PAUSE_DINE_IN = `Pause dine-in in Hours & ordering until closing (can resume early). Tell seated tables to order with staff. New rounds: paper slip, card machine. ${PAID_ALREADY} ${UNTIL_FIXED}`;
+const REFUNDED =
+  "A paid pickup order nobody can accept is refunded automatically about 30 minutes after payment (Orders shows the time), even if the guest has the food. If so, with their agreement take payment on the card machine and enter it as a Counter order recorded after an outage; if they decline or cannot be reached, write it on the incident sheet as a loss.";
+const PAUSE_TELLS =
+  "A pause tells new guests to order with staff; it does not reach seated tables.";
+const PAY_AT_END = "A table that pays at the end still pays at the end.";
+const PICKUP_STOPS = {
+  title: "Pickup orders cannot go through",
+  summary: `Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders here. A pause tells guests to order with staff. ${REFUNDED}`,
+  action: PAUSE_PICKUP,
+};
+const TABLES_STOP = {
+  title: "Table orders cannot go through",
+  summary: `Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders here. ${PAUSE_TELLS} ${PAY_AT_END}`,
+  action: PAUSE_DINE_IN,
+};
+const PICKUP_PAID = {
+  title: "Paid pickup orders may not reach the kitchen and may be refunded automatically",
+  summary: `Guests can still order pickup and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. ${REFUNDED}`,
+  action: PAUSE_PICKUP,
+};
+const TABLES_PAID = {
+  title: "Paid table orders may not reach the kitchen",
+  summary: `Guests at tables can still order and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. At a table that pays at the end nobody pays per round: its rounds may not send at all, and it still pays at the end.`,
+  action: PAUSE_DINE_IN,
+};
+/** Tells a Store that offers both order types that the other one carries on. */
+const besides = (words, other) => ({ ...words, summary: `${words.summary} ${other}` });
 const ORDER_WORKFLOW_WORDS = Object.freeze({
   Orders: {
     title: "New orders cannot go through",
-    summary:
-      "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.",
-    action:
-      "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine. Call BOP support now: they have to fix this. Stay on paper until they say it is fixed, then enter the paper orders.",
+    summary: `Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders here. ${PAUSE_TELLS} ${PAY_AT_END} ${REFUNDED}`,
+    action: PAUSE_ALL,
   },
-  Pickup: {
-    title: "Pickup orders cannot go through",
-    summary:
-      "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders on these screens. Dine-in is not affected.",
-    action:
-      "Take pickup orders on paper (items, name, pickup time) and take payment on the card machine. Dine-in carries on as usual. Call BOP support now: they have to fix this. Stay on paper for pickup until they say it is fixed, then enter the paper orders.",
-  },
-  Tables: {
-    title: "Table orders cannot go through",
-    summary:
-      "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders on these screens. Pickup is not affected.",
-    action:
-      "Take table orders on paper slips (table, round, items) and take payment on the card machine. Pickup carries on as usual. Call BOP support now: they have to fix this. Stay on paper for tables until they say it is fixed, then enter the paper orders.",
-  },
+  Pickup: besides(PICKUP_STOPS, "Dine-in is not affected."),
+  Tables: besides(TABLES_STOP, "Pickup is not affected."),
+  // Some order types stopped and others still taking payment, or all still taking payment.
   PaidOrders: {
-    title: "Paid orders may not reach the kitchen",
-    summary:
-      "Guests can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish orders on these screens.",
-    action: `In Hours & ordering, pause all services so guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. ${PAID_ALREADY} Call BOP support now and stay on paper until they say it is fixed.`,
+    title:
+      "Paid orders may not reach the kitchen, and paid pickup orders may be refunded automatically",
+    summary: `Some guests can still order and pay on their phones, but staff may not be able to accept or finish those orders, so they may not reach the kitchen. At a table that pays at the end, rounds may not send at all. ${REFUNDED}`,
+    action: PAUSE_ALL,
   },
-  PaidPickup: {
-    title: "Paid pickup orders may not reach the kitchen",
-    summary:
-      "Guests can still order pickup and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish pickup orders on these screens. Dine-in is not affected.",
-    action: `In Hours & ordering, pause pickup so guests stop paying for orders that may not reach the kitchen, and take pickup orders on paper with payment on the card machine. ${PAID_ALREADY} Call BOP support now and stay on paper for pickup until they say it is fixed.`,
-  },
-  PaidTables: {
-    title: "Paid table orders may not reach the kitchen",
-    summary:
-      "Guests at tables can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish table orders on these screens. Pickup is not affected.",
-    action: `In Hours & ordering, pause dine-in so new guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. ${PAID_ALREADY} Call BOP support now and stay on paper for tables until they say it is fixed.`,
-  },
+  PaidPickup: besides(PICKUP_PAID, "Dine-in is not affected."),
+  PaidTables: besides(TABLES_PAID, "Pickup is not affected."),
+  // A Store with one order type hears nothing about the type it does not sell.
+  PickupStore: PICKUP_STOPS,
+  TablesStore: TABLES_STOP,
+  PaidPickupStore: PICKUP_PAID,
+  PaidTablesStore: TABLES_PAID,
   FurtherRounds: {
     title: "Paid further rounds may not reach the kitchen",
     summary:
       "Guests at a table who pay round by round can still pay for another round on their phones, but that round may not reach the kitchen. First rounds, and tables that pay at the end, are not affected.",
-    action: `Ask seated tables to order further rounds with staff: paper slip, card machine. ${PAID_ALREADY} Call BOP support now and stay on paper for further rounds until they say it is fixed.`,
+    // A table keeps the timing it opened with, so this is worded by table: no Store setting can say.
+    action: `Tables that pay before each round order further rounds with staff: paper slip, card machine. Tables that pay at the end carry on as usual. ${PAID_ALREADY} ${UNTIL_FIXED}`,
   },
   PickupNotOffered: {
     title: "Pickup cannot be turned on yet",
@@ -160,14 +183,19 @@ function orderWorkflowState({ refusals, orderTypes }) {
   const pickup = refused("Pickup", offersPickup),
     tables = refused("DineIn", offersTables),
     rounds = refused("AdditionalRelease", offersTables);
-  const stops = (refusal) => refusal !== null && refusal.rule !== VERSION_MISMATCH;
-  // "Dine-in is not affected" holds only when both are offered and nothing of the other is refused.
-  const pickupOnly = offersPickup && offersTables && pickup && !tables && !rounds;
-  const tablesOnly = offersPickup && offersTables && tables && !pickup;
-  if (stops(pickup) || stops(tables))
-    return pickupOnly ? "Pickup" : tablesOnly ? "Tables" : "Orders";
-  if (pickup || tables) return pickupOnly ? "PaidPickup" : tablesOnly ? "PaidTables" : "PaidOrders";
-  if (rounds) return "FurtherRounds";
+  if (pickup !== null || tables !== null) {
+    const paying = (refusal) => refusal.rule === VERSION_MISMATCH;
+    // Someone can still pay for what then does not reach the kitchen. A further round is stopped
+    // with the first (it is submitted and paid the same way), and paid for while the first goes on.
+    const stillPaying =
+      (pickup !== null && paying(pickup)) || (tables !== null ? paying(tables) : rounds !== null);
+    const paid = stillPaying ? "Paid" : "";
+    if (!offersPickup || !offersTables) return `${paid}${offersPickup ? "Pickup" : "Tables"}Store`;
+    if (pickup === null) return `${paid}Tables`;
+    if (tables === null && rounds === null) return `${paid}Pickup`;
+    return stillPaying ? "PaidOrders" : "Orders";
+  }
+  if (rounds !== null) return "FurtherRounds";
   if (refusals.some(({ binding }) => binding === "Pickup")) return "PickupNotOffered";
   return refusals.some(({ binding }) => binding !== "Pickup" && !offersTables)
     ? "TablesNotOffered"
@@ -339,10 +367,11 @@ export const ALERT_CATALOG = Object.freeze({
     severity: "critical",
     raiseAfterMs: 2 * MINUTE,
     title: () => "Unpaid rounds are not being cancelled",
+    // A round at a table that pays at the end goes to the kitchen unpaid and is never this round.
     summary: () =>
-      "Unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party.",
+      "At tables that pay before each round, unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party. At a table that pays at the end, only a round waiting for staff is affected: it can be sent to the kitchen but not cancelled.",
     action: () =>
-      "Tables with an unpaid round cannot be closed and those rounds cannot be cancelled here, so trying again will not help. Seat the next party at another table and keep a note of those tables. Call BOP support now: they have to fix this. Close those tables once they say it is fixed.",
+      "Tables that pay before each round: one with an unpaid round cannot be closed and that round cannot be cancelled here, so trying again will not help. Seat the next party at another table and note those tables. Tables that pay at the end carry on and close once they pay. Call BOP support now: they have to fix this. Close the noted tables once they say it is fixed.",
     runbook: "alert-orders-unpaid-rounds",
   },
   "reconciliation.differences": {

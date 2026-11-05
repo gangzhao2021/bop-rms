@@ -55,9 +55,12 @@ export function alertTitle(title: string): string {
     "New orders cannot go through": t("New orders cannot go through"),
     "Pickup orders cannot go through": t("Pickup orders cannot go through"),
     "Table orders cannot go through": t("Table orders cannot go through"),
-    "Paid orders may not reach the kitchen": t("Paid orders may not reach the kitchen"),
-    "Paid pickup orders may not reach the kitchen": t(
-      "Paid pickup orders may not reach the kitchen",
+    "Paid orders may not reach the kitchen, and paid pickup orders may be refunded automatically":
+      t(
+        "Paid orders may not reach the kitchen, and paid pickup orders may be refunded automatically",
+      ),
+    "Paid pickup orders may not reach the kitchen and may be refunded automatically": t(
+      "Paid pickup orders may not reach the kitchen and may be refunded automatically",
     ),
     "Paid table orders may not reach the kitchen": t("Paid table orders may not reach the kitchen"),
     "Paid further rounds may not reach the kitchen": t(

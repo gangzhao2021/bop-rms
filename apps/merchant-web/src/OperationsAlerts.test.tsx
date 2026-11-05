@@ -94,6 +94,30 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     expect(quiet).not.toContain("all good");
     expect(quiet).toContain("alerted by email and phone or message alerts");
   });
+  it("WP-2423 item 9: every wording of these rows fits the board, or Home would lose the whole board", () => {
+    const rows = [
+      "Orders",
+      "Pickup",
+      "Tables",
+      "PaidOrders",
+      "PaidPickup",
+      "PaidTables",
+      "PickupStore",
+      "TablesStore",
+      "PaidPickupStore",
+      "PaidTablesStore",
+      "FurtherRounds",
+      "PickupNotOffered",
+      "TablesNotOffered",
+    ].map((state) => ["orders.workflow", { state }] as const);
+    for (const [key, params] of [...rows, ["orders.unpaid_rounds", {}] as const]) {
+      const { title, summary, action } = renderAlert(key, params);
+      const active = [
+        { key, severity: "critical" as const, title, summary, action, raisedAt: critical.raisedAt },
+      ];
+      expect(parseOperationsAlertView(view({ active })).active).toHaveLength(1);
+    }
+  });
   it("WP-2423 item 9: puts what a refused order Workflow stops, and what to do, at the top of Home", () => {
     const alert = (key: string, params: unknown, severity: "critical" | "warning") => {
       const { title, summary, action } = renderAlert(key, params);

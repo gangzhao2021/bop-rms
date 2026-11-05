@@ -66,6 +66,10 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
     { state: "PaidOrders" },
     { state: "PaidPickup" },
     { state: "PaidTables" },
+    { state: "PickupStore" },
+    { state: "TablesStore" },
+    { state: "PaidPickupStore" },
+    { state: "PaidTablesStore" },
     { state: "FurtherRounds" },
     { state: "PickupNotOffered" },
     { state: "TablesNotOffered" },
@@ -181,12 +185,36 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     expect(action("orders.held_stock", { count: 1, oldestAgeMs: 1 })).toContain("释放占用的配料");
     expect(action("backup.restore_check")).toContain("保留之前的备份");
     expect(action("orders.workflow", { state: "Orders" })).toContain("刷卡机");
-    expect(action("orders.workflow", { state: "Pickup" })).toContain("堂食照常");
-    expect(action("orders.workflow", { state: "Tables" })).toContain("自取照常");
+    expect(action("orders.workflow", { state: "Pickup" })).toContain("暂停自取");
+    expect(action("orders.workflow", { state: "Pickup" })).toContain("自动退款");
+    expect(action("orders.workflow", { state: "Tables" })).toContain("暂停堂食");
     expect(action("orders.workflow", { state: "PaidOrders" })).toContain("暂停所有服务");
     expect(action("orders.workflow", { state: "PaidPickup" })).toContain("暂停自取");
     expect(action("orders.workflow", { state: "PaidTables" })).toContain("暂停堂食");
     expect(action("orders.workflow", { state: "FurtherRounds" })).toContain("不要再收一次");
+    expect(action("orders.workflow", { state: "FurtherRounds" })).toContain(
+      "最后统一结账的桌子照常",
+    );
+    for (const state of ["Orders", "Pickup", "Tables", "PaidOrders", "PaidPickup", "PaidTables"]) {
+      expect(action("orders.workflow", { state })).toContain("一直到打烊（可以提前恢复）");
+      expect(action("orders.workflow", { state })).toContain("不要再收一次");
+      expect(action("orders.workflow", { state })).toContain("录入系统");
+      expect(action("orders.workflow", { state })).toContain("不要重做");
+    }
+    const summary = (state: string) =>
+      alertSummary(renderAlert("orders.workflow", { state }).summary);
+    for (const state of ["Orders", "Pickup", "PaidOrders", "PaidPickup", "PaidPickupStore"]) {
+      expect(summary(state)).toContain("付款约 30 分钟后会自动退款");
+      expect(summary(state)).toContain("记为损失");
+    }
+    expect(summary("TablesStore")).not.toContain("自取");
+    expect(summary("PaidTablesStore")).not.toContain("自取");
+    expect(summary("PickupStore")).not.toContain("堂食");
+    expect(summary("PaidPickupStore")).not.toContain("堂食");
+    expect(alertTitle(renderAlert("orders.workflow", { state: "PaidPickup" }).title)).toContain(
+      "自动退款",
+    );
+    expect(action("orders.unpaid_rounds")).toContain("付完款就能关闭");
     expect(action("orders.workflow", { state: "PickupNotOffered" })).toContain("开启自取之前");
     expect(action("orders.workflow", { state: "TablesNotOffered" })).toContain("开启堂食之前");
     expect(action("orders.unpaid_rounds")).toContain("重试没有用");
