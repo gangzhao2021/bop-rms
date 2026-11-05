@@ -42,6 +42,7 @@ import { createMerchantKitchenNotPrepared } from "../../apps/api/dist/merchant-k
 import { createMerchantProductAlcohol } from "../../apps/api/dist/merchant-product-alcohol.js";
 import { createMerchantKitchenSections } from "../../apps/api/dist/merchant-kitchen-sections.js";
 import { createMerchantKitchenSetup } from "../../apps/api/dist/merchant-kitchen-setup.js";
+import { createMerchantOpeningChecklist } from "../../apps/api/dist/merchant-opening-checklist.js";
 import { createMerchantMemberPoints } from "../../apps/api/dist/merchant-member-points.js";
 import {
   createMerchantStoreSupport,
@@ -1652,6 +1653,11 @@ export async function createInternalMerchant(
         persistence,
         authentication: service,
         nextReference: () => resources.credentials.reference(),
+      }),
+      // WP-2423 item 13 ③: what a new merchant's Owner still has to do.
+      openingChecklist: createMerchantOpeningChecklist({
+        persistence,
+        authentication: service,
       }),
       // WP-2423 item 11: the Store's kitchen setup, in the product.
       kitchenSetup: createMerchantKitchenSetup({

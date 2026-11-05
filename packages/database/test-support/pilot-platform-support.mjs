@@ -6,6 +6,7 @@ import {
   maskGuestName,
   ownerOnlySupportActions,
 } from "../../../apps/api/dist/merchant-store-support.js";
+import { createMerchantOpeningChecklist } from "../../../apps/api/dist/merchant-opening-checklist.js";
 import { createMerchantStoreScope } from "../../../apps/api/dist/merchant-store-scope.js";
 import { createMerchantOrderStaffCancellation } from "../../../apps/api/dist/merchant-order-staff-cancellation.js";
 import { createMerchantOrderItemStaffCancellation } from "../../../apps/api/dist/merchant-order-item-staff-cancellation.js";
@@ -240,6 +241,7 @@ export async function exercisePilotPlatformSupport(context) {
   // The harness's sign-in double, with what the real service adds: the session without a workspace.
   const known = (cookie) => [session, manager, support].find((one) => one.sessionCookie === cookie);
   const routes = (persistence, authentication) => ({
+    openingChecklist: createMerchantOpeningChecklist({ persistence, authentication }),
     storeSupport: createMerchantStoreSupport({
       persistence,
       authentication: {
@@ -282,6 +284,15 @@ export async function exercisePilotPlatformSupport(context) {
       assert.equal((await send("support/session")).status, 403);
       assert.equal((await send("support/store/view", { storeReference: store })).status, 403);
       assert.equal((await send("support/overview", {})).status, 403);
+      // WP-2423 item 13 ③: the Owner's opening list, as the restricted role: yes or no only.
+      const opening = await send("store/opening-list");
+      assert.equal(opening.status, 200, JSON.stringify(opening.body));
+      assert.deepEqual(Object.keys(opening.body).sort(), [
+        "allergenList",
+        "menuListed",
+        "setupPublished",
+      ]);
+      assert.equal(opening.body.setupPublished, true);
     },
     routes,
   );

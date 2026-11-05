@@ -196,6 +196,15 @@ const databaseAccessManifestInput = {
   ],
   accesses: [
     {
+      id: "owner-published-setup.read.store_configuration_version",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_store", table: "store_configuration_version" },
+      principal: { kind: "module", id: "@rms/store" },
+      readPattern: "owner-repository",
+      source: "packages/rms/store/src/infrastructure/persistence/owner-published-setup-source.ts",
+    },
+    {
       id: "store-features.read.store_feature_setting",
       operation: "read",
       mechanism: "repository",

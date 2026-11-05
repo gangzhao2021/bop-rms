@@ -1,6 +1,7 @@
 import { systemText, countOf, t } from "./i18n/i18n.js";
 import { useApprovalsWaiting, type ApprovalsWaiting } from "./approvals-waiting.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { OpeningList } from "./OpeningList.js";
 import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { Link } from "react-router";
@@ -1196,6 +1197,9 @@ export function StoreOverview({
         onRefresh={() => void load(true)}
         onCheckSystem={() => void system.refresh()}
       />
+      {permitted.kitchenSetup ? (
+        <OpeningList csrf={csrf} storeReference={storeReference} fetcher={fetcher} />
+      ) : null}
       <OverviewToday
         state={state}
         timeZone={timeZone}

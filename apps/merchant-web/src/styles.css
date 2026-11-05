@@ -9785,3 +9785,24 @@ tr[data-drop-target="true"] {
     color: var(--bop-color-text-muted);
   }
 }
+.opening-list {
+  display: grid;
+  gap: var(--bop-space-2);
+}
+.opening-list > * {
+  margin-block: 0;
+}
+.opening-list ol {
+  padding: 0;
+  list-style: none;
+}
+.opening-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--bop-space-3);
+  padding-block: var(--bop-space-2);
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.opening-list a[data-next] {
+  font-weight: 600;
+}

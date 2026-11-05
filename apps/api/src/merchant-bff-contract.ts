@@ -105,6 +105,7 @@ import type { createMerchantOrdinaryRefundApproval } from "./merchant-ordinary-r
 import type { createMerchantOrdinaryRefundDecline } from "./merchant-ordinary-refund-decline.js";
 import type { createMerchantOrdinaryRefundProgress } from "./merchant-ordinary-refund-progress.js";
 import type { createMerchantOrdinaryRefundApprovals } from "./merchant-ordinary-refund-approvals.js";
+import type { createMerchantOpeningChecklist } from "./merchant-opening-checklist.js";
 import type { createMerchantSoleOperator } from "./merchant-sole-operator-setting.js";
 import type { createMerchantStoreReceiptProfile } from "./merchant-store-receipt-profile.js";
 import type { createMerchantStorePublicProfile } from "./merchant-store-public-profile.js";
@@ -629,6 +630,8 @@ export interface MerchantBffRouterOptions {
   readonly memberPoints?: ReturnType<typeof createMerchantMemberPoints>;
   readonly storeSupportAccess?: ReturnType<typeof createMerchantStoreSupportAccess>;
   /** WP-2423 item 11: the Store's kitchen setup (one kitchen line and what it can't take). */
+  /** WP-2423 item 13 ③: what a new merchant's Owner still has to do. */
+  readonly openingChecklist?: ReturnType<typeof createMerchantOpeningChecklist>;
   readonly kitchenSetup?: ReturnType<typeof createMerchantKitchenSetup>;
   readonly kitchenSections?: ReturnType<typeof createMerchantKitchenSections>;
   /** WP-2423 item 8 ⑦ 4b-2: the per-head tea charge of a table. */

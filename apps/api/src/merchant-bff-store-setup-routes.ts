@@ -826,6 +826,23 @@ export function installMerchantStoreSetupRoutes(
   });
 
   // WP-2423 item 11: the Store's kitchen setup, read by staff who open Store setup.
+  router.get("/store/opening-list", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      !options.openingChecklist
+    ) {
+      denied(response);
+      return;
+    }
+    void options.openingChecklist
+      .read({ sessionCookie })
+      .then((view) => response.set("Cache-Control", NO_STORE).json(view))
+      .catch(() => denied(response));
+  });
   router.get("/store/kitchen-setup", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     if (
