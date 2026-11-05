@@ -50,14 +50,22 @@ function fakeIo({ apiUp = () => true, channels = [] } = {}) {
 const fresh = () => ({ schemaVersion: 1, alert: emptyAlertState(), probes: {}, channels: {} });
 
 describe("WP-2423 Q13 monitor cycle", () => {
-  it("WP-2423 item 9: names the rule that refused in BOP's log, and only there", async () => {
+  it("WP-2423 item 9: names what refused and the rule in BOP's log, and only there", async () => {
     const sent = [];
     const channel = { id: "email", kind: "email", send: vi.fn(async (m) => sent.push(m)) };
     const io = fakeIo({ apiUp: () => true, channels: [channel] });
     const observeBusiness = io.observeBusiness;
     io.observeBusiness = async () => ({
       ...(await observeBusiness()),
-      workflow: { ready: false, reason: "Orders", rule: "TwoBrandVersions" },
+      workflow: {
+        ready: false,
+        refusals: [
+          { binding: "Pickup", rule: "TwoBrandVersions" },
+          { binding: "DineIn", rule: "TwoBrandVersions" },
+          { binding: "Cancellation", rule: "TwoBrandVersions" },
+        ],
+        orderTypes: ["DineIn", "Pickup"],
+      },
     });
     const config = parsePilotOpsConfig(null, ".local/pilot-test");
     let state = fresh();
@@ -69,11 +77,22 @@ describe("WP-2423 Q13 monitor cycle", () => {
         event: "alert_raised",
         key: "orders.workflow",
         severity: "critical",
-        rule: "TwoBrandVersions",
+        refused: "Pickup:TwoBrandVersions DineIn:TwoBrandVersions",
+      },
+      {
+        event: "alert_raised",
+        key: "orders.unpaid_rounds",
+        severity: "critical",
+        refused: "Cancellation:TwoBrandVersions",
       },
     ]);
     expect(JSON.stringify(io.boards.at(-1))).not.toContain("TwoBrandVersions");
-    expect(io.boards.at(-1).active.map(({ key }) => key)).toEqual(["orders.workflow"]);
+    expect(
+      io.boards
+        .at(-1)
+        .active.map(({ key }) => key)
+        .sort(),
+    ).toEqual(["orders.unpaid_rounds", "orders.workflow"]);
     expect(JSON.stringify(sent)).not.toContain("TwoBrandVersions");
   });
   it("raises a down entry once on each channel, survives a restart without re-sending and clears", async () => {
@@ -321,6 +340,7 @@ describe("WP-2423 Q13 observations", () => {
         },
       });
     const clean = { count: 0, oldestAgeMs: 0 };
+    const orderTypes = ["DineIn"];
     for (const settlement of [clean, null]) {
       expect(
         (
@@ -330,35 +350,54 @@ describe("WP-2423 Q13 observations", () => {
           }, settlement)
         ).workflow,
       ).toEqual({ ready: true });
-      expect(
-        (
-          await read(
-            async () => ({ ready: false, reason: "Orders", rule: "NoBrandVersion" }),
-            settlement,
-          )
-        ).workflow,
-      ).toEqual({ ready: false, reason: "Orders", rule: "NoBrandVersion" });
-      expect(
-        (
-          await read(
-            async () => ({ ready: false, reason: "Cancellation", rule: "BrandVersionNotActive" }),
-            settlement,
-          )
-        ).workflow,
-      ).toEqual({ ready: false, reason: "Cancellation", rule: "BrandVersionNotActive" });
+      for (const refusals of [
+        [{ binding: "Pickup", rule: "NoBrandVersion" }],
+        [{ binding: "AdditionalRelease", rule: "ExpectedVersionChanged" }],
+        [
+          { binding: "DineIn", rule: "TwoBrandVersions" },
+          { binding: "Cancellation", rule: "BrandVersionNotActive" },
+        ],
+      ])
+        expect(
+          (await read(async () => ({ ready: false, refusals, orderTypes }), settlement)).workflow,
+        ).toEqual({ ready: false, refusals, orderTypes });
+      // Nothing installed yet: not checked, which is not the same as all good.
+      expect((await read(async () => null, settlement)).workflow).toBeNull();
       expect(
         (
           await read(async () => {
-            throw Error("lock timeout");
+            throw Error("PILOT_WORKFLOW_BINDING_UNAVAILABLE");
           }, settlement)
         ).workflow,
       ).toBe("unreadable");
     }
-    // A reason outside the closed pair reads as the worse one.
-    expect((await read(async () => ({ ready: false }), clean)).workflow).toEqual({
+    // Only the closed shape goes on: anything else could not be checked, never all good.
+    for (const answer of [
+      undefined,
+      {},
+      { ready: false },
+      { ready: false, refusals: [], orderTypes },
+      { ready: false, refusals: [{ binding: "Pickup", rule: "NoBrandVersion" }] },
+      { ready: false, refusals: [{ binding: "Sam", rule: "NoBrandVersion" }], orderTypes },
+    ])
+      expect((await read(async () => answer, clean)).workflow).toBe("unreadable");
+    // Extra fields stop here.
+    expect(
+      (
+        await read(
+          async () => ({
+            ready: false,
+            refusals: [{ binding: "Pickup", rule: "NoBrandVersion", detail: "table 4" }],
+            orderTypes,
+            detail: "table 4",
+          }),
+          clean,
+        )
+      ).workflow,
+    ).toEqual({
       ready: false,
-      reason: "Orders",
-      rule: "Refused",
+      refusals: [{ binding: "Pickup", rule: "NoBrandVersion" }],
+      orderTypes,
     });
   });
   it("WP-2423: reports whether a receipt can be issued with the Store's published template", async () => {

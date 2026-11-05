@@ -639,6 +639,8 @@ export async function installWorkflowRelease(args, now = () => Date.now()) {
     purposeCode: result.plan.published.purposeCode,
     versionReference: result.plan.published.versionReference,
     status: result.status,
+    // Services read the file when they start: "Written" means this Store needs a restart for it.
+    bindingFile: existing === null ? "Written" : "Unchanged",
   };
 }
 

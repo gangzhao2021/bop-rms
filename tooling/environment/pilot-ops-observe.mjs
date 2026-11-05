@@ -237,6 +237,26 @@ const settlementMissingGraceMs = 6 * 60 * 60_000;
  * differences: owner exception source items not yet closed by a refund; settlement: the daily
  * settlement status (days with differences, and closed days still missing after 6 h).
  */
+const WORKFLOW_BINDINGS = Object.freeze(["Pickup", "DineIn", "AdditionalRelease", "Cancellation"]);
+/** Only the closed shape goes on; anything else is unreadable, never a guess that all is well. */
+function closedWorkflowReadiness(readiness) {
+  if (readiness === null) return null;
+  if (readiness?.ready === true) return { ready: true };
+  if (
+    readiness?.ready !== false ||
+    !Array.isArray(readiness.refusals) ||
+    readiness.refusals.length === 0 ||
+    readiness.refusals.some(({ binding }) => !WORKFLOW_BINDINGS.includes(binding)) ||
+    !Array.isArray(readiness.orderTypes)
+  )
+    throw Error("PILOT_WORKFLOW_READINESS_INVALID");
+  return {
+    ready: false,
+    refusals: readiness.refusals.map(({ binding, rule }) => ({ binding, rule: String(rule) })),
+    orderTypes: readiness.orderTypes.map(String),
+  };
+}
+
 export async function readBusinessSignals({
   resources,
   installation,
@@ -332,20 +352,12 @@ export async function readBusinessSignals({
       quoteTax = "unreadable";
     }
 
-  // WP-2423 item 9: can orders still move through this Store's Workflows (read only; ready, reason
-  // and the refusing rule only)? null when not composed.
+  // WP-2423 item 9: can orders still move through this Store's Workflows (read only; which binding
+  // refused, the rule and the Store's order types only)? null when not composed or not installed yet.
   let workflow = null;
   if (typeof dependencies.readWorkflowReadiness === "function")
     try {
-      const readiness = await dependencies.readWorkflowReadiness(resources);
-      workflow =
-        readiness?.ready === true
-          ? { ready: true }
-          : {
-              ready: false,
-              reason: readiness?.reason === "Cancellation" ? "Cancellation" : "Orders",
-              rule: String(readiness?.rule ?? "Refused"),
-            };
+      workflow = closedWorkflowReadiness(await dependencies.readWorkflowReadiness(resources));
     } catch {
       workflow = "unreadable";
     }

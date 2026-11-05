@@ -160,8 +160,9 @@ export async function runMonitorCycle({ now, state, config, io }) {
       event: `alert_${item.kind}`,
       key: item.key,
       severity: item.severity,
-      // Which rule refused (a fixed word): for BOP's log only, never on a screen or in a message.
-      ...(typeof item.params?.rule === "string" ? { rule: item.params.rule } : {}),
+      // Which Workflow refused and by which rule (fixed words): for BOP's log only, never on a
+      // screen or in a message.
+      ...(typeof item.params?.refused === "string" ? { refused: item.params.refused } : {}),
     });
   const channels = await deliver({
     channels: io.channels,

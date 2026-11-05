@@ -54,13 +54,44 @@ export function alertAction(english: string): string {
       t(
         "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.",
       ),
-    "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. BOP support has to fix this.":
+    "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine. Call BOP support now: they have to fix this. Stay on paper until they say it is fixed, then enter the paper orders.":
       t(
-        "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. BOP support has to fix this.",
+        "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine. Call BOP support now: they have to fix this. Stay on paper until they say it is fixed, then enter the paper orders.",
       ),
-    "Nothing changes for guests yet. Tell BOP support today: they have to fix this.": t(
-      "Nothing changes for guests yet. Tell BOP support today: they have to fix this.",
+    "Take pickup orders on paper (items, name, pickup time) and take payment on the card machine. Dine-in carries on as usual. Call BOP support now: they have to fix this. Stay on paper for pickup until they say it is fixed, then enter the paper orders.":
+      t(
+        "Take pickup orders on paper (items, name, pickup time) and take payment on the card machine. Dine-in carries on as usual. Call BOP support now: they have to fix this. Stay on paper for pickup until they say it is fixed, then enter the paper orders.",
+      ),
+    "Take table orders on paper slips (table, round, items) and take payment on the card machine. Pickup carries on as usual. Call BOP support now: they have to fix this. Stay on paper for tables until they say it is fixed, then enter the paper orders.":
+      t(
+        "Take table orders on paper slips (table, round, items) and take payment on the card machine. Pickup carries on as usual. Call BOP support now: they have to fix this. Stay on paper for tables until they say it is fixed, then enter the paper orders.",
+      ),
+    "In Hours & ordering, pause all services so guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper until they say it is fixed.":
+      t(
+        "In Hours & ordering, pause all services so guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper until they say it is fixed.",
+      ),
+    "In Hours & ordering, pause pickup so guests stop paying for orders that may not reach the kitchen, and take pickup orders on paper with payment on the card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for pickup until they say it is fixed.":
+      t(
+        "In Hours & ordering, pause pickup so guests stop paying for orders that may not reach the kitchen, and take pickup orders on paper with payment on the card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for pickup until they say it is fixed.",
+      ),
+    "In Hours & ordering, pause dine-in so new guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for tables until they say it is fixed.":
+      t(
+        "In Hours & ordering, pause dine-in so new guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for tables until they say it is fixed.",
+      ),
+    "Ask seated tables to order further rounds with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for further rounds until they say it is fixed.":
+      t(
+        "Ask seated tables to order further rounds with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for further rounds until they say it is fixed.",
+      ),
+    "Nothing to do in the store today. Ask BOP support to fix this before you turn pickup on.": t(
+      "Nothing to do in the store today. Ask BOP support to fix this before you turn pickup on.",
     ),
+    "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.": t(
+      "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.",
+    ),
+    "Tables with an unpaid round cannot be closed and those rounds cannot be cancelled here, so trying again will not help. Seat the next party at another table and keep a note of those tables. Call BOP support now: they have to fix this. Close those tables once they say it is fixed.":
+      t(
+        "Tables with an unpaid round cannot be closed and those rounds cannot be cancelled here, so trying again will not help. Seat the next party at another table and keep a note of those tables. Call BOP support now: they have to fix this. Close those tables once they say it is fixed.",
+      ),
     'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
       t(
         'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
@@ -405,9 +436,41 @@ export function alertSummary(english: string): string {
       t(
         "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.",
       ),
-    "Rounds a table did not pay for stay open and keep their ingredients set aside. New orders and payments still work.":
+    "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders on these screens. Dine-in is not affected.":
       t(
-        "Rounds a table did not pay for stay open and keep their ingredients set aside. New orders and payments still work.",
+        "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders on these screens. Dine-in is not affected.",
+      ),
+    "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders on these screens. Pickup is not affected.":
+      t(
+        "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders on these screens. Pickup is not affected.",
+      ),
+    "Guests can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish orders on these screens.":
+      t(
+        "Guests can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish orders on these screens.",
+      ),
+    "Guests can still order pickup and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish pickup orders on these screens. Dine-in is not affected.":
+      t(
+        "Guests can still order pickup and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish pickup orders on these screens. Dine-in is not affected.",
+      ),
+    "Guests at tables can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish table orders on these screens. Pickup is not affected.":
+      t(
+        "Guests at tables can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish table orders on these screens. Pickup is not affected.",
+      ),
+    "Guests at a table who pay round by round can still pay for another round on their phones, but that round may not reach the kitchen. First rounds, and tables that pay at the end, are not affected.":
+      t(
+        "Guests at a table who pay round by round can still pay for another round on their phones, but that round may not reach the kitchen. First rounds, and tables that pay at the end, are not affected.",
+      ),
+    "This store does not offer pickup now, so guests and staff are not affected. If pickup were turned on, pickup orders would not go through.":
+      t(
+        "This store does not offer pickup now, so guests and staff are not affected. If pickup were turned on, pickup orders would not go through.",
+      ),
+    "This store does not offer dine-in now, so guests and staff are not affected. If dine-in were turned on, table orders would not go through.":
+      t(
+        "This store does not offer dine-in now, so guests and staff are not affected. If dine-in were turned on, table orders would not go through.",
+      ),
+    "Unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party.":
+      t(
+        "Unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party.",
       ),
     "No successful backup has been recorded for this store yet.": t(
       "No successful backup has been recorded for this store yet.",

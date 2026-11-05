@@ -76,6 +76,112 @@ const list = (values) => {
   return items.length <= 3 ? items.join(", ") : `${items.slice(0, 3).join(", ")} and more`;
 };
 
+const PAID_ALREADY =
+  "Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen.";
+/**
+ * WP-2423 item 9: an order Workflow the resolver refuses, by what it stops on the floor. A refusal
+ * stops that order type for guests and staff. A binding naming another version than the one that
+ * resolves does not stop guests: they still order and pay, and what they paid for is then refused
+ * at acceptance and paid release, so telling staff the phones are down would be false (the `Paid...`
+ * words). A further round is released by its own Workflow, so that one alone reaches only those
+ * rounds. Staff stay on paper until BOP support says so, never "until this clears": services hold
+ * the binding they loaded when they started, so the row can clear before a fix has reached them.
+ */
+const ORDER_WORKFLOW_WORDS = Object.freeze({
+  Orders: {
+    title: "New orders cannot go through",
+    summary:
+      "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.",
+    action:
+      "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine. Call BOP support now: they have to fix this. Stay on paper until they say it is fixed, then enter the paper orders.",
+  },
+  Pickup: {
+    title: "Pickup orders cannot go through",
+    summary:
+      "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders on these screens. Dine-in is not affected.",
+    action:
+      "Take pickup orders on paper (items, name, pickup time) and take payment on the card machine. Dine-in carries on as usual. Call BOP support now: they have to fix this. Stay on paper for pickup until they say it is fixed, then enter the paper orders.",
+  },
+  Tables: {
+    title: "Table orders cannot go through",
+    summary:
+      "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders on these screens. Pickup is not affected.",
+    action:
+      "Take table orders on paper slips (table, round, items) and take payment on the card machine. Pickup carries on as usual. Call BOP support now: they have to fix this. Stay on paper for tables until they say it is fixed, then enter the paper orders.",
+  },
+  PaidOrders: {
+    title: "Paid orders may not reach the kitchen",
+    summary:
+      "Guests can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish orders on these screens.",
+    action: `In Hours & ordering, pause all services so guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. ${PAID_ALREADY} Call BOP support now and stay on paper until they say it is fixed.`,
+  },
+  PaidPickup: {
+    title: "Paid pickup orders may not reach the kitchen",
+    summary:
+      "Guests can still order pickup and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish pickup orders on these screens. Dine-in is not affected.",
+    action: `In Hours & ordering, pause pickup so guests stop paying for orders that may not reach the kitchen, and take pickup orders on paper with payment on the card machine. ${PAID_ALREADY} Call BOP support now and stay on paper for pickup until they say it is fixed.`,
+  },
+  PaidTables: {
+    title: "Paid table orders may not reach the kitchen",
+    summary:
+      "Guests at tables can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish table orders on these screens. Pickup is not affected.",
+    action: `In Hours & ordering, pause dine-in so new guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. ${PAID_ALREADY} Call BOP support now and stay on paper for tables until they say it is fixed.`,
+  },
+  FurtherRounds: {
+    title: "Paid further rounds may not reach the kitchen",
+    summary:
+      "Guests at a table who pay round by round can still pay for another round on their phones, but that round may not reach the kitchen. First rounds, and tables that pay at the end, are not affected.",
+    action: `Ask seated tables to order further rounds with staff: paper slip, card machine. ${PAID_ALREADY} Call BOP support now and stay on paper for further rounds until they say it is fixed.`,
+  },
+  PickupNotOffered: {
+    title: "Pickup cannot be turned on yet",
+    summary:
+      "This store does not offer pickup now, so guests and staff are not affected. If pickup were turned on, pickup orders would not go through.",
+    action:
+      "Nothing to do in the store today. Ask BOP support to fix this before you turn pickup on.",
+  },
+  TablesNotOffered: {
+    title: "Dine-in cannot be turned on yet",
+    summary:
+      "This store does not offer dine-in now, so guests and staff are not affected. If dine-in were turned on, table orders would not go through.",
+    action:
+      "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.",
+  },
+});
+const ORDER_WORKFLOW_NOT_OFFERED = Object.freeze(["PickupNotOffered", "TablesNotOffered"]);
+const VERSION_MISMATCH = "ExpectedVersionChanged";
+
+/** What the refused order bindings stop, among the order types this Store offers; null if nothing. */
+function orderWorkflowState({ refusals, orderTypes }) {
+  const offersPickup = orderTypes.includes("Pickup"),
+    offersTables = orderTypes.includes("DineIn");
+  const refused = (binding, offered) =>
+    (offered && refusals.find((refusal) => refusal.binding === binding)) || null;
+  const pickup = refused("Pickup", offersPickup),
+    tables = refused("DineIn", offersTables),
+    rounds = refused("AdditionalRelease", offersTables);
+  const stops = (refusal) => refusal !== null && refusal.rule !== VERSION_MISMATCH;
+  // "Dine-in is not affected" holds only when both are offered and nothing of the other is refused.
+  const pickupOnly = offersPickup && offersTables && pickup && !tables && !rounds;
+  const tablesOnly = offersPickup && offersTables && tables && !pickup;
+  if (stops(pickup) || stops(tables))
+    return pickupOnly ? "Pickup" : tablesOnly ? "Tables" : "Orders";
+  if (pickup || tables) return pickupOnly ? "PaidPickup" : tablesOnly ? "PaidTables" : "PaidOrders";
+  if (rounds) return "FurtherRounds";
+  if (refusals.some(({ binding }) => binding === "Pickup")) return "PickupNotOffered";
+  return refusals.some(({ binding }) => binding !== "Pickup" && !offersTables)
+    ? "TablesNotOffered"
+    : null;
+}
+/** Which binding refused and by which rule, in fixed words, for BOP's log only. */
+const refusedWords = (refusals) =>
+  refusals
+    .map(
+      ({ binding, rule }) =>
+        `${binding}:${/^[A-Za-z]{1,40}$/u.test(rule ?? "") ? rule : "Refused"}`,
+    )
+    .join(" ");
+
 /**
  * The closed alert catalog. `severity` may be overridden per condition (escalation). Each entry
  * renders a title, a plain summary and what staff or the Owner should do; `runbook` names the
@@ -216,19 +322,28 @@ export const ALERT_CATALOG = Object.freeze({
       'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
     runbook: "alert-pricing-tax-configuration",
   },
+  // WP-2423 item 9: an order Workflow the resolver refuses, in the words of what it stops. Worded by
+  // ORDER_WORKFLOW_WORDS; a row that has cleared has no state and keeps the general title.
   "orders.workflow": {
     severity: "critical",
     raiseAfterMs: 2 * MINUTE,
-    title: () => "The store's order rules cannot be used",
-    summary: (p) =>
-      p.reason === "Cancellation"
-        ? "Rounds a table did not pay for stay open and keep their ingredients set aside. New orders and payments still work."
-        : "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.",
-    action: (p) =>
-      p.reason === "Cancellation"
-        ? "Nothing changes for guests yet. Tell BOP support today: they have to fix this."
-        : "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. BOP support has to fix this.",
+    title: (p) => ORDER_WORKFLOW_WORDS[p.state]?.title ?? "The store's order rules cannot be used",
+    summary: (p) => (ORDER_WORKFLOW_WORDS[p.state] ?? ORDER_WORKFLOW_WORDS.Orders).summary,
+    action: (p) => (ORDER_WORKFLOW_WORDS[p.state] ?? ORDER_WORKFLOW_WORDS.Orders).action,
     runbook: "alert-orders-workflow",
+  },
+  // WP-2423 item 9: the cancellation Workflow refused. A manager's cancel and "Guests left" pass the
+  // same Workflow as the automatic cancellation, so staff have no way round it on these screens,
+  // and their retry answers as if the connection had dropped.
+  "orders.unpaid_rounds": {
+    severity: "critical",
+    raiseAfterMs: 2 * MINUTE,
+    title: () => "Unpaid rounds are not being cancelled",
+    summary: () =>
+      "Unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party.",
+    action: () =>
+      "Tables with an unpaid round cannot be closed and those rounds cannot be cancelled here, so trying again will not help. Seat the next party at another table and keep a note of those tables. Call BOP support now: they have to fix this. Close those tables once they say it is fixed.",
+    runbook: "alert-orders-unpaid-rounds",
   },
   "reconciliation.differences": {
     severity: "warning",
@@ -453,17 +568,22 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
             : "TaxConfigurationMismatch",
       });
     if (business.workflow === "unreadable") unreadable.push("workflow");
-    else if (business.workflow?.ready === false)
-      raise(
-        "orders.workflow",
-        {
-          reason: business.workflow.reason === "Cancellation" ? "Cancellation" : "Orders",
-          rule: /^[A-Za-z]{1,40}$/u.test(business.workflow.rule ?? "")
-            ? business.workflow.rule
-            : "Refused",
-        },
-        business.workflow.reason === "Cancellation" ? "warning" : "critical",
-      );
+    else if (business.workflow?.ready === false) {
+      const { refusals, orderTypes } = business.workflow;
+      const state = orderWorkflowState({ refusals, orderTypes });
+      if (state !== null)
+        raise(
+          "orders.workflow",
+          {
+            state,
+            refused: refusedWords(refusals.filter(({ binding }) => binding !== "Cancellation")),
+          },
+          ORDER_WORKFLOW_NOT_OFFERED.includes(state) ? "warning" : "critical",
+        );
+      const unpaid = refusals.filter(({ binding }) => binding === "Cancellation");
+      if (unpaid.length > 0 && orderTypes.includes("DineIn"))
+        raise("orders.unpaid_rounds", { refused: refusedWords(unpaid) });
+    }
     if (business.heldStock === "unreadable") unreadable.push("heldStock");
     else if (pick(business.heldStock))
       raise("orders.held_stock", {

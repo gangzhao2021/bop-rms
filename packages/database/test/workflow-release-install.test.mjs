@@ -542,6 +542,8 @@ it("the tool writes a lost or second Store's binding, and refuses to move one th
       const first = file("first", "internal-test-workflow-Pickup.json");
       const installed = await install("OrderFulfillmentPickup", first);
       assert.equal(installed.status, "Applied");
+      // Services read the file when they start, so the operator is told when one needs a restart.
+      assert.equal(installed.bindingFile, "Written");
       assert.equal((await stat(first)).mode & 0o777, 0o600);
       const before = await counts(admin);
       const original = await readFile(first, "utf8");
@@ -573,11 +575,14 @@ it("the tool writes a lost or second Store's binding, and refuses to move one th
       // Rerunning changes nothing, not even the file.
       const rerun = await install("OrderFulfillmentPickup", first);
       assert.equal(rerun.status, "AlreadyInstalled");
+      assert.equal(rerun.bindingFile, "Unchanged");
       assert.equal(await readFile(first, "utf8"), original);
 
       // A lost file comes back naming the version the Brand uses.
       await rm(first);
-      assert.equal((await install("OrderFulfillmentPickup", first)).status, "AlreadyInstalled");
+      const restored = await install("OrderFulfillmentPickup", first);
+      assert.equal(restored.status, "AlreadyInstalled");
+      assert.equal(restored.bindingFile, "Written");
       assert.equal(named(await readFile(first, "utf8")), installed.versionReference);
       assert.deepEqual(await counts(admin), before);
 
@@ -922,16 +927,19 @@ it("a family that cannot serve the release is refused; an older one still binds;
       assert.equal(line.rule, "TwoBrandVersions");
 
       // Staff hear before a guest does: the monitor's read, under the restricted role, raises the row.
+      const bindingFile = (brand, plan, release) =>
+        workflowRuntimeFile(plan, {
+          environment: "InternalTest",
+          database: context.databaseName,
+          scope: { tenantReference: id(1), brandReference: brand, storeReference: id(3) },
+          operationReference: id(1),
+          release,
+        });
       const binding = (brand, version) =>
-        workflowRuntimeFile(
+        bindingFile(
+          brand,
           { published: { ...one.plan.published, versionReference: version } },
-          {
-            environment: "InternalTest",
-            database: context.databaseName,
-            scope: { tenantReference: id(1), brandReference: brand, storeReference: id(3) },
-            operationReference: id(1),
-            release: "OrderFulfillmentPickup",
-          },
+          "OrderFulfillmentPickup",
         );
       const resources = (brand) => ({
         publicProfile: { binding: { tenantReference: id(1) } },
@@ -939,40 +947,149 @@ it("a family that cannot serve the release is refused; an older one still binds;
         now: () => new Date(now()).toISOString(),
         transactions: restricted,
       });
-      const pickupOnly = (saved) => ({
-        loadWorkflow: async (kind) => {
-          if (kind !== "Pickup") throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
-          return saved;
-        },
-        loadCancellationWorkflow: async () => {
-          throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
-        },
+      const lost = () => {
+        throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
+      };
+      const store = ({ Cancellation, ...orders } = {}) => ({
+        loadWorkflow: async (kind) => orders[kind] ?? lost(),
+        loadCancellationWorkflow: async () => Cancellation ?? lost(),
       });
-      const notReady = await readInternalWorkflowReadiness(
+      const raised = (workflow) =>
+        evaluateAlertConditions({
+          now: now(),
+          probes: {},
+          supervisor: { maintenance: false, reportAgeMs: 0, attention: [] },
+          business: { workflow },
+          backup: { lastSuccessAt: new Date(now()).toISOString() },
+          certificate: null,
+          disks: [],
+          channels: [],
+        });
+      const duplicatedStore = store({
+        Pickup: binding(duplicated, one.plan.published.versionReference),
+      });
+      // Its other bindings do not load, and the refusal is still raised.
+      const notReady = await readInternalWorkflowReadiness(resources(duplicated), duplicatedStore);
+      assert.deepEqual(notReady, {
+        ready: false,
+        refusals: [{ binding: "Pickup", rule: "TwoBrandVersions" }],
+        // Nothing published yet: it is not called a type the Store does not sell.
+        orderTypes: ["Pickup", "DineIn"],
+      });
+      assert.deepEqual([...raised(notReady).keys()], ["orders.workflow"]);
+      assert.equal(raised(notReady).get("orders.workflow").severity, "critical");
+      assert.equal(raised(notReady).get("orders.workflow").params.state, "Pickup");
+
+      // Dine-in only, as the trial's hotpot restaurant: a refused pickup family is no emergency.
+      const configuration = (brand, version, modes) =>
+        admin.query(
+          `INSERT INTO rms_store.store_configuration_version(configuration_id,brand_id,store_id,configuration_version,lifecycle,configuration_source,brand_base_version_reference,default_locale,currency_code,time_zone,address_reference,contact_reference,receipt_reference,tax_configuration_reference,payment_configuration_reference,enabled_service_modes,effective_from,supersedes_configuration_reference,reason_code,authored_by_reference,approved_by_reference,approval_evidence_reference,publication_reference,live_gate_evidence_reference,created_at,updated_at,data_classification)
+           VALUES($1,$2,$3,$4,'Published','StoreOverride',$5,'en-CA','CAD','America/Toronto',$6,$7,$8,$9,$10,$11::text[],$12,$13,'TEST_ONLY',$14,$15,$16,$17,$18,$12,$12,'ConfigurationMetadata')`,
+          [
+            id(400 + version),
+            brand,
+            id(3),
+            version,
+            ...[410, 411, 412, 413, 414, 415].map(id),
+            modes,
+            "2026-01-01T00:00:00.000Z",
+            version === 1 ? null : id(400 + version - 1),
+            ...[416, 417, 418, 419, 420].map(id),
+          ],
+        );
+      await configuration(duplicated, 1, ["DineIn"]);
+      const dineInOnly = await readInternalWorkflowReadiness(
         resources(duplicated),
-        pickupOnly(binding(duplicated, one.plan.published.versionReference)),
+        duplicatedStore,
       );
-      assert.deepEqual(notReady, { ready: false, reason: "Orders", rule: "TwoBrandVersions" });
-      const conditions = evaluateAlertConditions({
-        now: now(),
-        probes: {},
-        supervisor: { maintenance: false, reportAgeMs: 0, attention: [] },
-        business: { workflow: notReady },
-        backup: { lastSuccessAt: new Date(now()).toISOString() },
-        certificate: null,
-        disks: [],
-        channels: [],
+      assert.deepEqual(dineInOnly.orderTypes, ["DineIn"]);
+      assert.equal(raised(dineInOnly).get("orders.workflow").severity, "warning");
+      assert.equal(raised(dineInOnly).get("orders.workflow").params.state, "PickupNotOffered");
+      // The Owner turns pickup on: the newest published version answers, and it is urgent at once.
+      await configuration(duplicated, 2, ["DineIn", "Pickup"]);
+      const turnedOn = await readInternalWorkflowReadiness(resources(duplicated), duplicatedStore);
+      assert.deepEqual(turnedOn.orderTypes, ["DineIn", "Pickup"]);
+      assert.equal(raised(turnedOn).get("orders.workflow").severity, "critical");
+      // Another Store's configuration says nothing about this one: row security, not a filter.
+      const another = await restricted.run(async (tx) => {
+        await tx.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [duplicated, id(4)],
+        );
+        return (
+          await tx.query(
+            "SELECT count(*)::int AS n FROM rms_store.store_configuration_version WHERE brand_id=$1",
+            [duplicated],
+          )
+        ).rows[0].n;
       });
-      assert.deepEqual([...conditions.keys()], ["orders.workflow"]);
-      assert.equal(conditions.get("orders.workflow").severity, "critical");
-      // A healthy Brand is ready, under the same role, and an older family is healthy too.
+      assert.equal(another, 0);
+
+      // A whole, healthy Store: every binding the tool writes loads and answers, under the same
+      // role, and a family from an earlier repository is healthy too.
+      const installWhole = async (brand, first, pickupInstalled = null) => {
+        const files = {};
+        for (const [index, release] of Object.keys(platformWorkflows).entries()) {
+          const installed =
+            release === "OrderFulfillmentPickup" && pickupInstalled !== null
+              ? pickupInstalled
+              : await inTransaction(admin, () =>
+                  applyWorkflowRelease(admin, released(brand, first + index, release), now),
+                );
+          files[platformWorkflows[release].binding ?? "Cancellation"] = bindingFile(
+            brand,
+            installed.plan,
+            release,
+          );
+        }
+        return files;
+      };
+      const healthyBrand = id(25);
+      const healthy = await installWhole(healthyBrand, 11);
+      assert.deepEqual(
+        await readInternalWorkflowReadiness(resources(healthyBrand), store(healthy)),
+        { ready: true },
+      );
       assert.deepEqual(
         await readInternalWorkflowReadiness(
           resources(olderBrand),
-          pickupOnly(binding(olderBrand, older.plan.published.versionReference)),
+          store(await installWhole(olderBrand, 21, older)),
         ),
         { ready: true },
       );
+
+      // A binding naming another version: guests still pay, so it is not the same alarm.
+      const staleBinding = binding(healthyBrand, id(999));
+      const stale = await readInternalWorkflowReadiness(
+        resources(healthyBrand),
+        store({ ...healthy, Pickup: staleBinding }),
+      );
+      assert.deepEqual(stale.refusals, [{ binding: "Pickup", rule: "ExpectedVersionChanged" }]);
+      assert.equal(raised(stale).get("orders.workflow").params.state, "PaidPickup");
+
+      // A cancellation binding from another family: the staff cancel would refuse it.
+      const otherFamily = {
+        ...healthy.Cancellation,
+        definition: { ...healthy.Cancellation.definition, workflowReference: id(998) },
+      };
+      const noCancel = await readInternalWorkflowReadiness(
+        resources(healthyBrand),
+        store({ ...healthy, Cancellation: otherFamily }),
+      );
+      assert.deepEqual(noCancel.refusals, [
+        { binding: "Cancellation", rule: "ExpectedVersionChanged" },
+      ]);
+      assert.deepEqual([...raised(noCancel).keys()], ["orders.unpaid_rounds"]);
+
+      // Lost bindings at a Store whose Brand has its Workflows: it cannot say all is well, in whole
+      // or in part. Services hold their copies until the next restart, so nobody else would notice.
+      for (const lostSome of [store(), store({ ...healthy, DineIn: undefined })])
+        await assert.rejects(
+          readInternalWorkflowReadiness(resources(healthyBrand), lostSome),
+          /PILOT_WORKFLOW_BINDING_UNAVAILABLE/u,
+        );
+      // A Store being opened, whose Brand holds nothing yet: not checked.
+      assert.equal(await readInternalWorkflowReadiness(resources(id(26)), store()), null);
     } finally {
       spy.mockRestore();
       await roles.drop();

@@ -5808,6 +5808,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Receipts are not being issued": "收据没有开出",
   "Orders cannot be priced": "订单无法计价",
   "The store's order rules cannot be used": "门店的订单规则无法使用",
+  "New orders cannot go through": "无法接收新订单",
+  "Pickup orders cannot go through": "无法接收自取订单",
+  "Table orders cannot go through": "无法接收堂食订单",
+  "Paid orders may not reach the kitchen": "已付款的订单可能到不了后厨",
+  "Paid pickup orders may not reach the kitchen": "已付款的自取订单可能到不了后厨",
+  "Paid table orders may not reach the kitchen": "已付款的堂食订单可能到不了后厨",
+  "Paid further rounds may not reach the kitchen": "已付款的加点轮次可能到不了后厨",
+  "Pickup cannot be turned on yet": "暂时不能开启自取",
+  "Dine-in cannot be turned on yet": "暂时不能开启堂食",
+  "Unpaid rounds are not being cancelled": "未付款的轮次取消不了",
   "Payment differences need checking": "付款差异需要核对",
   "Day-end settlement has open problems": "日结还有未解决的问题",
   "Last night's backup failed": "昨晚备份失败",
@@ -7076,10 +7086,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人暂时不受影响。今天内请 BOP 技术支持检查自取时间；如果只剩最后一小时，自取订单改记在纸上。",
   "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.":
     "有客人问起，告诉他们修好后收据会显示在订单页面上。店主：在“门店设置”里选择一个已发布的收据模板（第 5 步），然后发送、批准并发布设置（第 8 步）。这段时间已付款订单的收据之后会自动补上；如果持续超过 30 分钟，请 BOP 技术支持重新发送卡住的更新。",
-  "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. BOP support has to fix this.":
-    "新订单先记在纸上（菜品、姓名、桌号或自取时间），在刷卡机上收款，等这条提醒消失后再录入系统。这个问题需要 BOP 技术支持处理。",
-  "Nothing changes for guests yet. Tell BOP support today: they have to fix this.":
-    "客人暂时不受影响。请今天告知 BOP 技术支持，这个问题需要他们处理。",
+  "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine. Call BOP support now: they have to fix this. Stay on paper until they say it is fixed, then enter the paper orders.":
+    "新订单先记在纸上（菜品、姓名、桌号或自取时间），在刷卡机上收款。请立即联系 BOP 技术支持，这个问题需要他们处理。在他们确认修好之前继续用纸质点单，之后再把纸质订单录入系统。",
+  "Take pickup orders on paper (items, name, pickup time) and take payment on the card machine. Dine-in carries on as usual. Call BOP support now: they have to fix this. Stay on paper for pickup until they say it is fixed, then enter the paper orders.":
+    "自取订单先记在纸上（菜品、姓名、自取时间），在刷卡机上收款。堂食照常进行。请立即联系 BOP 技术支持，这个问题需要他们处理。在他们确认修好之前，自取继续用纸质点单，之后再把纸质订单录入系统。",
+  "Take table orders on paper slips (table, round, items) and take payment on the card machine. Pickup carries on as usual. Call BOP support now: they have to fix this. Stay on paper for tables until they say it is fixed, then enter the paper orders.":
+    "堂食订单先写在纸条上（桌号、轮次、菜品），在刷卡机上收款。自取照常进行。请立即联系 BOP 技术支持，这个问题需要他们处理。在他们确认修好之前，堂食继续用纸质点单，之后再把纸质订单录入系统。",
+  "In Hours & ordering, pause all services so guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper until they say it is fixed.":
+    "请在“营业时间与点单”里暂停所有服务，免得客人继续为可能到不了后厨的订单付款；请已入座的客人找员工点单：写纸条，用刷卡机收款。客人说已经付过款的，不要再收一次；把他们点的菜写在纸条上交给后厨。请立即联系 BOP 技术支持，在他们确认修好之前继续用纸质点单。",
+  "In Hours & ordering, pause pickup so guests stop paying for orders that may not reach the kitchen, and take pickup orders on paper with payment on the card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for pickup until they say it is fixed.":
+    "请在“营业时间与点单”里暂停自取，免得客人继续为可能到不了后厨的订单付款；自取订单记在纸上，用刷卡机收款。客人说已经付过款的，不要再收一次；把他们点的菜写在纸条上交给后厨。请立即联系 BOP 技术支持，在他们确认修好之前，自取继续用纸质点单。",
+  "In Hours & ordering, pause dine-in so new guests stop paying for orders that may not reach the kitchen, and ask seated tables to order with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for tables until they say it is fixed.":
+    "请在“营业时间与点单”里暂停堂食，免得新来的客人继续为可能到不了后厨的订单付款；请已入座的客人找员工点单：写纸条，用刷卡机收款。客人说已经付过款的，不要再收一次；把他们点的菜写在纸条上交给后厨。请立即联系 BOP 技术支持，在他们确认修好之前，堂食继续用纸质点单。",
+  "Ask seated tables to order further rounds with staff: paper slip, card machine. Do not take a second payment from guests who say they paid; put their order on a paper slip for the kitchen. Call BOP support now and stay on paper for further rounds until they say it is fixed.":
+    "请已入座的客人找员工加点：写纸条，用刷卡机收款。客人说已经付过款的，不要再收一次；把他们点的菜写在纸条上交给后厨。请立即联系 BOP 技术支持，在他们确认修好之前，加点继续用纸质点单。",
+  "Nothing to do in the store today. Ask BOP support to fix this before you turn pickup on.":
+    "今天店里不用做什么。开启自取之前，请先让 BOP 技术支持处理好这个问题。",
+  "Nothing to do in the store today. Ask BOP support to fix this before you turn dine-in on.":
+    "今天店里不用做什么。开启堂食之前，请先让 BOP 技术支持处理好这个问题。",
+  "Tables with an unpaid round cannot be closed and those rounds cannot be cancelled here, so trying again will not help. Seat the next party at another table and keep a note of those tables. Call BOP support now: they have to fix this. Close those tables once they say it is fixed.":
+    "有未付款轮次的桌子关不了，这些轮次在这里也取消不了，重试没有用。请把下一桌客人安排到别的桌子，并记下这些桌号。请立即联系 BOP 技术支持，这个问题需要他们处理。等他们确认修好后，再关闭这些桌子。",
   'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
     "新订单先记在纸上（菜品、姓名、桌号或自取时间），在刷卡机上收款，等这条提醒消失后再录入系统。店主：在“门店设置”第 8 步，税务选择“使用当前门店的设置”，然后发送、批准并发布。否则请联系 BOP 技术支持。",
   "Open Exceptions to see each difference. For a business day's totals, open Settlement and choose that day; it explains the difference and what to do.":
@@ -7187,8 +7213,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "“门店设置”里选择的收据模板无法使用，所以现在付款的客人拿不到收据。订单、付款和后厨不受影响。",
   "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.":
     "客人无法在手机上点餐或付款，员工也可能无法在这些页面录入、接单或完成订单。",
-  "Rounds a table did not pay for stay open and keep their ingredients set aside. New orders and payments still work.":
-    "桌上未付款的那一轮不会自动取消，占用的配料也不会释放。新订单和付款仍可正常进行。",
+  "Guests cannot order or pay for pickup on their phones, and staff may not be able to enter, accept or finish pickup orders on these screens. Dine-in is not affected.":
+    "客人无法在手机上下自取订单或付款，员工也可能无法在这些页面录入、接单或完成自取订单。堂食不受影响。",
+  "Guests at tables cannot order or pay on their phones, and staff may not be able to enter, accept or finish table orders on these screens. Pickup is not affected.":
+    "堂食客人无法在手机上点餐或付款，员工也可能无法在这些页面录入、接单或完成堂食订单。自取不受影响。",
+  "Guests can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish orders on these screens.":
+    "客人还能在手机上点餐付款，但付款的订单可能到不了后厨，员工也可能无法在这些页面接单或完成订单。",
+  "Guests can still order pickup and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish pickup orders on these screens. Dine-in is not affected.":
+    "客人还能在手机上下自取订单并付款，但付款的订单可能到不了后厨，员工也可能无法在这些页面接单或完成自取订单。堂食不受影响。",
+  "Guests at tables can still order and pay on their phones, but what they pay for may not reach the kitchen, and staff may not be able to accept or finish table orders on these screens. Pickup is not affected.":
+    "堂食客人还能在手机上点餐付款，但付款的订单可能到不了后厨，员工也可能无法在这些页面接单或完成堂食订单。自取不受影响。",
+  "Guests at a table who pay round by round can still pay for another round on their phones, but that round may not reach the kitchen. First rounds, and tables that pay at the end, are not affected.":
+    "按轮付款的桌子还能在手机上为加点付款，但这一轮可能到不了后厨。第一轮和最后统一结账的桌子不受影响。",
+  "This store does not offer pickup now, so guests and staff are not affected. If pickup were turned on, pickup orders would not go through.":
+    "这家店现在不提供自取，客人和员工不受影响。如果开启自取，自取订单将无法接收。",
+  "This store does not offer dine-in now, so guests and staff are not affected. If dine-in were turned on, table orders would not go through.":
+    "这家店现在不提供堂食，客人和员工不受影响。如果开启堂食，堂食订单将无法接收。",
+  "Unpaid rounds are not cancelled automatically and a manager cannot cancel them. They stay open and keep their ingredients set aside, so dishes can show as sold out to other guests, and the table cannot be closed for the next party.":
+    "未付款的轮次不会自动取消，经理也取消不了。它们一直开着并占用配料，其他客人可能看到菜品售罄，这张桌子也无法关闭、接待下一桌。",
   "The Store's published settings could not be read, so no new order can be priced, online or at the counter. Orders already paid are not affected.":
     "读取不到门店已发布的设置，所以线上和柜台的新订单都无法计价。已付款的订单不受影响。",
   "The tax settings published in Store setup are not the ones this store is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.":

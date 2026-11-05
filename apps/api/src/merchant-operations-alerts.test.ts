@@ -16,6 +16,7 @@ vi.mock("./merchant-store-scope.js", () => ({
 }));
 import {
   createPersistentMerchantOperationsAlerts,
+  operationsAlertKeys,
   projectOperationsAlertBoard,
 } from "./merchant-operations-alerts.js";
 
@@ -43,6 +44,22 @@ const board = () => ({
   ],
   outboundChannels: { email: true, webhooks: 1, heartbeat: false },
   lastSuccessfulBackupAt: "2026-10-14T02:00:00.000Z",
+});
+
+describe("WP-2423 item 9: the rows about a Store's own orders", () => {
+  /**
+   * A row that says guests are stuck is useless if the Owner's Home drops it. Once each Store has
+   * its own board (fix-store-monitors), a merchant's Home shows only `merchantOperationsAlertKeys`,
+   * a list this branch does not have: when the two meet, this fails until both keys are on it.
+   */
+  it("stay on the Home of the merchant they are about", async () => {
+    const module = (await import("./merchant-operations-alerts.js")) as unknown as {
+      readonly merchantOperationsAlertKeys?: ReadonlySet<string>;
+    };
+    const merchant = module.merchantOperationsAlertKeys ?? new Set(operationsAlertKeys);
+    for (const key of ["orders.workflow", "orders.unpaid_rounds"])
+      expect(merchant.has(key), `${key} on a merchant's Home`).toBe(true);
+  });
 });
 
 describe("WP-2423 Q13 operations alert board projection", () => {

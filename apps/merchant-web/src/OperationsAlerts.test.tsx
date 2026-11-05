@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   OPERATIONS_ALERTS_NOT_PERMITTED,
   StoreSystemLine,
@@ -10,6 +11,20 @@ import {
   type OperationsAlertView,
 } from "./OperationsAlerts.js";
 import { NeedsAttention, initialOverviewState } from "./StoreOverview.js";
+
+/** The monitor's own catalog: what a merchant reads is what it writes. */
+const catalogFile = new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url).href;
+const { renderAlert } = (await import(/* @vite-ignore */ catalogFile)) as {
+  readonly renderAlert: (
+    key: string,
+    params: unknown,
+  ) => {
+    readonly title: string;
+    readonly summary: string;
+    readonly action: string;
+    readonly runbook: string;
+  };
+};
 
 const view = (change: Partial<OperationsAlertView> = {}): OperationsAlertView => ({
   monitor: "Reporting",
@@ -78,6 +93,40 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
     expect(quiet).toContain("Store system: needs attention");
     expect(quiet).not.toContain("all good");
     expect(quiet).toContain("alerted by email and phone or message alerts");
+  });
+  it("WP-2423 item 9: puts what a refused order Workflow stops, and what to do, at the top of Home", () => {
+    const alert = (key: string, params: unknown, severity: "critical" | "warning") => {
+      const { title, summary, action } = renderAlert(key, params);
+      return { key, severity, title, summary, action, raisedAt: "2026-10-15T11:56:00.000Z" };
+    };
+    const read = {
+      kind: "Ready",
+      value: parseOperationsAlertView(
+        view({
+          active: [
+            alert("orders.workflow", { state: "PickupNotOffered" }, "warning"),
+            alert("orders.unpaid_rounds", {}, "critical"),
+          ],
+        }),
+      ),
+    } as const;
+    const html = rows(read);
+    expect(html.indexOf("Unpaid rounds are not being cancelled")).toBeLessThan(
+      html.indexOf("Pickup cannot be turned on yet"),
+    );
+    expect(html).toContain("trying again will not help");
+    expect(html).toContain("Urgent");
+    expect(html).toContain("Today");
+    expect(line(read)).not.toContain("all good");
+    setLanguageForTest("zh-Hans");
+    try {
+      const chinese = rows(read);
+      expect(chinese).toContain("未付款的轮次取消不了");
+      expect(chinese).toContain("暂时不能开启自取");
+      expect(chinese).toContain("重试没有用");
+    } finally {
+      setLanguageForTest("en");
+    }
   });
   it("warns in Needs attention that nothing is being checked when the monitor is silent or not running", () => {
     const silent = { kind: "Ready", value: view({ monitor: "Silent" }) } as const;

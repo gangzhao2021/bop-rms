@@ -57,7 +57,20 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
     { reason: "StoreConfigurationUnavailable" },
     { reason: "TaxConfigurationMismatch" },
   ],
-  "orders.workflow": [{ reason: "Orders" }, { reason: "Cancellation" }],
+  "orders.workflow": [
+    // The title of a row that has cleared, which has no state left.
+    {},
+    { state: "Orders" },
+    { state: "Pickup" },
+    { state: "Tables" },
+    { state: "PaidOrders" },
+    { state: "PaidPickup" },
+    { state: "PaidTables" },
+    { state: "FurtherRounds" },
+    { state: "PickupNotOffered" },
+    { state: "TablesNotOffered" },
+  ],
+  "orders.unpaid_rounds": [{}],
   "reconciliation.differences": [
     { count: 1, oldestAgeMs: 2 * 60 * MIN },
     { count: 3, oldestAgeMs: 5 * MIN },
@@ -167,8 +180,17 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     expect(action("pickup.capacity_horizon", { coveredMs: 5 })).toContain("客人暂时不受影响");
     expect(action("orders.held_stock", { count: 1, oldestAgeMs: 1 })).toContain("释放占用的配料");
     expect(action("backup.restore_check")).toContain("保留之前的备份");
-    expect(action("orders.workflow", { reason: "Orders" })).toContain("刷卡机");
-    expect(action("orders.workflow", { reason: "Cancellation" })).toContain("客人暂时不受影响");
+    expect(action("orders.workflow", { state: "Orders" })).toContain("刷卡机");
+    expect(action("orders.workflow", { state: "Pickup" })).toContain("堂食照常");
+    expect(action("orders.workflow", { state: "Tables" })).toContain("自取照常");
+    expect(action("orders.workflow", { state: "PaidOrders" })).toContain("暂停所有服务");
+    expect(action("orders.workflow", { state: "PaidPickup" })).toContain("暂停自取");
+    expect(action("orders.workflow", { state: "PaidTables" })).toContain("暂停堂食");
+    expect(action("orders.workflow", { state: "FurtherRounds" })).toContain("不要再收一次");
+    expect(action("orders.workflow", { state: "PickupNotOffered" })).toContain("开启自取之前");
+    expect(action("orders.workflow", { state: "TablesNotOffered" })).toContain("开启堂食之前");
+    expect(action("orders.unpaid_rounds")).toContain("重试没有用");
+    expect(action("orders.unpaid_rounds")).toContain("别的桌子");
   });
   it("shows the monitor's own words when a text matches nothing, never blank", () => {
     setLanguageForTest("zh-Hans");

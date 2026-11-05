@@ -231,55 +231,231 @@ describe("WP-2423 Q13 alert rules", () => {
       "the check that orders can be priced",
     ]);
   });
-  it("WP-2423 item 9: says so when the store's order rules cannot be used, and what staff do", () => {
-    const o = healthy();
-    o.business.workflow = { ready: true };
-    expect(keys(evaluateAlertConditions(o))).toEqual([]);
-    o.business.workflow = { ready: false, reason: "Orders", rule: "TwoBrandVersions" };
-    const c = evaluateAlertConditions(o);
-    expect(keys(c)).toEqual(["orders.workflow"]);
-    expect(c.get("orders.workflow").severity).toBe("critical");
-    expect(c.get("orders.workflow").params).toEqual({
-      reason: "Orders",
-      rule: "TwoBrandVersions",
+  describe("WP-2423 item 9: what a refused Workflow stops, in the words of the floor", () => {
+    const both = ["DineIn", "Pickup"];
+    const conditions = (refusals, orderTypes = both) => {
+      const o = healthy();
+      o.business.workflow = { ready: false, refusals, orderTypes };
+      return evaluateAlertConditions(o);
+    };
+    const refused = (binding, rule = "TwoBrandVersions") => ({ binding, rule });
+    const stale = (binding) => refused(binding, "ExpectedVersionChanged");
+    const say = (condition, key = "orders.workflow") => renderAlert(key, condition.get(key).params);
+    const readable = (text) => {
+      expect(text.title.length).toBeLessThanOrEqual(120);
+      expect(text.summary.length).toBeLessThanOrEqual(600);
+      expect(text.action.length).toBeLessThanOrEqual(400);
+      // The rule stays in BOP's log, and staff are never sent back the moment the row clears.
+      expect(`${text.title} ${text.summary} ${text.action}`).not.toMatch(
+        /TwoBrandVersions|ExpectedVersionChanged|Workflow|binding|once this clears/u,
+      );
+      expect(text.runbook).toMatch(/^alert-orders-/u);
+    };
+
+    it("is quiet when every Workflow answers", () => {
+      const o = healthy();
+      o.business.workflow = { ready: true };
+      expect(keys(evaluateAlertConditions(o))).toEqual([]);
+      o.business.workflow = null;
+      expect(keys(evaluateAlertConditions(o))).toEqual([]);
     });
-    const text = renderAlert("orders.workflow", c.get("orders.workflow").params);
-    expect(text.title).toBe("The store's order rules cannot be used");
-    expect(text.summary).toContain("cannot order or pay on their phones");
-    expect(text.action).toContain("on paper");
-    expect(text.action).toContain("card machine");
-    expect(text.action).toContain("BOP support");
-    expect(text.runbook).toBe("alert-orders-workflow");
-    // The rule stays in BOP's log: it never reaches the words a person reads.
-    expect(`${text.title} ${text.summary} ${text.action}`).not.toContain("TwoBrandVersions");
-    const { state } = advanceAlertState(emptyAlertState(), c, T0);
-    const raised = advanceAlertState(state, c, T0 + 2 * MIN);
-    expect(raised.notifications.map((n) => [n.kind, n.key])).toEqual([
-      ["raised", "orders.workflow"],
-    ]);
-    const shown = buildAlertBoard(raised.state, {
-      observedAt: new Date(T0).toISOString(),
-      channels: [],
-      backup: null,
+    it("every order type refused: paper and the card machine, urgent", () => {
+      const c = conditions([refused("Pickup"), refused("DineIn"), refused("AdditionalRelease")]);
+      expect(keys(c)).toEqual(["orders.workflow"]);
+      expect(c.get("orders.workflow").severity).toBe("critical");
+      expect(c.get("orders.workflow").params).toEqual({
+        state: "Orders",
+        refused:
+          "Pickup:TwoBrandVersions DineIn:TwoBrandVersions AdditionalRelease:TwoBrandVersions",
+      });
+      const text = say(c);
+      readable(text);
+      expect(text.title).toBe("New orders cannot go through");
+      expect(text.summary).toContain("cannot order or pay on their phones");
+      expect(text.action).toContain("on paper");
+      expect(text.action).toContain("card machine");
+      expect(text.action).toContain("until they say it is fixed");
     });
-    expect(shown.active.map(({ key }) => key)).toEqual(["orders.workflow"]);
-    expect(JSON.stringify(shown)).not.toContain("TwoBrandVersions");
-    // Only the cancellation Workflow refused: guests are not stopped, so it is not urgent.
-    o.business.workflow = { ready: false, reason: "Cancellation", rule: "BrandVersionNotActive" };
-    const later = evaluateAlertConditions(o);
-    expect(later.get("orders.workflow").severity).toBe("warning");
-    const quiet = renderAlert("orders.workflow", later.get("orders.workflow").params);
-    expect(quiet.summary).toContain("New orders and payments still work");
-    expect(quiet.action).toContain("Nothing changes for guests yet");
-    // A rule that is not one fixed word never reaches the log.
-    o.business.workflow = { ready: false, reason: "Orders", rule: "guest Sam at table 4" };
-    expect(evaluateAlertConditions(o).get("orders.workflow").params.rule).toBe("Refused");
-    // A read that could not run is "could not check", never the alarm itself.
-    o.business.workflow = "unreadable";
-    expect(keys(evaluateAlertConditions(o))).toEqual(["monitor.source"]);
-    expect(evaluateAlertConditions(o).get("monitor.source").params.sources).toEqual([
-      "the check of the store's order rules",
-    ]);
+    it("Pickup only: the floor keeps serving dine-in", () => {
+      const c = conditions([refused("Pickup")]);
+      expect(c.get("orders.workflow").severity).toBe("critical");
+      const text = say(c);
+      readable(text);
+      expect(text.title).toBe("Pickup orders cannot go through");
+      expect(text.summary).toContain("Dine-in is not affected");
+      expect(text.action).toContain("pickup orders on paper");
+      expect(text.action).toContain("Dine-in carries on as usual");
+    });
+    it("dine-in only: pickup carries on, and later rounds are stopped with the first", () => {
+      for (const refusals of [
+        [refused("DineIn")],
+        [refused("DineIn"), refused("AdditionalRelease")],
+      ]) {
+        const text = say(conditions(refusals));
+        readable(text);
+        expect(text.title).toBe("Table orders cannot go through");
+        expect(text.summary).toContain("Pickup is not affected");
+        expect(text.action).toContain("Pickup carries on as usual");
+      }
+    });
+    it("a Store with one order type is never told the other is unaffected", () => {
+      const dineInOnly = say(conditions([refused("DineIn")], ["DineIn"]));
+      expect(dineInOnly.title).toBe("New orders cannot go through");
+      expect(dineInOnly.summary).not.toContain("Pickup");
+      const pickupOnly = say(conditions([refused("Pickup")], ["Pickup"]));
+      expect(pickupOnly.title).toBe("New orders cannot go through");
+      expect(pickupOnly.summary).not.toContain("Dine-in");
+      expect(say(conditions([stale("DineIn")], ["DineIn"])).title).toBe(
+        "Paid orders may not reach the kitchen",
+      );
+    });
+    it("one order type refused while the other is affected too reads as both", () => {
+      expect(say(conditions([refused("Pickup"), refused("AdditionalRelease")])).title).toBe(
+        "New orders cannot go through",
+      );
+      expect(say(conditions([refused("Pickup"), stale("DineIn")])).title).toBe(
+        "New orders cannot go through",
+      );
+      expect(say(conditions([stale("Pickup"), stale("AdditionalRelease")])).title).toBe(
+        "Paid orders may not reach the kitchen",
+      );
+    });
+    it("a stale binding on every order type: guests still pay, so staff stop it themselves", () => {
+      const c = conditions([stale("Pickup"), stale("DineIn"), stale("AdditionalRelease")]);
+      expect(c.get("orders.workflow").severity).toBe("critical");
+      expect(c.get("orders.workflow").params.state).toBe("PaidOrders");
+      const text = say(c);
+      readable(text);
+      expect(text.title).toBe("Paid orders may not reach the kitchen");
+      expect(text.summary).toContain("can still order and pay");
+      expect(text.summary).not.toContain("cannot order");
+      expect(text.action).toContain("pause all services");
+      expect(text.action).toContain("order with staff");
+      expect(text.action).toContain("Do not take a second payment");
+      expect(text.action).toContain("until they say it is fixed");
+    });
+    it("a stale binding on one order type names that type", () => {
+      const pickup = say(conditions([stale("Pickup")]));
+      readable(pickup);
+      expect(pickup.title).toBe("Paid pickup orders may not reach the kitchen");
+      expect(pickup.summary).toContain("Dine-in is not affected");
+      expect(pickup.action).toContain("pause pickup");
+      const tables = say(conditions([stale("DineIn")]));
+      readable(tables);
+      expect(tables.title).toBe("Paid table orders may not reach the kitchen");
+      expect(tables.summary).toContain("Pickup is not affected");
+      expect(tables.action).toContain("pause dine-in");
+    });
+    it("further rounds only: first rounds keep going, and either way of refusing reads the same", () => {
+      for (const refusal of [refused("AdditionalRelease"), stale("AdditionalRelease")]) {
+        const c = conditions([refusal]);
+        expect(c.get("orders.workflow").severity).toBe("critical");
+        const text = say(c);
+        readable(text);
+        expect(text.title).toBe("Paid further rounds may not reach the kitchen");
+        expect(text.summary).toContain("First rounds");
+        expect(text.action).toContain("order further rounds with staff");
+        expect(text.action).not.toContain("pause");
+      }
+    });
+    it("an order type the Store does not offer is never an emergency, and BOP still hears", () => {
+      // The hotpot has pickup off and a Pickup binding: no paper on a Saturday for a refused family.
+      const pickup = conditions([refused("Pickup")], ["DineIn"]);
+      expect(pickup.get("orders.workflow").severity).toBe("warning");
+      expect(pickup.get("orders.workflow").params.refused).toBe("Pickup:TwoBrandVersions");
+      const text = say(pickup);
+      readable(text);
+      expect(text.title).toBe("Pickup cannot be turned on yet");
+      expect(text.action).toContain("before you turn pickup on");
+      expect(`${text.summary} ${text.action}`).not.toMatch(/paper|card machine/u);
+      // Turning pickup on makes the same refusal urgent on the next read.
+      expect(conditions([refused("Pickup")]).get("orders.workflow").severity).toBe("critical");
+      for (const binding of ["DineIn", "AdditionalRelease", "Cancellation"]) {
+        const tables = conditions([refused(binding)], ["Pickup"]);
+        expect(keys(tables)).toEqual(["orders.workflow"]);
+        expect(tables.get("orders.workflow").severity).toBe("warning");
+        readable(say(tables));
+        expect(say(tables).title).toBe("Dine-in cannot be turned on yet");
+      }
+      // What it does offer still comes first.
+      expect(say(conditions([refused("Pickup"), refused("DineIn")], ["DineIn"])).title).toBe(
+        "New orders cannot go through",
+      );
+    });
+    it("the cancellation Workflow has its own urgent row, and names what staff cannot do", () => {
+      const c = conditions([refused("Cancellation", "BrandVersionNotActive")]);
+      expect(keys(c)).toEqual(["orders.unpaid_rounds"]);
+      expect(c.get("orders.unpaid_rounds").severity).toBe("critical");
+      expect(c.get("orders.unpaid_rounds").params).toEqual({
+        refused: "Cancellation:BrandVersionNotActive",
+      });
+      const text = say(c, "orders.unpaid_rounds");
+      readable(text);
+      expect(text.title).toBe("Unpaid rounds are not being cancelled");
+      expect(text.summary).toContain("a manager cannot cancel them");
+      expect(text.summary).toContain("sold out");
+      expect(text.action).toContain("cannot be closed");
+      expect(text.action).toContain("trying again will not help");
+      expect(text.action).toContain("another table");
+      expect(text.action).toContain("Call BOP support now");
+      expect(text.action).not.toContain("Nothing changes");
+      // With order Workflows refused too, staff read both.
+      const all = conditions([refused("DineIn"), refused("Cancellation")]);
+      expect(keys(all)).toEqual(["orders.unpaid_rounds", "orders.workflow"]);
+      expect(all.get("orders.workflow").params.refused).toBe("DineIn:TwoBrandVersions");
+    });
+    it("raises after two minutes, and the rule goes nowhere a person reads", () => {
+      const c = conditions([refused("Pickup"), refused("DineIn"), refused("Cancellation")]);
+      const { state, notifications } = advanceAlertState(emptyAlertState(), c, T0);
+      expect(notifications).toEqual([]);
+      const raised = advanceAlertState(state, c, T0 + 2 * MIN);
+      expect(raised.notifications.map((n) => [n.kind, n.key])).toEqual([
+        ["raised", "orders.workflow"],
+        ["raised", "orders.unpaid_rounds"],
+      ]);
+      const board = buildAlertBoard(raised.state, {
+        observedAt: new Date(T0).toISOString(),
+        channels: [],
+        backup: null,
+      });
+      expect(board.active.map(({ key }) => key).sort()).toEqual([
+        "orders.unpaid_rounds",
+        "orders.workflow",
+      ]);
+      expect(JSON.stringify(board)).not.toContain("TwoBrandVersions");
+      const message = renderMessage(raised.notifications, {
+        siteLabel: "Main St",
+        runbookBase: "x",
+      });
+      expect(JSON.stringify(message)).not.toContain("TwoBrandVersions");
+      // A row that has cleared has no state left, and still has a title.
+      const gone = advanceAlertState(raised.state, new Map(), T0 + 3 * MIN);
+      const cleared = advanceAlertState(gone.state, new Map(), T0 + 6 * MIN);
+      expect(
+        buildAlertBoard(cleared.state, {
+          observedAt: new Date(T0).toISOString(),
+          channels: [],
+          backup: null,
+        }).recentlyCleared.map(({ title }) => title),
+      ).toEqual([
+        "The store's order rules cannot be used",
+        "Unpaid rounds are not being cancelled",
+      ]);
+    });
+    it("a rule that is not one fixed word never reaches the log", () => {
+      expect(
+        conditions([refused("Pickup", "guest Sam at table 4")]).get("orders.workflow").params
+          .refused,
+      ).toBe("Pickup:Refused");
+    });
+    it('a read that could not run is "could not check", never the alarm itself', () => {
+      const o = healthy();
+      o.business.workflow = "unreadable";
+      expect(keys(evaluateAlertConditions(o))).toEqual(["monitor.source"]);
+      expect(evaluateAlertConditions(o).get("monitor.source").params.sources).toEqual([
+        "the check of the store's order rules",
+      ]);
+    });
   });
   it("says no backup exists until the first one, and nothing about the supervisor during maintenance", () => {
     const o = healthy();

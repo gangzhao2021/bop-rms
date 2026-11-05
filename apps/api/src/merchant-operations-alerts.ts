@@ -22,6 +22,7 @@ export const operationsAlertKeys = Object.freeze([
   "receipts.template",
   "pricing.tax_configuration",
   "orders.workflow",
+  "orders.unpaid_rounds",
   "orders.held_stock",
   "pickup.capacity_horizon",
   "reconciliation.differences",
