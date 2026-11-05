@@ -7650,7 +7650,7 @@ describe("WP-2423 Q13 operations alerts read route", () => {
     outbound: { email: false, webhooks: 0, heartbeat: false },
     lastSuccessfulBackupAt: null,
     plannedUpdate: null,
-    checksIncomplete: false,
+    checksIncompleteSince: null,
     support: null,
   };
   it("passes only the session cookie and answers without caching", async () => {

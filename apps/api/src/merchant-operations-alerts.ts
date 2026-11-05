@@ -98,10 +98,11 @@ export interface OperationsAlertView {
    */
   readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
   /**
-   * Merchant: some of this Store's checks could not run (BOP has been told). The Home must not say
-   * all is good. Always false for Installation, whose board names them.
+   * Merchant: some of this Store's checks could not run since this instant (BOP has been told). The
+   * Home must not say all is good, or quote `observedAt`: the board is rewritten every minute whether
+   * or not a read worked. Always null for Installation, whose board names them.
    */
-  readonly checksIncomplete: boolean;
+  readonly checksIncompleteSince: string | null;
   /** Who staff call when a row says "Ask BOP support"; null until the operator configures it. */
   readonly support: { readonly phone: string; readonly testOnly: boolean } | null;
 }
@@ -169,7 +170,7 @@ export function projectOperationsAlertBoard(
       outbound: noOutbound,
       lastSuccessfulBackupAt: null,
       plannedUpdate: null,
-      checksIncomplete: false,
+      checksIncompleteSince: null,
       support: null,
     });
   const boardKeys = [
@@ -271,7 +272,9 @@ export function projectOperationsAlertBoard(
         }),
     lastSuccessfulBackupAt: merchant ? null : lastSuccessfulBackupAt,
     plannedUpdate: silent ? null : plannedUpdate,
-    checksIncomplete: merchant && active.some((item) => item.key === "monitor.source"),
+    checksIncompleteSince: merchant
+      ? (active.find((item) => item.key === "monitor.source")?.raisedAt ?? null)
+      : null,
     support,
   });
 }

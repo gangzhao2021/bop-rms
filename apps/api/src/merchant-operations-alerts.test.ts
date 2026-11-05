@@ -131,7 +131,7 @@ describe("WP-2423 Q13 operations alert board projection", () => {
       outbound: { email: true, webhooks: 1, heartbeat: false },
       lastSuccessfulBackupAt: "2026-10-14T02:00:00.000Z",
       plannedUpdate: null,
-      checksIncomplete: false,
+      checksIncompleteSince: null,
       support: null,
     });
   });
@@ -250,19 +250,24 @@ describe("a merchant's projection of its own board", () => {
       expiresAt: "2026-10-15T08:13:00.000Z",
     });
   });
-  it("says when some of its checks could not run, without naming them", () => {
-    const incomplete = { ...board(), active: [entry("monitor.source")] };
+  it("says since when some of its checks could not run, without naming them", () => {
+    const incomplete = {
+      ...board(),
+      active: [{ ...entry("monitor.source"), raisedAt: "2026-10-15T05:05:00.000Z" }],
+    };
     const view = projectOperationsAlertBoard(incomplete, at, { audience: "Merchant" });
     expect(view.active).toEqual([]);
-    expect(view.checksIncomplete).toBe(true);
+    // The board is rewritten every minute whether or not a read worked: its time proves nothing.
+    expect(view.observedAt).toBe("2026-10-15T08:00:00.000Z");
+    expect(view.checksIncompleteSince).toBe("2026-10-15T05:05:00.000Z");
     expect(
       projectOperationsAlertBoard({ ...board(), active: [] }, at, { audience: "Merchant" })
-        .checksIncomplete,
-    ).toBe(false);
+        .checksIncompleteSince,
+    ).toBe(null);
     // The board that says it in words keeps saying it.
     const installation = projectOperationsAlertBoard(incomplete, at);
     expect(installation.active.map((item) => item.key)).toEqual(["monitor.source"]);
-    expect(installation.checksIncomplete).toBe(false);
+    expect(installation.checksIncompleteSince).toBe(null);
   });
   it("a merchant reads of the end of its ordering only in the last day, from the monitor's own catalog", async () => {
     const catalog = (await import(
@@ -327,8 +332,11 @@ describe("a merchant's projection of its own board", () => {
   });
   it("is unchanged for the installation, apart from saying who it is for", () => {
     const value = everything();
-    const { audience, checksIncomplete, support, ...view } = projectOperationsAlertBoard(value, at);
-    expect([audience, checksIncomplete, support]).toEqual(["Installation", false, null]);
+    const { audience, checksIncompleteSince, support, ...view } = projectOperationsAlertBoard(
+      value,
+      at,
+    );
+    expect([audience, checksIncompleteSince, support]).toEqual(["Installation", null, null]);
     expect(view.active).toHaveLength(operationsAlertKeys.length);
     expect(view.recentlyCleared).toHaveLength(3);
     expect(view.outbound).toEqual(value.outboundChannels);

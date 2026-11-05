@@ -529,7 +529,7 @@ const merchantBoard = {
   outbound: { email: false, webhooks: 0, heartbeat: false },
   lastSuccessfulBackupAt: null,
   plannedUpdate: null,
-  checksIncomplete: false,
+  checksIncompleteSince: null,
   support: null,
 };
 const stuckUpdates = {
@@ -566,10 +566,11 @@ test("@production A merchant's Home says nothing about a monitor it cannot start
   await expect(card.getByText(/Last checked 12:00/u)).toBeVisible();
   await expect(page.getByText(/backup/iu)).toHaveCount(0);
 
-  // Some of its checks could not run: BOP is told; here it does not say all is good.
-  board = { ...merchantBoard, checksIncomplete: true };
+  // Some of its checks could not run: BOP is told; here it does not say all is good, and the time
+  // is when they stopped, not the board's, which moves every minute whether a read worked or not.
+  board = { ...merchantBoard, checksIncompleteSince: "2026-10-15T13:05:00.000Z" };
   await card.getByRole("button", { name: "Check again" }).click();
-  await expect(card.getByText("Store system: last checked Oct 15, 2026, 12:00 PM")).toBeVisible();
+  await expect(card.getByText("Store system: last checked Oct 15, 2026, 9:05 AM")).toBeVisible();
   await expect(card.getByText("all good")).toHaveCount(0);
 
   // Its own problem: what to do, the page that settles it and who to call.

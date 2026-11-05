@@ -36,7 +36,7 @@ const view = (change: Partial<OperationsAlertView> = {}): OperationsAlertView =>
   outbound: { email: false, webhooks: 0, heartbeat: false },
   lastSuccessfulBackupAt: "2026-10-15T08:30:00.000Z",
   plannedUpdate: null,
-  checksIncomplete: false,
+  checksIncompleteSince: null,
   support: null,
   ...change,
 });
@@ -413,10 +413,22 @@ describe("a merchant's own Store on the Home", () => {
     const quiet = line(merchant({ monitor: "Silent" }));
     expect(quiet).toContain("Store system: last checked Oct 15, 2026, 8:00 AM");
     expect(quiet).not.toContain("all good");
-    // Some of its checks could not run: not "all good", and nothing to alarm the owner about.
-    const partial = line(merchant({ checksIncomplete: true }));
-    expect(partial).toContain("Store system: last checked Oct 15, 2026, 8:00 AM");
+    // Some of its checks could not run: not "all good", and nothing to alarm the owner about. The
+    // time is when they stopped, not the board's: that moves every minute whether a read worked.
+    const since = "2026-10-15T09:05:00.000Z";
+    const partial = line(merchant({ checksIncompleteSince: since }));
+    expect(partial).toContain("Store system: last checked Oct 15, 2026, 5:05 AM");
+    expect(partial).not.toContain("8:00");
     expect(partial).not.toContain("all good");
+    // The monitor stopping later does not make the checks more recent than they were.
+    expect(line(merchant({ monitor: "Silent", checksIncompleteSince: since }))).toContain(
+      "Store system: last checked Oct 15, 2026, 5:05 AM",
+    );
+    // With a row to show the line points at it, and still does not vouch for a minute ago.
+    const both = line(merchant({ active: [stuck], checksIncompleteSince: since }));
+    expect(both).toContain("Store system: needs attention");
+    expect(both).toContain("Last checked Oct 15, 2026, 5:05 AM");
+    expect(both).not.toContain("08:00");
     expect(line(merchant({ active: [stuck] }))).toContain("Store system: needs attention");
     expect(line(merchant({ monitor: "Silent", active: [stuck] }))).toContain(
       "Store system: needs attention",
@@ -497,18 +509,18 @@ describe("a merchant's own Store on the Home", () => {
   it("reads what an older server sends, and refuses what it does not know", () => {
     const older: Record<string, unknown> = { ...view() };
     delete older.audience;
-    delete older.checksIncomplete;
+    delete older.checksIncompleteSince;
     delete older.support;
     expect(parseOperationsAlertView(older)).toMatchObject({
       audience: "Installation",
-      checksIncomplete: false,
+      checksIncompleteSince: null,
       support: null,
     });
     expect(parseOperationsAlertView(view({ audience: "Merchant" })).audience).toBe("Merchant");
     expect(() => parseOperationsAlertView({ ...view(), audience: "Guest" })).toThrow(
       "OPERATIONS_ALERTS_UNAVAILABLE",
     );
-    expect(() => parseOperationsAlertView({ ...view(), checksIncomplete: "yes" })).toThrow(
+    expect(() => parseOperationsAlertView({ ...view(), checksIncompleteSince: "yes" })).toThrow(
       "OPERATIONS_ALERTS_UNAVAILABLE",
     );
   });

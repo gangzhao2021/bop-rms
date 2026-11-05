@@ -41,8 +41,11 @@ export interface OperationsAlertView {
   readonly lastSuccessfulBackupAt: string | null;
   /** WP-2423 (2026-10-18): a planned update in progress; store-down alerts wait during it. */
   readonly plannedUpdate: { readonly startedAt: string; readonly expiresAt: string } | null;
-  /** Merchant: some of this Store's checks could not run, so the Home must not say all is good. */
-  readonly checksIncomplete: boolean;
+  /**
+   * Merchant: some of this Store's checks could not run since this instant, so the Home must not say
+   * all is good, or quote `observedAt`, which moves every minute whether or not a read worked.
+   */
+  readonly checksIncompleteSince: string | null;
   /** Who staff call when a row says "Ask BOP support"; null until it is configured. */
   readonly support: { readonly phone: string; readonly testOnly: boolean } | null;
 }
@@ -185,14 +188,12 @@ export function parseOperationsAlertView(value: unknown): OperationsAlertView {
   // An older server sends none of these.
   const view = exact(value, [
     ...keys,
-    ...["plannedUpdate", "audience", "checksIncomplete", "support"].filter(
+    ...["plannedUpdate", "audience", "checksIncompleteSince", "support"].filter(
       (optional) => value !== null && typeof value === "object" && Object.hasOwn(value, optional),
     ),
   ]);
   const audience = view.audience ?? "Installation";
   if (audience !== "Installation" && audience !== "Merchant") return invalid();
-  const checksIncomplete = view.checksIncomplete ?? false;
-  if (typeof checksIncomplete !== "boolean") return invalid();
   let support: OperationsAlertView["support"] = null;
   if (view.support !== undefined && view.support !== null) {
     const contact = exact(view.support, ["phone", "testOnly"]);
@@ -252,7 +253,10 @@ export function parseOperationsAlertView(value: unknown): OperationsAlertView {
     lastSuccessfulBackupAt:
       view.lastSuccessfulBackupAt === null ? null : instant(view.lastSuccessfulBackupAt),
     plannedUpdate,
-    checksIncomplete,
+    checksIncompleteSince:
+      view.checksIncompleteSince === undefined || view.checksIncompleteSince === null
+        ? null
+        : instant(view.checksIncompleteSince),
     support,
   };
 }
@@ -404,9 +408,10 @@ export function systemAttentionItems(
       ],
       later: [],
     };
+  const lastChecked = view.checksIncompleteSince ?? view.observedAt;
   const asOf =
-    view.monitor === "Silent" && view.observedAt !== null
-      ? t(" · as of {observedAt}", { observedAt: at(view.observedAt) })
+    view.monitor === "Silent" && lastChecked !== null
+      ? t(" · as of {observedAt}", { observedAt: at(lastChecked) })
       : "";
   const row = (item: OperationsAlert): AttentionItem => {
     const page = ALERT_PAGES[item.key];
@@ -479,14 +484,15 @@ export function systemAttentionItems(
   };
 }
 
-/** A merchant's board with nothing to report and no way to vouch for it: when it last checked. */
+/**
+ * A merchant's board with nothing to report and no way to vouch for it: when it last checked. That
+ * is when its checks stopped running if they did, and the board's own time only if the monitor went
+ * quiet with every check still running.
+ */
 const quietSince = (view: OperationsAlertView): string | null =>
-  view.audience === "Merchant" &&
-  view.active.length === 0 &&
-  view.plannedUpdate === null &&
-  (view.monitor === "Silent" || view.checksIncomplete)
-    ? view.observedAt
-    : null;
+  view.audience !== "Merchant" || view.active.length > 0 || view.plannedUpdate !== null
+    ? null
+    : (view.checksIncompleteSince ?? (view.monitor === "Silent" ? view.observedAt : null));
 
 function systemStatusWords(
   read: OperationsAlertsRead,
@@ -561,7 +567,11 @@ export function StoreSystemLine({
               {view.observedAt === null
                 ? ""
                 : t(" · Last checked {observedAt}", {
-                    observedAt: storeTime(view.observedAt, timeZone),
+                    // Checks that stopped running may have stopped days ago: with the date.
+                    observedAt:
+                      view.checksIncompleteSince === null
+                        ? storeTime(view.observedAt, timeZone)
+                        : at(view.checksIncompleteSince),
                   })}
             </span>
           )}
