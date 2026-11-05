@@ -147,6 +147,60 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     expect(choicesComplete(item, { [id(7)]: [id(9)] })).toBe(true);
   });
 
+  it("WP-2423 item 3b: a choice repeated at the table counts each repeat, and prices each", () => {
+    const item = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
+    if (!item) throw new Error("fixture");
+    const rule = item.rules[0];
+    if (!rule) throw new Error("fixture");
+    const pearls = id(20),
+      pudding = id(21);
+    const toppings = {
+      ...item,
+      rules: [
+        {
+          ...rule,
+          bindingReference: id(19),
+          minimumSelections: 0,
+          maximumSelections: 3,
+          options: [
+            {
+              optionReference: pearls,
+              name: "Pearls",
+              priceMinor: "80",
+              maximumQuantity: 2,
+              selectedByDefault: false,
+              defaultQuantity: 0,
+              conflictOptionReferences: [],
+            },
+            {
+              optionReference: pudding,
+              name: "Pudding",
+              priceMinor: "120",
+              maximumQuantity: 2,
+              selectedByDefault: false,
+              defaultQuantity: 0,
+              conflictOptionReferences: [],
+            },
+          ],
+        },
+      ],
+    };
+    const chosen = { [id(19)]: [pearls, pudding] };
+    expect(choicesComplete(toppings, chosen, { [pearls]: 2, [pudding]: 1 })).toBe(true);
+    // Two of pearls and two of pudding is four of "at most 3".
+    expect(choicesComplete(toppings, chosen, { [pearls]: 2, [pudding]: 2 })).toBe(false);
+    // More of one than the group allows of each.
+    expect(choicesComplete(toppings, { [id(19)]: [pearls] }, { [pearls]: 3 })).toBe(false);
+    expect(
+      estimatedLineMinor({
+        key: "a",
+        item: toppings,
+        quantity: 1,
+        options: [{ optionReference: pearls, name: "Pearls", quantity: 2 }],
+      }),
+    ).toBe(610n);
+  });
+
   it("v15 run: names a short item, how many are left and how many were ordered", () => {
     const item = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
     if (!item) throw new Error("fixture");

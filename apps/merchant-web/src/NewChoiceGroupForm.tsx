@@ -1,6 +1,7 @@
 import { t } from "./i18n/i18n.js";
 import { useState } from "react";
 import { newOperationReference } from "./operation-reference.js";
+import { choiceRule } from "./store-option-set-page.js";
 import { MenuPageError, type MenuClient, type NewChoiceGroupCommand } from "./store-menu-pages.js";
 
 interface Row {
@@ -8,7 +9,24 @@ interface Row {
   readonly nameZh: string;
 }
 
-/** The command for a simple group: choose one (required or not) or any; the first one may be the default. */
+/**
+ * WP-2423 item 3b: the limits an "any number" group may have. The server and the domain refuse the
+ * same (at most 50 in total, 20 of one choice, and never more of one choice than the group allows).
+ */
+export function choiceGroupLimitsAllowed(most: number | null, perChoice: number): boolean {
+  return (
+    (most === null || (Number.isSafeInteger(most) && most >= 1 && most <= 50)) &&
+    Number.isSafeInteger(perChoice) &&
+    perChoice >= 1 &&
+    perChoice <= 20 &&
+    (most === null || perChoice <= most)
+  );
+}
+
+/**
+ * The command for a simple group: choose one (required or not) or any, up to a limit and up to a
+ * number of each; the first one may be the default.
+ */
 export function newChoiceGroupCommand(input: {
   readonly operationReference: string;
   readonly name: string;
@@ -17,21 +35,28 @@ export function newChoiceGroupCommand(input: {
   readonly required: boolean;
   readonly firstIsDefault: boolean;
   readonly options: readonly Row[];
+  /** "Any": the most in total (absent or null: no limit). */
+  readonly most?: number | null;
+  /** "Any": the most of one choice (absent: 1). */
+  readonly perChoice?: number;
 }): NewChoiceGroupCommand | null {
   const options = input.options
     .map((o) => ({ name: o.name.trim(), nameZh: o.nameZh.trim() }))
     .filter((o) => o.name !== "");
   if (input.name.trim() === "" || options.length === 0) return null;
   if (new Set(options.map((o) => o.name.toLowerCase())).size !== options.length) return null;
+  const most = input.kind === "One" ? 1 : (input.most ?? null);
+  const perChoice = input.kind === "One" ? 1 : (input.perChoice ?? 1);
+  if (!choiceGroupLimitsAllowed(most, perChoice)) return null;
   return {
     action: "Create",
     operationReference: input.operationReference,
     name: input.name.trim(),
     nameZh: input.nameZh.trim(),
-    kind: input.kind,
+    kind: input.kind === "Any" && perChoice > 1 ? "Quantity" : input.kind,
     minimum: input.required ? 1 : 0,
-    maximum: input.kind === "One" ? 1 : null,
-    perOptionMaximum: 1,
+    maximum: most,
+    perOptionMaximum: perChoice,
     options: options.map((o, index) => ({
       optionReference: null,
       name: o.name,
@@ -60,6 +85,10 @@ export function NewChoiceGroupForm({
   const [nameZh, setNameZh] = useState("");
   const [kind, setKind] = useState<"One" | "Any">("One");
   const [required, setRequired] = useState(true);
+  // "Up to [ ] in total" (empty: no limit) and, when guests may repeat a choice, "Up to [2] of each".
+  const [limit, setLimit] = useState("");
+  const [repeats, setRepeats] = useState(false);
+  const [each, setEach] = useState("2");
   const [rows, setRows] = useState<readonly Row[]>([
     { name: "", nameZh: "" },
     { name: "", nameZh: "" },
@@ -67,8 +96,19 @@ export function NewChoiceGroupForm({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [operation, setOperation] = useState<string | null>(null);
+  const most = kind === "One" || limit.trim() === "" ? null : Number(limit);
+  const perChoice = kind === "Any" && repeats ? Number(each) : 1;
+  const limitsAllowed = choiceGroupLimitsAllowed(most, perChoice);
   const create = async () => {
     if (client.createChoiceGroup === undefined || busy) return;
+    if (!limitsAllowed) {
+      setProblem(
+        most !== null && perChoice > most
+          ? t("The most of one choice can't be more than the group's limit.")
+          : t("Use a limit from 1 to 50 in total, and from 1 to 20 of each."),
+      );
+      return;
+    }
     const reference = operation ?? newOperationReference();
     const command = newChoiceGroupCommand({
       operationReference: reference,
@@ -78,6 +118,8 @@ export function NewChoiceGroupForm({
       required: kind === "One" && required,
       firstIsDefault: kind === "One" && required,
       options: rows,
+      most,
+      perChoice,
     });
     if (command === null) {
       setProblem(t("Give the group a name and at least one choice, each with its own name."));
@@ -139,7 +181,60 @@ export function NewChoiceGroupForm({
             />
             {t("Required; the first choice is the default")}
           </label>
-        ) : null}
+        ) : (
+          <>
+            <label className="dish-editor__field">
+              <span>{t("Up to this many in total (empty for no limit)")}</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                inputMode="numeric"
+                value={limit}
+                onChange={(e) => setLimit(e.target.value)}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={repeats}
+                onChange={(e) => setRepeats(e.target.checked)}
+              />
+              {t("Guests can take more than one of the same choice")}
+            </label>
+            {repeats ? (
+              <label className="dish-editor__field">
+                <span>{t("Up to this many of each")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  inputMode="numeric"
+                  value={each}
+                  onChange={(e) => setEach(e.target.value)}
+                />
+              </label>
+            ) : null}
+          </>
+        )}
+        {limitsAllowed ? (
+          <p className="dish-editor__note">
+            {t("Customers see: {value}", {
+              value: choiceRule({
+                kind: kind === "Any" && perChoice > 1 ? "Quantity" : kind,
+                minimum: kind === "One" && required ? 1 : 0,
+                maximum: kind === "One" ? 1 : most,
+                perOptionMaximum: perChoice,
+              }),
+            })}
+          </p>
+        ) : (
+          <p className="dish-editor__problem">
+            {most !== null && perChoice > most
+              ? t("The most of one choice can't be more than the group's limit.")
+              : t("Use a limit from 1 to 50 in total, and from 1 to 20 of each.")}
+          </p>
+        )}
       </fieldset>
       <ol className="dish-editor__choices">
         {rows.map((row, index) => (

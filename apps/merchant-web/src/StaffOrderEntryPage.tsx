@@ -57,6 +57,15 @@ export function estimatedLineMinor(line: Line): bigint | null {
   return each * BigInt(line.quantity);
 }
 
+/** How many of each option chosen by default (a choice guests can repeat, such as double pearls). */
+function defaultCounts(item: CounterMenuItem) {
+  return Object.fromEntries(
+    item.rules.flatMap((rule) =>
+      rule.options.map((option) => [option.optionReference, option.defaultQuantity || 1]),
+    ),
+  ) as Record<string, number>;
+}
+
 /** Defaults pre-chosen per option group; a group of one choice is a single pick. */
 function defaultChoices(item: CounterMenuItem) {
   return Object.fromEntries(
@@ -70,10 +79,31 @@ function defaultChoices(item: CounterMenuItem) {
   ) as Record<string, string[]>;
 }
 
-export function choicesComplete(item: CounterMenuItem, choices: Record<string, string[]>) {
+/** The group's limit counts each repeat of a choice (two of pearls is two of "at most 3"). */
+const chosenInRule = (choices: readonly string[], counts: Readonly<Record<string, number>>) =>
+  choices.reduce((sum, reference) => sum + (counts[reference] ?? 1), 0);
+export function choicesComplete(
+  item: CounterMenuItem,
+  choices: Record<string, string[]>,
+  counts: Readonly<Record<string, number>> = {},
+) {
   return item.rules.every((rule) => {
-    const picked = choices[rule.bindingReference]?.length ?? 0;
-    return picked >= rule.minimumSelections && picked <= rule.maximumSelections;
+    const chosen = choices[rule.bindingReference] ?? [];
+    const picked = chosenInRule(chosen, counts);
+    return (
+      picked >= rule.minimumSelections &&
+      picked <= rule.maximumSelections &&
+      chosen.every((reference) => {
+        const option = rule.options.find((candidate) => candidate.optionReference === reference);
+        const count = counts[reference] ?? 1;
+        return (
+          option !== undefined &&
+          Number.isSafeInteger(count) &&
+          count >= 1 &&
+          count <= option.maximumQuantity
+        );
+      })
+    );
   });
 }
 
@@ -292,6 +322,8 @@ export function StaffOrderEntryPage({
   const [choosing, setChoosing] = useState<{
     item: CounterMenuItem;
     choices: Record<string, string[]>;
+    /** How many of each chosen option, where guests can take more than one of the same choice. */
+    counts: Record<string, number>;
     quantity: number;
     note: string;
     /** The order line being changed; null for a new line. */
@@ -469,7 +501,14 @@ export function StaffOrderEntryPage({
   // note is added with Change on the order line.
   const add = (item: CounterMenuItem) => {
     if (item.rules.length > 0) {
-      setChoosing({ item, choices: defaultChoices(item), quantity: 1, note: "", editing: null });
+      setChoosing({
+        item,
+        choices: defaultChoices(item),
+        counts: defaultCounts(item),
+        quantity: 1,
+        note: "",
+        editing: null,
+      });
       return;
     }
     const same = lines.find(
@@ -749,7 +788,7 @@ export function StaffOrderEntryPage({
               return {
                 optionReference: reference,
                 name: option?.name ?? "",
-                quantity: option?.defaultQuantity ?? 1,
+                quantity: choosing.counts[reference] ?? option?.defaultQuantity ?? 1,
               };
             }),
           ),
@@ -953,7 +992,14 @@ export function StaffOrderEntryPage({
                       {line.options.length > 0 ? (
                         <span className="bop-muted">
                           {" "}
-                          · {line.options.map((option) => option.name).join(", ")}
+                          ·{" "}
+                          {line.options
+                            .map((option) =>
+                              option.quantity > 1
+                                ? `${option.name} × ${option.quantity}`
+                                : option.name,
+                            )
+                            .join(", ")}
                         </span>
                       ) : null}
                       {line.note ? (
@@ -1008,6 +1054,15 @@ export function StaffOrderEntryPage({
                                       ),
                                   ]),
                                 ),
+                                counts: {
+                                  ...defaultCounts(line.item),
+                                  ...Object.fromEntries(
+                                    line.options.map((option) => [
+                                      option.optionReference,
+                                      option.quantity,
+                                    ]),
+                                  ),
+                                },
                                 quantity: line.quantity,
                                 note: line.note ?? "",
                                 editing: line.key,
@@ -1403,7 +1458,7 @@ export function StaffOrderEntryPage({
             aria-label={t("Choose {name}", { name: choosing.item.name })}
             onSubmit={(event) => {
               event.preventDefault();
-              if (!choicesComplete(choosing.item, choosing.choices)) return;
+              if (!choicesComplete(choosing.item, choosing.choices, choosing.counts)) return;
               changeLines(
                 choosing.editing === null
                   ? [...lines, choosingLine]
@@ -1418,6 +1473,7 @@ export function StaffOrderEntryPage({
             {choosing.item.rules.map((rule) => {
               const single = rule.maximumSelections === 1;
               const picked = choosing.choices[rule.bindingReference] ?? [];
+              const total = chosenInRule(picked, choosing.counts);
               return (
                 <fieldset key={rule.bindingReference}>
                   <legend>
@@ -1433,7 +1489,7 @@ export function StaffOrderEntryPage({
                         disabled={
                           !single &&
                           !picked.includes(option.optionReference) &&
-                          picked.length >= rule.maximumSelections
+                          total >= rule.maximumSelections
                         }
                         onChange={(event) => {
                           const checked = event.currentTarget.checked;
@@ -1458,6 +1514,36 @@ export function StaffOrderEntryPage({
                       ) : null}
                     </label>
                   ))}
+                  {/* WP-2423 item 3b: a choice guests can repeat (double pearls) at the table too. */}
+                  {rule.options
+                    .filter(
+                      (option) =>
+                        option.maximumQuantity > 1 && picked.includes(option.optionReference),
+                    )
+                    .map((option) => (
+                      <label key={option.optionReference} className="counter-order__quantity">
+                        {t("How many {name}", { name: option.name })}
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={option.maximumQuantity}
+                          value={choosing.counts[option.optionReference] ?? 1}
+                          onChange={(event) =>
+                            setChoosing({
+                              ...choosing,
+                              counts: {
+                                ...choosing.counts,
+                                [option.optionReference]: Math.min(
+                                  option.maximumQuantity,
+                                  Math.max(1, Number(event.currentTarget.value) || 1),
+                                ),
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
                 </fieldset>
               );
             })}
@@ -1494,7 +1580,7 @@ export function StaffOrderEntryPage({
               <button
                 type="submit"
                 className="counter-order__primary"
-                disabled={!choicesComplete(choosing.item, choosing.choices)}
+                disabled={!choicesComplete(choosing.item, choosing.choices, choosing.counts)}
               >
                 {choosing.editing === null ? t("Add to order") : t("Save change")}
                 {choosingMinor === null ? "" : ` · ${cad(choosingMinor.toString())}`}

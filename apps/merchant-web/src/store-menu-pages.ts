@@ -600,10 +600,10 @@ export interface NewChoiceGroupCommand {
   readonly operationReference: string;
   readonly name: string;
   readonly nameZh: string;
-  readonly kind: "One" | "Any";
+  readonly kind: "One" | "Any" | "Quantity";
   readonly minimum: number;
   readonly maximum: number | null;
-  readonly perOptionMaximum: 1;
+  readonly perOptionMaximum: number;
   readonly options: readonly {
     readonly optionReference: null;
     readonly name: string;

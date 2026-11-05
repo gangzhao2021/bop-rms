@@ -39,6 +39,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check the name (up to 40 characters) and the number of seats (1 to 100).":
     "请检查名称（最多 40 个字符）和座位数（1 到 100）。",
   "You don't have permission to change this Store's tables.": "你没有权限修改本店的餐桌。",
+  "Up to this many in total (empty for no limit)": "一共最多几个（不限就留空）",
+  "Guests can take more than one of the same choice": "同一个选项可以点多份",
+  "Up to this many of each": "每个选项最多几份",
+  "The most of one choice can't be more than the group's limit.":
+    "每个选项的上限不能超过这一组的总上限。",
+  "Use a limit from 1 to 50 in total, and from 1 to 20 of each.":
+    "总上限请填 1 到 50，每个选项的上限请填 1 到 20。",
+  "How many {name}": "{name} 要几份",
   "Add a table": "添加餐桌",
   "Rename {stableLabel}": "重命名 {stableLabel}",
   "Retire {stableLabel}?": "停用 {stableLabel}？",
