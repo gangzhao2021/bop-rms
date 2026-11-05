@@ -147,8 +147,6 @@ export async function verifyMerchantAuthorizationRead({
       ],
       ["SELECT brand_id FROM bop_tenant.brand WHERE brand_id=$1 FOR UPDATE NOWAIT", [f.BRAND]],
       ["SELECT store_id FROM bop_tenant.store WHERE store_id=$1 FOR UPDATE NOWAIT", [f.STORE]],
-      ["LOCK TABLE bop_membership.membership IN ROW EXCLUSIVE MODE NOWAIT", []],
-      ["LOCK TABLE bop_membership.store_assignment IN ROW EXCLUSIVE MODE NOWAIT", []],
     ]) {
       await admin.query("BEGIN");
       try {
@@ -158,6 +156,21 @@ export async function verifyMerchantAuthorizationRead({
       } finally {
         await admin.query("ROLLBACK");
       }
+    }
+    // The Brand's Membership fence is held too: its writers wait for this read.
+    await admin.query("BEGIN");
+    try {
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+            ["MembershipFence:" + f.BRAND],
+          )
+        ).rows[0].acquired,
+        false,
+      );
+    } finally {
+      await admin.query("ROLLBACK");
     }
   });
   assert.equal(allowed?.storeReference, f.STORE);

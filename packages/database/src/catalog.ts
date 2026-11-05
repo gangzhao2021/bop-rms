@@ -416,8 +416,10 @@ function validateSql(
           "migrations/0200-bop-identity-tenancy/0200_030_create_brand_template_reference_read.sql" &&
           metadata.owner === "@bop/tenant" &&
           metadata.schema === "bop_tenant") ||
-          (file ===
-            "migrations/0200-bop-identity-tenancy/0200_031_create_membership_brand_discovery_read.sql" &&
+          ([
+            "migrations/0200-bop-identity-tenancy/0200_031_create_membership_brand_discovery_read.sql",
+            "migrations/2000-release-001/2000_166_create_membership_brand_fence.sql",
+          ].includes(file) &&
             metadata.owner === "@bop/membership" &&
             metadata.schema === "bop_membership") ||
           (file ===

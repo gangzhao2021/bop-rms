@@ -25,14 +25,14 @@ export async function createInitialBrandMerchantTransactions(f, context) {
     `GRANT SELECT,INSERT,UPDATE(consumed_at,version) ON bop_identity.oidc_authorization_transaction TO ${role}`,
   );
   await f.admin.query(
-    `GRANT SELECT,INSERT,MAINTAIN,UPDATE(status,revocation_reason,revoked_at,version) ON bop_identity.authentication_session TO ${role}`,
+    `GRANT SELECT,INSERT,UPDATE(status,revocation_reason,revoked_at,version) ON bop_identity.authentication_session TO ${role}`,
   );
   await f.admin.query(
     `GRANT SELECT,INSERT,UPDATE(session_id) ON bop_identity.browser_brand_session_selection TO ${role}`,
   );
   await f.admin.query(`GRANT SELECT,UPDATE(version) ON bop_tenant.brand TO ${role}`);
   await f.admin.query(
-    `GRANT SELECT,MAINTAIN ON bop_membership.membership,bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override TO ${role}`,
+    `GRANT SELECT ON bop_membership.membership,bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override TO ${role}`,
   );
   await f.admin.query(
     `GRANT SELECT ON bop_feature_control.control_version,bop_feature_control.control_dependency TO ${role}`,
@@ -41,7 +41,7 @@ export async function createInitialBrandMerchantTransactions(f, context) {
     `GRANT SELECT,INSERT ON rms_catalog.brand_catalog_source,rms_catalog.brand_catalog_source_operation,bop_tenant.brand_configuration_authoring_revision,bop_tenant.brand_configuration_authoring_operation,bop_tenant.brand_configuration_version,platform_audit.audit_record TO ${role}`,
   );
   await f.admin.query(
-    `GRANT SELECT,INSERT,MAINTAIN ON bop_publishing.publishing_mutation_record TO ${role}`,
+    `GRANT SELECT,INSERT ON bop_publishing.publishing_mutation_record TO ${role}`,
   );
   await f.admin.query(`GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_chain_head TO ${role}`);
   for (const [table, privilege] of [

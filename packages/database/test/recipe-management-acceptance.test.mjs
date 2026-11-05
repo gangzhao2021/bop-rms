@@ -1834,16 +1834,20 @@ async function prove(context) {
           { run: async (work) => work(tx) },
           id(2),
         ).resolve(saleInput);
-        for (const table of ["recipe", "recipe_scope_binding", "recipe_modifier_version"]) {
-          await observer.query("BEGIN");
-          try {
-            await assert.rejects(
-              observer.query("LOCK TABLE rms_recipe." + table + " IN ROW EXCLUSIVE MODE NOWAIT"),
-              { code: "55P03" },
-            );
-          } finally {
-            await observer.query("ROLLBACK");
-          }
+        // The Brand's Recipe fence is held until COMMIT: a writer waits for this order's read.
+        await observer.query("BEGIN");
+        try {
+          assert.equal(
+            (
+              await observer.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["RecipeCatalogReferenceV1:" + id(2)],
+              )
+            ).rows[0].acquired,
+            false,
+          );
+        } finally {
+          await observer.query("ROLLBACK");
         }
         return result;
       });
@@ -1856,8 +1860,14 @@ async function prove(context) {
       );
       await observer.query("BEGIN");
       try {
-        await observer.query(
-          "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_scope_binding,rms_recipe.recipe_modifier_version IN ROW EXCLUSIVE MODE NOWAIT",
+        assert.equal(
+          (
+            await observer.query(
+              "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+              ["RecipeCatalogReferenceV1:" + id(2)],
+            )
+          ).rows[0].acquired,
+          true,
         );
       } finally {
         await observer.query("ROLLBACK");

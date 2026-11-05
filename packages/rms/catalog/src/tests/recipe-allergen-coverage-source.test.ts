@@ -98,12 +98,10 @@ describe("Catalog-owned Allergen full history", () => {
     expect(
       await source.withCurrent(request(), read, async () => {
         expect(
-          query.mock.calls.some(
-            ([sql]) =>
-              sql ===
-              "LOCK TABLE rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion IN SHARE MODE",
-          ),
-        ).toBe(true);
+          query.mock.calls.filter(
+            ([sql]) => sql === "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+          ).length,
+        ).toBeGreaterThanOrEqual(2);
         return "read";
       }),
     ).toBe("read");

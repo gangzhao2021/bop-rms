@@ -1314,8 +1314,11 @@ it("commits actual OptionPrice authoring history, quotes, recovery and 014 coher
         release = signal(),
         beforeCollision = await counts();
       const firstPublish = run((owner) => owner.execute(publishes[0]), {
-        afterQuery: async (sql) => {
-          if (sql.startsWith("LOCK TABLE rms_pricing") && sql.includes("SHARE ROW EXCLUSIVE")) {
+        afterQuery: async (sql, values) => {
+          if (
+            sql.startsWith("SELECT pg_advisory_xact_lock(") &&
+            String(values?.[0]).startsWith("PricingConfigurationReferenceV1:")
+          ) {
             acquired.release();
             await release.promise;
           }
@@ -1326,13 +1329,15 @@ it("commits actual OptionPrice authoring history, quotes, recovery and 014 coher
         await finiteSignal(acquired.promise);
         secondPublish = run((owner) => owner.execute(publishes[1]), {
           beforeQuery: async (sql, values, pid) => {
-            void values;
-            if (sql.startsWith("LOCK TABLE rms_pricing") && sql.includes("SHARE ROW EXCLUSIVE"))
+            if (
+              sql.startsWith("SELECT pg_advisory_xact_lock(") &&
+              String(values?.[0]).startsWith("PricingConfigurationReferenceV1:")
+            )
               entered.release(pid);
           },
         });
         const pid = await finiteSignal(entered.promise);
-        await blocked(pid, "relation");
+        await blocked(pid, "advisory");
         release.release();
         const results = await Promise.allSettled([firstPublish, secondPublish]);
         assert.equal(results[0].status, "fulfilled");

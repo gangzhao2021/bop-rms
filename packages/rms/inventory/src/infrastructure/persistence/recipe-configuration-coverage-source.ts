@@ -218,10 +218,9 @@ export function createPostgresInventoryRecipeConfigurationSource(options: {
     at: string,
     create: boolean,
   ): Promise<readonly InventoryConfigurationDependency[]> {
-    await tx.query(
-      "LOCK TABLE rms_inventory.inventory_item,rms_inventory.inventory_item_version,rms_inventory.inventory_item_operation IN SHARE MODE",
-      [],
-    );
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "InventoryCatalogReferenceV1:" + tenant + ":" + brand,
+    ]);
     const facts = rows(
       await tx.query(
         `SELECT r.item_id AS "itemReference",r.internal_code AS "internalCode",r.item_type AS "itemType",r.created_by_actor_id AS "createdBy",to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",v.version::text AS version,v.snapshot_json AS snapshot,to_char(v.recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "recordedAt"

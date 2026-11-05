@@ -44,10 +44,9 @@ export function createPostgresStorePauseHistorySource(options: {
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [brand, store],
       );
-      await tx.query(
-        "LOCK TABLE rms_store.store_configuration_operation,rms_store.store_service_pause_content,rms_store.store_service_resume_content IN SHARE MODE",
-        [],
-      );
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "StoreServicePauseFence:" + brand + ":" + store,
+      ]);
       const result = await tx.query(
         "SELECT o.operation_id,o.configuration_id,o.command_type,o.intent_digest,o.expected_version,o.resulting_version,o.actor_reference,o.purpose_code,o.audit_reference,o.occurred_at,p.effective_from,p.effective_until,p.service_modes,r.pause_operation_id,r.effective_at FROM rms_store.store_configuration_operation o LEFT JOIN rms_store.store_service_pause_content p ON p.brand_id=o.brand_id AND p.store_id=o.store_id AND p.operation_id=o.operation_id LEFT JOIN rms_store.store_service_resume_content r ON r.brand_id=o.brand_id AND r.store_id=o.store_id AND r.operation_id=o.operation_id WHERE o.brand_id=$1 AND o.store_id=$2 AND o.command_type IN ('PauseService','ResumeService') AND o.occurred_at <= $3 ORDER BY o.occurred_at,o.operation_id LIMIT 10001",
         [brand, store, at],

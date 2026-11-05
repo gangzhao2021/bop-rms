@@ -54,10 +54,9 @@ export function createPostgresStoreWeeklyScheduleSource(options: {
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [brand, store],
       );
-      await tx.query(
-        "LOCK TABLE rms_store.store_configuration_version,rms_store.store_weekly_service_period IN SHARE MODE",
-        [],
-      );
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "StoreConfigurationFence:" + brand + ":" + store,
+      ]);
       const config = rows(
         await tx.query(
           "SELECT configuration_id FROM rms_store.store_configuration_version WHERE brand_id=$1 AND store_id=$2 AND configuration_id=$3 AND lifecycle='Published' AND effective_from <= $4 AND (effective_until IS NULL OR effective_until > $4) AND created_at <= $4 AND updated_at <= $4",

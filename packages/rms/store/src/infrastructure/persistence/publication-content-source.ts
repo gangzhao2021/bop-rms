@@ -42,10 +42,9 @@ export function createPostgresStorePublicationContentSource(options: {
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [brand, store],
       );
-      await tx.query(
-        "LOCK TABLE rms_store.store_configuration_version,rms_store.store_configuration_publication_content IN SHARE MODE",
-        [],
-      );
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "StoreConfigurationFence:" + brand + ":" + store,
+      ]);
       const result = await tx.query(
         "SELECT to_jsonb(v) AS base,c.configuration_json,c.content_digest,c.publishing_family_reference,c.configuration_type,c.purpose_code,c.business_day_start_source,c.recorded_at FROM rms_store.store_configuration_version v JOIN rms_store.store_configuration_publication_content c ON c.brand_id=v.brand_id AND c.store_id=v.store_id AND c.configuration_id=v.configuration_id WHERE v.brand_id=$1 AND v.store_id=$2 AND v.configuration_id=$3",
         [brand, store, reference],

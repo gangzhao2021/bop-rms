@@ -55,10 +55,9 @@ export function createPostgresCurrentLiveGateSource(options: {
         "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
         [tenant, brand, store],
       );
-      await tx.query(
-        "LOCK TABLE bop_publishing.live_gate_version,bop_publishing.live_gate_requirement IN SHARE MODE",
-        [],
-      );
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "LiveGateFence:" + brand + ":" + store,
+      ]);
       const candidates = rows(
         await tx.query(
           "SELECT DISTINCT gate_reference FROM bop_publishing.live_gate_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND decision_evidence_reference=$4 LIMIT 2",

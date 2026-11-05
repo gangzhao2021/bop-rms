@@ -47,10 +47,13 @@ export function createPostgresMenuReviewOptionSource(options: {
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
         [brand],
       );
-      await tx.query(
-        "LOCK TABLE rms_catalog.sku,rms_catalog.product_version,rms_catalog.option_set,rms_catalog.option_set_version,rms_catalog.option,rms_catalog.option_conflict,rms_catalog.product_option_binding,rms_catalog.product_option_binding_option,rms_catalog.product_option_binding_sku_scope,rms_catalog.product_option_binding_channel IN SHARE MODE",
-        [],
-      );
+      // DEC-MERCHANT-LOCK-SCOPE: always content before binding.
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "CatalogOptionContentFence:" + brand,
+      ]);
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "CatalogProductBindingFence:" + brand,
+      ]);
       const reader = createPostgresCurrentOptionBindingsStore(
         { run: (work) => work(tx) },
         { brandReference: brand },

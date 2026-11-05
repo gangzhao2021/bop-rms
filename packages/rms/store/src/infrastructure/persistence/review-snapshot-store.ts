@@ -51,13 +51,12 @@ export function createPostgresStoreReviewSnapshotStore(options: {
       brand,
       store,
     ]);
-    if (write)
-      await tx.query(
-        "LOCK TABLE rms_store.store_configuration_review_snapshot IN SHARE ROW EXCLUSIVE MODE",
-        [],
-      );
-    else
-      await tx.query("LOCK TABLE rms_store.store_configuration_review_snapshot IN SHARE MODE", []);
+    await tx.query(
+      write
+        ? "SELECT pg_advisory_xact_lock(hashtextextended($1,0))"
+        : "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+      ["StoreReviewSnapshotFence:" + brand + ":" + store],
+    );
   };
   const parse = (row: Record<string, unknown>, at: string) => {
     const configuration = createStoreConfigurationVersion(row.configuration_json);

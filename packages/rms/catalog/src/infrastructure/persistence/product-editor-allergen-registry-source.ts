@@ -181,10 +181,9 @@ export function createPostgresProductEditorAllergenRegistrySource(options: {
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
             [tenant, brand],
           );
-          await tx.query(
-            "LOCK TABLE rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry IN SHARE MODE",
-            [],
-          );
+          await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+            "CatalogAllergenRegistryFence:" + brand,
+          ]);
           check();
           const result = await tx.query<{ readonly facts: unknown; readonly coherent: boolean }>(
             select,

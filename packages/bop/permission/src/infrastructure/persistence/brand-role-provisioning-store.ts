@@ -183,10 +183,9 @@ export async function provisionBrandRoles(
     revision?.catalog_digest !== plan.catalogDigest
   )
     throw new StoreRoleProvisioningError("STORE_ROLE_PROVISIONING_CATALOG_MISMATCH");
-  await tx.query(
-    "LOCK TABLE bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override IN SHARE ROW EXCLUSIVE MODE",
-    [],
-  );
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "PermissionPolicyFence:" + plan.brandReference,
+  ]);
   const actions = [...new Set(plan.roles.flatMap((role) => role.actions))];
   const permissions = new Map(
     (

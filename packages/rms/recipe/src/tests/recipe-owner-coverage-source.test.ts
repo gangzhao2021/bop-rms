@@ -137,7 +137,9 @@ describe("actual Recipe-family source boundary", () => {
     );
     expect(
       query.mock.calls.some(
-        ([sql]) => sql === "LOCK TABLE rms_recipe.recipe_preparation_content IN SHARE MODE",
+        ([sql, values]) =>
+          sql === "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))" &&
+          String(values?.[0]).startsWith("RecipePreparationContentFence:"),
       ),
     ).toBe(true);
     const work = vi.fn(async () => "prepared");
@@ -255,9 +257,12 @@ describe("actual Recipe-family source boundary", () => {
         expect.anything(),
         expect.objectContaining({ family, ...scope }),
       );
-      const table = family === "Substitution" ? "recipe_modifier_version" : "recipe_scope_binding";
       expect(
-        query.mock.calls.some(([sql]) => sql === `LOCK TABLE rms_recipe.${table} IN SHARE MODE`),
+        query.mock.calls.some(
+          ([sql, values]) =>
+            sql === "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))" &&
+            String(values?.[0]).startsWith("RecipeCatalogReferenceV1:"),
+        ),
       ).toBe(true);
       expect(await source.withCurrent(request(), captured, async () => "covered")).toBe("covered");
       await expect(setup(false, family).source.capture(request())).rejects.toMatchObject({
@@ -394,7 +399,7 @@ describe("actual Recipe-family source boundary", () => {
       query.mock.calls.some(
         ([sql]) =>
           sql.includes("FROM rms_recipe") ||
-          sql.startsWith("LOCK TABLE") ||
+          sql.includes("pg_advisory_xact_lock") ||
           sql.startsWith("INSERT"),
       ),
     ).toBe(false);
@@ -405,7 +410,9 @@ describe("actual Recipe-family source boundary", () => {
     const result = await source.withCurrent(request(), read, async (current) => {
       expect(current.coverage).toEqual(read.coverage);
       expect(
-        query.mock.calls.some(([sql]) => sql === "LOCK TABLE rms_recipe.recipe IN SHARE MODE"),
+        query.mock.calls.some(
+          ([sql]) => sql === "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+        ),
       ).toBe(true);
       return "read";
     });

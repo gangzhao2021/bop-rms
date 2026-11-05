@@ -119,7 +119,9 @@ export function createPostgresWorkflowDefinitionStore(
       const version = workflowReference(versionReference),
         at = parsePublishingInstant(observedAt);
       return run(async (tx) => {
-        await tx.query("LOCK TABLE bop_workflow.workflow_definition_version IN SHARE MODE", []);
+        await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+          "WorkflowDefinitionFence:" + tenant + ":" + brand,
+        ]);
         const found = rows(
           await tx.query(
             "SELECT definition_json AS definition FROM bop_workflow.workflow_definition_version WHERE tenant_id=$1 AND brand_id=$2 AND version_id=$3",
@@ -217,13 +219,12 @@ export function createPostgresWorkflowDefinitionStore(
           if (prior.intent !== intent) return workflowUnavailable("OperationReused");
           return Object.freeze({ status: "AlreadyApplied" as const, ...prior });
         }
-        // Before the table lock: a writer holding this purpose may need SHARE on the table next.
+        // Before the merchant fence: a writer holding this purpose may need the fence shared next.
         if (definition.versionNumber === 1)
           await lockPurpose(tx, definition.purposeCode, definition.applicabilityCode);
-        await tx.query(
-          "LOCK TABLE bop_workflow.workflow_definition_version IN ROW EXCLUSIVE MODE",
-          [],
-        );
+        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          "WorkflowDefinitionFence:" + tenant + ":" + brand,
+        ]);
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
           "WorkflowDefinition:" + tenant + ":" + brand + ":" + definition.workflowReference,
         ]);
@@ -384,7 +385,9 @@ export function createPostgresWorkflowDefinitionStore(
     input: Readonly<{ purposeCode: string; applicabilityCode: string; observedAt: string }>,
   ) {
     if (store === null) return workflowUnavailable("ScopeMismatch");
-    await tx.query("LOCK TABLE bop_workflow.workflow_definition_version IN SHARE MODE", []);
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "WorkflowDefinitionFence:" + tenant + ":" + brand,
+    ]);
     const definitions = rows(
       await tx.query(
         "SELECT definition_json AS definition FROM bop_workflow.workflow_definition_version WHERE tenant_id=$1 AND brand_id=$2 AND (store_id IS NULL OR store_id=$3) AND purpose_code=$4 AND applicability_code=$5 ORDER BY workflow_id,version_number LIMIT 1025",

@@ -103,10 +103,9 @@ export async function extendInternalTestMembershipValidity(
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
     "bop_membership.internal_test_validity:" + input.brandReference,
   ]);
-  await tx.query(
-    "LOCK TABLE bop_membership.membership,bop_membership.store_assignment IN SHARE ROW EXCLUSIVE MODE",
-    [],
-  );
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "MembershipFence:" + input.brandReference,
+  ]);
   const memberships = (
     await tx.query(
       `SELECT membership_id::text id,actor_id::text actor,workforce_relationship_reference::text relationship,

@@ -982,9 +982,9 @@ export function createPostgresTaxConfigAuthoringStore(options: TaxConfigAuthorin
       return fail();
     check();
     await rootLock(configuration, true);
-    await query(
-      "LOCK TABLE rms_pricing.tax_configuration,rms_pricing.tax_configuration_version,rms_pricing.tax_configuration_rule,rms_pricing.tax_configuration_operation_record IN SHARE ROW EXCLUSIVE MODE",
-    );
+    await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      "PricingTaxReferenceV1:" + scope.brandReference,
+    ]);
     const locked = await state(configuration, false);
     if (!equal(locked, current)) return fail("TAX_CONFIG_VERSION_CONFLICT");
     let serviceInput = "";

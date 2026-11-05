@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { setTimeout } from "node:timers";
 import pg from "pg";
 import {
   buildWorkforceAccountBinding,
@@ -617,32 +616,14 @@ export async function verifyApprovedWorkforceMembership(context, extension) {
         other,
       );
       pendingB.catch(() => undefined);
-      let waiting = false;
-      const until = Date.now() + 1000;
-      while (Date.now() < until) {
-        const locks = (
-          await query(
-            admin,
-            `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND relation='bop_membership.membership'::regclass
-          AND mode='ShareRowExclusiveLock' AND NOT granted) waiting,$2=ANY(pg_blocking_pids($1)) blocked`,
-            [bPid, aPid],
-          )
-        ).rows[0];
-        if (locks.waiting && locks.blocked) {
-          waiting = true;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      assert(waiting, "ACTUAL_SRE_WAIT_REQUIRED");
-      assert.equal(
-        bReachedMemberRead,
-        false,
-        "SECOND_BRAND_MUST_NOT_RETAIN_MEMBERSHIP_SHARE_BEFORE_ADMISSION",
-      );
-      assert.equal(bReachedMemberWrite, false, "SECOND_BRAND_MUST_NOT_WRITE_BEFORE_ADMISSION");
+      // DEC-MERCHANT-LOCK-SCOPE: another Brand's activation never meets this one's fence: it
+      // commits while the first is still held at its gate.
+      const resultB = await pendingB;
+      assert.equal(bReachedMemberRead, true, "SECOND_BRAND_READS_WHILE_THE_FIRST_IS_HELD");
+      assert.equal(bReachedMemberWrite, true, "SECOND_BRAND_WRITES_WHILE_THE_FIRST_IS_HELD");
+      assert.notEqual(aPid, bPid);
       releaseA();
-      const results = await Promise.all([pendingA, pendingB]);
+      const results = [await pendingA, resultB];
       mark("CrossBrandCommittedAssertions");
       for (const result of results) {
         assert.equal(result.membership.lifecycle, "Active");
@@ -711,11 +692,10 @@ export async function verifyApprovedWorkforceMembership(context, extension) {
       admin,
       `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
     );
-    // MAINTAIN is the existing PG18 minimum for the owner's creation predicate
-    // table fence; the three column grants alone permit only lifecycle/CAS writes.
+    // The three column grants alone permit only lifecycle/CAS writes.
     await query(
       admin,
-      `GRANT SELECT,INSERT,MAINTAIN,UPDATE(lifecycle,version,updated_at) ON bop_membership.membership TO ${role}`,
+      `GRANT SELECT,INSERT,UPDATE(lifecycle,version,updated_at) ON bop_membership.membership TO ${role}`,
     );
     await query(admin, `GRANT SELECT,UPDATE(version) ON bop_tenant.brand TO ${role}`);
     await query(admin, `GRANT SELECT,INSERT ON platform_audit.audit_record TO ${role}`);

@@ -205,11 +205,14 @@ it("persists synthetic Workflow versions with atomic Audit, original recovery an
         const result = await source.resolveCurrent(currentInput);
         await admin.query("BEGIN");
         try {
-          await assert.rejects(
-            admin.query(
-              "LOCK TABLE bop_workflow.workflow_definition_version IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            { code: "55P03" },
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["WorkflowDefinitionFence:" + id(1) + ":" + id(2)],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await admin.query("ROLLBACK");
@@ -299,11 +302,14 @@ it("persists synthetic Workflow versions with atomic Audit, original recovery an
         assert.deepEqual(seen, ["resource", "publication", "action", "rule"]);
         await admin.query("BEGIN");
         try {
-          await assert.rejects(
-            admin.query(
-              "LOCK TABLE bop_workflow.workflow_definition_version IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            { code: "55P03" },
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["WorkflowDefinitionFence:" + id(1) + ":" + id(2)],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await admin.query("ROLLBACK");
@@ -327,8 +333,14 @@ it("persists synthetic Workflow versions with atomic Audit, original recovery an
       });
       await admin.query("BEGIN");
       try {
-        await admin.query(
-          "LOCK TABLE bop_workflow.workflow_definition_version IN ROW EXCLUSIVE MODE NOWAIT",
+        assert.equal(
+          (
+            await admin.query(
+              "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+              ["WorkflowDefinitionFence:" + id(1) + ":" + id(2)],
+            )
+          ).rows[0].acquired,
+          true,
         );
       } finally {
         await admin.query("ROLLBACK");

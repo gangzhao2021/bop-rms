@@ -79,7 +79,7 @@ export async function exerciseBrandDiscovery(
       f.extraRoles.push(name);
       await f.admin.query(`GRANT USAGE ON SCHEMA bop_membership,platform_helpers TO ${name}`);
     }
-    await f.admin.query(`GRANT SELECT,MAINTAIN ON bop_membership.membership TO ${owner}`);
+    await f.admin.query(`GRANT SELECT ON bop_membership.membership TO ${owner}`);
     await f.admin.query(
       `GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.is_uuid_v7(uuid) TO ${owner}`,
     );
@@ -195,6 +195,14 @@ export async function exerciseBrandDiscovery(
         [actor, brand],
       ),
       (error) => error.code === "55P03",
+    );
+    await writer.query("ROLLBACK");
+    // DEC-MERCHANT-LOCK-SCOPE: that person's fence only; another person's membership is free.
+    await writer.query("BEGIN");
+    await writer.query("SET LOCAL lock_timeout='100ms'");
+    await writer.query(
+      "UPDATE bop_membership.membership SET version=version WHERE actor_id<>$1 AND brand_id=$2",
+      [actor, brand],
     );
     await writer.query("ROLLBACK");
     await client.query("ROLLBACK");

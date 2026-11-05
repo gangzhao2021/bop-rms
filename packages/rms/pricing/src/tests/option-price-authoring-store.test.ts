@@ -94,7 +94,8 @@ function fixture(publication?: "NotRequired" | "Required" | "SelfApproval", defe
         else if (sql.includes("set_config('bop.store_id','',true)")) currentStore = null;
         if (sql.startsWith("SET CONSTRAINTS rms_pricing.")) checkDeferred();
       }
-      if (sql.includes("SHARE ROW EXCLUSIVE")) acquisitionOrder.push("PricingSRE");
+      if (String(values[0]).startsWith("PricingConfigurationReferenceV1:"))
+        acquisitionOrder.push("PricingSRE");
       if (String(values[0]).startsWith("PricingOptionPriceRule:"))
         acquisitionOrder.push("PricingRule");
       let rows: unknown[] = [];
@@ -459,7 +460,9 @@ describe("fixed Option price authoring owning transaction", () => {
     expect(result[0]?.currentPublished?.lifecycle).toBe("Published");
     expect(result[0]?.draft?.lifecycle).toBe("Draft");
     expect(result[0]?.aggregateVersion).toBe(3);
-    expect(f.queries.slice(entered).findIndex((q) => q.sql.includes("IN SHARE MODE"))).toBeLessThan(
+    expect(
+      f.queries.slice(entered).findIndex((q) => q.sql.includes("pg_advisory_xact_lock_shared")),
+    ).toBeLessThan(
       f.queries
         .slice(entered)
         .findIndex((q) => q.sql.startsWith("SELECT option_price_rule_id::text rule_reference")),
@@ -632,7 +635,9 @@ describe("fixed Option price authoring owning transaction", () => {
         .findIndex((q) => String(q.values[0]).startsWith("PricingOptionPriceRule:")),
     ).toBeGreaterThanOrEqual(0);
     expect(
-      f.queries.slice(entered).findIndex((q) => q.sql.includes("SHARE ROW EXCLUSIVE")),
+      f.queries
+        .slice(entered)
+        .findIndex((q) => String(q.values[0]).startsWith("PricingConfigurationReferenceV1:")),
     ).toBeGreaterThan(
       f.queries
         .slice(entered)

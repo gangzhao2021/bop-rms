@@ -150,11 +150,7 @@ function fixture(input = command()) {
         result = {
           rows: [{ isolation: control.isolation, transaction_id: control.transactionId }],
         };
-      } else if (
-        sql.includes("set_config") ||
-        sql.includes("pg_advisory_xact_lock") ||
-        sql.startsWith("LOCK TABLE")
-      )
+      } else if (sql.includes("set_config") || sql.includes("pg_advisory_xact_lock"))
         result = { rows: [] };
       else if (sql.startsWith("SELECT role_id::text AS reference"))
         result = { rows: tables.roles.slice(0, 1).map((r) => ({ reference: r.roleReference })) };

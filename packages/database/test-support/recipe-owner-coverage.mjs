@@ -23,16 +23,11 @@ export async function exerciseRecipeOwnerCoverage({ admin, context, role, id, sc
   await admin.query(
     `GRANT SELECT,INSERT,UPDATE,DELETE ON rms_recipe.recipe_admin_source_capture TO ${role}`,
   );
-  await admin.query(`GRANT MAINTAIN ON rms_recipe.recipe TO ${role}`);
   await admin.query(
     `GRANT SELECT ON rms_recipe.recipe_preparation_content,rms_recipe.recipe_modifier_version TO ${role}`,
   );
-  await admin.query(`GRANT MAINTAIN ON rms_recipe.recipe_preparation_content TO ${role}`);
   await admin.query(
     `GRANT SELECT ON rms_recipe.recipe_scope_binding,rms_recipe.recipe_scope_binding_end TO ${role}`,
-  );
-  await admin.query(
-    `GRANT MAINTAIN ON rms_recipe.recipe_modifier_version,rms_recipe.recipe_scope_binding TO ${role}`,
   );
   await admin.query(`GRANT EXECUTE ON FUNCTION platform_helpers.current_store_id() TO ${role}`);
   let directoryLeases = 0;
@@ -61,7 +56,7 @@ export async function exerciseRecipeOwnerCoverage({ admin, context, role, id, sc
                 return await client.query(sql, [...values]);
               } catch (error) {
                 failure = {
-                  operation: sql.startsWith("LOCK TABLE")
+                  operation: sql.includes("pg_advisory_xact_lock")
                     ? "lock"
                     : sql.startsWith("INSERT")
                       ? "insert"

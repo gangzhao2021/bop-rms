@@ -141,10 +141,9 @@ export function createPostgresStoreServiceControl(options: {
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [brand, store],
       );
-      await tx.query(
-        "LOCK TABLE rms_store.store_configuration_operation,rms_store.store_service_pause_content,rms_store.store_service_resume_content IN SHARE ROW EXCLUSIVE MODE",
-        [],
-      );
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "StoreServicePauseFence:" + brand + ":" + store,
+      ]);
       const original = rows(
         await tx.query(
           "SELECT intent_digest,resulting_version FROM rms_store.store_configuration_operation WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3",

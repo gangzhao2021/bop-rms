@@ -151,8 +151,8 @@ export function createPostgresBrandAdministrationMembershipSource(
 }
 
 /** Admission for the actual intended Workforce Actor's onboarding activation.
- * Take the owning write-compatible table fence before any Membership SHARE/read,
- * so different Brands cannot both retain SHARE and then upgrade for UPDATE.
+ * Take the Brand's Membership fence exclusive before any read, so two activations
+ * cannot both hold it shared and then upgrade for UPDATE.
  * The returned Pending receipt is inert; the activation writer owns the exact
  * successor and final guard. Identity/Brand/approval remain actual outer facts. */
 export function createPostgresBrandAdministrationMembershipActivationSource(
@@ -211,9 +211,12 @@ function brandMembershipSource(
             : "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
           [brand, ""],
         );
-        if (activation)
-          await query("LOCK TABLE bop_membership.membership IN SHARE ROW EXCLUSIVE MODE", []);
-        await query("LOCK TABLE bop_membership.membership IN SHARE MODE", []);
+        await query(
+          activation
+            ? "SELECT pg_advisory_xact_lock(hashtextextended($1,0))"
+            : "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+          ["MembershipFence:" + brand],
+        );
         const records = brandMembershipRows(
           await query(
             `SELECT membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,version,
@@ -267,10 +270,9 @@ export function createPostgresCurrentMembershipSource(
       brand,
       store?.storeReference,
     ]);
-    await tx.query(
-      "LOCK TABLE bop_membership.membership,bop_membership.store_assignment IN SHARE MODE",
-      [],
-    );
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "MembershipFence:" + brand,
+    ]);
   }
   return Object.freeze({
     async findMemberships(actorReference, brandReference) {

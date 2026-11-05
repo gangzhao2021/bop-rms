@@ -138,10 +138,9 @@ async function prepare(context) {
     );
     await admin.query(`GRANT SELECT,INSERT,UPDATE(version) ON bop_tenant.brand TO ${role}`);
     await admin.query(`GRANT SELECT,INSERT ON bop_tenant.brand_admin_operation TO ${role}`);
-    // MAINTAIN permits the owning predicate lock without lifecycle UPDATE.
     // UPDATE(version) supplies SELECT FOR UPDATE's separate row-lock privilege.
     await admin.query(
-      `GRANT SELECT,INSERT,MAINTAIN,UPDATE(version) ON bop_membership.membership TO ${role}`,
+      `GRANT SELECT,INSERT,UPDATE(version) ON bop_membership.membership TO ${role}`,
     );
     await admin.query(
       `GRANT SELECT,INSERT ON bop_permission.policy_state,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant TO ${role}`,

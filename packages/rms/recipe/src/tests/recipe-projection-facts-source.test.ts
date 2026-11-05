@@ -71,7 +71,9 @@ describe("separate Recipe projection graph facts capability", () => {
       seal = await source.capture(request());
     const facts = await source.withCurrentFacts(request(), seal, async (value) => {
       expect(
-        query.mock.calls.some(([sql]) => sql === "LOCK TABLE rms_recipe.recipe IN SHARE MODE"),
+        query.mock.calls.some(
+          ([sql]) => sql === "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+        ),
       ).toBe(true);
       return value;
     });

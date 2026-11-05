@@ -1283,7 +1283,11 @@ export async function archiveRecipe(
   });
   const prior = await replay(tx, brand, input.operationReference, intent, input.actorReference);
   if (prior) return prior;
-  await tx.query("LOCK TABLE rms_recipe.recipe_scope_binding IN SHARE MODE", []);
+  // DEC-MERCHANT-LOCK-SCOPE: this read leads to a write of the same fence, so it is exclusive from
+  // the start (two archives both holding it shared would deadlock on the write).
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "RecipeCatalogReferenceV1:" + brand,
+  ]);
   const current = await currentOf(tx, brand, input.recipeReference);
   if (current === null) return fail("RECIPE_AUTHORING_NOT_FOUND");
   const s = current.snapshot;

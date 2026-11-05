@@ -246,7 +246,9 @@ export function createPostgresInitialBrandMembershipStore(
         );
         // Initial creation is rare. This owning predicate fence prevents a raw
         // concurrent INSERT from adding a second Actor/Brand row after the guard.
-        await query("LOCK TABLE bop_membership.membership IN SHARE ROW EXCLUSIVE MODE", []);
+        await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          "MembershipFence:" + request.brandReference,
+        ]);
         for (const member of [...request.members].sort((a, b) =>
           a.actorReference.localeCompare(b.actorReference),
         ))

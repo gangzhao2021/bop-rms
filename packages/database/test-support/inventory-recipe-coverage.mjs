@@ -15,9 +15,6 @@ export async function exerciseInventoryRecipeCoverage({ admin, context, role, id
     `GRANT SELECT ON rms_inventory.inventory_item,rms_inventory.inventory_item_version,rms_inventory.inventory_item_operation TO ${role}`,
   );
   await admin.query(
-    `GRANT MAINTAIN ON rms_inventory.inventory_item,rms_inventory.inventory_item_version,rms_inventory.inventory_item_operation TO ${role}`,
-  );
-  await admin.query(
     `GRANT SELECT,INSERT,UPDATE,DELETE ON rms_inventory.recipe_configuration_source_version,rms_inventory.recipe_configuration_source_capture TO ${role}`,
   );
   let sequence = 31000,

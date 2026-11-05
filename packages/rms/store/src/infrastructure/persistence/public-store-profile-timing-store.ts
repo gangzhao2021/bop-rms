@@ -61,9 +61,9 @@ export function createPostgresPublicStoreProfileTimingStore(options: {
     ]);
     await tx.query(
       write
-        ? "LOCK TABLE rms_store.public_store_profile_timing IN SHARE ROW EXCLUSIVE MODE"
-        : "LOCK TABLE rms_store.public_store_profile_timing IN SHARE MODE",
-      [],
+        ? "SELECT pg_advisory_xact_lock(hashtextextended($1,0))"
+        : "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+      ["StorePublicProfileTimingFence:" + brand + ":" + store],
     );
   };
   function timing(value: EffectiveConfigurationVersion) {

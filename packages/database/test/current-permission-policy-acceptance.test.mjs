@@ -178,11 +178,14 @@ it("evaluates actual workforce policy, deny precedence, revocation and lock rete
       const allowed = await evaluate(async () => {
         await admin.query("BEGIN");
         try {
-          await assert.rejects(
-            admin.query(
-              "LOCK TABLE bop_permission.permission_override IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            { code: "55P03" },
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["PermissionPolicyFence:" + f.BRAND],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await admin.query("ROLLBACK");
@@ -309,8 +312,8 @@ it("recomputes synthetic owning Permission decisions from fresh PG packets while
             scopeRestores = 0;
           const tx = {
             query: async (sql, values) => {
-              if (sql.startsWith("LOCK TABLE ")) {
-                assert.equal(sql, "LOCK TABLE " + tables + " IN SHARE MODE");
+              if (sql.includes("pg_advisory_xact_lock_shared")) {
+                assert.deepEqual(values, ["PermissionPolicyFence:" + f.BRAND]);
                 shareLocks++;
               } else if (sql.includes("'PermissionCurrentPolicyPacketV1'")) packetReads++;
               else if (sql.startsWith("SELECT set_config(")) scopeRestores++;
@@ -418,11 +421,14 @@ it("recomputes synthetic owning Permission decisions from fresh PG packets while
         // Actual PG lock retention, not a query-counter claim of successful lock.
         await admin.query("BEGIN");
         try {
-          await assert.rejects(
-            admin.query(
-              "LOCK TABLE bop_permission.permission_override IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            { code: "55P03" },
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["PermissionPolicyFence:" + f.BRAND],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await admin.query("ROLLBACK");

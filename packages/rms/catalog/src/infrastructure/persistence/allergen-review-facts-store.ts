@@ -83,12 +83,14 @@ export function createPostgresAllergenReviewFactsStore(options: {
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)",
         [brand],
       );
-      // Entries and assertions are mutable configuration rows. Lock the complete
-      // source tables so insertion of a new assertion cannot race the review.
-      await tx.query(
-        "LOCK TABLE rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion IN SHARE MODE",
-        [],
-      );
+      // Entries and assertions are mutable configuration rows. Fence this Brand's complete
+      // sources so insertion of a new assertion cannot race the review.
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "CatalogAllergenRegistryFence:" + brand,
+      ]);
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "CatalogAllergenEvidenceFence:" + brand,
+      ]);
       const result = await tx.query<{
         coherent: boolean;
         facts: {

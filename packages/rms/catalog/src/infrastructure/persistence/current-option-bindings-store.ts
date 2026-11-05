@@ -241,10 +241,9 @@ export function createPostgresProductOptionSetSource(options: {
         [brand],
       );
       // Keep option/version content stable through validation and the caller's Draft commit.
-      await tx.query(
-        "LOCK TABLE rms_catalog.option_set,rms_catalog.option_set_version,rms_catalog.option,rms_catalog.option_conflict IN SHARE MODE",
-        [],
-      );
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "CatalogOptionContentFence:" + brand,
+      ]);
       const result = await tx.query<{ value: unknown }>(
         `SELECT jsonb_build_object('optionSetReference',os.option_set_id,
 'brandReference',os.brand_id,

@@ -67,12 +67,9 @@ export const internalTestStoreSetupGrants = Object.freeze([
   ["routine", "platform_helpers.is_uuid_v7(uuid)"],
   ["table", "bop_tenant.store", "SELECT"],
   ["table", "bop_tenant.store_opening", "SELECT"],
-  // The owners' current-fact reads lock these (LOCK TABLE ... IN SHARE MODE needs MAINTAIN).
-  ["table", "bop_publishing.publishing_mutation_record", "SELECT,INSERT,MAINTAIN"],
-  // The owners' current-fact reads lock these (LOCK TABLE ... IN SHARE MODE needs MAINTAIN).
-  ["table", "bop_publishing.live_gate_version", "SELECT,INSERT,MAINTAIN"],
-  // The owners' current-fact reads lock these (LOCK TABLE ... IN SHARE MODE needs MAINTAIN).
-  ["table", "bop_publishing.live_gate_requirement", "SELECT,INSERT,MAINTAIN"],
+  ["table", "bop_publishing.publishing_mutation_record", "SELECT,INSERT"],
+  ["table", "bop_publishing.live_gate_version", "SELECT,INSERT"],
+  ["table", "bop_publishing.live_gate_requirement", "SELECT,INSERT"],
   ["table", "rms_store.store_configuration_version", "SELECT,INSERT"],
   ["table", "rms_store.store_configuration_authoring_operation", "SELECT,INSERT"],
   ["table", "rms_store.store_configuration_publication_content", "SELECT,INSERT"],

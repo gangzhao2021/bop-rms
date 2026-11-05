@@ -171,11 +171,7 @@ it("reads the real selected dictionary only and holds exact editor authority thr
     requiredFields: productEditorAllergenRegistryFields,
   });
   expect(
-    h.sql.some(
-      (q) =>
-        q.text ===
-        "LOCK TABLE rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry IN SHARE MODE",
-    ),
+    h.sql.some((q) => q.text === "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))"),
   ).toBe(true);
   expect(h.sql.some((q) => /allergen_source_|recipe_|menu_|INSERT|UPDATE/.test(q.text))).toBe(
     false,

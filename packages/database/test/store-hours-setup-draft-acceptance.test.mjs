@@ -74,11 +74,15 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
       // already read); the writer then starts, takes the head lock and holds it until the reader
       // waits for it, so the head the reader finds is newer than its first clock reading.
       let headBarrier = null;
-      const headLock = "LOCK TABLE rms_store.store_configuration_authoring_operation IN ";
+      const sharedFence = "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+        exclusiveFence = "SELECT pg_advisory_xact_lock(hashtextextended($1,0))";
+      const fenceOf = (sql, values, name) =>
+        (sql === sharedFence || sql === exclusiveFence) &&
+        String(values?.[0]).startsWith(name + ":");
       const headLockWaiter = async () => {
         for (let attempt = 0; attempt < 400; attempt++) {
           const waiting = await admin.query(
-            "SELECT count(*)::int n FROM pg_locks WHERE relation='rms_store.store_configuration_authoring_operation'::regclass AND NOT granted",
+            "SELECT count(*)::int n FROM pg_locks WHERE locktype='advisory' AND NOT granted",
           );
           if (waiting.rows[0].n > 0) return true;
           await new Promise((resolve) => setTimeout(resolve, 10));
@@ -86,7 +90,6 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
         return false;
       };
       let approvalBarrier = null;
-      const snapshotLock = "LOCK TABLE rms_store.store_configuration_review_snapshot IN ";
       const anyLockWaiter = async () =>
         (await admin.query("SELECT count(*)::int n FROM pg_locks WHERE NOT granted")).rows[0].n > 0;
       const transactions = {
@@ -103,7 +106,8 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
                 const approval = approvalBarrier;
                 if (approval !== null) {
                   if (
-                    sql === snapshotLock + "SHARE ROW EXCLUSIVE MODE" &&
+                    sql === exclusiveFence &&
+                    fenceOf(sql, values, "StoreReviewSnapshotFence") &&
                     approval.winner === null
                   ) {
                     approval.winner = self;
@@ -113,7 +117,8 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
                       await new Promise((resolve) => setTimeout(resolve, 10));
                     }
                   } else if (
-                    sql === snapshotLock + "SHARE MODE" &&
+                    sql === sharedFence &&
+                    fenceOf(sql, values, "StoreReviewSnapshotFence") &&
                     approval.winner !== null &&
                     approval.winner !== self
                   ) {
@@ -123,7 +128,12 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
                   }
                 }
                 const barrier = headBarrier;
-                if (barrier !== null && sql === headLock + "SHARE MODE" && !barrier.readerHeld) {
+                if (
+                  barrier !== null &&
+                  sql === sharedFence &&
+                  fenceOf(sql, values, "StoreAuthoringFence") &&
+                  !barrier.readerHeld
+                ) {
                   barrier.readerHeld = true;
                   barrier.readerAtLock();
                   await barrier.writerLocked;
@@ -132,7 +142,8 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
                 if (
                   barrier !== null &&
                   barrier.readerHeld &&
-                  sql === headLock + "SHARE ROW EXCLUSIVE MODE" &&
+                  sql === exclusiveFence &&
+                  fenceOf(sql, values, "StoreAuthoringFence") &&
                   !barrier.writerHeld
                 ) {
                   barrier.writerHeld = true;
@@ -435,8 +446,10 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
           let readerAtLock, lockTaken;
           const atLock = new Promise((resolve) => (readerAtLock = resolve));
           const writerLocked = new Promise((resolve) => (lockTaken = resolve));
+          // Armed after the composition is built: only the read itself stops at the fence.
+          const managerHours = await hoursFor(people.manager);
           headBarrier = { readerAtLock, lockTaken, writerLocked, waiterSeen: false };
-          const reading = (await hoursFor(people.manager)).read(people.manager.sessionCookie);
+          const reading = managerHours.read(people.manager.sessionCookie);
           await atLock;
           const validated = act(people.owner, "Validate");
           const [view] = await Promise.all([reading, validated]);

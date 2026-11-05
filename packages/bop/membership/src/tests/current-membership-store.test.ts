@@ -130,7 +130,8 @@ it("reads owner rows under scoped transaction fences and resolves current access
   const f = fixture();
   expect((await current(f)).storeReference).toBe(store.storeReference);
   expect(f.calls[0]?.values).toEqual([brand.brandReference, store.storeReference]);
-  expect(f.calls[1]?.sql).toContain("IN SHARE MODE");
+  expect(f.calls[1]?.sql).toContain("pg_advisory_xact_lock_shared");
+  expect(f.calls[1]?.values).toEqual(["MembershipFence:" + brand.brandReference]);
 });
 it("denies a foreign requested Store before any database query", async () => {
   const f = fixture();
@@ -227,7 +228,7 @@ it("reads fresh Brand membership rows without a Store assignment or permission c
   expect(Object.isFrozen(result)).toBe(true);
   expect(Object.keys(f.source)).toEqual(["findMemberships"]);
   expect(f.calls[0]?.values).toEqual([brand.brandReference, ""]);
-  expect(f.calls[1]?.sql).toBe("LOCK TABLE bop_membership.membership IN SHARE MODE");
+  expect(f.calls[1]?.sql).toBe("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))");
   expect(f.calls[2]?.values).toEqual([actor.actorReference, brand.brandReference]);
   expect(f.calls[2]?.sql).toContain("ORDER BY membership_id LIMIT 1025");
   expect(f.calls[2]?.sql).toContain("AT TIME ZONE 'UTC'");
@@ -425,7 +426,7 @@ it.each(["Draft", "Active", "Suspended", "Archived"] as const)(
     expect(f.calls[0]?.sql).toContain("set_config('bop.tenant_id',$1,true)");
     expect(f.calls[0]?.sql).toContain("set_config('bop.brand_id',$1,true)");
     expect(f.calls[0]?.values).toEqual([brand.brandReference, ""]);
-    expect(f.calls[1]?.sql).toBe("LOCK TABLE bop_membership.membership IN SHARE MODE");
+    expect(f.calls[1]?.sql).toBe("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))");
     expect(f.calls[2]?.values).toEqual([actor.actorReference, brand.brandReference]);
     expect(f.calls.every((call) => !call.sql.includes("store_assignment"))).toBe(true);
   },
@@ -584,7 +585,7 @@ it("poisons administrative reentry and never grants Membership from an absent ro
   await expect(absent.current()).rejects.toThrow("active membership was not found");
 });
 
-it("takes activation SRE before SHARE and actual Pending read without operational permission", async () => {
+it("takes the activation fence exclusive before the actual Pending read without operational permission", async () => {
   const target = createIdentityActor({
     ...actor,
     verificationLevel: "RecentMfa",
@@ -605,12 +606,12 @@ it("takes activation SRE before SHARE and actual Pending read without operationa
   expect(Object.isFrozen(result[0])).toBe(true);
   expect(Object.keys(f.source)).toEqual(["findMemberships"]);
   expect(f.calls[0]?.values).toEqual([brand.brandReference, ""]);
-  expect(f.calls[1]?.sql).toBe("LOCK TABLE bop_membership.membership IN SHARE ROW EXCLUSIVE MODE");
-  expect(f.calls[2]?.sql).toBe("LOCK TABLE bop_membership.membership IN SHARE MODE");
-  expect(f.calls[3]?.sql).toContain(
+  expect(f.calls[1]?.sql).toBe("SELECT pg_advisory_xact_lock(hashtextextended($1,0))");
+  expect(f.calls[1]?.values).toEqual(["MembershipFence:" + brand.brandReference]);
+  expect(f.calls[2]?.sql).toContain(
     "FROM bop_membership.membership WHERE actor_id=$1 AND brand_id=$2",
   );
-  expect(f.calls[3]?.values).toEqual([actor.actorReference, brand.brandReference]);
+  expect(f.calls[2]?.values).toEqual([actor.actorReference, brand.brandReference]);
   expect(
     f.calls.some((call) => call.sql.includes("store_assignment") || call.sql.startsWith("UPDATE")),
   ).toBe(false);
@@ -619,13 +620,13 @@ it("takes activation SRE before SHARE and actual Pending read without operationa
   expect(await f.read()).toEqual([]);
 });
 
-it("keeps both ordinary Brand read admissions on SHARE without activation SRE", async () => {
+it("keeps both ordinary Brand read admissions shared without the activation fence", async () => {
   for (const input of [brandContext, administrativeContext()]) {
     const f = brandFixture(input);
     await f.read();
     expect(
-      f.calls.filter((call) => call.sql.startsWith("LOCK TABLE")).map((call) => call.sql),
-    ).toEqual(["LOCK TABLE bop_membership.membership IN SHARE MODE"]);
+      f.calls.filter((call) => call.sql.includes("pg_advisory_xact_lock")).map((call) => call.sql),
+    ).toEqual(["SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))"]);
   }
 });
 
@@ -648,7 +649,7 @@ it.each(["Actor", "Brand"])(
   },
 );
 
-it.each([1, 2, 3, 4])(
+it.each([1, 2, 3])(
   "poisons activation port drift at checkpoint %s without invoking the replacement",
   async (at) => {
     const f = brandFixture(administrativeContext(), true),
@@ -670,10 +671,10 @@ it.each([1, 2, 3, 4])(
   },
 );
 
-it("poisons caught activation reentry at SRE and malformed actual rows", async () => {
+it("poisons caught activation reentry at the fence and malformed actual rows", async () => {
   const f = brandFixture(administrativeContext(), true);
   f.state.beforeReturn = async (sql) => {
-    if (sql.includes("SHARE ROW EXCLUSIVE")) {
+    if (sql.startsWith("SELECT pg_advisory_xact_lock(")) {
       f.state.beforeReturn = null;
       await expect(f.read()).rejects.toThrow("membership input is invalid");
     }
@@ -723,7 +724,7 @@ it("authorizes target employee eligibility through owner facts without changing 
   const f = eligibilityFixture();
   expect(await f.read()).toBe(true);
   expect(context.actor.actorReference).toBe(id(1));
-  expect(f.calls.some((c) => c.sql.startsWith("LOCK TABLE"))).toBe(true);
+  expect(f.calls.some((c) => c.sql.includes("pg_advisory_xact_lock_shared"))).toBe(true);
   expect(
     f.calls
       .filter((c) => c.sql.startsWith("SELECT * FROM bop_membership.membership"))

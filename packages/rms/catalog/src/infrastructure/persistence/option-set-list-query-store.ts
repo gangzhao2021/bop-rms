@@ -457,10 +457,13 @@ export function createPostgresOptionSetListQueryStore(options: {
           sourceRecord(isolation[0], ["compatible"]).compatible !== true
         )
           return poison();
-        // PostgreSQL SHARE requires owning table lock ACL; no grant is created here.
-        await query(
-          "LOCK TABLE rms_catalog.option_set,rms_catalog.option_set_version,rms_catalog.option,rms_catalog.option_conflict,rms_catalog.product_option_binding IN SHARE MODE",
-        );
+        // DEC-MERCHANT-LOCK-SCOPE: always content before binding.
+        await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+          "CatalogOptionContentFence:" + scope.brandReference,
+        ]);
+        await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+          "CatalogProductBindingFence:" + scope.brandReference,
+        ]);
         const selected = resultRows(await query(sourceSql, [scope.brandReference]));
         if (selected.length !== 1) return poison();
         const packet = sourceRecord(selected[0], ["asOfUtc", "items"]),

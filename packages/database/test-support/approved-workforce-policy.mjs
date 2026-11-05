@@ -312,11 +312,10 @@ async function verifyPolicyForActualPending({
       admin,
       `GRANT EXECUTE ON FUNCTION platform_helpers.is_uuid_v7(uuid),platform_helpers.current_brand_id(),platform_helpers.current_store_id() TO ${role}`,
     );
-    // PG18 MAINTAIN is required for the owning predicate/table fence; it does
-    // not add DML. No role/grant/assignment UPDATE or definition write is given.
+    // No role/grant/assignment UPDATE or definition write is given.
     await q(
       admin,
-      `GRANT SELECT,MAINTAIN ON bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override TO ${role}`,
+      `GRANT SELECT ON bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override TO ${role}`,
     );
     await q(
       admin,

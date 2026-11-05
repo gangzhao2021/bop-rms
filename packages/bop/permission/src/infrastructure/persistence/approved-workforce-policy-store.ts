@@ -850,16 +850,12 @@ export function createPostgresApprovedWorkforcePolicyStore(
         `Brand:${parsed.policy.brandReference}`,
       ]);
       const held = await qualify();
-      if (preparing)
-        await query(
-          "LOCK TABLE bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override IN SHARE ROW EXCLUSIVE MODE",
-          [],
-        );
-      else
-        await query(
-          "LOCK TABLE bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override IN SHARE MODE",
-          [],
-        );
+      await query(
+        preparing
+          ? "SELECT pg_advisory_xact_lock(hashtextextended($1,0))"
+          : "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+        ["PermissionPolicyFence:" + parsed.policy.brandReference],
+      );
       await sameTx();
       if (parsed.profile === "PrepareApprovedWorkforcePolicyV1") await prepare(parsed, held);
       else confirm(await read(held.brand, held.member));

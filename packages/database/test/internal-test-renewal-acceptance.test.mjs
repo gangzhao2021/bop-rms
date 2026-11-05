@@ -331,8 +331,8 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
       ).rows[0];
       assert.deepEqual(renewalRole, { rolbypassrls: false, rolcanlogin: false, rolsuper: false });
       // Least privilege (2026-10-18): no whole-table UPDATE anywhere; row locks and versioned
-      // changes through the written columns only; table locks through MAINTAIN; append-only
-      // history SELECT and INSERT only. The broad grants of the earlier role are gone.
+      // changes through the written columns only; advisory fences need no table privilege;
+      // append-only history SELECT and INSERT only. The broad grants of the earlier role are gone.
       const privilege = async (sql, values) =>
         (await q(sql, [renewed.role, ...values])).rows[0].allowed;
       const table = (object, mode) =>
@@ -363,10 +363,10 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
         "bop_publishing.live_gate_requirement",
         "rms_pricing.tax_configuration",
         "rms_pricing.tax_reference_scope",
+        "bop_membership.membership",
+        "bop_permission.role",
       ])
         assert.equal(await table(object, "MAINTAIN"), false, object + " MAINTAIN");
-      for (const object of ["bop_membership.membership", "bop_permission.role"])
-        assert.equal(await table(object, "MAINTAIN"), true, object + " MAINTAIN");
       assert.equal(await table("bop_publishing.live_gate_version", "INSERT"), true);
       assert.equal(
         await column("platform_audit.audit_chain_head", "next_sequence", "UPDATE"),

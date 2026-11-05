@@ -222,10 +222,12 @@ export function createPostgresCatalogAllergenCoverageSource(options: {
     tx: ProductLifecycleTransaction,
     at: string,
   ): Promise<readonly CatalogAllergenDependency[]> {
-    await tx.query(
-      "LOCK TABLE rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion IN SHARE MODE",
-      [],
-    );
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "CatalogAllergenRegistryFence:" + brand,
+    ]);
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "CatalogAllergenEvidenceFence:" + brand,
+    ]);
     async function read(sql: string): Promise<readonly unknown[]> {
       const value = rows(await tx.query(sql, [brand]), 2049);
       if (value.length > 2048) return fail();

@@ -340,7 +340,7 @@ export async function exerciseOptionSetApprovalWaiver() {
             ? "isolation"
             : sql.startsWith("SELECT set_config")
               ? "scope"
-              : sql.startsWith("LOCK TABLE")
+              : sql.includes("pg_advisory_xact_lock")
                 ? "source-lock"
                 : sql.includes("optionSetPolicyContent")
                   ? "policy-registration"

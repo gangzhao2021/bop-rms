@@ -54,9 +54,9 @@ export function createPostgresPublicStoreProfileStore(options: {
     ]);
     await tx.query(
       write
-        ? "LOCK TABLE rms_store.public_store_profile_version IN SHARE ROW EXCLUSIVE MODE"
-        : "LOCK TABLE rms_store.public_store_profile_version IN SHARE MODE",
-      [],
+        ? "SELECT pg_advisory_xact_lock(hashtextextended($1,0))"
+        : "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+      ["StorePublicProfileFence:" + brand + ":" + store],
     );
   };
   const parse = (value: unknown) => {

@@ -249,7 +249,7 @@ it("returns truthful empty current state through actual owning read and final au
     contentDigest: null,
   });
   expect(value.businessReferenceValidation).toBe("NotEvaluated");
-  expect(f.queries.filter((sql) => sql.includes("IN SHARE MODE")).length).toBe(2);
+  expect(f.queries.filter((sql) => sql.includes("pg_advisory_xact_lock_shared")).length).toBe(2);
   // WP-2423: the caller is resolved in full exactly twice (start, and before the checks/COMMIT).
   expect(f.state.allowedCalls).toBe(2);
   expect(mocks.scope).toHaveBeenCalledOnce();

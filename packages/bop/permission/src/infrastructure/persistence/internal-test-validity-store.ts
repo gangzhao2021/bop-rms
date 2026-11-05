@@ -105,12 +105,11 @@ export async function extendInternalTestPermissionValidity(
       store,
     ]);
   await scope(input.storeReference);
-  // Role administration takes the same lock on policy_state first, so concurrent role changes
-  // serialize with the extension; only the tables it changes are locked.
-  await tx.query(
-    "LOCK TABLE bop_permission.policy_state,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant IN SHARE ROW EXCLUSIVE MODE",
-    [],
-  );
+  // Role administration takes the same fence first, so concurrent role changes serialize with the
+  // extension.
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "PermissionPolicyFence:" + input.brandReference,
+  ]);
   const window = [input.brandReference, input.storeReference, input.from, input.to];
   const inScope = (alias: string) =>
     `${alias}.brand_id=$1 AND (${alias}.store_id IS NULL OR ${alias}.store_id=$2) AND ${alias}.lifecycle='Active' AND ${alias}.effective_until IN ($3::timestamptz,$4::timestamptz)`;

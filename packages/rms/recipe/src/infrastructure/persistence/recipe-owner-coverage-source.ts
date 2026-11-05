@@ -260,7 +260,9 @@ function createPostgresOwnedCoverageSource(
     readonly currentRecipes: readonly RecipeSnapshot[];
     readonly recipes: readonly RecipeSnapshot[];
   }> {
-    await tx.query("LOCK TABLE rms_recipe.recipe IN SHARE MODE", []);
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "RecipeCatalogReferenceV1:" + brand,
+    ]);
     const found = rows(await tx.query(selectCurrent, [brand]), 2049);
     if (found.length > 2048) return fail();
     const seen = new Set<string>();
@@ -398,7 +400,9 @@ function createPostgresOwnedCoverageSource(
       .digest("hex")}`;
   }
   async function substitutionCurrent(tx: RecipeTransaction, at: string, recipeDigest: string) {
-    await tx.query("LOCK TABLE rms_recipe.recipe_modifier_version IN SHARE MODE", []);
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "RecipeCatalogReferenceV1:" + brand,
+    ]);
     const found = rows(
       await tx.query(
         `SELECT m.rule_id AS "objectReference",m.rule_version_id AS "versionReference",m.recipe_id AS "recipeReference",m.recipe_version_id AS "recipeVersionReference",m.rule_digest AS "ruleDigest",m.rule_json AS rule,m.version,m.lifecycle,m.review_evidence_json AS publication,to_char(m.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "occurredAt",to_char(m.effective_from AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "effectiveFrom",to_char(m.effective_until AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "effectiveUntil",v.snapshot_json AS snapshot
@@ -493,7 +497,9 @@ function createPostgresOwnedCoverageSource(
     recipeDigest: string,
     stores: RecipeUsageStoreCoverage,
   ) {
-    await tx.query("LOCK TABLE rms_recipe.recipe_scope_binding IN SHARE MODE", []);
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "RecipeCatalogReferenceV1:" + brand,
+    ]);
     const found: unknown[] = [];
     for (const store of [null, ...stores.storeReferences]) {
       await tx.query("SELECT set_config('bop.store_id',$1,true)", [store ?? ""]);
@@ -598,7 +604,9 @@ function createPostgresOwnedCoverageSource(
       if (stores === undefined) return fail();
       return usageCurrent(tx, at, recipe.digest, stores);
     }
-    await tx.query("LOCK TABLE rms_recipe.recipe_preparation_content IN SHARE MODE", []);
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "RecipePreparationContentFence:" + brand,
+    ]);
     const publications = rows(
       await tx.query(
         `SELECT p.content_id AS "contentReference",p.recipe_id AS "recipeReference",p.recipe_version_id AS "versionReference",p.modifier_rule_version_id AS "modifierVersionReference",p.operation_id AS "operationReference",p.content_digest AS digest,p.record_json AS record,to_char(p.published_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "publishedAt",v.snapshot_json AS snapshot,m.rule_json AS rule,m.lifecycle AS "modifierLifecycle",to_char(m.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "modifierOccurredAt",m.review_evidence_json AS "modifierPublication"

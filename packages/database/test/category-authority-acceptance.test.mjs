@@ -2529,12 +2529,27 @@ it.each(["authority", "normal-tree"])(
               "SELECT store_id FROM bop_tenant.store WHERE store_id=$1 FOR UPDATE NOWAIT",
               [targetStore],
             ],
-            ["LOCK TABLE bop_membership.membership IN ROW EXCLUSIVE MODE NOWAIT", []],
-            ["LOCK TABLE bop_permission.permission_grant IN ROW EXCLUSIVE MODE NOWAIT", []],
           ]) {
             await admin.query("BEGIN");
             try {
               await assert.rejects(admin.query(sql, values), { code: "55P03" });
+            } finally {
+              await admin.query("ROLLBACK");
+            }
+          }
+          // The Brand's Membership and Permission fences are held too.
+          for (const fence of ["MembershipFence:" + f.BRAND, "PermissionPolicyFence:" + f.BRAND]) {
+            await admin.query("BEGIN");
+            try {
+              assert.equal(
+                (
+                  await admin.query(
+                    "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                    [fence],
+                  )
+                ).rows[0].acquired,
+                false,
+              );
             } finally {
               await admin.query("ROLLBACK");
             }

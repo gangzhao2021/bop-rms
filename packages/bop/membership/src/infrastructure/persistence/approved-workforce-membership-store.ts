@@ -565,7 +565,9 @@ export function createPostgresApprovedWorkforceMembershipStore(
       const actor = await qualify(request, requestDigest);
       await scope(a);
       if (!activating)
-        await query("LOCK TABLE bop_membership.membership IN SHARE ROW EXCLUSIVE MODE", []);
+        await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          "MembershipFence:" + a.brandReference,
+        ]);
       await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
         `ApprovedWorkforceMembership:${a.brandReference}:${a.actorReference}`,
       ]);

@@ -80,10 +80,9 @@ export function createPostgresStoreConfigurationAdministration(options: {
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
           [brand, store],
         );
-        await tx.query(
-          "LOCK TABLE rms_store.store_configuration_authoring_operation IN SHARE ROW EXCLUSIVE MODE",
-          [],
-        );
+        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          "StoreAuthoringFence:" + brand + ":" + store,
+        ]);
         locked = true;
       }
       const authorization: StoreConfigurationAdministrationPorts["authorization"] = {
@@ -270,9 +269,9 @@ export function createPostgresStoreConfigurationAuthoringSource(options: {
       );
       await tx.query(
         mode === "Write"
-          ? "LOCK TABLE rms_store.store_configuration_authoring_operation IN SHARE ROW EXCLUSIVE MODE"
-          : "LOCK TABLE rms_store.store_configuration_authoring_operation IN SHARE MODE",
-        [],
+          ? "SELECT pg_advisory_xact_lock(hashtextextended($1,0))"
+          : "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
+        ["StoreAuthoringFence:" + brand + ":" + store],
       );
       const result = rows(
         await tx.query(
@@ -594,7 +593,9 @@ export function createPostgresStoreConfigurationHistorySource(
       "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
       [fixed.tenantReference, fixed.brandReference, fixed.storeReference],
     );
-    await sql("LOCK TABLE rms_store.store_configuration_authoring_operation IN SHARE MODE", []);
+    await sql("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "StoreAuthoringFence:" + fixed.brandReference + ":" + fixed.storeReference,
+    ]);
     const observedAt = check();
     const result = rows(
       await sql(

@@ -155,10 +155,9 @@ async function advancePolicy(
   snapshot: string,
   at: string,
 ): Promise<number> {
-  await tx.query(
-    "LOCK TABLE bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override IN SHARE ROW EXCLUSIVE MODE",
-    [],
-  );
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "PermissionPolicyFence:" + brandReference,
+  ]);
   const updated = await tx.query(
     "UPDATE bop_permission.policy_state SET snapshot_id=$2,version=version+1,updated_at=$3 WHERE brand_id=$1 RETURNING version::text v",
     [brandReference, snapshot, at],

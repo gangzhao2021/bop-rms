@@ -189,8 +189,8 @@ describe("actual owning live Option authoring list", () => {
     expect(last.items[0]?.internalCode).toBe("SYNTHETIC_12");
     expect(last.nextCursor).toBeNull();
     expect(
-      f.query.mock.calls.some(([sql]) => sql.includes("LOCK TABLE rms_catalog.option_set")),
-    ).toBe(true);
+      f.query.mock.calls.filter(([sql]) => sql.includes("pg_advisory_xact_lock_shared")).length,
+    ).toBeGreaterThanOrEqual(2);
     expect(f.hold).toHaveBeenCalledTimes(9);
   });
   it("keeps caller-transaction results tentative until the actual async and final host guards", async () => {

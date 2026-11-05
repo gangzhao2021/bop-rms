@@ -408,10 +408,9 @@ export function createPostgresRoleAdministrationPorts(options: {
 
   /** Activation applies exactly the approved selections; deactivation suspends the role. */
   async function materialize(next: RoleAdministrationVersionRecord, at: string): Promise<void> {
-    await tx.query(
-      "LOCK TABLE bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override IN SHARE ROW EXCLUSIVE MODE",
-      [],
-    );
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      "PermissionPolicyFence:" + next.brandReference,
+    ]);
     const active = next.lifecycle === "Active";
     await tx.query(
       "UPDATE bop_permission.role SET lifecycle=$3,version=version+1,updated_at=$4 WHERE role_id=$1 AND brand_id=$2",

@@ -771,9 +771,7 @@ describe("merchant exception current authorization", () => {
       storeReference: ids.storeAllowed,
       sessionReference: ids.session,
     });
-    expect(calls.some((sql) => sql.startsWith("LOCK TABLE bop_permission.policy_state"))).toBe(
-      true,
-    );
+    expect(calls.some((sql) => sql.includes("pg_advisory_xact_lock_shared"))).toBe(true);
     policies.snapshot = Object.freeze({
       ...policySnapshot(true),
       permissionOverrides: Object.freeze([

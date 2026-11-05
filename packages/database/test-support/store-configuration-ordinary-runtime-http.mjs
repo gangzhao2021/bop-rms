@@ -82,13 +82,12 @@ export async function exerciseStoreConfigurationOrdinaryRuntimeHttp(input) {
     falseFields = [];
   // Race barrier: the first transaction to take the Store configuration head lock holds it until
   // another transaction is waiting for that lock, so the loser reads its clock before the winner.
-  const headLock =
-    "LOCK TABLE rms_store.store_configuration_authoring_operation IN SHARE ROW EXCLUSIVE MODE";
+  const headLock = "SELECT pg_advisory_xact_lock(hashtextextended($1,0))";
   let headLockBarrier = null;
   const awaitHeadLockWaiter = async () => {
     for (let attempt = 0; attempt < 400; attempt++) {
       const waiting = await admin.query(
-        "SELECT count(*)::int waiting FROM pg_locks WHERE relation='rms_store.store_configuration_authoring_operation'::regclass AND NOT granted",
+        "SELECT count(*)::int waiting FROM pg_locks WHERE locktype='advisory' AND NOT granted",
       );
       if (waiting.rows[0].waiting > 0) return true;
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -104,7 +103,12 @@ export async function exerciseStoreConfigurationOrdinaryRuntimeHttp(input) {
             tx.query = async (sql, values) => {
               const result = await query.call(tx, sql, values);
               const barrier = headLockBarrier;
-              if (barrier !== null && !barrier.used && sql === headLock) {
+              if (
+                barrier !== null &&
+                !barrier.used &&
+                sql === headLock &&
+                String(values?.[0]).startsWith("StoreAuthoringFence:")
+              ) {
                 barrier.used = true;
                 barrier.observedWaiter = await awaitHeadLockWaiter();
               }

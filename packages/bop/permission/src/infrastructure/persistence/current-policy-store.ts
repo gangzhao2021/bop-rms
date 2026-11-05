@@ -609,10 +609,9 @@ function createPermissionPolicySource(
           [brand, store ?? ""],
         );
         if (!reuseConstructors || !shared) {
-          await query(
-            "LOCK TABLE bop_permission.policy_state,bop_permission.permission_definition,bop_permission.role,bop_permission.role_assignment,bop_permission.permission_grant,bop_permission.permission_override IN SHARE MODE",
-            [],
-          );
+          await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+            "PermissionPolicyFence:" + brand,
+          ]);
           if (reuseConstructors) shared = true;
         }
         const packet = policyPacket(

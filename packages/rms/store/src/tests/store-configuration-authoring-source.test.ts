@@ -28,8 +28,8 @@ describe("owning configuration head barrier", () => {
       expect(await source({ query }, at)).toBeNull();
       expect(query.mock.calls[1]?.[0]).toBe(
         mode === "Write"
-          ? "LOCK TABLE rms_store.store_configuration_authoring_operation IN SHARE ROW EXCLUSIVE MODE"
-          : "LOCK TABLE rms_store.store_configuration_authoring_operation IN SHARE MODE",
+          ? "SELECT pg_advisory_xact_lock(hashtextextended($1,0))"
+          : "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
       );
       expect(authorize).toHaveBeenCalledTimes(2);
     }
@@ -161,7 +161,7 @@ describe("head committed while the head lock was awaited", () => {
     let clock = at;
     const query = vi.fn(async (sql: string) => {
       // The concurrent writer commits while this read waits for the head lock.
-      if (sql.startsWith("LOCK TABLE")) clock = "2026-10-05T10:00:00.500Z";
+      if (sql.includes("pg_advisory_xact_lock")) clock = "2026-10-05T10:00:00.500Z";
       return {
         rows: sql.includes("ORDER BY sequence_number DESC")
           ? [

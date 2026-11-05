@@ -8,7 +8,7 @@ export async function exerciseCatalogAllergenCoverage({ admin, context, role, id
   const tables =
     "rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry,rms_catalog.allergen_source_evidence,rms_catalog.allergen_source_assertion";
   await admin.query(`GRANT USAGE ON SCHEMA rms_catalog TO ${role}`);
-  await admin.query(`GRANT SELECT,MAINTAIN ON ${tables} TO ${role}`);
+  await admin.query(`GRANT SELECT ON ${tables} TO ${role}`);
   await admin.query(
     `GRANT SELECT,INSERT,UPDATE,DELETE ON rms_catalog.recipe_allergen_source_capture TO ${role}`,
   );

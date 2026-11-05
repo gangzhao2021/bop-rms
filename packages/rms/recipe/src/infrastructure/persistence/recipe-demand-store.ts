@@ -191,10 +191,9 @@ function createSaleRecipeDemandSource(
       return runner
         .run(async (tx) => {
           if (submission)
-            await tx.query(
-              "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_scope_binding,rms_recipe.recipe_modifier_version IN SHARE MODE",
-              [],
-            );
+            await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+              "RecipeCatalogReferenceV1:" + brand,
+            ]);
           const demand = await createDemandSource({ run: async (work) => work(tx) }, brand).resolve(
             {
               storeReference: input.storeReference,
@@ -292,10 +291,9 @@ export function createPostgresConfiguredRecipePreparationSource(options: {
           "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
           [brand, store],
         );
-        await tx.query(
-          "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_scope_binding,rms_recipe.recipe_modifier_version IN SHARE MODE",
-          [],
-        );
+        await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+          "RecipeCatalogReferenceV1:" + brand,
+        ]);
         const runner = {
           run: async <T>(work: (transaction: ConsumerTransaction) => Promise<T>) => work(tx),
         };
@@ -441,10 +439,9 @@ export function createPostgresRecipeReviewSource(options: {
       brand,
       store,
     ]);
-    await tx.query(
-      "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_scope_binding,rms_recipe.recipe_modifier_version IN SHARE MODE",
-      [],
-    );
+    await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+      "RecipeCatalogReferenceV1:" + brand,
+    ]);
     const runner = {
       run: async <T>(work: (transaction: RecipeTransaction) => Promise<T>) => work(tx),
     };

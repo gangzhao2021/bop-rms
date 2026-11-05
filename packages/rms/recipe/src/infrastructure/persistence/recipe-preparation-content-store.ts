@@ -72,10 +72,9 @@ export function createPostgresRecipePreparationContentStore(options: {
   ) {
     if (identity.brandReference !== brand) return fail();
     if (current)
-      await tx.query(
-        "LOCK TABLE rms_recipe.recipe,rms_recipe.recipe_modifier_version IN SHARE MODE",
-        [],
-      );
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "RecipeCatalogReferenceV1:" + brand,
+      ]);
     const rows = (
       await tx.query(
         "SELECT v.snapshot_json AS snapshot,c.lifecycle AS current_lifecycle,p.record_json->'publicationEvidence' AS publication " +

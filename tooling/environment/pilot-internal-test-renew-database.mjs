@@ -57,9 +57,9 @@ const unavailable = (reason, details = {}) => {
 /**
  * Least privilege of the renewal role (Owner standing approval 2026-10-14, WP-2423 renewal;
  * narrowed 2026-10-18 under the same rules as the API role, docs/spec/pilot-acl-additions.json):
- * a row lock needs UPDATE on one column only, `LOCK TABLE ... IN SHARE [ROW EXCLUSIVE] MODE`
- * needs MAINTAIN (PostgreSQL 17+; MAINTAIN cannot change rows), and an UPDATE is granted only on
- * the columns the renewal store writes. Append-only history (launch gate versions, tax versions,
+ * a row lock needs UPDATE on one column only, the merchant fences are advisory (DEC-MERCHANT-LOCK-
+ * SCOPE: no table lock, no MAINTAIN), and an UPDATE is granted only on the columns the renewal
+ * store writes. Append-only history (launch gate versions, tax versions,
  * audit records) is SELECT and INSERT only. The tax reference triggers are SECURITY DEFINER and
  * need nothing from this role.
  */
@@ -74,29 +74,29 @@ export const internalTestRenewalGrants = Object.freeze([
   ["routine", "platform_helpers.current_brand_id()"],
   ["routine", "platform_helpers.current_store_id()"],
   ["routine", "platform_helpers.is_uuid_v7(uuid)"],
-  // Membership validity: LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE, then the versioned change.
-  ["table", "bop_membership.membership", "SELECT,MAINTAIN"],
+  // Membership validity: the Brand's Membership fence, then the versioned change.
+  ["table", "bop_membership.membership", "SELECT"],
   ["column", "bop_membership.membership", "UPDATE", ["effective_until", "version", "updated_at"]],
-  ["table", "bop_membership.store_assignment", "SELECT,MAINTAIN"],
+  ["table", "bop_membership.store_assignment", "SELECT"],
   [
     "column",
     "bop_membership.store_assignment",
     "UPDATE",
     ["effective_until", "version", "updated_at"],
   ],
-  // Permission validity: the same table lock, a new policy snapshot, then the versioned change.
-  ["table", "bop_permission.policy_state", "SELECT,MAINTAIN"],
+  // Permission validity: the Brand's policy fence, a new policy snapshot, then the versioned change.
+  ["table", "bop_permission.policy_state", "SELECT"],
   ["column", "bop_permission.policy_state", "UPDATE", ["snapshot_id", "version", "updated_at"]],
-  ["table", "bop_permission.role", "SELECT,MAINTAIN"],
+  ["table", "bop_permission.role", "SELECT"],
   ["column", "bop_permission.role", "UPDATE", ["effective_until", "version", "updated_at"]],
-  ["table", "bop_permission.role_assignment", "SELECT,MAINTAIN"],
+  ["table", "bop_permission.role_assignment", "SELECT"],
   [
     "column",
     "bop_permission.role_assignment",
     "UPDATE",
     ["effective_until", "version", "updated_at"],
   ],
-  ["table", "bop_permission.permission_grant", "SELECT,MAINTAIN"],
+  ["table", "bop_permission.permission_grant", "SELECT"],
   [
     "column",
     "bop_permission.permission_grant",

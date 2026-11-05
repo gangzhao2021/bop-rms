@@ -75,10 +75,12 @@ export function createPostgresStoreBusinessDateConfigurationSource(options: {
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [brandReference, storeReference],
       );
-      await tx.query(
-        "LOCK TABLE rms_store.store_configuration_authoring_operation,rms_store.store_configuration_version,rms_store.store_configuration_publication_content IN SHARE MODE",
-        [],
-      );
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "StoreAuthoringFence:" + brandReference + ":" + storeReference,
+      ]);
+      await tx.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+        "StoreConfigurationFence:" + brandReference + ":" + storeReference,
+      ]);
       const result = await tx.query(
         "WITH RECURSIVE published AS (SELECT v.configuration_id FROM rms_store.store_configuration_version v JOIN rms_store.store_configuration_publication_content c ON c.brand_id=v.brand_id AND c.store_id=v.store_id AND c.configuration_id=v.configuration_id WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' AND c.recorded_at <= $3 AND v.created_at <= $3 AND v.updated_at <= $3), nodes AS (SELECT configuration_id,configuration_version,supersedes_configuration_reference FROM rms_store.store_configuration_version WHERE brand_id=$1 AND store_id=$2 UNION SELECT configuration_id,configuration_version,(configuration_json->>'supersedesConfigurationReference')::uuid FROM rms_store.store_configuration_authoring_operation WHERE brand_id=$1 AND store_id=$2 AND occurred_at <= $3), lineage AS (SELECT configuration_id AS root_id,configuration_id,configuration_version,supersedes_configuration_reference::uuid AS supersedes_configuration_reference FROM rms_store.store_configuration_version WHERE brand_id=$1 AND store_id=$2 AND lifecycle='Published' AND effective_from <= $3 AND configuration_id IN (SELECT configuration_id FROM published) UNION SELECT l.root_id,n.configuration_id,n.configuration_version,n.supersedes_configuration_reference FROM lineage l JOIN nodes n ON n.configuration_id=l.supersedes_configuration_reference AND n.configuration_version < l.configuration_version) SELECT configuration_id,configuration_version,brand_id,store_id,time_zone,business_day_start_local_time,effective_from,effective_until,approval_evidence_reference,publication_reference,live_gate_evidence_reference,created_at,updated_at FROM rms_store.store_configuration_version v WHERE brand_id=$1 AND store_id=$2 AND lifecycle='Published' AND configuration_id IN (SELECT configuration_id FROM published) AND effective_from <= $3 AND (effective_until IS NULL OR effective_until > $3) AND NOT EXISTS (SELECT 1 FROM lineage successor WHERE successor.configuration_id=v.configuration_id AND successor.root_id<>v.configuration_id) ORDER BY configuration_version DESC LIMIT 2",
         [brandReference, storeReference, at],

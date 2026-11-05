@@ -800,6 +800,13 @@ describe("migration catalog", () => {
       "2000_156_alter_product_frozen_commit_guard",
       "2000_157_alter_workflow_one_family_per_purpose",
       "2000_160_alter_publishing_mutation_family_fence",
+      "2000_161_create_live_gate_fence",
+      "2000_162_create_catalog_fences",
+      "2000_163_create_store_fences",
+      "2000_164_create_workflow_fence",
+      "2000_165_create_permission_brand_fence",
+      "2000_166_create_membership_brand_fence",
+      "2000_167_create_recipe_bounded_fence",
       "2000_180_create_brand_guest_intake",
       "2000_181_alter_platform_support_merchant_pause",
     ]);
@@ -2026,6 +2033,7 @@ describe("migration catalog", () => {
       ["2000_144_alter_platform_support_public_revoke", "@bop/permission", "bop_permission"],
       // WP-2423 item 13 ②: pausing a merchant's new guests is a support permission of its own.
       ["2000_181_alter_platform_support_merchant_pause", "@bop/permission", "bop_permission"],
+      ["2000_165_create_permission_brand_fence", "@bop/permission", "bop_permission"],
     ]);
     const permission = migrations.find(
       (migration) => migration.id === "0300_001_create_permission",

@@ -872,10 +872,9 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
     await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
       "PricingOptionPriceRule:" + brand + ":" + command.ruleReference,
     ]);
-    await query(
-      "LOCK TABLE rms_pricing.option_price_rule,rms_pricing.option_price_rule_version IN SHARE ROW EXCLUSIVE MODE",
-      [],
-    );
+    await query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      "PricingConfigurationReferenceV1:" + brand,
+    ]);
     const fresh = await loadState(command.ruleReference);
     if (
       encode(fresh === null ? null : optionPriceWireState(fresh)) !==
@@ -1020,10 +1019,9 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
         const binding = parsePricingReference(input.bindingReference),
           option = parsePricingReference(input.optionReference);
         await hold("Read", null, null);
-        await query(
-          "LOCK TABLE rms_pricing.option_price_rule,rms_pricing.option_price_rule_version IN SHARE MODE",
-          [],
-        );
+        await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+          "PricingConfigurationReferenceV1:" + brand,
+        ]);
         const roots = (
           await query(
             "SELECT option_price_rule_id::text rule_reference FROM rms_pricing.option_price_rule WHERE brand_id=$1 AND binding_id=$2 AND option_id=$3 ORDER BY option_price_rule_id LIMIT 1001",
@@ -1053,10 +1051,9 @@ export function createPostgresOptionPriceAuthoringStore(options: OptionPriceAuth
       return run(async () => {
         const rule = parsePricingReference(ruleReference);
         await hold("Read", null, null);
-        await query(
-          "LOCK TABLE rms_pricing.option_price_rule,rms_pricing.option_price_rule_version IN SHARE MODE",
-          [],
-        );
+        await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
+          "PricingConfigurationReferenceV1:" + brand,
+        ]);
         const state = await loadState(rule);
         await hold("Read", null, state);
         records.push({ mode: "Read", command: null, state });

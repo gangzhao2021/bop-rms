@@ -326,14 +326,16 @@ it("loads the open business day's settlement with card-machine payments, also wh
       assert.ok(queryLog.length <= 90, "the order exceptions took " + queryLog.length + " queries");
 
       /**
-       * Live work holds a lock the read needs (here: a writer on the Store's launch gate, which
-       * every business-date proof reads in SHARE mode) for longer than the 2 s lock timeout.
+       * Live work holds a lock the read needs (here: a writer on the Store's launch gate, whose
+       * fence every business-date proof holds shared) for longer than the 2 s lock timeout.
        */
       const holdLock = async (ms) => {
         const holder = new Client(context.clientConfig);
         await holder.connect();
         await holder.query("BEGIN");
-        await holder.query("LOCK TABLE bop_publishing.live_gate_version IN ROW EXCLUSIVE MODE");
+        await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          "LiveGateFence:" + scope.brandReference + ":" + scope.storeReference,
+        ]);
         // Wrapped so awaiting the holder does not wait for its release.
         return {
           released: new Promise((resolve) => setTimeout(resolve, ms)).then(async () => {

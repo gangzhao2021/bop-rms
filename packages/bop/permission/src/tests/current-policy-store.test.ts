@@ -193,10 +193,12 @@ it.each(["Draft", "Active", "Suspended", "Archived"] as const)(
     });
     expect(x.context.brand.lifecycle).toBe(lifecycle);
     expect(x.calls[0]?.values).toEqual([f.BRAND, ""]);
-    expect(x.calls[1]?.sql).toContain("IN SHARE MODE");
+    expect(x.calls[1]?.sql).toContain("pg_advisory_xact_lock_shared");
     expect(x.calls[2]?.values).toEqual([f.BRAND, null, f.ACTOR, f.MEMBERSHIP]);
     expect(await x.source.authorize(x.input)).toEqual(result.decision);
-    expect(x.calls.filter((call) => call.sql.includes("IN SHARE MODE"))).toHaveLength(1);
+    expect(
+      x.calls.filter((call) => call.sql.includes("pg_advisory_xact_lock_shared")),
+    ).toHaveLength(1);
     expect(
       x.calls.filter((call) => call.sql.startsWith("SELECT jsonb_build_object(")),
     ).toHaveLength(2);
@@ -367,7 +369,7 @@ it("returns a frozen unbounded observation without changing the existing decisio
   expect(await x.source.authorize(x.input)).toEqual(result.decision);
   expect(Object.hasOwn(await x.source.authorize(x.input), "validUntil")).toBe(false);
   expect(x.calls[0]?.values).toEqual([f.BRAND, f.STORE]);
-  expect(x.calls[1]?.sql).toContain("IN SHARE MODE");
+  expect(x.calls[1]?.sql).toContain("pg_advisory_xact_lock_shared");
   const firstRead = x.calls.findIndex((c) => c.sql.startsWith("SELECT jsonb_build_object("));
   expect(firstRead).toBeGreaterThan(1);
 });
@@ -520,7 +522,7 @@ function batchInput(x: ReturnType<typeof fixture>, actions: readonly string[]) {
   void action;
   return { ...facts, actions };
 }
-it("transaction source holds six-table SHARE once while every call still obtains the full fresh packet and restores scope", async () => {
+it("transaction source holds the policy fence once while every call still obtains the full fresh packet and restores scope", async () => {
   const x = fixture(true),
     legacy = fixture();
   expect(await x.source.authorizeWithRoles(x.input)).toEqual(
@@ -538,12 +540,16 @@ it("transaction source holds six-table SHARE once while every call still obtains
     { action: f.ACTION, effect: "Allow" },
     { action: "catalog.product.read", effect: "Deny", source: "DefaultDeny" },
   ]);
-  expect(x.calls.filter((call) => call.sql.startsWith("LOCK TABLE"))).toHaveLength(1);
+  expect(x.calls.filter((call) => call.sql.includes("pg_advisory_xact_lock_shared"))).toHaveLength(
+    1,
+  );
   expect(x.calls.filter((call) => call.sql.includes("set_config"))).toHaveLength(2);
   expect(x.calls.filter((call) => call.sql.startsWith("SELECT jsonb_build_object("))).toHaveLength(
     2,
   );
-  expect(legacy.calls.filter((call) => call.sql.startsWith("LOCK TABLE"))).toHaveLength(2);
+  expect(
+    legacy.calls.filter((call) => call.sql.includes("pg_advisory_xact_lock_shared")),
+  ).toHaveLength(2);
 });
 it("transaction source allows Brand-first then the one selected Store without mixing scope facts", async () => {
   const x = fixture(true),
@@ -562,7 +568,9 @@ it("transaction source allows Brand-first then the one selected Store without mi
     [f.BRAND, f.store.storeReference],
     [f.BRAND, ""],
   ]);
-  expect(x.calls.filter((call) => call.sql.startsWith("LOCK TABLE"))).toHaveLength(1);
+  expect(x.calls.filter((call) => call.sql.includes("pg_advisory_xact_lock_shared"))).toHaveLength(
+    1,
+  );
 });
 it("transaction source reevaluates unchanged facts at a future deny boundary instead of retaining an Allow", async () => {
   const x = fixture(true);
@@ -718,7 +726,7 @@ it.each(["Membership", "Store"])(
 it("failed first SHARE acquisition never permits a packet read or a later cached authorization", async () => {
   const x = fixture(true);
   x.queryControl.before = async (sql) => {
-    if (sql.startsWith("LOCK TABLE")) throw new Error("Controlled lock failure");
+    if (sql.includes("pg_advisory_xact_lock_shared")) throw new Error("Controlled lock failure");
   };
   await expect(x.source.authorize(x.input)).rejects.toMatchObject(unavailable);
   expect(x.calls.some((call) => call.sql.startsWith("SELECT jsonb_build_object("))).toBe(false);
@@ -867,7 +875,7 @@ it("single-action public decisions and metadata remain equivalent to the batch o
   expect(x.calls).toHaveLength(6);
 });
 
-it("loads one explicit versioned packet after scope and all six SHARE locks, with original filters and bounds", async () => {
+it("loads one explicit versioned packet after scope and the Brand's policy fence, with original filters and bounds", async () => {
   const x = fixture();
   await x.source.authorizeWithRoles(x.input);
   const sql = x.calls[2]?.sql;
@@ -887,15 +895,8 @@ it("loads one explicit versioned packet after scope and all six SHARE locks, wit
   expect(sql).toContain('YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
   expect(sql).toContain("version::text");
   expect(x.calls[2]?.values).toEqual([f.BRAND, f.STORE, f.ACTOR, f.MEMBERSHIP]);
-  for (const table of [
-    "policy_state",
-    "permission_definition",
-    "role",
-    "role_assignment",
-    "permission_grant",
-    "permission_override",
-  ])
-    expect(x.calls[1]?.sql).toContain("bop_permission." + table);
+  expect(x.calls[1]?.sql).toContain("pg_advisory_xact_lock_shared");
+  expect(x.calls[1]?.values).toEqual(["PermissionPolicyFence:" + f.BRAND]);
 });
 
 it.each([

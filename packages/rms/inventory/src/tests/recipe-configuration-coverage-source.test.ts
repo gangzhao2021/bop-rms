@@ -86,9 +86,7 @@ describe("Inventory-owned Recipe configuration coverage", () => {
       await source.withCurrent(request(), read, async () => {
         expect(
           query.mock.calls.some(
-            ([sql]) =>
-              sql ===
-              "LOCK TABLE rms_inventory.inventory_item,rms_inventory.inventory_item_version,rms_inventory.inventory_item_operation IN SHARE MODE",
+            ([sql]) => sql === "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
           ),
         ).toBe(true);
         return "read";
