@@ -6,6 +6,7 @@ import {
   applyConfirmedKitchenSteps,
   kitchenRefusalText,
   kitchenStepText,
+  kitchenTargetName,
   type KitchenConfirmedStep,
 } from "./use-kitchen-actions.js";
 
@@ -104,6 +105,24 @@ describe("WP-2423 a confirmed kitchen step shows at once", () => {
     ]).items;
     expect(combo?.comboParts?.map((part) => part.done)).toEqual([true, false]);
     expect(combo?.status).toBe("In Progress");
+  });
+  it("names the dish a cook finished on a combo's card, never the whole combo", () => {
+    const parts = [
+      { optionReference: id(20), nameZh: "奶茶", name: "Milk tea", done: false, served: false },
+      { optionReference: id(21), nameZh: "", name: "Fries", done: false, served: false },
+    ];
+    const [combo] = board({ displayName: "Set for two", comboParts: parts }).items;
+    if (combo === undefined) throw new Error("fixture");
+    const target = (optionReferences: readonly string[] | null) => ({
+      lineKey: combo.workItemReference,
+      item: combo,
+      optionReferences,
+    });
+    expect(kitchenTargetName(target([id(20)]))).toBe("奶茶");
+    expect(kitchenTargetName(target([id(21)]))).toBe("Fries");
+    expect(kitchenTargetName(target([id(20), id(21)]))).toBe("奶茶, Fries");
+    // The foot button finished the whole combo: then it is the combo that is done.
+    expect(kitchenTargetName(target(null))).toBe("Set for two");
   });
   it("says what the cook just did in plain words, and nothing when nothing changed", () => {
     expect(kitchenStepText("Order 6", "Latte", { outcome: "Finished" })).toBe(

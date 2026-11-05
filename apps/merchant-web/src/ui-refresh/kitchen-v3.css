@@ -330,6 +330,10 @@
 .kitchen-ticket__state[data-state="Done"]::before {
   background: var(--bop-color-success-mark);
 }
+/* Everything on it was cancelled: the Orders page's cancelled dot, and no "done" anywhere. */
+.kitchen-ticket__state[data-state="Cancelled"]::before {
+  background: var(--bop-color-border-control);
+}
 .kitchen-ticket__next {
   min-height: 56px;
   margin-top: 4px;
@@ -1119,24 +1123,30 @@
   }
 }
 
-/* The ticket's top row: its quiet Start, or what a tap is doing. Never near the Done buttons. */
+/* The ticket's top row: its quiet Start, or what a tap is doing. Never near the Done buttons. The
+   ticket's name is never squeezed for it: on a narrow card the row moves under the name instead. */
 .kitchen-order-group.kitchen-ticket > .kitchen-ticket__header {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   min-height: var(--bop-kitchen-target);
 }
 .kitchen-order-group.kitchen-ticket .kitchen-ticket__header .kitchen-order-group__label {
+  flex: 1 1 9rem;
   min-width: 0;
 }
 .kitchen-ticket__top {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
-  gap: 12px;
+  gap: 0 12px;
+  max-width: 100%;
   margin-inline-start: auto;
 }
 .kitchen-ticket__top button {
+  min-width: var(--bop-kitchen-target);
   min-height: var(--bop-kitchen-target);
   padding: 0 4px;
   border: 0;

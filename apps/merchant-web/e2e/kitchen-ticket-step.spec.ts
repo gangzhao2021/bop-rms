@@ -263,6 +263,86 @@ test("@production the next ticket does not move during the hold", async ({ page 
   await expect(first.locator(".kitchen-ticket__next")).toBeDisabled();
 });
 
+test("@production a ticket that moved when a line above it left ignores a tap for a moment", async ({
+  page,
+}) => {
+  // Three dishes on the first ticket and five more tickets: the second row sits under the first.
+  const table = { orderNumber: "7", orderType: "DineIn", tableLabel: "T5" };
+  const others = [11, 12, 13, 14, 15].map((n, index) =>
+    dish(n, "TEST order " + n, {
+      ticketReference: id(100 + n),
+      orderReference: id(200 + n),
+      orderLabel: { orderNumber: String(n), orderType: "Pickup", tableLabel: null },
+      workItemCreatedAt: `2026-10-26T22:13:${String(10 + index).padStart(2, "0")}.000Z`,
+    }),
+  );
+  await page.setViewportSize({ width: 1024, height: 900 });
+  const { taps } = await mockBoard(page, [
+    ...[1, 2, 3].map((n) => dish(n, "TEST dish " + n, { orderLabel: table })),
+    ...others,
+  ]);
+  await page.goto("/operations/kitchen");
+  const first = page.locator(".kitchen-ticket").filter({ hasText: "TEST dish 1" });
+  const below = page.locator(".kitchen-ticket").filter({ hasText: "TEST order 13" });
+  const before = await below.boundingBox();
+  await first.getByRole("button", { name: "Mark TEST dish 1 finished" }).click();
+  // When the hold ends the dish leaves and the row below moves up under the cook's finger.
+  await expect
+    .poll(async () => (await below.boundingBox())?.y, { timeout: holdMs + 8_000, intervals: [20] })
+    .toBeLessThan(before?.y ?? 0);
+  await below.locator(".kitchen-ticket__next").click();
+  await expect(below.locator(".kitchen-work-item")).not.toHaveAttribute("data-pending", /./u);
+  // A moment later the same tap is taken.
+  await page.waitForTimeout(700);
+  await below.locator(".kitchen-ticket__next").click();
+  await expect(below.locator(".kitchen-work-item")).toHaveAttribute("data-pending", "Holding");
+  expect(taps.map((tap) => tap.lines.map((line) => line.workItemReference))).toEqual([[id(1)]]);
+});
+
+test("@production a tap that could not be recorded keeps the ticket's name whole, at every width", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(at) });
+  const table = { orderNumber: "15", orderType: "DineIn", tableLabel: "Patio 12" };
+  await mockBoard(page, [dish(1, "TEST fish", { orderLabel: table })]);
+  await page.route("**/merchant/kitchen/step", (route) => route.abort("failed"));
+  await page.goto("/operations/kitchen");
+  const ticket = page.locator(".kitchen-ticket");
+  await ticket.locator(".kitchen-ticket__next").click();
+  // The hold, then the same body again at 3, 8 and 20 seconds; then the cook decides.
+  for (const wait of [5_100, 3_100, 8_100, 20_100, 1_000]) await page.clock.runFor(wait);
+  const top = ticket.locator(".kitchen-ticket__top");
+  await expect(top).toContainText("Not recorded yet");
+  await expect(top.getByRole("button", { name: "Try again" })).toBeVisible();
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    const number = await ticket.locator(".kitchen-ticket__number").boundingBox();
+    const card = await ticket.boundingBox();
+    // The name reads on one line and is never squeezed into a column by the buttons.
+    expect(number?.height ?? 99).toBeLessThan(40);
+    expect(number?.width ?? 0).toBeGreaterThan(100);
+    for (const button of await top.getByRole("button").all()) {
+      const box = await button.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(48);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(48);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(
+        (card?.x ?? 0) + (card?.width ?? 0) + 1,
+      );
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+    ).toBeLessThanOrEqual(0);
+    await page.screenshot({ path: `test-results/kitchen-not-recorded-${width}.png` });
+  }
+  // Never mind gives the ticket back to the cook.
+  await top.getByRole("button", { name: "Never mind" }).click();
+  await expect(ticket.locator(".kitchen-ticket__next")).toBeEnabled();
+});
+
 test("@production a five-dish table takes five taps and the first dish needs no Start", async ({
   page,
 }) => {

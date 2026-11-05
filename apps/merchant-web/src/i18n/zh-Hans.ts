@@ -5413,8 +5413,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "正式门店每位员工用自己的账号登录。",
   interval: "时段",
   "invalid item cancellation answer": "商品取消的回应无效",
-  "is not today's order with the same number. Check it is the right ticket before you":
-    "不是今天同号的订单。请先确认是正确的票据，再",
+  "{order} from {day} is not today's order with the same number. Check it is the right ticket first.":
+    "{day}的{order}不是今天同号的订单。请先确认是正确的票据。",
   it: "它",
   item: "项",
   "item removed": "项商品已移除",

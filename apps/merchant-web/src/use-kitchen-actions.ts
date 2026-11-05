@@ -1,4 +1,4 @@
-import { t } from "./i18n/i18n.js";
+import { listSeparator, t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { KitchenWorkClientError, createKitchenWorkClient } from "./kitchen-work-client.js";
 import {
@@ -101,6 +101,20 @@ export function applyConfirmedKitchenSteps(
     });
   });
   return Object.freeze({ ...view, items: Object.freeze(items) });
+}
+
+/**
+ * The name of what a tap took: a combo's chosen dishes by their own names (Chinese first), so one
+ * dish done on a combo's card never reads as the whole combo done; otherwise the line's name.
+ */
+export function kitchenTargetName(target: KitchenStepTarget): string {
+  const parts = target.item.comboParts;
+  const chosen = target.optionReferences;
+  if (parts === undefined || chosen === null) return target.item.displayName;
+  const names = parts
+    .filter((part) => chosen.includes(part.optionReference))
+    .map((part) => part.nameZh || part.name);
+  return names.length === 0 ? target.item.displayName : names.join(listSeparator());
 }
 
 /** What the cook just did, in their words ("Order 6 · Latte done."); null when nothing changed. */
@@ -235,7 +249,7 @@ export function useKitchenActions(input: {
           const target = tap.targets.find(
             (candidate) => candidate.item.workItemReference === line.workItemReference,
           );
-          const name = target?.item.displayName ?? "";
+          const name = target === undefined ? "" : kitchenTargetName(target);
           if (line.outcome === "Refused")
             sayRef.current("Problem", kitchenRefusalText(name, line.refusedReason));
           else if (line.outcome === "NotAttempted")

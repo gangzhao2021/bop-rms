@@ -223,7 +223,11 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   await ticket.getByRole("button", { name: "Finished" }).click();
   const confirm = page.getByRole("dialog", { name: "This ticket is from Fri, Oct 9 — continue?" });
   await expect(confirm).toBeVisible();
-  await expect(confirm.getByText("is not today's order with the same number")).toBeVisible();
+  await expect(
+    confirm.getByText(
+      "Pickup · Order 2 from Fri, Oct 9 is not today's order with the same number. Check it is the right ticket first.",
+    ),
+  ).toBeVisible();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await expect(confirm.getByRole("button", { name: "Continue — Finished" })).toBeInViewport();
@@ -236,6 +240,9 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   // Continuing sends exactly that step for the old ticket.
   await ticket.getByRole("button", { name: "Finished" }).click();
   await confirm.getByRole("button", { name: "Continue — Finished" }).click();
+  // Held on the card first, with its own Undo, as on today's tickets.
+  await expect(ticket.getByText("Marked done")).toBeVisible();
+  await expect(ticket.getByRole("button", { name: "Undo" })).toBeVisible();
   await expect.poll(() => commands.length, { timeout: 8_000 }).toBe(1);
   expect(commands[0]).toMatchObject({ workItemReference: old.workItemReference });
 

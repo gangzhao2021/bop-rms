@@ -171,14 +171,20 @@ export function kitchenTicketNextStep(
       label: startFirst.length > 1 ? t("Start all") : t("Start cooking"),
     };
   const finish = lines.filter(kitchenLineFinishable);
+  // A combo's foot button finishes every dish of it still to make: it says "all" over two dishes,
+  // so it never reads as one of the dish buttons above it.
+  const dishes = finish.reduce(
+    (sum, item) => sum + Math.max(1, item.comboParts?.filter((part) => !part.done).length ?? 1),
+    0,
+  );
   if (finish.length > 0)
     return {
       kind: "Finish",
       items: finish,
       label:
-        later > 0 && finish.length > 1
+        later > 0 && dishes > 1
           ? t("Round finished")
-          : finish.length > 1
+          : dishes > 1
             ? t("All finished")
             : t("Finished"),
     };
@@ -1092,6 +1098,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1309,6 +1316,83 @@ export function kitchenFocusTarget(
 
 /** What a tap asks of a line. */
 export type KitchenBoardStep = KitchenStepKind | "MarkReady";
+
+/** The taps that hold any line of these items (a combo's dishes are held under its work item). */
+function kitchenCardTaps(
+  items: readonly KitchenBoardItem[],
+  pendingLines: ReadonlyMap<string, KitchenTap<KitchenStepTarget>> | undefined,
+): readonly KitchenTap<KitchenStepTarget>[] {
+  return [
+    ...new Map(
+      [...(pendingLines?.entries() ?? [])]
+        .filter(([key]) =>
+          items.some(
+            (item) => key === kitchenLineKey(item) || key.startsWith(item.workItemReference + ":"),
+          ),
+        )
+        .map(([, tap]) => [tap.id, tap] as const),
+    ).values(),
+  ];
+}
+
+/**
+ * What a tap on this card is doing, in the card's top row, away from the Done just tapped: Undo while
+ * it is held, "recording" while it goes, and a retry once it failed. Otherwise the row shows what the
+ * card offers there (the quiet Start).
+ */
+function KitchenTapStatus({
+  taps,
+  readOnly,
+  steps,
+  children,
+}: {
+  readonly taps: readonly KitchenTap<KitchenStepTarget>[];
+  readonly readOnly: boolean;
+  readonly steps:
+    | {
+        readonly onUndo: (taps: readonly number[]) => void;
+        readonly onRetry: (taps: readonly number[]) => void;
+        readonly onDismiss: (taps: readonly number[]) => void;
+      }
+    | undefined;
+  readonly children?: ReactNode;
+}) {
+  const failed = taps.filter((tap) => tap.phase === "Failed").map((tap) => tap.id);
+  const holding = taps.filter((tap) => tap.phase === "Holding");
+  const sending = taps.some(
+    (tap) => tap.phase === "Waiting" || tap.phase === "Sending" || tap.phase === "Retrying",
+  );
+  return (
+    <div className="kitchen-ticket__top" aria-live="polite">
+      {failed.length > 0 ? (
+        <>
+          <span className="kitchen-ticket__top-text" data-tone="problem">
+            {t("Not recorded yet")}
+          </span>
+          <button type="button" disabled={readOnly} onClick={() => steps?.onRetry(failed)}>
+            {t("Try again")}
+          </button>
+          <button type="button" onClick={() => steps?.onDismiss(failed)}>
+            {t("Never mind")}
+          </button>
+        </>
+      ) : holding.length > 0 ? (
+        <>
+          <span className="kitchen-ticket__top-text">
+            {holding.every((tap) => tap.step === "Start") ? t("Marked started") : t("Marked done")}
+          </span>
+          <button type="button" onClick={() => steps?.onUndo(holding.map((tap) => tap.id))}>
+            {t("Undo")}
+          </button>
+        </>
+      ) : sending ? (
+        <span className="kitchen-ticket__top-text">{t("Recording…")}</span>
+      ) : (
+        children
+      )}
+    </div>
+  );
+}
 
 function WorkCard({
   item,
@@ -2360,6 +2444,30 @@ export function KitchenBoardScreen({
       slots.current.set(group.orderReference, { signature, changedAt: performance.now() });
   });
   slotsSeeded.current = true;
+  // A ticket that moved is a changed slot too (a line of the ticket above it left, or a ticket before
+  // it closed): the finger that was over its Done may now be over another order's. Measured from
+  // its place on the board, so scrolling is never a move.
+  const slotPlaces = useRef(new Map<string, string>());
+  const slotElements = useRef(new Map<string, HTMLElement>());
+  const slotRef = (key: string) => (element: HTMLElement | null) => {
+    if (element) slotElements.current.set(key, element);
+    else slotElements.current.delete(key);
+  };
+  useLayoutEffect(() => {
+    const now = performance.now();
+    const places = new Map<string, string>();
+    for (const [key, element] of slotElements.current) {
+      const place = `${element.offsetLeft},${element.offsetTop}`;
+      places.set(key, place);
+      const before = slotPlaces.current.get(key);
+      if (before !== undefined && before !== place)
+        slots.current.set(key, {
+          signature: slots.current.get(key)?.signature ?? "",
+          changedAt: now,
+        });
+    }
+    slotPlaces.current = places;
+  });
   return (
     <KitchenFrame
       workspaceFrame={workspaceFrame}
@@ -2654,6 +2762,7 @@ export function KitchenBoardScreen({
                   <section
                     className="kitchen-earlier-ticket"
                     key={ticket.ticketReference}
+                    ref={slotRef(ticket.ticketReference)}
                     aria-label={`${ticket.orderLabel}, ${earlierDayText(ticket.businessDate)}`}
                   >
                     <header className="kitchen-earlier-ticket__heading">
@@ -2664,6 +2773,11 @@ export function KitchenBoardScreen({
                           {t("· waiting {waited}", { waited: kitchenWaitText(waited) })}
                         </p>
                       </div>
+                      <KitchenTapStatus
+                        taps={kitchenCardTaps(ticket.items, pendingLines)}
+                        readOnly={readOnly || actionsBlocked || stale !== undefined}
+                        steps={steps}
+                      />
                       {canCloseEarlier ? (
                         <button
                           type="button"
@@ -2815,30 +2929,13 @@ export function KitchenBoardScreen({
                       const slot = group.orderReference;
                       const heldOf = (line: KitchenBoardItem) =>
                         pendingLines?.get(kitchenLineKey(line));
-                      // A combo's dishes are held under the combo's work item.
-                      const cardTaps = [
-                        ...new Map(
-                          [...(pendingLines?.entries() ?? [])]
-                            .filter(([key]) =>
-                              group.items.some(
-                                (item) =>
-                                  key === kitchenLineKey(item) ||
-                                  key.startsWith(item.workItemReference + ":"),
-                              ),
-                            )
-                            .map(([, tap]) => [tap.id, tap] as const),
-                        ).values(),
-                      ];
-                      const ids = (phases: readonly string[]) =>
-                        cardTaps.filter((tap) => phases.includes(tap.phase)).map((tap) => tap.id);
-                      const holding = cardTaps.filter((tap) => tap.phase === "Holding");
-                      const failed = ids(["Failed"]);
-                      const sending = ids(["Waiting", "Sending", "Retrying"]).length > 0;
+                      const cardTaps = kitchenCardTaps(group.items, pendingLines);
                       const rounds = kitchenTicketRounds(group.items);
                       return (
                         <section
                           className="kitchen-order-group kitchen-ticket"
                           key={group.orderReference}
+                          ref={slotRef(slot)}
                           data-age={ticket.tier}
                           data-fresh={
                             group.items.some((item) => arrivals.includes(kitchenLineKey(item)))
@@ -2884,40 +2981,12 @@ export function KitchenBoardScreen({
                               ) : null}
                             </h4>
                             {/* Away from the Done just tapped, so undo is never a stray second tap. */}
-                            <div className="kitchen-ticket__top" aria-live="polite">
-                              {failed.length > 0 ? (
-                                <>
-                                  <span className="kitchen-ticket__top-text" data-tone="problem">
-                                    {t("Not recorded yet")}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    disabled={ticketReadOnly}
-                                    onClick={() => steps?.onRetry(failed)}
-                                  >
-                                    {t("Try again")}
-                                  </button>
-                                  <button type="button" onClick={() => steps?.onDismiss(failed)}>
-                                    {t("Never mind")}
-                                  </button>
-                                </>
-                              ) : holding.length > 0 ? (
-                                <>
-                                  <span className="kitchen-ticket__top-text">
-                                    {holding.every((tap) => tap.step === "Start")
-                                      ? t("Marked started")
-                                      : t("Marked done")}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => steps?.onUndo(holding.map((tap) => tap.id))}
-                                  >
-                                    {t("Undo")}
-                                  </button>
-                                </>
-                              ) : sending ? (
-                                <span className="kitchen-ticket__top-text">{t("Recording…")}</span>
-                              ) : start !== null && steps !== undefined ? (
+                            <KitchenTapStatus
+                              taps={cardTaps}
+                              readOnly={ticketReadOnly}
+                              steps={steps}
+                            >
+                              {start !== null && steps !== undefined ? (
                                 <button
                                   type="button"
                                   className="kitchen-ticket__start"
@@ -2927,11 +2996,14 @@ export function KitchenBoardScreen({
                                   {start.label}
                                 </button>
                               ) : null}
-                            </div>
+                            </KitchenTapStatus>
                           </header>
                           {/* The ticket's state and its wait share one row, on every ticket. */}
                           <div className="kitchen-ticket__status">
-                            <p className="kitchen-ticket__state" data-state={state}>
+                            <p
+                              className="kitchen-ticket__state"
+                              data-state={allCancelled ? "Cancelled" : state}
+                            >
                               {allCancelled
                                 ? t("Cancelled")
                                 : state === "ToMake"
@@ -2941,7 +3013,7 @@ export function KitchenBoardScreen({
                                     : t("Done")}
                             </p>
                             <p className="kitchen-ticket__wait">
-                              {ticket.minutes === null ? (
+                              {allCancelled ? null : ticket.minutes === null ? (
                                 <span className="kitchen-ticket__timer">{t("Done")}</span>
                               ) : (
                                 <span className="kitchen-ticket__timer" data-age={ticket.tier}>

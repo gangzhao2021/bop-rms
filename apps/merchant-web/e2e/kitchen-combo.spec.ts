@@ -145,7 +145,8 @@ test("@production a combo's dishes are made and marked done one by one on the ki
   // Each dish has its own Done; the ticket's main step finishes every dish still to make, for the
   // one-screen shop.
   const ticket = page.locator(".kitchen-ticket").filter({ hasText: "二人套餐" });
-  await expect(ticket.locator(".kitchen-ticket__next")).toHaveText("Finished");
+  // Under two dish buttons it says "all", so it never reads as one of them.
+  await expect(ticket.locator(".kitchen-ticket__next")).toHaveText("All finished");
   await expect(dishes.getByRole("button", { name: "Mark 馄饨汤 finished" })).toHaveCSS(
     "min-height",
     "48px",
@@ -176,6 +177,10 @@ test("@production a combo's dishes are made and marked done one by one on the ki
   await expect(dishes.getByRole("button", { name: "Mark 馄饨汤 finished" })).toHaveCount(0);
   await expect(dishes.locator("li").first()).toContainText("Done");
   await expect(ticket).toBeVisible();
+  // The board says which dish was done, never that the combo is.
+  await expect(page.locator(".kitchen-status-row")).toContainText("馄饨汤 done.");
+  await expect(page.locator(".kitchen-status-row")).not.toContainText("二人套餐 done");
+  await expect(ticket.locator(".kitchen-ticket__next")).toHaveText("Finished");
   // The last dish done finishes the combo in the same step, whichever cook taps it.
   await dishes.getByRole("button", { name: "Mark 炒饭 finished" }).click();
   await expect.poll(() => steps.length, { timeout: 8_000 }).toBe(2);

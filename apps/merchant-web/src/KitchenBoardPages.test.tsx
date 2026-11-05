@@ -656,6 +656,9 @@ describe("WP-2423 M3 kitchen display", () => {
     );
     expect(html).toContain("Cancelled · don&#x27;t make it");
     expect(html).toContain('data-cancelled-notice="true"');
+    // The ticket says cancelled with the cancelled dot, and never "Done" for food nobody made.
+    expect(html).toContain('data-state="Cancelled"');
+    expect(html).not.toContain('class="kitchen-ticket__timer">Done<');
     const later = renderToStaticMarkup(
       <MemoryRouter>
         <KitchenBoardScreen view={after} actionsBlocked={false} />
@@ -1343,6 +1346,44 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
       html.indexOf('class="kitchen-board-lanes"'),
     );
     expect(html).toContain("1 work item");
+  });
+  it("DEC-KITCHEN-ONE-TAP: an earlier day's card can undo a held tap and retry a failed one", () => {
+    const tap = (phase: "Holding" | "Failed") => ({
+      id: 1,
+      step: "Finish" as const,
+      phase,
+      targets: [],
+    });
+    const withTap = (phase: "Holding" | "Failed") =>
+      renderToStaticMarkup(
+        <StoreBusinessDayContext.Provider
+          value={{ businessDate: "2026-08-12", startsAt: null, endsAt: null }}
+        >
+          <MemoryRouter>
+            <KitchenBoardScreen
+              view={parseKitchenBoardView({ ...kitchenBoardFixture(), items: [today, old] })}
+              earlierDays={{ blocked: false, onClose: () => undefined }}
+              steps={{
+                ...noSteps,
+                pendingLines: new Map([[old.workItemReference, tap(phase)]]),
+              }}
+              actionsBlocked={false}
+            />
+          </MemoryRouter>
+        </StoreBusinessDayContext.Provider>,
+      );
+    const earlier = (html: string) =>
+      html.slice(
+        html.indexOf('class="kitchen-earlier-ticket"'),
+        html.indexOf('class="kitchen-board-lanes"'),
+      );
+    const held = earlier(withTap("Holding"));
+    expect(held).toContain("Marked done");
+    expect(held).toContain(">Undo</button>");
+    const failed = earlier(withTap("Failed"));
+    expect(failed).toContain("Not recorded yet");
+    expect(failed).toContain(">Try again</button>");
+    expect(failed).toContain(">Never mind</button>");
   });
   it("offers the close only to a manager, and shows nothing apart while the business day is unknown", () => {
     const cook = render(false);

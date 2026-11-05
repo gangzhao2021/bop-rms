@@ -339,12 +339,11 @@ export function KitchenEarlierDayConfirm({
         <div>
           <h2 id={titleId}>{t("This ticket is from {day} — continue?", { day: day })}</h2>
           <p>
-            {t("Order numbers restart every business day.")} {request.orderLabel.split(" · ")[0]}{" "}
-            {t("from")} {day}{" "}
+            {t("Order numbers restart every business day.")}{" "}
             {t(
-              "is not today's order with the same number. Check it is the right ticket before you",
-            )}{" "}
-            {request.actionLabel.toLocaleLowerCase()}.
+              "{order} from {day} is not today's order with the same number. Check it is the right ticket first.",
+              { order: request.orderLabel, day },
+            )}
           </p>
           <div className="kitchen-remake-dialog__actions">
             <button type="button" autoFocus onClick={() => dialog.current?.close()}>

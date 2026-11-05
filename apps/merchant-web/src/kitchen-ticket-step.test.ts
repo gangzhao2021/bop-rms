@@ -58,6 +58,26 @@ describe("DEC-KITCHEN-ONE-TAP: one main step per ticket", () => {
       [kitchenTicketNextStep(several)?.label, kitchenTicketStartStep(several)?.label].join(" "),
     ).not.toMatch(/accept/iu);
   });
+  it("a combo's foot button says all when it finishes more than one of its dishes", () => {
+    const part = (n: number, done: boolean) => ({
+      optionReference: ref(500 + n),
+      nameZh: `菜${n}`,
+      name: `Dish ${n}`,
+      done,
+      served: false,
+    });
+    const combo = (parts: ReturnType<typeof part>[]) => [
+      { ...item(1, "Queued"), comboParts: parts } as KitchenBoardItem,
+    ];
+    // Under two dish buttons, a plain "Finished" would read as one of them.
+    expect(kitchenTicketNextStep(combo([part(1, false), part(2, false)]))?.label).toBe(
+      "All finished",
+    );
+    // One dish left: the foot button finishes exactly that one.
+    expect(kitchenTicketNextStep(combo([part(1, true), part(2, false)]))?.label).toBe("Finished");
+    // Every dish done but the combo still open: one thing to finish.
+    expect(kitchenTicketNextStep(combo([part(1, true), part(2, true)]))?.label).toBe("Finished");
+  });
   it("a five-dish table takes five taps and the first dish needs no Start", () => {
     const table = [1, 2, 3, 4, 5].map((n) => item(n, "Queued"));
     // Every unfinished dish has its own Done from the moment the ticket appears.
