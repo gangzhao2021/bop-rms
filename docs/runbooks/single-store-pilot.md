@@ -1975,6 +1975,8 @@ Paths are as the container sees them (`.local/...` is `.local/pilot-runtime/...`
    `internal-test-workflow-AdditionalRelease.json`, each with `--output .local/pilot-v15/stores/<name>/<file>`,
    `--runtime-environment InternalTest`, the merchant's tenant, Brand and Store, the operator and
    approver of step 3, and a fresh `--operation` and `--approval-evidence`, issued within 15 minutes.
+   Once only: a second install leaves the Brand two current versions and every guest payment at
+   that merchant stops at "preparing payment" (the log names `WORKFLOW_DEFINITION_UNAVAILABLE`).
 6. **Restart** in a planned update window (`maintenance start`, `up -d --force-recreate pilot ops`,
    wait for `/ready`, `maintenance end`). It starts serving; check `supervisor.health.json` shows
    `stores/<name>:…` running.
