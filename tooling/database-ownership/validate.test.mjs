@@ -607,6 +607,82 @@ describe("Database Schema Ownership Architecture Test", () => {
     if (changed === "valid") expect(codes).not.toContain("UNSUPPORTED_DATABASE_ASSET");
     else expect(codes).toContain("UNSUPPORTED_DATABASE_ASSET");
   });
+  it("refuses a table lock in runtime source and in a function body, not in comments or tests", async () => {
+    const write = async (root, file, text) => {
+      await mkdir(dirname(join(root, file)), { recursive: true });
+      await writeFile(join(root, file), text);
+    };
+    const locked = await fixture();
+    await write(
+      locked,
+      "packages/rms/store/src/infrastructure/persistence/some-source.ts",
+      'export const fence = () => "LOCK TABLE rms_store.anything IN SHARE MODE";\n',
+    );
+    await write(
+      locked,
+      "apps/api/src/some-route.ts",
+      "export const fence = `LOCK  TABLE ${'x'} IN SHARE MODE`;\n",
+    );
+    const findings = (await validateDatabaseOwnership({ root: locked })).diagnostics.filter(
+      (item) => item.code === "RUNTIME_TABLE_LOCK",
+    );
+    expect(findings.map((item) => item.file).sort()).toEqual([
+      "apps/api/src/some-route.ts",
+      "packages/rms/store/src/infrastructure/persistence/some-source.ts",
+    ]);
+    const quiet = await fixture();
+    await write(
+      quiet,
+      "packages/rms/store/src/infrastructure/persistence/some-source.ts",
+      "// LOCK TABLE in a comment says nothing.\nexport const fence = /LOCK TABLE/u;\n",
+    );
+    await write(
+      quiet,
+      "packages/rms/store/src/tests/some.test.ts",
+      'export const probe = "LOCK TABLE rms_store.anything IN SHARE MODE";\n',
+    );
+    await write(
+      quiet,
+      "packages/database/test-support/some.mjs",
+      'export const probe = "LOCK TABLE rms_store.anything IN SHARE MODE";\n',
+    );
+    await write(
+      quiet,
+      "packages/bop/identity/src/infrastructure/persistence/browser-session-store.ts",
+      'export const platformOnly = "LOCK TABLE bop_identity.authentication_session IN SHARE MODE";\n',
+    );
+    expect(await resultCodes(quiet)).not.toContain("RUNTIME_TABLE_LOCK");
+  });
+  it.each([
+    [
+      "a trigger body",
+      "CREATE FUNCTION a.b() RETURNS trigger AS $$ BEGIN LOCK TABLE a.t IN SHARE MODE; END $$;",
+      true,
+    ],
+    [
+      "a tagged body",
+      "CREATE FUNCTION a.b() RETURNS trigger AS $body$ BEGIN LOCK TABLE a.t IN SHARE MODE; END $body$;",
+      true,
+    ],
+    [
+      "a planned window's DDL",
+      "LOCK TABLE a.t IN SHARE ROW EXCLUSIVE MODE;\nCREATE TRIGGER x BEFORE INSERT ON a.t FOR EACH ROW EXECUTE FUNCTION a.b();",
+      false,
+    ],
+    [
+      "a body with no lock",
+      "CREATE FUNCTION a.b() RETURNS trigger AS $$ BEGIN PERFORM 1; END $$;\nLOCK TABLE a.t IN SHARE MODE;",
+      false,
+    ],
+  ])("judges table locks in migrations: %s", async (_label, sql, refused) => {
+    const root = await fixture();
+    await mkdir(join(root, "migrations/2000-release-001"), { recursive: true });
+    await writeFile(join(root, "migrations/2000-release-001/2000_999_anything.sql"), sql);
+    const findings = (await validateDatabaseOwnership({ root })).diagnostics.filter(
+      (item) => item.code === "RUNTIME_TABLE_LOCK",
+    );
+    expect(findings.length > 0).toBe(refused);
+  });
   it("registers the default-denied platform helper schema under migration authority", () => {
     expect(platformSource).toContain('schema: "platform_helpers"');
     expect(platformSource).toContain('technicalOwner: "shared-infrastructure/helpers"');

@@ -4402,9 +4402,96 @@ async function evidenceFor(root, module, diagnostics) {
     return null;
   }
 }
+/**
+ * WP-2423 DEC-MERCHANT-LOCK-SCOPE: one merchant must never block another. A table lock in a request
+ * path reaches every merchant on the installation (it took sign-in, orders and guest menus down
+ * beside one listing), so runtime source and trigger or function bodies may not take one. Top-level
+ * LOCK TABLE in a migration stays allowed: a planned window's DDL. Named exceptions only: the Platform
+ * directory, written by platform staff (it depends on the session table lock, 0200_027), and bodies
+ * in migrations already applied, whose live versions are replaced or platform-only.
+ */
+const runtimeTableLockSources = new Set([
+  "packages/bop/identity/src/infrastructure/persistence/browser-session-store.ts",
+]);
+const historicalTableLockBodies = new Set([
+  "migrations/0200-bop-identity-tenancy/0200_026_create_platform_brand_template.sql",
+  "migrations/0200-bop-identity-tenancy/0200_027_create_platform_actor_directory.sql",
+  "migrations/0200-bop-identity-tenancy/0200_030_create_brand_template_reference_read.sql",
+  "migrations/0200-bop-identity-tenancy/0200_031_create_membership_brand_discovery_read.sql",
+  "migrations/0400-bop-operations/0400_014_alter_option_set_policy_waiver_guard.sql",
+  "migrations/0400-bop-operations/0400_015_alter_option_set_current_qualification_guard.sql",
+  "migrations/0400-bop-operations/0400_019_create_brand_template_publication_read.sql",
+  "migrations/2000-release-001/2000_140_backfill_store_reference_projection.sql",
+]);
+const tableLockText = /\bLOCK\s+TABLE\b/iu;
+function sourceTakesTableLock(text, file) {
+  if (!tableLockText.test(text)) return false;
+  let found = false;
+  const visit = (node) => {
+    if (
+      (ts.isStringLiteralLike(node) ||
+        ts.isTemplateHead(node) ||
+        ts.isTemplateMiddle(node) ||
+        ts.isTemplateTail(node)) &&
+      tableLockText.test(node.text)
+    )
+      found = true;
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true));
+  return found;
+}
+function functionBodyTakesTableLock(sql) {
+  for (const body of sql.matchAll(/(\$[A-Za-z_]*\$)([\s\S]*?)\1/gu))
+    if (tableLockText.test(body[2] ?? "")) return true;
+  return false;
+}
+async function scanRuntimeTableLocks(root, diagnostics) {
+  const walk = async (directory, visit) => {
+    if (!(await state(directory))?.isDirectory()) return;
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!ignored.has(entry.name)) await walk(path, visit);
+      } else if (entry.isFile()) await visit(path);
+    }
+  };
+  const runtime = async (path) => {
+    const file = relative(root, path).replaceAll("\\", "/");
+    if (
+      !codeExtensions.has(extname(path)) ||
+      /(?:^|\/)(?:tests?|test-support)\/|\.test\.|\.fixture\.|\.spec\./u.test(file) ||
+      runtimeTableLockSources.has(file)
+    )
+      return;
+    if (sourceTakesTableLock(await readFile(path, "utf8"), file))
+      diagnostics.push(
+        diag(
+          "RUNTIME_TABLE_LOCK",
+          file,
+          "a table lock in a request path stops every merchant; use a merchant-scoped fence",
+        ),
+      );
+  };
+  for (const base of ["packages", "apps", "tooling/environment"])
+    await walk(join(root, base), runtime);
+  await walk(join(root, "migrations"), async (path) => {
+    const file = relative(root, path).replaceAll("\\", "/");
+    if (extname(path) !== ".sql" || historicalTableLockBodies.has(file)) return;
+    if (functionBodyTakesTableLock(await readFile(path, "utf8")))
+      diagnostics.push(
+        diag(
+          "RUNTIME_TABLE_LOCK",
+          file,
+          "a table lock in a function body stops every merchant; use a merchant-scoped fence",
+        ),
+      );
+  });
+}
 export async function validateDatabaseOwnership({ root = process.cwd() } = {}) {
   root = await realpath(root);
   const diagnostics = [];
+  await scanRuntimeTableLocks(root, diagnostics);
   if (await state(join(root, "migrations"))) {
     const catalog = await readMigrationCatalog(root);
     for (const item of catalog.diagnostics)
