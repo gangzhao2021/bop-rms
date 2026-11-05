@@ -25,8 +25,8 @@ const fail = (): never => {
   throw new Error("MERCHANT_TASK_INBOX_UNAVAILABLE");
 };
 function authority(value: MerchantTaskInboxAuthority | null) {
+  if (value === null) throw new Error("MERCHANT_TASK_INBOX_DENIED");
   if (
-    value === null ||
     typeof value.canClaim !== "boolean" ||
     typeof value.storeLabel !== "string" ||
     !/^[^\p{Cc}\p{Cf}]{1,100}$/u.test(value.storeLabel)
