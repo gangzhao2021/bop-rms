@@ -55,6 +55,18 @@ export function createPostgresDiningStaffCallParticipationStore(
   return createParticipationStore(runner, scopeInput, "None", true);
 }
 
+/**
+ * WP-2423 item 6 (DEC-DINE-IN-PAY-LATER rule 3): what the guest's cart and quote ask. A table checking
+ * out comes back as such, so the participation query can say "this table is checking out" instead of
+ * "not part of the table": ordering still needs Active, because that query refuses Closing.
+ */
+export function createPostgresDiningCartParticipationStore(
+  runner: DiningTableTransactionRunner,
+  scopeInput: DiningTableStoreScope,
+): DiningCartParticipationOptions["repository"] {
+  return createParticipationStore(runner, scopeInput, "None", true);
+}
+
 /** The staff call's write fence: the participant fence, with a table checking out still seated. */
 export function createPostgresDiningStaffCallParticipantFence(
   runner: DiningTableTransactionRunner,

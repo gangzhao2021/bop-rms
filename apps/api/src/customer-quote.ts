@@ -57,6 +57,8 @@ export type QuoteCartResult =
   | { readonly status: "InvalidConfiguration" }
   /** DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is checking out this Cart. */
   | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
+  /** DEC-DINE-IN-PAY-LATER: staff started the table's checkout; no more rounds from a phone. */
+  | { readonly status: "TableCheckingOut" }
   | { readonly status: "Unavailable" };
 
 export interface CustomerQuotePort {
@@ -70,6 +72,7 @@ type ErrorCode =
   | "quote_idempotency_conflict"
   | "quote_configuration_invalid"
   | "cart_checkout_in_progress"
+  | "cart_table_checking_out"
   | "quote_service_unavailable";
 
 const errors = Object.freeze({
@@ -79,6 +82,7 @@ const errors = Object.freeze({
   quote_idempotency_conflict: { status: 409, messageKey: "customer.quote.idempotency_conflict" },
   quote_configuration_invalid: { status: 422, messageKey: "customer.quote.configuration_invalid" },
   cart_checkout_in_progress: { status: 409, messageKey: "customer.cart.checkout_in_progress" },
+  cart_table_checking_out: { status: 409, messageKey: "customer.cart.table_checking_out" },
   quote_service_unavailable: { status: 503, messageKey: "customer.quote.service_unavailable" },
 } as const);
 
@@ -304,6 +308,7 @@ export class CustomerQuoteHandler {
         VersionConflict: "quote_version_conflict",
         IdempotencyConflict: "quote_idempotency_conflict",
         InvalidConfiguration: "quote_configuration_invalid",
+        TableCheckingOut: "cart_table_checking_out",
         Unavailable: "quote_service_unavailable",
       } as const;
       sendError(response, mapping[result.status]);

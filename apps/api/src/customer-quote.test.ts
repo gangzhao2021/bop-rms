@@ -264,6 +264,19 @@ describe("WP-1103/1104 Customer Quote API", () => {
     });
   });
 
+  it("WP-2423 item 6: a table checking out is said as such, with nothing to wait for", async () => {
+    const service = new Port();
+    const port = await listen(service);
+    service.result = { status: "TableCheckingOut" };
+    const response = await post(port);
+    expect(response.status).toBe(409);
+    expect(response.headers.get("retry-after")).toBeNull();
+    expect(await response.json()).toEqual({
+      schemaVersion: 1,
+      error: { code: "cart_table_checking_out", messageKey: "customer.cart.table_checking_out" },
+    });
+  });
+
   it("fails closed on thrown or declared service unavailability", async () => {
     const service = new Port();
     const port = await listen(service);

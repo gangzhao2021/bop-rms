@@ -338,6 +338,27 @@ export interface CustomerDiningCartCompositionOptions {
     readonly audit: DiningCartItemOptions["audit"];
   };
 }
+/** DEC-DINE-IN-PAY-LATER: Dining's "this table is checking out" reaches the guest as such. */
+export function cartParticipation(
+  source: DiningCartReadPorts["participation"],
+): DiningCartReadPorts["participation"] {
+  return Object.freeze({
+    resolve: async (value: Parameters<DiningCartReadPorts["participation"]["resolve"]>[0]) => {
+      try {
+        return await source.resolve(value);
+      } catch (error) {
+        // By name as well: the pilot's entry and this build can load Dining as two copies.
+        if (
+          error instanceof DiningTableCheckingOutError ||
+          (error instanceof Error && error.name === "DiningTableCheckingOutError")
+        )
+          throw new CartError("CART_TABLE_CHECKING_OUT");
+        throw error;
+      }
+    },
+  });
+}
+
 export function createCustomerDiningCartComposition(
   options: CustomerDiningCartCompositionOptions,
 ): CustomerCartPort {
@@ -345,18 +366,7 @@ export function createCustomerDiningCartComposition(
   const fixedScope = scope(options.scope);
   const now = options.now;
   const sessions = options.sessions;
-  // DEC-DINE-IN-PAY-LATER: Dining's "this table is checking out" reaches the guest as such.
-  const participation: DiningCartReadPorts["participation"] = Object.freeze({
-    resolve: async (value: Parameters<DiningCartReadPorts["participation"]["resolve"]>[0]) => {
-      try {
-        return await options.participation.resolve(value);
-      } catch (error) {
-        if (error instanceof DiningTableCheckingOutError)
-          throw new CartError("CART_TABLE_CHECKING_OUT");
-        throw error;
-      }
-    },
-  });
+  const participation = cartParticipation(options.participation);
   const writer = createPostgresDiningCartSelectionStore(options.selectionTransactions, {
     ...options.selection,
     scope: fixedScope,

@@ -11,7 +11,7 @@ import {
   parseDiningSession,
   parseDiningParticipant,
   createDiningCartParticipationQuery,
-  createPostgresDiningParticipationStore,
+  createPostgresDiningCartParticipationStore,
 } from "../../rms/dining/src/index.ts";
 import { seedCheckoutCatalog, cartCatalogTables } from "./cart-catalog-seed.mjs";
 import { id } from "../../rms/ordering/src/tests/configured-cart-quote.fixture.ts";
@@ -273,7 +273,7 @@ export async function prepareConfiguredQuoteEntry({ context, admin, f, guest, no
       participation: createDiningCartParticipationQuery({
         scope,
         now,
-        repository: createPostgresDiningParticipationStore(runner(2), ownerScope),
+        repository: createPostgresDiningCartParticipationStore(runner(2), ownerScope),
       }),
       sessionCredential,
       csrfCredential,

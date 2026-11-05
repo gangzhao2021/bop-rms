@@ -1,3 +1,4 @@
+import { cartParticipation } from "./customer-dining-cart-composition.js";
 import { createCustomerQuotePort } from "./customer-quote-composition.js";
 import {
   CartError,
@@ -122,7 +123,8 @@ export function createCustomerConfiguredQuoteComposition(
         }
       : {
           orderType: "DineIn" as const,
-          participation: options.participation,
+          // WP-2423 item 6: a table checking out is said as such, never as a Store fault.
+          participation: cartParticipation(options.participation),
           checkoutHold: options.checkoutHold,
         }),
     catalog: createPostgresCatalogOrderSnapshotSource(
@@ -293,7 +295,7 @@ export function createCustomerConfiguredQuoteHttpComposition(
         })
       : createDiningCartQuoteExpiryService({
           ...common,
-          participation: options.participation,
+          participation: cartParticipation(options.participation),
           carts: {
             loadCart: createPostgresCartQueryStore(options.cartTransactions, options.scope).load,
           },

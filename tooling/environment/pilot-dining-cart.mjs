@@ -1,6 +1,6 @@
 import {
   createDiningCartParticipationQuery,
-  createPostgresDiningParticipationStore,
+  createPostgresDiningCartParticipationStore,
 } from "../../packages/rms/dining/src/index.ts";
 import { createCustomerDiningCheckoutHold } from "../../apps/api/dist/customer-checkout-hold.js";
 export function createInternalDiningCart(resources, items, { createCart }) {
@@ -14,7 +14,7 @@ export function createInternalDiningCart(resources, items, { createCart }) {
     catalogDiningCart: {
       participation: createDiningCartParticipationQuery({
         scope: resources.scope,
-        repository: createPostgresDiningParticipationStore(resources.transactions, scope),
+        repository: createPostgresDiningCartParticipationStore(resources.transactions, scope),
         now: resources.now,
       }),
       // DEC-DINING-ANY-PARTICIPANT-SUBMIT: edits and quotes wait while another guest pays.

@@ -151,6 +151,9 @@ function initialFailure(error: unknown): QuoteCartResult {
     case "CART_QUOTE_EXPIRED":
     case "CART_SELECTION_INVALID":
       return { status: "InvalidConfiguration" };
+    // WP-2423 item 6: staff started checkout; nothing a guest can do by asking again.
+    case "CART_TABLE_CHECKING_OUT":
+      return { status: "TableCheckingOut" };
     default:
       return unavailable;
   }

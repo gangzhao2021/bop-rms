@@ -582,6 +582,28 @@ it.each([false, true])(
             beforeExpiry,
           );
           assert.deepEqual(await send(), httpQuote);
+          if (dining) {
+            // WP-2423 item 6: staff started the table's checkout. The guest's phone is told so at
+            // once: never a 503 and a busy wait that ends in "we couldn't confirm your order".
+            const tablePhase = async (phase) => {
+              await admin.query("BEGIN");
+              await admin.query(
+                "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+                [scope.brandReference, scope.storeReference],
+              );
+              const { rowCount } = await admin.query(
+                "UPDATE rms_dining.dining_session SET phase=$2,version=version+1,session_snapshot=session_snapshot||jsonb_build_object('phase',$2::text,'version',version+1) WHERE session_id=$1",
+                [cart.diningSessionReference, phase],
+              );
+              await admin.query("COMMIT");
+              assert.equal(rowCount, 1);
+            };
+            await tablePhase("Closing");
+            const closing = await send(id(905));
+            assert.equal(closing.status, 409);
+            assert.equal(closing.body.error.code, "cart_table_checking_out");
+            await tablePhase("Active");
+          }
           await entry.revoke();
           assert.equal((await send()).status, 404);
           assert.equal((await send(id(904))).status, 404);
