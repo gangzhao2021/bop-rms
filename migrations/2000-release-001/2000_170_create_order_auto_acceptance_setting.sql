@@ -10,7 +10,8 @@
 -- WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: a Store may send paid pickup orders and paid table rounds
 -- straight to the kitchen. Off until the owner turns it on: no row reads as off, so no existing
 -- Store changes. Each change is the next version with who and when. The decision table holds why a
--- paid batch was not sent (only when the reason changes) and which version sent one. Append-only,
+-- paid batch was not sent (only when the reason changes), which version sent one, and who said a
+-- pickup sent that way is being made by hand, so it is not refunded automatically. Append-only,
 -- Store RLS. The database refuses an automatic acceptance while the switch is off, and takes the
 -- setting's lock so one cannot commit after a switch-off it did not see.
 -- Grants: api SELECT/INSERT on both tables (Owner standing approval 2026-10-14, WP-2423).
@@ -72,18 +73,21 @@ CREATE TABLE rms_ordering.order_auto_acceptance_decision (
  store_id platform_helpers.uuid_v7 NOT NULL,
  order_id platform_helpers.uuid_v7 NOT NULL,
  order_batch_id platform_helpers.uuid_v7 NOT NULL,
- outcome text NOT NULL CHECK (outcome IN ('Accepted','Skipped')),
+ outcome text NOT NULL CHECK (outcome IN ('Accepted','Skipped','Kept')),
  reason_code text CHECK (reason_code IN ('PaidBeforeSwitch','PaidTooLongAgo','KitchenScreenOff','StoreNotOpen','HasAlcohol','LargeOrder','StockChanged','NotEligible')),
  item_count integer CHECK (item_count BETWEEN 1 AND 100000),
  setting_version integer NOT NULL,
  acceptance_id platform_helpers.uuid_v7 REFERENCES rms_ordering.order_acceptance_record(acceptance_id),
+ actor_id platform_helpers.uuid_v7,
  decided_at timestamptz NOT NULL CHECK (isfinite(decided_at) AND decided_at=date_trunc('milliseconds',decided_at)),
  FOREIGN KEY (order_batch_id,order_id,brand_id,store_id) REFERENCES rms_ordering.order_batch(order_batch_id,order_id,brand_id,store_id),
  FOREIGN KEY (brand_id,store_id,setting_version) REFERENCES rms_ordering.order_auto_acceptance_setting(brand_id,store_id,version),
- CHECK ((outcome='Accepted' AND acceptance_id IS NOT NULL AND reason_code IS NULL)
-  OR (outcome='Skipped' AND acceptance_id IS NULL AND reason_code IS NOT NULL))
+ CHECK ((outcome='Accepted' AND acceptance_id IS NOT NULL AND reason_code IS NULL AND actor_id IS NULL)
+  OR (outcome='Skipped' AND acceptance_id IS NULL AND reason_code IS NOT NULL AND actor_id IS NULL)
+  OR (outcome='Kept' AND acceptance_id IS NOT NULL AND reason_code IS NULL AND actor_id IS NOT NULL))
 );
 CREATE UNIQUE INDEX order_auto_acceptance_decision_accepted ON rms_ordering.order_auto_acceptance_decision (brand_id,store_id,order_batch_id) WHERE outcome='Accepted';
+CREATE UNIQUE INDEX order_auto_acceptance_decision_kept ON rms_ordering.order_auto_acceptance_decision (brand_id,store_id,order_batch_id) WHERE outcome='Kept';
 CREATE INDEX order_auto_acceptance_decision_batch ON rms_ordering.order_auto_acceptance_decision (brand_id,store_id,order_batch_id,decided_at DESC,decision_id DESC);
 CREATE INDEX order_auto_acceptance_decision_accepted_at ON rms_ordering.order_auto_acceptance_decision (brand_id,store_id,decided_at DESC) WHERE outcome='Accepted';
 CREATE TRIGGER order_auto_acceptance_decision_no_mutation BEFORE UPDATE OR DELETE ON rms_ordering.order_auto_acceptance_decision
@@ -96,6 +100,26 @@ CREATE POLICY order_auto_acceptance_decision_scope ON rms_ordering.order_auto_ac
  USING (brand_id=platform_helpers.current_brand_id() AND store_id=platform_helpers.current_store_id())
  WITH CHECK (brand_id=platform_helpers.current_brand_id() AND store_id=platform_helpers.current_store_id());
 REVOKE ALL ON TABLE rms_ordering.order_auto_acceptance_decision FROM PUBLIC;
+
+-- Only a pickup the System accepted has an automatic refund to stop, and the row names that acceptance.
+CREATE FUNCTION rms_ordering.validate_order_auto_accepted_kept() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog
+AS $$
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a
+   JOIN rms_ordering.order_header h ON h.brand_id=a.brand_id AND h.store_id=a.store_id AND h.order_id=a.order_id
+  WHERE a.acceptance_id=NEW.acceptance_id AND a.brand_id=NEW.brand_id AND a.store_id=NEW.store_id
+   AND a.order_id=NEW.order_id AND a.order_batch_id=NEW.order_batch_id
+   AND a.reason_code='STORE_AUTO_ACCEPT_PAID' AND h.order_type='Pickup') THEN
+  RAISE EXCEPTION 'only an automatically accepted pickup is kept' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER order_auto_acceptance_decision_kept_guard BEFORE INSERT ON rms_ordering.order_auto_acceptance_decision
+ FOR EACH ROW WHEN (NEW.outcome='Kept')
+ EXECUTE FUNCTION rms_ordering.validate_order_auto_accepted_kept();
 
 -- An automatic acceptance is the System's, and only while the Store's current switch for this order
 -- type is on. Shared lock: acceptances do not wait for each other, only for a switch change.
@@ -126,3 +150,4 @@ CREATE TRIGGER order_acceptance_auto_guard BEFORE INSERT ON rms_ordering.order_a
 REVOKE ALL ON FUNCTION rms_ordering.validate_order_auto_acceptance_setting() FROM PUBLIC;
 REVOKE ALL ON FUNCTION rms_ordering.reject_order_auto_acceptance_mutation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION rms_ordering.validate_order_auto_acceptance() FROM PUBLIC;
+REVOKE ALL ON FUNCTION rms_ordering.validate_order_auto_accepted_kept() FROM PUBLIC;

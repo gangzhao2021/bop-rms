@@ -72,7 +72,10 @@ export function createOrderAutoAcceptanceEvaluator(options: {
   ): Promise<OrderAutoAcceptanceOperating | null>;
   audit: Readonly<{ retentionPolicyCode: string; retentionPolicyVersion: number }>;
   /** An unexpected failure, at most once per payment event; expected refusals stay quiet. */
-  report(code: "ORDER_AUTO_ACCEPT_SKIPPED", error: unknown): void;
+  report(
+    code: "ORDER_AUTO_ACCEPT_SKIPPED" | "ORDER_AUTO_ACCEPT_STORE_STATUS_UNREADABLE",
+    error: unknown,
+  ): void;
 }) {
   const scope = Object.freeze({ ...options.scope });
   const ownerScope = Object.freeze({
@@ -80,11 +83,19 @@ export function createOrderAutoAcceptanceEvaluator(options: {
     storeReference: scope.storeReference,
   });
   const reported = new Set<string>();
-  const report = (eventReference: string, error: unknown) => {
-    if (orderAutoAcceptanceFailureIsQuiet(error) || reported.has(eventReference)) return;
+  const reportOnce = (
+    eventReference: string,
+    code: "ORDER_AUTO_ACCEPT_SKIPPED" | "ORDER_AUTO_ACCEPT_STORE_STATUS_UNREADABLE",
+    error: unknown,
+  ) => {
+    if (reported.has(code + eventReference)) return;
     if (reported.size >= 1_000) reported.clear();
-    reported.add(eventReference);
-    options.report("ORDER_AUTO_ACCEPT_SKIPPED", error);
+    reported.add(code + eventReference);
+    options.report(code, error);
+  };
+  const report = (eventReference: string, error: unknown) => {
+    if (orderAutoAcceptanceFailureIsQuiet(error)) return;
+    reportOnce(eventReference, "ORDER_AUTO_ACCEPT_SKIPPED", error);
   };
   /** Rolls back on failure; `null` means it failed (and the transaction is usable again). */
   const guarded = async <T>(
@@ -226,15 +237,21 @@ export function createOrderAutoAcceptanceEvaluator(options: {
       let operating: OrderAutoAcceptanceOperating | null = null;
       if (Date.parse(observedAt) - Date.parse(paidAt) < orderAutoAcceptancePaidWindowMs) {
         await tx.query("SAVEPOINT " + operatingSavepoint, []);
+        let failure: unknown = null;
         try {
           await tx.query("SET LOCAL lock_timeout='250ms'", []);
           operating = await options.readOperating(tx, observedAt);
-        } catch {
+        } catch (error) {
           operating = null;
+          failure = error;
         } finally {
           await tx.query("ROLLBACK TO SAVEPOINT " + operatingSavepoint, []);
           await tx.query("RELEASE SAVEPOINT " + operatingSavepoint, []);
         }
+        // Reads as not open, so staff are told the Store was closed while it may not be. Say so once
+        // per payment; a reader that always fails must not look like a quiet closed Store.
+        if (operating === null && !orderAutoAcceptanceFailureIsQuiet(failure))
+          reportOnce(event.eventId, "ORDER_AUTO_ACCEPT_STORE_STATUS_UNREADABLE", failure);
       }
       return Object.freeze({ setting, operating });
     },

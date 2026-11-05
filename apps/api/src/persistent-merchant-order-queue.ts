@@ -28,7 +28,12 @@ import {
   listOrderPriceReductions,
   orderPriceReductionPermission,
 } from "@rms/ordering";
-import { listStoreKitchenOrderItemStates, listStoreStartedKitchenBatches } from "@rms/kitchen";
+import {
+  listStoreKitchenBatchTouches,
+  listStoreKitchenBatchesNotPrepared,
+  listStoreKitchenOrderItemStates,
+  listStoreStartedKitchenBatches,
+} from "@rms/kitchen";
 import { listDiningSessionTableLabels } from "@rms/dining";
 import {
   listStorePickupAcceptanceDeadlines,
@@ -403,6 +408,42 @@ export function createPersistentMerchantOrderQueue(options: {
           const automaticBatches = [...autoAcceptance]
             .filter(([, fact]) => fact.kind === "Accepted")
             .map(([batch]) => batch);
+          // Which of them never got to the kitchen, and which the kitchen does not make at all.
+          const automaticKitchen =
+            ownerScope === null || automaticBatches.length === 0
+              ? {
+                  reached: new Set<string>(),
+                  notPrepared: new Set<string>() as ReadonlySet<string>,
+                }
+              : await withOptionalRead(
+                  businessTransaction,
+                  async () => {
+                    const reached = new Set<string>();
+                    for (let index = 0; index < automaticBatches.length; index += 200)
+                      for (const batch of (
+                        await listStoreKitchenBatchTouches(
+                          businessTransaction,
+                          ownerScope,
+                          automaticBatches.slice(index, index + 200),
+                        )
+                      ).keys())
+                        reached.add(batch);
+                    const notPrepared = new Set<string>();
+                    for (let index = 0; index < automaticBatches.length; index += 200)
+                      for (const batch of await listStoreKitchenBatchesNotPrepared(
+                        businessTransaction,
+                        ownerScope,
+                        automaticBatches.slice(index, index + 200),
+                      ))
+                        notPrepared.add(batch);
+                    return { reached, notPrepared: notPrepared as ReadonlySet<string> };
+                  },
+                  // Unreadable: no claim that it failed to arrive, and Can't make it not offered.
+                  {
+                    reached: new Set<string>(automaticBatches),
+                    notPrepared: new Set<string>(automaticBatches) as ReadonlySet<string>,
+                  },
+                );
           // WP-2423 Q6: staff cancellations (with refund status) and which paid, accepted batches the
           // kitchen has not started, so the cancel action is offered only where the command accepts it.
           const orderReferences = result.items.map((item) => item.orderReference);
@@ -1237,7 +1278,13 @@ export function createPersistentMerchantOrderQueue(options: {
             // DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that has it on or has orders from it.
             ...(paidOrderWatch === null
               ? {}
-              : { paidOrderWatch: Object.freeze({ ...paidOrderWatch, canTurnOff: pauseAllowed }) }),
+              : {
+                  paidOrderWatch: Object.freeze({
+                    ...paidOrderWatch,
+                    canTurnOff: pauseAllowed,
+                    canAcceptOrders: acceptanceAllowed,
+                  }),
+                }),
             items: Object.freeze(
               result.items.map((item) => {
                 const closed = unfulfillable.get(item.orderReference) ?? null;
@@ -1322,9 +1369,28 @@ export function createPersistentMerchantOrderQueue(options: {
                       // DEC-PAID-ORDER-AUTO-ACCEPT: keys only where they apply, so a tablet at a
                       // Store without it keeps reading the list it knows.
                       const automatic = autoAcceptance.get(batch.orderBatchReference);
+                      const canCantMake =
+                        automatic?.kind === "Accepted" &&
+                        acceptanceAllowed &&
+                        closed === null &&
+                        item.currentVersion !== null &&
+                        !uncollected.has(item.orderReference) &&
+                        !cancellations.has(batch.orderBatchReference) &&
+                        confirmed.has(batch.orderBatchReference) &&
+                        !started.has(batch.orderBatchReference) &&
+                        !automaticKitchen.notPrepared.has(batch.orderBatchReference) &&
+                        // The same phases the general cancel is offered in.
+                        (item.orderType === "Pickup"
+                          ? item.currentPhase === "Accepted"
+                          : ["Submitted", "Accepted", "InProgress", "Ready"].includes(
+                              String(item.currentPhase),
+                            ));
                       const automaticKeys: {
                         acceptedAutomaticallyAt?: string;
                         canCantMake?: boolean;
+                        reachedKitchen?: boolean;
+                        kept?: boolean;
+                        canKeep?: boolean;
                         notSentAutomatically?: Readonly<{
                           reason: string;
                           itemCount: number | null;
@@ -1333,14 +1399,13 @@ export function createPersistentMerchantOrderQueue(options: {
                         automatic?.kind === "Accepted"
                           ? {
                               acceptedAutomaticallyAt: automatic.acceptedAt,
-                              canCantMake:
-                                acceptanceAllowed &&
-                                closed === null &&
-                                item.currentVersion !== null &&
-                                !uncollected.has(item.orderReference) &&
-                                !cancellations.has(batch.orderBatchReference) &&
-                                confirmed.has(batch.orderBatchReference) &&
-                                !started.has(batch.orderBatchReference),
+                              canCantMake,
+                              reachedKitchen: automaticKitchen.reached.has(
+                                batch.orderBatchReference,
+                              ),
+                              kept: automatic.kept,
+                              canKeep:
+                                canCantMake && item.orderType === "Pickup" && !automatic.kept,
                             }
                           : automatic?.kind === "Skipped" && batch.acceptanceStatus === "NotAccepted"
                             ? {

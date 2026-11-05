@@ -134,7 +134,10 @@ export function parseKitchenWorkCancelledEnvelope(value: unknown): KitchenWorkCa
       "redactionClassification",
       "replayMetadata",
     ]);
-    const actor = exact(raw.actor, ["type", "actorId"]);
+    // A person, or the System when it closed an automatically accepted pickup nobody touched.
+    const bySystem =
+      (raw.actor as { type?: unknown } | null | undefined)?.type === "System";
+    const actor = exact(raw.actor, bySystem ? ["type"] : ["type", "actorId"]);
     const replayMetadata = exact(raw.replayMetadata, ["replaySafe"]);
     if (
       raw.eventType !== "KitchenWorkCancelled" ||
@@ -142,7 +145,7 @@ export function parseKitchenWorkCancelledEnvelope(value: unknown): KitchenWorkCa
       raw.producerModule !== "@rms/kitchen" ||
       raw.aggregateType !== "KitchenTicket" ||
       raw.redactionClassification !== "personal" ||
-      actor.type !== "Actor" ||
+      (actor.type !== "Actor" && actor.type !== "System") ||
       replayMetadata.replaySafe !== true ||
       typeof raw.aggregateVersion !== "bigint"
     )
@@ -161,10 +164,12 @@ export function parseKitchenWorkCancelledEnvelope(value: unknown): KitchenWorkCa
       aggregateVersion: raw.aggregateVersion,
       correlationId: parseKitchenTicketReference(raw.correlationId),
       causationId: parseKitchenTicketReference(raw.causationId),
-      actor: Object.freeze({
-        type: "Actor" as const,
-        actorId: parseKitchenTicketReference(actor.actorId),
-      }),
+      actor: bySystem
+        ? Object.freeze({ type: "System" as const })
+        : Object.freeze({
+            type: "Actor" as const,
+            actorId: parseKitchenTicketReference(actor.actorId),
+          }),
       payload,
       redactionClassification: "personal" as const,
       replayMetadata: Object.freeze({ replaySafe: true as const }),
@@ -182,7 +187,7 @@ export function parseKitchenWorkCancelledEnvelope(value: unknown): KitchenWorkCa
       candidate.tenantId,
       candidate.storeId,
       candidate.aggregateId,
-      candidate.actor.actorId,
+      ...(candidate.actor.type === "Actor" ? [candidate.actor.actorId] : []),
       payload.orderReference,
       payload.orderBatchReference,
       candidate.correlationId,
@@ -206,7 +211,8 @@ export function parseKitchenWorkCancelledEnvelope(value: unknown): KitchenWorkCa
 export function createKitchenWorkCancelledEnvelope(input: {
   readonly eventReference: string;
   readonly operationReference: string;
-  readonly actorReference: string;
+  /** Null: the System. */
+  readonly actorReference: string | null;
   readonly brandReference: string;
   readonly storeReference: string;
   readonly payload: KitchenWorkCancelledPayload;
@@ -224,7 +230,10 @@ export function createKitchenWorkCancelledEnvelope(input: {
     aggregateVersion: BigInt(input.payload.ticketVersion),
     correlationId: input.payload.orderCancellationReference,
     causationId: input.operationReference,
-    actor: { type: "Actor", actorId: input.actorReference },
+    actor:
+      input.actorReference === null
+        ? { type: "System" }
+        : { type: "Actor", actorId: input.actorReference },
     payload: input.payload,
     redactionClassification: "personal",
     replayMetadata: { replaySafe: true },

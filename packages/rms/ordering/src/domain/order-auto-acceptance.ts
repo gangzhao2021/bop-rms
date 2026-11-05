@@ -89,8 +89,57 @@ export function decideOrderAutoAcceptance(
  * refunded automatically (DEC-DINE-IN-PAID-ROUND-WAIT): the guest is in the room.
  */
 export const orderAutoAcceptedPickupRefundAfterMs = 30 * 60_000;
-export function orderAutoAcceptedPickupRefundAt(acceptedAt: string): string {
-  return new Date(Date.parse(acceptedAt) + orderAutoAcceptedPickupRefundAfterMs).toISOString();
+/**
+ * Recording Start is optional, so a pickup in the queue of a working kitchen may be in the pan with
+ * nothing recorded. It is refunded only once the Store's kitchen has recorded no step for this long.
+ */
+export const orderAutoAcceptedPickupKitchenQuietMs = 10 * 60_000;
+/** Staff back after an outage have this long, as for a pickup held for a manager's decision. */
+export const orderAutoAcceptedPickupBackOnlineMs = 15 * 60_000;
+
+export interface OrderAutoAcceptedPickupRefundFacts {
+  /** When the System sent it to the kitchen. */
+  readonly sentAt: string;
+  readonly observedAt: string;
+  /** False: no ticket and no preparation decision, so the kitchen can't be working on it. */
+  readonly reachedKitchen: boolean;
+  readonly lastKitchenStepAt: string | null;
+  /** Staff presence at an instant that has passed, and when they came back after it if they had gone. */
+  storeAt(at: string): Promise<{ readonly online: boolean; readonly backOnlineAt: string | null }>;
+}
+
+export interface OrderAutoAcceptedPickupRefund {
+  /** When it refunds; null while the Store is offline past its time (no refund, no countdown). */
+  readonly refundAt: string | null;
+  readonly due: boolean;
+}
+
+/**
+ * When an untouched automatically accepted pickup refunds. The same outage rule as a pickup nobody
+ * accepted (DEC-OUTAGE-ACCEPTANCE-HOLD): the Store offline at the refund time means no refund, since
+ * staff may be making it on paper and cannot say so; once they are back it gets a new time, 15
+ * minutes after, with the same warnings. A host that comes back after an hour therefore refunds
+ * nothing until the Store's screens are back too. Repeats for an outage inside the new window.
+ */
+export async function resolveOrderAutoAcceptedPickupRefund(
+  facts: OrderAutoAcceptedPickupRefundFacts,
+): Promise<OrderAutoAcceptedPickupRefund> {
+  const observed = Date.parse(facts.observedAt);
+  const quietUntil =
+    facts.reachedKitchen && facts.lastKitchenStepAt !== null
+      ? Date.parse(facts.lastKitchenStepAt) + orderAutoAcceptedPickupKitchenQuietMs
+      : 0;
+  let earliest = Date.parse(facts.sentAt) + orderAutoAcceptedPickupRefundAfterMs;
+  for (let turn = 0; turn < 8; turn += 1) {
+    const at = Math.max(earliest, quietUntil);
+    const refundAt = new Date(at).toISOString();
+    if (at > observed) return Object.freeze({ refundAt, due: false });
+    const store = await facts.storeAt(refundAt);
+    if (store.online) return Object.freeze({ refundAt, due: true });
+    if (store.backOnlineAt === null) return Object.freeze({ refundAt: null, due: false });
+    earliest = Date.parse(store.backOnlineAt) + orderAutoAcceptedPickupBackOnlineMs;
+  }
+  return Object.freeze({ refundAt: null, due: false });
 }
 
 /** How log noise is kept out: an expected refusal is a quiet skip, the rest is reported once. */

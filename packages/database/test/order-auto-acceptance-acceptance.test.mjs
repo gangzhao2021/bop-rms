@@ -762,8 +762,10 @@ it("staff give back an automatically accepted order, and a pickup nobody touched
         environment: "Test",
       }),
     });
-    // A kitchen step on this ticket stops it; a ticket nobody touched does not.
-    await world.seedKitchenTicket(started, { step: "KITCHEN_WORK_ITEM_ACCEPTED" });
+    // A kitchen step on this ticket stops it, and steps on it never hold back a pickup with no ticket
+    // (the kitchen can't be working on that one). Staff screens were on when it came due.
+    await world.staffSeen(new Date(Date.now() - world.minutes(2)).toISOString());
+    await world.kitchenStep(await world.seedKitchenTicket(started), "AcceptKitchenWorkItem");
     const touches = await world
       .worker()
       .run((tx) =>
@@ -778,13 +780,13 @@ it("staff give back an automatically accepted order, and a pickup nobody touched
       await world.worker().run((tx) => loadStoreLastKitchenStepAt(tx, scope, world.now())),
       /Z$/u,
     );
-    const due = await expiry.listDue(10);
+    const { due } = await expiry.listDue(10);
     assert.deepEqual(
       due.map((batch) => batch.orderBatchReference),
       [untouched.orderBatchReference],
     );
     assert.equal(await expiry.close(due[0]), "Closed");
-    assert.deepEqual(await expiry.listDue(10), []);
+    assert.deepEqual((await expiry.listDue(10)).due, []);
     // Closed by the System: the audit says so, the actor column is the reserved one, never a person.
     const closed = await query(
       "SELECT permission_code,actor_id,reason_code,previous_phase FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1",

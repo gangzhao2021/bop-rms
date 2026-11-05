@@ -6,6 +6,8 @@ import {
   type OrderAcceptanceHold,
 } from "@rms/ordering";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
+import { readPaidOrderRefundTimes } from "./merchant-paid-order-watch.js";
+import { withOptionalRead } from "./merchant-round-business-date.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 /**
@@ -66,6 +68,11 @@ export async function readPickupRefundDeadlines(
 export interface StoreAwaitingPickupDeadline {
   readonly orderNumber: string;
   readonly acceptBy: string;
+  /**
+   * DEC-PAID-ORDER-AUTO-ACCEPT: sent straight to the kitchen, so its refund is not stopped by Accept.
+   * "Marked": the kitchen has it and can mark it. "NotReached": no ticket arrived. Absent otherwise.
+   */
+  readonly autoAccepted?: "Marked" | "NotReached";
 }
 
 /**
@@ -108,13 +115,27 @@ export function createStoreAwaitingPickupDeadlines(options: {
       where,
       waiting.map((order) => order.orderReference),
     );
-    return Object.freeze(
-      waiting.flatMap((order) => {
+    // A countdown must not vanish from the signed-out screen because the order was never waiting
+    // for Accept. Unreadable: the ones above still answer, as they would without this.
+    const sent = await withOptionalRead(
+      transaction,
+      () => readPaidOrderRefundTimes(transaction, where, scope.at),
+      [],
+    );
+    return Object.freeze([
+      ...waiting.flatMap((order) => {
         const acceptBy = deadlines.get(order.orderReference);
         return acceptBy === undefined
           ? []
           : [Object.freeze({ orderNumber: order.orderNumber, acceptBy })];
       }),
-    );
+      ...sent.map((order) =>
+        Object.freeze({
+          orderNumber: order.orderNumber,
+          acceptBy: order.acceptBy,
+          autoAccepted: order.reachedKitchen ? ("Marked" as const) : ("NotReached" as const),
+        }),
+      ),
+    ]);
   };
 }

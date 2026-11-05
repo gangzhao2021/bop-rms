@@ -141,7 +141,10 @@ import {
   createMerchantKitchenScreenPresence,
   createMerchantStorePresence,
 } from "../../apps/api/dist/merchant-store-presence.js";
-import { createMerchantPaidOrderAutoAcceptOff } from "../../apps/api/dist/merchant-paid-order-watch.js";
+import {
+  createMerchantPaidOrderAutoAcceptOff,
+  createMerchantPaidOrderKeep,
+} from "../../apps/api/dist/merchant-paid-order-watch.js";
 import { createMerchantOrderAcceptanceHoldRefund } from "../../apps/api/dist/merchant-order-acceptance-hold-refund.js";
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
 import { createInternalStoreSetupBff } from "./pilot-store-setup.mjs";
@@ -414,11 +417,22 @@ export async function createInternalMerchant(
     ...orderStaffCancellationOptions,
     autoAcceptedOnly: true,
   });
+  const orderCantMakePreview = createMerchantOrderStaffCancellationPreview({
+    ...orderStaffCancellationOptions,
+    autoAcceptedOnly: true,
+  });
   // DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause turns automatic sending off.
   const paidOrderAutoAcceptOff = createMerchantPaidOrderAutoAcceptOff({
     persistence,
     authentication: service,
     now: resources.now,
+  });
+  // DEC-PAID-ORDER-AUTO-ACCEPT: "Making it by hand", for a pickup made without the kitchen screen.
+  const paidOrderKeep = createMerchantPaidOrderKeep({
+    persistence,
+    authentication: service,
+    now: resources.now,
+    nextReference: orderStaffCancellationOptions.nextReference,
   });
   // WP-2423 (v15 2026-10-18): the cancel dialog reads what the cancellation would refund.
   const orderStaffCancellationPreview = createMerchantOrderStaffCancellationPreview(
@@ -1490,6 +1504,8 @@ export async function createInternalMerchant(
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
       orderStaffCancellation,
       orderCantMake,
+      orderCantMakePreview,
+      paidOrderKeep,
       paidOrderAutoAcceptOff,
       orderStaffCancellationPreview,
       ...(unpaidRoundCancellation === undefined ? {} : { unpaidRoundCancellation }),

@@ -1,3 +1,4 @@
+import { appendAuditRecordInTransaction, validateAuditRecord } from "@bop/audit";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { parseOrderingInstant, parseOrderingReference } from "../../domain/cart.js";
 import type {
@@ -7,8 +8,9 @@ import type {
 
 /**
  * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the Store's switch (Ordering's fact, because acceptance is)
- * and the per-batch record of why a paid batch was not sent, or which switch version sent it.
- * Append-only; no row reads as off, so no Store changes until its owner turns it on.
+ * and the per-batch record of why a paid batch was not sent, which switch version sent it, and who
+ * said a pickup sent that way is being made by hand. Append-only; no row reads as off, so no Store
+ * changes until its owner turns it on.
  */
 export class OrderAutoAcceptanceSettingConflictError extends Error {
   constructor() {
@@ -150,7 +152,7 @@ export async function loadOrderAutoAcceptanceSkip(
   const { brand, store } = await scoped(tx, scope);
   const row = (
     await tx.query(
-      "SELECT reason_code FROM rms_ordering.order_auto_acceptance_decision WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=$3 ORDER BY decided_at DESC,decision_id DESC LIMIT 1",
+      "SELECT reason_code FROM rms_ordering.order_auto_acceptance_decision WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=$3 AND outcome<>'Kept' ORDER BY decided_at DESC,decision_id DESC LIMIT 1",
       [brand, store, String(parseOrderingReference(orderBatchReference))],
     )
   ).rows[0] as { reason_code: OrderAutoAcceptanceSkipReason | null } | undefined;
@@ -220,7 +222,12 @@ export async function recordOrderAutoAcceptanceAccepted(
 }
 
 export type OrderAutoAcceptanceBatchFact =
-  | { readonly kind: "Accepted"; readonly acceptedAt: string }
+  | {
+      readonly kind: "Accepted";
+      readonly acceptedAt: string;
+      /** Staff said they are making it by hand: it is not refunded automatically. */
+      readonly kept: boolean;
+    }
   | {
       readonly kind: "Skipped";
       readonly reason: OrderAutoAcceptanceSkipReason;
@@ -239,7 +246,8 @@ export async function listStoreOrderAutoAcceptanceFacts(
     await tx.query(
       "SELECT DISTINCT ON (d.order_batch_id) d.order_batch_id::text AS batch,d.outcome,d.reason_code,d.item_count::int AS item_count," +
         asInstant("d.decided_at") +
-        " AS decided_at FROM rms_ordering.order_auto_acceptance_decision d WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=ANY($3::uuid[]) ORDER BY d.order_batch_id,d.decided_at DESC,d.decision_id DESC",
+        " AS decided_at,EXISTS (SELECT 1 FROM rms_ordering.order_auto_acceptance_decision k WHERE k.brand_id=d.brand_id AND k.store_id=d.store_id AND k.order_batch_id=d.order_batch_id AND k.outcome='Kept') AS kept" +
+        " FROM rms_ordering.order_auto_acceptance_decision d WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=ANY($3::uuid[]) AND d.outcome<>'Kept' ORDER BY d.order_batch_id,d.decided_at DESC,d.decision_id DESC",
       [brand, store, orderReferences.map((value) => String(parseOrderingReference(value)))],
     )
   ).rows as readonly {
@@ -248,12 +256,17 @@ export async function listStoreOrderAutoAcceptanceFacts(
     reason_code: OrderAutoAcceptanceSkipReason | null;
     item_count: number | null;
     decided_at: unknown;
+    kept: unknown;
   }[];
   return new Map(
     rows.map((row) => [
       row.batch,
       row.outcome === "Accepted"
-        ? Object.freeze({ kind: "Accepted" as const, acceptedAt: instant(row.decided_at) })
+        ? Object.freeze({
+            kind: "Accepted" as const,
+            acceptedAt: instant(row.decided_at),
+            kept: row.kept === true,
+          })
         : Object.freeze({
             kind: "Skipped" as const,
             reason: row.reason_code as OrderAutoAcceptanceSkipReason,
@@ -320,31 +333,66 @@ export interface OpenAutoAcceptedBatch {
   readonly orderType: "Pickup" | "DineIn";
   readonly acceptedAt: string;
   readonly acceptedOrderVersion: number;
+  /** Staff said they are making it by hand: it is not refunded automatically. */
+  readonly kept: boolean;
 }
+
+/** Where a pass over the Store's open batches stopped, for the next one to carry on from. */
+export interface OpenAutoAcceptedBatchCursor {
+  readonly acceptedAt: string;
+  readonly orderBatchReference: string;
+}
+
+const openAutoAcceptedColumns =
+  "SELECT a.order_id::text AS order_id,a.order_batch_id::text AS batch,h.order_number,h.order_type,a.accepted_order_version::int AS accepted_order_version," +
+  asInstant("a.accepted_at") +
+  " AS accepted_at,EXISTS (SELECT 1 FROM rms_ordering.order_auto_acceptance_decision k WHERE k.brand_id=d.brand_id AND k.store_id=d.store_id AND k.order_batch_id=d.order_batch_id AND k.outcome='Kept') AS kept" +
+  " FROM rms_ordering.order_auto_acceptance_decision d JOIN rms_ordering.order_acceptance_record a ON a.acceptance_id=d.acceptance_id JOIN rms_ordering.order_header h ON h.brand_id=a.brand_id AND h.store_id=a.store_id AND h.order_id=a.order_id ";
+const stillOpen =
+  "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=a.brand_id AND c.store_id=a.store_id AND c.order_batch_id=a.order_batch_id) " +
+  "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t WHERE t.brand_id=a.brand_id AND t.store_id=a.store_id AND t.order_id=a.order_id) " +
+  "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_fulfillment_completion_record f WHERE f.brand_id=a.brand_id AND f.store_id=a.store_id AND f.order_id=a.order_id) " +
+  "AND coalesce((SELECT v.status FROM rms_ordering.order_closure_version v WHERE v.brand_id=a.brand_id AND v.store_id=a.store_id AND v.order_id=a.order_id ORDER BY v.closure_version DESC LIMIT 1),'Open')<>'Closed' ";
 
 /**
  * Automatically accepted batches accepted since `since` that are still open: not cancelled, the
  * Order neither terminated, closed nor fulfilled. Whether the kitchen touched them is Kitchen's.
+ * Oldest first from `after`, for a pass that must reach every one; `newestFirst` for a screen, so
+ * a day's open tickets never push out the order that needs saying.
  */
 export async function listStoreOpenAutoAcceptedBatches(
   tx: ConsumerTransaction,
   scope: Scope,
-  input: { readonly since: string; readonly limit: number; readonly onlyPickup?: boolean },
+  input: {
+    readonly since: string;
+    readonly limit: number;
+    readonly onlyPickup?: boolean;
+    readonly after?: OpenAutoAcceptedBatchCursor | null;
+    readonly newestFirst?: boolean;
+  },
 ): Promise<readonly OpenAutoAcceptedBatch[]> {
   const { brand, store } = await scoped(tx, scope);
   const rows = (
     await tx.query(
-      "SELECT a.order_id::text AS order_id,a.order_batch_id::text AS batch,h.order_number,h.order_type,a.accepted_order_version::int AS accepted_order_version," +
-        asInstant("a.accepted_at") +
-        " AS accepted_at FROM rms_ordering.order_acceptance_record a JOIN rms_ordering.order_header h ON h.brand_id=a.brand_id AND h.store_id=a.store_id AND h.order_id=a.order_id " +
-        "WHERE a.brand_id=$1 AND a.store_id=$2 AND a.reason_code='STORE_AUTO_ACCEPT_PAID' AND a.accepted_at>=$3::timestamptz " +
+      openAutoAcceptedColumns +
+        "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.outcome='Accepted' AND d.decided_at>=$3::timestamptz " +
         "AND ($5::boolean IS NOT TRUE OR h.order_type='Pickup') " +
-        "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=a.brand_id AND c.store_id=a.store_id AND c.order_batch_id=a.order_batch_id) " +
-        "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t WHERE t.brand_id=a.brand_id AND t.store_id=a.store_id AND t.order_id=a.order_id) " +
-        "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_fulfillment_completion_record f WHERE f.brand_id=a.brand_id AND f.store_id=a.store_id AND f.order_id=a.order_id) " +
-        "AND coalesce((SELECT v.status FROM rms_ordering.order_closure_version v WHERE v.brand_id=a.brand_id AND v.store_id=a.store_id AND v.order_id=a.order_id ORDER BY v.closure_version DESC LIMIT 1),'Open')<>'Closed' " +
-        "ORDER BY a.accepted_at LIMIT $4",
-      [brand, store, instant(input.since), input.limit, input.onlyPickup === true],
+        "AND ($6::timestamptz IS NULL OR (d.decided_at,d.order_batch_id)>($6::timestamptz,$7::uuid)) " +
+        stillOpen +
+        (input.newestFirst === true
+          ? "ORDER BY d.decided_at DESC,d.order_batch_id DESC LIMIT $4"
+          : "ORDER BY d.decided_at,d.order_batch_id LIMIT $4"),
+      [
+        brand,
+        store,
+        instant(input.since),
+        input.limit,
+        input.onlyPickup === true,
+        input.after === undefined || input.after === null ? null : instant(input.after.acceptedAt),
+        input.after === undefined || input.after === null
+          ? null
+          : String(parseOrderingReference(input.after.orderBatchReference)),
+      ],
     )
   ).rows as readonly {
     order_id: string;
@@ -353,6 +401,7 @@ export async function listStoreOpenAutoAcceptedBatches(
     order_type: "Pickup" | "DineIn";
     accepted_order_version: number;
     accepted_at: unknown;
+    kept: unknown;
   }[];
   return Object.freeze(
     rows.map((row) =>
@@ -363,6 +412,143 @@ export async function listStoreOpenAutoAcceptedBatches(
         orderType: row.order_type,
         acceptedAt: instant(row.accepted_at),
         acceptedOrderVersion: row.accepted_order_version,
+        kept: row.kept === true,
+      }),
+    ),
+  );
+}
+
+export class OrderAutoAcceptedKeepError extends Error {
+  readonly code = "ORDER_AUTO_ACCEPTED_NOT_KEEPABLE";
+  constructor() {
+    super("this order can no longer be kept");
+    this.name = "OrderAutoAcceptedKeepError";
+  }
+}
+
+/**
+ * "Making it by hand": a person says an automatically accepted pickup is being made without the
+ * kitchen screen (a dead board, or a ticket that never arrived), so the automatic refund must not
+ * give away food the guest may already have. Under the Order's fence, so it is settled against the
+ * System close. Only an open pickup the System accepted; the first person's name stays. Moves no
+ * money, and it can still be given back with "Can't make it" while the kitchen has not marked it.
+ */
+export async function keepOrderAutoAcceptedPickup(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  input: {
+    readonly decisionReference: string;
+    readonly auditReference: string;
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+): Promise<"Kept" | "AlreadyKept"> {
+  const { brand, store } = await scoped(tx, scope);
+  const order = String(parseOrderingReference(input.orderReference));
+  const batch = String(parseOrderingReference(input.orderBatchReference));
+  const actor = String(parseOrderingReference(input.actorReference));
+  const at = instant(input.observedAt);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "OrderingOrderDisposition:" + brand + ":" + store + ":" + order,
+  ]);
+  const accepted = (
+    await tx.query(
+      "SELECT d.acceptance_id::text AS acceptance,d.item_count::int AS item_count,d.setting_version::int AS setting_version FROM rms_ordering.order_auto_acceptance_decision d " +
+        "JOIN rms_ordering.order_acceptance_record a ON a.acceptance_id=d.acceptance_id JOIN rms_ordering.order_header h ON h.brand_id=a.brand_id AND h.store_id=a.store_id AND h.order_id=a.order_id " +
+        "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=$3 AND d.order_batch_id=$4 AND d.outcome='Accepted' AND h.order_type='Pickup' " +
+        stillOpen,
+      [brand, store, order, batch],
+    )
+  ).rows[0] as { acceptance: string; item_count: number | null; setting_version: number } | undefined;
+  if (accepted === undefined) throw new OrderAutoAcceptedKeepError();
+  const inserted = await tx.query(
+    "INSERT INTO rms_ordering.order_auto_acceptance_decision (decision_id,brand_id,store_id,order_id,order_batch_id,outcome,reason_code,item_count,setting_version,acceptance_id,actor_id,decided_at) VALUES ($1,$2,$3,$4,$5,'Kept',NULL,$6,$7,$8,$9,$10) ON CONFLICT (brand_id,store_id,order_batch_id) WHERE outcome='Kept' DO NOTHING",
+    [
+      String(parseOrderingReference(input.decisionReference)),
+      brand,
+      store,
+      order,
+      batch,
+      accepted.item_count,
+      accepted.setting_version,
+      accepted.acceptance,
+      actor,
+      at,
+    ],
+  );
+  if (inserted.rowCount !== 1) return "AlreadyKept";
+  await appendAuditRecordInTransaction(
+    tx,
+    validateAuditRecord({
+      auditId: String(parseOrderingReference(input.auditReference)),
+      brandId: brand,
+      storeId: store,
+      actor: { type: "User", reference: actor },
+      actionCode: "ORDER_AUTOMATIC_REFUND_STOPPED",
+      targetType: "Order",
+      targetId: order,
+      correlationId: String(parseOrderingReference(input.decisionReference)),
+      reasonCode: "STAFF_MAKING_BY_HAND",
+      occurredAt: at,
+      sourceChannel: "MERCHANT_WEB",
+      afterSummary: { orderBatchReference: batch },
+      dataClassification: "Restricted",
+      retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+      retentionPolicyVersion: 1,
+    }),
+  );
+  return "Kept";
+}
+
+/** What a closing manager should see named: a person's refund, the System's, a person's keep. */
+export interface OrderAutoAcceptanceEvent {
+  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand";
+  readonly orderNumber: string;
+  /** Null for the System. */
+  readonly actorReference: string | null;
+  readonly reasonCode: string | null;
+  readonly at: string;
+}
+
+/** Oldest first, at most 100, in the window (the Store's business day). Whoever asks authorizes. */
+export async function listStoreOrderAutoAcceptanceEvents(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  window: { readonly startsAt: string; readonly endsAt: string },
+): Promise<readonly OrderAutoAcceptanceEvent[]> {
+  const { brand, store } = await scoped(tx, scope);
+  const rows = (
+    await tx.query(
+      "SELECT kind,order_number,actor,reason_code," +
+        asInstant("at") +
+        " AS at FROM (" +
+        "SELECT CASE WHEN t.actor_type='System' THEN 'AutomaticRefund' ELSE 'CantMake' END AS kind,h.order_number,CASE WHEN t.actor_type='System' THEN NULL ELSE c.actor_id::text END AS actor,c.reason_code,c.cancelled_at AS at " +
+        "FROM rms_ordering.order_staff_cancellation c JOIN rms_ordering.order_header h ON h.brand_id=c.brand_id AND h.store_id=c.store_id AND h.order_id=c.order_id " +
+        "LEFT JOIN rms_ordering.order_termination_record t ON t.brand_id=c.brand_id AND t.store_id=c.store_id AND t.termination_id=c.cancellation_id " +
+        "WHERE c.brand_id=$1 AND c.store_id=$2 AND c.cancelled_at>=$3::timestamptz AND c.cancelled_at<$4::timestamptz AND (c.permission_code='ordering.order.accept' OR t.actor_type='System') " +
+        "UNION ALL SELECT 'KeptByHand',h.order_number,d.actor_id::text,NULL,d.decided_at " +
+        "FROM rms_ordering.order_auto_acceptance_decision d JOIN rms_ordering.order_header h ON h.brand_id=d.brand_id AND h.store_id=d.store_id AND h.order_id=d.order_id " +
+        "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.outcome='Kept' AND d.decided_at>=$3::timestamptz AND d.decided_at<$4::timestamptz" +
+        ") events ORDER BY at LIMIT 100",
+      [brand, store, instant(window.startsAt), instant(window.endsAt)],
+    )
+  ).rows as readonly {
+    kind: OrderAutoAcceptanceEvent["kind"];
+    order_number: unknown;
+    actor: string | null;
+    reason_code: string | null;
+    at: unknown;
+  }[];
+  return Object.freeze(
+    rows.map((row) =>
+      Object.freeze({
+        kind: row.kind,
+        orderNumber: String(row.order_number),
+        actorReference: row.actor,
+        reasonCode: row.reason_code,
+        at: instant(row.at),
       }),
     ),
   );

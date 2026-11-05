@@ -84,6 +84,9 @@ export type KitchenWorkCancelledEnvelope = DomainEventEnvelope<KitchenWorkCancel
   readonly producerModule: "@rms/kitchen";
   readonly aggregateType: "KitchenTicket";
   readonly redactionClassification: "personal";
-  readonly actor: Readonly<{ readonly type: "Actor"; readonly actorId: string }>;
+  /** A person, or the System when it closed an automatically accepted pickup nobody touched. */
+  readonly actor:
+    | Readonly<{ readonly type: "Actor"; readonly actorId: string }>
+    | Readonly<{ readonly type: "System" }>;
   readonly replayMetadata: Readonly<{ readonly replaySafe: true }>;
 };

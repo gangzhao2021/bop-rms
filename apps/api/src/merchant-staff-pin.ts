@@ -94,7 +94,12 @@ export const REFUND_RECHECK_MAX_ORDERS = 10;
 export interface TabletRefundRecheck {
   readonly checkedAt: string;
   /** Each asked order; `acceptBy` is null once it no longer waits (accepted, refunded, closed). */
-  readonly orders: readonly { readonly orderNumber: string; readonly acceptBy: string | null }[];
+  readonly orders: readonly {
+    readonly orderNumber: string;
+    readonly acceptBy: string | null;
+    /** DEC-PAID-ORDER-AUTO-ACCEPT: only for an order sent straight to the kitchen. */
+    readonly autoAccepted?: "Marked" | "NotReached";
+  }[];
 }
 const CHOICE = /^[A-Za-z0-9_-]{43}$/u;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -140,7 +145,13 @@ export function createMerchantStaffPin(options: {
       readonly timeZone: string;
       readonly at: string;
     },
-  ): Promise<readonly { readonly orderNumber: string; readonly acceptBy: string }[]>;
+  ): Promise<
+    readonly {
+      readonly orderNumber: string;
+      readonly acceptBy: string;
+      readonly autoAccepted?: "Marked" | "NotReached";
+    }[]
+  >;
   readonly retentionPolicyCode: string;
   readonly retentionPolicyVersion: number;
 }) {
@@ -350,18 +361,24 @@ export function createMerchantStaffPin(options: {
         const at = now();
         const profile = await options.describeStore(tx, { ...scope, at });
         const waiting = await read(tx, { ...scope, timeZone: profile.timeZone, at });
-        const soonest = new Map<string, string>();
+        const soonest = new Map<string, (typeof waiting)[number]>();
         for (const order of waiting) {
           const known = soonest.get(order.orderNumber);
-          if (known === undefined || Date.parse(order.acceptBy) < Date.parse(known))
-            soonest.set(order.orderNumber, order.acceptBy);
+          if (known === undefined || Date.parse(order.acceptBy) < Date.parse(known.acceptBy))
+            soonest.set(order.orderNumber, order);
         }
         return Object.freeze({
           checkedAt: at,
           orders: Object.freeze(
-            asked.map((orderNumber) =>
-              Object.freeze({ orderNumber, acceptBy: soonest.get(orderNumber) ?? null }),
-            ),
+            asked.map((orderNumber) => {
+              const order = soonest.get(orderNumber);
+              return Object.freeze({
+                orderNumber,
+                acceptBy: order?.acceptBy ?? null,
+                // Only where it applies, so a tablet at a Store without it keeps reading this.
+                ...(order?.autoAccepted === undefined ? {} : { autoAccepted: order.autoAccepted }),
+              });
+            }),
           ),
         });
       });

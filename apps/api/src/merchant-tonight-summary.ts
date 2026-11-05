@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
+import { memberDisplayNames, type MemberDirectoryTransaction } from "@bop/membership";
 import { createPostgresDiningSessionReadStore, createPostgresDiningTableStore } from "@rms/dining";
-import { listStoreCancelledDishes } from "@rms/ordering";
+import { listStoreCancelledDishes, listStoreOrderAutoAcceptanceEvents } from "@rms/ordering";
 import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
 
 /**
@@ -19,7 +20,21 @@ export interface TonightOpenTable {
   /** Minutes since the table was opened. */
   readonly openedMinutes: number;
 }
+/**
+ * DEC-PAID-ORDER-AUTO-ACCEPT: what a closing manager should see named, because no manager was asked:
+ * a "Can't make it" refund, an automatic refund, a pickup someone said they made by hand.
+ */
+export interface TonightPaidOrderEvent {
+  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand";
+  readonly orderNumber: string;
+  /** Null for the System, or a person no longer on the staff list. */
+  readonly staffName: string | null;
+  readonly reasonCode: string | null;
+  readonly at: string;
+}
 export interface TonightFacts {
+  /** Only when there is something to say (a Store without it sees nothing new). */
+  readonly paidOrderEvents?: readonly TonightPaidOrderEvent[];
   readonly openTables: readonly TonightOpenTable[];
   readonly openTablesOwedMinor: string;
   readonly cancelled: {
@@ -92,8 +107,33 @@ export async function readTonightFacts(
     after = listed.nextAfterTableReference;
   }
   const cancelled = await listStoreCancelledDishes(tx, input.scope, input.window);
+  const events = await listStoreOrderAutoAcceptanceEvents(tx, input.scope, input.window);
+  const names =
+    events.length === 0
+      ? new Map<string, string>()
+      : await memberDisplayNames(
+          tx as unknown as MemberDirectoryTransaction,
+          input.scope,
+          events.flatMap((event) => (event.actorReference === null ? [] : [event.actorReference])),
+        );
   if (!(await allowed())) throw new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE");
   return Object.freeze({
+    ...(events.length === 0
+      ? {}
+      : {
+          paidOrderEvents: Object.freeze(
+            events.map((event) =>
+              Object.freeze({
+                kind: event.kind,
+                orderNumber: event.orderNumber,
+                staffName:
+                  event.actorReference === null ? null : (names.get(event.actorReference) ?? null),
+                reasonCode: event.reasonCode,
+                at: event.at,
+              }),
+            ),
+          ),
+        }),
     openTables: Object.freeze(open),
     openTablesOwedMinor: open.reduce((sum, table) => sum + BigInt(table.owedMinor), 0n).toString(),
     cancelled: Object.freeze({

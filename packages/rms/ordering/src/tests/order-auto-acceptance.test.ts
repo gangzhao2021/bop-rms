@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideOrderAutoAcceptance,
   orderAutoAcceptanceFailureIsQuiet,
-  orderAutoAcceptedPickupRefundAt,
+  resolveOrderAutoAcceptedPickupRefund,
   type OrderAutoAcceptanceFacts,
 } from "../domain/order-auto-acceptance.js";
 
@@ -75,10 +75,110 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT decision", () => {
     ).toEqual({ action: "Skip", reason: "StoreNotOpen" });
   });
 
-  it("a pickup the kitchen has not touched refunds 30 minutes after it was sent", () => {
-    expect(orderAutoAcceptedPickupRefundAt("2026-11-05T12:00:00.000Z")).toBe(
-      "2026-11-05T12:30:00.000Z",
-    );
+  describe("when an untouched pickup refunds", () => {
+    const sentAt = "2026-11-05T12:00:00.000Z";
+    const at = (time: string) => `2026-11-05T${time}:00.000Z`;
+    const online = async () => ({ online: true, backOnlineAt: null });
+    const base = {
+      sentAt,
+      reachedKitchen: true,
+      lastKitchenStepAt: null,
+      storeAt: online,
+    };
+
+    it("30 minutes after it was sent, with staff on and a quiet kitchen", async () => {
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({ ...base, observedAt: at("12:10") }),
+      ).toEqual({ refundAt: at("12:30"), due: false });
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({ ...base, observedAt: at("12:30") }),
+      ).toEqual({ refundAt: at("12:30"), due: true });
+    });
+
+    it("a kitchen still recording steps holds it: the queue may just be long", async () => {
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({
+          ...base,
+          observedAt: at("12:35"),
+          lastKitchenStepAt: at("12:31"),
+        }),
+      ).toEqual({ refundAt: at("12:41"), due: false });
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({
+          ...base,
+          observedAt: at("12:41"),
+          lastKitchenStepAt: at("12:31"),
+        }),
+      ).toEqual({ refundAt: at("12:41"), due: true });
+    });
+
+    it("one that never reached the kitchen is not held by steps on other tickets", async () => {
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({
+          ...base,
+          reachedKitchen: false,
+          observedAt: at("12:30"),
+          lastKitchenStepAt: at("12:29"),
+        }),
+      ).toEqual({ refundAt: at("12:30"), due: true });
+    });
+
+    it("the Store offline at its time: no refund and no time, until staff are back", async () => {
+      const asked: string[] = [];
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({
+          ...base,
+          observedAt: at("13:00"),
+          storeAt: async (when) => {
+            asked.push(when);
+            return { online: false, backOnlineAt: null };
+          },
+        }),
+      ).toEqual({ refundAt: null, due: false });
+      expect(asked).toEqual([at("12:30")]);
+    });
+
+    it("staff back gets a new window of 15 minutes, with no refund before it ends", async () => {
+      const storeAt = async (when: string) =>
+        when === at("12:30")
+          ? { online: false, backOnlineAt: at("13:00") }
+          : { online: true, backOnlineAt: null };
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({ ...base, observedAt: at("13:01"), storeAt }),
+      ).toEqual({ refundAt: at("13:15"), due: false });
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({ ...base, observedAt: at("13:15"), storeAt }),
+      ).toEqual({ refundAt: at("13:15"), due: true });
+    });
+
+    it("an outage inside the new window moves it again", async () => {
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({
+          ...base,
+          observedAt: at("14:00"),
+          storeAt: async (when) =>
+            when === at("12:30")
+              ? { online: false, backOnlineAt: at("13:00") }
+              : when === at("13:15")
+                ? { online: false, backOnlineAt: at("13:50") }
+                : { online: true, backOnlineAt: null },
+        }),
+      ).toEqual({ refundAt: at("14:05"), due: false });
+    });
+
+    it("gives up after a chain of outages rather than refund on a guess", async () => {
+      let hours = 12;
+      expect(
+        await resolveOrderAutoAcceptedPickupRefund({
+          ...base,
+          observedAt: "2026-11-06T12:00:00.000Z",
+          storeAt: async () => {
+            hours += 1;
+            return { online: false, backOnlineAt: at(String(hours) + ":00") };
+          },
+        }),
+      ).toEqual({ refundAt: null, due: false });
+    });
   });
 
   it("expected refusals stay quiet; anything else is reported", () => {

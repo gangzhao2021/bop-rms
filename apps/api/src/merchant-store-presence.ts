@@ -68,9 +68,10 @@ export function createMerchantStorePresence(options: {
 
 /**
  * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: that a kitchen board is open at this Store. Only the board's
- * own read counts: an Orders page at the till, or on an owner's phone at home, must not send paid
- * orders to a screen nobody has open. At most one write a minute per Store from this process; a
- * failure is logged as a code only and never fails the board.
+ * own read counts: an Orders page at the till, an owner's phone at home, or the small watch every
+ * screen of a kitchen sign-in makes for its warnings (query kind "Watch") must not send paid orders
+ * to a screen nobody has open. At most one write a minute per Store from this process; a failure is
+ * logged as a code only and never fails the board.
  */
 export function createMerchantKitchenScreenPresence(options: {
   transactions: Transactions;
@@ -84,6 +85,9 @@ export function createMerchantKitchenScreenPresence(options: {
     ) {
       return async (...input: Input): Promise<Output> => {
         const output = await read(...input);
+        const asked = (input[0] as { readonly query?: { readonly kind?: unknown } } | undefined)
+          ?.query;
+        if (asked?.kind === "Watch") return output;
         const key = scope.brandReference + ":" + scope.storeReference;
         const observedAt = options.now();
         const at = Date.parse(observedAt);

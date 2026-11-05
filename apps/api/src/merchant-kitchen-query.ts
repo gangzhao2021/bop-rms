@@ -467,11 +467,30 @@ export function createMerchantKitchenQuery(options: {
       if (typeof input.query !== "object" || input.query === null) throw new Error("invalid query");
       const descriptor = Object.getOwnPropertyDescriptor(input.query, "kind");
       const kind = descriptor && "value" in descriptor ? descriptor.value : null;
-      if (kind !== "List" && kind !== "Get") throw new Error("invalid query");
-      query = readClosedRecord(
-        input.query,
-        kind === "List" ? ["kind", "filters", "cursor", "limit"] : ["kind", "workItemReference"],
-      );
+      if (kind !== "List" && kind !== "Get" && kind !== "Watch") throw new Error("invalid query");
+      // DEC-PAID-ORDER-AUTO-ACCEPT: a kitchen sign-in's screen-wide warnings: the first ticket and
+      // what comes with the first page. Not the board's own read, so not a sign a board is open.
+      query =
+        kind === "Watch"
+          ? (readClosedRecord(input.query, ["kind"]),
+            Object.freeze({
+              kind: "List",
+              filters: Object.freeze({
+                orderReference: null,
+                ticketReference: null,
+                workItemReference: null,
+                stationReference: null,
+                status: null,
+              }),
+              cursor: null,
+              limit: 1,
+            }))
+          : readClosedRecord(
+              input.query,
+              kind === "List"
+                ? ["kind", "filters", "cursor", "limit"]
+                : ["kind", "workItemReference"],
+            );
     } catch {
       throw new KitchenQueueProjectionError("KITCHEN_QUEUE_INPUT_INVALID");
     }

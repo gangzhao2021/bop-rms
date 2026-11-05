@@ -19,7 +19,7 @@ import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.
 import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js";
 import { AcceptanceHoldRefundError } from "./merchant-order-acceptance-hold-refund.js";
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
-import { PaidOrderAutoAcceptOffError } from "./merchant-paid-order-watch.js";
+import { PaidOrderAutoAcceptOffError, PaidOrderKeepError } from "./merchant-paid-order-watch.js";
 import { UnpaidRoundCancellationError } from "./merchant-unpaid-round-cancellation.js";
 import { EndedOrderStockReleaseError } from "./merchant-stock-holding-orders.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
@@ -139,6 +139,9 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
         : {
             acceptedAutomaticallyAt: batch.acceptedAutomaticallyAt,
             canCantMake: batch.canCantMake === true,
+            reachedKitchen: batch.reachedKitchen === true,
+            kept: batch.kept === true,
+            canKeep: batch.canKeep === true,
           }),
       ...(batch.notSentAutomatically === undefined
         ? {}
@@ -937,6 +940,76 @@ export function installMerchantOrderRoutes(
         });
       })
       .catch((error: unknown) => staffCancellationError(response, error));
+  });
+  // DEC-PAID-ORDER-AUTO-ACCEPT: what Can't make it would refund, read when its dialog opens.
+  router.post("/orders/cant-make/preview", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.orderCantMakePreview) {
+      response.status(503).json({ error: "order_cancellation_unavailable" });
+      return;
+    }
+    void options
+      .orderCantMakePreview({ sessionCookie, csrf, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({
+          orderReference: result.orderReference,
+          orderBatchReference: result.orderBatchReference,
+          refundMethod: result.refundMethod,
+          paidMinor: result.paidMinor,
+          refundMinor: result.refundMinor,
+          currencyCode: result.currencyCode,
+        });
+      })
+      .catch((error: unknown) => staffCancellationError(response, error));
+  });
+  // DEC-PAID-ORDER-AUTO-ACCEPT: "Making it by hand" stops a pickup's automatic refund.
+  router.post("/orders/auto-accepted/keep", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.paidOrderKeep) {
+      response.status(503).json({ error: "paid_order_keep_unavailable" });
+      return;
+    }
+    void options
+      .paidOrderKeep({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        const code = error instanceof PaidOrderKeepError ? error.code : null;
+        if (code === null || code === "PAID_ORDER_KEEP_DENIED") {
+          denied(response);
+          return;
+        }
+        response
+          .status(
+            code === "PAID_ORDER_KEEP_INPUT_INVALID"
+              ? 400
+              : code === "PAID_ORDER_KEEP_NOT_KEEPABLE"
+                ? 409
+                : 503,
+          )
+          .set("Cache-Control", NO_STORE)
+          .json({ error: code.toLowerCase() });
+      });
   });
   // DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause turns automatic sending off from Orders or Tables.
   router.post("/orders/auto-accept/off", sameOriginMutation(options), (request, response) => {

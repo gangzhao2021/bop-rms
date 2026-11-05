@@ -31,8 +31,15 @@ const hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
  * `submitter` (DEC-DINING-ANY-PARTICIPANT-SUBMIT) is another seated guest's Guest session who
  * submits and pays this round; the Cart lines keep the fixture guest as the one who added them.
  */
-export function journeyRound({ at, prefix, submitter = null, party = null, dineIn = true }) {
-  const f = orderWriteFixture({ at, dineIn });
+export function journeyRound({
+  at,
+  prefix,
+  submitter = null,
+  party = null,
+  dineIn = true,
+  quantity,
+}) {
+  const f = orderWriteFixture({ at, dineIn, ...(quantity === undefined ? {} : { quantity }) });
   const record = f.request.record,
     batch = record.order.batches[0],
     evidence = f.request.checkoutValidationEvidence;
@@ -653,6 +660,8 @@ export async function seedJourneyStorePublication({
   prefix,
   // How long the publication's launch evidence stays valid (default two days after publishing).
   validUntil = new Date(Date.parse(publishedAt) + 2 * 86400000).toISOString(),
+  // Open all day every day (test only), for a read that happens at whatever time the test runs.
+  allWeek = false,
 }) {
   const id = (n) =>
     n === 90
@@ -681,15 +690,15 @@ export async function seedJourneyStorePublication({
     weeklySchedule: Array.from({ length: 7 }, (_, i) => ({
       isoWeekday: i + 1,
       intervals:
-        i === 0
+        i === 0 || allWeek
           ? [
               {
-                startLocalTime: "09:00:00",
-                endLocalTime: "22:00:00",
+                startLocalTime: allWeek ? "00:00:00" : "09:00:00",
+                endLocalTime: allWeek ? "23:59:59" : "22:00:00",
                 endsNextDay: false,
                 serviceModes: ["DineIn", "Pickup"],
-                orderCutoffSeconds: 900,
-                leadTimeSeconds: 1200,
+                orderCutoffSeconds: allWeek ? 0 : 900,
+                leadTimeSeconds: allWeek ? 0 : 1200,
               },
             ]
           : [],
@@ -745,10 +754,17 @@ export async function seedJourneyStorePublication({
     "INSERT INTO rms_store.store_configuration_version SELECT * FROM jsonb_populate_record(NULL::rms_store.store_configuration_version,$1::jsonb)",
     [JSON.stringify(row)],
   );
-  await client.query(
-    "INSERT INTO rms_store.store_weekly_service_period VALUES($1,$2,$3,$4,1,1,'09:00:00','22:00:00',false,ARRAY['DineIn','Pickup'],900,1200,'ConfigurationMetadata')",
-    [id(20), scope.brandReference, scope.storeReference, id(1)],
-  );
+  if (allWeek)
+    for (let weekday = 1; weekday <= 7; weekday += 1)
+      await client.query(
+        "INSERT INTO rms_store.store_weekly_service_period VALUES($1,$2,$3,$4,$5,1,'00:00:00','23:59:59',false,ARRAY['DineIn','Pickup'],0,0,'ConfigurationMetadata')",
+        [id(20 + weekday), scope.brandReference, scope.storeReference, id(1), weekday],
+      );
+  else
+    await client.query(
+      "INSERT INTO rms_store.store_weekly_service_period VALUES($1,$2,$3,$4,1,1,'09:00:00','22:00:00',false,ARRAY['DineIn','Pickup'],900,1200,'ConfigurationMetadata')",
+      [id(20), scope.brandReference, scope.storeReference, id(1)],
+    );
   const digest = "sha256:" + sha256Hex(canonicalizeRfc8785(configuration));
   await client.query(
     "INSERT INTO rms_store.store_configuration_publication_content VALUES ($1,$2,$3,$4,'STORE_CONFIGURATION','STORE_CONFIGURATION',$5,$6,'StoreOverride',$7,'ConfigurationMetadata')",

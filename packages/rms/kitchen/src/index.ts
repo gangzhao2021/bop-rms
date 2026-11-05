@@ -314,6 +314,7 @@ export {
   createPostgresKitchenBatchCancellation,
   listStoreKitchenOrderItemStates,
   listStoreKitchenBatchTouches,
+  listStoreKitchenBatchesNotPrepared,
   listStoreStartedKitchenBatches,
   loadStoreLastKitchenStepAt,
 } from "./infrastructure/persistence/kitchen-work-cancellation-store.js";

@@ -8,8 +8,9 @@
 -- statement-timeout-ms: 60000
 -- recovery: forward-fix
 -- WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: "Can't make it · refund". Whoever can accept an order may give
--- back an automatically accepted one the kitchen has not started: a full refund to the card that
--- paid, with a reason, in their name. The record names the permission actually used, so it may now
+-- back an automatically accepted one the kitchen has not marked started: what is left of the payment
+-- goes to the card that paid, with a reason, in their name (nothing, when ordinary refunds already
+-- returned it all). The record names the permission actually used, so it may now
 -- be ordering.order.accept, and only for an automatically accepted batch. A pickup the kitchen never
 -- touched closes by itself: its termination then says System, with no person, only for such a batch
 -- (the cancellation row's actor column requires one: the reserved System actor). Other cancellations
@@ -111,7 +112,7 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog
 AS $$
 BEGIN
- IF NEW.previous_phase<>'Accepted' OR NEW.refund_disposition<>'Refund'
+ IF NEW.previous_phase<>'Accepted'
   OR NOT EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=NEW.brand_id
    AND a.store_id=NEW.store_id AND a.order_id=NEW.order_id AND a.order_batch_id=NEW.order_batch_id
    AND a.actor_type='System' AND a.reason_code='STORE_AUTO_ACCEPT_PAID')

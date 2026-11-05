@@ -198,7 +198,8 @@ export function createPostgresStaffOrderCancellationStore(options: {
     tx: ConsumerTransaction,
     order: string,
     batch: string,
-    expectedOrderVersion: number,
+    /** Null: the Order's version as it stands under the fence (the System close). */
+    expectedOrderVersion: number | null,
   ): Promise<
     | { status: "Ready"; plan: StaffOrderCancellationPlan; occurredAt: string }
     | { status: "NotEligible"; reason: StaffOrderCancellationNotEligibleReason }
@@ -309,7 +310,8 @@ export function createPostgresStaffOrderCancellationStore(options: {
       [brand, store, order],
     );
     if (!latest || typeof latest.version !== "number") return unavailable();
-    if (latest.version !== expectedOrderVersion) return notEligible("VersionConflict");
+    if (expectedOrderVersion !== null && latest.version !== expectedOrderVersion)
+      return notEligible("VersionConflict");
     const items = (
       await tx.query(
         "SELECT order_item_id::text AS item FROM rms_ordering.order_item WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND order_batch_id=$4 ORDER BY order_item_id LIMIT 10001",
@@ -389,6 +391,35 @@ export function createPostgresStaffOrderCancellationStore(options: {
         identity.orderReference,
         identity.orderBatchReference,
         expected,
+      );
+      await allowed(tx, identity);
+      return result.status === "Ready"
+        ? Object.freeze({ status: "Ready" as const, plan: result.plan })
+        : Object.freeze(result);
+    },
+
+    /**
+     * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the same preparation at the version the Order has under the
+     * fence, for the System close. A person's command states the version they saw; the System saw
+     * nothing, and a line cancelled since it accepted the order only leaves less to refund.
+     */
+    async prepareAtCurrentVersion(
+      tx: ConsumerTransaction,
+      input: { orderReference: string; orderBatchReference: string; actorReference: string },
+    ): Promise<StaffOrderCancellationPreparation> {
+      const identity = {
+        orderReference: parseOrderingReference(input.orderReference),
+        orderBatchReference: parseOrderingReference(input.orderBatchReference),
+        actorReference: parseOrderingReference(input.actorReference),
+      };
+      await allowed(tx, identity);
+      await setScope(tx, scope);
+      await fence(tx, scope, identity.orderReference);
+      const result = await evaluate(
+        tx,
+        identity.orderReference,
+        identity.orderBatchReference,
+        null,
       );
       await allowed(tx, identity);
       return result.status === "Ready"

@@ -479,16 +479,21 @@ export {
 export {
   changeOrderAutoAcceptanceSetting,
   countStoreCantMakeRefundsSince,
+  keepOrderAutoAcceptedPickup,
   listStoreOpenAutoAcceptedBatches,
+  listStoreOrderAutoAcceptanceEvents,
   listStoreOrderAutoAcceptanceFacts,
   listStoreOrderAutoAcceptanceSkipsByOrder,
   loadOrderAutoAcceptanceSetting,
   loadOrderAutoAcceptanceSkip,
   OrderAutoAcceptanceSettingConflictError,
+  OrderAutoAcceptedKeepError,
   recordOrderAutoAcceptanceAccepted,
   recordOrderAutoAcceptanceSkip,
   type OpenAutoAcceptedBatch,
+  type OpenAutoAcceptedBatchCursor,
   type OrderAutoAcceptanceBatchFact,
+  type OrderAutoAcceptanceEvent,
   type OrderAutoAcceptanceSetting,
 } from "./infrastructure/persistence/order-auto-acceptance-store.js";
 export {
@@ -497,12 +502,16 @@ export {
   orderAutoAcceptanceKitchenScreenMs,
   orderAutoAcceptanceMaximumItems,
   orderAutoAcceptancePaidWindowMs,
+  orderAutoAcceptedPickupBackOnlineMs,
+  orderAutoAcceptedPickupKitchenQuietMs,
   orderAutoAcceptedPickupRefundAfterMs,
-  orderAutoAcceptedPickupRefundAt,
+  resolveOrderAutoAcceptedPickupRefund,
   type OrderAutoAcceptanceDecision,
   type OrderAutoAcceptanceFacts,
   type OrderAutoAcceptanceSkipReason,
   type OrderAutoAcceptanceSwitch,
+  type OrderAutoAcceptedPickupRefund,
+  type OrderAutoAcceptedPickupRefundFacts,
 } from "./domain/order-auto-acceptance.js";
 // WP-2423 Q14: the priced items of the Store's Orders behind the Store sales reports.
 export * from "./infrastructure/persistence/store-sales-order-source.js";

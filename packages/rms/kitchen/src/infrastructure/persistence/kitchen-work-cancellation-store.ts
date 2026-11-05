@@ -165,8 +165,8 @@ interface CancelInput {
   readonly eventReference: string;
   /**
    * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the System closed it, not a person. `actorReference` is then
-   * the reserved System actor (the actor columns require one, as the stock ledger's do); the audit
-   * says System.
+   * the reserved System actor (the work item and cancellation columns require a User actor, as the
+   * stock ledger's do); the audit and the event say System, from the worker.
    */
   readonly bySystem?: boolean;
   nextReference(): string;
@@ -491,7 +491,7 @@ export function createPostgresKitchenBatchCancellation(options: {
       createKitchenWorkCancelledEnvelope({
         eventReference: input.eventReference,
         operationReference: input.operationReference,
-        actorReference: input.actorReference,
+        actorReference: raw.bySystem === true ? null : input.actorReference,
         brandReference: brand,
         storeReference: store,
         payload: Object.freeze({
@@ -648,7 +648,7 @@ export function createPostgresKitchenBatchCancellation(options: {
         reasonCode: kitchenWorkCancellationReasonCode,
         correlationId: input.orderCancellationReference,
         occurredAt: input.cancelledAt,
-        sourceChannel: kitchenWorkCancellationSourceChannel,
+        sourceChannel: raw.bySystem === true ? "EVENT_CONSUMER" : kitchenWorkCancellationSourceChannel,
         dataClassification: "Confidential",
         retentionPolicyCode: kitchenWorkLifecycleAuditRetentionPolicyCode,
         retentionPolicyVersion: kitchenWorkLifecycleAuditRetentionPolicyVersion,
@@ -844,6 +844,35 @@ export async function listStoreKitchenBatchTouches(
       );
     }
     return touches;
+  } catch {
+    return unavailable();
+  }
+}
+
+/**
+ * Batches made only of dishes the kitchen does not prepare (a bottled drink): served once ordered,
+ * with no ticket and nothing a cook could be unable to make.
+ */
+export async function listStoreKitchenBatchesNotPrepared(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderBatchReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const brand = guarded(() => parseKitchenTicketReference(scope.brandReference));
+  const store = guarded(() => parseKitchenTicketReference(scope.storeReference));
+  if (!Array.isArray(orderBatchReferences) || orderBatchReferences.length > 200)
+    return unavailable();
+  const batches = guarded(() =>
+    [...new Set(orderBatchReferences)].map((value) => parseKitchenTicketReference(value)),
+  );
+  if (batches.length === 0) return new Set();
+  try {
+    const result = await tx.query(
+      "SELECT order_batch_id::text AS batch FROM rms_kitchen.kitchen_batch_preparation_decision " +
+        "WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=ANY($3::uuid[]) AND all_not_prepared",
+      [brand, store, batches],
+    );
+    return new Set(result.rows.map((row) => parseKitchenTicketReference(row.batch)));
   } catch {
     return unavailable();
   }

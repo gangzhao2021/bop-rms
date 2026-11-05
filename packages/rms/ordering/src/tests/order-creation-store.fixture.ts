@@ -18,6 +18,8 @@ export function orderWriteFixture(
     dineIn?: boolean;
     /** WP-2423 Q7: a counter (Pos) pickup Cart staff open for a walk-up guest. */
     pos?: boolean;
+    /** Portions of the one line (default 2), its amounts following. */
+    quantity?: number;
   } = {},
 ) {
   const original = orderSnapshotInput();
@@ -37,7 +39,40 @@ export function orderWriteFixture(
       return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, shift(v)]));
     return value;
   }
-  const shifted = shift(original) as typeof original;
+  const portions = (input: typeof original): typeof original => {
+    if (options.quantity === undefined) return input;
+    const count = BigInt(options.quantity);
+    const times = <T extends { amountMinor: bigint }>(money: T, each: bigint): T => ({
+      ...money,
+      amountMinor: each * count,
+    });
+    return {
+      ...input,
+      cart: {
+        ...input.cart,
+        items: input.cart.items.map((item) => ({ ...item, quantity: options.quantity as number })),
+      },
+      lines: input.lines.map((line) => {
+        const unit = line.pricing.unitPrice.amountMinor;
+        const unitTax = line.pricing.tax.amountMinor / BigInt(line.pricing.quantity);
+        return {
+          ...line,
+          pricing: {
+            ...line.pricing,
+            quantity: options.quantity as number,
+            subtotal: times(line.pricing.subtotal, unit),
+            tax: times(line.pricing.tax, unitTax),
+            total: times(line.pricing.total, unit + unitTax),
+            taxComponents: line.pricing.taxComponents.map((component) => ({
+              ...component,
+              taxAmount: times(component.taxAmount, unitTax),
+            })),
+          },
+        };
+      }),
+    };
+  };
+  const shifted = portions(shift(original) as typeof original);
   const id = (n: number) => namespace + "-0000-7000-8000-" + n.toString(16).padStart(12, "0");
   const counter = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(counter);

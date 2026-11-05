@@ -3,6 +3,7 @@ import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresKitchenBatchCancellation,
   KitchenBatchCancellationError,
+  listStoreKitchenBatchesNotPrepared,
 } from "@rms/kitchen";
 import {
   createPostgresStaffOrderCancellationStore,
@@ -244,6 +245,29 @@ function databaseCode(error: unknown) {
 }
 
 /**
+ * "Can't make it" and the System close are for a batch the System accepted and the kitchen still has
+ * to make. A round the kitchen does not prepare was served once ordered (a bottled drink, in the
+ * guest's hand), so it is not theirs to give back; it stays with a manager's refund. Past that, the
+ * command needs no phase of its own: any kitchen step is refused by the Kitchen cancel, a completed
+ * or closed Order by the Ordering fence, whichever the queue happened to show.
+ */
+async function autoAcceptedOnlyRefusal(
+  tx: ConsumerTransaction,
+  selected: { tenantReference: string; brandReference: string; storeReference: string },
+  plan: StaffOrderCancellationPlan,
+): Promise<StaffOrderCancellationErrorCode | null> {
+  const orderReference = String(plan.orderReference);
+  const orderBatchReference = String(plan.orderBatchReference);
+  const fact = (await listStoreOrderAutoAcceptanceFacts(tx, selected, [orderReference])).get(
+    orderBatchReference,
+  );
+  if (fact?.kind !== "Accepted" || plan.previousPhase === "Submitted")
+    return "ORDER_CANCELLATION_NOT_CANCELLABLE";
+  const served = await listStoreKitchenBatchesNotPrepared(tx, selected, [orderBatchReference]);
+  return served.has(orderBatchReference) ? "ORDER_CANCELLATION_NOT_CANCELLABLE" : null;
+}
+
+/**
  * One cancellation, under the caller's authorization: Ordering fence and eligibility, what is left to
  * refund, every Kitchen item still unstarted, the append-only record, and the reserved stock
  * released, all or nothing. The Payment compensation workload refunds from the record.
@@ -271,7 +295,7 @@ export async function cancelPaidBatch(
     reasonCode: StaffOrderCancellationReasonCode;
     /** DEC-PAID-ORDER-AUTO-ACCEPT: "Can't make it" records the permission it used. */
     permissionCode?: "ordering.order.accept";
-    /** Only a batch the System accepted, refunded in full ("Can't make it", the System close). */
+    /** Only a batch the System accepted ("Can't make it", the System close). */
     autoAcceptedOnly?: boolean;
     /** The System closed it: the actor is the reserved System actor and the audit says System. */
     bySystem?: boolean;
@@ -318,15 +342,8 @@ export async function cancelPaidBatch(
   const refundDisposition: "Refund" | "AlreadyRefunded" =
     position?.remainingMinor === 0n ? "AlreadyRefunded" : "Refund";
   if (input.autoAcceptedOnly === true) {
-    const fact = (await listStoreOrderAutoAcceptanceFacts(tx, selected, [orderReference])).get(
-      orderBatchReference,
-    );
-    if (
-      fact?.kind !== "Accepted" ||
-      plan.previousPhase === "Submitted" ||
-      refundDisposition !== "Refund"
-    )
-      return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+    const refusal = await autoAcceptedOnlyRefusal(tx, selected, plan);
+    if (refusal !== null) return fail(refusal);
   }
   const cancellationReference = String(parseOrderingReference(options.nextReference()));
   const cancelledAt = parseOrderingInstant(options.now());
@@ -425,9 +442,9 @@ export function createMerchantOrderStaffCancellation(options: {
   nextReference(): string;
   /**
    * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: "Can't make it · refund". Whoever can accept may give back an
-   * automatically accepted batch the kitchen has not started, in full, to the card that paid; the
-   * general cancellation stays with managers. Not behind the PIN step-up: the money only goes back
-   * to the card it came from, and it is attributed and listed for the manager.
+   * automatically accepted batch the kitchen has not marked started: what is left of its payment, to
+   * the card that paid; the general cancellation stays with managers. Not behind the PIN step-up: the
+   * money only goes back to the card it came from, and it is attributed and listed for the manager.
    */
   autoAcceptedOnly?: boolean;
   /**
@@ -659,7 +676,9 @@ export function createMerchantOrderStaffCancellationPreview(
               const current = await resolveScope(
                 transaction,
                 input.sessionCookie,
-                staffOrderCancellationPermission,
+                options.autoAcceptedOnly === true
+                  ? "order.accept"
+                  : staffOrderCancellationPermission,
                 session.sessionReference,
               ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
               if ((await current.allowed()) !== true)
@@ -703,6 +722,10 @@ export function createMerchantOrderStaffCancellationPreview(
                     ? "ORDER_CANCELLATION_VERSION_CONFLICT"
                     : "ORDER_CANCELLATION_NOT_CANCELLABLE",
               );
+            if (options.autoAcceptedOnly === true) {
+              const refusal = await autoAcceptedOnlyRefusal(tx, selected, prepared.plan);
+              if (refusal !== null) return fail(refusal);
+            }
             const position = await readStaffCancellationRemaining(
               tx,
               { ...options, now: options.persistence.now },
