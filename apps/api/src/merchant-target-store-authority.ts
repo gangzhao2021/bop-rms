@@ -12,6 +12,7 @@ import {
   parseStoreReference,
 } from "@bop/tenant";
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 
 type Transaction = Parameters<
@@ -109,8 +110,9 @@ export function createMerchantTargetStoreAuthority(options: PersistentMerchantBf
         timeZone: String(store.timeZone),
         locale: String(store.locale),
       });
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMerchantRefusal(error)) return null;
+      throw error;
     }
   };
 }

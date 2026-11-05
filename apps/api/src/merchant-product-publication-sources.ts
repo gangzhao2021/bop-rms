@@ -43,6 +43,7 @@ import type {
   MerchantProductWarningAcknowledgementSourceFactory,
   MerchantProductWarningAcknowledgementSourceFactoryInput,
 } from "./merchant-product-publication-warning-acknowledgement-command.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Host =
   | MerchantProductPublicationSourceFactoryV2Input
@@ -557,7 +558,7 @@ export function createMerchantProductPublicationSources(
         if (sourceError) throw sourceError;
         if (error instanceof CatalogError && error.code === "CATALOG_DEPENDENCY_UNAVAILABLE")
           throw error;
-        return unavailable();
+        return keepingCause(unavailable)(error);
       }
     }
     return {

@@ -83,7 +83,7 @@ it("rejects a malformed date, a different day than requested and a changed scope
   const denied = fixture();
   denied.authorize.mockResolvedValue(null);
   await expect(denied.read({ sessionCookie: "c", businessDate: null })).rejects.toThrow(
-    "MERCHANT_SETTLEMENT_UNAVAILABLE",
+    "MERCHANT_SETTLEMENT_DENIED",
   );
 });
 it("WP-2423 Q19: shows the day's self-approved refunds, or null when not composed", async () => {

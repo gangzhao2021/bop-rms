@@ -32,7 +32,7 @@ import { createStaffLabels, distinctStaffLabels } from "./merchant-staff-labels.
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { isMerchantRefusal, keepingCause, onlyRefusal } from "./merchant-failure.js";
+import { isMerchantRefusal, keepingCause, onlyRefusal, withCause } from "./merchant-failure.js";
 
 /**
  * WP-2423 Q18 option A (DEC-STAFF-SESSION-CONTINUITY section 5, Owner 2026-10-14): staff switch on
@@ -175,7 +175,7 @@ export function createMerchantStaffPin(options: {
           ? Object.getOwnPropertyDescriptor(error, "code")?.value
           : undefined;
       if (code === "TENANT_DATABASE_TRANSACTION_CONFLICT") throw error;
-      throw new MerchantStaffPinError("Unavailable");
+      throw withCause(new MerchantStaffPinError("Unavailable"), error);
     });
   const directory = (tx: Tx) => tx as unknown as MemberDirectoryTransaction;
   const deviceHash = (cookie: unknown): string | null =>

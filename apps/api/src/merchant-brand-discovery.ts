@@ -25,6 +25,7 @@ import {
 import { readMerchantCurrentBrandAdministrationAuthority } from "./merchant-current-brand-scope.js";
 import type { PersistentBrandAdministrationBffOptions } from "./persistent-brand-administration-bff.js";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 export type MerchantBrandDiscoveryPersistence = Omit<
@@ -435,7 +436,7 @@ export function createMerchantBrandDiscovery(options: MerchantBrandDiscoveryOpti
       if (error instanceof MerchantBrandDiscoveryError) throw error;
       if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_DENIED")
         return fail("Denied");
-      return fail();
+      return keepingCause(fail)(error);
     }
   }
   const bootstrap = (cookie: unknown) =>

@@ -19,6 +19,7 @@ import {
   type MerchantProductCategoryPolicy,
 } from "./merchant-product-category-assignments.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 export class MerchantProductDraftBaselineError extends Error {
   constructor(readonly code: "Invalid" | "Denied" | "Unavailable" | "Stale" | "FeatureDisabled") {
     super("Product draft baseline is unavailable");
@@ -269,7 +270,7 @@ export function createMerchantProductDraftBaselineQuery(options: {
       if (error instanceof MerchantProductDraftBaselineError) throw error;
       if (error instanceof CatalogError)
         return fail(error.code === "CATALOG_PERMISSION_DENIED" ? "Denied" : "Unavailable");
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
 }

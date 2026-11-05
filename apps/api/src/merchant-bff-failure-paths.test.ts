@@ -220,22 +220,61 @@ describe("service catch handlers", () => {
     for (const name of services) {
       if (causeAllowed[name] !== undefined) continue;
       const file = parse(name);
+      const rewrites = (body: ts.Node) =>
+        unavailableText.test(body.getText()) ||
+        called(body, unavailableHelper) ||
+        callsUnavailableHelper(file, body);
       walk(file, (node) => {
         if (ts.isCatchClause(node)) {
           if (usesBinding(node.variableDeclaration?.name, node.block)) return;
-          const text = node.block.getText();
-          if (!unavailableText.test(text) && !called(node.block, unavailableHelper)) return;
+          if (!rewrites(node.block)) return;
           if (!/\bawait\b|\.then\(|\.catch\(/u.test(node.parent.tryBlock.getText())) return;
           offenders.push(at(file, node));
           return;
         }
         const handler = promiseHandler(node);
         if (handler === undefined) return;
+        if (ts.isIdentifier(handler)) {
+          const helper = declaredFunction(file, handler.text);
+          if (helper !== undefined && helper.parameters.length === 0 && mentionsUnavailable(helper))
+            offenders.push(at(file, node));
+          return;
+        }
         if (!ts.isArrowFunction(handler) && !ts.isFunctionExpression(handler)) return;
         if (usesBinding(handler.parameters[0]?.name, handler.body)) return;
-        const text = handler.body.getText();
-        if (!unavailableText.test(text) && !called(handler.body, unavailableHelper)) return;
+        if (!rewrites(handler.body)) return;
         offenders.push(at(file, node));
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("a handler that looks first and then says unavailable keeps what really failed too", () => {
+    const offenders: string[] = [];
+    for (const name of services) {
+      const file = parse(name);
+      const check = (node: ts.Node, binding: ts.BindingName | undefined, body: ts.Node) => {
+        const statements = ts.isBlock(body) ? body.statements : [body];
+        const last = statements[statements.length - 1];
+        if (last === undefined || binding === undefined || !ts.isIdentifier(binding)) return;
+        if (!ts.isReturnStatement(last) && !ts.isThrowStatement(last)) {
+          if (ts.isBlock(body) || !ts.isCallExpression(last)) return;
+        }
+        const rewrites = unavailableText.test(last.getText()) || callsUnavailableHelper(file, last);
+        if (!rewrites) return;
+        // The caught failure goes along, whichever way it is written.
+        if (usesBinding(binding, last)) return;
+        offenders.push(at(file, node));
+      };
+      walk(file, (node) => {
+        if (ts.isCatchClause(node)) check(node, node.variableDeclaration?.name, node.block);
+        const handler = promiseHandler(node);
+        if (
+          handler !== undefined &&
+          (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler)) &&
+          handler.parameters.length > 0
+        )
+          check(node, handler.parameters[0]?.name, handler.body);
       });
     }
     expect(offenders).toEqual([]);
@@ -254,7 +293,7 @@ describe("service catch handlers", () => {
   it("a permission branch never answers with an unavailable code", () => {
     const offenders: string[] = [];
     const permission =
-      /\.allowed\(\)|\.authorize\w*\(|\.effect !== "Allow"|\.guard\(\)|\bauthorize\(\)|\bguard\(\)/u;
+      /\.allowed\(\)|\.authorize\w*\(|\.effect !== "Allow"|\.guard\(\)|\bauthorize\(\)|\bguard\(\)|^!scope$|^scope === null$|\b[aA]llowed\(\)\)$/u;
     for (const name of services) {
       if (permissionAllowed[name] !== undefined) continue;
       const file = parse(name);
@@ -333,6 +372,24 @@ function refusesUnconditionally(statement: ts.Node) {
     }
   });
   return refuses;
+}
+
+/** The helper throws an unavailable code, by default or for good. */
+function mentionsUnavailable(helper: ts.Node) {
+  return /"[A-Z0-9_]*_UNAVAILABLE"|"Unavailable"|\bnew \w*Unavailable\w*\(/u.test(helper.getText());
+}
+/** `fail()` or `poison()`, called with no code of their own, where that ends up unavailable. */
+function callsUnavailableHelper(file: ts.SourceFile, body: ts.Node, depth = 0): boolean {
+  let found = false;
+  walk(body, (child) => {
+    if (!ts.isCallExpression(child) || !ts.isIdentifier(child.expression)) return;
+    if (child.arguments.length > 0) return;
+    const helper = declaredFunction(file, child.expression.text);
+    if (helper === undefined) return;
+    if (mentionsUnavailable(helper)) found = true;
+    else if (depth < 2 && callsUnavailableHelper(file, helper, depth + 1)) found = true;
+  });
+  return found;
 }
 
 /** `const name = (...) => ...` or `function name(...)` anywhere in the file. */

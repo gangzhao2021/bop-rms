@@ -22,6 +22,7 @@ import {
   type TenantContext,
 } from "@bop/tenant";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 export interface MerchantBrandStoreTopologyCapabilityOptions {
@@ -272,7 +273,7 @@ export function createMerchantBrandStoreTopologyCapability(
         authorityFailure = error;
         throw error;
       }
-      return fail();
+      return keepingCause(fail)(error);
     }
   }
   const borrowed = Object.freeze({
@@ -428,7 +429,7 @@ export function createMerchantBrandStoreTopologyCapability(
       if (authorityFailure) throw authorityFailure;
       if (disabled && mode === "Command") throw new MerchantBrandStoreTopologyFeatureDisabled();
       if (error instanceof BrandStoreTopologyError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   }
   async function hold(): Promise<void> {

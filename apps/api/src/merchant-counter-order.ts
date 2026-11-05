@@ -22,7 +22,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 Q7: taking an order on behalf of a customer. Front of house, store managers and owners
@@ -783,7 +783,7 @@ export function createMerchantCounterOrder(options: {
       } catch {
         // Reporting never changes the answer.
       }
-      return fail("COUNTER_ORDER_UNAVAILABLE");
+      return keepingCause(() => fail("COUNTER_ORDER_UNAVAILABLE"))(error);
     }
   };
 }

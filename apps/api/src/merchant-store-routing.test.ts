@@ -1,6 +1,9 @@
 import type { Request, RequestHandler, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
-import { createMerchantStoreRouting } from "./merchant-store-routing.js";
+import {
+  createMerchantSessionStoreResolver,
+  createMerchantStoreRouting,
+} from "./merchant-store-routing.js";
 
 const store = (n: number) => "018f4f8a-9c2d-7a11-8d01-00000000000" + String(n);
 const router = (name: string): RequestHandler & { readonly label: string } =>
@@ -108,6 +111,44 @@ describe("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: staff requests go to their Ses
       body: { code: "MERCHANT_STORE_UNAVAILABLE" },
     });
     expect(onUnexpected).toHaveBeenCalledOnce();
+  });
+  it("WP-2423 item 10: a lock on the routing read waits, and never reads as signed out", async () => {
+    const onUnexpected = vi.fn();
+    const handler = createMerchantStoreRouting({
+      primaryStoreReference: store(1),
+      routers: new Map([
+        [store(1), router("first")],
+        [store(2), router("second")],
+      ]),
+      resolve: async () => {
+        throw Object.assign(new Error("safe"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+      },
+      onUnexpected,
+    });
+    expect(await call(handler, "any")).toMatchObject({
+      status: 503,
+      body: { error: "retry_later" },
+    });
+    expect(onUnexpected).not.toHaveBeenCalled();
+  });
+  it("WP-2423 item 10: the session read is null only when the person was refused", async () => {
+    const resolver = (failure: unknown) =>
+      createMerchantSessionStoreResolver({
+        identity: { hasher: {} },
+        transactions: { run: () => Promise.reject(failure) },
+        currentActor: {},
+        now: () => "2026-11-05T12:00:00.000Z",
+        validateAssociation: async () => true,
+      } as never);
+    await expect(resolver(new Error("BROWSER_SESSION_DENIED"))("cookie")).resolves.toBeNull();
+    await expect(
+      resolver(new Error("MERCHANT_SELECTED_CONTEXT_DENIED"))("cookie"),
+    ).resolves.toBeNull();
+    const lock = Object.assign(new Error("safe"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" });
+    await expect(resolver(lock)("cookie")).rejects.toBe(lock);
+    const fault = new TypeError("broken");
+    await expect(resolver(fault)("cookie")).rejects.toBe(fault);
+    await expect(resolver(fault)(null)).resolves.toBeNull();
   });
   it("a registered tablet's lock screen goes to its Store; signed out, so does the rest", async () => {
     const handler = createMerchantStoreRouting({

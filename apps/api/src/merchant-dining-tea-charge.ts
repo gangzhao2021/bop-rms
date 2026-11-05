@@ -21,7 +21,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import { readDiningTableBill, scopeOf } from "./merchant-dining-table-checkout.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { onlyRefusal, withCause } from "./merchant-failure.js";
 
 export type MerchantDiningTeaChargeErrorCode =
   | "DINING_TEA_CHARGE_INPUT_INVALID"
@@ -439,7 +439,7 @@ export function createMerchantDiningTeaCharge(options: {
       return viewOf(await readCurrent(input.sessionCookie, command.session), problem);
     } catch (error) {
       if (error instanceof MerchantDiningTeaChargeError) throw error;
-      throw new MerchantDiningTeaChargeError("DINING_TEA_CHARGE_UNAVAILABLE");
+      throw withCause(new MerchantDiningTeaChargeError("DINING_TEA_CHARGE_UNAVAILABLE"), error);
     }
   };
 }

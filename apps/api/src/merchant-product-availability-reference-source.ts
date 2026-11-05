@@ -10,6 +10,7 @@ import {
   type ProductLifecycleReviewRequest,
   type AvailabilityReferenceSourceOptions,
 } from "@rms/catalog";
+import { withCause } from "./merchant-failure.js";
 type CurrentOptions = Parameters<typeof createPostgresProductPricingBindingSourceStore>[0];
 type RecordedOptions = Parameters<typeof createPostgresProductReferenceHistorySourceStore>[0];
 /** Internal owning source composition, not an HTTP command or complete lifecycle review.
@@ -77,7 +78,7 @@ export function createMerchantProductAvailabilityReferenceSource(options: {
       } catch (error) {
         if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
           throw error;
-        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), error);
       }
     },
   });

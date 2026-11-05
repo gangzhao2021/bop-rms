@@ -20,6 +20,7 @@ import {
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { MerchantProductCurrentAuthorization } from "./merchant-product-current-authorization.js";
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 export interface MerchantProductStoreCapabilityGuardOptions {
@@ -201,7 +202,7 @@ export function createMerchantProductStoreCapabilityGuard(
         authorityFailure = error;
         throw error;
       }
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
   const beforeCommit = async () => {
@@ -335,7 +336,7 @@ export function createMerchantProductStoreCapabilityGuard(
       if (featureDisabled) throw new MerchantProductWriteFeatureDisabled();
       if (authorityFailure) throw authorityFailure;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       active = false;
     }

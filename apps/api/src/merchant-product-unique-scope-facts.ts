@@ -33,6 +33,7 @@ import {
   type CurrentProductPublicationPolicy,
 } from "./current-product-publication-policy.js";
 import type { HeldProductContentPolicyConfiguration } from "./current-product-held-content-policy.js";
+import { keepingCause } from "./merchant-failure.js";
 type SourceOptions = Parameters<typeof createCurrentProductCandidateUniqueScopeSource>[0];
 type PolicyOptions = Parameters<typeof createCurrentProductPublicationPolicySource>[0];
 type Port = ProductPublicationStoreOptions["sources"]["withHeldCurrentFacts"];
@@ -208,7 +209,7 @@ export function createMerchantProductUniqueScopeFacts(options: {
       if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
         denied = error;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
   const native = () =>
@@ -688,7 +689,7 @@ export function createMerchantProductUniqueScopeFacts(options: {
       failed = true;
       if (denied) throw denied;
       if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED") throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       active = false;
     }

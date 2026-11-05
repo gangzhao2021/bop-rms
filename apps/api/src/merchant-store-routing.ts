@@ -2,6 +2,11 @@ import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { parseStoreReference } from "@bop/tenant";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { cookie } from "./merchant-bff-http.js";
+import {
+  isDatabaseContention,
+  isMerchantRefusal,
+  merchantFailureKind,
+} from "./merchant-failure.js";
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
 import { storeDeviceCookieName } from "./merchant-staff-pin-http.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -10,7 +15,9 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
  * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Store a staff request belongs to is the Store the
  * server has bound to the person's current Session (the selection the sign-in or an audited Store
  * switch recorded, re-validated against their current Tenant association). Never a request field.
- * Null when there is no current Session (signed out, expired) or no valid selection.
+ * Null when there is no current Session (signed out, expired) or no valid selection. A read that
+ * failed is neither (WP-2423 item 10): sent to the first Store, a person of another Store would be
+ * told they have no permission because of a lock timeout.
  */
 export function createMerchantSessionStoreResolver(
   options: Pick<
@@ -36,8 +43,9 @@ export function createMerchantSessionStoreResolver(
         const store = selected.context.store;
         return store ? String(parseStoreReference(store.storeReference)) : null;
       });
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMerchantRefusal(error)) return null;
+      throw error;
     }
   };
 }
@@ -99,8 +107,14 @@ export function createMerchantStoreRouting(options: {
         return router(request, response, next);
       })
       .catch((error: unknown) => {
-        options.onUnexpected?.(error);
         response.setHeader("Cache-Control", "no-store");
+        // A lock or a race passes if the page waits: the same answer as the Store's own routes.
+        if (isDatabaseContention(error) || merchantFailureKind(error) === "Changed") {
+          response.setHeader("Retry-After", "2");
+          response.status(503).json({ error: "retry_later" });
+          return;
+        }
+        options.onUnexpected?.(error);
         response.status(503).json({ code: "MERCHANT_STORE_UNAVAILABLE" });
       });
   };

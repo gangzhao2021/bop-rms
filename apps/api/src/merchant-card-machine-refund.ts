@@ -20,7 +20,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 export const cardMachineRefundCommandErrorCodes = [
   "CARD_MACHINE_REFUND_INPUT_INVALID",
@@ -321,7 +321,7 @@ function createRecord(
       } catch {
         // Reporting never changes the answer.
       }
-      return fail("CARD_MACHINE_REFUND_UNAVAILABLE");
+      return keepingCause(() => fail("CARD_MACHINE_REFUND_UNAVAILABLE"))(error);
     }
   };
 }

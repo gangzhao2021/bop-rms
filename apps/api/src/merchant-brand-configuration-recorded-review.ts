@@ -13,6 +13,7 @@ import {
   type BrandConfigurationAuthoringTransaction,
 } from "@bop/tenant";
 import { createPostgresPublishingMutationStore, createPublishingScope } from "@bop/publishing";
+import { keepingCause } from "./merchant-failure.js";
 
 export interface MerchantBrandConfigurationRecordedReview {
   readonly profile: "MerchantBrandConfigurationRecordedReviewV1";
@@ -382,7 +383,7 @@ export async function readMerchantBrandConfigurationRecordedReview(options: {
         check();
       },
     });
-  } catch {
-    return fail();
+  } catch (error) {
+    return keepingCause(fail)(error);
   }
 }

@@ -13,6 +13,7 @@ import {
   type RecipeReferenceSourceOptions,
 } from "@rms/recipe";
 import { composeMerchantProductRecipeReferenceMatches } from "./merchant-product-recipe-reference-matches.js";
+import { withCause } from "./merchant-failure.js";
 type CurrentOptions = Parameters<typeof createPostgresProductPricingBindingSourceStore>[0];
 type RecordedOptions = Parameters<typeof createPostgresProductReferenceHistorySourceStore>[0];
 /** Internal owning source composition, not an HTTP command or complete lifecycle review.
@@ -94,7 +95,7 @@ export function createMerchantProductRecipeReferenceSource(options: {
           throw new CatalogError("CATALOG_PERMISSION_DENIED");
         if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
           throw error;
-        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), error);
       }
     },
   });

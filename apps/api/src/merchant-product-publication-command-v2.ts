@@ -40,6 +40,7 @@ import {
   type MerchantProductStoreCapabilityGuard,
 } from "./merchant-product-store-capability.js";
 import { createMerchantProductPublicationRuntimeAuthority } from "./merchant-product-publication-runtime-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 
 const fields = [
   "profile",
@@ -469,7 +470,7 @@ export function createMerchantProductPublicationCommandV2(
           failed = true;
           if (error instanceof CatalogError || error instanceof MerchantProductWriteFeatureDisabled)
             throw error;
-          return fail();
+          return keepingCause(fail)(error);
         }
       };
       const authority: ProductPublicationStoreOptionsV2["authority"] = {

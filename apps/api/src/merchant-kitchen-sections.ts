@@ -12,7 +12,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 export type MerchantKitchenSectionsErrorCode =
   | "KITCHEN_SECTIONS_INPUT_INVALID"
@@ -235,7 +235,7 @@ export function createMerchantKitchenSections(options: {
         if (error.code === "KITCHEN_SECTION_INPUT_INVALID")
           return fail("KITCHEN_SECTIONS_INPUT_INVALID");
       }
-      return fail("KITCHEN_SECTIONS_UNAVAILABLE");
+      return keepingCause(() => fail("KITCHEN_SECTIONS_UNAVAILABLE"))(error);
     }
   };
 }

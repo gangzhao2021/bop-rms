@@ -13,6 +13,7 @@ import { createTenantContext, type TenantContext } from "@bop/tenant";
 import type { ConsumerTransaction } from "@bop/eventing";
 import type { MerchantExceptionScope } from "./merchant-order-exception-read.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 /** Transaction-bound public adapters resolve credentials, selected scope and current policy. */
 export function createMerchantOrderExceptionAuthorization(options: {
@@ -90,8 +91,9 @@ export function createMerchantOrderExceptionAuthorization(options: {
         storeReference: store.storeReference,
         sessionReference: session.sessionReference,
       });
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMerchantRefusal(error)) return null;
+      throw error;
     }
   };
 }

@@ -23,6 +23,7 @@ import {
 } from "./merchant-product-command-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 export interface MerchantOptionSetListQueryOptions {
   readonly merchant: PersistentMerchantBffOptions;
   readonly authentication: Pick<MerchantBffService, "authorize">;
@@ -110,7 +111,7 @@ export function createMerchantOptionSetListQuery(options: MerchantOptionSetListQ
     };
     try {
       const session = await authenticate({ sessionCookie, csrf }).catch((error: unknown) => {
-        if (error instanceof BrowserSessionError) return fail("Denied");
+        if (error instanceof BrowserSessionError && isMerchantRefusal(error)) return fail("Denied");
         return fail();
       });
       now();

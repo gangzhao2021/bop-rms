@@ -10,6 +10,7 @@ import { resolveMerchantProductLifecycleIntent } from "./merchant-product-lifecy
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
 import type { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
+import { keepingCause } from "./merchant-failure.js";
 type Tx = Parameters<
   ReturnType<typeof createMerchantCategoryTransactions>["registerBeforeCommit"]
 >[0];
@@ -204,7 +205,7 @@ export function createMerchantProductLifecycleGuard(options: {
       } catch (error) {
         bindingFailed = true;
         if (error instanceof CatalogError) throw error;
-        return unavailable();
+        return keepingCause(unavailable)(error);
       }
     },
     async holdAndRegister() {

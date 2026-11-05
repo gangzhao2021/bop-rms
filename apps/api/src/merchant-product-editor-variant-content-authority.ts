@@ -21,6 +21,7 @@ import {
   remainingProductEditorReferenceChecks,
   type MerchantProductEditorRemainingContentAuthority,
 } from "./merchant-product-editor-registered-content-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type VariantOptions = Parameters<typeof createPostgresProductVariantIdentityHistorySource>[0];
 type CreationOptions = Parameters<typeof createPostgresProductVariantCreationSource>[0];
@@ -381,7 +382,7 @@ export function createMerchantProductEditorVariantContentAuthority(options: {
     } catch (error) {
       state.failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       state.active = false;
     }

@@ -11,7 +11,7 @@ import { storeOffersPoints } from "./merchant-store-features.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 取舍 18 DEC-MEMBER-POINTS (Section 88 LOY-PROGRAM-LIST): the back office of a Brand's
@@ -130,7 +130,7 @@ export function createMerchantMemberPoints(options: {
         return fail("MEMBER_POINTS_CHANGED");
       if ((error as { code?: unknown } | null)?.code === "CUSTOMER_PROFILE_INVALID")
         return fail("MEMBER_POINTS_INPUT_INVALID");
-      return fail("MEMBER_POINTS_UNAVAILABLE");
+      return keepingCause(() => fail("MEMBER_POINTS_UNAVAILABLE"))(error);
     }
   };
   return Object.freeze({

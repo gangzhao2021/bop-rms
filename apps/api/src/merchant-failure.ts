@@ -11,6 +11,10 @@
  * - Unexpected: everything else, including no code, TypeError, a raw SQLSTATE and a new code nobody
  *   listed, so a new fault is seen rather than hidden. Each code the services throw today is
  *   classified in merchant-failure.test.ts.
+ *
+ * A service that rewrites whatever failed into its own "unavailable" code keeps the cause, and a
+ * refusal of the person behind it (an ended sign-in, a permission) stays a refusal: otherwise someone
+ * whose sign-in has ended is told "try again" for ever instead of being sent to sign in.
  */
 export type MerchantFailureKind = "Refused" | "Changed" | "RetryLater" | "Unexpected";
 
@@ -33,19 +37,21 @@ export function merchantFailureCode(error: unknown): string | null {
     : null;
 }
 
-const refusedCodes: ReadonlySet<string> = new Set([
-  // Merchant*Error codes that name a refusal.
+const deniedCodes: ReadonlySet<string> = new Set([
+  // Merchant*Error codes that refuse the person.
   "Denied",
   "PermissionDenied",
   "NotOwner",
   "OwnerOnly",
-  "Invalid",
   // A sign-in that has ended or was never good. The people behind it are sent to sign in again.
   "BROWSER_SESSION_ENDED",
   "SESSION_EXPIRED",
   "SESSION_REVOKED",
   "ACTOR_INACTIVE",
   "TENANT_CONTEXT_ACTOR_INVALID",
+]);
+const malformedCodes: ReadonlySet<string> = new Set([
+  "Invalid",
   // Malformed identifiers in a request.
   "ACTOR_REFERENCE_INVALID",
   "BRAND_REFERENCE_INVALID",
@@ -67,13 +73,33 @@ const retryCodes: ReadonlySet<string> = new Set([
   "TENANT_DATABASE_TRANSACTION_CONFLICT",
   "TENANT_DATABASE_ACQUIRE_FAILED",
 ]);
-const refusedEnding = /_(?:DENIED|FORBIDDEN|INPUT_INVALID|COMMAND_INVALID|REQUEST_INVALID)$/u;
+const deniedEnding = /_(?:DENIED|FORBIDDEN)$/u;
+const malformedEnding = /_(?:INPUT_INVALID|COMMAND_INVALID|REQUEST_INVALID)$/u;
 const changedEnding = /_(?:CONFLICT|CHANGED|NOT_FOUND|EXPIRED|HISTORY_UNAVAILABLE)$/u;
 /** Nobody is a member or assigned here: a refusal (more than one active is bad data: Unexpected). */
 const activeNotFound = /^ACTIVE_[A-Z_]+_NOT_FOUND$/u;
 
+/** The person may not do this, as opposed to a request that could not be read. */
+const namesDenial = (code: string) =>
+  deniedCodes.has(code) || deniedEnding.test(code) || activeNotFound.test(code);
 const namesRefusal = (code: string) =>
-  refusedCodes.has(code) || refusedEnding.test(code) || activeNotFound.test(code);
+  namesDenial(code) || malformedCodes.has(code) || malformedEnding.test(code);
+
+/**
+ * Behind a rewrite, the person was refused, and no query of the transaction had failed: nothing was
+ * read wrongly to decide it with. A malformed value behind a rewrite is not their refusal: it may be
+ * a stored row that did not parse.
+ */
+function deniedBehindRewrite(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4 && current !== null && typeof current === "object"; depth += 1) {
+    if (own(current, databaseFailureKey) !== undefined) return false;
+    const code = merchantFailureCode(current);
+    if (depth > 0 && code !== null && namesDenial(code)) return true;
+    current = own(current, "cause");
+  }
+  return false;
+}
 
 /** A statement cancelled by its timeout or a lost connection is transient; other failures are not. */
 function transientSqlState(sqlState: unknown): boolean {
@@ -91,10 +117,10 @@ function failedStatementState(error: unknown): unknown {
 
 export function merchantFailureKind(error: unknown): MerchantFailureKind {
   const code = merchantFailureCode(error);
-  if (code === null) return "Unexpected";
+  if (code === null) return deniedBehindRewrite(error) ? "Refused" : "Unexpected";
   if (code === "TENANT_DATABASE_TRANSACTION_FAILED")
     return transientSqlState(failedStatementState(error)) ? "RetryLater" : "Unexpected";
-  if (retryCodes.has(code)) return "RetryLater";
+  if (retryCodes.has(code)) return deniedBehindRewrite(error) ? "Refused" : "RetryLater";
   if (namesRefusal(code)) {
     // Decided after a query of its own transaction failed: nothing was read to decide it with.
     const failure = own(error, databaseFailureKey) as { sqlState?: unknown } | undefined;
@@ -102,8 +128,8 @@ export function merchantFailureKind(error: unknown): MerchantFailureKind {
     return transientSqlState(failure.sqlState) ? "RetryLater" : "Unexpected";
   }
   if (changedCodes.has(code) || changedEnding.test(code)) return "Changed";
-  if (code.endsWith("_UNAVAILABLE")) return "RetryLater";
-  return "Unexpected";
+  if (deniedBehindRewrite(error)) return "Refused";
+  return code.endsWith("_UNAVAILABLE") ? "RetryLater" : "Unexpected";
 }
 
 /** True only for an error that says the request was refused. */

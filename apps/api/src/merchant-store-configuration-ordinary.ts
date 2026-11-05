@@ -54,6 +54,7 @@ import {
   requireMerchantStoreSoleOperator,
   type ResolveContext,
 } from "./merchant-sole-operator.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 type Existing = Parameters<typeof createMerchantStoreConfiguration>[0];
 type Scope = Parameters<Existing["configure"]>[1];
@@ -332,7 +333,7 @@ export function createMerchantStoreConfigurationOrdinary(
         ? await authorize
             .call(authentication, { sessionCookie: input.sessionCookie, csrf: input.csrf })
             .catch((error: unknown) => {
-              if (error instanceof BrowserSessionError)
+              if (error instanceof BrowserSessionError && isMerchantRefusal(error))
                 return fail("STORE_CONFIGURATION_ORIGINAL_PERMISSION_DENIED");
               throw error;
             })

@@ -13,6 +13,7 @@ import {
   parseDeviceInstant,
   type DigitalReceiptTemplateDraftActorScope,
 } from "@rms/printing-device";
+import { keepingCause } from "./merchant-failure.js";
 
 export interface ReceiptTemplateReviewRequest {
   readonly familyReference: string;
@@ -218,7 +219,7 @@ export function createMerchantReceiptTemplateReviewSource(options: {
       return mutation;
     } catch (error) {
       if (error instanceof DigitalReceiptTemplateError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       active = false;
     }

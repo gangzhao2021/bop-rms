@@ -38,6 +38,7 @@ import {
   requireMerchantStoreSoleOperator,
   type ResolveContext,
 } from "./merchant-sole-operator.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 type MerchantStoreScopeResult = Awaited<ReturnType<ReturnType<typeof createMerchantStoreScope>>>;
 type LifecycleTransaction = Parameters<
@@ -750,7 +751,7 @@ export function createMerchantReceiptTemplateLifecycle(options: {
           (error: unknown) => {
             if (
               (error instanceof Error && error.message === "STORE_SERVICE_PERMISSION_DENIED") ||
-              error instanceof BrowserSessionError
+              (error instanceof BrowserSessionError && isMerchantRefusal(error))
             )
               return fail("RECEIPT_TEMPLATE_PERMISSION_DENIED");
             throw error;

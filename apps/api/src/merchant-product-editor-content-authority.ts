@@ -9,6 +9,7 @@ import {
 } from "@rms/catalog";
 import type { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Scope = Awaited<ReturnType<ReturnType<typeof createMerchantBrandScope>>>;
 type Tx = Parameters<ProductEditorContentAuthority["holdUntilTransactionCompletes"]>[0];
@@ -148,14 +149,14 @@ export function createMerchantProductEditorContentAuthority(options: {
             } catch (error) {
               failed = true;
               if (error instanceof CatalogError) throw error;
-              return unavailable();
+              return keepingCause(unavailable)(error);
             }
           });
         }
       } catch (error) {
         failed = true;
         if (error instanceof CatalogError) throw error;
-        return unavailable();
+        return keepingCause(unavailable)(error);
       }
     },
   });

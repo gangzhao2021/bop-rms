@@ -24,6 +24,7 @@ import {
   parseBrandAdministrationContext,
 } from "@bop/tenant";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 export interface MerchantBrandAdministrationCapabilityOptions {
@@ -378,7 +379,7 @@ function createCapabilityHolder<C extends TenantContext | BrandAdministrationCon
         authorityFailure = error;
         throw error;
       }
-      return fail();
+      return keepingCause(fail)(error);
     }
   }
   const borrowed = Object.freeze({
@@ -571,7 +572,7 @@ function createCapabilityHolder<C extends TenantContext | BrandAdministrationCon
       if (authorityFailure) throw authorityFailure;
       if (disabled && mode === "Command") throw new MerchantBrandAdministrationFeatureDisabled();
       if (error instanceof BrandConfigurationOperationError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   }
   async function hold(): Promise<void> {

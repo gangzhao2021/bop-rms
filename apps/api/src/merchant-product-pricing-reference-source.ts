@@ -12,6 +12,7 @@ import {
   type ConfigurationReferenceSourceOptions,
 } from "@rms/pricing";
 import { composeMerchantProductPricingReferenceSourceMatches } from "./merchant-product-pricing-reference-matches.js";
+import { withCause } from "./merchant-failure.js";
 type CurrentOptions = Parameters<typeof createPostgresProductPricingBindingSourceStore>[0];
 type RecordedOptions = Parameters<typeof createPostgresProductReferenceHistorySourceStore>[0];
 export type MerchantProductPricingReferenceMatches = ReturnType<
@@ -82,7 +83,7 @@ export function createMerchantProductPricingReferenceSource(options: {
       } catch (error) {
         if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
           throw error;
-        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), error);
       }
     },
   });

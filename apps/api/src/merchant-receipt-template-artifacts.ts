@@ -26,6 +26,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { bindMerchantReceiptTemplateArtifactCommand } from "./merchant-receipt-template-artifact-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /** Ordinary Device-owned software artifact registration. Professional review, template publication and complete Setup remain separate. */
 export function createMerchantReceiptTemplateArtifacts(options: {
@@ -168,7 +169,7 @@ export function createMerchantReceiptTemplateArtifacts(options: {
                     !/^[A-Za-z0-9_-]{43}$/u.test(input.csrf))))
             )
               return fail("RECEIPT_TEMPLATE_PERMISSION_DENIED");
-            return fail();
+            return keepingCause(fail)(error);
           })
       : undefined;
     check();

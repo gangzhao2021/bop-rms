@@ -31,6 +31,7 @@ import {
   type DigitalReceiptTemplateDraftActorScope,
   type DigitalReceiptTemplateArtifactVersion,
 } from "@rms/printing-device";
+import { withCause } from "./merchant-failure.js";
 export interface MerchantReceiptTemplateSubmitKernelOptions {
   readonly transaction: PublishingTransaction;
   readonly currentTenantContext: TenantContext;
@@ -357,7 +358,7 @@ export function createMerchantReceiptTemplateSubmitKernel(
           error.code === "PUBLISHING_PERMISSION_DENIED"
         )
           throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_PERMISSION_DENIED");
-        throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_UNAVAILABLE");
+        throw withCause(new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_UNAVAILABLE"), error);
       } finally {
         active = false;
       }

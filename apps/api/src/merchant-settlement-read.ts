@@ -216,7 +216,7 @@ export function createMerchantSettlementRead(options: {
         return unavailable();
       const permission = merchantSettlementReadPermission;
       const scope = await options.authorize(tx, { sessionCookie: input.sessionCookie, permission });
-      if (!scope) return unavailable();
+      if (!scope) throw new Error("MERCHANT_SETTLEMENT_DENIED");
       const storeLabel = await options.storeLabel(tx, scope);
       if (typeof storeLabel !== "string" || !/^[^\p{Cc}\p{Cf}]{1,100}$/u.test(storeLabel))
         return unavailable();

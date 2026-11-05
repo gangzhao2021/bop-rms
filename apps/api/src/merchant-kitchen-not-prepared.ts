@@ -11,7 +11,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { onlyRefusal, withCause } from "./merchant-failure.js";
 
 export type MerchantKitchenNotPreparedErrorCode =
   | "KITCHEN_NOT_PREPARED_INPUT_INVALID"
@@ -221,7 +221,10 @@ export function createMerchantKitchenNotPrepared(options: {
       if (error instanceof MerchantKitchenNotPreparedError) throw error;
       if (error instanceof KitchenNotPreparedError && error.code === "KITCHEN_NOT_PREPARED_CHANGED")
         throw new MerchantKitchenNotPreparedError("KITCHEN_NOT_PREPARED_CHANGED");
-      throw new MerchantKitchenNotPreparedError("KITCHEN_NOT_PREPARED_UNAVAILABLE");
+      throw withCause(
+        new MerchantKitchenNotPreparedError("KITCHEN_NOT_PREPARED_UNAVAILABLE"),
+        error,
+      );
     }
   };
 }

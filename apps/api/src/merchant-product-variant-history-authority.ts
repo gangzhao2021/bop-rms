@@ -11,6 +11,7 @@ import {
 } from "@rms/catalog";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type HistoryAuthority = Parameters<
   typeof createPostgresProductVariantIdentityHistorySource
@@ -108,7 +109,7 @@ export function createMerchantProductVariantHistoryAuthority(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       active = false;
     }
@@ -167,7 +168,7 @@ export function createMerchantProductVariantHistoryAuthority(options: {
       } catch (error) {
         failed = true;
         if (error instanceof CatalogError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       } finally {
         active = false;
       }

@@ -36,7 +36,7 @@ import {
   staffOrderCancellationPermission,
   type createMerchantOrderStaffCancellation,
 } from "./merchant-order-staff-cancellation.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 export const staffItemCancellationErrorCodes = [
   "ORDER_CANCELLATION_INPUT_INVALID",
@@ -343,7 +343,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
         return fail("ORDER_CANCELLATION_VERSION_CONFLICT");
       if (code === "STORE_SERVICE_PERMISSION_DENIED")
         return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
-      return fail("ORDER_CANCELLATION_UNAVAILABLE");
+      return keepingCause(() => fail("ORDER_CANCELLATION_UNAVAILABLE"))(error);
     }
   }
 
@@ -806,7 +806,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
       });
     } catch (error) {
       if (error instanceof StaffOrderCancellationError) return fail(error.code);
-      return fail("ORDER_CANCELLATION_UNAVAILABLE");
+      return keepingCause(() => fail("ORDER_CANCELLATION_UNAVAILABLE"))(error);
     }
     const session = await options.authentication.authorize(input);
     // The amount the compensation refunds: the remaining payment, including tip.

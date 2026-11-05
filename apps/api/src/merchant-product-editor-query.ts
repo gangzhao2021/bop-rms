@@ -24,6 +24,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { createMerchantProductCurrentAuthorization } from "./merchant-product-current-authorization.js";
 import { createMerchantProductStoreCapabilityGuard } from "./merchant-product-store-capability.js";
 import { createMerchantProductPublicationRuntimeReadAuthority } from "./merchant-product-publication-runtime-read-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type SourceOptions = Parameters<typeof createPostgresProductEditorSourceStore>[0];
 type Transaction = Parameters<SourceOptions["authority"]["holdUntilTransactionCompletes"]>[0];
@@ -397,7 +398,7 @@ export function createMerchantProductEditorQuery(options: {
       if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_DENIED")
         return denied();
       if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED") throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
 }

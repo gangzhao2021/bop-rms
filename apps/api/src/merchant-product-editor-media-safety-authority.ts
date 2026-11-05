@@ -22,6 +22,7 @@ import {
   remainingProductEditorVariantReferenceChecks,
   type MerchantProductEditorVariantRemainingAuthority,
 } from "./merchant-product-editor-variant-content-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type MediaOptions = Parameters<typeof createPostgresMediaEditorReadSource>[0];
 type SafetyOptions = Parameters<typeof createPostgresProductEditorAllergenRegistrySource>[0];
@@ -136,8 +137,8 @@ export function createMerchantProductEditorMediaSafetyAuthority(options: {
         )
           return poison();
         state.active = false;
-      } catch {
-        return poison();
+      } catch (error) {
+        return keepingCause(poison)(error);
       }
     }
     function poison(): never {
@@ -451,7 +452,7 @@ export function createMerchantProductEditorMediaSafetyAuthority(options: {
     } catch (error) {
       state.failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       state.active = false;
     }

@@ -50,6 +50,7 @@ import {
   brandCatalogSourceIntentDigest,
   parseCatalogReference,
 } from "@rms/catalog";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 export interface MerchantBrandAdministrationHttpOptions {
   readonly brandReference: string | null;
@@ -178,7 +179,7 @@ function failure(response: Response, error: unknown) {
       ? error.code
       : null;
   const status =
-    error instanceof BrowserSessionError ||
+    (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
     (error instanceof MerchantBrandDiscoveryError && error.reason === "Denied") ||
     code === "BRAND_CONFIGURATION_PERMISSION_DENIED" ||
     code === "CATALOG_PERMISSION_DENIED"
@@ -616,7 +617,7 @@ export function createMerchantBrandAdministrationRouter(
           : reason === "Invalid" || code === "BRAND_CONFIGURATION_INPUT_INVALID"
             ? 400
             : reason === "Denied" ||
-                actual instanceof BrowserSessionError ||
+                (actual instanceof BrowserSessionError && isMerchantRefusal(actual)) ||
                 code === "BRAND_CONFIGURATION_PERMISSION_DENIED"
               ? 403
               : 503;

@@ -28,7 +28,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { createSubmissionInventoryRelease } from "./submission-inventory-release.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /** DEC-ORDER-CANCELLATION-PILOT: store managers and owners hold it; front of house does not. */
 export const staffOrderCancellationPermission = "ordering.order.cancel" as const;
@@ -640,7 +640,7 @@ export function createMerchantOrderStaffCancellation(options: {
         return fail("ORDER_CANCELLATION_VERSION_CONFLICT");
       if (code === "STORE_SERVICE_PERMISSION_DENIED")
         return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
-      return fail("ORDER_CANCELLATION_UNAVAILABLE");
+      return keepingCause(() => fail("ORDER_CANCELLATION_UNAVAILABLE"))(error);
     }
   };
 }
@@ -782,7 +782,7 @@ export function createMerchantOrderStaffCancellationPreview(
         return fail("ORDER_CANCELLATION_VERSION_CONFLICT");
       if (code === "STORE_SERVICE_PERMISSION_DENIED")
         return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
-      return fail("ORDER_CANCELLATION_UNAVAILABLE");
+      return keepingCause(() => fail("ORDER_CANCELLATION_UNAVAILABLE"))(error);
     }
   };
 }

@@ -19,6 +19,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 export class MerchantProductCategoryLookupError extends Error {
   constructor(readonly code: "Invalid" | "Denied" | "Unavailable" | "Stale" | "FeatureDisabled") {
     super("Product category lookup is unavailable");
@@ -261,7 +262,7 @@ export function createMerchantProductCategoryLookupQuery(options: {
       if (error instanceof MerchantProductCategoryLookupError) throw error;
       if (error instanceof CatalogError)
         return fail(error.code === "CATALOG_PERMISSION_DENIED" ? "Denied" : "Unavailable");
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
 }

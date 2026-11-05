@@ -15,6 +15,7 @@ import {
 } from "./merchant-product-command-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { isMerchantRefusal, keepingCause } from "./merchant-failure.js";
 export interface MerchantOptionSetAuthoringContextOptions {
   readonly merchant: PersistentMerchantBffOptions;
   readonly authentication: Pick<MerchantBffService, "authorize">;
@@ -98,11 +99,13 @@ export function createMerchantOptionSetAuthoringContextQuery(
       }
     };
     const session = await authenticate({ sessionCookie, csrf }).catch((error: unknown) =>
-      fail(
-        error instanceof BrowserSessionError
-          ? "CATALOG_PERMISSION_DENIED"
-          : "CATALOG_DEPENDENCY_UNAVAILABLE",
-      ),
+      keepingCause(() =>
+        fail(
+          error instanceof BrowserSessionError && isMerchantRefusal(error)
+            ? "CATALOG_PERMISSION_DENIED"
+            : "CATALOG_DEPENDENCY_UNAVAILABLE",
+        ),
+      )(error),
     );
     now();
     let calls = 0,
@@ -199,7 +202,7 @@ export function createMerchantOptionSetAuthoringContextQuery(
             failed = true;
             if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
               throw error;
-            return fail();
+            return keepingCause(fail)(error);
           }
         };
         rehold = async () => {
@@ -251,7 +254,7 @@ export function createMerchantOptionSetAuthoringContextQuery(
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED") throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
     return Object.freeze({
       profile: "CatalogOptionSetAuthoringContextV1",

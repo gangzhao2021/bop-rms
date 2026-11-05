@@ -19,6 +19,7 @@ import {
   type TaxConfigAuthoringScope,
 } from "@rms/pricing";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 export interface MerchantTaxConfigCapabilityOptions {
@@ -235,7 +236,7 @@ export function createMerchantTaxConfigCapability(options: MerchantTaxConfigCapa
         authorityFailure = error;
         throw error;
       }
-      return fail();
+      return keepingCause(fail)(error);
     }
   }
   const borrowed = Object.freeze({
@@ -375,7 +376,7 @@ export function createMerchantTaxConfigCapability(options: MerchantTaxConfigCapa
       if (authorityFailure) throw authorityFailure;
       if (disabled) throw new MerchantTaxConfigFeatureDisabled();
       if (error instanceof TaxConfigWorkflowError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   }
   return Object.freeze({

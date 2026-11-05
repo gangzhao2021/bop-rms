@@ -41,7 +41,7 @@ it.each([
   "a kitchen display sign-in (%s) gets no order exception authority before any selection or policy read",
   async (kitchenDisplay, contextReads) => {
     const context = vi.fn(async () => {
-      throw new Error("SYNTHETIC_STOP");
+      throw new Error("MERCHANT_SELECTED_CONTEXT_DENIED");
     });
     const authorize = createMerchantOrderExceptionAuthorization({
       now: () => at,
@@ -60,3 +60,23 @@ it.each([
     expect(context).toHaveBeenCalledTimes(contextReads);
   },
 );
+
+it("WP-2423 item 10: a read that failed is not a refusal", async () => {
+  const fault = new TypeError("broken");
+  const authorize = createMerchantOrderExceptionAuthorization({
+    now: () => at,
+    session: async () => session(false),
+    context: async () => {
+      throw fault;
+    },
+    membership: () => {
+      throw new Error("UNEXPECTED_MEMBERSHIP_READ");
+    },
+  });
+  await expect(
+    authorize({} as never, {
+      sessionCookie: "synthetic-cookie",
+      permission: "operations.order-exception.manage",
+    }),
+  ).rejects.toBe(fault);
+});

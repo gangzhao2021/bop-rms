@@ -25,6 +25,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { bindMerchantStorePaymentConfigurationCommand } from "./merchant-store-payment-configuration-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /** Ordinary Payment-owned Store rules. Saved rules do not prove Provider readiness or activate methods in a published Store. */
 export function createMerchantStorePaymentConfiguration(options: {
@@ -162,7 +163,7 @@ export function createMerchantStorePaymentConfiguration(options: {
                     !/^[A-Za-z0-9_-]{43}$/u.test(input.csrf))))
             )
               return fail("STORE_PAYMENT_CONFIGURATION_PERMISSION_DENIED");
-            return fail();
+            return keepingCause(fail)(error);
           })
       : undefined;
     check();

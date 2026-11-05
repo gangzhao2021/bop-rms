@@ -16,6 +16,7 @@ import {
   currentProductPolicyFields,
 } from "./current-product-publication-policy.js";
 import { createCurrentProductApprovalDecisionSource } from "./current-product-approval-decision.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type SourceOptions = Parameters<typeof createPostgresProductPublicationSourceStore>[0];
 type PolicyOptions = Parameters<typeof createCurrentProductPublicationPolicySource>[0];
@@ -121,7 +122,7 @@ export function createMerchantProductApprovalDecisionFacts(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
   const assertCurrent = async () => {
@@ -150,7 +151,7 @@ export function createMerchantProductApprovalDecisionFacts(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
   const reviewSource = createPostgresProductPublicationSourceStore({
@@ -277,7 +278,7 @@ export function createMerchantProductApprovalDecisionFacts(options: {
       } catch (error) {
         failed = true;
         if (error instanceof CatalogError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       } finally {
         active = false;
       }

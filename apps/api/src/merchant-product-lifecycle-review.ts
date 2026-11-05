@@ -10,6 +10,7 @@ import {
 } from "@rms/catalog";
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { createMerchantBrandScope } from "./merchant-brand-scope.js";
+import { keepingCause } from "./merchant-failure.js";
 type Tx = Parameters<
   ReturnType<typeof createMerchantCategoryTransactions>["registerBeforeCommit"]
 >[0];
@@ -110,7 +111,7 @@ export function createMerchantProductLifecycleReviewLease(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return unavailable();
+      return keepingCause(unavailable)(error);
     }
   };
   return Object.freeze({

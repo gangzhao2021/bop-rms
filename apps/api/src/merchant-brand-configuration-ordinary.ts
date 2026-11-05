@@ -41,6 +41,7 @@ import {
   readMerchantBrandConfigurationRecordedReview,
 } from "./merchant-brand-configuration-recorded-review.js";
 import { projectMerchantBrandTemplateCandidates } from "./merchant-brand-template-candidates.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 type Tx = BrandConfigurationAuthoringTransaction;
 export interface MerchantBrandConfigurationOrdinarySourceHost {
@@ -94,7 +95,7 @@ const fail = (
 function authorityFailure(error: unknown): never {
   if (error instanceof BrandConfigurationOperationError) throw error;
   if (
-    error instanceof BrowserSessionError ||
+    (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
     (error instanceof Error && error.message === "BRAND_SERVICE_PERMISSION_DENIED")
   )
     return fail("BRAND_CONFIGURATION_PERMISSION_DENIED");

@@ -11,6 +11,7 @@ import {
 } from "@rms/catalog";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /** Current native IAM and independent registry fields/policy both remain mandatory.
  * The Catalog source owns its definitions and history; this adapter grants none. */
@@ -156,7 +157,7 @@ export function createMerchantProductContentRegistryAuthority(options: {
       } catch (error) {
         failed = true;
         if (error instanceof CatalogError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       } finally {
         active = false;
       }

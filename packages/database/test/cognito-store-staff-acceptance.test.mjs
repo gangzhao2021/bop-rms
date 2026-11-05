@@ -40,7 +40,8 @@ vi.mock("../../../apps/api/src/merchant-store-scope.ts", () => ({
 }));
 vi.mock("../../../apps/api/src/merchant-brand-scope.ts", () => ({
   createMerchantBrandScope: () => async () => {
-    throw new Error("NO_BRAND_SCOPE_IN_THIS_TEST");
+    // Nobody here has a Brand scope: the refusal the real scope gives them.
+    throw new Error("BRAND_SERVICE_PERMISSION_DENIED");
   },
 }));
 const express = createRequire(new URL("../../../apps/api/package.json", import.meta.url))(

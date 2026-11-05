@@ -21,7 +21,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { createSubmissionInventoryRelease } from "./submission-inventory-release.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER (rule 2): staff take dishes — or a whole round — off the bill of a
@@ -293,7 +293,7 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
       const code = databaseCode(error);
       if (code === "40P01" || code === "40001" || code === "55P03")
         return fail("UNPAID_ITEM_REMOVAL_VERSION_CONFLICT");
-      return fail("UNPAID_ITEM_REMOVAL_UNAVAILABLE");
+      return keepingCause(() => fail("UNPAID_ITEM_REMOVAL_UNAVAILABLE"))(error);
     }
   };
 }

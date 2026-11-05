@@ -17,6 +17,7 @@ import {
   remainingProductEditorVariantReferenceChecks,
   type MerchantProductEditorVariantRemainingAuthority,
 } from "./merchant-product-editor-variant-content-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 type OptionOptions = Parameters<typeof createFrozenFullOptionBindingRuleSource>[0];
 export interface CurrentPublishedProductOptionBindingAssessment extends Omit<
   FrozenFullOptionBindingRuleAssessment,
@@ -346,7 +347,7 @@ export function createMerchantProductEditorPinnedOptionAuthority(options: {
     } catch (error) {
       if (tx && typeof tx === "object") failed.add(tx);
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       if (tx && typeof tx === "object") active.delete(tx);
     }

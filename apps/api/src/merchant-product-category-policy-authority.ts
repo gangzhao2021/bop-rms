@@ -11,6 +11,7 @@ import {
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantProductCategoryPolicy } from "./merchant-product-category-assignments.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /** Native IAM is independent of the mandatory current fields/phase/policy holder.
  * Category facts remain owned by Catalog; neither source can grant the other. */
@@ -160,7 +161,7 @@ export function createMerchantProductCategoryPolicyAuthority(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return unavailable();
+      return keepingCause(unavailable)(error);
     } finally {
       active = false;
     }

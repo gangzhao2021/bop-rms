@@ -64,7 +64,7 @@ export function createMerchantOrderQueueRead(options: {
   }) =>
     options.transactions.run(async (transaction) => {
       const scope = await options.authorize(transaction, input.sessionCookie);
-      if (scope === null) return unavailable();
+      if (scope === null) throw new Error("MERCHANT_ORDER_QUEUE_DENIED");
       const recheck = async () => {
         const current = await options.authorize(transaction, input.sessionCookie);
         return (

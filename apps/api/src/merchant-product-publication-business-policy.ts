@@ -29,6 +29,7 @@ import type {
   MerchantProductPublicationBusinessAssessment,
   MerchantProductPublicationSourcesConfiguration,
 } from "./merchant-product-publication-sources.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Policy = MerchantProductPublicationSourcesConfiguration["businessPolicy"];
 type Input = Parameters<Policy["withAssessment"]>[1];
@@ -774,7 +775,7 @@ export function createMerchantProductPublicationBusinessPolicy(
         if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
           throw error;
         if (consumerError instanceof CatalogError) throw consumerError;
-        return unavailable();
+        return keepingCause(unavailable)(error);
       }
     },
   });

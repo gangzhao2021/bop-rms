@@ -31,6 +31,7 @@ import { parseTaxConfigClassificationChoices } from "./merchant-tax-config-workb
 import { bindMerchantStoreSetupCommand } from "./merchant-store-setup-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /** Ordinary partial Setup; complete configuration and publication remain separate owning workflows. */
 export function createMerchantStoreSetup(options: {
@@ -179,7 +180,7 @@ export function createMerchantStoreSetup(options: {
                     !/^[A-Za-z0-9_-]{43}$/u.test(input.csrf))))
             )
               return fail("STORE_SETUP_OPERATION_PERMISSION_DENIED");
-            return fail();
+            return keepingCause(fail)(error);
           })
       : undefined;
     check();

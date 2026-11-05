@@ -12,7 +12,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { onlyRefusal, withCause } from "./merchant-failure.js";
 
 export type MerchantDiningHeldRoundErrorCode =
   | "HELD_ROUND_INPUT_INVALID"
@@ -161,7 +161,7 @@ export function createMerchantDiningHeldRound(options: {
       );
     } catch (error) {
       if (error instanceof MerchantDiningHeldRoundError) throw error;
-      throw new MerchantDiningHeldRoundError("HELD_ROUND_UNAVAILABLE");
+      throw withCause(new MerchantDiningHeldRoundError("HELD_ROUND_UNAVAILABLE"), error);
     }
   };
 }
@@ -279,7 +279,7 @@ export function createMerchantDiningRoundHoldSetting(options: {
         error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT"
       )
         throw new MerchantDiningHeldRoundError("HELD_ROUND_CHANGED");
-      throw new MerchantDiningHeldRoundError("HELD_ROUND_UNAVAILABLE");
+      throw withCause(new MerchantDiningHeldRoundError("HELD_ROUND_UNAVAILABLE"), error);
     }
   };
 }

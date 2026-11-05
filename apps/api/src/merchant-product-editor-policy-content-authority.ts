@@ -24,6 +24,7 @@ import {
   remainingProductEditorVariantReferenceChecks,
   type MerchantProductEditorVariantRemainingAuthority,
 } from "./merchant-product-editor-variant-content-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type BrandOptions = Parameters<typeof createPostgresTenantBrandConfigurationContentSource>[0];
 type PolicyOptions = Parameters<typeof createCurrentProductPublicationPolicySource>[0];
@@ -442,7 +443,7 @@ export function createMerchantProductEditorPolicyContentAuthority(options: {
     } catch (error) {
       if (tx && typeof tx === "object") failed.add(tx);
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
 }

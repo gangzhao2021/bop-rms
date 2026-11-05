@@ -33,7 +33,7 @@ import {
 } from "./merchant-counter-order.js";
 import type { DiningPayLaterRound } from "./dining-pay-later-round.js";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): entering a round for a table on behalf of its
@@ -829,11 +829,13 @@ export function createMerchantStaffDiningRound(options: {
           if (code !== "ORDER_CREATE_STOCK_SHORT" && code !== "CHECKOUT_REQUOTE_REQUIRED")
             throw error;
           await withdraw();
-          return fail(
-            code === "ORDER_CREATE_STOCK_SHORT"
-              ? "STAFF_ROUND_ITEM_UNAVAILABLE"
-              : "STAFF_ROUND_NOT_PRICED",
-          );
+          return keepingCause(() =>
+            fail(
+              code === "ORDER_CREATE_STOCK_SHORT"
+                ? "STAFF_ROUND_ITEM_UNAVAILABLE"
+                : "STAFF_ROUND_NOT_PRICED",
+            ),
+          )(error);
         }
         return await finished("Placed", entry.record);
       }
@@ -853,11 +855,13 @@ export function createMerchantStaffDiningRound(options: {
         if (code !== "ORDER_CREATE_STOCK_SHORT" && code !== "CHECKOUT_REQUOTE_REQUIRED")
           throw error;
         await withdraw();
-        return fail(
-          code === "ORDER_CREATE_STOCK_SHORT"
-            ? "STAFF_ROUND_ITEM_UNAVAILABLE"
-            : "STAFF_ROUND_NOT_PRICED",
-        );
+        return keepingCause(() =>
+          fail(
+            code === "ORDER_CREATE_STOCK_SHORT"
+              ? "STAFF_ROUND_ITEM_UNAVAILABLE"
+              : "STAFF_ROUND_NOT_PRICED",
+          ),
+        )(error);
       }
       // The round was submitted with another tip: the same command reads back what it holds.
       if (preparation.tip.amountMinor !== tip) return fail("STAFF_ROUND_IN_PROGRESS");
@@ -901,7 +905,9 @@ export function createMerchantStaffDiningRound(options: {
       }
       // WP-2423: a definite "could not send" only while nothing can exist yet; once the checkout
       // started the round may exist, so the same command is sent again to recover it.
-      return fail(roundMayExist ? "STAFF_ROUND_IN_PROGRESS" : "STAFF_ROUND_UNAVAILABLE");
+      return keepingCause(() =>
+        fail(roundMayExist ? "STAFF_ROUND_IN_PROGRESS" : "STAFF_ROUND_UNAVAILABLE"),
+      )(error);
     }
   };
 }

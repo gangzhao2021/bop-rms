@@ -44,6 +44,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 export interface BrandStoreTopologyWorkbench {
   readonly profile: "BrandStoreTopologyWorkbenchV1";
@@ -192,7 +193,7 @@ function scope(value: unknown): BrandStoreTopologyActorScope {
 function bounded(error: unknown): never {
   if (error instanceof BrandStoreTopologyError) throw error;
   if (
-    error instanceof BrowserSessionError ||
+    (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
     (error instanceof Error &&
       ["BRAND_SERVICE_PERMISSION_DENIED", "STORE_SERVICE_PERMISSION_DENIED"].includes(
         error.message,

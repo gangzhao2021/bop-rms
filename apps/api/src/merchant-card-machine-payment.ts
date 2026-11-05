@@ -26,7 +26,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { counterOrderPermission } from "./merchant-counter-order.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 export const cardMachinePaymentCommandErrorCodes = [
   "CARD_MACHINE_INPUT_INVALID",
@@ -378,7 +378,7 @@ export function createMerchantCardMachinePayment(options: {
       } catch {
         // Reporting never changes the answer.
       }
-      return fail("CARD_MACHINE_UNAVAILABLE");
+      return keepingCause(() => fail("CARD_MACHINE_UNAVAILABLE"))(error);
     }
   };
 }

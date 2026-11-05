@@ -16,6 +16,7 @@ import {
   type DigitalReceiptTemplateSubmissionStoreOptions,
   type DigitalReceiptTemplateSubmissionTransaction,
 } from "@rms/printing-device";
+import { keepingCause } from "./merchant-failure.js";
 
 export interface MerchantReceiptTemplateEditingReviewPacket {
   readonly profile: "DigitalReceiptTemplateEditingReviewV1";
@@ -352,7 +353,7 @@ export function createMerchantReceiptTemplateEditingReview(
       } catch (error) {
         phase = "Poison";
         if (error instanceof DigitalReceiptTemplateError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       }
     },
     assertFinalized(actual: Transaction) {

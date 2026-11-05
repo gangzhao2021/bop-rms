@@ -11,7 +11,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { onlyRefusal, withCause } from "./merchant-failure.js";
 
 export type MerchantDiningPartySizeErrorCode =
   | "DINING_PARTY_SIZE_INPUT_INVALID"
@@ -187,7 +187,7 @@ export function createMerchantDiningPartySize(options: {
         error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT"
       )
         throw new MerchantDiningPartySizeError("DINING_PARTY_SIZE_CHANGED");
-      throw new MerchantDiningPartySizeError("DINING_PARTY_SIZE_UNAVAILABLE");
+      throw withCause(new MerchantDiningPartySizeError("DINING_PARTY_SIZE_UNAVAILABLE"), error);
     }
   };
 }

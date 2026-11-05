@@ -45,6 +45,7 @@ import {
   parseCatalogReference,
   type BrandCatalogSourceExact,
 } from "@rms/catalog";
+import { keepingCause } from "./merchant-failure.js";
 
 type Prepare = BrandConfigurationAuthoringStoreOptions["prepareFresh"];
 type PrepareInput = Parameters<Prepare>[1];
@@ -837,7 +838,7 @@ function createPreparation(strategy: PreparationStrategy): Prepare {
     } catch (error) {
       failed = true;
       if (error instanceof BrandConfigurationOperationError) throw error;
-      return unavailable();
+      return keepingCause(unavailable)(error);
     } finally {
       active = false;
     }

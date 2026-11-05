@@ -11,6 +11,7 @@ import {
 } from "@rms/catalog";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type OptionAuthority = FrozenFullOptionSetContentAuthority;
 
@@ -104,7 +105,7 @@ export function createMerchantProductFrozenOptionAuthority(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       active = false;
     }
@@ -191,7 +192,7 @@ export function createMerchantProductFrozenOptionAuthority(options: {
       } catch (error) {
         failed = true;
         if (error instanceof CatalogError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       } finally {
         active = false;
       }

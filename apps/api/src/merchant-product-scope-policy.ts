@@ -10,6 +10,7 @@ import {
   createCurrentProductPublicationPolicySource,
   currentProductPolicyFields,
 } from "./current-product-publication-policy.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type SourceOptions = Parameters<typeof createCurrentProductPublicationPolicySource>[0];
 type ScopePort = NonNullable<ProductPublicationStoreOptions["sources"]["withHeldScopePolicy"]>;
@@ -84,7 +85,7 @@ export function createMerchantProductScopePolicy(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
   const assertCurrent = async () => {
@@ -103,7 +104,7 @@ export function createMerchantProductScopePolicy(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
   const source = createCurrentProductPublicationPolicySource({
@@ -182,7 +183,7 @@ export function createMerchantProductScopePolicy(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     } finally {
       active = false;
     }

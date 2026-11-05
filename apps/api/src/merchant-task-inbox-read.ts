@@ -2,6 +2,7 @@ import {
   parseMerchantTaskInboxFilters,
   resolveMerchantTaskOwnerFilters,
 } from "./merchant-task-inbox-filters.js";
+import { keepingCause } from "./merchant-failure.js";
 import {
   createTaskRecord,
   matchesTaskQueueFilters,
@@ -143,8 +144,8 @@ export function createMerchantTaskInboxRead(options: {
           nextAfterTaskReference,
         });
       });
-    } catch {
-      return fail();
+    } catch (error) {
+      return keepingCause(fail)(error);
     }
   };
 }

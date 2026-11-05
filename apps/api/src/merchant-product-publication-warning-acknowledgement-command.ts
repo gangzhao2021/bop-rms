@@ -32,6 +32,7 @@ import {
   type MerchantProductStoreCapabilityGuard,
 } from "./merchant-product-store-capability.js";
 import { createMerchantProductPublicationRuntimeAuthority } from "./merchant-product-publication-runtime-authority.js";
+import { isMerchantRefusal, keepingCause } from "./merchant-failure.js";
 
 type StoreOptions = ProductPublicationWarningAcknowledgementStoreOptions;
 type AuthorityInput = Parameters<StoreOptions["authority"]["holdUntilTransactionCompletes"]>[1];
@@ -205,11 +206,13 @@ export function createMerchantProductPublicationWarningAcknowledgementCommand(
       sessionCookie: request.sessionCookie,
       csrf: request.csrf,
     }).catch((error: unknown) => {
-      return fail(
-        error instanceof BrowserSessionError
-          ? "CATALOG_PERMISSION_DENIED"
-          : "CATALOG_DEPENDENCY_UNAVAILABLE",
-      );
+      return keepingCause(() =>
+        fail(
+          error instanceof BrowserSessionError && isMerchantRefusal(error)
+            ? "CATALOG_PERMISSION_DENIED"
+            : "CATALOG_DEPENDENCY_UNAVAILABLE",
+        ),
+      )(error);
     });
     let failed = false,
       latest = parseCatalogInstant(clock()),

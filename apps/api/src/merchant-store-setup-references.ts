@@ -26,6 +26,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { bindMerchantStoreSetupReferenceCommand } from "./merchant-store-setup-reference-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /** Ordinary Store-owned address/contact configuration; complete Setup and publication remain separate. */
 export function createMerchantStoreSetupReferences(options: {
@@ -168,7 +169,7 @@ export function createMerchantStoreSetupReferences(options: {
                     !/^[A-Za-z0-9_-]{43}$/u.test(input.csrf))))
             )
               return fail("STORE_SETUP_REFERENCE_PERMISSION_DENIED");
-            return fail();
+            return keepingCause(fail)(error);
           })
       : undefined;
     check();

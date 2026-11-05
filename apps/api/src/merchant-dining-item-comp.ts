@@ -17,7 +17,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 item 8 ① segment 2 (Owner decision 2, DEC-TABLES-SERVER-MAIN): a manager comps or
@@ -260,7 +260,7 @@ export function createMerchantDiningItemComp(options: {
       const code = databaseCode(error);
       if (code === "40P01" || code === "40001" || code === "55P03")
         return fail("ITEM_COMP_CONFLICT");
-      return fail("ITEM_COMP_UNAVAILABLE");
+      return keepingCause(() => fail("ITEM_COMP_UNAVAILABLE"))(error);
     }
   };
 }

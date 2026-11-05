@@ -105,7 +105,7 @@ export async function verifyMerchantExceptionHttp({
         bootstrap: async (sessionCookie) =>
           transactions.run(async (tx) => {
             const authorized = await authorize(tx, { ...input, sessionCookie });
-            if (!authorized) throw new Error("denied");
+            if (!authorized) throw new Error("BROWSER_SESSION_DENIED");
             const session = await sessionSource(tx, sessionCookie);
             const selectedScope = {
               brandLabel: "Synthetic Brand",

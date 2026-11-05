@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   isDatabaseContention,
   isExpectedContention,
+  isMerchantRefusal,
   keepingCause,
   merchantFailureCode,
   merchantFailureKind,
@@ -18,6 +19,7 @@ import {
 const coded = (code: string) => Object.assign(new Error("safe"), { code });
 const database = (code: string, sqlState: string | null) =>
   Object.assign(new Error("safe"), { code, diagnostic: { sqlState } });
+const missingGrant = () => database("TENANT_DATABASE_TRANSACTION_FAILED", "42501");
 const afterFailedQuery = (error: Error, sqlState: string) =>
   Object.defineProperty(error, Symbol.for("bop.database.failure"), {
     value: { sqlState },
@@ -139,6 +141,35 @@ describe("what a failure means", () => {
     expect(merchantFailureKind(afterFailedQuery(refused(), "57014"))).toBe("RetryLater");
     // A typed answer to a failed statement keeps its meaning: "code taken", "conflict".
     expect(merchantFailureKind(afterFailedQuery(new Error("X_CONFLICT"), "23505"))).toBe("Changed");
+  });
+
+  it("a rewrite around a refusal of the person stays a refusal", () => {
+    const rewrite = (cause: unknown) =>
+      withCause(new Error("MERCHANT_TASK_INBOX_UNAVAILABLE"), cause);
+    expect(merchantFailureKind(rewrite(new Error("BROWSER_SESSION_DENIED")))).toBe("Refused");
+    expect(merchantFailureKind(rewrite(coded("SESSION_REVOKED")))).toBe("Refused");
+    expect(merchantFailureKind(rewrite(rewrite(coded("ACTIVE_MEMBERSHIP_NOT_FOUND"))))).toBe(
+      "Refused",
+    );
+    expect(merchantFailureKind(withCause(coded("Unavailable"), coded("PermissionDenied")))).toBe(
+      "Refused",
+    );
+    expect(merchantFailureKind(withCause(new Error("guest Sam"), coded("X_DENIED")))).toBe(
+      "Refused",
+    );
+    // Whatever else is behind it stays what it was.
+    expect(merchantFailureKind(rewrite(new TypeError("x")))).toBe("RetryLater");
+    expect(merchantFailureKind(rewrite(missingGrant()))).toBe("RetryLater");
+    // A stored row that did not parse is no refusal of this person.
+    expect(merchantFailureKind(rewrite(coded("ACTOR_REFERENCE_INVALID")))).toBe("RetryLater");
+    // Decided after a query failed: nothing was read to decide it with, wherever that shows.
+    expect(merchantFailureKind(afterFailedQuery(rewrite(coded("X_DENIED")), "42501"))).toBe(
+      "RetryLater",
+    );
+    expect(merchantFailureKind(rewrite(afterFailedQuery(coded("X_DENIED"), "42501")))).toBe(
+      "RetryLater",
+    );
+    expect(isMerchantRefusal(rewrite(coded("X_DENIED")))).toBe(true);
   });
 
   it("takes the code from `code`, or from a code-shaped message and never other text", () => {

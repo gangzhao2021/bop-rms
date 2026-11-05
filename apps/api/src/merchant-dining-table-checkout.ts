@@ -46,7 +46,7 @@ import {
   tipRefusal,
   type StoreTipChoices,
 } from "./merchant-store-features.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's checkout. Staff read the table's bill (each
@@ -1182,7 +1182,7 @@ export function createMerchantDiningTableSettle(options: {
                 ? "TABLE_CHECKOUT_PERMISSION_DENIED"
                 : "TABLE_CHECKOUT_UNAVAILABLE",
         );
-      return fail("TABLE_CHECKOUT_UNAVAILABLE");
+      return keepingCause(() => fail("TABLE_CHECKOUT_UNAVAILABLE"))(error);
     }
   };
 }
@@ -1426,7 +1426,7 @@ export function createMerchantDiningTableSplit(options: {
                 ? "TABLE_CHECKOUT_PERMISSION_DENIED"
                 : "TABLE_CHECKOUT_UNAVAILABLE",
         );
-      return fail("TABLE_CHECKOUT_UNAVAILABLE");
+      return keepingCause(() => fail("TABLE_CHECKOUT_UNAVAILABLE"))(error);
     }
   };
 }

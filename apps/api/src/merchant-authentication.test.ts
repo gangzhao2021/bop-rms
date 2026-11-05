@@ -783,7 +783,10 @@ describe("merchant exception current authorization", () => {
       ]),
     });
     expect(await authorize(tx, input)).toBeNull();
+    // WP-2423 item 10: a policy that can't be read is a fault for the log, not a refusal of this person.
     policies.snapshot = null;
-    expect(await authorize(tx, input)).toBeNull();
+    await expect(authorize(tx, input)).rejects.toMatchObject({
+      code: "PERMISSION_POLICY_MATERIALIZATION_INVALID",
+    });
   });
 });

@@ -23,6 +23,7 @@ import {
 } from "@rms/catalog";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 type Transaction = Parameters<CategoryPersistenceAuthority["holdUntilTransactionCompletes"]>[0];
 type Request =
   | Parameters<CategoryPersistenceAuthority["holdUntilTransactionCompletes"]>[1]
@@ -299,14 +300,14 @@ export function createMerchantCategoryAuthority(options: {
                 );
             } catch (error) {
               if (error instanceof CatalogError) throw error;
-              return fail();
+              return keepingCause(fail)(error);
             }
           });
           registered.add(tx);
         }
       } catch (error) {
         if (error instanceof CatalogError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       }
     },
   });

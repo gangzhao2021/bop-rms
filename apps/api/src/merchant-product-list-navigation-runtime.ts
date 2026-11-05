@@ -35,6 +35,7 @@ import { merchantProductListRequiredFields } from "./merchant-product-list-query
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 type Transaction = Parameters<Host["registerBeforeCommit"]>[0];
@@ -274,8 +275,8 @@ export function createMerchantProductListNavigationRuntime(options: {
               if (admitted && !(await current())) return poison();
               check();
               guardComplete = true;
-            } catch {
-              return poison();
+            } catch (error) {
+              return keepingCause(poison)(error);
             }
           },
           () => {
@@ -396,8 +397,8 @@ export function createMerchantProductListNavigationRuntime(options: {
         check();
         settled = true;
         return admitted;
-      } catch {
-        return poison();
+      } catch (error) {
+        return keepingCause(poison)(error);
       }
     },
   });

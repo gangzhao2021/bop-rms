@@ -118,7 +118,7 @@ export async function readTonightFacts(
           input.scope,
           events.flatMap((event) => (event.actorReference === null ? [] : [event.actorReference])),
         );
-  if (!(await allowed())) throw new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE");
+  if (!(await allowed())) throw new Error("MERCHANT_STORE_REPORTS_DENIED");
   return Object.freeze({
     ...(events.length === 0
       ? {}

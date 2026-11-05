@@ -8,6 +8,7 @@ import { createPostgresCurrentPermissionPolicySource } from "@bop/permission";
 import type { ConsumerTransaction } from "@bop/eventing";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
+import { keepingCause } from "./merchant-failure.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
 const fail = (): never => {
   throw new Error("MERCHANT_QUEUE_ELIGIBILITY_UNAVAILABLE");
@@ -141,7 +142,7 @@ export async function prepareMerchantManagerQueueEligibility(
       checkedAt,
       validUntil,
     });
-  } catch {
-    return fail();
+  } catch (error) {
+    return keepingCause(fail)(error);
   }
 }

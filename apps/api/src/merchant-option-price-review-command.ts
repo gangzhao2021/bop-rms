@@ -61,6 +61,7 @@ import { optionPricePublicationReviewCheckCodes } from "./merchant-option-price-
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 export interface MerchantOptionPriceReviewCommandOptions {
   readonly merchant: PersistentMerchantBffOptions;
   readonly authentication: Pick<MerchantBffService, "authorize">;
@@ -163,7 +164,7 @@ const bounded = (error: unknown): never => {
   if (error instanceof OptionPriceError && error.code === "OPTION_PRICE_CONFLICT")
     return fail("OPTION_PRICE_CONFLICT");
   if (
-    error instanceof BrowserSessionError ||
+    (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
     (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
   )
     return fail("OPTION_PRICE_PERMISSION_DENIED");

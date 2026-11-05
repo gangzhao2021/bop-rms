@@ -15,6 +15,7 @@ import {
 import { createMerchantProductPublicationRuntimeAuthority } from "./merchant-product-publication-runtime-authority.js";
 import type { MerchantProductPublicationSourceFactoryV2Input } from "./merchant-product-publication-command-v2.js";
 import type { MerchantProductWarningAcknowledgementSourceFactoryInput } from "./merchant-product-publication-warning-acknowledgement-command.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Host =
   | MerchantProductPublicationSourceFactoryV2Input
@@ -207,7 +208,7 @@ export function createMerchantProductPublicationRuntimeSources(
           } catch (error) {
             poisoned = true;
             if (error instanceof CatalogError) throw error;
-            return unavailable();
+            return keepingCause(unavailable)(error);
           }
         },
       },

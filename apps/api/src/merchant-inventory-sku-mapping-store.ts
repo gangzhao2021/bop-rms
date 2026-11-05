@@ -13,6 +13,7 @@ import {
   type InventorySkuMappingHeldSku,
   type InventorySkuMappingCommand,
 } from "@rms/inventory";
+import { keepingCause, withCause } from "./merchant-failure.js";
 export interface MerchantInventorySkuMappingOptions {
   readonly tenantReference: string;
   readonly brandReference: string;
@@ -110,7 +111,7 @@ export function createMerchantInventorySkuMappingStore(
                         return await work(held);
                       } catch (error) {
                         callbackError = ownError(error);
-                        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+                        throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), error);
                       }
                     },
                   );
@@ -120,7 +121,7 @@ export function createMerchantInventorySkuMappingStore(
                   if (callbackError) throw callbackError;
                   if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
                     throw new InventoryItemError("INVENTORY_ITEM_PERMISSION_DENIED");
-                  return fail();
+                  return keepingCause(fail)(error);
                 }
               },
             },
@@ -133,7 +134,7 @@ export function createMerchantInventorySkuMappingStore(
       } catch (error) {
         const preserved = ownError(error);
         if (preserved) throw preserved;
-        return fail();
+        return keepingCause(fail)(error);
       }
     },
   });

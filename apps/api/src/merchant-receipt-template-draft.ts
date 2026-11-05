@@ -30,6 +30,7 @@ import { bindMerchantReceiptTemplateDraftCommand } from "./merchant-receipt-temp
 import { createMerchantReceiptTemplateEditingReview } from "./merchant-receipt-template-editing-review.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /** Ordinary Device-owned immutable template draft. Submission, professional review and publication remain separate. */
 export function createMerchantReceiptTemplateDraft(options: {
@@ -182,7 +183,7 @@ export function createMerchantReceiptTemplateDraft(options: {
                     !/^[A-Za-z0-9_-]{43}$/u.test(input.csrf))))
             )
               return fail("RECEIPT_TEMPLATE_PERMISSION_DENIED");
-            return fail();
+            return keepingCause(fail)(error);
           })
       : undefined;
     check();

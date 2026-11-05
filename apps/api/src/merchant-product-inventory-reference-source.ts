@@ -13,6 +13,7 @@ import {
   type InventorySkuMappingReferenceSourceOptions,
 } from "@rms/inventory";
 import { composeMerchantProductInventoryReferenceMatches } from "./merchant-product-inventory-reference-matches.js";
+import { withCause } from "./merchant-failure.js";
 type CurrentOptions = Parameters<typeof createPostgresProductPricingBindingSourceStore>[0];
 type RecordedOptions = Parameters<typeof createPostgresProductReferenceHistorySourceStore>[0];
 /** Internal reference composition bound to the caller's physical RC transaction.
@@ -93,7 +94,7 @@ export function createMerchantProductInventoryReferenceSource(options: {
       } catch (error) {
         if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
           throw error;
-        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), error);
       }
     },
   });

@@ -15,7 +15,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
 import { createSubmissionInventoryRelease } from "./submission-inventory-release.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 (2026-10-16 v15 stock leak): an Order round from an earlier business day that still has
@@ -303,7 +303,7 @@ export function createMerchantEndedOrderStockRelease(options: {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === "STORE_SERVICE_PERMISSION_DENIED")
         return fail("ENDED_ORDER_STOCK_PERMISSION_DENIED");
-      return fail("ENDED_ORDER_STOCK_UNAVAILABLE");
+      return keepingCause(() => fail("ENDED_ORDER_STOCK_UNAVAILABLE"))(error);
     }
   };
 }

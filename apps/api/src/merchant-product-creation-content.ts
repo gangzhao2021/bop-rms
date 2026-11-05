@@ -18,6 +18,7 @@ import {
   type MerchantProductAuthoringSources,
 } from "./merchant-product-editor-runtime-brand-sources.js";
 import type { createMerchantProductCurrentAuthorization } from "./merchant-product-current-authorization.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type Registry = Parameters<typeof createMerchantProductEditorRegisteredContentAuthority>[0];
 type Variant = Parameters<typeof createMerchantProductEditorVariantContentAuthority>[0];
@@ -374,7 +375,7 @@ function createCapturedProductCreationContentFactory(
       } catch (error) {
         failed = true;
         if (error instanceof CatalogError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       } finally {
         active = false;
       }

@@ -14,7 +14,7 @@ import {
   DiningTableOnlinePaymentError,
   type createDiningTableOnlinePayments,
 } from "./dining-table-online-payment.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { onlyRefusal, withCause } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER S4: staff stop a phone payment a guest gave up on, so the table
@@ -85,7 +85,7 @@ export function createMerchantDiningTableOnlinePaymentStop(options: {
         throw new DiningTableCheckoutError("TABLE_CHECKOUT_GUEST_PAYING");
       throw error instanceof DiningTableCheckoutError
         ? error
-        : new DiningTableCheckoutError("TABLE_CHECKOUT_UNAVAILABLE");
+        : withCause(new DiningTableCheckoutError("TABLE_CHECKOUT_UNAVAILABLE"), error);
     }
   };
 }

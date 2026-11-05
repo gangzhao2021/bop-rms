@@ -37,6 +37,7 @@ import {
 } from "./merchant-sole-operator.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 const fail = (code: ConstructorParameters<typeof CatalogError>[0]): never => {
   throw new CatalogError(code);
@@ -365,7 +366,7 @@ export function createMerchantMenuPublicationCommand(options: {
                       throw new MenuReviewGapError(error.gap);
                     if (error instanceof MenuRecipeAllergenError)
                       throw new MenuReviewStoppedError(error.reason, error.skuReference);
-                    return fail("CATALOG_DEPENDENCY_UNAVAILABLE");
+                    return keepingCause(() => fail("CATALOG_DEPENDENCY_UNAVAILABLE"))(error);
                   });
           if (
             reviewed.lifecycleReference !== binding.lifecycleReference ||

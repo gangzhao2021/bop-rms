@@ -70,6 +70,7 @@ import {
 } from "./merchant-tax-config-authoring-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { isMerchantRefusal, withCause } from "./merchant-failure.js";
 
 export interface MerchantTaxConfigAuthoringOptions {
   readonly persistence: PersistentMerchantBffOptions;
@@ -114,7 +115,7 @@ function bounded(error: unknown): never {
     );
   }
   if (
-    error instanceof BrowserSessionError ||
+    (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
     (error instanceof Error &&
       ["STORE_SERVICE_PERMISSION_DENIED", "BRAND_SERVICE_PERMISSION_DENIED"].includes(
         error.message,
@@ -736,7 +737,7 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
                     if (
                       (error instanceof TaxConfigWorkflowError &&
                         error.code === "TAX_CONFIG_PERMISSION_DENIED") ||
-                      error instanceof BrowserSessionError ||
+                      (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
                       (error instanceof Error &&
                         [
                           "STORE_SERVICE_PERMISSION_DENIED",
@@ -744,7 +745,7 @@ export function createMerchantTaxConfigAuthoring(options: MerchantTaxConfigAutho
                         ].includes(error.message))
                     )
                       throw new CatalogError("CATALOG_PERMISSION_DENIED");
-                    throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+                    throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), error);
                   }
                 },
               },

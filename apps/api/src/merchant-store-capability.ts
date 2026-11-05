@@ -26,6 +26,7 @@ import { parseCatalogInstant } from "@rms/catalog";
 import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 export interface MerchantStoreCapabilityOptions {
   readonly persistence: PersistentMerchantBffOptions;
@@ -39,6 +40,10 @@ export interface MerchantStoreCapabilityOptions {
 }
 const fail = (): never => {
   throw new StoreCapabilityUnavailableError();
+};
+/** The person may not: answered as a refusal, behind the unavailable error this module throws. */
+const notAllowed = (): never => {
+  throw new Error("STORE_CAPABILITY_DENIED");
 };
 /** Current observations and backend guards share the owning resolver. Trusted
  * consumers choose their own action/key. HTTP bodies cannot choose an action,
@@ -198,7 +203,7 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
             )
           )
             return fail();
-          if (!(await storeAllowed())) return fail();
+          if (!(await storeAllowed())) return notAllowed();
           retain(scope.authorizationValidUntil());
           check();
         };
@@ -347,9 +352,9 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
             same: (previous, fresh) => previous === fresh,
             restore: () => restoreBrandTransactionRowSecurity(tx, brandReference, storeReference),
           });
-        if (!(await allowed())) return fail();
+        if (!(await allowed())) return notAllowed();
         await host.registerBeforeCommit(tx, async () => {
-          if (!(await allowed())) return fail();
+          if (!(await allowed())) return notAllowed();
         });
         const definitions = createPostgresFeatureControlAdministrationQueryStore(
           { run: (callback) => callback(tx) },
@@ -378,7 +383,7 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
                   request.observedAt,
                 );
                 const result = await callback(context);
-                if (!(await allowed())) return fail();
+                if (!(await allowed())) return notAllowed();
                 return result;
               },
             },
@@ -387,8 +392,8 @@ export function createMerchantStoreCapability(options: MerchantStoreCapabilityOp
         );
         return service.withCurrentCapability(key, work);
       });
-    } catch {
-      return fail();
+    } catch (error) {
+      return keepingCause(fail)(error);
     }
   }
   return Object.freeze({

@@ -3,6 +3,7 @@ import { request as httpRequest, type Server } from "node:http";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
+import { withCause } from "./merchant-failure.js";
 import { MerchantMenuError } from "./merchant-menus.js";
 
 /**
@@ -387,6 +388,20 @@ describe("each route tells a refusal from a failure", () => {
     expect(failed.status).toBe(503);
     expect(await failed.text()).not.toContain("private");
     expect(failing.reported).toHaveLength(1);
+  });
+
+  it("a service's own rewrite around an ended sign-in still sends them to sign in", async () => {
+    const ended = withCause(
+      new Error("MERCHANT_TASK_INBOX_UNAVAILABLE"),
+      new Error("BROWSER_SESSION_DENIED"),
+    );
+    const refused = await serve({ taskInbox: rejecting(ended) } as never);
+    expect((await refused.get("/tasks")).status).toBe(403);
+    expect(refused.reported).toEqual([]);
+    const fault = withCause(new Error("MERCHANT_TASK_INBOX_UNAVAILABLE"), missingGrant());
+    const failing = await serve({ taskInbox: rejecting(fault) } as never);
+    expect((await failing.get("/tasks")).status).toBe(503);
+    expect(failing.reported).toEqual([["/tasks", fault]]);
   });
 
   it("the session routes that only ask the session", async () => {

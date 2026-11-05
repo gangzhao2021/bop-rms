@@ -27,6 +27,7 @@ import {
 } from "@rms/pricing";
 import type { CurrentPublishedOptionSetGraphOptions } from "./current-published-option-set-graph.js";
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /** Expected evidence inventory, not a statement that any check ran. The actual
  * Submit producer must construct all four reports from its held owner facts. */
@@ -582,7 +583,7 @@ export function createMerchantOptionPricePublicationAuthority(
           error instanceof MerchantProductWriteFeatureDisabled
         )
           throw error;
-        return fail();
+        return keepingCause(fail)(error);
       } finally {
         active = false;
       }

@@ -16,7 +16,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a table's one payment as the Orders page shows it (method,
@@ -347,7 +347,7 @@ export function createMerchantDiningTableCashRefund(options: {
         error.code === "DINING_TABLE_SETTLEMENT_IDEMPOTENCY_CONFLICT"
       )
         return fail("TABLE_PAYMENT_IDEMPOTENCY_CONFLICT");
-      return fail("TABLE_PAYMENT_UNAVAILABLE");
+      return keepingCause(() => fail("TABLE_PAYMENT_UNAVAILABLE"))(error);
     }
   };
 }
@@ -529,7 +529,7 @@ export function createMerchantDiningTableOnlineRefund(options: {
       // Another manager refunded at the same moment: the database refused going over the payment.
       if ((error as { code?: unknown } | null)?.code === "23514")
         return fail("TABLE_PAYMENT_TOO_MUCH");
-      return fail("TABLE_PAYMENT_UNAVAILABLE");
+      return keepingCause(() => fail("TABLE_PAYMENT_UNAVAILABLE"))(error);
     }
   };
 }
@@ -681,7 +681,7 @@ export function createMerchantDiningTableCardRefund(options: {
         return fail("TABLE_PAYMENT_IDEMPOTENCY_CONFLICT");
       if ((error as { code?: unknown } | null)?.code === "23514")
         return fail("TABLE_PAYMENT_TOO_MUCH");
-      return fail("TABLE_PAYMENT_UNAVAILABLE");
+      return keepingCause(() => fail("TABLE_PAYMENT_UNAVAILABLE"))(error);
     }
   };
 }

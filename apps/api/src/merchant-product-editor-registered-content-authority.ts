@@ -18,6 +18,7 @@ import type {
   MerchantProductEditorContentAuthority,
   MerchantProductEditorContentAuthorityInput,
 } from "./merchant-product-editor-content-authority.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type RegistryOptions = Parameters<typeof createPostgresProductContentRegistryStore>[0];
 export const remainingProductEditorReferenceChecks = Object.freeze(
@@ -273,7 +274,7 @@ export function createMerchantProductEditorRegisteredContentAuthority(options: {
       held.set(tx, proof);
     } catch (error) {
       if (error instanceof CatalogError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
 }

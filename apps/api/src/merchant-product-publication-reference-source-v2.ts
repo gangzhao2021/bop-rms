@@ -60,6 +60,7 @@ import {
   createPostgresProductPublicationConfigurationReferenceSourceV2,
 } from "@rms/pricing";
 import { joinMerchantRecipeInventoryReferenceGraphs } from "./merchant-product-recipe-inventory-reference-matches.js";
+import { keepingCause } from "./merchant-failure.js";
 
 const hash = (value: unknown) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
 const fail = (): never => {
@@ -1412,7 +1413,7 @@ export function createMerchantProductPublicationReferenceSourceV2(
         });
       } catch (error) {
         if (permissionDenied(error)) throw new CatalogError("CATALOG_PERMISSION_DENIED");
-        return fail();
+        return keepingCause(fail)(error);
       }
     },
   });
@@ -1614,7 +1615,7 @@ export function createMerchantProductWarningAcknowledgementReferenceSource(
         });
       } catch (error) {
         if (permissionDenied(error)) throw new CatalogError("CATALOG_PERMISSION_DENIED");
-        return fail();
+        return keepingCause(fail)(error);
       }
     },
   });

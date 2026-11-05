@@ -11,7 +11,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { onlyRefusal, withCause } from "./merchant-failure.js";
 
 export type MerchantDiningChaseErrorCode =
   | "DINING_CHASE_INPUT_INVALID"
@@ -131,7 +131,7 @@ export function createMerchantDiningChase(options: {
       if (error instanceof MerchantDiningChaseError) throw error;
       if (error instanceof KitchenChaseTooSoonError)
         throw new MerchantDiningChaseError("DINING_CHASE_TOO_SOON", error.retryAt);
-      throw new MerchantDiningChaseError("DINING_CHASE_UNAVAILABLE");
+      throw withCause(new MerchantDiningChaseError("DINING_CHASE_UNAVAILABLE"), error);
     }
   };
 }

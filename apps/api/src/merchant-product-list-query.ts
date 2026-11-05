@@ -14,6 +14,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 export const merchantProductListRequiredFields = Object.freeze([
   "activeSkuCount",
@@ -253,7 +254,7 @@ export function createMerchantProductListQuery(options: {
       return parseCatalogProductListView(result);
     } catch (error) {
       if (error instanceof CatalogProductListError) throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
 }

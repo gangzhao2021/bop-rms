@@ -14,6 +14,7 @@ import {
 } from "./merchant-product-command-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 type SourceOptions = Parameters<typeof createPostgresProductPublicationSourceStore>[0];
 type Transaction = Parameters<SourceOptions["authority"]["holdUntilTransactionCompletes"]>[0];
@@ -203,7 +204,7 @@ export function createMerchantProductScopeJournalQuery(options: {
       return completed.view;
     } catch (error) {
       if (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED") throw error;
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
 }

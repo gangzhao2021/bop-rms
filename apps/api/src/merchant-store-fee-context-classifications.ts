@@ -12,6 +12,7 @@ import { StoreSetupOperationError } from "@rms/store";
 import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { parseTaxConfigClassificationChoices } from "./merchant-tax-config-workbench-values.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { withCause } from "./merchant-failure.js";
 
 /** Brand registry authority, borrowed from the ordinary Store Setup request.
  * Registry entries establish recorded identity, never tax/legal qualification. */
@@ -238,7 +239,7 @@ export function createMerchantStoreFeeContextClassifications(options: {
               known.code === "STORE_SETUP_OPERATION_PERMISSION_DENIED"
             )
               throw new CatalogError("CATALOG_PERMISSION_DENIED");
-            throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+            throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), known);
           }
         }
       },

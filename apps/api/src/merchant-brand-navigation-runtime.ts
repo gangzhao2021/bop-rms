@@ -30,6 +30,7 @@ import {
 import type { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
+import { keepingCause } from "./merchant-failure.js";
 type Host = ReturnType<typeof createMerchantCategoryTransactions>;
 type Transaction = Parameters<Host["registerBeforeCommit"]>[0];
 type Selected = Awaited<ReturnType<ReturnType<typeof createMerchantSelectedContext>>>;
@@ -274,8 +275,8 @@ export function createMerchantBrandNavigationRuntime(
               if ((actual !== null) !== admittedAuthority) return poison();
               guardComplete = true;
               check();
-            } catch {
-              return poison();
+            } catch (error) {
+              return keepingCause(poison)(error);
             }
           },
           () => {
@@ -347,7 +348,7 @@ export function createMerchantBrandNavigationRuntime(
       } catch (error) {
         failed = true;
         if (error instanceof BrandStoreTopologyError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       }
     },
     assertFinalized(): string {

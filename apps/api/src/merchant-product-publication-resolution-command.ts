@@ -22,6 +22,7 @@ import {
 } from "./merchant-product-command-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { isMerchantRefusal, keepingCause } from "./merchant-failure.js";
 
 type StoreOptions = ProductPublicationResolutionStoreOptions;
 type AuthorityInput = Parameters<StoreOptions["authority"]["holdUntilTransactionCompletes"]>[1];
@@ -196,11 +197,13 @@ export function createMerchantProductPublicationResolutionCommand(
       sessionCookie,
       csrf,
     }).catch((error: unknown) =>
-      fail(
-        error instanceof BrowserSessionError
-          ? "CATALOG_PERMISSION_DENIED"
-          : "CATALOG_DEPENDENCY_UNAVAILABLE",
-      ),
+      keepingCause(() =>
+        fail(
+          error instanceof BrowserSessionError && isMerchantRefusal(error)
+            ? "CATALOG_PERMISSION_DENIED"
+            : "CATALOG_DEPENDENCY_UNAVAILABLE",
+        ),
+      )(error),
     );
     let failed = false,
       latest: string;
@@ -417,7 +420,7 @@ export function createMerchantProductPublicationResolutionCommand(
               (error instanceof CatalogError && error.code === "CATALOG_PERMISSION_DENIED")
             )
               throw error;
-            return reject();
+            return keepingCause(reject)(error);
           }
         };
         recheck = async () => {
@@ -523,7 +526,7 @@ export function createMerchantProductPublicationResolutionCommand(
       } catch (error) {
         failed = true;
         if (error instanceof CatalogError) throw error;
-        return fail();
+        return keepingCause(fail)(error);
       }
     });
     if (calls !== 1 || !completed || result !== completed) return reject();

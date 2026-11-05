@@ -8,6 +8,7 @@ import {
   rawHeaderValues,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 import { decodeMerchantProductCommandScopeHeader } from "./merchant-product-command-scope.js";
 import { CatalogError } from "@rms/catalog";
 import { MerchantProductWriteFeatureDisabled } from "./merchant-product-write-authority.js";
@@ -38,6 +39,10 @@ export function installMerchantProductPublicationRoutes(
       .storeCapability({ sessionCookie, csrf, query: request.body })
       .then((decision) => response.json(decision))
       .catch((error: unknown) => {
+        if (isMerchantRefusal(error)) {
+          denied(response);
+          return;
+        }
         noteFailure(response, error);
         response.status(503).json({ error: "store_capability_unavailable" });
       });

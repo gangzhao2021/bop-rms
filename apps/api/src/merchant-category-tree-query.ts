@@ -17,6 +17,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import { createMerchantCategoryAuthority } from "./merchant-category-authority.js";
 import { createMerchantCategoryTransactions } from "./merchant-category-transactions.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 export type MerchantCategoryTreeErrorCode =
   "Invalid" | "Denied" | "Unavailable" | "FeatureDisabled" | "Stale";
@@ -271,7 +272,7 @@ export function createMerchantCategoryTreeQuery(options: {
               ? "Denied"
               : "Unavailable",
         );
-      return fail();
+      return keepingCause(fail)(error);
     }
   };
 }

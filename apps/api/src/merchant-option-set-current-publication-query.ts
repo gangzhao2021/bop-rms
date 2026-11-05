@@ -21,6 +21,7 @@ import {
 } from "./merchant-product-command-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { isMerchantRefusal, keepingCause } from "./merchant-failure.js";
 
 type GraphSource = Parameters<
   ReturnType<typeof createCurrentPublishedOptionSetGraphSource>["withCurrentGraph"]
@@ -173,11 +174,13 @@ export function createMerchantOptionSetCurrentPublicationQuery(
       }
     };
     const session = await authenticate({ sessionCookie, csrf }).catch((error: unknown) =>
-      fail(
-        error instanceof BrowserSessionError
-          ? "CATALOG_PERMISSION_DENIED"
-          : "CATALOG_DEPENDENCY_UNAVAILABLE",
-      ),
+      keepingCause(() =>
+        fail(
+          error instanceof BrowserSessionError && isMerchantRefusal(error)
+            ? "CATALOG_PERMISSION_DENIED"
+            : "CATALOG_DEPENDENCY_UNAVAILABLE",
+        ),
+      )(error),
     );
     now();
     let calls = 0,
@@ -521,7 +524,7 @@ export function createMerchantOptionSetCurrentPublicationQuery(
           return completed;
         } catch (error) {
           if (error instanceof CatalogError && error.code !== "CATALOG_INPUT_INVALID") throw error;
-          return reject();
+          return keepingCause(reject)(error);
         }
       } catch (error) {
         failed = true;

@@ -33,6 +33,7 @@ import {
   merchantBrandAdministrationCapabilityRequiredFields,
 } from "./merchant-brand-administration-capability.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 export interface MerchantBrandCatalogSourceOptions {
   readonly persistence: MerchantCurrentBrandAdministrationOptions &
@@ -53,7 +54,7 @@ const fail = (
 function sourceFailure(error: unknown): never {
   if (error instanceof CatalogError) throw error;
   if (
-    error instanceof BrowserSessionError ||
+    (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
     (error instanceof Error && error.message === "BRAND_SERVICE_PERMISSION_DENIED") ||
     // WP-2423: a permission withdrawn before COMMIT, reported by the Brand administration holder.
     (error instanceof BrandConfigurationOperationError &&

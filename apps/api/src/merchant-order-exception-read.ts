@@ -116,7 +116,7 @@ export function createMerchantOrderExceptionRead(options: {
           return unavailable();
         const input = { sessionCookie, permission: "operations.order-exception.manage" as const };
         const scope = await options.authorize(tx, input);
-        if (!scope) return unavailable();
+        if (!scope) throw Error("MERCHANT_ORDER_EXCEPTION_DENIED");
         const sources = options.sources(scope);
         // WP-2423: every open case, whatever the Store's lifetime count; resolved cases a page at
         // a time. Never present silently truncated open work.

@@ -41,6 +41,7 @@ import {
   hasDigitalReceiptTemplateSoleOperatorApproval,
   recordDigitalReceiptTemplateSoleOperatorApproval,
 } from "@rms/printing-device";
+import { withCause } from "./merchant-failure.js";
 export interface MerchantReceiptTemplateLifecycleActualPacket {
   readonly mutation: CommitPublishingMutationInput;
   readonly approval: PublishingApprovalEvidence;
@@ -449,7 +450,7 @@ export function createMerchantReceiptTemplateLifecycleKernel(
       if (error instanceof DigitalReceiptTemplateError) throw error;
       if (error instanceof PublishingServiceError && error.code === "PUBLISHING_PERMISSION_DENIED")
         throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_PERMISSION_DENIED");
-      throw new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_UNAVAILABLE");
+      throw withCause(new DigitalReceiptTemplateError("RECEIPT_TEMPLATE_UNAVAILABLE"), error);
     } finally {
       active = false;
     }

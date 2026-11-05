@@ -8,7 +8,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
 import type { OpenPaymentAttemptResolution } from "./open-payment-attempt-resolution.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 export const unpaidRoundCancellationErrorCodes = [
   "UNPAID_ROUND_INPUT_INVALID",
@@ -194,7 +194,7 @@ export function createMerchantUnpaidRoundCancellation(options: {
       if (code === "40P01" || code === "40001" || code === "55P03")
         return fail("UNPAID_ROUND_VERSION_CONFLICT");
       if (code === "STORE_SERVICE_PERMISSION_DENIED") return fail("UNPAID_ROUND_PERMISSION_DENIED");
-      return fail("UNPAID_ROUND_UNAVAILABLE");
+      return keepingCause(() => fail("UNPAID_ROUND_UNAVAILABLE"))(error);
     }
   };
 }

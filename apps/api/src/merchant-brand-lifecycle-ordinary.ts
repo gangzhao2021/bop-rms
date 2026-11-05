@@ -31,6 +31,7 @@ import {
   type MerchantBrandLifecycleReceipt,
 } from "./brand-lifecycle-command.js";
 import type { MerchantBrandDiscoveryPersistence } from "./merchant-brand-discovery.js";
+import { isMerchantRefusal, keepingCause } from "./merchant-failure.js";
 
 export type { MerchantBrandLifecycleReceipt } from "./brand-lifecycle-command.js";
 export interface MerchantBrandLifecycleOrdinaryOptions {
@@ -481,12 +482,12 @@ export function createMerchantBrandLifecycleOrdinary(
         if (error instanceof MerchantBrandLifecycleError) throw error;
         if (
           !transactionStarted &&
-          (error instanceof BrowserSessionError ||
+          ((error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
             (error instanceof BrandAdministrationServiceError &&
               error.code === "BRAND_ADMIN_PERMISSION_DENIED"))
         )
           return fail("Denied");
-        return fail();
+        return keepingCause(fail)(error);
       }
     },
   });

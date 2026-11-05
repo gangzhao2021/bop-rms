@@ -15,7 +15,7 @@ import {
   rememberBrandTransactionValue,
   restoreBrandTransactionRowSecurity,
 } from "./merchant-brand-transaction-authorization.js";
-import { keepingCause } from "./merchant-failure.js";
+import { isMerchantRefusal, keepingCause } from "./merchant-failure.js";
 
 let instances = 0;
 
@@ -167,7 +167,7 @@ export function createMerchantProductCurrentAuthorization(options: {
       if (error instanceof CatalogError) throw error;
       return keepingCause(() =>
         fail(
-          error instanceof BrowserSessionError ||
+          (error instanceof BrowserSessionError && isMerchantRefusal(error)) ||
             (error instanceof Error &&
               ["STORE_SERVICE_PERMISSION_DENIED", "BRAND_SERVICE_PERMISSION_DENIED"].includes(
                 error.message,
