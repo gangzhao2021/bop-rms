@@ -1,5 +1,6 @@
-import type { ConsumerTransaction } from "@bop/eventing";
+import { appendEventInTransaction, type ConsumerTransaction } from "@bop/eventing";
 import { parseConfirmedOrderIntakeReceipt } from "./confirmed-order-intake.js";
+import { createKitchenReadyEventBundle } from "./kitchen-ready-events.js";
 import type { ConfirmedOrderConsumerPorts } from "./ports/confirmed-order-consumer-ports.js";
 import {
   loadKitchenBatchPreparationDecision,
@@ -29,14 +30,42 @@ const receiptFromStore = (value: unknown) =>
     ),
   );
 
+export interface KitchenRoundLine {
+  readonly orderItemReference: string;
+  readonly productReference: string;
+  readonly skuReference: string;
+  readonly quantity: number;
+}
+
+/**
+ * WP-2423 item 8a: the lines of a round the kitchen does not prepare. The Store's own mark on the
+ * dish wins, either way; a dish with no mark at this Store follows its size's default (a size
+ * declared a charge, or the Store's tea item); everything else goes to the kitchen.
+ */
+export function kitchenLinesNotPrepared(
+  lines: readonly KitchenRoundLine[],
+  marks: ReadonlyMap<string, { readonly notPrepared: boolean }>,
+  notPreparedByDefault: ReadonlySet<string>,
+): readonly KitchenRoundLine[] {
+  return lines.filter(
+    (line) =>
+      marks.get(line.productReference)?.notPrepared ?? notPreparedByDefault.has(line.skuReference),
+  );
+}
+
 /**
  * WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 2, coordinator 2026-10-29): the
  * kitchen takes a confirmed round without the dishes it does not prepare. When the round first
- * reaches the kitchen, the dishes marked "not prepared" at that moment are fixed as the round's
- * decision (later changes of the mark never move work already issued). A round with something to
- * prepare goes on to its ticket (its kitchen source then leaves those lines out); a round made only
- * of such dishes makes no ticket, and its intake receipt is kept with the decision, so the
- * confirmed round is still consumed exactly once.
+ * reaches the kitchen, the dishes marked "not prepared" at that moment, and with no mark the charges
+ * and the Store's tea item (item 8a), are fixed as the round's decision (later changes never move
+ * work already issued). A round with something to prepare goes on to its ticket (its kitchen source
+ * then leaves those lines out); a round made only of such dishes makes no ticket, and its intake
+ * receipt is kept with the decision, so the confirmed round is still consumed exactly once.
+ *
+ * A Pickup round with nothing to prepare is ready the moment it reaches the kitchen: nothing else
+ * would ever say so, and a bottled drink or a bag at the counter must be handed over straight away.
+ * Kitchen says so with its own ready events, as when a ticket's last dish is finished; the ticket
+ * they name is one derived from the round, because there is none.
  */
 export function createKitchenNotPreparedIntakeAdapter(options: {
   readonly inner: Intakes;
@@ -45,10 +74,77 @@ export function createKitchenNotPreparedIntakeAdapter(options: {
   allLines(
     transaction: ConsumerTransaction,
     receipt: Parameters<Intakes["accept"]>[0]["receipt"],
-  ): Promise<readonly { readonly orderItemReference: string; readonly productReference: string }[]>;
+  ): Promise<readonly KitchenRoundLine[]>;
+  /** Of these sizes, the ones the kitchen does not prepare unless the Store marked the dish. */
+  notPreparedByDefault(
+    transaction: ConsumerTransaction,
+    skuReferences: readonly string[],
+  ): Promise<ReadonlySet<string>>;
+  /** The round's order type; a round whose type can't be read must fail, never pass as dine-in. */
+  orderType(
+    transaction: ConsumerTransaction,
+    receipt: Parameters<Intakes["accept"]>[0]["receipt"],
+  ): Promise<"DineIn" | "Pickup">;
+  /** A stable reference for this purpose and identity. */
+  derive(purpose: string, identity: string): string;
   now(): string;
 }): Intakes {
   const tx = (transaction: ConsumerTransaction) => transaction as unknown as Transaction;
+  const publishReady = async (
+    transaction: ConsumerTransaction,
+    receipt: Parameters<Intakes["accept"]>[0]["receipt"],
+    lines: readonly KitchenRoundLine[],
+    readyAt: string,
+  ) => {
+    const round = String(receipt.orderBatchReference);
+    const ordered = [...lines].sort((a, b) =>
+      a.orderItemReference.localeCompare(b.orderItemReference),
+    );
+    const resultOf = (line: KitchenRoundLine) =>
+      options.derive("KitchenNotPreparedReadyResult", line.orderItemReference);
+    const readiness = ordered.map((line) => ({
+      orderItemReference: line.orderItemReference,
+      requiredQuantity: line.quantity,
+      readyResultReference: resultOf(line),
+      readyQuantity: line.quantity,
+      readyAt,
+    }));
+    for (const [index, line] of ordered.entries()) {
+      const bundle = createKitchenReadyEventBundle({
+        itemEventReference: options.derive("KitchenNotPreparedItemEvent", line.orderItemReference),
+        // The last line's bundle also says the whole round is ready.
+        orderEventReference:
+          index === ordered.length - 1
+            ? options.derive("KitchenNotPreparedOrderEvent", round)
+            : null,
+        brandReference: options.scope.brandReference,
+        storeReference: options.scope.storeReference,
+        ticketReference: options.derive("KitchenNotPreparedRound", round),
+        ticketVersion: 1n,
+        orderReference: String(receipt.orderReference),
+        orderBatchReference: round,
+        orderItemReference: line.orderItemReference,
+        readyResultReference: resultOf(line),
+        readyQuantity: line.quantity,
+        requiredQuantity: line.quantity,
+        readyAt,
+        correlationReference: String(receipt.confirmationReference),
+        causationReference: String(receipt.sourceEventReference),
+        // Only the last bundle checks that the whole round is ready.
+        readiness:
+          index === ordered.length - 1
+            ? readiness
+            : readiness.map((entry) =>
+                entry.orderItemReference === line.orderItemReference
+                  ? entry
+                  : { ...entry, readyResultReference: null, readyQuantity: null, readyAt: null },
+              ),
+      });
+      await appendEventInTransaction(transaction as never, bundle.itemEvent);
+      if (bundle.orderEvent !== null)
+        await appendEventInTransaction(transaction as never, bundle.orderEvent);
+    }
+  };
   return Object.freeze<Intakes>({
     async resolveByIdentity(input) {
       const found = await options.inner.resolveByIdentity(input);
@@ -90,10 +186,22 @@ export function createKitchenNotPreparedIntakeAdapter(options: {
       const marks = await loadKitchenNotPreparedProducts(tx(input.transaction), options.scope, [
         ...new Set(lines.map((line) => line.productReference)),
       ]);
-      const notPrepared = lines
-        .filter((line) => marks.get(line.productReference)?.notPrepared === true)
-        .map((line) => line.orderItemReference);
+      const unmarked = [
+        ...new Set(
+          lines
+            .filter((line) => !marks.has(line.productReference))
+            .map((line) => line.skuReference),
+        ),
+      ];
+      const byDefault =
+        unmarked.length === 0
+          ? new Set<string>()
+          : await options.notPreparedByDefault(input.transaction, unmarked);
+      const notPrepared = kitchenLinesNotPrepared(lines, marks, byDefault).map(
+        (line) => line.orderItemReference,
+      );
       const allNotPrepared = lines.length > 0 && notPrepared.length === lines.length;
+      const decidedAt = new Date(Date.parse(options.now())).toISOString();
       await recordKitchenBatchPreparationDecision(tx(input.transaction), options.scope, {
         orderReference: String(input.receipt.orderReference),
         orderBatchReference: round,
@@ -102,9 +210,11 @@ export function createKitchenNotPreparedIntakeAdapter(options: {
         notPreparedOrderItemReferences: notPrepared,
         allNotPrepared,
         intakeReceipt: allNotPrepared ? storedReceipt(input.receipt) : null,
-        decidedAt: new Date(Date.parse(options.now())).toISOString(),
+        decidedAt,
       });
       if (!allNotPrepared) return options.inner.accept(input);
+      if ((await options.orderType(input.transaction, input.receipt)) === "Pickup")
+        await publishReady(input.transaction, input.receipt, lines, decidedAt);
       return Object.freeze({ status: "Created" as const, receipt: input.receipt });
     },
   });

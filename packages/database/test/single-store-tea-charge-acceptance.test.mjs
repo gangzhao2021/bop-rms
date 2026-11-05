@@ -24,12 +24,12 @@ import {
   loadDiningTeaChargeSetting,
 } from "../../rms/dining/src/index.ts";
 import {
-  changeKitchenNotPreparedProduct,
   createPostgresKitchenRoutingConfigurationStore,
   loadKitchenNotPreparedProducts,
   rebindKitchenRoutingEvidence,
 } from "../../rms/kitchen/src/index.ts";
 import { listInventoryRecipeIngredientFacts } from "../../rms/inventory/src/index.ts";
+import { listDeclaredChargeSkus } from "../../rms/recipe/src/index.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
 import {
@@ -457,9 +457,8 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
       assert.equal(blocked?.problem?.missing, "Recipe");
       assert.equal(await refusal(tea), "STORE_FEATURES_TEA_NOT_LISTED");
 
-      // 2. Declared a charge with no stock ingredients (who and when, labelled), not prepared by
-      // the kitchen; "List it" now lists it.
-      // As the dish editor saves it: "A charge, no stock ingredients (such as tea)".
+      // 2. Declared a charge with no stock ingredients (who and when, labelled); "List it" now
+      // lists it. As the dish editor saves it: "A fee, not food".
       const declared = await saveDish(
         "Tea charge (TEST)",
         "茶位",
@@ -498,30 +497,35 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
         { code: "DeclaredOtherwise" },
       );
       const tenantScope = { tenantReference, brandReference, storeReference };
-      await asApi((tx) =>
-        changeKitchenNotPreparedProduct(tx, tenantScope, {
-          productReference: teaDish.productReference,
-          operationReference: op(),
-          expectedVersion: 0,
-          notPrepared: true,
-          actorReference: owner,
-          observedAt: new Date().toISOString(),
-        }),
-      );
+      // WP-2423 item 8a: nothing else to remember. A declared charge has no mark and still does not
+      // go to the kitchen (the charge default's own acceptance follows a round through it).
       assert.equal(
         (
           await asApi((tx) =>
             loadKitchenNotPreparedProducts(tx, tenantScope, [teaDish.productReference]),
           )
-        ).get(teaDish.productReference)?.notPrepared,
-        true,
+        ).get(teaDish.productReference),
+        undefined,
+      );
+      assert.deepEqual(
+        [...(await asApi((tx) => listDeclaredChargeSkus(tx, tenantScope, [tea])))],
+        [tea],
       );
       await listAll();
 
       // 3. A tea choice, named once; the tea check accepts it; the Store's tea is set to it.
       assert.deepEqual(
         (await choices()).filter((item) => item.sellableReference === tea),
-        [{ sellableReference: tea, name: "Tea charge (TEST) 茶位", unavailable: null }],
+        [
+          {
+            sellableReference: tea,
+            name: "Tea charge (TEST) 茶位",
+            unavailable: null,
+            declaredCharge: true,
+            priceAmount: "1.50",
+            kitchenPrepares: false,
+          },
+        ],
       );
       assert.equal(await refusal(tea), null);
       const teaSetting = await asApi(async (tx) => {

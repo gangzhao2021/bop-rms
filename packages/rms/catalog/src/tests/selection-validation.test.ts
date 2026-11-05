@@ -554,7 +554,7 @@ describe("complete review configuration coverage", () => {
     ).toThrowError(expect.objectContaining({ code: "CATALOG_DEPENDENCY_UNAVAILABLE" }));
     // Conditions or conflicts between options: the full answer.
     const conflicted = [
-      group(760, 0, 1, [{ ...option(761), conflictOptionReferences: [id(771)] }]),
+      group(760, 0, 1, [{ ...option(761), conflictOptionReferences: [id(771) as never] }]),
       group(770, 0, 1, [option(771)]),
     ];
     expect(enumerateCatalogReviewSelections(conflicted, budget, "every-option")).toEqual(

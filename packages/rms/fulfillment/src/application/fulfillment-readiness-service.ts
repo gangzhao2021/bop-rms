@@ -457,9 +457,12 @@ async function apply(
 }
 
 function handlerFailure(error: unknown) {
+  // WP-2423 item 8a: a round with nothing to prepare is ready the moment it reaches the kitchen, so
+  // its ready event can come before the pickup itself was created. It is delivered again.
   if (
     error instanceof FulfillmentReadinessError &&
-    error.code !== "FULFILLMENT_READINESS_DEPENDENCY_UNAVAILABLE"
+    error.code !== "FULFILLMENT_READINESS_DEPENDENCY_UNAVAILABLE" &&
+    error.code !== "FULFILLMENT_READINESS_NOT_FOUND"
   )
     return { status: "rejected" as const, errorCode: "CONSUMER_REJECTED" as const };
   return { status: "retry_required" as const, errorCode: "CONSUMER_TEMPORARY_FAILURE" as const };

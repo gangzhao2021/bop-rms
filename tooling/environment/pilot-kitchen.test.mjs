@@ -1,13 +1,24 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-const seam = vi.hoisted(() => ({ routing: null }));
+const seam = vi.hoisted(() => ({
+  routing: null,
+  identity: null,
+  charges: new Set(),
+  tea: null,
+  intake: null,
+}));
 vi.mock("../../packages/rms/ordering/src/index.ts", () => ({
   parseOrderConfirmedEnvelope: (value) => value,
   createPostgresOrderKitchenSourceStore: () => ({ resolve: async () => ({}) }),
+  createPostgresOrderBatchIdentitySource: () => ({ load: async () => seam.identity }),
 }));
 vi.mock("../../packages/rms/recipe/src/index.ts", () => ({
   createPostgresRecipePreparationContentStore: () => ({}),
   createPostgresConfiguredRecipePreparationSource: () => ({}),
+  listDeclaredChargeSkus: async (_tx, _scope, skus) => skus.filter((sku) => seam.charges.has(sku)),
+}));
+vi.mock("../../packages/rms/dining/src/index.ts", () => ({
+  loadDiningTeaChargeSetting: async () => ({ teaSellableReference: seam.tea }),
 }));
 vi.mock("../../apps/api/src/kitchen-recipe-preparation-source.ts", () => ({
   createKitchenRecipePreparationSource: () => ({ resolve: async () => ({}) }),
@@ -20,7 +31,10 @@ vi.mock("../../packages/rms/kitchen/src/index.ts", () => ({
   }),
   createPostgresKitchenTicketStore: () => ({}),
   createKitchenTicketIntakeAdapter: (ports) => ports,
-  createKitchenNotPreparedIntakeAdapter: ({ inner }) => inner,
+  createKitchenNotPreparedIntakeAdapter: (options) => {
+    seam.intake = options;
+    return options.inner;
+  },
   createKitchenWorkPlanService: (options) => ({
     resolve: async () => options.stationRouting.resolve({}),
   }),
@@ -38,7 +52,7 @@ vi.mock("../../packages/rms/kitchen/src/index.ts", () => ({
 vi.mock("../../packages/bop/eventing/src/index.ts", () => ({
   consumeEventInTransaction: async () => ({ status: "processed" }),
 }));
-import { createInternalKitchen } from "./pilot-kitchen.mjs";
+import { createInternalKitchen, kitchenDefaultNotPrepared } from "./pilot-kitchen.mjs";
 
 afterEach(() => vi.unstubAllEnvs());
 const id = (n) => "0190fa36-0000-7000-8000-" + String(n).padStart(12, "0");
@@ -68,4 +82,42 @@ it("v15 2026-11-01: a confirmed order the kitchen cannot route names why, and is
   await expect(kitchen.worker.registration.handler(context)).resolves.toEqual({
     status: "completed",
   });
+});
+
+// WP-2423 item 8a: Kitchen's default is fed by Recipe's public read and Dining's public setting.
+it("the kitchen's default: a declared charge and the Store's current tea item", async () => {
+  const scope = { brandReference: id(1), storeReference: id(2) };
+  seam.charges = new Set([id(10)]);
+  seam.tea = id(11);
+  expect(await kitchenDefaultNotPrepared(scope)({}, [id(10), id(11), id(12)])).toEqual(
+    new Set([id(10), id(11)]),
+  );
+  // Another tea gives the dish back to the kitchen, with nothing to undo.
+  seam.tea = id(13);
+  expect(await kitchenDefaultNotPrepared(scope)({}, [id(10), id(11)])).toEqual(new Set([id(10)]));
+  seam.tea = null;
+  expect(await kitchenDefaultNotPrepared(scope)({}, [id(11)])).toEqual(new Set());
+});
+
+// A round's order type is never guessed: a Pickup taken for dine-in would never reach the handover.
+it("a round whose order type can't be read fails instead of passing as dine-in", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const scope = { brandReference: id(1), storeReference: id(2) };
+  const kitchen = createInternalKitchen({
+    scope,
+    now: () => "2026-11-01T03:00:00.000Z",
+    publicProfile: { binding: { validUntil: "2099-01-01T00:00:00.000Z" } },
+  });
+  seam.routing = { candidates: [] };
+  await kitchen.worker.registration.handler({
+    envelope: { tenantId: scope.brandReference, storeId: scope.storeReference },
+    transaction: {},
+  });
+  seam.identity = null;
+  const receipt = { orderReference: id(3), orderBatchReference: id(4) };
+  await expect(seam.intake.orderType({}, receipt)).rejects.toThrow(
+    "INTERNAL_KITCHEN_IDENTITY_UNAVAILABLE",
+  );
+  seam.identity = { orderType: "Pickup" };
+  await expect(seam.intake.orderType({}, receipt)).resolves.toBe("Pickup");
 });

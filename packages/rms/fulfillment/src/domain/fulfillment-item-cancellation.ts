@@ -131,14 +131,23 @@ export interface FulfillmentReadinessFold {
   readonly readyAt: string | null;
 }
 
-/** Phase rule shared by every writer: the remaining (not cancelled) lines are all ready. */
+/**
+ * Phase rule shared by every writer: the remaining (not cancelled) lines are all ready. A line the
+ * kitchen decided not to prepare (a bag fee, a bottled drink beside a dish it does prepare) needs
+ * nothing from the kitchen: it is ready when the rest is, and goes with them (WP-2423 item 8a).
+ */
 export function fulfillmentPhaseFor(
   items: readonly FulfillmentReadinessFoldItem[],
   ready: ReadonlySet<string> | ReadonlyMap<string, number>,
   cancelled: ReadonlySet<string>,
+  readyWithoutWork: ReadonlySet<string> = new Set(),
 ): "Pending" | "Ready" {
   const active = items.filter((item) => !cancelled.has(item.fulfillmentItemReference));
-  return active.length > 0 && active.every((item) => ready.has(item.fulfillmentItemReference))
+  return active.length > 0 &&
+    active.every(
+      (item) =>
+        ready.has(item.fulfillmentItemReference) || readyWithoutWork.has(item.orderItemReference),
+    )
     ? "Ready"
     : "Pending";
 }
@@ -152,6 +161,8 @@ export function foldFulfillmentReadiness(input: {
   readonly items: readonly FulfillmentReadinessFoldItem[];
   readonly ready: readonly FulfillmentReadinessFoldReady[];
   readonly cancellations: readonly FulfillmentItemCancellationRecord[];
+  /** Order lines the kitchen decided not to prepare, in a round it did prepare (item 8a). */
+  readonly readyWithoutWork?: ReadonlySet<string>;
 }): FulfillmentReadinessFold {
   const facts = [
     ...input.ready.map((fact) => ({ kind: "Ready" as const, fact })),
@@ -165,8 +176,12 @@ export function foldFulfillmentReadiness(input: {
   );
   const ready = new Map<string, number>();
   const cancelled = new Set<string>();
+  const readyWithoutWork = input.readyWithoutWork ?? new Set<string>();
   let version = 1n;
   let phase: "Pending" | "Ready" = "Pending";
+  // What the facts recorded: a fact from before a line counted as ready without work says Pending
+  // where the phase is now Ready, and stays what it recorded.
+  let recordedPhase: "Pending" | "Ready" = "Pending";
   let readyAt: string | null = null;
   for (const { kind, fact } of facts) {
     const item = input.items.find(
@@ -179,7 +194,7 @@ export function foldFulfillmentReadiness(input: {
       cancelled.has(item.fulfillmentItemReference) ||
       fact.aggregateVersionBefore !== version ||
       fact.aggregateVersionAfter !== version + 1n ||
-      fact.phaseBefore !== phase
+      fact.phaseBefore !== recordedPhase
     )
       return unavailable();
     if (kind === "Ready") {
@@ -187,11 +202,16 @@ export function foldFulfillmentReadiness(input: {
         return unavailable();
       ready.set(item.fulfillmentItemReference, item.orderedQuantity);
     } else {
-      if (phase !== "Pending") return unavailable();
+      if (recordedPhase !== "Pending") return unavailable();
       cancelled.add(item.fulfillmentItemReference);
     }
-    phase = fulfillmentPhaseFor(input.items, ready, cancelled);
-    if (fact.phaseAfter !== phase) return unavailable();
+    phase = fulfillmentPhaseFor(input.items, ready, cancelled, readyWithoutWork);
+    if (
+      fact.phaseAfter !== phase &&
+      fact.phaseAfter !== fulfillmentPhaseFor(input.items, ready, cancelled)
+    )
+      return unavailable();
+    recordedPhase = fact.phaseAfter;
     const at =
       kind === "Ready" ? (fact as FulfillmentReadinessFoldReady).occurredAt : fact.cancelledAt;
     if (readyAt === null || at > readyAt) readyAt = at;

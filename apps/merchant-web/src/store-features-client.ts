@@ -31,6 +31,8 @@ export interface StoreFeatures {
     readonly version: number;
     readonly teaSellableReference: string | null;
     readonly changedAt: string | null;
+    /** WP-2423 item 8a: the Store marked the tea item as made in the kitchen; that mark stands. */
+    readonly kitchenPrepares: boolean;
   };
   /**
    * v15 2026-10-29: the items the tea charge can be — on the listed dine-in menu (hidden ones
@@ -41,6 +43,12 @@ export interface StoreFeatures {
     readonly name: string;
     /** Why it can't be the tea now: hidden from this Store on the menu, or no price here. */
     readonly unavailable: "NotOffered" | "NoPrice" | null;
+    /** WP-2423 item 8a: declared a charge; anything else is a dish, and the owner is asked first. */
+    readonly declaredCharge: boolean;
+    /** What each guest would be charged here ("1.50"); null when it has no price. */
+    readonly priceAmount: string | null;
+    /** The Store marked it as made in the kitchen, so it still goes there as the tea. */
+    readonly kitchenPrepares: boolean;
   }[];
   /**
    * WP-2423 item 8 ⑦ (Owner decision 11): the three tip percentages guests and staff are
@@ -100,7 +108,10 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
   if (
     tea === null ||
     typeof tea !== "object" ||
-    Object.keys(tea).sort().join(",") !== "changedAt,teaSellableReference,version" ||
+    Object.keys(tea)
+      .filter((key) => key !== "kitchenPrepares")
+      .sort()
+      .join(",") !== "changedAt,teaSellableReference,version" ||
     !Number.isSafeInteger(tea.version) ||
     Number(tea.version) < 0 ||
     (tea.teaSellableReference !== null &&
@@ -180,6 +191,7 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       version: Number(tea.version),
       teaSellableReference: tea.teaSellableReference as string | null,
       changedAt: tea.changedAt as string | null,
+      kitchenPrepares: tea.kitchenPrepares === true,
     }),
     teaChoices: Object.freeze(
       (Array.isArray(raw.teaChoices) ? (raw.teaChoices as unknown[]) : []).flatMap((entry) => {
@@ -197,6 +209,9 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
                   item.unavailable === "NotOffered" || item.unavailable === "NoPrice"
                     ? item.unavailable
                     : null,
+                declaredCharge: item.declaredCharge === true,
+                priceAmount: typeof item.priceAmount === "string" ? item.priceAmount : null,
+                kitchenPrepares: item.kitchenPrepares === true,
               }),
             ]
           : [];

@@ -112,8 +112,9 @@ export async function changeKitchenNotPreparedProduct(
   const current = (await loadKitchenNotPreparedProducts(tx, scope, [product])).get(product);
   if ((current?.version ?? 0) !== input.expectedVersion)
     throw new KitchenNotPreparedError("KITCHEN_NOT_PREPARED_CHANGED");
-  if ((current?.notPrepared ?? false) === input.notPrepared)
-    return current ?? Object.freeze({ notPrepared: false, version: 0 });
+  // WP-2423 item 8a: a dish with no mark follows its default (a declared charge does not go to the
+  // kitchen), so the first choice of either value is recorded: "the kitchen does prepare it" counts.
+  if (current !== undefined && current.notPrepared === input.notPrepared) return current;
   const version = (current?.version ?? 0) + 1;
   const inserted = await tx.query(
     "INSERT INTO rms_kitchen.kitchen_not_prepared_product (tenant_id,brand_id,store_id,product_id,version,operation_id,not_prepared,actor_id,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
@@ -206,6 +207,24 @@ export async function listKitchenNotPreparedOrderItems(
   const { brand, store } = await context(tx, scope);
   const { rows } = await tx.query<Record<string, unknown>>(
     "SELECT unnest(not_prepared_order_item_ids)::text AS item FROM rms_kitchen.kitchen_batch_preparation_decision WHERE brand_id=$1 AND store_id=$2 AND order_id=$3",
+    [brand, store, reference(orderReference)],
+  );
+  return new Set(rows.map((row) => String(row.item)));
+}
+
+/**
+ * WP-2423 item 8a, Fulfillment's public read for a Pickup Order: the lines left out of a round the
+ * kitchen did prepare. They are ready as far as the kitchen goes, with no event to say so, and go
+ * with the rest of the order. A round with nothing to prepare says so itself with ready events.
+ */
+export async function listKitchenLinesReadyWithoutWork(
+  tx: NotPreparedTransaction,
+  scope: Scope,
+  orderReference: string,
+): Promise<ReadonlySet<string>> {
+  const { brand, store } = await context(tx, scope);
+  const { rows } = await tx.query<Record<string, unknown>>(
+    "SELECT unnest(not_prepared_order_item_ids)::text AS item FROM rms_kitchen.kitchen_batch_preparation_decision WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 AND NOT all_not_prepared",
     [brand, store, reference(orderReference)],
   );
   return new Set(rows.map((row) => String(row.item)));

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresKitchenCustomerStatusReader,
+  loadKitchenBatchPreparationDecision,
   listOpenKitchenReworkItems,
 } from "@rms/kitchen";
 import { withOptionalRead } from "./merchant-round-business-date.js";
@@ -302,6 +303,18 @@ export function createMerchantOrderQueueRead(options: {
                   (batch.status === "InProgress" || batch.status === "Ready")
                 )
                   kitchenPhase = batch.status;
+                // WP-2423 item 8a: nothing to prepare, so no ticket: ready as it reached the kitchen.
+                if (
+                  work === null &&
+                  (
+                    await loadKitchenBatchPreparationDecision(
+                      transaction as never,
+                      ownerScope,
+                      item.initialBatchReference,
+                    ).catch(() => null)
+                  )?.allNotPrepared === true
+                )
+                  kitchenPhase = "Ready";
               }
               return {
                 phase: execution.phase,

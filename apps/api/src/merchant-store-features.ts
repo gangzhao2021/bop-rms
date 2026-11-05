@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresPublishedMenuQueryStore,
+  listBrandSkuChoices,
   parseCatalogCode,
   parseCatalogInstant,
   parseCatalogReference,
 } from "@rms/catalog";
-import { skuRecipeUsesStock } from "@rms/recipe";
+import { loadKitchenNotPreparedProducts } from "@rms/kitchen";
+import { listDeclaredChargeSkus, skuRecipeUsesStock } from "@rms/recipe";
 import {
   changeDiningServiceSetting,
   changeDiningTeaChargeSetting,
@@ -152,6 +154,8 @@ export interface StoreFeaturesView {
     readonly version: number;
     readonly teaSellableReference: string | null;
     readonly changedAt: string | null;
+    /** WP-2423 item 8a: the Store marked the tea item as made in the kitchen; that mark stands. */
+    readonly kitchenPrepares: boolean;
   };
   /**
    * v15 2026-10-29: what the owner may choose as the tea: the items on the Store's listed dine-in
@@ -165,6 +169,12 @@ export interface StoreFeaturesView {
      * the menu), or no price here. A staff round could not sell it.
      */
     readonly unavailable: "NotOffered" | "NoPrice" | null;
+    /** WP-2423 item 8a: declared a charge; anything else is a dish, and the owner is asked first. */
+    readonly declaredCharge: boolean;
+    /** What each guest would be charged here ("1.50"); null when it has no price. */
+    readonly priceAmount: string | null;
+    /** The Store marked it as made in the kitchen, so it still goes there as the tea. */
+    readonly kitchenPrepares: boolean;
   }[];
   /** Owner decision 11: the three tip percentages offered, or tips off (Payment's own setting). */
   readonly tips: {
@@ -506,6 +516,10 @@ export function createMerchantStoreFeatures(options: {
               tips,
               offInStoreSetup,
               teaCharge,
+              teaCharge.teaSellableReference !== null &&
+                (await skusTheKitchenPrepares(tx, scope, [teaCharge.teaSellableReference])).has(
+                  teaCharge.teaSellableReference,
+                ),
               teaChoices,
               autoAccept,
               true,
@@ -537,6 +551,7 @@ function storeFeaturesView(
   tips: StoreTipSetting,
   offInStoreSetup: boolean,
   teaCharge: DiningTeaChargeSetting,
+  kitchenPrepares: boolean,
   teaChoices: StoreFeaturesView["teaChoices"],
   autoAccept: OrderAutoAcceptanceSetting,
   canChange: boolean,
@@ -566,6 +581,7 @@ function storeFeaturesView(
       version: teaCharge.version,
       teaSellableReference: teaCharge.teaSellableReference,
       changedAt: teaCharge.changedAt,
+      kitchenPrepares,
     }),
     teaChoices: Object.freeze(teaChoices.map((item) => Object.freeze({ ...item }))),
     tips: Object.freeze({
@@ -587,6 +603,38 @@ function storeFeaturesView(
 
 interface QueryTransaction {
   query(sql: string, values: readonly unknown[]): Promise<unknown>;
+}
+
+/**
+ * WP-2423 item 8a: the tea item is not sent to the kitchen unless the Store marked its dish as made
+ * there. Choosing the tea writes no mark, so choosing another gives a dish back to the kitchen.
+ */
+async function skusTheKitchenPrepares(
+  tx: QueryTransaction,
+  scope: { brandReference: string; storeReference: string },
+  skus: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (skus.length === 0) return new Set();
+  const products = new Map(
+    (await listBrandSkuChoices(tx as never, scope)).map((sku) => [
+      sku.skuReference,
+      sku.productReference,
+    ]),
+  );
+  // The Catalog read leaves no Store selected.
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  const marks = await loadKitchenNotPreparedProducts(tx as never, scope, [
+    ...new Set(skus.flatMap((sku) => products.get(sku) ?? [])),
+  ]);
+  return new Set(
+    skus.filter((sku) => {
+      const product = products.get(sku);
+      return product !== undefined && marks.get(product)?.notPrepared === false;
+    }),
+  );
 }
 
 /**
@@ -675,6 +723,11 @@ export async function listedTeaChoices(
             requestedAt,
             sellableReferences: [...items.keys()].map((sku) => parseCatalogReference(sku)),
           });
+    const charges =
+      items.size === 0
+        ? new Set<string>()
+        : await listDeclaredChargeSkus(tx as never, scope, [...items.keys()]);
+    const kitchenMade = await skusTheKitchenPrepares(tx, scope, [...items.keys()]);
     return [...items].map(([sellableReference, name]) => {
       const fact = facts?.get(parseCatalogReference(sellableReference));
       return {
@@ -688,6 +741,9 @@ export async function listedTeaChoices(
               : fact.price === null
                 ? ("NoPrice" as const)
                 : null,
+        declaredCharge: charges.has(sellableReference),
+        priceAmount: fact?.price?.amount ?? null,
+        kitchenPrepares: kitchenMade.has(sellableReference),
       };
     });
   } finally {

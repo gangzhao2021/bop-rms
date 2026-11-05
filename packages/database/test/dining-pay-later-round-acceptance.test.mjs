@@ -3863,7 +3863,12 @@ async function journey(ending) {
               },
               scope,
               now,
-              allLines: async () => lines,
+              allLines: async () =>
+                lines.map((line) => ({ ...line, skuReference: id(0x7a0), quantity: 1 })),
+              // This case is about the mark; the default is the charge acceptance's.
+              notPreparedByDefault: async () => new Set(),
+              orderType: async () => "DineIn",
+              derive: () => fresh(),
             });
           const receipt = createConfirmedOrderIntakeReceipt({
             sourceEvent: event1,

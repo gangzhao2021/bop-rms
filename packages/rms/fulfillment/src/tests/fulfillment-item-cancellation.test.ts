@@ -73,6 +73,47 @@ function cancellation(
   });
 }
 
+describe("WP-2423 item 8a: a line the kitchen decided not to prepare", () => {
+  const leftOut = new Set([items[1].orderItemReference]);
+  it("is ready when the rest of the round is, and not before", () => {
+    expect(fulfillmentPhaseFor(items, new Set(), new Set(), leftOut)).toBe("Pending");
+    expect(
+      fulfillmentPhaseFor(items, new Set([items[0].fulfillmentItemReference]), new Set(), leftOut),
+    ).toBe("Ready");
+    expect(fulfillmentPhaseFor(items, new Set(), new Set())).toBe("Pending");
+  });
+  it("makes the pickup Ready on the last line the kitchen prepares", () => {
+    const fold = foldFulfillmentReadiness({
+      items,
+      ready: [ready(0, 1n, "Ready")],
+      cancellations: [],
+      readyWithoutWork: leftOut,
+    });
+    expect(fold.canonicalPhase).toBe("Ready");
+    expect(fold.aggregateVersion).toBe(2n);
+  });
+  it("still reads what was recorded before the line counted as ready", () => {
+    // Finished dish first (the old fold said Pending), then the rest of the facts as recorded.
+    const fold = foldFulfillmentReadiness({
+      items,
+      ready: [ready(0, 1n, "Pending"), ready(1, 2n, "Ready")],
+      cancellations: [],
+      readyWithoutWork: leftOut,
+    });
+    expect(fold.canonicalPhase).toBe("Ready");
+    expect(fold.aggregateVersion).toBe(3n);
+  });
+  it("refuses a recorded phase that no rule could have written", () => {
+    expect(() =>
+      foldFulfillmentReadiness({
+        items,
+        ready: [ready(0, 1n, "Pending"), ready(1, 2n, "Pending")],
+        cancellations: [],
+      }),
+    ).toThrow(FulfillmentReadinessError);
+  });
+});
+
 describe("WP-2423 Q6 cancelled pickup lines", () => {
   it("makes the pickup Ready when the last unfinished line is cancelled", () => {
     const fold = foldFulfillmentReadiness({

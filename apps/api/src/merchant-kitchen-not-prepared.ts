@@ -1,9 +1,12 @@
 import { readClosedRecord } from "@bop/identity";
+import { listBrandSkuChoices } from "@rms/catalog";
+import { loadDiningTeaChargeSetting } from "@rms/dining";
 import {
   changeKitchenNotPreparedProduct,
   KitchenNotPreparedError,
   loadKitchenNotPreparedProducts,
 } from "@rms/kitchen";
+import { listDeclaredChargeSkus } from "@rms/recipe";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -33,9 +36,58 @@ const ref = (value: unknown) =>
 export interface MerchantKitchenNotPreparedResult {
   readonly products: readonly {
     readonly productReference: string;
+    /** What the kitchen does with the dish now: the Store's mark, or with none its default. */
     readonly notPrepared: boolean;
     readonly version: number;
+    /** The Store decided this itself; otherwise it follows the dish's default (item 8a). */
+    readonly decided: boolean;
+    /** With no mark, the kitchen would not prepare it: a declared charge, or the tea item. */
+    readonly notPreparedByDefault: boolean;
   }[];
+}
+
+/**
+ * WP-2423 item 8a: the dishes the kitchen does not prepare unless the Store marks them: every size is
+ * declared a charge, or is the Store's tea item (as a round reaching the kitchen decides per size).
+ */
+export async function dishesNotPreparedByDefault(
+  tx: unknown,
+  scope: {
+    readonly tenantReference: string;
+    readonly brandReference: string;
+    readonly storeReference: string;
+  },
+  products: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (products.length === 0) return new Set();
+  const query = tx as {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  };
+  const wanted = new Set(products);
+  const sizes = (await listBrandSkuChoices(query, scope)).filter(
+    (sku) => sku.active && wanted.has(sku.productReference),
+  );
+  // Catalog's read leaves the transaction with no Store; Recipe's and Dining's read the Store's.
+  await query.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [scope.brandReference, scope.storeReference],
+  );
+  const charges = await listDeclaredChargeSkus(
+    query,
+    scope,
+    sizes.map((sku) => sku.skuReference),
+  );
+  const tea = (await loadDiningTeaChargeSetting(tx as never, scope)).teaSellableReference;
+  const isDefault = (sku: string) => charges.has(sku) || sku === tea;
+  return new Set(
+    products.filter((product) => {
+      const own = sizes.filter((sku) => sku.productReference === product);
+      return own.length > 0 && own.every((sku) => isDefault(sku.skuReference));
+    }),
+  );
 }
 
 /**
@@ -145,15 +197,20 @@ export function createMerchantKitchenNotPrepared(options: {
             const products =
               command.action === "Read" ? command.products : [command.productReference];
             const marks = await loadKitchenNotPreparedProducts(runner, scope, products);
+            const byDefault = await dishesNotPreparedByDefault(tx, scope, products);
             return Object.freeze({
               products: Object.freeze(
-                products.map((productReference) =>
-                  Object.freeze({
+                products.map((productReference) => {
+                  const mark = marks.get(productReference);
+                  const notPreparedByDefault = byDefault.has(productReference);
+                  return Object.freeze({
                     productReference,
-                    notPrepared: marks.get(productReference)?.notPrepared ?? false,
-                    version: marks.get(productReference)?.version ?? 0,
-                  }),
-                ),
+                    notPrepared: mark?.notPrepared ?? notPreparedByDefault,
+                    version: mark?.version ?? 0,
+                    decided: mark !== undefined,
+                    notPreparedByDefault,
+                  });
+                }),
               ),
             });
           },

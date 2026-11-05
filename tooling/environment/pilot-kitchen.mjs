@@ -1,10 +1,15 @@
 import { consumeEventInTransaction } from "../../packages/bop/eventing/src/index.ts";
+import { loadDiningTeaChargeSetting } from "../../packages/rms/dining/src/index.ts";
 import { parseOrderConfirmedEnvelope } from "../../packages/rms/ordering/src/index.ts";
 import { createHash } from "node:crypto";
-import { createPostgresOrderKitchenSourceStore } from "../../packages/rms/ordering/src/index.ts";
+import {
+  createPostgresOrderBatchIdentitySource,
+  createPostgresOrderKitchenSourceStore,
+} from "../../packages/rms/ordering/src/index.ts";
 import {
   createPostgresRecipePreparationContentStore,
   createPostgresConfiguredRecipePreparationSource,
+  listDeclaredChargeSkus,
 } from "../../packages/rms/recipe/src/index.ts";
 import { createKitchenRecipePreparationSource } from "../../apps/api/src/kitchen-recipe-preparation-source.ts";
 import {
@@ -27,6 +32,18 @@ export function kitchenNotPreparedLines(scope) {
       (await loadKitchenBatchPreparationDecision(transaction, scope, round.orderBatchReference))
         ?.notPreparedOrderItemReferences ?? [],
     );
+}
+/**
+ * WP-2423 item 8a: of these sizes, the ones the kitchen does not prepare unless the Store marked the
+ * dish: a size declared a charge, and the Store's current tea item (choosing another tea gives the
+ * dish back to the kitchen, with nothing to undo).
+ */
+export function kitchenDefaultNotPrepared(scope) {
+  return async (transaction, skuReferences) => {
+    const tea = (await loadDiningTeaChargeSetting(transaction, scope)).teaSellableReference;
+    const charges = await listDeclaredChargeSkus(transaction, scope, skuReferences);
+    return new Set([...charges, ...(tea !== null && skuReferences.includes(tea) ? [tea] : [])]);
+  };
 }
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalKitchen(resources) {
@@ -168,6 +185,20 @@ export function createInternalKitchen(resources) {
         inner: createKitchenTicketIntakeAdapter(ports),
         scope,
         now: resources.now,
+        derive: references.derive,
+        notPreparedByDefault: kitchenDefaultNotPrepared(scope),
+        orderType: async (tx, receipt) => {
+          const identity = await createPostgresOrderBatchIdentitySource({
+            ...scope,
+            authorize: async () => active(),
+          }).load(tx, {
+            orderReference: receipt.orderReference,
+            orderBatchReference: receipt.orderBatchReference,
+            observedAt: resources.now(),
+          });
+          if (!identity) throw new Error("INTERNAL_KITCHEN_IDENTITY_UNAVAILABLE");
+          return identity.orderType;
+        },
         allLines: async (tx, receipt) =>
           (
             await allLines.resolve({
@@ -188,6 +219,8 @@ export function createInternalKitchen(resources) {
           ).items.map((item) => ({
             orderItemReference: String(item.orderItemReference),
             productReference: String(item.productReference),
+            skuReference: String(item.skuReference),
+            quantity: item.quantity,
           })),
       }),
       digests: { sha256: hash },

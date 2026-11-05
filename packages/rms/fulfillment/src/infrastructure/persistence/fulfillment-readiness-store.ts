@@ -28,6 +28,7 @@ import { validatePickupFulfillmentRecordEffect } from "../../application/pickup-
 import { createPostgresPickupFulfillmentStore } from "./pickup-fulfillment-store.js";
 import { createHash } from "node:crypto";
 import { appendAuditRecordInTransaction } from "@bop/audit";
+import { listKitchenLinesReadyWithoutWork } from "@rms/kitchen";
 import {
   foldFulfillmentReadiness,
   fulfillmentItemCancellationActionCode,
@@ -217,8 +218,16 @@ export function createPostgresFulfillmentReadinessStore(options: {
       orderItemReference: String(item.orderItemReference),
       orderedQuantity: item.orderedQuantity,
     }));
+    // WP-2423 item 8a: what the kitchen fixed for this round when it reached it: these lines wait
+    // for nothing from the kitchen, and go with the rest of the order.
+    const readyWithoutWork = await listKitchenLinesReadyWithoutWork(
+      tx as never,
+      { brandReference: brand, storeReference: store },
+      order,
+    );
     const fold = foldFulfillmentReadiness({
       items,
+      readyWithoutWork,
       ready: history.map((effect) => ({
         fulfillmentItemReference: String(effect.result.fulfillmentItemReference),
         orderItemReference: String(effect.result.orderItemReference),
@@ -255,14 +264,18 @@ export function createPostgresFulfillmentReadinessStore(options: {
       canonicalPhase: phase,
       aggregateVersion: version,
       lockedAt,
-      items: activeItems.map((item) => ({
-        fulfillmentItemReference: item.fulfillmentItemReference,
-        orderItemReference: item.orderItemReference,
-        orderedQuantity: item.orderedQuantity,
-        readyQuantity: ready.get(item.fulfillmentItemReference) ?? 0,
-        handedOverQuantity: 0,
-        state: ready.has(item.fulfillmentItemReference) ? "Ready" : "Pending",
-      })),
+      items: activeItems.map((item) => {
+        const withoutWork = readyWithoutWork.has(String(item.orderItemReference));
+        return {
+          fulfillmentItemReference: item.fulfillmentItemReference,
+          orderItemReference: item.orderItemReference,
+          orderedQuantity: item.orderedQuantity,
+          readyQuantity:
+            ready.get(item.fulfillmentItemReference) ?? (withoutWork ? item.orderedQuantity : 0),
+          handedOverQuantity: 0,
+          state: withoutWork || ready.has(item.fulfillmentItemReference) ? "Ready" : "Pending",
+        };
+      }),
     });
     const proofHistory = await readPickupProofHistory(
       tx,

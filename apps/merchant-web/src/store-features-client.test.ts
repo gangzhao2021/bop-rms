@@ -66,7 +66,16 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
           { sellableReference: tea },
         ],
       }).teaChoices,
-    ).toEqual([{ sellableReference: tea, name: "Tea (TEST) 茶位", unavailable: null }]);
+    ).toEqual([
+      {
+        sellableReference: tea,
+        name: "Tea (TEST) 茶位",
+        unavailable: null,
+        declaredCharge: false,
+        priceAmount: null,
+        kitchenPrepares: false,
+      },
+    ]);
     expect(
       parseStoreFeatures({
         ...view,

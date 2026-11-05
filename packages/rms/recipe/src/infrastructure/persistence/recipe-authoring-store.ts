@@ -1532,6 +1532,15 @@ export async function recordStaffDeclaredAllergenSource(
 }
 
 /**
+ * The rest of a read of a size's current recipe bindings at a Store ($1 Brand, $2 Store): the Brand's
+ * and the Store's own, each with its recipe's family (`f`), which a revision of a recipe keeps.
+ */
+const currentSizeBinding = `LEFT JOIN rms_recipe.recipe_version_presentation f ON f.recipe_version_id=b.recipe_version_id AND f.brand_id=b.brand_id
+   WHERE b.brand_id=$1 AND (b.store_id=$2 OR b.store_id IS NULL) AND b.option_binding_id IS NULL
+     AND b.effective_from<=now() AND (b.effective_until IS NULL OR b.effective_until>now())
+     AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding_end e WHERE e.brand_id=b.brand_id AND e.recipe_scope_binding_id=b.recipe_scope_binding_id)`;
+
+/**
  * WP-2423 item 8 ⑦ 4b-3 (coordinator 2026-10-29): whether this SKU uses stock at the Store — it has
  * a current recipe binding there (not one generated only to declare allergens). The per-head tea
  * charge must not: taking tea off an unpaid bill would then have stock to return.
@@ -1556,8 +1565,42 @@ export async function skuRecipeUsesStock(
     scope.storeReference,
   ]);
   const { rows } = await tx.query(
-    "SELECT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding b WHERE b.brand_id=$1 AND (b.store_id=$2 OR b.store_id IS NULL) AND b.sku_id=$3 AND b.option_binding_id IS NULL AND b.effective_from<=now() AND (b.effective_until IS NULL OR b.effective_until>now()) AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding_end e WHERE e.brand_id=b.brand_id AND e.recipe_scope_binding_id=b.recipe_scope_binding_id) AND NOT EXISTS (SELECT 1 FROM rms_recipe.staff_declared_allergen_source s WHERE s.brand_id=b.brand_id AND s.recipe_id=b.recipe_id)) AS uses",
+    `SELECT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding b ${currentSizeBinding} AND b.sku_id=$3 AND NOT EXISTS (SELECT 1 FROM rms_recipe.staff_declared_allergen_source s WHERE s.brand_id=b.brand_id AND s.recipe_id=COALESCE(f.family_id,b.recipe_id))) AS uses`,
     [scope.brandReference, scope.storeReference, skuReference],
   );
   return rows[0]?.uses === true;
+}
+
+/**
+ * WP-2423 item 8a: of these SKUs, the ones declared a charge with no stock ingredients and not given
+ * a real recipe since: the kitchen's default is not to prepare them. Recipe's public read for
+ * Kitchen, which never reads this table itself. A generated recipe declared again is a new recipe of
+ * the same family, and is still the charge; only a recipe of another family makes it a dish again.
+ */
+export async function listDeclaredChargeSkus(
+  tx: {
+    query(
+      sql: string,
+      values: readonly unknown[],
+    ): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+  },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  skuReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+  if (![scope.brandReference, scope.storeReference, ...skuReferences].every((v) => uuid.test(v)))
+    throw new Error("RECIPE_DECLARED_CHARGE_INPUT_INVALID");
+  if (skuReferences.length === 0) return new Set();
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  const { rows } = await tx.query(
+    `SELECT d.sku_id::text sku FROM rms_recipe.staff_declared_allergen_source d
+     WHERE d.brand_id=$1 AND d.subject_kind='Dish' AND d.label='NoIngredientsDeclaredByStaff' AND d.sku_id=ANY($3::uuid[])
+       AND NOT EXISTS (SELECT 1 FROM rms_recipe.recipe_scope_binding b ${currentSizeBinding}
+         AND b.sku_id=d.sku_id AND COALESCE(f.family_id,b.recipe_id)<>d.recipe_id)`,
+    [scope.brandReference, scope.storeReference, [...skuReferences]],
+  );
+  return new Set(rows.map((row) => String(row.sku)));
 }
