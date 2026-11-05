@@ -159,6 +159,8 @@ export async function exercisePilotStoreMonitors(context) {
   const monitors = createStoreMonitors({
     runtimeDirectory: directory,
     log: async (entry) => logs.push(entry),
+    // This run steps through minutes by the instants it passes, however long each read takes.
+    clock: () => 0,
     load: async (storeDirectory) => {
       loaded.push(path.relative(directory, storeDirectory));
       const of = stores.find((each) => each.name === path.basename(storeDirectory));
