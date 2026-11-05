@@ -1,20 +1,57 @@
 import { parseCanonicalInstant } from "@bop/tenant";
+/**
+ * Which rule refused, for the log only: a fixed word that never carries a reference or a fact and
+ * never reaches a browser. The code and message stay the same for every rule, so no caller and no
+ * customer answer can depend on it.
+ */
+export type WorkflowDefinitionRule =
+  | "Malformed"
+  | "ScopeMismatch"
+  | "DuplicateVersion"
+  | "TooManyVersions"
+  | "NoBrandVersion"
+  | "TwoBrandVersions"
+  | "TwoStoreVersions"
+  | "BrandVersionNotActive"
+  | "StoreVersionNotActive"
+  | "StoreVersionBaseMismatch"
+  | "ResourceRefused"
+  | "ExpectedVersionChanged"
+  | "NoTransition"
+  | "PublicationRefused"
+  | "ActionRefused"
+  | "RuleRefused"
+  | "OperationReused"
+  | "VersionSequence"
+  | "FamilyAlreadyExists"
+  | "Dependency";
 export class WorkflowDefinitionError extends Error {
   readonly code = "WORKFLOW_DEFINITION_UNAVAILABLE";
-  constructor() {
-    super("Workflow definition is unavailable");
+  readonly rule: WorkflowDefinitionRule | undefined;
+  constructor(rule?: WorkflowDefinitionRule, options?: { readonly cause?: unknown }) {
+    super("Workflow definition is unavailable", options);
     this.name = "WorkflowDefinitionError";
+    this.rule = rule;
   }
 }
-export function workflowUnavailable(): never {
-  throw new WorkflowDefinitionError();
+export function workflowUnavailable(rule?: WorkflowDefinitionRule, cause?: unknown): never {
+  throw new WorkflowDefinitionError(rule, cause === undefined ? undefined : { cause });
+}
+/**
+ * A catch-all keeps a refusal as it is and names anything else as a failed dependency, with what
+ * failed as its cause. Read by code: tooling loads this package's source and the API its build, so
+ * one refusal can cross two copies of this class.
+ */
+export function rethrowWorkflowFailure(error: unknown): never {
+  if ((error as { code?: unknown } | null)?.code === "WORKFLOW_DEFINITION_UNAVAILABLE") throw error;
+  return workflowUnavailable("Dependency", error);
 }
 export function workflowReference(value: unknown): string {
   if (
     typeof value !== "string" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)
   )
-    return workflowUnavailable();
+    return workflowUnavailable("Malformed");
   return value;
 }
 function code(value: unknown): string {
@@ -165,7 +202,7 @@ export function parseWorkflowDefinitionVersion(value: unknown) {
       transitions: Object.freeze(transitions),
     });
   } catch {
-    return workflowUnavailable();
+    return workflowUnavailable("Malformed");
   }
 }
 export type WorkflowDefinitionVersion = ReturnType<typeof parseWorkflowDefinitionVersion>;
@@ -204,7 +241,7 @@ export function parseWorkflowActionRequest(value: unknown) {
       observedAt: parseCanonicalInstant(raw.observedAt),
     });
   } catch {
-    return workflowUnavailable();
+    return workflowUnavailable("Malformed");
   }
 }
 export type WorkflowActionRequest = ReturnType<typeof parseWorkflowActionRequest>;

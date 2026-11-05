@@ -90,6 +90,48 @@ describe("Workflow action evaluation with synthetic owner gates", () => {
     );
     expect(ports.evaluateRule).toHaveBeenCalledTimes(2);
   });
+  it("names each refusing gate, and keeps what failed behind a dependency failure", async () => {
+    const refusal = (ports: WorkflowActionPorts, patch: Record<string, unknown> = {}) =>
+      evaluateWorkflowAction({ ...request(), ...patch }, ports).then(
+        () => {
+          throw new Error("expected a refusal");
+        },
+        (error: unknown) => error,
+      );
+    const rule = (name: string) =>
+      expect.objectContaining({ code: "WORKFLOW_DEFINITION_UNAVAILABLE", rule: name });
+    for (const [gate, name] of [
+      ["authorizeResource", "ResourceRefused"],
+      ["validatePublication", "PublicationRefused"],
+      ["authorizeAction", "ActionRefused"],
+      ["evaluateRule", "RuleRefused"],
+    ] as const) {
+      const { ports } = fixture();
+      ports[gate].mockResolvedValue(false);
+      expect(await refusal(ports)).toEqual(rule(name));
+    }
+    expect(await refusal(fixture().ports, { expectedVersionReference: id(99) })).toEqual(
+      rule("ExpectedVersionChanged"),
+    );
+    expect(await refusal(fixture().ports, { action: "ConsumeInventory" })).toEqual(
+      rule("NoTransition"),
+    );
+    expect(await refusal(fixture().ports, { extra: true })).toEqual(rule("Malformed"));
+    // The resolver's own refusal passes through the catch-all as it is.
+    const twoFamilies = fixture();
+    twoFamilies.ports.resolveVersions.mockResolvedValue([
+      definition(),
+      definition({ workflowReference: id(40), versionReference: id(41) }),
+    ]);
+    expect(await refusal(twoFamilies.ports)).toEqual(rule("TwoBrandVersions"));
+    const backend = Object.assign(new Error("private backend detail"), { code: "42501" });
+    const broken = fixture();
+    broken.ports.evaluateRule.mockRejectedValue(backend);
+    const failed = await refusal(broken.ports);
+    expect(failed).toEqual(rule("Dependency"));
+    expect((failed as Error).cause).toBe(backend);
+    expect((failed as Error).message).toBe("Workflow definition is unavailable");
+  });
   it("supplies both Brand and Store definitions for override authorization", async () => {
     const { source, ports } = fixture();
     const override = definition({

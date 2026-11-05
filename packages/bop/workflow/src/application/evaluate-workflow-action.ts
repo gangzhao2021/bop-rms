@@ -1,5 +1,6 @@
 import {
   parseWorkflowActionRequest,
+  rethrowWorkflowFailure,
   workflowUnavailable,
   type WorkflowActionRequest,
   type WorkflowDefinitionVersion,
@@ -44,7 +45,8 @@ export interface WorkflowActionPorts {
 export async function evaluateWorkflowAction(value: unknown, ports: WorkflowActionPorts) {
   try {
     const request = parseWorkflowActionRequest(value);
-    if ((await ports.authorizeResource(request)) !== true) return workflowUnavailable();
+    if ((await ports.authorizeResource(request)) !== true)
+      return workflowUnavailable("ResourceRefused");
     const resolved = resolveWorkflowDefinition({
       versions: await ports.resolveVersions(request),
       tenantReference: request.tenantReference,
@@ -56,25 +58,25 @@ export async function evaluateWorkflowAction(value: unknown, ports: WorkflowActi
     });
     const { definition, brandDefinition } = resolved;
     if (definition.versionReference !== request.expectedVersionReference)
-      return workflowUnavailable();
+      return workflowUnavailable("ExpectedVersionChanged");
     const transition = definition.transitions.find(
       (candidate) =>
         candidate.currentState === request.currentState && candidate.action === request.action,
     );
-    if (!transition) return workflowUnavailable();
+    if (!transition) return workflowUnavailable("NoTransition");
     if (
       (await ports.validatePublication(Object.freeze({ request, definition, brandDefinition }))) !==
       true
     )
-      return workflowUnavailable();
+      return workflowUnavailable("PublicationRefused");
     const action = Object.freeze({ request, definition, transition });
-    if ((await ports.authorizeAction(action)) !== true) return workflowUnavailable();
+    if ((await ports.authorizeAction(action)) !== true) return workflowUnavailable("ActionRefused");
     for (const ruleReference of transition.ruleReferences) {
       if ((await ports.evaluateRule(Object.freeze({ ...action, ruleReference }))) !== true)
-        return workflowUnavailable();
+        return workflowUnavailable("RuleRefused");
     }
     return Object.freeze({ request, definition, brandDefinition, transition });
-  } catch {
-    return workflowUnavailable();
+  } catch (error) {
+    return rethrowWorkflowFailure(error);
   }
 }

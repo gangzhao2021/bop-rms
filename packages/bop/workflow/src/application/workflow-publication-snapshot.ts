@@ -17,7 +17,7 @@ export function workflowDefinitionContent(definition: WorkflowDefinitionVersion)
 }
 export function createWorkflowPublicationSnapshot(value: unknown) {
   const draft = parseWorkflowDefinitionVersion(value);
-  if (draft.lifecycle !== "Draft") return workflowUnavailable();
+  if (draft.lifecycle !== "Draft") return workflowUnavailable("PublicationRefused");
   return Object.freeze({
     familyReference: draft.workflowReference,
     configurationType: "WORKFLOW_DEFINITION" as const,
@@ -40,6 +40,6 @@ export function bindWorkflowPublicationSnapshot(publishedValue: unknown, draftVa
     published.createdAt < draft.createdAt ||
     workflowDefinitionContent(published) !== workflowDefinitionContent(draft)
   )
-    return workflowUnavailable();
+    return workflowUnavailable("PublicationRefused");
   return createWorkflowPublicationSnapshot(draft);
 }

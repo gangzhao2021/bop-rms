@@ -23,16 +23,16 @@ export function resolveWorkflowDefinition(
     at = parseCanonicalInstant(input.observedAt);
   if (
     !Array.isArray(input.versions) ||
-    input.versions.length > 1024 ||
     Reflect.ownKeys(input.versions).length !== input.versions.length + 1
   )
-    return workflowUnavailable();
+    return workflowUnavailable("Malformed");
+  if (input.versions.length > 1024) return workflowUnavailable("TooManyVersions");
   const latest = new Map<string, WorkflowDefinitionVersion>(),
     ids = new Set<string>(),
     numbers = new Set<string>();
   for (let i = 0; i < input.versions.length; i++) {
     const d = Object.getOwnPropertyDescriptor(input.versions, String(i));
-    if (!d?.enumerable || !("value" in d)) return workflowUnavailable();
+    if (!d?.enumerable || !("value" in d)) return workflowUnavailable("Malformed");
     const v = parseWorkflowDefinitionVersion(d.value);
     if (
       v.tenantReference !== tenant ||
@@ -41,10 +41,11 @@ export function resolveWorkflowDefinition(
       v.purposeCode !== input.purposeCode ||
       v.applicabilityCode !== input.applicabilityCode
     )
-      return workflowUnavailable();
+      return workflowUnavailable("ScopeMismatch");
     const key = (v.storeReference ?? "Brand") + ":" + v.workflowReference;
     const number = key + ":" + v.versionNumber;
-    if (ids.has(v.versionReference) || numbers.has(number)) return workflowUnavailable();
+    if (ids.has(v.versionReference) || numbers.has(number))
+      return workflowUnavailable("DuplicateVersion");
     ids.add(v.versionReference);
     numbers.add(number);
     if (v.lifecycle === "Draft" || v.createdAt > at || v.effectiveFrom > at) continue;
@@ -53,14 +54,17 @@ export function resolveWorkflowDefinition(
   }
   const brandVersions = [...latest.values()].filter((v) => v.storeReference === null);
   const storeVersions = [...latest.values()].filter((v) => v.storeReference === store);
-  if (brandVersions.length !== 1 || storeVersions.length > 1) return workflowUnavailable();
+  if (brandVersions.length > 1) return workflowUnavailable("TwoBrandVersions");
+  if (storeVersions.length > 1) return workflowUnavailable("TwoStoreVersions");
   const base = brandVersions[0];
+  if (!base) return workflowUnavailable("NoBrandVersion");
   const active = (v: WorkflowDefinitionVersion) =>
     v.lifecycle === "Published" && (v.effectiveUntil === null || v.effectiveUntil > at);
-  if (!base || !active(base)) return workflowUnavailable();
+  if (!active(base)) return workflowUnavailable("BrandVersionNotActive");
   const selected = storeVersions[0];
   if (!selected) return Object.freeze({ definition: base, brandDefinition: base });
-  if (!active(selected) || selected.baseVersionReference !== base.versionReference)
-    return workflowUnavailable();
+  if (!active(selected)) return workflowUnavailable("StoreVersionNotActive");
+  if (selected.baseVersionReference !== base.versionReference)
+    return workflowUnavailable("StoreVersionBaseMismatch");
   return Object.freeze({ definition: selected, brandDefinition: base });
 }

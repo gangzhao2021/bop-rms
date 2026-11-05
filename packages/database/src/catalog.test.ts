@@ -798,6 +798,7 @@ describe("migration catalog", () => {
       "2000_154_create_dining_table_split_part_item",
       "2000_155_alter_store_opening_first_store",
       "2000_156_alter_product_frozen_commit_guard",
+      "2000_157_alter_workflow_one_family_per_purpose",
       "2000_180_create_brand_guest_intake",
       "2000_181_alter_platform_support_merchant_pause",
     ]);

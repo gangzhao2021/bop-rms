@@ -20,6 +20,7 @@ import {
 import {
   parseWorkflowDefinitionVersion,
   parseWorkflowActionRequest,
+  rethrowWorkflowFailure,
   workflowReference,
   workflowUnavailable,
   type WorkflowDefinitionVersion,
@@ -43,10 +44,10 @@ export interface WorkflowDefinitionWrite {
   readonly audit: unknown;
 }
 function rows(value: unknown, max = 1): readonly Record<string, unknown>[] {
-  if (!value || typeof value !== "object") return workflowUnavailable();
+  if (!value || typeof value !== "object") return workflowUnavailable("Malformed");
   const d = Object.getOwnPropertyDescriptor(value, "rows");
-  if (!d || !("value" in d) || !Array.isArray(d.value) || d.value.length > max)
-    return workflowUnavailable();
+  if (!d || !("value" in d) || !Array.isArray(d.value)) return workflowUnavailable("Malformed");
+  if (d.value.length > max) return workflowUnavailable("TooManyVersions");
   return d.value;
 }
 /** Internal owner capability. Reauthorize every access; new writes also require current publication/override gates. */
@@ -70,10 +71,20 @@ export function createPostgresWorkflowDefinitionStore(
         );
         return work(tx);
       });
-    } catch {
-      return workflowUnavailable();
+    } catch (error) {
+      return rethrowWorkflowFailure(error);
     }
   };
+  /**
+   * One family per scope, purpose and order type: the lock a new family's first row takes, here and
+   * in bop_workflow.guard_definition_version (same key), held until the transaction ends.
+   */
+  const lockPurpose = (tx: WorkflowTransaction, purposeCode: string, applicabilityCode: string) =>
+    tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      ["WorkflowPurpose", tenant, brand, store ?? "Brand", purposeCode, applicabilityCode].join(
+        ":",
+      ),
+    ]);
   function bind(value: unknown) {
     const definition = parseWorkflowDefinitionVersion(value);
     if (
@@ -81,7 +92,7 @@ export function createPostgresWorkflowDefinitionStore(
       definition.brandReference !== brand ||
       (definition.storeReference !== null && definition.storeReference !== store)
     )
-      return workflowUnavailable();
+      return workflowUnavailable("ScopeMismatch");
     return definition;
   }
   async function original(tx: WorkflowTransaction, operation: string) {
@@ -94,7 +105,7 @@ export function createPostgresWorkflowDefinitionStore(
     const row = found[0];
     if (!row) return null;
     if (typeof row.intent !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(row.intent))
-      return workflowUnavailable();
+      return workflowUnavailable("Malformed");
     return Object.freeze({
       definition: bind(row.definition),
       intent: row.intent,
@@ -115,17 +126,17 @@ export function createPostgresWorkflowDefinitionStore(
             [tenant, brand, version],
           ),
         )[0];
-        if (!found) return workflowUnavailable();
+        if (!found) return workflowUnavailable("PublicationRefused");
         const published = bind(found.definition);
         if (published.lifecycle !== "Published" || published.createdAt > at)
-          return workflowUnavailable();
+          return workflowUnavailable("PublicationRefused");
         const draftRow = rows(
           await tx.query(
             "SELECT definition_json AS definition FROM bop_workflow.workflow_definition_version WHERE tenant_id=$1 AND brand_id=$2 AND workflow_id=$3 AND version_number=$4",
             [tenant, brand, published.workflowReference, published.versionNumber - 1],
           ),
         )[0];
-        if (!draftRow) return workflowUnavailable();
+        if (!draftRow) return workflowUnavailable("PublicationRefused");
         const snapshot = bindWorkflowPublicationSnapshot(published, bind(draftRow.definition));
         try {
           const publishing = createPostgresPublishingMutationStore(
@@ -150,7 +161,7 @@ export function createPostgresWorkflowDefinitionStore(
             actual.release.snapshotDigest !== snapshot.snapshotDigest ||
             actual.release.createdAt > published.createdAt
           )
-            return workflowUnavailable();
+            return workflowUnavailable("PublicationRefused");
           return Object.freeze({ snapshot, publication: actual });
         } finally {
           await tx.query(
@@ -184,7 +195,7 @@ export function createPostgresWorkflowDefinitionStore(
         (definition.lifecycle === "Draft" &&
           audit.actor.reference !== definition.authoredByReference)
       )
-        return workflowUnavailable();
+        return workflowUnavailable("Malformed");
       const actorReference = audit.actor.reference;
       const intent =
         "sha256:" +
@@ -203,9 +214,12 @@ export function createPostgresWorkflowDefinitionStore(
         ]);
         const prior = await original(tx, operation);
         if (prior) {
-          if (prior.intent !== intent) return workflowUnavailable();
+          if (prior.intent !== intent) return workflowUnavailable("OperationReused");
           return Object.freeze({ status: "AlreadyApplied" as const, ...prior });
         }
+        // Before the table lock: a writer holding this purpose may need SHARE on the table next.
+        if (definition.versionNumber === 1)
+          await lockPurpose(tx, definition.purposeCode, definition.applicabilityCode);
         await tx.query(
           "LOCK TABLE bop_workflow.workflow_definition_version IN ROW EXCLUSIVE MODE",
           [],
@@ -228,8 +242,25 @@ export function createPostgresWorkflowDefinitionStore(
             definition.lifecycle !== "Draft" &&
             workflowDefinitionContent(previous) !== workflowDefinitionContent(definition))
         )
-          return workflowUnavailable();
-        if ((await validateNewWrite(tx, definition)) !== true) return workflowUnavailable();
+          return workflowUnavailable("VersionSequence");
+        if (previous === null) {
+          const others = rows(
+            await tx.query(
+              "SELECT 1 FROM bop_workflow.workflow_definition_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND purpose_code=$4 AND applicability_code=$5 AND workflow_id<>$6 LIMIT 1",
+              [
+                tenant,
+                brand,
+                store,
+                definition.purposeCode,
+                definition.applicabilityCode,
+                definition.workflowReference,
+              ],
+            ),
+          );
+          if (others.length > 0) return workflowUnavailable("FamilyAlreadyExists");
+        }
+        if ((await validateNewWrite(tx, definition)) !== true)
+          return workflowUnavailable("PublicationRefused");
         await appendAuditRecordInTransaction(tx, audit);
         await tx.query(
           "INSERT INTO bop_workflow.workflow_definition_version (tenant_id,brand_id,store_id,workflow_id,version_id,version_number,operation_id,intent_hash,actor_id,audit_id,purpose_code,applicability_code,lifecycle,effective_from,effective_until,created_at,definition_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)",
@@ -266,6 +297,31 @@ export function createPostgresWorkflowDefinitionStore(
       input: Readonly<{ purposeCode: string; applicabilityCode: string; observedAt: string }>,
     ) {
       return run((tx) => resolveCurrentInTransaction(tx, input));
+    },
+    /**
+     * The latest version of every family this scope holds for one purpose and order type, with the
+     * operation that wrote it. Takes the purpose lock, so the answer stays true until the caller's
+     * transaction ends. More than one family is a damaged scope the resolver refuses.
+     */
+    async familiesOfPurpose(input: Readonly<{ purposeCode: string; applicabilityCode: string }>) {
+      return run(async (tx) => {
+        await lockPurpose(tx, input.purposeCode, input.applicabilityCode);
+        const found = rows(
+          await tx.query(
+            "SELECT DISTINCT ON (workflow_id) definition_json AS definition,operation_id AS operation FROM bop_workflow.workflow_definition_version WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND purpose_code=$4 AND applicability_code=$5 ORDER BY workflow_id,version_number DESC LIMIT 17",
+            [tenant, brand, store, input.purposeCode, input.applicabilityCode],
+          ),
+          16,
+        );
+        return Object.freeze(
+          found.map((row) =>
+            Object.freeze({
+              definition: bind(row.definition),
+              operationReference: workflowReference(row.operation),
+            }),
+          ),
+        );
+      });
     },
     /** Bind runner to the outer domain transaction to retain fences through its commit. */
     /** Production publication gate: owner evidence cannot be replaced by a caller boolean. */
@@ -306,7 +362,7 @@ export function createPostgresWorkflowDefinitionStore(
         request.brandReference !== brand ||
         request.storeReference !== store
       )
-        return workflowUnavailable();
+        return workflowUnavailable("ScopeMismatch");
       return run((tx) =>
         evaluateWorkflowAction(request, {
           authorizeResource: (request) => gates.authorizeResource(tx, request),
@@ -327,7 +383,7 @@ export function createPostgresWorkflowDefinitionStore(
     tx: WorkflowTransaction,
     input: Readonly<{ purposeCode: string; applicabilityCode: string; observedAt: string }>,
   ) {
-    if (store === null) return workflowUnavailable();
+    if (store === null) return workflowUnavailable("ScopeMismatch");
     await tx.query("LOCK TABLE bop_workflow.workflow_definition_version IN SHARE MODE", []);
     const definitions = rows(
       await tx.query(

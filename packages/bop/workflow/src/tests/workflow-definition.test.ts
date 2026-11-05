@@ -93,6 +93,62 @@ describe("synthetic Workflow version selection", () => {
     expect(() => resolve([definition({ tenantReference: id(99) })])).toThrow();
     expect(() => resolve([])).toThrow();
   });
+  it("names the rule that refused, with the code and message unchanged", () => {
+    const refusal = (versions: readonly unknown[]) => {
+      try {
+        resolve(versions);
+      } catch (error) {
+        return error;
+      }
+      throw new Error("expected a refusal");
+    };
+    const rule = (name: string) =>
+      expect.objectContaining({
+        code: "WORKFLOW_DEFINITION_UNAVAILABLE",
+        message: "Workflow definition is unavailable",
+        rule: name,
+      });
+    const store = (overrides: Record<string, unknown> = {}) =>
+      definition({
+        workflowReference: id(20),
+        versionReference: id(21),
+        storeReference: id(10),
+        baseVersionReference: id(2),
+        overrideAuthorizationReference: id(22),
+        ...overrides,
+      });
+    const withdrawn = { lifecycle: "Withdrawn" };
+    expect(refusal([])).toEqual(rule("NoBrandVersion"));
+    expect(
+      refusal([definition(), definition({ workflowReference: id(40), versionReference: id(41) })]),
+    ).toEqual(rule("TwoBrandVersions"));
+    expect(
+      refusal([
+        definition(),
+        store(),
+        store({ workflowReference: id(40), versionReference: id(41) }),
+      ]),
+    ).toEqual(rule("TwoStoreVersions"));
+    expect(refusal([definition(withdrawn)])).toEqual(rule("BrandVersionNotActive"));
+    expect(refusal([definition(), store(withdrawn)])).toEqual(rule("StoreVersionNotActive"));
+    expect(refusal([definition(), store({ baseVersionReference: id(99) })])).toEqual(
+      rule("StoreVersionBaseMismatch"),
+    );
+    expect(refusal([definition(), definition()])).toEqual(rule("DuplicateVersion"));
+    expect(refusal([definition({ tenantReference: id(99) })])).toEqual(rule("ScopeMismatch"));
+    expect(refusal([{ ...definition(), unexpected: true }])).toEqual(rule("Malformed"));
+    expect(refusal(Array.from({ length: 1025 }, () => definition()))).toEqual(
+      rule("TooManyVersions"),
+    );
+  });
+  it("does not let two families that are each Withdrawn pass as none", () => {
+    expect(() =>
+      resolve([
+        definition({ lifecycle: "Withdrawn" }),
+        definition({ workflowReference: id(40), versionReference: id(41), lifecycle: "Withdrawn" }),
+      ]),
+    ).toThrow(expect.objectContaining({ rule: "TwoBrandVersions" }));
+  });
   it("requires publication evidence and unambiguous transition actions", () => {
     expect(() =>
       parseWorkflowDefinitionVersion(definition({ publicationReference: null })),
