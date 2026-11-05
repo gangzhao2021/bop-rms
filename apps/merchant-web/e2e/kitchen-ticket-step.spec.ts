@@ -129,7 +129,10 @@ async function mockBoard(
     });
   });
   await page.route("**/merchant/kitchen/rework/query", (route) =>
-    route.fulfill({ headers, json: { items: [], canRework: true } }),
+    route.fulfill({
+      headers,
+      json: { storeReference: scope.storeReference, observedAt: at, items: [], canRework: true },
+    }),
   );
   return { taps, items, setItems: (next: readonly ReturnType<typeof dish>[]) => (items = next) };
 }
@@ -302,7 +305,17 @@ for (const [width, height] of [
 ] as const)
   test(`@production nothing above the tickets moves them at ${width} wide`, async ({ page }) => {
     await page.setViewportSize({ width, height });
-    let queryItems: readonly ReturnType<typeof dish>[] = [dish(1, "TEST latte")];
+    const finished = dish(9, "TEST done", {
+      ticketReference: id(80),
+      orderReference: id(81),
+      orderLabel: { orderNumber: "2", orderType: "Pickup", tableLabel: null },
+      status: "Completed",
+      completedQuantity: 1,
+      acceptedAt: at,
+      orderItemReadyAt: at,
+      workItemCreatedAt: "2026-10-26T22:00:00.000Z",
+    });
+    let queryItems: readonly ReturnType<typeof dish>[] = [dish(1, "TEST latte"), finished];
     await mockBoard(page, () => queryItems);
     await page.route("**/merchant/kitchen/step", (route) =>
       route.fulfill({
@@ -329,15 +342,29 @@ for (const [width, height] of [
         },
       }),
     );
+    await page.route("**/merchant/kitchen/rework/command", (route) =>
+      route.fulfill({ headers, status: 422, json: { error: "KITCHEN_REWORK_WINDOW_CLOSED" } }),
+    );
     await page.goto("/operations/kitchen");
     const ticket = page.locator(".kitchen-ticket").filter({ hasText: "TEST latte" });
     await expect(ticket).toBeVisible();
     // The sound reminder leaves at the first tap anywhere: no ticket moves when it does.
     const yOf = async () => (await ticket.boundingBox())?.y;
     const start = await yOf();
+    // A remake notice.
+    await page.getByText("Recently finished · 1").click();
+    await page.getByRole("button", { name: /^Remake TEST done/u }).click();
+    const dialog = page.getByRole("dialog", { name: "Remake TEST done" });
+    await dialog.getByLabel("Dropped").check();
+    await dialog.getByRole("button", { name: "Send remake" }).click();
+    await expect(page.locator(".kitchen-status-row__line")).toContainText("Remake not recorded");
+    expect(await yOf()).toBe(start);
+    // The remake's lane and notice stay out of the way of what comes next.
+    await page.locator("details.kitchen-recent-finished > summary").click();
     // An arrival.
     queryItems = [
       dish(1, "TEST latte"),
+      finished,
       dish(2, "TEST mocha", {
         ticketReference: id(60),
         orderReference: id(61),

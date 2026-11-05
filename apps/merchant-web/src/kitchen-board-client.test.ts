@@ -477,3 +477,37 @@ it("WP-2423 item 8 ③ decision 8: shows a dish's Chinese name first with its En
   expect(view.items[1]?.displayName).toBe("Synthetic rice");
   expect(view.items[1]).not.toHaveProperty("otherName");
 });
+
+it("reads each chosen dish's section, and a server that does not give it", async () => {
+  const f = setup();
+  const combo = {
+    ...item(10),
+    comboParts: [
+      { optionReference: id(41), nameZh: "奶茶", name: "Milk tea", done: false, served: false },
+    ],
+    comboPartSections: { [id(41)]: "饮品" },
+  };
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [combo], nextCursor: null }));
+  const [read] = parseKitchenBoardView(await f.client.loadQueue()).items;
+  expect(read?.comboPartSections).toEqual({ [id(41)]: "饮品" });
+  // A new key inside a part would take a board down; beside the parts it is simply ignored.
+  const { comboPartSections: _absent, ...older } = combo;
+  void _absent;
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [older], nextCursor: null }));
+  const [plain] = parseKitchenBoardView(await f.client.loadQueue()).items;
+  expect(plain?.comboPartSections).toBeUndefined();
+  expect(plain?.comboParts).toHaveLength(1);
+  // A closed record: anything but a reference and a safe name is refused.
+  expect(() =>
+    parseKitchenBoardView({
+      screenId: "KIT-KITCHEN-QUEUE",
+      projectionName: "kitchen_work_queue_v1",
+      projectionVersion: 1,
+      storeLabel: "TEST",
+      projectedAt: at,
+      freshnessStatus: "Fresh",
+      operatorStatus: "Named",
+      items: [{ ...read, comboPartSections: { "not-a-reference": "饮品" } }],
+    }),
+  ).toThrow();
+});

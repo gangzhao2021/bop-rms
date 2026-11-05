@@ -27,6 +27,8 @@ export interface KitchenStepNotice {
   readonly id: number;
   readonly tone: "Done" | "Problem";
   readonly text: string;
+  /** When it was said (this page's clock), so the board says the newest thing first. */
+  readonly at: number;
 }
 /** Confirmed steps show at once; a problem stays long enough to read it. */
 export const kitchenNoticeDoneMs = 6_000;
@@ -180,7 +182,8 @@ export function useKitchenActions(input: {
   const say = (tone: KitchenStepNotice["tone"], text: string) => {
     noticeId.current += 1;
     const id = noticeId.current;
-    setNotices((current) => [{ id, tone, text }, ...current].slice(0, 6));
+    const at = performance.now();
+    setNotices((current) => [{ id, tone, text, at }, ...current].slice(0, 6));
     if (typeof window !== "undefined")
       window.setTimeout(
         () => setNotices((current) => current.filter((notice) => notice.id !== id)),

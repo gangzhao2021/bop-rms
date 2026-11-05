@@ -23,6 +23,7 @@ import type {
 } from "../../../apps/api/src/merchant-bff.js";
 import { createCurrentOrderQueueClient } from "../../../apps/merchant-web/src/current-order-queue-client.js";
 import { createKitchenBoardClient } from "../../../apps/merchant-web/src/kitchen-board-client.js";
+import { prepareKitchenStep } from "../../../apps/merchant-web/src/kitchen-step-client.js";
 import { parseKitchenBoardView } from "../../../apps/merchant-web/src/kitchen-board.js";
 import { parsePickupQueueView } from "../../../apps/merchant-web/src/pickup.js";
 import { createDiningSessionClient } from "../../../apps/merchant-web/src/dining-session-client.js";
@@ -134,6 +135,7 @@ beforeAll(async () => {
         acceptedHost: "merchant.invalid",
         orderQueue: read("orderQueue"),
         kitchenQuery: read("kitchenQuery"),
+        kitchenStep: read("kitchenStep"),
         diningTables: read("diningTables"),
         settlement: read("settlement"),
         pickupQuery: read("pickupQuery"),
@@ -691,6 +693,7 @@ const kitchenItem = (n: number, status: "Queued" | "Completed"): KitchenList["it
       served: false,
     },
   ],
+  comboPartSections: { [id(0x650 + n)]: null },
   chase: { count: 1, lastChasedAt: at(20) },
   takenOnPaper: true,
   workItemCreatedAt: at(16),
@@ -979,6 +982,49 @@ describe("merchant BFF responses carry every read-model field the browser parses
     expect(dropped(kitchenView)).toEqual([]);
     expect(board.items).toHaveLength(2);
     expect(board.awaitingAcceptance?.map((label) => label.acceptBy)).toEqual([at(40), null]);
+  });
+
+  it("kitchen step", async () => {
+    const line = {
+      ticketReference: id(0x660),
+      workItemReference: id(0x661),
+      orderItemReference: id(0x662),
+      optionReferences: null,
+    };
+    const stepView = {
+      projectionName: "kitchen_work_queue_v1" as const,
+      projectionPending: true as const,
+      occurredAt: at(20),
+      lines: [
+        {
+          ...line,
+          outcome: "Finished" as const,
+          refusedReason: null,
+          ticketVersion: "9",
+          workItemVersion: "4",
+          workItemStatus: "Completed" as const,
+          completedQuantity: 1,
+          requiredQuantity: 1,
+          acceptedAt: at(20),
+          readyAt: at(20),
+          dishesDone: null,
+        },
+      ],
+    };
+    stub("kitchenStep").mockResolvedValue(stepView);
+    const reply = await throughClient(() =>
+      prepareKitchenStep(
+        {
+          step: "Finish",
+          storeReference,
+          correlationReference: id(0x663),
+          lines: [{ ...line, idempotencyKey: id(0x664) }],
+        },
+        fetcher,
+      ).execute(csrf),
+    );
+    expect(dropped(stepView)).toEqual([]);
+    expect(reply.lines[0]?.outcome).toBe("Finished");
   });
 
   it("tables", async () => {

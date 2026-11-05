@@ -1,3 +1,5 @@
+import { comboDishesWithoutSection } from "./merchant-combo-parts.js";
+import { withOptionalRead } from "./merchant-round-business-date.js";
 import { readClosedRecord } from "@bop/identity";
 import {
   changeKitchenProductSection,
@@ -39,6 +41,11 @@ export interface MerchantKitchenSectionsResult {
     readonly productReference: string;
     readonly sectionReference: string | null;
     readonly version: number;
+  }[];
+  /** Dishes used in combos with no section here: they show on every section's screen. */
+  readonly comboDishesWithoutSection: readonly {
+    readonly productReference: string;
+    readonly name: string;
   }[];
 }
 
@@ -192,9 +199,20 @@ export function createMerchantKitchenSections(options: {
                   ? [command.productReference]
                   : [];
             const marks = await loadKitchenProductSections(runner, scope, products);
+            // Combos by section: said on the page where the owner names sections, also after one
+            // was removed. Left out when it cannot be read.
+            const unmarked =
+              command.action === "ChangeDish"
+                ? []
+                : await withOptionalRead(
+                    runner,
+                    () => comboDishesWithoutSection(runner, scope, "en-CA"),
+                    [],
+                  );
             return Object.freeze({
               version: list.version,
               sections: list.sections,
+              comboDishesWithoutSection: Object.freeze(unmarked),
               products: Object.freeze(
                 products.map((productReference) =>
                   Object.freeze({

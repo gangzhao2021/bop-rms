@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { t } from "./i18n/i18n.js";
+import { listSeparator, t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 
 export interface KitchenSectionsView {
   readonly version: number;
   readonly sections: readonly { readonly sectionReference: string; readonly name: string }[];
+  /** Dishes used in combos with no section here: they show on every section's screen. */
+  readonly comboDishesWithoutSection?: readonly {
+    readonly productReference: string;
+    readonly name: string;
+  }[];
 }
 export class KitchenSectionsClientError extends Error {
   constructor(readonly code: "Denied" | "Changed" | "Unavailable") {
@@ -25,6 +30,15 @@ export function parseKitchenSections(value: unknown): KitchenSectionsView {
     throw new KitchenSectionsClientError("Unavailable");
   return {
     version: Number(raw.version),
+    comboDishesWithoutSection: Array.isArray(raw.comboDishesWithoutSection)
+      ? (raw.comboDishesWithoutSection as Record<string, unknown>[]).flatMap((dish) =>
+          typeof dish.productReference === "string" &&
+          reference.test(dish.productReference) &&
+          typeof dish.name === "string"
+            ? [{ productReference: dish.productReference, name: dish.name }]
+            : [],
+        )
+      : [],
     sections: (raw.sections as Record<string, unknown>[]).map((section) => {
       if (
         typeof section.sectionReference !== "string" ||
@@ -230,6 +244,18 @@ export function StoreKitchenSections({
           {t("Save sections")}
         </button>
       </div>
+      {(saved?.comboDishesWithoutSection ?? []).length > 0 ? (
+        <p className="store-features__detail" role="note">
+          {t(
+            "In a combo with no section yet: {dishes}. They show on every section's screen until someone finishes them. Give each its section on the menu.",
+            {
+              dishes: (saved?.comboDishesWithoutSection ?? [])
+                .map((dish) => dish.name)
+                .join(listSeparator()),
+            },
+          )}
+        </p>
+      ) : null}
       {message ? <p role={message.tone}>{message.text}</p> : null}
     </fieldset>
   );

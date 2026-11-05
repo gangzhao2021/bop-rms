@@ -449,6 +449,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "About {value} before tax and tip. The final total comes when you send the order.":
     "约 {value}，未含税和小费。发送后显示最终合计。",
   "Start cooking": "开始做",
+  "Remake: {dish}": "重做：{dish}",
+  "In a combo with no section yet: {dishes}. They show on every section's screen until someone finishes them. Give each its section on the menu.":
+    "这些套餐里的菜还没有档口：{dishes}。在有人做好之前，每个档口的屏幕上都会显示。请在菜单上给每道菜选档口。",
   "A combo's dishes go to their own sections.": "套餐里的每道菜去各自的档口。",
   "The kitchen got this {minutes} min ago and may already be making it. Ask them first.":
     "后厨收到已 {minutes} 分钟，可能已经在做了，先问一声后厨。",

@@ -76,6 +76,51 @@ export async function comboChoiceProducts(
 }
 
 /**
+ * Combos by section: the dishes used in this brand's combos that have no kitchen section at this
+ * Store now (never marked, marked none, or their section was removed). Each shows on every section's
+ * screen until someone finishes it, so the owner is told which they are.
+ */
+export async function comboDishesWithoutSection(
+  tx: Tx,
+  scope: Scope,
+  locale: string,
+): Promise<readonly { readonly productReference: string; readonly name: string }[]> {
+  const records = await listBundleComboRecords(tx as never, scope);
+  if (records.choices.length === 0) {
+    await restoreStore(tx, scope);
+    return [];
+  }
+  const dishSkus = new Set(records.choices.map((choice) => choice.dishSkuReference));
+  const dishes = new Map(
+    (await listBrandSkuChoices(tx as never, scope))
+      .filter((sku) => dishSkus.has(sku.skuReference))
+      .map((sku) => [sku.productReference, sku]),
+  );
+  await restoreStore(tx, scope);
+  const sections = new Set(
+    (await loadKitchenSections(tx as never, scope)).sections.map(
+      (section) => section.sectionReference,
+    ),
+  );
+  if (sections.size === 0) return [];
+  const marks = await loadKitchenProductSections(tx as never, scope, [...dishes.keys()]);
+  return [...dishes.entries()]
+    .filter(([product]) => {
+      const section = marks.get(product)?.sectionReference ?? null;
+      return section === null || !sections.has(section);
+    })
+    .map(([productReference, sku]) => {
+      const names = sku.productLocalizedNames;
+      return Object.freeze({
+        productReference,
+        name:
+          chineseOf(names) ||
+          (names[locale] ?? names["en-CA"] ?? Object.values(names)[0] ?? sku.skuCode),
+      });
+    });
+}
+
+/**
  * The combo parts of these order lines (lines that are not combos are left out): the chosen
  * dishes in the order chosen, each with whether the kitchen is finished with it and (with a tenant)
  * whether it was served. A dish the kitchen does not prepare (Kitchen's own rule, as the work

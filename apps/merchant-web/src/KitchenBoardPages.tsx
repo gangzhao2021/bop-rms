@@ -881,6 +881,8 @@ export interface KitchenStatusEntry {
   readonly key: string;
   readonly tone: "Info" | "New" | "Problem";
   readonly text: string;
+  /** When it was said (this page's clock); a standing fact has none and comes last. */
+  readonly at?: number;
 }
 /**
  * DEC-KITCHEN-ONE-TAP: nothing above the tickets changes height during service, so a message arriving
@@ -896,7 +898,8 @@ export function KitchenStatusRow({
   readonly details?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [first] = entries;
+  const sorted = [...entries].sort((a, b) => (b.at ?? -1) - (a.at ?? -1));
+  const [first] = sorted;
   const hasMore = entries.length > 1 || details !== undefined;
   const opened = open && hasMore;
   const hasDetails = details !== undefined;
@@ -922,7 +925,7 @@ export function KitchenStatusRow({
         <div className="kitchen-status-row__detail">
           {entries.length > 0 ? (
             <ul>
-              {entries.map((entry) => (
+              {sorted.map((entry) => (
                 <li key={entry.key} data-tone={entry.tone}>
                   {entry.text}
                 </li>
@@ -1683,6 +1686,7 @@ export function KitchenBoardScreen({
   soundResumes = false,
   onSoundToggle,
   arrivals = [],
+  arrivalsAt,
   cancelledLines,
   section: chosenSection,
   onSection,
@@ -1755,6 +1759,8 @@ export function KitchenBoardScreen({
   readonly soundResumes?: boolean | undefined;
   /** The lines of this screen that arrived in the last minute. */
   readonly arrivals?: readonly string[] | undefined;
+  /** When the newest of them arrived (this page's clock). */
+  readonly arrivalsAt?: number | undefined;
   /** The lines of this screen just cancelled, kept on their card for a minute. */
   readonly cancelledLines?: ReadonlySet<string> | undefined;
   /** The section this screen shows, when the page keeps it (it decides what rings here). */
@@ -2466,6 +2472,7 @@ export function KitchenBoardScreen({
                   {
                     key: "stale",
                     tone: "Problem" as const,
+                    at: Infinity,
                     text:
                       t("Read-only until reconnected") +
                       " · " +
@@ -2477,6 +2484,7 @@ export function KitchenBoardScreen({
                     {
                       key: "catching-up",
                       tone: "Problem" as const,
+                      at: Infinity,
                       text: t("Catching up with new orders"),
                     },
                   ]
@@ -2488,6 +2496,7 @@ export function KitchenBoardScreen({
                   {
                     key: "arrivals",
                     tone: "New" as const,
+                    ...(arrivalsAt === undefined ? {} : { at: arrivalsAt }),
                     text:
                       arrivalLabels.length === 1
                         ? t("New order: {list}", { list: arrivalLabels.join(listSeparator()) })
@@ -3498,17 +3507,40 @@ function KitchenBoardContent(
     const now = Math.max(arrivalClock, typeof performance === "undefined" ? 0 : performance.now());
     return [...arrivals].filter(([, at]) => now - at < kitchenArrivalFreshMs).map(([key]) => key);
   }, [arrivals, arrivalClock]);
+  // When each last changed: the row says the newest thing first.
+  const reworkKind = useRef(rework.state.kind);
+  const reworkChangedAt = useRef(0);
+  if (reworkKind.current !== rework.state.kind) {
+    reworkKind.current = rework.state.kind;
+    reworkChangedAt.current = performance.now();
+  }
+  const closeKind = useRef(staleClose.state.kind);
+  const closeChangedAt = useRef(0);
+  if (closeKind.current !== staleClose.state.kind) {
+    closeKind.current = staleClose.state.kind;
+    closeChangedAt.current = performance.now();
+  }
+  // A remake that went through has nothing more to say after a moment.
+  const dismissRework = rework.dismiss;
+  const reworkConfirmed = rework.state.kind === "Confirmed";
+  useEffect(() => {
+    if (!reworkConfirmed || typeof window === "undefined") return;
+    const timer = window.setTimeout(dismissRework, 30_000);
+    return () => window.clearTimeout(timer);
+  }, [reworkConfirmed, dismissRework]);
   const statusEntries: readonly KitchenStatusEntry[] = [
     ...actions.notices.map((notice) => ({
       key: "step-" + notice.id,
       tone: notice.tone === "Done" ? ("Info" as const) : ("Problem" as const),
       text: notice.text,
+      at: notice.at,
     })),
     ...(rework.state.kind === "Idle"
       ? []
       : [
           {
             key: "rework",
+            at: reworkChangedAt.current,
             tone:
               rework.state.kind === "Confirmed" || rework.state.kind === "Submitting"
                 ? ("Info" as const)
@@ -3521,6 +3553,7 @@ function KitchenBoardContent(
       : [
           {
             key: "stale-close",
+            at: closeChangedAt.current,
             tone:
               staleClose.state.kind === "Confirmed" || staleClose.state.kind === "Submitting"
                 ? ("Info" as const)
@@ -3593,6 +3626,7 @@ function KitchenBoardContent(
       soundResumes={soundResumes}
       onSoundToggle={toggleSound}
       arrivals={freshArrivals}
+      arrivalsAt={freshArrivals.length === 0 ? undefined : Math.max(...arrivals.values())}
       cancelledLines={cancelled}
       section={section}
       onSection={setSection}

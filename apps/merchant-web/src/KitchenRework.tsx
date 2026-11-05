@@ -382,7 +382,10 @@ export function KitchenRemakeDialog({
     if (!element) return;
     if (item && !element.open) {
       setReason(null);
-      setNote("");
+      // Combos by section: remaking from a dish's line says which dish; the record stays the combo's.
+      setNote(
+        item.comboPartOf === undefined ? "" : t("Remake: {dish}", { dish: item.displayName }),
+      );
       setQuantity(item.requiredQuantity);
       element.showModal();
     } else if (!item && element.open) element.close();
@@ -518,7 +521,6 @@ export function KitchenRecentlyFinished({
   readonly orderLabel: (item: KitchenBoardItem) => string;
 }) {
   const finished = recentlyFinishedKitchenItems(items, observedAt);
-  if (finished.length === 0) return null;
   const remade = (item: KitchenBoardItem) =>
     reworks.filter(
       (rework) =>

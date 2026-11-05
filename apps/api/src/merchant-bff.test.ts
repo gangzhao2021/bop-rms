@@ -7830,3 +7830,90 @@ describe("WP-2423 (2026-10-16 v15) Store configuration withdrawal", () => {
     expect(restore).toHaveBeenCalledTimes(3);
   });
 });
+
+it("DEC-KITCHEN-ONE-TAP: a tap reaches the step route with its session, and a big one fits", async () => {
+  const step = vi.fn<NonNullable<MerchantBffRouterOptions["kitchenStep"]>>(async () => ({
+    projectionName: "kitchen_work_queue_v1",
+    projectionPending: true,
+    occurredAt: "2026-11-05T12:00:00.000Z",
+    lines: [],
+  }));
+  const root = await serveKitchenStep(step);
+  {
+    const post = (
+      body: string,
+      headers: Record<string, string> = {},
+      path = "/merchant/kitchen/step",
+    ) =>
+      request(root, path, {
+        method: "POST",
+        headers: {
+          ...safeHeaders,
+          Cookie: "__Host-bop-merchant=" + sessionCookie,
+          "X-BOP-CSRF": csrf,
+          "Content-Type": "application/json",
+          ...headers,
+        },
+        body,
+      });
+    // The largest tap: 50 lines, each naming 20 chosen dishes.
+    const reference = "01909985-0000-7000-8000-000000000001";
+    const largest = JSON.stringify({
+      step: "Finish",
+      storeReference: reference,
+      correlationReference: reference,
+      lines: Array.from({ length: 50 }, () => ({
+        idempotencyKey: reference,
+        ticketReference: reference,
+        workItemReference: reference,
+        orderItemReference: reference,
+        optionReferences: Array.from({ length: 20 }, () => reference),
+      })),
+    });
+    const fits = await post(largest);
+    expect(fits.status).toBe(200);
+    expect(fits.headers.get("cache-control")).toBe("no-store");
+    expect(step.mock.calls[0]?.[0]).toMatchObject({ sessionCookie, csrf });
+    // Too big is its own closed answer, never "result unknown".
+    const large = await post(JSON.stringify({ padding: "x".repeat(70_000) }));
+    expect(large.status).toBe(413);
+    expect(await large.json()).toEqual({ error: "kitchen_step_invalid" });
+    // No query fields; a cross-site tap is refused before it runs.
+    expect((await post("{}", {}, "/merchant/kitchen/step?store=other")).status).toBe(403);
+    expect((await post("{}", { Origin: "https://elsewhere.example" })).status).toBe(403);
+    // A refusal maps as /kitchen/work does.
+    step.mockRejectedValueOnce(new KitchenWorkLifecycleError("KITCHEN_WORK_INPUT_INVALID"));
+    expect((await post("{}")).status).toBe(400);
+    step.mockRejectedValueOnce(new KitchenWorkLifecycleError("KITCHEN_WORK_PERMISSION_DENIED"));
+    expect((await post("{}")).status).toBe(403);
+    step.mockRejectedValueOnce(
+      new KitchenWorkLifecycleError("KITCHEN_WORK_DEPENDENCY_UNAVAILABLE"),
+    );
+    expect((await post("{}")).status).toBe(503);
+    step.mockRejectedValueOnce(
+      Object.assign(new Error("synthetic"), { code: "TENANT_DATABASE_TRANSACTION_CONFLICT" }),
+    );
+    const busy = await post("{}");
+    expect(busy.status).toBe(503);
+    expect(await busy.json()).toEqual({ error: "retry_later" });
+  }
+});
+
+async function serveKitchenStep(kitchenStep: NonNullable<MerchantBffRouterOptions["kitchenStep"]>) {
+  const app = express();
+  app.use(
+    "/merchant",
+    createMerchantBffRouter({
+      service: fakeService(),
+      kitchenStep,
+      exactOrigin: "https://merchant.invalid",
+      acceptedHost: "merchant.invalid",
+    }),
+  );
+  const server = app.listen(0, "127.0.0.1");
+  servers.push(server);
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("listener unavailable");
+  return `http://127.0.0.1:${address.port}`;
+}
