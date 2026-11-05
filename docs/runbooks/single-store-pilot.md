@@ -484,9 +484,10 @@ choice yet, so:
    can't be chosen. If it is out for the rest of the day, list after the rush. Offer it again the
    same way when it is back, and list again.
 4. An order already placed with it: the kitchen or the counter tells the guest and offers another
-   choice. At a table paying at the end, open the order under `Orders`, use
-   `Take dishes off the bill` (with the reason) and enter the changed dish as a new round. For an
-   order already paid, use `Cancel items`, which refunds it, and take a new order for the change.
+   choice. At a table paying at the end, open the order under `Orders`: if the kitchen has not
+   started it, use `Take dishes off the bill`; if it has, record `Comp or discount` on the table with
+   the reason. Then enter the changed dish as a new round. For an order already paid, use
+   `Cancel items`, which refunds it, and take a new order for the change.
 
 A combo offers its dishes without their choices (no size, sugar or ice), so staff ask the guest for
 those and tell the kitchen by word or on the slip.
@@ -855,8 +856,9 @@ never goes to the kitchen`; save, and press `List it`. Do not hide it: guests ne
 - **Fees and items the kitchen does not make** (WP-2423 item 8a): a fee (tea, corkage, sauce bar,
   bag fee) and a dish marked `Not prepared by the kitchen` never appear on the board, on a table
   or on a pickup. A pickup is ready as soon as the rest of it is, and one with nothing to prepare
-  is ready at once and can be handed over. On paper the counter writes them on the bill, not on the
-  kitchen's slip.
+  is ready at once and can be handed over. To take one off a table's bill use `Comp or discount`,
+  because it counts as served from the moment it is ordered. On paper the counter writes them on the
+  bill, not on the kitchen's slip.
 - **Kitchen sections** (WP-2423 item 8 ⑧): the owner names the sections once on `Store features`
   under `Kitchen sections`, and gives each dish its section on `Menu` (a dish with none shows under
   `No section`). The board can then show one section on a screen, chosen on that screen and kept
