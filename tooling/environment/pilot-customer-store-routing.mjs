@@ -22,6 +22,8 @@ const GUEST_COOKIE = "__Host-bop-guest";
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MENU = /^\/api\/v1\/public\/stores\/([^/?]+)\/menu(?:[?].*)?$/u;
 const ENTRY = /^\/bff\/customer\/entry(?:[?].*)?$/u;
+/** A fresh browser's CSRF token, before it belongs to any Store; it names no merchant's data. */
+const CSRF = /^\/api\/v1\/customer\/session\/csrf(?:[?].*)?$/u;
 /** Requests whose Store is in their body (read before forwarding, at most this many bytes). */
 export const bodyRoutedLimit = 16 * 1024;
 export const isBodyRouted = (method, url) => method === "POST" && ENTRY.test(url);
@@ -79,6 +81,7 @@ export function createCustomerStoreRouting({
   /** The Store a request goes to (its `target`). */
   return async function storeOf({ method, url, cookie, body }) {
     if (stores.length === 1) return primary;
+    const nobody = typeof url === "string" && CSRF.test(url) ? primary : unowned;
     const menu = typeof url === "string" ? MENU.exec(url) : null;
     if (menu) return byPublic.get(decodeURIComponent(menu[1])) ?? unowned;
     if (isBodyRouted(method, url) && body !== undefined) {
@@ -86,7 +89,7 @@ export function createCustomerStoreRouting({
       return (reference !== null && UUID_V7.test(reference) && byPublic.get(reference)) || unowned;
     }
     const credential = guestCookie(cookie);
-    if (credential === null) return unowned;
+    if (credential === null) return nobody;
     // Each Store's own hash of the cookie, in its own records (merchants don't share a guest key).
     for (const { store, sessions } of owners) {
       let selector;
@@ -103,6 +106,6 @@ export function createCustomerStoreRouting({
         return store;
       }
     }
-    return unowned;
+    return nobody;
   };
 }

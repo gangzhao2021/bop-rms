@@ -47,6 +47,21 @@ it("DEC-MULTI-MERCHANT-ONE-INSTALLATION: a request no merchant owns reaches no m
   expect(await storeOf({ ...other, cookie: cookieOf(credential) })).toBeNull();
 });
 
+it("a fresh browser's CSRF token comes from the first Store: it names no merchant's data", async () => {
+  const first = store(1, 1);
+  const storeOf = routing([first, store(2, 2)]);
+  expect(await storeOf({ method: "GET", url: "/api/v1/customer/session/csrf" })).toBe(first);
+  // A guest of a Store gets it from their own Store.
+  const second = store(2, 2, ["2:" + credential]);
+  expect(
+    await routing([first, second])({
+      method: "GET",
+      url: "/api/v1/customer/session/csrf",
+      cookie: cookieOf(credential),
+    }),
+  ).toBe(second);
+});
+
 it("routes a guest to their own merchant's Store by server-side records", async () => {
   const a = store(1, 1),
     b = store(2, 2, ["2:" + credential]);

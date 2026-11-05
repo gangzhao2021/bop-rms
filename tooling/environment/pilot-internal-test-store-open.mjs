@@ -226,6 +226,13 @@ async function merchant(options) {
     const openedAt = new Date().toISOString();
     await client.query("BEGIN");
     try {
+      // TEST-ONLY: the Owner's authenticator status, as the DEMO staff have (a real Owner's comes
+      // with their Cognito account). Identity's own row; the file's first person shows its shape.
+      const staff = await read("internal-test-merchant.json");
+      await client.query(
+        "INSERT INTO bop_identity.workforce_mfa_status (actor_id,status,provider_evidence_id,verified_at,reset_at,version) SELECT $1,status,NULL,NULL,NULL,1 FROM bop_identity.workforce_mfa_status WHERE actor_id=$2 ON CONFLICT (actor_id) DO NOTHING",
+        [options.ownerActorReference, staff.actors[0].actorReference],
+      );
       await client.query(`SET LOCAL ROLE "${installation.roles.api}"`);
       const result = await opening.recordMerchantOpening(client, {
         command,

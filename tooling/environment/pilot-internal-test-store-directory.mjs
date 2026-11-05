@@ -110,7 +110,11 @@ const merchantOwnFiles = new Set([
   "cancellation-workflow-draft-result.json",
 ]);
 /** A new merchant's keys are its own, created for it (`pilot-qr`, `pilot-dining`), never copied. */
-const merchantOwnKeys = new Set(["internal-test-dining-key", "internal-test-qr-key.pem"]);
+const merchantOwnKeys = new Set([
+  "internal-test-dining-key",
+  "internal-test-qr-key.pem",
+  "internal-test-staff-totp.json",
+]);
 /** Files that name one Store's dining tables; the new Store has none until staff add them. */
 const isTableFile = (name) => /^internal-test-dining-table.*\.json$/u.test(name);
 /** Historical copies and records the new Store never had. */
@@ -360,6 +364,9 @@ async function provisionMerchantOwn(directory, target, merchant) {
     ...common,
     file: join(target, "internal-test-qr-key.pem"),
   }).provisionInternalQr();
+  // Its Owner's own TEST authenticator; no other merchant's secrets.
+  const { provisionInternalStaffTotp } = await import("./pilot-staff-totp.mjs");
+  await provisionInternalStaffTotp({ directory: target, selectors: [merchant.owner.selector] });
   const file = join(directory, "internal-test-merchant.json");
   const staff = JSON.parse(await readFile(file, "utf8"));
   if (!staff.actors.some((entry) => entry.selector === merchant.owner.selector)) {
