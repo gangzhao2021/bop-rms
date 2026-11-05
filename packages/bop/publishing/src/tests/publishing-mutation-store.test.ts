@@ -149,14 +149,12 @@ function fixture(storeScoped = false) {
   };
 }
 
-it("holds actual Brand SRE before existing public current reads and mutations on the same borrowed transaction", async () => {
+it("holds the Brand family fence exclusive before existing public current reads and mutations on the same borrowed transaction", async () => {
   const f = fixture(),
     callback = vi.fn(async (held: PublishingTransaction) => {
       expect(held).toBe(f.tx);
       expect(held.query).toBe(f.query);
-      expect(f.calls.at(-1)).toBe(
-        "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE",
-      );
+      expect(f.calls.at(-1)).toBe("SELECT pg_advisory_xact_lock(hashtextextended($1,0))");
       const owner = createPostgresPublishingMutationStore(
         { run: (work) => work(held) },
         id(1),
@@ -183,7 +181,7 @@ it("holds actual Brand SRE before existing public current reads and mutations on
   expect(f.query.mock.calls[1]?.[1]).toEqual([id(1), id(2)]);
   expect(f.calls).not.toContain("COMMIT");
   expect(f.calls).not.toContain("ROLLBACK");
-  const admission = f.calls.findIndex((sql) => sql.includes("SHARE ROW EXCLUSIVE")),
+  const admission = f.calls.findIndex((sql) => sql.includes("pg_advisory_xact_lock(")),
     firstRead = f.calls.findIndex((sql) => sql.startsWith("SELECT mutation_json")),
     firstInsert = f.calls.findIndex((sql) => sql.startsWith("INSERT INTO"));
   expect(firstRead).toBeGreaterThan(admission);

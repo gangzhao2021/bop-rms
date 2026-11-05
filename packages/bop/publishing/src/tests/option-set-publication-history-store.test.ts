@@ -159,7 +159,9 @@ it("returns actual minimal original headers and requires genuine final guards", 
   expect(result.entries[0]).not.toHaveProperty("validationEvidence");
   await f.finish();
   expect(f.authority).toHaveBeenCalledTimes(3);
-  expect(f.query.mock.calls.some(([sql]) => sql.includes("IN SHARE MODE"))).toBe(true);
+  expect(f.query.mock.calls.some(([sql]) => sql.includes("pg_advisory_xact_lock_shared"))).toBe(
+    true,
+  );
 });
 it("cannot claim finalized before host COMMIT guards", async () => {
   const f = fixture();

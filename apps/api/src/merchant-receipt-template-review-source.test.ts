@@ -87,8 +87,7 @@ function fixture() {
       expect(values).toEqual([id(1), id(2), id(3)]);
       return { rows: [] };
     }
-    if (sql === "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE")
-      return { rows: [] };
+    if (sql === "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))") return { rows: [] };
     if (sql.includes("ORDER BY lifecycle_version DESC LIMIT 1")) {
       expect(values).toEqual([id(1), id(2), id(3), id(5)]);
       const original = parseRecordedPublishingMutation(packet);
@@ -185,7 +184,7 @@ it("reads real canonical SubmitReview through the public owner and two current a
   expect(f.hold).toHaveBeenCalledTimes(2);
   expect(f.query.mock.calls.map(([sql]) => sql)).toEqual([
     expect.stringContaining("SELECT set_config"),
-    "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE",
+    "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",
     expect.stringContaining("ORDER BY lifecycle_version DESC LIMIT 1"),
   ]);
 });

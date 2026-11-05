@@ -265,7 +265,9 @@ describe("as-published release for historical reads", () => {
     expect(result.observedAt).toBe(observedAt);
     expect(Object.isFrozen(result)).toBe(true);
     expect(run).toHaveBeenCalledOnce();
-    const lock = query.mock.calls.findIndex(([sql]) => sql.includes("IN SHARE MODE"));
+    const lock = query.mock.calls.findIndex(([sql]) =>
+      sql.includes("pg_advisory_xact_lock_shared"),
+    );
     const read = query.mock.calls.findIndex(([sql]) => sql.includes("AND release_id=$5"));
     expect(lock).toBeGreaterThanOrEqual(0);
     expect(read).toBeGreaterThan(lock);

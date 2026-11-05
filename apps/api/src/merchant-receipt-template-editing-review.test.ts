@@ -310,8 +310,8 @@ it("uses actual owning readers for historical submission/current Review and perm
   expect(packet.submission?.submittedByReference).not.toBe(scope.actorReference);
   expect(packet.submission?.validationValidUntil).toBe(expiry);
   const sql = f.query.mock.calls.map((call) => call[0]);
-  expect(sql.findIndex((s) => s.includes("pg_advisory_xact_lock"))).toBeLessThan(
-    sql.findIndex((s) => s.includes("LOCK TABLE bop_publishing")),
+  expect(sql.findIndex((s) => s.includes("pg_advisory_xact_lock("))).toBeLessThan(
+    sql.findIndex((s) => s.includes("pg_advisory_xact_lock_shared")),
   );
   expect(await f.commit()).toBe(until);
   expect(sql.some((s) => s.startsWith("INSERT"))).toBe(false);

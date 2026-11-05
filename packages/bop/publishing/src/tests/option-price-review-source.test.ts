@@ -125,7 +125,8 @@ function fixture(records: CommitPublishingMutationInput[] = history()) {
   const query = vi.fn(async (sql: string) => {
     events.push(sql);
     if (sql.includes("transaction_isolation")) return { rows: [{ isolation }] };
-    if (sql.startsWith("SELECT set_config") || sql.startsWith("LOCK TABLE")) return { rows: [] };
+    if (sql.startsWith("SELECT set_config") || sql.includes("pg_advisory_xact_lock"))
+      return { rows: [] };
     if (sql.startsWith("SELECT mutation_json"))
       return {
         rows: records.map((record) => ({
@@ -173,7 +174,7 @@ describe("held OptionPrice rule review discovery", () => {
         expect(Object.isFrozen(result)).toBe(true);
       });
       const lock = f.events.findIndex((sql) =>
-        sql.includes(mode === "Write" ? "IN SHARE ROW EXCLUSIVE MODE" : "IN SHARE MODE"),
+        sql.includes(mode === "Write" ? "pg_advisory_xact_lock(" : "pg_advisory_xact_lock_shared("),
       );
       expect(lock).toBeGreaterThan(-1);
       expect(lock).toBeLessThan(f.events.indexOf("ACTUAL_PRICING_READ_CALLBACK"));

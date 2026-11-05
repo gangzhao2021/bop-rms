@@ -18,6 +18,8 @@ import {
 import {
   createPostgresPublishingMutationStore,
   parseRecordedPublishingMutation,
+  publishingFamilyFenceExclusive,
+  publishingFamilyFenceKey,
   publishingRecordedMutationDigest,
   type PublishingTransaction,
 } from "./publishing-mutation-store.js";
@@ -284,12 +286,11 @@ export function createPostgresOptionSetPublicationOperationStore(
       await checkedQuery("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
         "PublishingOperation:" + tenant + ":" + brand + ":" + c.operationReference,
       ]);
-      // Fixed owning write admission precedes every nested policy/candidate SHARE read.
+      // Fixed owning write admission precedes every nested policy/candidate read.
       if (mode === "Write")
-        await checkedQuery(
-          "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE",
-          [],
-        );
+        await checkedQuery(publishingFamilyFenceExclusive, [
+          publishingFamilyFenceKey(tenant, brand, null, c.optionSetReference),
+        ]);
       const wrapped = { query: checkedQuery },
         owner = createPostgresPublishingMutationStore(
           { run: (work) => work(wrapped) },
@@ -569,10 +570,9 @@ export function createPostgresOptionSetPublicationOperationStore(
       return execute(tx, c, "Resolve", async (host) => {
         const original = await host.inspect();
         if (original) return original;
-        await host.query(
-          "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE",
-          [],
-        );
+        await host.query(publishingFamilyFenceExclusive, [
+          publishingFamilyFenceKey(tenant, brand, null, c.optionSetReference),
+        ]);
         const reread = await host.inspect();
         if (reread) return reread;
         const at = host.check(),

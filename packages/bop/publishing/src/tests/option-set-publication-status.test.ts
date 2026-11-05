@@ -219,7 +219,9 @@ it("confirms real release absence with and without a recorded ordinary Draft", a
     latestRecordedLifecycle: { state: "Draft" },
     lastReleaseReference: null,
   });
-  expect(f.query.mock.calls.some(([sql]) => sql.includes("IN SHARE MODE"))).toBe(true);
+  expect(f.query.mock.calls.some(([sql]) => sql.includes("pg_advisory_xact_lock_shared"))).toBe(
+    true,
+  );
 });
 it("returns the complete original Approved publication proof through the existing current resolver", async () => {
   const f = fixture();

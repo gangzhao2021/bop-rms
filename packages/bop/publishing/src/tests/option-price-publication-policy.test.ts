@@ -152,7 +152,8 @@ function fixture(change: Record<string, unknown> = {}) {
     corrupt = false;
   const query = vi.fn(async (sql: string, values: readonly unknown[]) => {
     if (sql.includes("transaction_isolation")) return { rows: [{ isolation: "read committed" }] };
-    if (sql.startsWith("SELECT set_config") || sql.startsWith("LOCK TABLE")) return { rows: [] };
+    if (sql.startsWith("SELECT set_config") || sql.includes("pg_advisory_xact_lock"))
+      return { rows: [] };
     let selected: readonly CommitPublishingMutationInput[];
     if (sql.includes("release_id IS NOT NULL"))
       selected = history.filter((m) => m.release && m.next.familyReference === values[3]);
@@ -233,7 +234,9 @@ describe("OptionPrice publication policy", () => {
       expect(result.current.release.snapshotDigest).toBe(
         publishingOptionPricePublicationPolicyDigest(f.policy),
       );
-      expect(f.query.mock.calls.some(([sql]) => sql.includes("IN SHARE MODE"))).toBe(true);
+      expect(f.query.mock.calls.some(([sql]) => sql.includes("pg_advisory_xact_lock_shared"))).toBe(
+        true,
+      );
     },
   );
   it("retains historical governance approval after natural approval expiry while policy remains effective", async () => {

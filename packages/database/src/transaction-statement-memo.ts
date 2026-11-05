@@ -7,7 +7,9 @@
  * - a transaction-local scope setting already holding the value the statement writes stays as
  *   it is (every database trigger that changes a scope setting restores it before returning);
  * - an advisory transaction lock or a table lock the transaction already holds stays held until
- *   it ends, and taking it again returns at once.
+ *   it ends, and taking it again returns at once. An exclusive advisory lock also answers a shared
+ *   request on the same key; a shared one never answers an exclusive request (that is an upgrade,
+ *   which can wait).
  *
  * The memo answers such a repeat without a round trip. It forgets everything on any statement
  * that could undo or change what it remembers (a rollback to a savepoint, SET/RESET, any other
@@ -32,7 +34,7 @@ const pureSetConfig = new RegExp(
 );
 const setConfigCalls = new RegExp(setConfigCall, "giu");
 const advisoryLock =
-  /^SELECT\s+pg_advisory_xact_lock\(\s*hashtextextended\(\s*[^()]*,\s*0\s*\)\s*\)\s*;?$/iu;
+  /^SELECT\s+pg_advisory_xact_lock(_shared)?\(\s*hashtextextended\(\s*[^()]*,\s*0\s*\)\s*\)\s*;?$/iu;
 const tableLock =
   /^LOCK\s+TABLE\s+[a-z_][a-z0-9_.]*(?:\s*,\s*[a-z_][a-z0-9_.]*)*\s+IN\s+(?:ACCESS\s+SHARE|ROW\s+SHARE|ROW\s+EXCLUSIVE|SHARE\s+UPDATE\s+EXCLUSIVE|SHARE|SHARE\s+ROW\s+EXCLUSIVE|EXCLUSIVE|ACCESS\s+EXCLUSIVE)\s+MODE\s*;?$/iu;
 // A rollback (to a savepoint) undoes settings and releases locks taken since; SET/RESET may change
@@ -47,7 +49,13 @@ const mayUndo = (sql: string) =>
 
 type Remembered =
   | { readonly kind: "settings"; readonly pairs: readonly (readonly [string, string])[] }
-  | { readonly kind: "lock"; readonly key: string; readonly column: string };
+  | {
+      readonly kind: "lock";
+      readonly key: string;
+      readonly column: string;
+      /** A shared advisory lock: answered too by the exclusive one on the same key. */
+      readonly exclusiveKey: string | null;
+    };
 
 export interface TransactionStatementMemo {
   /** The result to answer instead of running the statement, or null to run it. */
@@ -81,14 +89,26 @@ function classify(sql: string, values: readonly unknown[]): Remembered | null {
     const pairs = settingPairs(text, values);
     return pairs === null ? null : { kind: "settings", pairs };
   }
-  if (advisoryLock.test(text) && values.every((value) => typeof value === "string"))
+  const advisory = advisoryLock.exec(text);
+  if (advisory !== null && values.every((value) => typeof value === "string")) {
+    const shared = advisory[1] !== undefined;
+    const exclusiveText = text.replace(/pg_advisory_xact_lock_shared/iu, "pg_advisory_xact_lock");
+    const key = (statement: string) =>
+      "advisory\u0000" + statement + "\u0000" + JSON.stringify(values);
     return {
       kind: "lock",
-      key: "advisory\u0000" + text + "\u0000" + JSON.stringify(values),
-      column: "pg_advisory_xact_lock",
+      key: key(text),
+      column: shared ? "pg_advisory_xact_lock_shared" : "pg_advisory_xact_lock",
+      exclusiveKey: shared ? key(exclusiveText) : null,
     };
+  }
   if (tableLock.test(text) && values.length === 0)
-    return { kind: "lock", key: "table\u0000" + text.replace(/\s+/gu, " "), column: "" };
+    return {
+      kind: "lock",
+      key: "table\u0000" + text.replace(/\s+/gu, " "),
+      column: "",
+      exclusiveKey: null,
+    };
   return null;
 }
 
@@ -123,7 +143,10 @@ export function createTransactionStatementMemo(
         return remembered.pairs.every(([name, value]) => settings.get(name) === value)
           ? resultOf("set_config", remembered.pairs.at(-1)?.[1] ?? null)
           : null;
-      return held.has(remembered.key) ? resultOf(remembered.column, "") : null;
+      return held.has(remembered.key) ||
+        (remembered.exclusiveKey !== null && held.has(remembered.exclusiveKey))
+        ? resultOf(remembered.column, "")
+        : null;
     },
     observe(sql: string, values: readonly unknown[]) {
       if (typeof sql !== "string" || !Array.isArray(values)) return forget();

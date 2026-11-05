@@ -64,6 +64,28 @@ describe("WP-2423 transaction statement memo", () => {
       memo.answer("SELECT pg_advisory_xact_lock(hashtextextended(now()::text,0))", []),
     ).toBeNull();
   });
+  it("answers a shared advisory lock after a shared or exclusive one, never an upgrade", () => {
+    const sharedSql = "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))";
+    const memo = createTransactionStatementMemo();
+    expect(memo.answer(sharedSql, ["a"])).toBeNull();
+    memo.observe(sharedSql, ["a"]);
+    expect(memo.answer(sharedSql, ["a"])).toMatchObject({
+      rows: [{ pg_advisory_xact_lock_shared: "" }],
+    });
+    // Shared held, exclusive asked: an upgrade that can wait, so it runs.
+    expect(memo.answer(lockSql, ["a"])).toBeNull();
+    expect(memo.answer(sharedSql, ["b"])).toBeNull();
+    memo.observe(lockSql, ["b"]);
+    // Exclusive held: a shared request on the same key returns at once.
+    expect(memo.answer(sharedSql, ["b"])).toMatchObject({
+      rows: [{ pg_advisory_xact_lock_shared: "" }],
+    });
+    expect(memo.answer(lockSql, ["b"])).toMatchObject({ rows: [{ pg_advisory_xact_lock: "" }] });
+    expect(memo.answer(sharedSql, ["c"])).toBeNull();
+    memo.observe("ROLLBACK TO SAVEPOINT s", []);
+    expect(memo.answer(sharedSql, ["a"])).toBeNull();
+    expect(memo.answer(sharedSql, ["b"])).toBeNull();
+  });
   it("keeps what it remembers across a savepoint that is released", () => {
     const memo = createTransactionStatementMemo({ "bop.brand_id": brand, "bop.store_id": store });
     memo.observe("SAVEPOINT s", []);

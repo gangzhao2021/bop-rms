@@ -841,23 +841,36 @@ async function proveListingBesideSettlement(context) {
         },
         active: async () => true,
       });
-    /** A listing's Publishing write, held `ms` before it commits (its own connection and role). */
-    const listingWrite = async (ms) => {
+    /**
+     * A publish of this Store's own configuration family, held `ms` before it commits (its own
+     * connection and role). DEC-MERCHANT-LOCK-SCOPE: only a write of the same family waits or is
+     * waited for; another merchant's write, or this merchant's menu, never meets the read.
+     */
+    const familyWrite = async (ms, key) => {
       await listing.query("BEGIN");
       await listing.query("SET LOCAL ROLE " + role);
-      await listing.query(
-        "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE",
-      );
+      await listing.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [key]);
       return new Promise((resolve) =>
         setTimeout(() => void listing.query("COMMIT").then(resolve), ms),
       );
     };
+    const storeFamily = "PublishingFamily:" + tenant + ":" + brand + ":" + store + ":" + family;
     const day = { endingAt: "2026-09-21T08:00:00.000Z" };
     const expected = await windowWith(transactions)(day);
     assert.equal(expected.businessDate, "2026-09-20");
 
-    // Without the wait: the read times out on the lock, as on v15.
-    let committed = listingWrite(3000);
+    // Another merchant's publish (and this merchant's menu) does not meet the read at all.
+    let committed = familyWrite(
+      3000,
+      "PublishingFamily:" + tenant + ":" + id(999) + ":Brand:" + family,
+    );
+    const beside = Date.now();
+    assert.deepEqual(await windowWith(transactions)(day), expected);
+    assert.ok(Date.now() - beside < 2000, "the read did not wait for another family");
+    await committed;
+
+    // A publish of this Store's own family: without the wait the read times out on the fence.
+    committed = familyWrite(3000, storeFamily);
     await assert.rejects(windowWith(transactions)(day), (error) => {
       assert.equal(error?.code, "TENANT_DATABASE_TRANSACTION_CONFLICT");
       return true;
@@ -865,7 +878,7 @@ async function proveListingBesideSettlement(context) {
     await committed;
 
     // The settlement composition waits it out and resolves the same day.
-    committed = listingWrite(3000);
+    committed = familyWrite(3000, storeFamily);
     const started = Date.now();
     assert.deepEqual(await windowWith(withTransactionConflictWait(transactions))(day), expected);
     assert.ok(Date.now() - started >= 2000, "the read waited for the listing write");

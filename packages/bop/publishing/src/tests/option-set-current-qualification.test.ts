@@ -112,11 +112,14 @@ it("fixed publication candidate acquires its writer-compatible fence before hist
     }),
   ).rejects.toThrow();
   const calls = query.mock.calls.map(([sql]) => sql);
-  expect(calls[1]).toBe(
-    "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE",
-  );
+  // The family's own fence, exclusive, before anything is read: no other family or merchant waits.
+  expect(calls[1]).toBe("SELECT pg_advisory_xact_lock(hashtextextended($1,0))");
+  expect(query.mock.calls[1]?.[1]).toEqual([
+    "PublishingFamily:" + id(1) + ":" + id(4) + ":Brand:" + id(5),
+  ]);
   expect(calls[2]).toContain("ORDER BY lifecycle_version DESC");
-  expect(calls.some((sql) => sql.includes(" IN SHARE MODE"))).toBe(false);
+  expect(calls.some((sql) => sql.includes("pg_advisory_xact_lock_shared"))).toBe(false);
+  expect(calls.some((sql) => sql.startsWith("LOCK TABLE"))).toBe(false);
   expect(calls.some((sql) => sql.startsWith("INSERT"))).toBe(false);
 });
 it("fixed candidate refuses unknown selectors/accessors before querying or claiming current authority", async () => {

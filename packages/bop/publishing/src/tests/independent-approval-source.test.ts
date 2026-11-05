@@ -138,7 +138,7 @@ describe("owning current independent approval source", () => {
     expect(Object.isFrozen(r)).toBe(true);
     expect(Object.isFrozen(r.validationCheckCodes)).toBe(true);
     expect(Object.isFrozen(r.scope)).toBe(true);
-    expect(query.mock.calls.some((c) => c[0].includes("IN SHARE MODE"))).toBe(true);
+    expect(query.mock.calls.some((c) => c[0].includes("pg_advisory_xact_lock_shared"))).toBe(true);
     row(m, 1).validationEvidence?.checkCodes.reverse();
     expect(r.validationCheckCodes).toEqual(["CURRENT_REFERENCES", "RULE_SATISFIABILITY"]);
     expect(JSON.stringify(r)).not.toContain('"audit"');

@@ -470,7 +470,7 @@ it("composes genuine public CreateDraft/Submit, independent Approve and Publish 
   expect(f.records[1]?.validationEvidence?.validUntil).toBe(after(60000));
   expect(f.calls.some((sql) => sql.startsWith("INSERT INTO platform_audit"))).toBe(true);
   expect(f.calls).not.toContain("COMMIT");
-  expect(f.calls.findIndex((sql) => sql.includes("SHARE ROW EXCLUSIVE"))).toBeLessThan(
+  expect(f.calls.findIndex((sql) => sql.includes("pg_advisory_xact_lock("))).toBeLessThan(
     f.calls.findIndex((sql) => sql.startsWith("INSERT INTO bop_publishing")),
   );
 });

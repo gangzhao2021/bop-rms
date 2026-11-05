@@ -191,7 +191,9 @@ describe("recorded independent approval behind actual current release", () => {
     const { digest, ...body } = result;
     expect(digest).toBe("sha256:" + sha256Hex(canonicalizeRfc8785(body)));
     expect(run).toHaveBeenCalledTimes(1);
-    const lock = query.mock.calls.findIndex(([sql]) => sql.includes("IN SHARE MODE"));
+    const lock = query.mock.calls.findIndex(([sql]) =>
+      sql.includes("pg_advisory_xact_lock_shared"),
+    );
     const history = query.mock.calls.findIndex(([sql]) =>
       sql.includes("lifecycle_version ASC LIMIT 5"),
     );

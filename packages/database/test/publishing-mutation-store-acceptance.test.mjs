@@ -384,11 +384,15 @@ it("commits Publishing and Audit atomically and matches original review evidence
         await bound.resolveCurrentReleaseForReference(referenceQuery);
         await admin.query("BEGIN");
         try {
-          await assert.rejects(
-            admin.query(
-              "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            { code: "55P03" },
+          // The family's writers wait for this reader; no other family or merchant does.
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["PublishingFamily:" + id(1) + ":" + id(2) + ":" + id(3) + ":" + id(4)],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await admin.query("ROLLBACK");
@@ -1097,11 +1101,15 @@ it("binds actual Tenant metadata to the current Publishing head in one held tran
         }
         await editor.query("BEGIN");
         try {
-          await assert.rejects(
-            editor.query(
-              "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            { code: "55P03" },
+          // The family's writers wait for this reader; no other family or merchant does.
+          assert.equal(
+            (
+              await editor.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["PublishingFamily:" + id(1) + ":" + id(2) + ":Brand:" + id(4)],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await editor.query("ROLLBACK");
@@ -1545,11 +1553,15 @@ it("binds actual Tenant metadata to the current Publishing head in one held tran
             }
             await editor.query("BEGIN");
             try {
-              await assert.rejects(
-                editor.query(
-                  "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE NOWAIT",
-                ),
-                { code: "55P03" },
+              // The family's writers wait for this reader; no other family or merchant does.
+              assert.equal(
+                (
+                  await editor.query(
+                    "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                    ["PublishingFamily:" + id(1) + ":" + id(2) + ":Brand:" + id(4)],
+                  )
+                ).rows[0].acquired,
+                false,
               );
             } finally {
               await editor.query("ROLLBACK");
@@ -1929,11 +1941,15 @@ it("binds actual Tenant metadata to the current Publishing head in one held tran
         );
         await editor.query("ROLLBACK");
         await editor.query("BEGIN");
-        await assert.rejects(
-          editor.query(
-            "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE NOWAIT",
-          ),
-          { code: "55P03" },
+        // The family's writers wait for this reader; no other family or merchant does.
+        assert.equal(
+          (
+            await editor.query(
+              "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+              ["PublishingFamily:" + id(1) + ":" + id(2) + ":Brand:" + id(2300)],
+            )
+          ).rows[0].acquired,
+          false,
         );
         await editor.query("ROLLBACK");
         return value;
@@ -2587,11 +2603,15 @@ it("persists typed Product policy content and resolves actual current governance
           { publication: publication(), observedAt: clock },
           async (p) => {
             await admin.query("BEGIN");
-            await assert.rejects(
-              admin.query(
-                "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE NOWAIT",
-              ),
-              (e) => e.code === "55P03",
+            // The family's writers wait for this reader; no other family or merchant does.
+            assert.equal(
+              (
+                await admin.query(
+                  "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                  ["PublishingFamily:" + id(1) + ":" + id(2) + ":Brand:" + id(4)],
+                )
+              ).rows[0].acquired,
+              false,
             );
             await admin.query("ROLLBACK");
             return p;
@@ -2934,7 +2954,7 @@ it("persists typed Option policy content and resolves actual current governance 
           assert.equal(
             (
               await tx.query(
-                "SELECT count(*)::int AS held FROM pg_locks WHERE pid=pg_backend_pid() AND relation='bop_publishing.publishing_mutation_record'::regclass AND mode='ShareLock' AND granted",
+                "SELECT count(*)::int AS held FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND mode='ShareLock' AND granted",
               )
             ).rows[0].held,
             1,
@@ -3020,7 +3040,7 @@ it("persists typed Option policy content and resolves actual current governance 
           assert.equal(
             (
               await tx.query(
-                "SELECT count(*)::int AS held FROM pg_locks WHERE pid=pg_backend_pid() AND relation='bop_publishing.publishing_mutation_record'::regclass AND mode='ShareLock' AND granted",
+                "SELECT count(*)::int AS held FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND mode='ShareLock' AND granted",
               )
             ).rows[0].held,
             1,

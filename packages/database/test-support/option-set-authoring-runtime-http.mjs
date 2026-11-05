@@ -206,7 +206,8 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
                   ? sql.includes("lock_shared")
                     ? "CurrentReviewShared"
                     : "CurrentReviewExclusive"
-                  : sql.includes("publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE")
+                  : String(values[0] ?? "").startsWith("PublishingFamily:") &&
+                      !sql.includes("lock_shared")
                     ? "PublishingWriteAdmission"
                     : sql.startsWith("INSERT INTO bop_publishing.option_set_publication_operation")
                       ? "TerminalAppend"
@@ -229,7 +230,8 @@ export async function exerciseOptionSetAuthoringRuntimeHttp(context, selection =
               if (
                 pause &&
                 client.processID === pause.writerPid &&
-                sql.includes("publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE")
+                String(values[0] ?? "").startsWith("PublishingFamily:") &&
+                !sql.includes("lock_shared")
               )
                 pause.publishingSreAttempted = true;
               const measuredFamily = /bop_(?:identity|membership|permission)\./u.test(sql)

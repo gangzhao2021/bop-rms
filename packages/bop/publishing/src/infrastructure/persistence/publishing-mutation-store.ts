@@ -64,6 +64,33 @@ export interface PublishingTransaction {
 export interface PublishingTransactionRunner {
   run<T>(work: (tx: PublishingTransaction) => Promise<T>): Promise<T>;
 }
+/**
+ * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a fence's scope is the fact it protects. Whoever holds a family's
+ * current fact keeps it until COMMIT (the accepted guarantee), and no other family or merchant ever
+ * meets that fence. Every writer takes it exclusive (`commit` and the history guard trigger, so a
+ * write path cannot skip it), a reader takes it shared before reading the family's head.
+ */
+export const publishingFamilyFenceShared =
+  "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))";
+export const publishingFamilyFenceExclusive =
+  "SELECT pg_advisory_xact_lock(hashtextextended($1,0))";
+export function publishingFamilyFenceKey(
+  tenantReference: string,
+  brandReference: string,
+  storeReference: string | null,
+  familyReference: string,
+): string {
+  return (
+    "PublishingFamily:" +
+    tenantReference +
+    ":" +
+    brandReference +
+    ":" +
+    (storeReference ?? "Brand") +
+    ":" +
+    familyReference
+  );
+}
 const fail = (): never => {
   throw new PublishingContractError("PUBLISHING_INPUT_INVALID");
 };
@@ -344,6 +371,9 @@ export function createPostgresPublishingMutationStore(
   const tenant = parsePublishingReference(tenantReference),
     scope = createPublishingScope(scopeInput);
   const scoped = [tenant, scope.brandReference, scope.storeReference];
+  const familyFence = (familyReference: string) => [
+    publishingFamilyFenceKey(tenant, scope.brandReference, scope.storeReference, familyReference),
+  ];
   const brandConfigurationRun = runner.run;
   // Server composition chooses this family. It is never request authorization or a SQL trust fact.
   const configuredFamily =
@@ -1138,11 +1168,7 @@ export function createPostgresPublishingMutationStore(
             [tenant, scope.brandReference],
           );
           check();
-          await query.call(
-            tx,
-            "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE",
-            [],
-          );
+          await query.call(tx, publishingFamilyFenceExclusive, familyFence(familyReference));
           check();
           const value = await work(tx);
           check();
@@ -1264,7 +1290,7 @@ export function createPostgresPublishingMutationStore(
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
             [tenant, scope.brandReference, scope.storeReference ?? ""],
           );
-          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+          await tx.query(publishingFamilyFenceShared, familyFence(family));
           const row = rows(
             await tx.query(
               "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND lifecycle_id=$4 ORDER BY lifecycle_version DESC LIMIT 1",
@@ -1316,7 +1342,7 @@ export function createPostgresPublishingMutationStore(
           "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
           [tenant, scope.brandReference],
         );
-        await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+        await tx.query(publishingFamilyFenceShared, familyFence(family));
         const records = rows(
           await tx.query(
             "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NULL AND lifecycle_id=$3 ORDER BY lifecycle_version ASC LIMIT 1025",
@@ -1446,10 +1472,7 @@ export function createPostgresPublishingMutationStore(
           "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
           [tenant, scope.brandReference],
         );
-        await tx.query(
-          "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE",
-          [],
-        );
+        await tx.query(publishingFamilyFenceExclusive, familyFence(family));
         const found = rows(
           await tx.query(
             "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NULL AND lifecycle_id=$3 ORDER BY lifecycle_version DESC LIMIT 1025",
@@ -1569,7 +1592,7 @@ export function createPostgresPublishingMutationStore(
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
             [tenant, scope.brandReference, scope.storeReference ?? ""],
           );
-          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+          await tx.query(publishingFamilyFenceShared, familyFence(family));
           const row = rows(
             await tx.query(
               "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND lifecycle_id=$4 ORDER BY lifecycle_version DESC LIMIT 1",
@@ -1850,10 +1873,7 @@ export function createPostgresPublishingMutationStore(
           "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
           [tenant, scope.brandReference],
         );
-        await query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
-        await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
-          "PublishingFamily:" + tenant + ":" + scope.brandReference + ":Brand:" + family,
-        ]);
+        await query(publishingFamilyFenceShared, familyFence(family));
         const select =
           "SELECT tenant_id,brand_id,store_id,family_id,lifecycle_id,lifecycle_version::text,operation_id,operation_code,actor_id,audit_id,intent_hash,release_id,release_sequence::text,to_char(changed_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') changed_at,mutation_json FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NULL AND family_id=$3";
         const statusRows = (result: unknown) => {
@@ -2047,7 +2067,7 @@ export function createPostgresPublishingMutationStore(
           "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
           [tenant, scope.brandReference],
         );
-        await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+        await tx.query(publishingFamilyFenceShared, familyFence(family));
         const found = rows(
           await tx.query(
             "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NULL AND family_id=$3 AND release_id IS NOT NULL ORDER BY release_sequence DESC LIMIT 1",
@@ -2132,7 +2152,7 @@ export function createPostgresPublishingMutationStore(
           "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
           [tenant, scope.brandReference],
         );
-        await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+        // The recorded release is immutable; the current read below takes its family's fence.
         const found = rows(
           await tx.query(
             "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NULL AND release_id=$3",
@@ -2268,7 +2288,7 @@ export function createPostgresPublishingMutationStore(
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
             [tenant, scope.brandReference, scope.storeReference ?? ""],
           );
-          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+          await tx.query(publishingFamilyFenceShared, familyFence(family));
           const headRow = rows(
             await tx.query(
               "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND family_id=$4 AND release_id IS NOT NULL ORDER BY release_sequence DESC LIMIT 1",
@@ -2354,7 +2374,7 @@ export function createPostgresPublishingMutationStore(
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
             [tenant, scope.brandReference, scope.storeReference ?? ""],
           );
-          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+          // The recorded release is immutable; the current read below takes its family's fence.
           const recordedRows = rows(
             await tx.query(
               "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND release_id=$4",
@@ -2478,7 +2498,7 @@ export function createPostgresPublishingMutationStore(
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
             [tenant, scope.brandReference, scope.storeReference ?? ""],
           );
-          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+          await tx.query(publishingFamilyFenceShared, familyFence(family));
           const recordedRows = rows(
             await tx.query(
               "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND family_id=$4 AND release_id=$5 LIMIT 2",
@@ -2673,7 +2693,7 @@ export function createPostgresPublishingMutationStore(
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
             [tenant, scope.brandReference],
           );
-          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+          // The registered body is immutable; the current read below takes its family's fence.
           const records = rows(
             await tx.query(
               "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NULL AND operation_code='CreateDraft' AND mutation_json ? 'productPolicyContent' AND mutation_json#>>'{next,snapshotReference}'=$3 ORDER BY changed_at,lifecycle_version LIMIT 1025",
@@ -2755,7 +2775,7 @@ export function createPostgresPublishingMutationStore(
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
             [tenant, scope.brandReference],
           );
-          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
+          // The registered body is immutable; the current read below takes its family's fence.
           const records = rows(
             await tx.query(
               "SELECT mutation_json,intent_hash FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NULL AND operation_code='CreateDraft' AND mutation_json ? 'optionSetPolicyContent' AND mutation_json#>>'{next,snapshotReference}'=$3 ORDER BY changed_at,lifecycle_version LIMIT 1025",
@@ -2879,10 +2899,8 @@ export function createPostgresPublishingMutationStore(
         );
         await query.call(
           tx,
-          mode === "Write"
-            ? "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE"
-            : "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE",
-          [],
+          mode === "Write" ? publishingFamilyFenceExclusive : publishingFamilyFenceShared,
+          familyFence(familyReference),
         );
         let active = true,
           reading = false,
@@ -3115,7 +3133,6 @@ export function createPostgresPublishingMutationStore(
             "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
             [tenant, scope.brandReference],
           );
-          await tx.query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
           const current = await createPostgresPublishingMutationStore(
             { run: (work) => work(tx) },
             tenant,
@@ -3301,25 +3318,7 @@ export function createPostgresPublishingMutationStore(
             if (original.intent_hash !== intent || digest(prior) !== intent) return fail();
             return Object.freeze({ auditReference: parsePublishingReference(original.audit_id) });
           }
-          await tx.query(
-            value.optionSetCurrentQualification ||
-              (next.configurationType === "RECEIPT_TEMPLATE" &&
-                next.purposeCode === "RECEIPT_ISSUANCE" &&
-                scope.kind === "Store")
-              ? "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE"
-              : "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE",
-            [],
-          );
-          await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-            "PublishingFamily:" +
-              tenant +
-              ":" +
-              scope.brandReference +
-              ":" +
-              (scope.storeReference ?? "Brand") +
-              ":" +
-              next.familyReference,
-          ]);
+          await tx.query(publishingFamilyFenceExclusive, familyFence(next.familyReference));
           const found = rows(
             await tx.query(
               "SELECT mutation_json FROM bop_publishing.publishing_mutation_record WHERE tenant_id=$1 AND brand_id=$2 AND store_id IS NOT DISTINCT FROM $3 AND lifecycle_id=$4 ORDER BY lifecycle_version DESC LIMIT 1025",

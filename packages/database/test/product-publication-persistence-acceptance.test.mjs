@@ -2232,11 +2232,15 @@ it("persists owning publication revisions, immutable content and controlled succ
               ).rows[0].acquired,
               false,
             );
-          await assert.rejects(
-            admin.query(
-              "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            { code: "55P03" },
+          // The family's writers wait for this reader; no other family or merchant does.
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["PublishingFamily:" + id(1) + ":" + id(2) + ":Brand:" + id(900)],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await admin.query("ROLLBACK");
@@ -6030,11 +6034,15 @@ it("records independent Product approval receipts and holds actual current origi
             ).rows[0].held,
             false,
           );
-          await assert.rejects(
-            admin.query(
-              "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            (e) => e.code === "55P03",
+          // The family's writers wait for this reader; no other family or merchant does.
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["PublishingFamily:" + id(1) + ":" + id(2) + ":Brand:" + id(900)],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await admin.query("ROLLBACK");

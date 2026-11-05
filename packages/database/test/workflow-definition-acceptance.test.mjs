@@ -550,11 +550,15 @@ it("persists synthetic Workflow versions with atomic Audit, original recovery an
         assert.equal(contextAfter.rows[0].store, id(10));
         await admin.query("BEGIN");
         try {
-          await assert.rejects(
-            admin.query(
-              "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE NOWAIT",
-            ),
-            { code: "55P03" },
+          // The family's writers wait for this reader; no other family or merchant does.
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+                ["PublishingFamily:" + id(1) + ":" + id(2) + ":Brand:" + snapshot.familyReference],
+              )
+            ).rows[0].acquired,
+            false,
           );
         } finally {
           await admin.query("ROLLBACK");

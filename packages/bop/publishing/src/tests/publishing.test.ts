@@ -1196,7 +1196,8 @@ it("actual independent approval remains a valid recorded decision under NotRequi
   const query = vi.fn(async (sql: string, values: readonly unknown[]) => {
     if (sql === "SELECT current_setting('transaction_isolation') AS isolation")
       return { rows: [{ isolation: "read committed" }] };
-    if (sql.startsWith("SELECT set_config") || sql.startsWith("LOCK TABLE")) return { rows: [] };
+    if (sql.startsWith("SELECT set_config") || sql.includes("pg_advisory_xact_lock"))
+      return { rows: [] };
     if (sql.includes("operation_code='CreateDraft'"))
       return { rows: history.filter((m) => m.optionSetPolicyContent).map(row) };
     if (sql.includes("release_id=$3"))

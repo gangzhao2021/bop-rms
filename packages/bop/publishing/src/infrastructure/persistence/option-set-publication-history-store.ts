@@ -15,6 +15,8 @@ import {
 import { evaluatePublishingTransition } from "../../domain/evaluate-publishing-transition.js";
 import {
   parseRecordedPublishingMutation,
+  publishingFamilyFenceKey,
+  publishingFamilyFenceShared,
   publishingRecordedMutationDigest,
   type PublishingTransaction,
 } from "./publishing-mutation-store.js";
@@ -276,11 +278,9 @@ export function createPostgresOptionSetPublicationHistoryStore(
         ]);
         if (environment.isolation !== "read committed" || environment.read_only !== "off")
           return fail();
-        // Table-before-family matches the actual owning writer's lock order.
-        await query("LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE", []);
-        check();
-        await query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [
-          "PublishingFamily:" + tenant + ":" + brand + ":Brand:" + request.familyReference,
+        // The family's fence alone: its writers (and only they) wait for this read.
+        await query(publishingFamilyFenceShared, [
+          publishingFamilyFenceKey(tenant, brand, null, request.familyReference),
         ]);
         check();
         const header = (r: Readonly<Record<string, unknown>>) => {

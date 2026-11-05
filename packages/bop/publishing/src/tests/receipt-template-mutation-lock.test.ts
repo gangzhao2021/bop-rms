@@ -146,28 +146,24 @@ function fixture(
       }),
   };
 }
-it("Store Receipt CreateDraft and SubmitReview acquire SHARE ROW EXCLUSIVE before insert and support actual subsequent SHARE head reads", async () => {
+const exclusiveFence = "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+  sharedFence = "SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))";
+it("Store Receipt CreateDraft and SubmitReview hold their family fence exclusive before insert and read the head under it", async () => {
   const f = fixture();
   for (const m of [f.create, f.submit]) {
     const start = f.calls.length;
     await expect(f.store.commit(m)).resolves.toEqual({ auditReference: m.audit.auditId });
     const writeCalls = f.calls.slice(start);
-    const lock = writeCalls.findIndex(
-        (s) =>
-          s === "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE",
-      ),
+    // The operation's own lock first, then the family's; the insert after both.
+    const lock = writeCalls.lastIndexOf(exclusiveFence),
       insert = writeCalls.findIndex((s) =>
         s.startsWith("INSERT INTO bop_publishing.publishing_mutation_record"),
       );
     expect(lock).toBeGreaterThanOrEqual(0);
     expect(insert).toBeGreaterThan(lock);
-    expect(writeCalls).not.toContain(
-      "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE",
-    );
+    expect(writeCalls.some((s) => s.startsWith("LOCK TABLE"))).toBe(false);
     await expect(f.read()).resolves.toEqual(m);
-    expect(f.calls.at(-2)).toBe(
-      "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE MODE",
-    );
+    expect(f.calls.at(-2)).toBe(sharedFence);
   }
   expect(f.records).toHaveLength(2);
 });
@@ -176,24 +172,22 @@ for (const [configuration, purpose, storeScoped] of [
   ["RECEIPT_TEMPLATE", "INTERNAL_TEST", true],
   ["RECEIPT_TEMPLATE", "RECEIPT_ISSUANCE", false],
 ] as const)
-  it(`retains original ROW EXCLUSIVE for ${configuration}/${purpose}/${storeScoped ? "Store" : "Brand"}`, async () => {
+  it(`takes no table lock for ${configuration}/${purpose}/${storeScoped ? "Store" : "Brand"}`, async () => {
     const f = fixture(configuration, purpose, storeScoped);
     await f.store.commit(f.create);
-    expect(f.calls).toContain(
-      "LOCK TABLE bop_publishing.publishing_mutation_record IN ROW EXCLUSIVE MODE",
-    );
-    expect(f.calls).not.toContain(
-      "LOCK TABLE bop_publishing.publishing_mutation_record IN SHARE ROW EXCLUSIVE MODE",
-    );
+    expect(f.calls).toContain(exclusiveFence);
+    expect(f.calls.some((s) => s.startsWith("LOCK TABLE"))).toBe(false);
     expect(f.records).toHaveLength(1);
   });
-it("exact Receipt mutation replay remains an original lookup without new table lock, mutation or Audit append", async () => {
+it("exact Receipt mutation replay remains an original lookup without new family lock, mutation or Audit append", async () => {
   const f = fixture();
   const receipt = await f.store.commit(f.create);
   const start = f.calls.length;
   await expect(f.store.commit(f.create)).resolves.toEqual(receipt);
   const replay = f.calls.slice(start);
-  expect(replay.some((s) => s.startsWith("LOCK TABLE") || s.startsWith("INSERT INTO"))).toBe(false);
+  // Only the operation's own lock, then the recorded original.
+  expect(replay.filter((s) => s === exclusiveFence)).toHaveLength(1);
+  expect(replay.some((s) => s.startsWith("INSERT INTO"))).toBe(false);
   expect(f.records).toHaveLength(1);
 });
 it("changed Receipt mutation intent remains rejected by original receipt comparison before new locking or writes", async () => {
@@ -208,8 +202,7 @@ it("changed Receipt mutation intent remains rejected by original receipt compari
       }),
     ),
   ).rejects.toMatchObject({ code: "PUBLISHING_INPUT_INVALID" });
-  expect(
-    f.calls.slice(start).some((s) => s.startsWith("LOCK TABLE") || s.startsWith("INSERT INTO")),
-  ).toBe(false);
+  expect(f.calls.slice(start).filter((s) => s === exclusiveFence)).toHaveLength(1);
+  expect(f.calls.slice(start).some((s) => s.startsWith("INSERT INTO"))).toBe(false);
   expect(f.records).toHaveLength(1);
 });
