@@ -169,7 +169,9 @@ export async function recordMerchantFirstContent(
   const of = (name: string) =>
     derivedReference(command.operationReference, "merchant-opening:content:" + name);
   const owner = command.ownerActorReference;
-  interface Tx { query(sql: string, values: readonly unknown[]): Promise<unknown> }
+  interface Tx {
+    query(sql: string, values: readonly unknown[]): Promise<unknown>;
+  }
   const db = tx as Tx;
   const noStore = () =>
     db.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [

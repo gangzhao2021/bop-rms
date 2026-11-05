@@ -3255,6 +3255,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "bop_tenant" &&
           module.manifest.ownedDatabase?.tables?.includes("store") &&
           moduleRelative === "src/infrastructure/persistence/brand-store-ids-source.ts";
+        // WP-2423 item 13 ③: whether a Store's Owner has published their own setup.
+        const acceptedOwnerPublishedSetupAsset =
+          module.packageName === "@rms/store" &&
+          module.manifest.ownedDatabase?.schema === "rms_store" &&
+          module.manifest.ownedDatabase?.tables?.includes("store_configuration_version") &&
+          moduleRelative === "src/infrastructure/persistence/owner-published-setup-source.ts";
         // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: opening another Store.
         const acceptedStoreOpeningAsset =
           module.packageName === "@bop/tenant" &&
@@ -3983,6 +3989,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedStoreOpeningScopeAsset &&
           !acceptedBrandStoreIdsAsset &&
           !acceptedStoreOpeningAsset &&
+          !acceptedOwnerPublishedSetupAsset &&
           !acceptedStoreRoleProvisioningAsset &&
           !acceptedBrandRoleProvisioningAsset &&
           !acceptedRoleAdministrationAsset &&
