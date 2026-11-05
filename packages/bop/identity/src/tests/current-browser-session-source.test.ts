@@ -43,6 +43,7 @@ function fixture() {
   let current = actor;
   let disabled = false;
   let records = [row];
+  let failure: unknown = null;
   const read = createPostgresCurrentBrowserSessionSource({
     now: () => "2026-09-10T10:10:00.000Z",
     hasher: { hash: () => parseSelectorHash("a".repeat(64)), equals: (a, b) => a === b },
@@ -54,12 +55,16 @@ function fixture() {
   const tx = {
     async query(sql: string, values: readonly unknown[]) {
       calls.push({ sql, values });
+      if (failure !== null) throw failure;
       return { rows: records };
     },
   };
   return {
     row,
     calls,
+    failQueries: (error: unknown) => {
+      failure = error;
+    },
     disableActor: () => {
       disabled = true;
     },
@@ -107,6 +112,25 @@ it("rejects disabled identity despite an active session", async () => {
   const f = fixture();
   f.disableActor();
   await expect(f.read()).rejects.toThrow();
+});
+it("WP-2423 item 10: a session read that failed carries on as itself, never as a refusal", async () => {
+  for (const failure of [
+    Object.assign(new Error("safe"), {
+      code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      diagnostic: { sqlState: "42501" },
+    }),
+    new TypeError("a bug"),
+  ]) {
+    const f = fixture();
+    f.failQueries(failure);
+    await expect(f.read()).rejects.toBe(failure);
+  }
+  // A session that has ended is still a refusal: these people are sent to sign in again.
+  const f = fixture();
+  f.row.status = "Revoked";
+  f.row.revocation_reason = "Logout";
+  f.row.revoked_at = new Date(at);
+  await expect(f.read()).rejects.toMatchObject({ code: "BROWSER_SESSION_DENIED" });
 });
 it("rejects future interactive activity", async () => {
   const f = fixture();

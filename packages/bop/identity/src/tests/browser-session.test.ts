@@ -15,6 +15,7 @@ import {
   createBrowserSessionRecord,
   createIdentityActor,
   IdentityContractError,
+  isBrowserSessionReadFailure,
   merchantSessionCookie,
   parseRawBrowserCredential,
   recordSessionActivity,
@@ -663,5 +664,36 @@ describe("browser Session and same-origin BFF Domain orchestration", () => {
       expect(String((error as Error).message)).not.toContain(secret);
       expect(JSON.stringify(error)).not.toContain(secret);
     }
+  });
+});
+
+describe("WP-2423 item 10: a read of the session that failed, as told apart from a decision", () => {
+  const marked = Object.defineProperty(
+    new BrowserSessionError("BROWSER_SESSION_DENIED"),
+    Symbol.for("bop.database.failure"),
+    { value: { sqlState: "42501" }, enumerable: false },
+  );
+  it.each([
+    [
+      "a database failure",
+      Object.assign(new Error("x"), { code: "TENANT_DATABASE_TRANSACTION_FAILED" }),
+    ],
+    ["a refusal decided after a query of its transaction failed", marked],
+    ["a raw SQLSTATE", Object.assign(new Error("x"), { code: "42501" })],
+    ["an owner's unavailable code", new Error("MEMBERSHIP_SOURCE_UNAVAILABLE")],
+    ["a programming error", new TypeError("a bug")],
+    ["an error with no code", new Error("something broke")],
+    ["no error at all", undefined],
+  ])("%s is a failure", (_name, error) => {
+    expect(isBrowserSessionReadFailure(error)).toBe(true);
+  });
+  it.each([
+    ["an ended session", new BrowserSessionError("BROWSER_SESSION_ENDED")],
+    ["a refused session", new BrowserSessionError("BROWSER_SESSION_DENIED")],
+    ["a refused person", new Error("WORKFORCE_ACCOUNT_BINDING_DENIED")],
+    ["a malformed credential", new IdentityContractError("IDENTITY_INPUT_INVALID")],
+    ["a secret that does not parse", new SyntaxError("Unexpected token")],
+  ])("%s is a decision", (_name, error) => {
+    expect(isBrowserSessionReadFailure(error)).toBe(false);
   });
 });
