@@ -129,7 +129,12 @@ export function createMerchantDiningTables(options: {
               equals: (a, b) => a === b,
             },
           );
-          const page = await store.listTables({ afterTableReference, limit, authorize });
+          const listed = await store.listTables({ afterTableReference, limit, authorize });
+          // A retired table is kept for its history but is no longer one of the Store's tables.
+          const page = {
+            ...listed,
+            items: listed.items.filter((table) => table.lifecycle !== "Retired"),
+          };
           const activeReferences = page.items.flatMap((table) =>
             table.activeDiningSessionReference === null ? [] : [table.activeDiningSessionReference],
           );

@@ -156,6 +156,37 @@ it("uses current selected scope and projects only safe fields", async () => {
     expect.objectContaining({ afterTableReference: null, limit: 10 }),
   );
 });
+it("WP-2423: leaves a retired table out, keeping the page's place in the list", async () => {
+  const f = setup();
+  mock.list.mockResolvedValue({
+    items: [
+      {
+        tableReference: id(4),
+        stableLabel: "T1",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Retired",
+        operationalState: "Available",
+        aggregateVersion: 3,
+        activeDiningSessionReference: null,
+      },
+      {
+        tableReference: id(5),
+        stableLabel: "T2",
+        areaCode: "MAIN",
+        capacity: 4,
+        lifecycle: "Published",
+        operationalState: "Available",
+        aggregateVersion: 2,
+        activeDiningSessionReference: null,
+      },
+    ],
+    nextAfterTableReference: id(5),
+  });
+  const view = await f.read(f.input);
+  expect(view.items.map((table) => table.stableLabel)).toEqual(["T2"]);
+  expect(view.nextAfterTableReference).toBe(id(5));
+});
 it("refuses the page before any table read without the dining.operate grant", async () => {
   const f = setup();
   f.authorizeAction.mockImplementation(async (action?: unknown) => ({
