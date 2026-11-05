@@ -49,6 +49,7 @@ import { createMerchantBrandScope } from "./merchant-brand-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import { createMerchantMenuPublicationCommand } from "./merchant-menu-publication-command.js";
 import { menuListingGaps, unpricedMenuOptions, type MenuListingGap } from "./menu-option-gates.js";
+import { menuReviewBudget, menuReviewBudgetExceededAt } from "./menu-review-preparation-source.js";
 import { itemAvailability } from "./merchant-availability.js";
 import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
@@ -103,8 +104,10 @@ export class MerchantMenuError extends Error {
 /** A menu review gap in staff terms: names only, never references or internal codes. */
 export interface MenuReviewProblem {
   /** "Stopped": nothing was named missing; `reason` says why it stopped (v15 2026-10-29).
-   * "Tax": an item is not taxed at one of the menu's Stores (listing gates, 2026-10-31). */
-  readonly missing: MenuReviewGap["missing"] | "Stopped" | "Tax" | "Kitchen" | "KitchenDish";
+   * "Tax": an item is not taxed at one of the menu's Stores (listing gates, 2026-10-31).
+   * "TooManyChoices": the item has more choice combinations than one review checks (WP-2423). */
+  readonly missing:
+    MenuReviewGap["missing"] | "Stopped" | "Tax" | "Kitchen" | "KitchenDish" | "TooManyChoices";
   /** WP-2423 item 11: the Store whose kitchen setup fixes it. */
   readonly storeReference?: string;
   readonly reason?: string;
@@ -814,6 +817,36 @@ export function createMerchantMenus(options: {
       },
     );
   };
+  /**
+   * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a menu whose review would run past its budget is refused before
+   * anything of it is listed, the item named: a milk tea with ten toppings has more combinations than
+   * one review checks, and finding that out only at Submit left its new prices live and showed staff
+   * a code. Counted as the review counts, without its recipe work. Leaves the Brand's scope.
+   */
+  const reviewBudgetGate = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
+    const over = await menuReviewBudgetExceededAt(ptx(tx) as never, {
+      brandReference: s.owner.brandReference,
+      menu: aggregate.draft,
+      observedAt: options.persistence.now(),
+      authorize: async () => s.permissions.maySubmit,
+    });
+    if (over === null) {
+      await brandScope(tx, s.owner.brandReference);
+      return;
+    }
+    const sku = (await listBrandSkuChoices(ptx(tx) as never, s.owner)).find(
+      (item) => item.skuReference === over,
+    );
+    await brandScope(tx, s.owner.brandReference);
+    throw new MerchantMenuError("ReviewBlocked", {
+      missing: "TooManyChoices",
+      productName: sku ? name(sku.productLocalizedNames, sku.skuCode) : null,
+      sizeName: sku ? name(sku.localizedNames, sku.skuCode) : null,
+      optionName: null,
+      quantity: null,
+      ingredientName: null,
+    });
+  };
   const unpricedOptions = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
     const missing = await unpricedMenuOptions(ptx(tx) as never, {
       owner: s.owner,
@@ -1016,7 +1049,7 @@ export function createMerchantMenus(options: {
       projectEvent(tx, input.brandReference, input.operationReference),
     authentication: options.authentication,
     reviewCreation: {
-      budget: { maximumConfigurations: 10000, maximumSearchSteps: 1000000 },
+      budget: menuReviewBudget,
       reference: (purpose, operation) => derivedReference(operation, "review:" + purpose),
     },
     reviewApproval: {
@@ -1160,6 +1193,7 @@ export function createMerchantMenus(options: {
             if ((await currentAllergenRegistry(ptx(tx) as never, s.owner)) === null)
               return stopped("Check:NoAllergenList");
             await listingGate(tx, s, loaded.aggregate);
+            await reviewBudgetGate(tx, s, loaded.aggregate);
             return { status: "Ready" as const };
           }),
         ),
@@ -1186,6 +1220,7 @@ export function createMerchantMenus(options: {
               if ((await unpricedOptions(tx, s, loaded.aggregate)).length > 0)
                 fail("OptionPriceMissing");
               await listingGate(tx, s, loaded.aggregate);
+              await reviewBudgetGate(tx, s, loaded.aggregate);
               return { s, loaded, registry };
             }),
           ),

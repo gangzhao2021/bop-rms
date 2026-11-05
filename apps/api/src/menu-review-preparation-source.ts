@@ -2,6 +2,7 @@ import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
 import { readClosedRecord } from "@bop/identity";
 import { loadProductImages } from "@bop/media";
 import {
+  CatalogError,
   createPostgresMenuDraftSource,
   createPostgresMenuReviewContentStore,
   createPostgresMenuReviewProductSource,
@@ -9,9 +10,11 @@ import {
   buildReviewedMenuOptionRules,
   buildReviewedMenuContent,
   createMenuReviewContent,
+  enumerateCatalogReviewSelections,
   validateMenuAllergenProvenance,
   parseCatalogReference,
   parseCatalogInstant,
+  type MenuAggregate,
   type ProductLifecycleTransaction,
   type AllergenSourceEvidence,
   type AllergenRegistryEntry,
@@ -36,6 +39,83 @@ export interface MenuReviewPreparationInput {
 const fail = (reason = "MenuReview"): never => {
   throw new MenuRecipeAllergenError(null, reason);
 };
+
+/**
+ * The most choice combinations one menu review checks, across every Store and channel of the menu.
+ * A drinks menu with many toppings reaches it; reviewing per option instead of per combination is
+ * a separate WP-2423 entry. Submit, Approve, Publish and the listing check all use this one.
+ */
+export const menuReviewBudget = Object.freeze({
+  maximumConfigurations: 10000,
+  maximumSearchSteps: 1000000,
+});
+
+/**
+ * WP-2423 DEC-MERCHANT-LOCK-SCOPE: the sellable at which a review of this menu would run out of its
+ * budget, or null when it would not. Counted exactly as the review counts (every Store and channel,
+ * each distinct set of chosen options and each option at every quantity, the budget shared by the
+ * whole menu) with no recipe or allergen work, so a menu the review would refuse is refused before
+ * anything of its listing (a price) goes live. Reads only; the caller owns the transaction.
+ */
+export async function menuReviewBudgetExceededAt(
+  tx: ProductLifecycleTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly menu: Pick<MenuAggregate["draft"], "sections" | "storeReferences" | "channelCodes">;
+    readonly observedAt: string;
+    readonly authorize: (tx: ProductLifecycleTransaction) => Promise<boolean>;
+  },
+): Promise<string | null> {
+  const references = [
+    ...new Set(
+      input.menu.sections.flatMap((section) =>
+        section.placements.map((placement) => String(placement.sellableReference)),
+      ),
+    ),
+  ].sort();
+  // The review refuses these itself, for its own reasons.
+  if (!references.length || !input.menu.storeReferences.length || !input.menu.channelCodes.length)
+    return null;
+  const products = await createPostgresMenuReviewProductSource({
+    brandReference: input.brandReference,
+    authorize: input.authorize,
+  })(tx, { sellableReferences: references, observedAt: input.observedAt });
+  const readOptions = createPostgresMenuReviewOptionSource({
+    brandReference: input.brandReference,
+    authorize: input.authorize,
+  });
+  let counted = 0;
+  for (const product of products) {
+    const source = await readOptions(tx, {
+      sellableReference: product.sellableReference,
+      productVersionReference: product.productVersionReference,
+      channelCodes: input.menu.channelCodes,
+      observedAt: input.observedAt,
+    });
+    // The review checks each channel once for every Store, each time against what is left of the
+    // one budget.
+    for (let stores = input.menu.storeReferences.length; stores > 0; stores -= 1)
+      for (const channel of source.channels) {
+        const remaining = menuReviewBudget.maximumConfigurations - counted;
+        if (remaining < 1) return String(product.sellableReference);
+        try {
+          counted += enumerateCatalogReviewSelections(
+            channel.rules,
+            {
+              maximumConfigurations: remaining,
+              maximumSearchSteps: menuReviewBudget.maximumSearchSteps,
+            },
+            "distinct-options",
+          ).length;
+        } catch (error) {
+          if (error instanceof CatalogError && error.code === "CATALOG_DEPENDENCY_UNAVAILABLE")
+            return String(product.sellableReference);
+          throw error;
+        }
+      }
+  }
+  return null;
+}
 
 /** Prepare only. Caller keeps tx open through immutable content/Publishing writes,
  * supplies current authority and uses the returned final digest for approval.

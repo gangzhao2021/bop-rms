@@ -6975,6 +6975,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Open {store}": "打开 {store}",
   "Approve your allergen list first: open Allergens, approve the list, then list the menu.":
     "请先批准过敏原清单：打开“过敏原”，批准清单，再上架菜单。",
+  "{item} has too many choice combinations to list. Remove a choice or split it into two dishes. Nothing was changed.":
+    "{item}的选项组合太多，无法上架。请去掉一个选项，或拆成两道菜。没有做任何改动。",
   "Looked at whether your Store is ready and when its last order came":
     "查看了门店是否就绪和最近一单的时间",
   "We can't read the merchants right now.": "现在读不出商家。",

@@ -730,6 +730,7 @@ async function listRealMenu({
     ]);
     const menus = createMerchantMenus({ ...common, currencyMetadata });
     const dishAllergens = createMerchantDishAllergens({ ...common, references: { next: op } });
+    const optionSets = createMerchantOptionSets(common);
     const commands = createMerchantOneStoreDishes({
       products: createMerchantProducts(common),
       prices: createMerchantPrices({ ...common, currencyMetadata }),
@@ -739,12 +740,19 @@ async function listRealMenu({
       optionRecipes: createMerchantOptionRecipes(common),
       availability: createMerchantAvailability(common),
       combos: createMerchantCombos(common),
-      optionSets: createMerchantOptionSets(common),
+      optionSets,
       now: () => new Date().toISOString(),
     });
     grants.as(owner);
     const session = { sessionCookie: "cookie", csrf: "csrf" };
-    const saveDish = (name, nameZh, priceMinor, productReference = null, allergens = null) =>
+    const saveDish = (
+      name,
+      nameZh,
+      priceMinor,
+      productReference = null,
+      allergens = null,
+      choiceGroups = [],
+    ) =>
       commands.command({
         ...session,
         body: {
@@ -759,7 +767,7 @@ async function listRealMenu({
           descriptionZh: "",
           taxClassificationReference,
           priceMinor,
-          choiceGroups: [],
+          choiceGroups,
           allergens,
         },
       });
@@ -798,6 +806,8 @@ async function listRealMenu({
         hooks,
         saveDish,
         listAll,
+        /** The Owner's choice groups (option sets), through the same commands. */
+        optionSets,
         /** The connection the Owner's commands run on, for a test watching what waits on them. */
         backendPid: () => authoring.processID,
         close: () => authoring.end(),

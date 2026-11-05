@@ -1,6 +1,7 @@
 import { createMenuReviewApprovalSource } from "./menu-review-approval-source.js";
 import {
   createMenuReviewDependencyBindingSource,
+  menuReviewBudget,
   MenuReviewDependencyChangedError,
 } from "./menu-review-preparation-source.js";
 import { readClosedRecord } from "@bop/identity";
@@ -341,7 +342,7 @@ export function createMerchantMenuPublicationCommand(options: {
               ? created.record
               : await createMenuReviewDependencyBindingSource({
                   brandReference: brand,
-                  budget: { maximumConfigurations: 10000, maximumSearchSteps: 1000000 },
+                  budget: menuReviewBudget,
                   authorize: async (_tx, input) =>
                     input.actorReference === scope.actorReference &&
                     input.menuReference === command.menuReference &&

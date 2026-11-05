@@ -74,7 +74,9 @@ export interface MenuReviewProblem {
     | "Tax"
     /** WP-2423 item 11: a Store's kitchen is not set up, or can't take this dish. */
     | "Kitchen"
-    | "KitchenDish";
+    | "KitchenDish"
+    /** WP-2423: the item has more choice combinations than one review checks. */
+    | "TooManyChoices";
   readonly reason?: string;
   readonly productName: string | null;
   readonly sizeName: string | null;
@@ -91,6 +93,7 @@ const missingKinds = new Set<MenuReviewProblem["missing"]>([
   "Tax",
   "Kitchen",
   "KitchenDish",
+  "TooManyChoices",
   "Recipe",
   "SubRecipe",
   "OptionRecipe",
@@ -147,6 +150,12 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         ? `${problem.optionName} × ${problem.quantity}`
         : problem.optionName;
   switch (problem.missing) {
+    case "TooManyChoices":
+      // Found before anything of the listing went live: no price moved.
+      return t(
+        "{item} has too many choice combinations to list. Remove a choice or split it into two dishes. Nothing was changed.",
+        { item: item },
+      );
     case "Kitchen":
       return t(
         "The kitchen at {store} is not set up, so its orders could not reach a kitchen and guests can't order there yet. Set it up in that Store's Store setup, then list this menu again.",

@@ -394,3 +394,22 @@ it("WP-2423 item 11: a listing refused for the kitchen names the Store and links
   );
   expect(menuReviewProblemFixHref(null)).toBeNull();
 });
+
+it("WP-2423: a menu with more choice combinations than a review checks names the dish, and no code", () => {
+  const problem = parseMenuReviewProblem({
+    missing: "TooManyChoices",
+    productName: "Milk tea (TEST)",
+    sizeName: "Milk tea (TEST)",
+    optionName: null,
+    quantity: null,
+    ingredientName: null,
+  });
+  expect(problem).not.toBeNull();
+  if (problem === null) throw new Error("parsed");
+  const text = menuReviewProblemText(problem);
+  expect(text).toBe(
+    "Milk tea (TEST) has too many choice combinations to list. Remove a choice or split it into two dishes. Nothing was changed.",
+  );
+  expect(text).not.toMatch(/CATALOG_|Unexpected|code/u);
+  expect(menuReviewProblemFixHref(problem)).toBeNull();
+});
