@@ -213,6 +213,10 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
     expect(tableNeed(table(1, { guestStart: closes(5) }), served, now).detail).toBe(
       "frees itself in 5 min",
     );
+    // Due, and the System hasn't reached it yet: never "in 0 min".
+    expect(tableNeed(table(1, { guestStart: closes(-1) }), served, now).detail).toBe(
+      "frees itself shortly",
+    );
   });
   it("a guest's unpaid round cancels itself: not a job for staff, unlike a payment not confirmed", () => {
     const round = (minutes: number) => ({

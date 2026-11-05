@@ -6648,6 +6648,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "started by a guest": "客人扫码开的桌",
   "no order yet": "还没点单",
   "frees itself in {minutes} min": "{minutes} 分钟后自动空出",
+  "frees itself shortly": "马上自动空出",
   "guests can start it now": "客人现在可以直接开始",
   "Guests can start free tables.": "客人可以自己开始用空桌。",
   "Many tables started by scanning · new guests are sent to staff for a few minutes":

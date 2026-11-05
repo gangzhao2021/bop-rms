@@ -56,9 +56,11 @@ function freesItself(table: StaffDiningTable, now: number): string | null {
   const at = table.guestStart?.closesByItselfAt;
   if (at === null || at === undefined) return null;
   const left = Math.ceil((Date.parse(at) - now) / 60_000);
-  return left > freesItselfWarningMinutes
-    ? null
-    : t("frees itself in {minutes} min", { minutes: String(Math.max(left, 0)) });
+  if (left > freesItselfWarningMinutes) return null;
+  // The System reaches every table within a few minutes of it being due.
+  return left <= 0
+    ? t("frees itself shortly")
+    : t("frees itself in {minutes} min", { minutes: String(left) });
 }
 
 const cad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "CAD" });
