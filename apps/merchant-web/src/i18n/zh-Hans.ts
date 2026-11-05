@@ -47,6 +47,106 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Use a limit from 1 to 50 in total, and from 1 to 20 of each.":
     "总上限请填 1 到 50，每个选项的上限请填 1 到 20。",
   "How many {name}": "{name} 要几份",
+  "whether the kitchen prepares it": "是否经后厨",
+  "its kitchen section": "档口",
+  "its alcohol mark": "含酒精标记",
+  "If the kitchen makes this, untick here.": "如果这项由后厨制作，请在这里取消勾选。",
+  "A charge does not go to the kitchen.": "收费项目不进后厨。",
+  "No allergens marked.": "没有标记过敏原。",
+  "Enter each extra like 0.80, or 0.00 if it is included.":
+    "加价请写成 0.80 这样；已包含就写 0.00。",
+  "Choice {n} extra ($)": "选项 {n} 加价（元）",
+  "Adds what each dish is missing, at this dish's extra. Nothing else on it changes.":
+    "只给每道菜加上它缺的选项，加价和这道菜相同。其他内容不变。",
+  "Dishes with sizes are changed on the Products page.": "有多个规格的菜品要到商品页修改。",
+  "Open products": "打开商品页",
+  "The dishes could not be read. Check the connection and try again.":
+    "读取不到菜品。请检查网络后重试。",
+  "Reading the dishes…": "正在读取菜品…",
+  "No other dish can take it.": "没有其他菜品可以使用。",
+  "All in this section": "这个分区全部",
+  "has it": "已有",
+  "Does {choice} contain anything on your allergen list?": "{choice} 含有过敏原清单上的成分吗？",
+  "{choice} adds nothing: these dishes' allergens do not change.":
+    "{choice} 不增加过敏原：这些菜品的过敏原不变。",
+  "Each dish that declares its allergens gains these and keeps what it has.":
+    "已申报过敏原的菜品会加上这些，原有的保留。",
+  "Also change this extra on dishes that already have it": "已有这个选项的菜品，也改成这个加价",
+  "Also change existing extras": "也修改已有的加价",
+  "The dishes chosen already have these extras.": "所选菜品已经是这些加价。",
+  "{choice} {from} to {to}": "{choice} {from} 改为 {to}",
+  "Allergens come from a recipe, so they will not change: {items}.":
+    "这些菜品的过敏原来自配方，不会改动：{items}。",
+  "Allergens come from a recipe, so they did not change: {items}.":
+    "这些菜品的过敏原来自配方，没有改动：{items}。",
+  "Finish this dish first: its name, price and extras are saved before the run.":
+    "请先填好这道菜：开始前会先保存它的名称、价格和加价。",
+  "The dishes chosen already have it.": "所选菜品都已经有了。",
+  "This changes the extra price on {dishes}: {lines}. Guests see it when the menu is listed.":
+    "这会修改 {dishes} 的加价：{lines}。菜单上架后客人能看到。",
+  "Change these prices": "修改这些价格",
+  "Apply to {dishes}": "应用到 {dishes}",
+  "Not now": "先不用",
+  "Applied to {done} of {total}. Keep this screen on.": "已应用 {done} / {total}。请保持屏幕常亮。",
+  "Stopped at {item}. {reason} What was applied stays; try again to carry on.":
+    "在 {item} 停下了。{reason} 已应用的保留；重试会接着做。",
+  "Applied to {dishes}. Guests see it when the menu is listed.":
+    "已应用到 {dishes}。菜单上架后客人能看到。",
+  "Still waiting for allergens: {items}.": "还在等申报过敏原：{items}。",
+  "Use {group} on other dishes": "把 {group} 用到其他菜品",
+  "{item} saved. Declare its allergens, then list it.": "{item} 已保存。请申报过敏原，然后上架。",
+  "{marks} could not be set. Open the dish with Edit and set it.":
+    "{marks} 没有设置成功。请点编辑打开这道菜再设置。",
+  "Added {count}.": "已添加 {count} 道。",
+  "1 needs allergens.": "1 道需要申报过敏原。",
+  "{count} need allergens.": "{count} 道需要申报过敏原。",
+  "Copied from {item}: its choices, extras, allergens and kitchen marks. Enter the names and price, then check the allergens.":
+    "已从 {item} 复制规格、加价、过敏原和后厨标记。请填写名称和价格，再核对过敏原。",
+  "Same as": "和这道菜一样",
+  "Start empty": "从空白开始",
+  "Change {group}": "修改 {group}",
+  "No usual price yet: enter it, or leave 0.00 if it is included.":
+    "还没有常用加价：请填写；已包含就保留 0.00。",
+  "Use on other dishes": "用到其他菜品",
+  "This store keeps stock, so a choice reaches other dishes through its recipe change.":
+    "这家门店管理库存，选项要通过选项配方用到其他菜品。",
+  "Open option recipes": "打开选项配方",
+  "A fee, not food (tea, corkage, sauce bar): no allergens, never goes to the kitchen":
+    "收费项目，不是食物（茶位、开瓶费、酱料台）：不申报过敏原，不进后厨",
+  "Change allergens": "修改过敏原",
+  "Save and add another": "保存并再加一道",
+  "Check the allergens to add the next one": "核对过敏原后才能加下一道",
+  "The menu could not be read again. Your form is kept; what you saved shows once it can be read.":
+    "菜单没能重新读取。你的表单还在；读取成功后会显示已保存的内容。",
+  "{choice} is not on any dish yet, and no dish uses its group. Open a dish and tick the group.":
+    "{choice} 还没有用在任何菜品上，也没有菜品使用它的规格组。请打开一道菜，勾选这个规格组。",
+  "Listing stopped part-way. List it again to finish; it carries on from where it stopped.":
+    "上架中途停止了。请再点上架完成，会从停下的地方继续。",
+  "1 dish still needs allergens": "还有 1 道菜需要申报过敏原",
+  "{count} dishes still need allergens": "还有 {count} 道菜需要申报过敏原",
+  "Show them": "查看",
+  "Show dishes without allergens": "查看未申报过敏原的菜品",
+  "Saved. Tea is added for each guest from the next party size recorded. It does not go to the kitchen.":
+    "已保存。从下一次记人数起，按人数加茶位。它不进后厨。",
+  "Only items on the listed menu are shown. For a new tea item: add it on the menu as a fee with its price, and list the menu; then choose it here. Don't hide it: guests never see the tea item on their menu, and staff must be able to add it.":
+    "这里只显示已上架菜单上的项目。要新建茶位项目：在菜单里把它加成收费项目并填价格，然后上架菜单，再回到这里选择。不要隐藏它：客人的菜单上本来就看不到茶位项目，员工需要能添加它。",
+  "The kitchen prepares this item, as set on the menu.": "这项由后厨制作，这是菜单上的设置。",
+  "{item} is a dish. It leaves the guest menu, every guest at a pay-later table is charged {price}, and it stops going to the kitchen.":
+    "{item} 是一道菜。选它之后，它会从客人菜单上消失，后付款餐桌每位客人收 {price}，并且不再进后厨。",
+  "Yes, make it the tea": "确定，用它做茶位",
+  "{choice} is not on any dish yet.": "{choice} 还没有用在任何菜品上。",
+  "Add it to dishes": "把它加到菜品",
+  "{item} has no allergens declared. Declare its allergens in this menu, or publish a recipe under Recipes and assign it to this size. Then list it again.":
+    "{item} 没有申报过敏原。请在这份菜单里申报，或在配方里发布配方并分配给这个规格，然后重新上架。",
+  "Saved. Tea is added for each guest from the next party size recorded.":
+    "已保存。从下一次记人数起，按人数加茶位。",
+  "{item} is a dish. It leaves the guest menu, and every guest at a pay-later table is charged {price}. The kitchen still makes it, as set on the menu.":
+    "{item} 是一道菜。选它之后，它会从客人菜单上消失，后付款餐桌每位客人收 {price}。它仍由后厨制作，这是菜单上的设置。",
+  "Goes to the kitchen": "进后厨",
+  "No alcohol": "不含酒精",
+  "Change kitchen": "修改后厨设置",
+  "Change alcohol": "修改含酒精设置",
+  "Add descriptions": "添加说明",
   "Add a table": "添加餐桌",
   "Rename {stableLabel}": "重命名 {stableLabel}",
   "Retire {stableLabel}?": "停用 {stableLabel}？",
@@ -5457,8 +5557,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{itemCount} items": "{itemCount} 项",
   "{itemReference} ({locationReference}): used {wastedQuantity} {unitCode}, taken off stock {recordedQuantity} {unitCode2}, not in stock {missingQuantity} {unitCode3}":
     "{itemReference}（{locationReference}）：用掉 {wastedQuantity} {unitCode}，从库存扣除 {recordedQuantity} {unitCode2}，库存中没有 {missingQuantity} {unitCode3}",
-  "{item} has no recipe for this menu's Stores. In this menu, declare its allergens, or mark it as a charge that uses no stock ingredients (such as tea); or publish a recipe under Recipes and assign it to this size. Then list it again.":
-    "{item}在此菜单的门店中没有配方。请在本菜单中声明它的过敏原，或标为不用库存原料的收费项目（如茶位）；也可以在“配方”中发布配方并分配给此规格。然后重新上架。",
   "{item} is back in stock.": "{item}已恢复库存。",
   "{item} is no longer offered at this Store.": "{item}在本店已不再提供。",
   "{item} is now offered at this Store.": "{item}现在在本店提供。",
@@ -6681,8 +6779,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "New tables need staff to open them now.": "现在新开桌需要店员操作。",
   "Turn off guests starting tables first.": "请先关掉“客人自己开桌”。",
   "Saved. No tea charge is added from now on.": "已保存。从现在起不再加茶位。",
-  "Saved. Tea is added for each guest from the next party size recorded.":
-    "已保存。从下一次记人数起，按人数加茶位。",
   "This wasn't saved. Check the connection and try again.": "没有保存，请检查网络后再试。",
   "Tea charge": "茶位费",
   "Choose the menu item charged per guest. When staff record how many guests sit at a table, that many are added to its bill; it is shown to guests as tea per person.":
@@ -6730,8 +6826,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Whether the kitchen prepares this dish could not be read.": "读不到这道菜是否经后厨。",
   "This wasn't saved. It has been read again: check it and try again.":
     "没有保存，已重新读取，请核对后再试。",
-  "After the dish is saved you can mark it as not prepared by the kitchen.":
-    "保存这道菜之后，可以把它标为不经后厨。",
   "Not prepared by the kitchen": "不经后厨",
   "This dish does not appear on the kitchen board; it counts as served once ordered and never holds up checkout. For example bottled drinks or the tea charge.":
     "这道菜不进后厨看板，下单就算已上，不挡结账。比如瓶装饮料、茶位。",
@@ -6788,7 +6882,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这桌客人的共用购物车里还有没送出的菜{value}，过了最后点单时间客人已经不能自己送出。把它们加进这一轮即可下单。",
   "Add them to this round": "加进这一轮",
   "A charge, no stock ingredients": "收费项目，不用库存原料",
-  "A charge, no stock ingredients (such as tea)": "收费项目，不用库存原料（如茶位）",
   "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.":
     "已声明为不用库存原料的收费项目（如茶位）：不计库存、不扣库存，客人看到的过敏原为无。",
   "This dish was already declared the other way (its allergens, or a charge with no stock ingredients). That record stays; ask the operator to change it.":
@@ -6797,8 +6890,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这一项的配方会扣库存，不能作为茶位。请选在菜单里声明为不用库存原料的收费项目。",
   "This item can't be the tea now: it must be on the listed menu, shown at this store, with its price here. Check it on the menu, then choose it here.":
     "这一项现在不能作为茶位：它必须在已上架的菜单上、对本店显示，并且在本店有价格。请先在菜单里检查，再回到这里选择。",
-  "Only items on the listed menu are shown. For a new tea item: add it on the menu with its price, declare it a charge with no stock ingredients, mark it “Not prepared by the kitchen”, and list the menu; then choose it here. Don't hide it: guests never see the tea item on their menu, and staff must be able to add it.":
-    "这里只列出已上架菜单上的项目。新建茶位项：在菜单里加上并定价，声明为不用库存原料的收费项目，标为“不经后厨”，然后上架菜单，再回到这里选择。不要把它设为隐藏：客人菜单上本来就不会显示茶位项，而店员需要能加茶位。",
   "{item} — hidden from this store on the menu; show it to choose it":
     "{item}——在菜单里对本店隐藏了，取消隐藏后才能选",
   "{item} — no price at this store": "{item}——本店没有价格",
@@ -7555,7 +7646,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Turn this on only if the store holds a valid liquor sales licence and staff who take orders or serve alcohol have completed Smart Serve. Dishes marked as containing alcohol can then be ordered at tables from 9 am to 2 am; they are never sold for pickup.":
     "只有门店持有有效酒牌、接单和上酒的员工都完成 Smart Serve 培训后才能开启。开启后，标为含酒精的菜品可在 9:00 至次日 2:00 堂食点单，不支持自取。",
   "Whether this dish contains alcohol could not be read.": "读取不到这道菜是否含酒精。",
-  "After the dish is saved you can mark it as containing alcohol.": "菜品保存后可以标记为含酒精。",
   "Contains alcohol": "含酒精",
   "Sold only at tables, from 9 am to 2 am, and only while Alcohol at tables is on in Store features. Guests see that they must be 19 or older, and staff see a reminder to check ID.":
     "只能堂食，9:00 至次日 2:00 供应，且门店功能里“堂食售酒”已开启。顾客会看到须年满 19 岁，员工会看到查验证件的提醒。",

@@ -788,7 +788,7 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await fresh.getByLabel("English name").fill("Hot and sour soup (TEST)");
   await fresh.getByLabel("Chinese name").fill("酸辣汤");
   await fresh.getByLabel("Price ($)").fill("6.50");
-  await fresh.getByLabel("Section").selectOption("SOUPS-TEST");
+  await fresh.getByRole("combobox", { name: "Section", exact: true }).selectOption("SOUPS-TEST");
   await fresh.getByRole("radiogroup", { name: "Wheat 小麦" }).getByLabel("Contains").check();
   await fresh.getByRole("button", { name: "Save dish" }).click();
   await expect(page.getByText("Hot and sour soup (TEST) saved.", { exact: false })).toBeVisible();
@@ -812,7 +812,14 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await tea.getByLabel("Price ($)").fill("1.50");
   const kind = tea.getByRole("radiogroup", { name: "What it is" });
   await expect(kind.getByLabel("A dish: declare its allergens")).toBeChecked();
-  await kind.getByLabel("A charge, no stock ingredients (such as tea)").check();
+  await kind
+    .getByLabel(
+      "A fee, not food (tea, corkage, sauce bar): no allergens, never goes to the kitchen",
+    )
+    .check();
+  // WP-2423 item 8a: nothing more to mark; the tick shows it does not go to the kitchen.
+  await expect(tea.getByText("A charge does not go to the kitchen.")).toBeVisible();
+  await expect(tea.getByRole("checkbox", { name: /Not prepared by the kitchen/u })).toBeChecked();
   await expect(tea.getByRole("radiogroup", { name: "Wheat 小麦" })).toHaveCount(0);
   await expect(
     tea.getByText("Declared a charge that uses no stock ingredients (such as tea)", {

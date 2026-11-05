@@ -419,6 +419,8 @@ export function optionSetChoices(sets: readonly OptionSetAggregate[], locale: st
     optionSetReference: set.optionSetReference,
     name: name(set.draft.localizedNames, set.internalCode),
     archived: set.lifecycle === "Archived",
+    // WP-2423 item 3: a combo's part ("Drink", "Snack") is not a group a dish chooses.
+    comboPart: set.internalCode.startsWith("COMBO-"),
     displayStyle: set.draft.displayStyle,
     minimum: set.draft.minimumSelection,
     maximum: set.draft.maximumSelection,

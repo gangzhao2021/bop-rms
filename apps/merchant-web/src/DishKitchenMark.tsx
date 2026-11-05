@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { DishMarks } from "./dish-marks.js";
 import { t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import { MenuPageError, type MenuClient } from "./store-menu-pages.js";
@@ -8,16 +9,36 @@ import { MenuPageError, type MenuClient } from "./store-menu-pages.js";
  * owner marks a dish the kitchen does not prepare (a bottled drink, the per-head tea). It never
  * reaches the kitchen board, counts as served once ordered and never holds up checkout. Saved on
  * its own (the Kitchen's record), against the mark the owner saw; rounds already sent keep what
- * the kitchen decided for them. A dish not saved yet is marked after its first save.
+ * the kitchen decided for them. Item 8a: the tick shows what happens now, a charge's default
+ * included, and unticking it records that the kitchen does make it. A new dish holds it as a form
+ * value, set right after its first save.
  */
 export function DishKitchenMark({
   productReference,
   client,
+  chargeChosen,
+  declaredCharge,
+  form,
+  onForm,
+  onUnfold,
 }: {
   readonly productReference: string | null;
   readonly client: MenuClient;
+  /** The form says this is a charge (it is not recorded yet). */
+  readonly chargeChosen: boolean;
+  /** Recorded as a charge. */
+  readonly declaredCharge: boolean;
+  /** A new dish: the marks as form values. */
+  readonly form: DishMarks;
+  readonly onForm: (change: Partial<DishMarks>) => void;
+  /** A form carried on from another dish: one line with Change, until it is pressed. */
+  readonly onUnfold?: () => void;
 }) {
-  const [mark, setMark] = useState<{ notPrepared: boolean; version: number } | null>(null);
+  const [mark, setMark] = useState<{
+    notPrepared: boolean;
+    version: number;
+    decided: boolean;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -41,7 +62,11 @@ export function DishKitchenMark({
           !Number.isSafeInteger(entry.version)
         )
           throw new Error("unreadable");
-        setMark({ notPrepared: entry.notPrepared, version: entry.version as number });
+        setMark({
+          notPrepared: entry.notPrepared,
+          version: entry.version as number,
+          decided: entry.decided === true || (entry.version as number) > 0,
+        });
       })
       .catch(() => {
         if (active) setProblem(t("Whether the kitchen prepares this dish could not be read."));
@@ -69,7 +94,11 @@ export function DishKitchenMark({
       const entry = value.products?.[0];
       operation.current = null;
       if (entry && typeof entry.notPrepared === "boolean" && Number.isSafeInteger(entry.version))
-        setMark({ notPrepared: entry.notPrepared, version: entry.version as number });
+        setMark({
+          notPrepared: entry.notPrepared,
+          version: entry.version as number,
+          decided: true,
+        });
       else setReload((current) => current + 1);
     } catch (error) {
       operation.current = null;
@@ -83,36 +112,103 @@ export function DishKitchenMark({
       setBusy(false);
     }
   };
+  const isNew = productReference === null;
+  // What happens now: a new dish follows the form; the owner's own answer always wins.
+  const checked = isNew ? (form.notPrepared ?? chargeChosen) : (mark?.notPrepared ?? false);
+  const ownAnswer = isNew ? form.notPrepared : mark?.decided === true ? mark.notPrepared : null;
+  if (onUnfold !== undefined)
+    return (
+      <FoldedKitchenLine
+        client={client}
+        text={
+          chargeChosen && ownAnswer !== false
+            ? t("A charge does not go to the kitchen.")
+            : checked
+              ? t("Not prepared by the kitchen")
+              : t("Goes to the kitchen")
+        }
+        sectionReference={form.sectionReference}
+        onUnfold={onUnfold}
+      />
+    );
   return (
     <fieldset className="dish-editor__kitchen">
       <legend>{t("Kitchen")}</legend>
-      {productReference === null ? (
-        <p className="dish-editor__note">
-          {t("After the dish is saved you can mark it as not prepared by the kitchen.")}
-        </p>
-      ) : (
-        <label className="dish-editor__confirm">
-          <input
-            type="checkbox"
-            checked={mark?.notPrepared ?? false}
-            disabled={mark === null || busy}
-            onChange={(event) => void change(event.target.checked)}
-          />
-          <span>
-            <strong>{t("Not prepared by the kitchen")}</strong>{" "}
-            <span className="dish-editor__note">
-              {t(
-                "This dish does not appear on the kitchen board; it counts as served once ordered and never holds up checkout. For example bottled drinks or the tea charge.",
-              )}
-            </span>
+      <label className="dish-editor__confirm">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={!isNew && (mark === null || busy)}
+          onChange={(event) =>
+            isNew
+              ? onForm({ notPrepared: event.target.checked })
+              : void change(event.target.checked)
+          }
+        />
+        <span>
+          <strong>{t("Not prepared by the kitchen")}</strong>{" "}
+          <span className="dish-editor__note">
+            {t(
+              "This dish does not appear on the kitchen board; it counts as served once ordered and never holds up checkout. For example bottled drinks or the tea charge.",
+            )}
           </span>
-        </label>
-      )}
-      {productReference === null ? null : (
-        <DishKitchenSection productReference={productReference} client={client} />
-      )}
+        </span>
+      </label>
+      {declaredCharge && checked ? (
+        <p className="dish-editor__note">{t("If the kitchen makes this, untick here.")}</p>
+      ) : chargeChosen && !declaredCharge && ownAnswer !== false ? (
+        <p className="dish-editor__note">{t("A charge does not go to the kitchen.")}</p>
+      ) : null}
+      <DishKitchenSection
+        productReference={productReference}
+        client={client}
+        form={form}
+        onForm={onForm}
+      />
       {problem ? <p role="alert">{problem}</p> : null}
     </fieldset>
+  );
+}
+
+/** The kept kitchen answer and section on one line of a carried form: seen, and one tap to change. */
+function FoldedKitchenLine({
+  client,
+  text,
+  sectionReference,
+  onUnfold,
+}: {
+  readonly client: MenuClient;
+  readonly text: string;
+  readonly sectionReference: string | null;
+  readonly onUnfold: () => void;
+}) {
+  const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
+  const call = client.kitchenSections;
+  useEffect(() => {
+    if (call === undefined || sectionReference === null) return;
+    let active = true;
+    void call({ action: "Read", productReferences: [] })
+      .then((value) => {
+        if (!active) return;
+        const { sections } = parseSectionState(value, null);
+        setNames(new Map(sections.map((section) => [section.sectionReference, section.name])));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [call, sectionReference]);
+  const section = sectionReference === null ? undefined : names.get(sectionReference);
+  return (
+    <p className="dish-editor__carried dish-editor__carried--mark">
+      <span>
+        <strong>{t("Kitchen")}</strong>: {text}
+        {section === undefined ? "" : ` · ${section}`}
+      </span>{" "}
+      <button type="button" aria-label={t("Change kitchen")} onClick={onUnfold}>
+        {t("Change")}
+      </button>
+    </p>
   );
 }
 
@@ -122,11 +218,15 @@ interface SectionState {
   readonly version: number;
 }
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-function parseSectionState(value: unknown, productReference: string): SectionState {
+function parseSectionState(value: unknown, productReference: string | null): SectionState {
   const raw = value as Record<string, unknown> | null;
   const sections = Array.isArray(raw?.sections) ? (raw.sections as Record<string, unknown>[]) : [];
   const products = Array.isArray(raw?.products) ? (raw.products as Record<string, unknown>[]) : [];
-  const entry = products.find((item) => item.productReference === productReference);
+  // A new dish reads only the Store's sections.
+  const entry =
+    productReference === null
+      ? { sectionReference: null, version: 0 }
+      : products.find((item) => item.productReference === productReference);
   if (
     entry === undefined ||
     !Number.isSafeInteger(entry.version) ||
@@ -158,9 +258,13 @@ function parseSectionState(value: unknown, productReference: string): SectionSta
 function DishKitchenSection({
   productReference,
   client,
+  form,
+  onForm,
 }: {
-  readonly productReference: string;
+  readonly productReference: string | null;
   readonly client: MenuClient;
+  readonly form: DishMarks;
+  readonly onForm: (change: Partial<DishMarks>) => void;
 }) {
   const [state, setState] = useState<SectionState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -171,7 +275,10 @@ function DishKitchenSection({
   useEffect(() => {
     if (call === undefined) return;
     let active = true;
-    void call({ action: "Read", productReferences: [productReference] })
+    void call({
+      action: "Read",
+      productReferences: productReference === null ? [] : [productReference],
+    })
       .then((value) => {
         if (active) setState(parseSectionState(value, productReference));
       })
@@ -184,6 +291,10 @@ function DishKitchenSection({
   }, [call, productReference, reload]);
   if (call === undefined) return null;
   const change = async (sectionReference: string | null) => {
+    if (productReference === null) {
+      onForm({ sectionReference });
+      return;
+    }
     if (state === null || busy) return;
     const key = `${state.version}:${sectionReference ?? "none"}`;
     if (operation.current?.key !== key)
@@ -228,7 +339,7 @@ function DishKitchenSection({
     <label className="dish-editor__field">
       <span>{t("Kitchen section")}</span>
       <select
-        value={state?.sectionReference ?? ""}
+        value={(productReference === null ? form.sectionReference : state?.sectionReference) ?? ""}
         disabled={state === null || busy}
         onChange={(event) =>
           void change(event.currentTarget.value === "" ? null : event.currentTarget.value)

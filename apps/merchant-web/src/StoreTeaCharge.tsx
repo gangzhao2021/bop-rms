@@ -30,14 +30,22 @@ export function StoreTeaCharge({
   const [chosen, setChosen] = useState<string>(view.teaCharge.teaSellableReference ?? "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
+  // WP-2423 item 8a: a dish chosen as the tea is money and food: the owner confirms it first.
+  const [confirming, setConfirming] = useState(false);
   const operation = useRef<{ key: string; reference: string } | null>(null);
   // A re-read that saved the same tea item keeps the owner's unsaved choice; only a changed saved
   // item (saved here or elsewhere) replaces it.
   const savedTea = view.teaCharge.teaSellableReference ?? "";
   useEffect(() => setChosen(savedTea), [savedTea]);
   const current = view.teaCharge.teaSellableReference ?? "";
+  const chosenItem = items.find((item) => item.sellableReference === chosen);
+  const saveAsked = () => {
+    if (chosenItem !== undefined && !chosenItem.declaredCharge) setConfirming(true);
+    else void save();
+  };
   const save = async () => {
     if (busy || locked || chosen === current) return;
+    setConfirming(false);
     const key = `${view.teaCharge.version}:${chosen}`;
     if (operation.current?.key !== key)
       operation.current = { key, reference: newOperationReference() };
@@ -56,7 +64,11 @@ export function StoreTeaCharge({
         text:
           chosen === ""
             ? t("Saved. No tea charge is added from now on.")
-            : t("Saved. Tea is added for each guest from the next party size recorded."),
+            : next.teaCharge.kitchenPrepares
+              ? t("Saved. Tea is added for each guest from the next party size recorded.")
+              : t(
+                  "Saved. Tea is added for each guest from the next party size recorded. It does not go to the kitchen.",
+                ),
       });
     } catch (error) {
       operation.current = null;
@@ -96,7 +108,13 @@ export function StoreTeaCharge({
       </p>
       <label className="store-features__row">
         <span>{t("Tea charge item")}</span>
-        <select value={chosen} onChange={(event) => setChosen(event.currentTarget.value)}>
+        <select
+          value={chosen}
+          onChange={(event) => {
+            setChosen(event.currentTarget.value);
+            setConfirming(false);
+          }}
+        >
           <option value="">{t("No tea charge")}</option>
           {items.map((item) => (
             <option
@@ -120,15 +138,49 @@ export function StoreTeaCharge({
       </label>
       <p className="store-features__detail">
         {t(
-          "Only items on the listed menu are shown. For a new tea item: add it on the menu with its price, declare it a charge with no stock ingredients, mark it “Not prepared by the kitchen”, and list the menu; then choose it here. Don't hide it: guests never see the tea item on their menu, and staff must be able to add it.",
+          "Only items on the listed menu are shown. For a new tea item: add it on the menu as a fee with its price, and list the menu; then choose it here. Don't hide it: guests never see the tea item on their menu, and staff must be able to add it.",
         )}
       </p>
+      {view.teaCharge.kitchenPrepares && chosen === current && current !== "" ? (
+        <p className="store-features__detail" role="note">
+          {t("The kitchen prepares this item, as set on the menu.")}
+        </p>
+      ) : null}
+      {confirming && chosenItem !== undefined ? (
+        <div role="alert">
+          <p className="store-features__detail">
+            {chosenItem.kitchenPrepares
+              ? t(
+                  "{item} is a dish. It leaves the guest menu, and every guest at a pay-later table is charged {price}. The kitchen still makes it, as set on the menu.",
+                  {
+                    item: chosenItem.name,
+                    price: chosenItem.priceAmount === null ? "" : `$${chosenItem.priceAmount}`,
+                  },
+                )
+              : t(
+                  "{item} is a dish. It leaves the guest menu, every guest at a pay-later table is charged {price}, and it stops going to the kitchen.",
+                  {
+                    item: chosenItem.name,
+                    price: chosenItem.priceAmount === null ? "" : `$${chosenItem.priceAmount}`,
+                  },
+                )}
+          </p>
+          <div className="store-features__actions">
+            <button type="button" className="store-features__save" onClick={() => void save()}>
+              {t("Yes, make it the tea")}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)}>
+              {t("Go back")}
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div className="store-features__actions">
         <button
           type="button"
           className="store-features__save"
-          disabled={busy || locked || chosen === current}
-          onClick={() => void save()}
+          disabled={busy || locked || chosen === current || confirming}
+          onClick={saveAsked}
         >
           {t("Save tea charge")}
         </button>

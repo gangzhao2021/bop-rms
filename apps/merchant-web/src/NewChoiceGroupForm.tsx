@@ -1,13 +1,19 @@
 import { t } from "./i18n/i18n.js";
-import { useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { composingEnter } from "./form-enter.js";
 import { newOperationReference } from "./operation-reference.js";
 import { choiceRule } from "./store-option-set-page.js";
 import { MenuPageError, type MenuClient, type NewChoiceGroupCommand } from "./store-menu-pages.js";
+import { dollarsToMinor } from "./store-price-pages.js";
 
 interface Row {
   readonly name: string;
   readonly nameZh: string;
+  /** WP-2423 item 3 D: what it adds on this dish (dollars); nothing is stored until it is saved. */
+  readonly extra?: string;
 }
+const maximumChoices = 20;
+const emptyRow: Row = { name: "", nameZh: "", extra: "0.00" };
 
 /**
  * WP-2423 item 3b: the limits an "any number" group may have. The server and the domain refuse the
@@ -78,7 +84,10 @@ export function NewChoiceGroupForm({
   onClose,
 }: {
   readonly client: MenuClient;
-  readonly onCreated: (optionSetReference: string | null) => void;
+  readonly onCreated: (
+    optionSetReference: string | null,
+    extras: ReadonlyMap<string, string>,
+  ) => void;
   readonly onClose: () => void;
 }) {
   const [name, setName] = useState("");
@@ -89,10 +98,24 @@ export function NewChoiceGroupForm({
   const [limit, setLimit] = useState("");
   const [repeats, setRepeats] = useState(false);
   const [each, setEach] = useState("2");
-  const [rows, setRows] = useState<readonly Row[]>([
-    { name: "", nameZh: "" },
-    { name: "", nameZh: "" },
-  ]);
+  const [rows, setRows] = useState<readonly Row[]>([emptyRow, emptyRow]);
+  // Enter in a choice goes to the next one, adding it at the end (never saves the dish around it).
+  const list = useRef<HTMLOListElement>(null);
+  const [focusRow, setFocusRow] = useState<number | null>(null);
+  useEffect(() => {
+    if (focusRow === null) return;
+    list.current?.querySelectorAll<HTMLInputElement>("input[data-choice-name]")[focusRow]?.focus();
+    setFocusRow(null);
+  }, [focusRow, rows.length]);
+  const nextRow = (event: KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (event.key !== "Enter" || composingEnter(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const last = index === rows.length - 1;
+    if (last && rows.length >= maximumChoices) return;
+    if (last) setRows((current) => [...current, emptyRow]);
+    setFocusRow(index + 1);
+  };
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [operation, setOperation] = useState<string | null>(null);
@@ -107,6 +130,11 @@ export function NewChoiceGroupForm({
           ? t("The most of one choice can't be more than the group's limit.")
           : t("Use a limit from 1 to 50 in total, and from 1 to 20 of each."),
       );
+      return;
+    }
+    const named = rows.filter((row) => row.name.trim() !== "");
+    if (named.some((row) => dollarsToMinor(row.extra ?? "0.00") === null)) {
+      setProblem(t("Enter each extra like 0.80, or 0.00 if it is included."));
       return;
     }
     const reference = operation ?? newOperationReference();
@@ -133,7 +161,10 @@ export function NewChoiceGroupForm({
         optionSet?: { optionSetReference?: string };
       } | null;
       setOperation(null);
-      onCreated(result?.optionSet?.optionSetReference ?? null);
+      onCreated(
+        result?.optionSet?.optionSetReference ?? null,
+        new Map(named.map((row) => [row.name.trim(), row.extra ?? "0.00"])),
+      );
     } catch (error) {
       if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
       setProblem(
@@ -236,14 +267,16 @@ export function NewChoiceGroupForm({
           </p>
         )}
       </fieldset>
-      <ol className="dish-editor__choices">
+      <ol className="dish-editor__choices" ref={list}>
         {rows.map((row, index) => (
           <li key={index}>
             <label className="dish-editor__field">
               <span>{t("Choice {n} (English)", { n: index + 1 })}</span>
               <input
+                data-choice-name
                 value={row.name}
                 maxLength={80}
+                onKeyDown={(e) => nextRow(e, index)}
                 onChange={(e) =>
                   setRows((current) =>
                     current.map((r, i) => (i === index ? { ...r, name: e.target.value } : r)),
@@ -257,9 +290,23 @@ export function NewChoiceGroupForm({
                 lang="zh-Hans"
                 value={row.nameZh}
                 maxLength={80}
+                onKeyDown={(e) => nextRow(e, index)}
                 onChange={(e) =>
                   setRows((current) =>
                     current.map((r, i) => (i === index ? { ...r, nameZh: e.target.value } : r)),
+                  )
+                }
+              />
+            </label>
+            <label className="dish-editor__field">
+              <span>{t("Choice {n} extra ($)", { n: index + 1 })}</span>
+              <input
+                inputMode="decimal"
+                value={row.extra ?? "0.00"}
+                onKeyDown={(e) => nextRow(e, index)}
+                onChange={(e) =>
+                  setRows((current) =>
+                    current.map((r, i) => (i === index ? { ...r, extra: e.target.value } : r)),
                   )
                 }
               />
@@ -270,8 +317,8 @@ export function NewChoiceGroupForm({
       <div className="dish-editor__actions">
         <button
           type="button"
-          disabled={rows.length >= 20}
-          onClick={() => setRows((current) => [...current, { name: "", nameZh: "" }])}
+          disabled={rows.length >= maximumChoices}
+          onClick={() => setRows((current) => [...current, emptyRow])}
         >
           {t("Add a choice")}
         </button>

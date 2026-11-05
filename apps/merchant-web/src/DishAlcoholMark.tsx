@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { DishMarks } from "./dish-marks.js";
 import { t } from "./i18n/i18n.js";
 import { newOperationReference } from "./operation-reference.js";
 import { MenuPageError, type MenuClient } from "./store-menu-pages.js";
@@ -6,15 +7,23 @@ import { MenuPageError, type MenuClient } from "./store-menu-pages.js";
 /**
  * WP-2423 DEC-ALCOHOL (Owner 2026-11-04 "要卖酒"): the owner marks a dish that contains alcohol.
  * Saved on its own and applied at once, without listing the menu again. A marked dish is sold only
- * at tables, only while the Store's alcohol switch is on and within the hours. A dish not saved
- * yet is marked after its first save.
+ * at tables, only while the Store's alcohol switch is on and within the hours. A new dish holds it
+ * as a form value, set right after its first save.
  */
 export function DishAlcoholMark({
   productReference,
   client,
+  form,
+  onForm,
+  onUnfold,
 }: {
   readonly productReference: string | null;
   readonly client: MenuClient;
+  /** A new dish: the marks as form values. */
+  readonly form: DishMarks;
+  readonly onForm: (change: Partial<DishMarks>) => void;
+  /** A form carried on from another dish: one line with Change, until it is pressed. */
+  readonly onUnfold?: () => void;
 }) {
   const [mark, setMark] = useState<{ containsAlcohol: boolean; version: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -86,31 +95,43 @@ export function DishAlcoholMark({
       setBusy(false);
     }
   };
+  if (onUnfold !== undefined)
+    return (
+      <p className="dish-editor__carried dish-editor__carried--mark">
+        <span>
+          <strong>{t("Alcohol")}</strong>:{" "}
+          {form.containsAlcohol ? t("Contains alcohol") : t("No alcohol")}
+        </span>{" "}
+        <button type="button" aria-label={t("Change alcohol")} onClick={onUnfold}>
+          {t("Change")}
+        </button>
+      </p>
+    );
   return (
     <fieldset className="dish-editor__kitchen">
       <legend>{t("Alcohol")}</legend>
-      {productReference === null ? (
-        <p className="dish-editor__note">
-          {t("After the dish is saved you can mark it as containing alcohol.")}
-        </p>
-      ) : (
-        <label className="dish-editor__confirm">
-          <input
-            type="checkbox"
-            checked={mark?.containsAlcohol ?? false}
-            disabled={mark === null || busy}
-            onChange={(event) => void change(event.target.checked)}
-          />
-          <span>
-            <strong>{t("Contains alcohol")}</strong>{" "}
-            <span className="dish-editor__note">
-              {t(
-                "Sold only at tables, from 9 am to 2 am, and only while Alcohol at tables is on in Store features. Guests see that they must be 19 or older, and staff see a reminder to check ID.",
-              )}
-            </span>
+      <label className="dish-editor__confirm">
+        <input
+          type="checkbox"
+          checked={
+            productReference === null ? form.containsAlcohol : (mark?.containsAlcohol ?? false)
+          }
+          disabled={productReference !== null && (mark === null || busy)}
+          onChange={(event) =>
+            productReference === null
+              ? onForm({ containsAlcohol: event.target.checked })
+              : void change(event.target.checked)
+          }
+        />
+        <span>
+          <strong>{t("Contains alcohol")}</strong>{" "}
+          <span className="dish-editor__note">
+            {t(
+              "Sold only at tables, from 9 am to 2 am, and only while Alcohol at tables is on in Store features. Guests see that they must be 19 or older, and staff see a reminder to check ID.",
+            )}
           </span>
-        </label>
-      )}
+        </span>
+      </label>
       {problem ? <p role="alert">{problem}</p> : null}
     </fieldset>
   );

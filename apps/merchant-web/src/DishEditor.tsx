@@ -1,17 +1,23 @@
 import { t } from "./i18n/i18n.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router";
-import { AllergenFields, type AllergenAnswer } from "./dish-allergens.js";
+import { ChoiceGroupApply } from "./ChoiceGroupApply.js";
+import { AllergenFields, allergenFormSummary, type AllergenAnswer } from "./dish-allergens.js";
+import { applySections } from "./dish-choice-apply.js";
+import {
+  copiedChoices,
+  dishEditorSource,
+  groupStart,
+  type DishEditorSource,
+} from "./dish-editor-source.js";
+import { applyDishMarks, noDishMarks, readDishMarks, type DishMarks } from "./dish-marks.js";
 import { DishAlcoholMark } from "./DishAlcoholMark.js";
 import { DishKitchenMark } from "./DishKitchenMark.js";
+import { composingEnter } from "./form-enter.js";
 import { NewChoiceGroupForm } from "./NewChoiceGroupForm.js";
 import { newOperationReference } from "./operation-reference.js";
 import type { MenuDish, MenuSectionRow } from "./one-store-menu.js";
-import {
-  taxClassText,
-  type ProductOptionSetChoice,
-  type ProductTaxClass,
-} from "./product-pages.js";
+import { taxClassText, type ProductOptionSetChoice } from "./product-pages.js";
 import { dollarsToMinor, minorToDollars } from "./store-price-pages.js";
 import { menuErrorText } from "./StoreMenuPages.js";
 import {
@@ -22,78 +28,23 @@ import {
   type SaveDishCommand,
 } from "./store-menu-pages.js";
 
-/** What the editor reads for one dish (or a new one). */
-export interface DishEditorSource {
-  readonly name: string;
-  readonly nameZh: string;
-  readonly description: string;
-  readonly descriptionZh: string;
-  readonly taxClassificationReference: string | null;
-  readonly sizes: number;
-  readonly taxClasses: readonly ProductTaxClass[];
-  readonly groups: readonly ProductOptionSetChoice[];
-  /** The dish's choice groups and, per option, its price (dollars) — published or waiting. */
-  readonly chosen: ReadonlyMap<string, ReadonlyMap<string, string>>;
-}
-const object = (value: unknown) =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-/** The product read (detail, or the list for a new dish) and the choice prices, for the editor. */
-export function dishEditorSource(
-  productReference: string | null,
-  loaded: { readonly product: unknown; readonly optionPrices: unknown },
-): DishEditorSource {
-  const view = object(loaded.product);
-  if (view === null || !Array.isArray(view.taxClasses)) throw new MenuPageError("Unavailable");
-  const product = object(view.product);
-  const groups = (Array.isArray(view.optionSetChoices) ? view.optionSetChoices : []).filter(
-    (g: ProductOptionSetChoice) => !g.archived,
-  ) as ProductOptionSetChoice[];
-  const prices = new Map<string, string>();
-  const optionView = object(loaded.optionPrices);
-  for (const p of Array.isArray(optionView?.products) ? optionView.products : [])
-    if (object(p)?.productReference === productReference)
-      for (const set of (p as { optionSets: { options: Record<string, unknown>[] }[] }).optionSets)
-        for (const o of set.options) {
-          const pending = object(o.pending)?.priceMinor;
-          const minor = typeof pending === "string" ? pending : o.priceMinor;
-          if (typeof minor === "string")
-            prices.set(String(o.optionReference), minorToDollars(minor));
-        }
-  const chosen = new Map<string, Map<string, string>>();
-  if (product !== null)
-    for (const set of (product.optionSets ?? []) as {
-      optionSetReference: string;
-      enabledOptionReferences: string[];
-    }[])
-      chosen.set(
-        set.optionSetReference,
-        new Map(set.enabledOptionReferences.map((o) => [o, prices.get(o) ?? "0.00"])),
-      );
-  const presentation = object(product?.presentation);
-  return {
-    name: typeof product?.name === "string" ? product.name : "",
-    nameZh: typeof product?.nameZh === "string" ? product.nameZh : "",
-    description: typeof presentation?.description === "string" ? presentation.description : "",
-    descriptionZh:
-      typeof presentation?.descriptionZh === "string" ? presentation.descriptionZh : "",
-    taxClassificationReference:
-      typeof product?.taxClassificationReference === "string"
-        ? product.taxClassificationReference
-        : null,
-    sizes: Array.isArray(product?.sizes) ? product.sizes.length : 1,
-    taxClasses: view.taxClasses as ProductTaxClass[],
-    groups,
-    chosen,
-  };
-}
+const dishLabel = (dish: Pick<MenuDish, "name" | "nameZh">) =>
+  dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
+
+/** A group's ticked choices on one line, every extra shown (+0.00 too: a free topping is seen). */
+const carriedLine = (group: ProductOptionSetChoice, options: ReadonlyMap<string, string>) =>
+  group.options
+    .filter((o) => options.has(o.optionReference))
+    .map((o) => `${o.name} +${options.get(o.optionReference) ?? ""}`)
+    .join(t(", "));
 
 /**
  * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (Owner 2026-10-28 decisions 7–8): one dish edited on the
  * one-page menu — English and Chinese names and descriptions, price, tax class, section, choice
  * groups with each choice's price, and its allergens (declared by staff). Saving keeps everything
- * waiting; guests see it when the menu is listed. A new dish is the same form, empty.
+ * waiting; guests see it when the menu is listed. A new dish is the same form, empty, or (item 3)
+ * copied from another dish, or carried on from the one just saved: after the first drink, each next
+ * one is its names, its price and one allergen tick.
  */
 export function DishEditor({
   menuReference,
@@ -103,7 +54,11 @@ export function DishEditor({
   allergenChoices,
   keepsStock,
   client,
+  isCombo = () => false,
+  lastSaved = null,
+  openApply = null,
   onSaved,
+  onSavedKeepOpen,
   onClose,
 }: {
   readonly menuReference: string;
@@ -115,22 +70,37 @@ export function DishEditor({
   /** The store keeps stock: declared allergens should become a real recipe. */
   readonly keepsStock: boolean;
   readonly client: MenuClient;
-  readonly onSaved: (message: string) => void;
+  readonly isCombo?: (skuReference: string) => boolean;
+  /** The dish saved last on this page: it heads the "Same as" list. */
+  readonly lastSaved?: string | null;
+  /** Arrived from a group's new choice: tick it here and open "Use on other dishes". */
+  readonly openApply?: {
+    readonly optionSetReference: string;
+    readonly optionReferences: readonly string[];
+  } | null;
+  readonly onSaved: (message: string, productReference?: string | null) => void;
+  /** "Save and add another": the menu reads again, and this form stays. */
+  readonly onSavedKeepOpen?: (productReference: string | null) => void;
   readonly onClose: () => void;
 }) {
-  const productReference = dish?.productReference ?? null;
+  const readReference = dish?.productReference ?? null;
+  // A new dish whose save stopped after the dish was made: it goes on as an edit of that dish.
+  const [adopted, setAdopted] = useState<string | null>(null);
+  const productReference = readReference ?? adopted;
   const [source, setSource] = useState<DishEditorSource | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  // A dish not listed yet has only its waiting price.
+  const [readPrice] = useState(() =>
+    (dish?.pendingPriceMinor ?? dish?.priceMinor)
+      ? minorToDollars((dish?.pendingPriceMinor ?? dish?.priceMinor) as string)
+      : "",
+  );
   const [form, setForm] = useState({
     name: "",
     nameZh: "",
     description: "",
     descriptionZh: "",
-    // A dish not listed yet has only its waiting price.
-    price:
-      (dish?.pendingPriceMinor ?? dish?.priceMinor)
-        ? minorToDollars((dish?.pendingPriceMinor ?? dish?.priceMinor) as string)
-        : "",
+    price: readPrice,
     tax: "",
     section: sectionCode,
   });
@@ -151,20 +121,60 @@ export function DishEditor({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [makingGroup, setMakingGroup] = useState(false);
+  // Item 3 E: a new dish's kitchen section and marks, set right after its first save.
+  const [marks, setMarks] = useState<DishMarks>(noDishMarks);
+  const changeMarks = (change: Partial<DishMarks>) =>
+    setMarks((current) => ({ ...current, ...change }));
+  // Item 3 B and C: the form came from another dish, so the lists fold and only the tick confirms.
+  const [carried, setCarried] = useState(false);
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
+  const [allergensOpen, setAllergensOpen] = useState(false);
+  const [marksOpen, setMarksOpen] = useState(false);
+  const [descriptionsOpen, setDescriptionsOpen] = useState(false);
+  const [copiedFrom, setCopiedFrom] = useState("");
+  const [copying, setCopying] = useState(false);
+  // What the last save did, shown above the English name, where the owner goes on typing.
+  const [note, setNote] = useState<string | null>(null);
+  const [added, setAdded] = useState({ dishes: 0, needAllergens: 0 });
+  // Item 3 F: the group whose "Use on other dishes" is open, and whether its run is going.
+  const [applying, setApplying] = useState<string | null>(null);
+  const [applyRunning, setApplyRunning] = useState(false);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const allergenRows = useRef<HTMLDivElement>(null);
+  // Where focus returns once the fields unlock after a save.
+  const focusAfter = useRef<HTMLElement | null>(null);
+  const focusName = useRef(false);
+  // A new run of the name and price fields: an emptied required field is not a mistake yet.
+  const [fresh, setFresh] = useState(0);
+  useEffect(() => {
+    if (busy) return;
+    if (focusName.current) nameInput.current?.focus();
+    else focusAfter.current?.focus();
+    focusName.current = false;
+    focusAfter.current = null;
+  }, [busy]);
+  const startBusy = () => {
+    focusAfter.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setBusy(true);
+    setProblem(null);
+  };
   /** After a group is made here: read the groups again (what staff typed stays) and choose it. */
-  const groupMade = async (optionSetReference: string | null) => {
+  const groupMade = async (
+    optionSetReference: string | null,
+    typed: ReadonlyMap<string, string>,
+  ) => {
     setMakingGroup(false);
     if (client.loadDish === undefined) return;
     try {
-      const found = dishEditorSource(productReference, await client.loadDish(productReference));
-      setSource((current) => (current === null ? found : { ...current, groups: found.groups }));
+      const found = dishEditorSource(readReference, await client.loadDish(readReference));
+      setSource((current) =>
+        current === null ? found : { ...current, groups: found.groups, usual: found.usual },
+      );
       const group = found.groups.find((g) => g.optionSetReference === optionSetReference);
       if (group !== undefined)
         setChosen((current) =>
-          new Map(current).set(
-            group.optionSetReference,
-            new Map(group.options.filter((o) => o.offered).map((o) => [o.optionReference, "0.00"])),
-          ),
+          new Map(current).set(group.optionSetReference, groupStart(group, found.usual, typed)),
         );
     } catch {
       setProblem(t("The dish could not be read. Check the connection and try again."));
@@ -176,10 +186,10 @@ export function DishEditor({
     let active = true;
     if (client.loadDish === undefined) return;
     void client
-      .loadDish(productReference)
+      .loadDish(readReference)
       .then((loaded) => {
         if (!active) return;
-        const found = dishEditorSource(productReference, loaded);
+        const found = dishEditorSource(readReference, loaded);
         setSource(found);
         setChosen(found.chosen);
         setForm((current) => ({
@@ -200,7 +210,27 @@ export function DishEditor({
     return () => {
       active = false;
     };
-  }, [client, productReference]);
+  }, [client, readReference]);
+  // Arrived from a group's new choice (item 3 F): tick it, once, and open the panel.
+  const openedApply = useRef(false);
+  useEffect(() => {
+    if (source === null || openApply === null || openedApply.current) return;
+    openedApply.current = true;
+    const group = source.groups.find((g) => g.optionSetReference === openApply.optionSetReference);
+    if (group === undefined) return;
+    setChosen((current) => {
+      const options = new Map(current.get(group.optionSetReference) ?? []);
+      for (const option of group.options)
+        if (
+          option.offered &&
+          openApply.optionReferences.includes(option.optionReference) &&
+          !options.has(option.optionReference)
+        )
+          options.set(option.optionReference, source.usual.get(option.optionReference) ?? "0.00");
+      return new Map(current).set(group.optionSetReference, options);
+    });
+    setApplying(group.optionSetReference);
+  }, [source, openApply]);
   const label =
     dish === null ? t("New dish") : dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
   const recipeAllergens = dish?.allergens.source === "Recipe";
@@ -234,7 +264,10 @@ export function DishEditor({
     description: form.description.trim(),
     descriptionZh: form.descriptionZh.trim(),
     taxClassificationReference: form.tax,
-    priceMinor: priceMinor ?? "0",
+    // Only when it was edited. At a Store with its own price, sending the shown price back would
+    // open a price draft for the whole Brand, and a price read minutes ago could undo a newer one.
+    priceMinor:
+      dish !== null && priceMinor === dollarsToMinor(readPrice) ? null : (priceMinor ?? "0"),
     choiceGroups: choicePrices.map((g) => ({
       optionSetReference: g.optionSetReference,
       options: g.options.map((o) => ({
@@ -289,38 +322,238 @@ export function DishEditor({
         </button>
       </div>
     );
-  const save = async () => {
-    if (client.oneStore === undefined || busy || invalid || priceMinor === null) return;
-    setBusy(true);
-    setProblem(null);
+  const sendDish = async (): Promise<
+    | "Unchanged"
+    | {
+        readonly productReference: string | null;
+        readonly choicesWaiting: boolean;
+        readonly name: string;
+        readonly declared: boolean;
+      }
+  > => {
     const content = dishContent();
-    if (loaded.current !== null && JSON.stringify(content) === loaded.current) {
-      setBusy(false);
-      onSaved(
-        t("Nothing in {item} changed; there is nothing new to list.", { item: content.name }),
-      );
-      return;
-    }
+    if (client.oneStore === undefined) throw new MenuPageError("Unavailable");
+    if (loaded.current !== null && JSON.stringify(content) === loaded.current) return "Unchanged";
     const reference = operation ?? newOperationReference();
     setOperation(reference);
-    const command: SaveDishCommand = { ...content, operationReference: reference };
+    const result = (await client.oneStore({ ...content, operationReference: reference })) as {
+      productReference?: unknown;
+      choicesWaiting?: unknown;
+    } | null;
+    setOperation(null);
+    // Saved: what is on the form is now what the dish is.
+    if (loaded.current !== null) loaded.current = JSON.stringify(content);
+    return {
+      productReference:
+        typeof result?.productReference === "string" ? result.productReference : productReference,
+      choicesWaiting: result?.choicesWaiting === true,
+      name: content.name,
+      declared: content.allergens !== null,
+    };
+  };
+  const saveFailed = (error: unknown) => {
+    const known = error instanceof MenuPageError ? error : null;
+    // Offline: no answer, so the same save is tried again. Otherwise the server answered: a dish
+    // that now exists goes on as an edit with a fresh operation (a reused one would replay its
+    // steps and quietly ignore a corrected price), and nothing makes a second copy of it.
+    if (known?.code !== "Offline") setOperation(null);
+    if (known !== null && known.productReference !== null) setAdopted(known.productReference);
+    setProblem(
+      known !== null
+        ? menuErrorText[known.code]
+        : t("That didn't go through. Read the menu again and retry."),
+    );
+  };
+  // The result of a save in the owner's words, including a mark that could not be set.
+  const savedText = (
+    result: { name: string; choicesWaiting: boolean },
+    notSet: readonly string[],
+  ) =>
+    [
+      result.choicesWaiting
+        ? t("{item} saved. Declare its allergens, then list it.", { item: result.name })
+        : t("{item} saved. Guests see it when the menu is listed.", { item: result.name }),
+      notSet.length > 0
+        ? t("{marks} could not be set. Open the dish with Edit and set it.", {
+            marks: notSet.join(t(", ")),
+          })
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  const marksOf = async (product: string | null) =>
+    dish === null && product !== null ? applyDishMarks(client, product, marks) : [];
+  const save = async () => {
+    if (client.oneStore === undefined || busy || invalid || priceMinor === null) return;
+    startBusy();
     try {
-      await client.oneStore(command);
-      setOperation(null);
-      onSaved(t("{item} saved. Guests see it when the menu is listed.", { item: command.name }));
+      const result = await sendDish();
+      if (result === "Unchanged") {
+        onSaved(
+          t("Nothing in {item} changed; there is nothing new to list.", { item: form.name.trim() }),
+        );
+        return;
+      }
+      onSaved(savedText(result, await marksOf(result.productReference)), result.productReference);
     } catch (error) {
-      if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
-      setProblem(
-        error instanceof MenuPageError
-          ? menuErrorText[error.code]
-          : t("That didn't go through. Read the menu again and retry."),
-      );
+      saveFailed(error);
     } finally {
       setBusy(false);
     }
   };
+  // Item 3 C: the next drink goes on from this one. Only a dish whose allergens were looked at (or
+  // a fee, or a Brand with no allergen list yet), or an undeclared run would surface only at List it.
+  const nextAllowed = allergensChecked || charge || allergenChoices.length === 0;
+  const saveAndAddAnother = async () => {
+    if (client.oneStore === undefined || busy || invalid || priceMinor === null) return;
+    if (dish !== null || !nextAllowed) return;
+    startBusy();
+    try {
+      const result = await sendDish();
+      if (result === "Unchanged") return;
+      const notSet = await marksOf(result.productReference);
+      const count = {
+        dishes: added.dishes + 1,
+        needAllergens: added.needAllergens + (result.declared && !result.choicesWaiting ? 0 : 1),
+      };
+      setAdded(count);
+      setNote(
+        [
+          savedText(result, notSet),
+          t("Added {count}.", { count: count.dishes }),
+          count.needAllergens === 0
+            ? ""
+            : count.needAllergens === 1
+              ? t("1 needs allergens.")
+              : t("{count} need allergens.", { count: count.needAllergens }),
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+      // Everything stays but the names, descriptions, price and tick. A fee is never carried on: it
+      // cannot be undone, and the next item must be asked for its allergens.
+      setForm((current) => ({
+        ...current,
+        name: "",
+        nameZh: "",
+        description: "",
+        descriptionZh: "",
+        price: "",
+      }));
+      setAllergensChecked(false);
+      setCharge(false);
+      setAdopted(null);
+      setCarried(true);
+      setOpenGroups(new Set());
+      setAllergensOpen(false);
+      setMarksOpen(false);
+      setDescriptionsOpen(false);
+      setCopiedFrom("");
+      focusName.current = true;
+      setFresh((current) => current + 1);
+      onSavedKeepOpen?.(result.productReference);
+      // New usual extras: what this dish set is what the next group starts from.
+      if (client.loadDish !== undefined)
+        void client
+          .loadDish(null)
+          .then((read) => {
+            const found = dishEditorSource(null, read);
+            setSource((current) =>
+              current === null ? found : { ...current, groups: found.groups, usual: found.usual },
+            );
+          })
+          .catch(() => undefined);
+    } catch (error) {
+      saveFailed(error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Item 3 B: a new dish starts from another. Its allergens are copied but not confirmed.
+  const copyFrom = async (product: string) => {
+    setCopiedFrom(product);
+    if (product === "" || client.loadDish === undefined) return;
+    const target = sections
+      .flatMap((row) => row.dishes)
+      .find((row) => row.productReference === product);
+    if (target === undefined) return;
+    setCopying(true);
+    setProblem(null);
+    setNote(null);
+    try {
+      const found = dishEditorSource(product, await client.loadDish(product));
+      setSource((current) =>
+        current === null ? found : { ...current, groups: found.groups, usual: found.usual },
+      );
+      setChosen(copiedChoices(found));
+      const placed = sections.find((row) =>
+        row.dishes.some((other) => other.skuReference === target.skuReference),
+      );
+      setForm((current) => ({
+        ...current,
+        tax: found.taxClassificationReference ?? current.tax,
+        section: placed?.code ?? current.section,
+      }));
+      setAllergens(
+        new Map(
+          target.allergens.source === "StaffDeclared"
+            ? target.allergens.declared.map((a) => [a.allergenReference, a.classification])
+            : [],
+        ),
+      );
+      setAllergensChecked(false);
+      setCharge(false);
+      setCarried(true);
+      setOpenGroups(new Set());
+      setAllergensOpen(false);
+      setMarksOpen(false);
+      setDescriptionsOpen(false);
+      setNote(
+        t(
+          "Copied from {item}: its choices, extras, allergens and kitchen marks. Enter the names and price, then check the allergens.",
+          { item: target.name },
+        ),
+      );
+      setMarks(await readDishMarks(client, product));
+    } catch {
+      setProblem(t("The dish could not be read. Check the connection and try again."));
+    } finally {
+      setCopying(false);
+    }
+  };
+  // Item 3 F: the run saves the dish on screen first. The panel shows any failure.
+  const saveThisDish = async () => {
+    try {
+      return (await sendDish()) !== "Unchanged";
+    } catch (error) {
+      if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
+      throw error;
+    }
+  };
+  /**
+   * Enter saves only from the names and price. In an extra it moves to the next extra, so an owner
+   * typing "Pudding 1.20, Enter" does not save seven toppings at their starting price; anywhere
+   * else on the form it does nothing. Enter committing pinyin belongs to the input method.
+   */
+  const onEnter = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== "Enter" || composingEnter(event)) return;
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    event.preventDefault();
+    if (target.dataset.saves !== undefined) {
+      if (carried && dish === null) void saveAndAddAnother();
+      else void save();
+      return;
+    }
+    if (target.dataset.extra !== undefined) {
+      const extras = [
+        ...event.currentTarget.querySelectorAll<HTMLInputElement>("input[data-extra]"),
+      ];
+      extras[extras.indexOf(target) + 1]?.focus();
+    }
+  };
   const field = (key: keyof typeof form, text: string, extra: Record<string, unknown> = {}) => (
-    <label className="dish-editor__field">
+    <label key={`${key}-${fresh}`} className="dish-editor__field">
       <span>{text}</span>
       <input
         value={form[key]}
@@ -329,227 +562,427 @@ export function DishEditor({
       />
     </label>
   );
+  const addingMore = carried && dish === null;
+  const mayApply =
+    dish !== null &&
+    !keepsStock &&
+    client.oneStore !== undefined &&
+    client.loadChoicePrices !== undefined;
+  // Item 3 B: last saved first, then by section, with both names. A fee is never copied, nor a dish
+  // with sizes (this form can't hold them); a combo is not a dish.
+  const copySources = applySections(sections, isCombo, null);
+  const lastDish =
+    lastSaved === null
+      ? undefined
+      : copySources.flatMap((row) => row.dishes).find((row) => row.productReference === lastSaved);
+  const declaresHere = !recipeAllergens && allergenChoices.length > 0 && !charge;
+  // A carried form asks for names, price and one tick; the rest folds to a line that can be opened.
+  const showDescriptions =
+    !carried || descriptionsOpen || form.description !== "" || form.descriptionZh !== "";
+  const foldMarks = carried && dish === null && !marksOpen;
   return (
     <form
       className="dish-editor"
       aria-label={label}
+      onKeyDown={onEnter}
       onSubmit={(event) => {
         event.preventDefault();
         void save();
       }}
     >
-      <div className="dish-editor__grid">
-        {field("name", t("English name"), { required: true, maxLength: 80 })}
-        {field("nameZh", t("Chinese name"), { maxLength: 80, lang: "zh-Hans" })}
-        {field("description", t("English description"), { maxLength: 240 })}
-        {field("descriptionZh", t("Chinese description"), { maxLength: 240, lang: "zh-Hans" })}
-        {field("price", t("Price ($)"), {
-          inputMode: "decimal",
-          required: true,
-          placeholder: "12.88",
-        })}
-        <label className="dish-editor__field">
-          <span>{t("Tax class")}</span>
-          <select
-            value={form.tax}
-            required
-            onChange={(event) => setForm((current) => ({ ...current, tax: event.target.value }))}
-          >
-            {source.taxClasses.map((choice, index) => (
-              <option
-                key={choice.taxClassificationReference}
-                value={choice.taxClassificationReference}
-              >
-                {t("Tax class {value} — {choice}", {
-                  value: index + 1,
-                  choice: taxClassText(choice),
-                })}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="dish-editor__field">
-          <span>{t("Section")}</span>
-          <select
-            value={form.section}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, section: event.target.value }))
-            }
-          >
-            {sections.map((section) => (
-              <option key={section.code} value={section.code}>
-                {section.nameZh ? `${section.name} ${section.nameZh}` : section.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {priceMinor === null && form.price.trim() !== "" ? (
-        <p className="dish-editor__problem">{t("Enter the price like 12.88.")}</p>
-      ) : null}
-      <fieldset>
-        <legend>{t("Choice groups")}</legend>
-        {source.groups.length === 0 ? (
-          <p className="dish-editor__note">{t("No choice groups yet.")}</p>
+      {/* Locked while saving, so what a fast typer starts next isn't cleared with the saved dish. */}
+      <fieldset className="dish-editor__lock" disabled={busy || applyRunning}>
+        {note !== null ? (
+          <p className="dish-editor__result" role="status">
+            {note}
+          </p>
         ) : null}
-        {source.groups.map((group) => {
-          const options = chosen.get(group.optionSetReference);
-          return (
-            <div key={group.optionSetReference} className="dish-editor__group">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={options !== undefined}
-                  onChange={(event) =>
-                    setChosen((current) => {
-                      const next = new Map(current);
-                      if (event.target.checked)
-                        next.set(
-                          group.optionSetReference,
-                          new Map(
-                            group.options
-                              .filter((o) => o.offered)
-                              .map((o) => [o.optionReference, "0.00"]),
-                          ),
-                        );
-                      else next.delete(group.optionSetReference);
-                      return next;
-                    })
-                  }
-                />
-                {group.name}
-              </label>
-              {options !== undefined ? (
-                <ul className="dish-editor__choices">
-                  {group.options
-                    .filter((o) => o.offered)
-                    .map((option) => (
-                      <li key={option.optionReference}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={options.has(option.optionReference)}
-                            onChange={(event) =>
-                              setChosen((current) => {
-                                const next = new Map(current);
-                                const set = new Map(next.get(group.optionSetReference) ?? []);
-                                if (event.target.checked) set.set(option.optionReference, "0.00");
-                                else set.delete(option.optionReference);
-                                next.set(group.optionSetReference, set);
-                                return next;
-                              })
-                            }
-                          />
-                          {option.name}
-                        </label>
-                        {options.has(option.optionReference) ? (
-                          <label className="dish-editor__choice-price">
-                            <span>{t("Extra ($) for {choice}", { choice: option.name })}</span>
+        <div className="dish-editor__grid">
+          {dish === null && copySources.length > 0 ? (
+            <label className="dish-editor__field">
+              <span>{t("Same as")}</span>
+              <select
+                value={copiedFrom}
+                disabled={copying}
+                onChange={(event) => void copyFrom(event.target.value)}
+              >
+                <option value="">{t("Start empty")}</option>
+                {lastDish !== undefined ? (
+                  <optgroup label={t("Last saved")}>
+                    <option value={lastDish.productReference ?? ""}>{dishLabel(lastDish)}</option>
+                  </optgroup>
+                ) : null}
+                {copySources.map((row) => (
+                  <optgroup
+                    key={row.code}
+                    label={row.nameZh ? `${row.name} ${row.nameZh}` : row.name}
+                  >
+                    {row.dishes
+                      .filter((other) => other.productReference !== lastDish?.productReference)
+                      .map((other) => (
+                        <option key={other.skuReference} value={other.productReference ?? ""}>
+                          {dishLabel(other)}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {field("name", t("English name"), {
+            required: true,
+            maxLength: 80,
+            ref: nameInput,
+            "data-saves": true,
+          })}
+          {field("nameZh", t("Chinese name"), {
+            maxLength: 80,
+            lang: "zh-Hans",
+            "data-saves": true,
+          })}
+          {field("price", t("Price ($)"), {
+            inputMode: "decimal",
+            required: true,
+            placeholder: "12.88",
+            "data-saves": true,
+          })}
+          <label className="dish-editor__field">
+            <span>{t("Tax class")}</span>
+            <select
+              value={form.tax}
+              required
+              onChange={(event) => setForm((current) => ({ ...current, tax: event.target.value }))}
+            >
+              {source.taxClasses.map((choice, index) => (
+                <option
+                  key={choice.taxClassificationReference}
+                  value={choice.taxClassificationReference}
+                >
+                  {t("Tax class {value} — {choice}", {
+                    value: index + 1,
+                    choice: taxClassText(choice),
+                  })}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="dish-editor__field">
+            <span>{t("Section")}</span>
+            <select
+              value={form.section}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, section: event.target.value }))
+              }
+            >
+              {sections.map((section) => (
+                <option key={section.code} value={section.code}>
+                  {section.nameZh ? `${section.name} ${section.nameZh}` : section.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {showDescriptions ? (
+            <>
+              {field("description", t("English description"), { maxLength: 240 })}
+              {field("descriptionZh", t("Chinese description"), {
+                maxLength: 240,
+                lang: "zh-Hans",
+              })}
+            </>
+          ) : null}
+        </div>
+        {showDescriptions ? null : (
+          <p className="dish-editor__carried dish-editor__carried--mark">
+            <button type="button" onClick={() => setDescriptionsOpen(true)}>
+              {t("Add descriptions")}
+            </button>
+          </p>
+        )}
+        {priceMinor === null && form.price.trim() !== "" ? (
+          <p className="dish-editor__problem">{t("Enter the price like 12.88.")}</p>
+        ) : null}
+        <fieldset>
+          <legend>{t("Choice groups")}</legend>
+          {source.groups.length === 0 ? (
+            <p className="dish-editor__note">{t("No choice groups yet.")}</p>
+          ) : null}
+          {source.groups.map((group) => {
+            const options = chosen.get(group.optionSetReference);
+            // A carried form folds to one line per group, with every extra showing.
+            if (options !== undefined && carried && !openGroups.has(group.optionSetReference))
+              return (
+                <div key={group.optionSetReference} className="dish-editor__group">
+                  <p className="dish-editor__carried">
+                    <span>
+                      <strong>{group.name}</strong>: {carriedLine(group, options)}
+                    </span>{" "}
+                    <button
+                      type="button"
+                      aria-label={t("Change {group}", { group: group.name })}
+                      onClick={() =>
+                        setOpenGroups((current) => new Set(current).add(group.optionSetReference))
+                      }
+                    >
+                      {t("Change")}
+                    </button>
+                  </p>
+                </div>
+              );
+            const noUsualYet =
+              options !== undefined &&
+              [...options].some(
+                ([option, dollars]) => !source.usual.has(option) && dollarsToMinor(dollars) === "0",
+              );
+            return (
+              <div key={group.optionSetReference} className="dish-editor__group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={options !== undefined}
+                    onChange={(event) =>
+                      setChosen((current) => {
+                        const next = new Map(current);
+                        if (event.target.checked)
+                          next.set(group.optionSetReference, groupStart(group, source.usual));
+                        else next.delete(group.optionSetReference);
+                        return next;
+                      })
+                    }
+                  />
+                  {group.name}
+                </label>
+                {options !== undefined ? (
+                  <ul className="dish-editor__choices">
+                    {group.options
+                      .filter((o) => o.offered)
+                      .map((option) => (
+                        <li key={option.optionReference}>
+                          <label>
                             <input
-                              inputMode="decimal"
-                              value={options.get(option.optionReference) ?? ""}
+                              type="checkbox"
+                              checked={options.has(option.optionReference)}
                               onChange={(event) =>
                                 setChosen((current) => {
                                   const next = new Map(current);
                                   const set = new Map(next.get(group.optionSetReference) ?? []);
-                                  set.set(option.optionReference, event.target.value);
+                                  if (event.target.checked)
+                                    set.set(
+                                      option.optionReference,
+                                      source.usual.get(option.optionReference) ?? "0.00",
+                                    );
+                                  else set.delete(option.optionReference);
                                   next.set(group.optionSetReference, set);
                                   return next;
                                 })
                               }
                             />
+                            {option.name}
                           </label>
-                        ) : null}
-                      </li>
-                    ))}
-                </ul>
-              ) : null}
-            </div>
-          );
-        })}
-        {client.createChoiceGroup === undefined ? (
-          <p className="dish-editor__note">
-            <Link to="/app/commerce/option-sets">{t("Add choice groups")}</Link>
-          </p>
-        ) : makingGroup ? (
-          <NewChoiceGroupForm
-            client={client}
-            onCreated={(reference) => void groupMade(reference)}
-            onClose={() => setMakingGroup(false)}
-          />
-        ) : (
-          <div className="dish-editor__actions">
-            <button type="button" onClick={() => setMakingGroup(true)}>
-              {t("New choice group")}
-            </button>
-          </div>
-        )}
-      </fieldset>
-      <fieldset>
-        <legend>{t("Allergens declared by staff")}</legend>
-        {recipeAllergens ? (
-          <p className="dish-editor__note">
-            {t("This dish has a recipe, so its allergens come from the recipe's ingredients.")}{" "}
-            <Link to="/app/commerce/recipes">{t("Open recipes")}</Link>
-          </p>
-        ) : allergenChoices.length === 0 ? (
-          <p className="dish-editor__note">{menuErrorText.RegistryMissing}</p>
-        ) : (
-          <>
-            {declaredCharge || declaredFood ? null : (
-              <div className="dish-editor__kind" role="radiogroup" aria-label={t("What it is")}>
-                <label>
-                  <input
-                    type="radio"
-                    name="dish-kind"
-                    checked={!charge}
-                    onChange={() => setCharge(false)}
-                  />
-                  {t("A dish: declare its allergens")}
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="dish-kind"
-                    checked={charge}
-                    onChange={() => setCharge(true)}
-                  />
-                  {t("A charge, no stock ingredients (such as tea)")}
-                </label>
+                          {options.has(option.optionReference) ? (
+                            <label className="dish-editor__choice-price">
+                              <span>{t("Extra ($) for {choice}", { choice: option.name })}</span>
+                              <input
+                                inputMode="decimal"
+                                data-extra
+                                value={options.get(option.optionReference) ?? ""}
+                                onChange={(event) =>
+                                  setChosen((current) => {
+                                    const next = new Map(current);
+                                    const set = new Map(next.get(group.optionSetReference) ?? []);
+                                    set.set(option.optionReference, event.target.value);
+                                    next.set(group.optionSetReference, set);
+                                    return next;
+                                  })
+                                }
+                              />
+                            </label>
+                          ) : null}
+                        </li>
+                      ))}
+                  </ul>
+                ) : null}
+                {noUsualYet ? (
+                  <p className="dish-editor__note">
+                    {t("No usual price yet: enter it, or leave 0.00 if it is included.")}
+                  </p>
+                ) : null}
+                {options !== undefined && options.size > 0 && mayApply ? (
+                  applying === group.optionSetReference ? (
+                    <ChoiceGroupApply
+                      menuReference={menuReference}
+                      group={group}
+                      extras={options}
+                      read={source.chosen.get(group.optionSetReference)}
+                      sections={applySections(sections, isCombo, dish?.skuReference ?? null)}
+                      allergenChoices={allergenChoices}
+                      client={client}
+                      thisDishName={form.name.trim()}
+                      thisDishReady={!invalid}
+                      saveThisDish={saveThisDish}
+                      onRunning={setApplyRunning}
+                      onFinished={(message) => onSaved(message)}
+                      onClose={() => setApplying(null)}
+                    />
+                  ) : (
+                    <div className="dish-editor__actions">
+                      <button
+                        type="button"
+                        aria-label={t("Use {group} on other dishes", { group: group.name })}
+                        onClick={() => setApplying(group.optionSetReference)}
+                      >
+                        {t("Use on other dishes")}
+                      </button>
+                    </div>
+                  )
+                ) : null}
               </div>
-            )}
-          </>
-        )}
-        {recipeAllergens || allergenChoices.length === 0 ? null : charge ? (
-          <p className="dish-editor__note">
-            {t(
-              "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.",
-            )}
-          </p>
-        ) : (
-          <>
+            );
+          })}
+          {dish !== null && keepsStock && chosen.size > 0 ? (
             <p className="dish-editor__note">
               {t(
-                "Not a costed recipe and not used for stock. Mark each allergen the dish contains or may contain.",
+                "This store keeps stock, so a choice reaches other dishes through its recipe change.",
+              )}{" "}
+              <Link to="/app/commerce/option-recipes">{t("Open option recipes")}</Link>
+            </p>
+          ) : null}
+          {client.createChoiceGroup === undefined ? (
+            <p className="dish-editor__note">
+              <Link to="/app/commerce/option-sets">{t("Add choice groups")}</Link>
+            </p>
+          ) : makingGroup ? (
+            <NewChoiceGroupForm
+              client={client}
+              onCreated={(reference, extras) => void groupMade(reference, extras)}
+              onClose={() => setMakingGroup(false)}
+            />
+          ) : (
+            <div className="dish-editor__actions">
+              <button type="button" onClick={() => setMakingGroup(true)}>
+                {t("New choice group")}
+              </button>
+            </div>
+          )}
+        </fieldset>
+        <fieldset>
+          <legend>{t("Allergens declared by staff")}</legend>
+          {recipeAllergens ? (
+            <p className="dish-editor__note">
+              {t("This dish has a recipe, so its allergens come from the recipe's ingredients.")}{" "}
+              <Link to="/app/commerce/recipes">{t("Open recipes")}</Link>
+            </p>
+          ) : allergenChoices.length === 0 ? (
+            <p className="dish-editor__note">{menuErrorText.RegistryMissing}</p>
+          ) : (
+            <>
+              {declaredCharge || declaredFood ? null : (
+                <div className="dish-editor__kind" role="radiogroup" aria-label={t("What it is")}>
+                  <label>
+                    <input
+                      type="radio"
+                      name="dish-kind"
+                      checked={!charge}
+                      onChange={() => setCharge(false)}
+                    />
+                    {t("A dish: declare its allergens")}
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="dish-kind"
+                      checked={charge}
+                      onChange={() => setCharge(true)}
+                    />
+                    {t(
+                      "A fee, not food (tea, corkage, sauce bar): no allergens, never goes to the kitchen",
+                    )}
+                  </label>
+                </div>
+              )}
+            </>
+          )}
+          {recipeAllergens || allergenChoices.length === 0 ? null : charge ? (
+            <p className="dish-editor__note">
+              {t(
+                "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.",
               )}
             </p>
-            {keepsStock && dish?.allergens.source === "StaffDeclared" ? (
-              <p className="dish-editor__note" role="note">
-                {t(
-                  "This store keeps stock and recipes. Replace these declared allergens with a real recipe for this dish.",
-                )}{" "}
-                <Link to="/app/commerce/recipes">{t("Open recipes")}</Link>
-              </p>
-            ) : null}
-            <AllergenFields
-              fieldKey={dish?.skuReference ?? "new"}
-              choices={allergenChoices}
-              values={allergens}
-              onChange={(allergen, next) => {
-                setAllergens((current) => new Map(current).set(allergen, next));
-                setAllergensChecked(true);
-              }}
-            />
+          ) : (
+            <>
+              {!carried || allergensOpen ? (
+                <p className="dish-editor__note">
+                  {t(
+                    "Not a costed recipe and not used for stock. Mark each allergen the dish contains or may contain.",
+                  )}
+                </p>
+              ) : null}
+              {keepsStock && dish?.allergens.source === "StaffDeclared" ? (
+                <p className="dish-editor__note" role="note">
+                  {t(
+                    "This store keeps stock and recipes. Replace these declared allergens with a real recipe for this dish.",
+                  )}{" "}
+                  <Link to="/app/commerce/recipes">{t("Open recipes")}</Link>
+                </p>
+              ) : null}
+              {!carried || allergensOpen ? (
+                <div ref={allergenRows}>
+                  <AllergenFields
+                    fieldKey={dish?.skuReference ?? "new"}
+                    choices={allergenChoices}
+                    values={allergens}
+                    onChange={(allergen, next) => {
+                      setAllergens((current) => new Map(current).set(allergen, next));
+                      // Copied values are confirmed only by the tick: changing one of them says
+                      // nothing about the rest.
+                      if (!carried) setAllergensChecked(true);
+                    }}
+                  />
+                </div>
+              ) : null}
+            </>
+          )}
+        </fieldset>
+        {/* WP-2423 item 8 ⑦: a dish the kitchen does not prepare. A dish that exists saves it on its
+          own; a new one with its first save (item 3 E). */}
+        <DishKitchenMark
+          productReference={readReference}
+          client={client}
+          chargeChosen={charge}
+          declaredCharge={declaredCharge}
+          form={marks}
+          onForm={changeMarks}
+          {...(foldMarks ? { onUnfold: () => setMarksOpen(true) } : {})}
+        />
+        {/* WP-2423 DEC-ALCOHOL: a dish that contains alcohol, likewise. */}
+        <DishAlcoholMark
+          productReference={readReference}
+          client={client}
+          form={marks}
+          onForm={changeMarks}
+          {...(foldMarks ? { onUnfold: () => setMarksOpen(true) } : {})}
+        />
+        {declaresHere ? (
+          <div className="dish-editor__check">
+            <p className="dish-editor__summary">
+              {allergenFormSummary(allergens, allergenChoices)}
+              {carried && !allergensOpen ? (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    aria-label={t("Change allergens")}
+                    onClick={() => {
+                      setAllergensOpen(true);
+                      window.requestAnimationFrame(() =>
+                        allergenRows.current?.querySelector("input")?.focus(),
+                      );
+                    }}
+                  >
+                    {t("Change")}
+                  </button>
+                </>
+              ) : null}
+            </p>
             <label className="dish-editor__confirm">
               <input
                 type="checkbox"
@@ -558,26 +991,40 @@ export function DishEditor({
               />
               {t("I checked every allergen of this dish.")}
             </label>
-          </>
-        )}
+          </div>
+        ) : null}
+        {problem ? (
+          <p className="dish-editor__problem" role="alert">
+            {problem}
+          </p>
+        ) : null}
+        <div className="dish-editor__actions">
+          <button
+            type={addingMore ? "button" : "submit"}
+            className={addingMore ? undefined : "one-menu__primary"}
+            disabled={busy || invalid}
+            onClick={addingMore ? () => void save() : undefined}
+          >
+            {busy ? t("Saving…") : t("Save dish")}
+          </button>
+          {dish === null && onSavedKeepOpen !== undefined ? (
+            <button
+              type="button"
+              className={addingMore ? "one-menu__primary" : undefined}
+              disabled={busy || invalid || !nextAllowed}
+              onClick={() => void saveAndAddAnother()}
+            >
+              {t("Save and add another")}
+            </button>
+          ) : null}
+          <button type="button" disabled={busy || applyRunning} onClick={onClose}>
+            {t("Close")}
+          </button>
+        </div>
+        {dish === null && onSavedKeepOpen !== undefined && !nextAllowed ? (
+          <p className="dish-editor__note">{t("Check the allergens to add the next one")}</p>
+        ) : null}
       </fieldset>
-      {/* WP-2423 item 8 ⑦: a dish the kitchen does not prepare (saved on its own). */}
-      <DishKitchenMark productReference={productReference} client={client} />
-      {/* WP-2423 DEC-ALCOHOL: a dish that contains alcohol (saved on its own). */}
-      <DishAlcoholMark productReference={productReference} client={client} />
-      {problem ? (
-        <p className="dish-editor__problem" role="alert">
-          {problem}
-        </p>
-      ) : null}
-      <div className="dish-editor__actions">
-        <button type="submit" className="one-menu__primary" disabled={busy || invalid}>
-          {busy ? t("Saving…") : t("Save dish")}
-        </button>
-        <button type="button" disabled={busy} onClick={onClose}>
-          {t("Close")}
-        </button>
-      </div>
     </form>
   );
 }

@@ -56,6 +56,8 @@ export class MenuPageError extends Error {
     readonly code: MenuErrorCode,
     /** WP-2423 (v15 2026-10-22): what a blocked review found missing, when the server knows. */
     readonly problem: MenuReviewProblem | null = null,
+    /** WP-2423 item 3: the dish exists although its save stopped; saving again continues it. */
+    readonly productReference: string | null = null,
   ) {
     super(t("Menus are unavailable"));
     this.name = "MenuPageError";
@@ -193,7 +195,7 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
           { item: item, store: problem.storeName },
         );
       return t(
-        "{item} has no recipe for this menu's Stores. In this menu, declare its allergens, or mark it as a charge that uses no stock ingredients (such as tea); or publish a recipe under Recipes and assign it to this size. Then list it again.",
+        "{item} has no allergens declared. Declare its allergens in this menu, or publish a recipe under Recipes and assign it to this size. Then list it again.",
         { item: item },
       );
     case "SubRecipe":
@@ -337,13 +339,15 @@ export interface SaveDishCommand {
   readonly operationReference: string;
   readonly menuReference: string;
   readonly productReference: string | null;
-  readonly sectionCode: string;
+  /** null only for a dish that exists: its place on the menu stays as it is. */
+  readonly sectionCode: string | null;
   readonly name: string;
   readonly nameZh: string;
   readonly description: string;
   readonly descriptionZh: string;
   readonly taxClassificationReference: string;
-  readonly priceMinor: string;
+  /** null only for a dish that exists: its price stays as it is. */
+  readonly priceMinor: string | null;
   readonly choiceGroups: readonly {
     readonly optionSetReference: string;
     readonly options: readonly { readonly optionReference: string; readonly amountMinor: string }[];
@@ -557,6 +561,8 @@ export interface MenuClient {
   /** WP-2423 item 8 ⑥: what the dish editor reads — the product (or the Brand's tax classes and
    * choice groups for a new dish) and the choice prices. */
   loadDish?(productReference: string | null): Promise<{ product: unknown; optionPrices: unknown }>;
+  /** WP-2423 item 3 F: every dish's choices and prices, to see which dishes have a group. */
+  loadChoicePrices?(): Promise<unknown>;
   /** WP-2423 item 8 ⑥: one dish saved, or everything listed. */
   oneStore?(command: SaveDishCommand | ListAllCommand | SaveComboCommand): Promise<unknown>;
   /** WP-2423 item 8 ⑥ part 4: the combos of the one-page menu. */
@@ -900,6 +906,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
       const payload = (await response.json().catch(() => null)) as {
         error?: unknown;
         part?: unknown;
+        productReference?: unknown;
       } | null;
       const code = String(payload?.error) as MenuErrorCode;
       throw new MenuPageError(
@@ -917,6 +924,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
           code === "KitchenNotReady"
           ? parseMenuReviewProblem((payload as { problem?: unknown } | null)?.problem)
           : null,
+        typeof payload?.productReference === "string" ? payload.productReference : null,
       );
     }
     return response.json() as Promise<unknown>;
@@ -927,10 +935,12 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
     loadDish: async (productReference) => {
       const [product, optionPrices] = await Promise.all([
         post("/merchant/commerce/products/query", { productReference }),
-        post("/merchant/commerce/option-prices/query", {}),
+        // Only this dish's prices and the usual extras: the whole list takes seconds to read.
+        post("/merchant/commerce/option-prices/query", { productReference }),
       ]);
       return { product, optionPrices };
     },
+    loadChoicePrices: () => post("/merchant/commerce/option-prices/query", {}),
     oneStore: (command) => post("/merchant/commerce/one-store-dishes/command", command),
     combos: () => post("/merchant/commerce/one-store-combos/query", {}),
     kitchenNotPrepared: (command) =>

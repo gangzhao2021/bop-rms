@@ -66,12 +66,43 @@ test("@production the owner applies the full-service setup, turns a module back 
       version: 0,
       teaSellableReference: null as string | null,
       changedAt: null as string | null,
+      kitchenPrepares: false,
     },
     // v15 2026-10-29: only items on the listed dine-in menu, each by its own name.
     teaChoices: [
-      { sellableReference: id(505), name: "Tea (TEST) 茶位", unavailable: null },
+      {
+        sellableReference: id(505),
+        name: "Tea (TEST) 茶位",
+        unavailable: null,
+        declaredCharge: true,
+        priceAmount: "1.50",
+        kitchenPrepares: false,
+      },
+      {
+        sellableReference: id(507),
+        name: "Kung Pao chicken (TEST) 宫保鸡丁",
+        unavailable: null,
+        declaredCharge: false,
+        priceAmount: "18.00",
+        kitchenPrepares: false,
+      },
+      {
+        sellableReference: id(508),
+        name: "Plated sauce (TEST)",
+        unavailable: null,
+        declaredCharge: false,
+        priceAmount: "2.00",
+        kitchenPrepares: true,
+      },
       // Hidden from this store on the menu: a staff round could not sell it.
-      { sellableReference: id(506), name: "Jasmine tea (TEST)", unavailable: "NotOffered" },
+      {
+        sellableReference: id(506),
+        name: "Jasmine tea (TEST)",
+        unavailable: "NotOffered",
+        declaredCharge: true,
+        priceAmount: null,
+        kitchenPrepares: false,
+      },
     ],
     tips: {
       version: 0,
@@ -97,6 +128,7 @@ test("@production the owner applies the full-service setup, turns a module back 
           version: current.teaCharge.version + 1,
           teaSellableReference: body.teaSellableReference as string | null,
           changedAt: "2026-10-29T15:30:00.000Z",
+          kitchenPrepares: body.teaSellableReference === id(508),
         },
       };
       return route.fulfill({ headers, json: current });
@@ -357,6 +389,8 @@ test("@production the owner applies the full-service setup, turns a module back 
   await expect(teaItem.getByRole("option")).toHaveText([
     "No tea charge",
     "Tea (TEST) 茶位",
+    "Kung Pao chicken (TEST) 宫保鸡丁",
+    "Plated sauce (TEST)",
     "Jasmine tea (TEST) — hidden from this store on the menu; show it to choose it",
   ]);
   // The option's own `disabled`: Playwright's toBeDisabled reads an <option> as enabled.
@@ -364,14 +398,45 @@ test("@production the owner applies the full-service setup, turns a module back 
     "disabled",
     true,
   );
+  // WP-2423 item 8a: nothing to remember about the kitchen; a dish chosen by mistake is asked about
+  // first, because it is money and it takes the dish from the menu and the kitchen.
+  await expect(page.getByText("Not prepared by the kitchen", { exact: false })).toHaveCount(0);
+  const teaCommands = () => commands.filter((c) => c.action === "ChangeTeaCharge");
+  await teaItem.selectOption({ label: "Kung Pao chicken (TEST) 宫保鸡丁" });
+  await page.getByRole("button", { name: "Save tea charge" }).click();
+  await expect(
+    page.getByText(
+      "Kung Pao chicken (TEST) 宫保鸡丁 is a dish. It leaves the guest menu, every guest at a pay-later table is charged $18.00, and it stops going to the kitchen.",
+    ),
+  ).toBeVisible();
+  expect(teaCommands()).toEqual([]);
+  await page.getByRole("button", { name: "Go back" }).click();
+  await expect(page.getByText("is a dish.", { exact: false })).toHaveCount(0);
+  await expect(teaItem).toHaveValue(id(507));
+  // Marked as made in the kitchen, the question says so; the answer says what was saved.
+  await teaItem.selectOption({ label: "Plated sauce (TEST)" });
+  await page.getByRole("button", { name: "Save tea charge" }).click();
+  await expect(
+    page.getByText("The kitchen still makes it, as set on the menu.", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Yes, make it the tea" }).click();
+  await expect(
+    page.getByText("Saved. Tea is added for each guest from the next party size recorded.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("The kitchen prepares this item, as set on the menu.")).toBeVisible();
+  // A fee needs no question.
   await teaItem.selectOption({ label: "Tea (TEST) 茶位" });
   await page.getByRole("button", { name: "Save tea charge" }).click();
   await expect(
-    page.getByText("Saved. Tea is added for each guest from the next party size recorded."),
+    page.getByText(
+      "Saved. Tea is added for each guest from the next party size recorded. It does not go to the kitchen.",
+    ),
   ).toBeVisible();
   expect(commands.at(-1)).toMatchObject({
     action: "ChangeTeaCharge",
-    expectedVersion: 0,
+    expectedVersion: 1,
     teaSellableReference: id(505),
   });
 

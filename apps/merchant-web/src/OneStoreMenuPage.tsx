@@ -1,7 +1,7 @@
 import { countOf, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { newOperationReference } from "./operation-reference.js";
 import { orderMoney } from "./order-money.js";
@@ -32,6 +32,7 @@ import {
 } from "./store-availability-page.js";
 import { menuErrorText } from "./StoreMenuPages.js";
 import { allergenSummary } from "./dish-allergens.js";
+import { firstDishUsing } from "./dish-choice-apply.js";
 import { DishEditor } from "./DishEditor.js";
 import { ComboEditor, comboDishChoices } from "./ComboEditor.js";
 import {
@@ -67,6 +68,20 @@ const filterText: Record<MenuFilter, string> = {
 const price = (minor: string | null) =>
   minor === null ? null : orderMoney({ amountMinor: minor, currencyCode: "CAD" });
 
+const noAllergensFilter: ReadonlySet<MenuFilter> = new Set(["NoAllergens"]);
+
+/**
+ * WP-2423 item 3 F: arriving from a group that just gained a choice (Option sets): the first dish
+ * using the group opens with the choice ticked and "Use on other dishes" open.
+ */
+export interface MenuApplyIntent {
+  readonly applyChoice: {
+    readonly optionSetReference: string;
+    readonly optionReferences: readonly string[];
+    readonly names: readonly string[];
+  };
+}
+
 /**
  * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU part 1: a single store's menu on one page. Sections and
  * dishes in the order guests see them (drag to reorder; Move buttons for the keyboard), both names,
@@ -96,7 +111,11 @@ export function OneStoreMenuPage({
   const [guestUnreadable, setGuestUnreadable] = useState<readonly string[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [problemFixHref, setProblemFixHref] = useState<string | null>(null);
+  // WP-2423 item 8a: a listing refused for a dish with no allergens points to the dishes concerned.
+  const [problemNeedsAllergens, setProblemNeedsAllergens] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  // A read that failed while a form is open: the form and what is typed in it stay.
+  const [readNotice, setReadNotice] = useState<string | null>(null);
   const [rows, setRows] = useState<readonly MenuSectionRow[]>([]);
   const [saved, setSaved] = useState("");
   const [search, setSearch] = useState("");
@@ -108,6 +127,19 @@ export function OneStoreMenuPage({
   const blocked = busy || listingBusy;
   // The dish open in its editor (one at a time; "new" for a new dish).
   const [editing, setEditing] = useState<string | null>(null);
+  const keepForm = useRef(false);
+  useEffect(() => {
+    keepForm.current = editing !== null && view !== null;
+  }, [editing, view]);
+  // The dish saved last: it heads "Same as".
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const [openApply, setOpenApply] = useState<{
+    readonly skuReference: string;
+    readonly optionSetReference: string;
+    readonly optionReferences: readonly string[];
+  } | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [newSection, setNewSection] = useState<{ name: string; nameZh: string } | null>(null);
   // One listing reference per intended listing, kept until it is answered (a retry continues it).
   const [listing, setListing] = useState<string | null>(null);
@@ -152,9 +184,18 @@ export function OneStoreMenuPage({
         setRows(next);
         setSaved(orderKey(next));
         setFailed(null);
+        setReadNotice(null);
       })
       .catch((error: unknown) => {
         if (!active) return;
+        if (keepForm.current) {
+          setReadNotice(
+            t(
+              "The menu could not be read again. Your form is kept; what you saved shows once it can be read.",
+            ),
+          );
+          return;
+        }
         setFailed(
           (error instanceof MenuPageError || error instanceof AvailabilityPageError) &&
             error.code === "PermissionDenied"
@@ -166,6 +207,39 @@ export function OneStoreMenuPage({
       active = false;
     };
   }, [client, availability, menuReference, onMultiStore, generation]);
+  useEffect(() => {
+    const intent = (location.state as Partial<MenuApplyIntent> | null)?.applyChoice;
+    if (intent === undefined || view === null || rows.length === 0) return;
+    // Once: a reload does not open it again.
+    void navigate(".", { replace: true, state: null });
+    if (client.loadChoicePrices === undefined || client.oneStore === undefined) return;
+    const isCombo = (sku: string) => combos.some((combo) => combo.skuReference === sku);
+    void client
+      .loadChoicePrices()
+      .then((prices) => {
+        const first = firstDishUsing(rows, prices, intent.optionSetReference, isCombo);
+        if (first === null) {
+          setProblem(
+            t(
+              "{choice} is not on any dish yet, and no dish uses its group. Open a dish and tick the group.",
+              {
+                choice: intent.names.join(t(", ")),
+              },
+            ),
+          );
+          return;
+        }
+        setOpenApply({
+          skuReference: first.skuReference,
+          optionSetReference: intent.optionSetReference,
+          optionReferences: intent.optionReferences,
+        });
+        setEditing(first.skuReference);
+      })
+      .catch(() =>
+        setProblem(t("The menu could not be read. Check the connection and try again.")),
+      );
+  }, [location.state, navigate, view, rows, combos, client]);
   const drag = useDragReorder((list, from, to) => {
     if (list === "sections") setRows((current) => moveTo(current, from, to));
     else
@@ -206,6 +280,11 @@ export function OneStoreMenuPage({
     }
   }, [view, listingSince, listingBusy, menuReference]);
   const shown = useMemo(() => filterRows(rows, search, filters), [rows, search, filters]);
+  // The same dishes the "Allergens not declared" filter shows.
+  const needAllergens = useMemo(
+    () => filterRows(rows, "", noAllergensFilter).flatMap((row) => row.dishes).length,
+    [rows],
+  );
   const unplaced = useMemo(
     () => (view === null || stock === null ? [] : dishesNotOnMenu(view, stock.items)),
     [view, stock],
@@ -237,6 +316,7 @@ export function OneStoreMenuPage({
   // A combo with saved changes is listed with the menu.
   const orderPending = listingPending(view) || combos.some((c) => c.state === "Waiting");
   const comboOf = (skuReference: string) => combos.find((c) => c.skuReference === skuReference);
+  const isCombo = (skuReference: string) => comboOf(skuReference) !== undefined;
 
   // One or more commands (a dish's sizes), one after another.
   const availabilityCommand = async (
@@ -321,6 +401,7 @@ export function OneStoreMenuPage({
       setListingSince(null);
       writeListingMarker(menuReference, null);
       setProblem(t("Listed. Guests see the menu as it is now."));
+      setProblemNeedsAllergens(false);
       reload();
     } catch (error) {
       // No answer (offline, or the page is going away): the listing may still be running on the
@@ -334,11 +415,20 @@ export function OneStoreMenuPage({
         error instanceof MenuPageError
           ? error.problem !== null
             ? menuReviewProblemText(error.problem)
-            : menuErrorText[error.code]
+            : error.code === "StoppedPartWay"
+              ? t(
+                  "Listing stopped part-way. List it again to finish; it carries on from where it stopped.",
+                )
+              : menuErrorText[error.code]
           : t("That didn't go through. Read the menu again and retry."),
       );
       setProblemFixHref(
         menuReviewProblemFixHref(error instanceof MenuPageError ? error.problem : null),
+      );
+      setProblemNeedsAllergens(
+        error instanceof MenuPageError &&
+          error.problem?.missing === "Recipe" &&
+          !error.problem.storeName,
       );
       reload();
     } finally {
@@ -651,12 +741,19 @@ export function OneStoreMenuPage({
           allergenChoices={choices}
           keepsStock={view.keepsStock === true}
           client={client}
-          onSaved={(message) => {
+          isCombo={isCombo}
+          openApply={openApply?.skuReference === dish.skuReference ? openApply : null}
+          onSaved={(message, product) => {
             setEditing(null);
+            setOpenApply(null);
+            if (product) setLastSaved(product);
             setProblem(message);
             reload();
           }}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setOpenApply(null);
+          }}
         />
       ) : null}
     </li>
@@ -802,9 +899,17 @@ export function OneStoreMenuPage({
           allergenChoices={choices}
           keepsStock={view.keepsStock === true}
           client={client}
-          onSaved={(message) => {
+          isCombo={isCombo}
+          lastSaved={lastSaved}
+          onSaved={(message, product) => {
             setEditing(null);
+            if (product) setLastSaved(product);
             setProblem(message);
+            reload();
+          }}
+          onSavedKeepOpen={(product) => {
+            if (product !== null) setLastSaved(product);
+            setProblem(null);
             reload();
           }}
           onClose={() => setEditing(null)}
@@ -836,6 +941,24 @@ export function OneStoreMenuPage({
       ) : null}
       {narrowing && view.permissions.mayEdit ? (
         <p className="one-menu__note">{t("Clear the search and filters to reorder dishes.")}</p>
+      ) : null}
+      {readNotice !== null ? (
+        <p className="one-menu__note" role="status">
+          {readNotice}{" "}
+          <button type="button" onClick={reload}>
+            {t("Read again")}
+          </button>
+        </p>
+      ) : null}
+      {needAllergens > 0 && mayEditDishes ? (
+        <p className="one-menu__note one-menu__need-allergens" role="status">
+          {needAllergens === 1
+            ? t("1 dish still needs allergens")
+            : t("{count} dishes still need allergens", { count: needAllergens })}{" "}
+          <button type="button" onClick={() => setFilters(noAllergensFilter)}>
+            {t("Show them")}
+          </button>
+        </p>
       ) : null}
       {listingInProgress && !changedOrder ? (
         <div className="one-menu__pending" role="status">
@@ -918,6 +1041,14 @@ export function OneStoreMenuPage({
             <>
               {" "}
               <Link to={problemFixHref}>{t("Set up the kitchen")}</Link>
+            </>
+          ) : null}
+          {problemNeedsAllergens ? (
+            <>
+              {" "}
+              <button type="button" onClick={() => setFilters(noAllergensFilter)}>
+                {t("Show dishes without allergens")}
+              </button>
             </>
           ) : null}
         </p>

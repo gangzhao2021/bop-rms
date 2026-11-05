@@ -14,15 +14,7 @@ export function allergenSummary(dish: MenuDish, choices: readonly AllergenChoice
   if (dish.allergens.source === "Recipe") return t("Allergens from its recipe");
   if (dish.allergens.source === "None") return t("Allergens not declared");
   if (dish.allergens.noIngredients === true) return t("A charge, no stock ingredients");
-  const names = new Map(choices.map((c) => [c.allergenReference, c.name]));
-  const of = (kind: AllergenClassification) =>
-    dish.allergens.declared
-      .filter((a) => a.classification === kind)
-      .map((a) => names.get(a.allergenReference) ?? "")
-      .filter((name) => name !== "")
-      .join(", ");
-  const contains = of("Contains"),
-    may = of("CrossContactPossible");
+  const { contains, may } = declaredNames(dish.allergens.declared, choices);
   if (contains === "" && may === "") return t("No allergens");
   return [
     contains ? t("Contains {list}", { list: contains }) : "",
@@ -30,6 +22,43 @@ export function allergenSummary(dish: MenuDish, choices: readonly AllergenChoice
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+function declaredNames(
+  declared: readonly {
+    readonly allergenReference: string;
+    readonly classification: AllergenClassification;
+  }[],
+  choices: readonly AllergenChoice[],
+) {
+  const names = new Map(choices.map((c) => [c.allergenReference, c.name]));
+  const of = (kind: AllergenClassification) =>
+    declared
+      .filter((a) => a.classification === kind)
+      .map((a) => names.get(a.allergenReference) ?? "")
+      .filter((name) => name !== "")
+      .join(", ");
+  return { contains: of("Contains"), may: of("CrossContactPossible") };
+}
+
+/** WP-2423 item 3: the allergens as the form now says, one line above the tick that confirms them. */
+export function allergenFormSummary(
+  values: ReadonlyMap<string, AllergenAnswer>,
+  choices: readonly AllergenChoice[],
+): string {
+  const { contains, may } = declaredNames(
+    [...values]
+      .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
+      .map(([allergenReference, classification]) => ({ allergenReference, classification })),
+    choices,
+  );
+  if (contains === "" && may === "") return t("No allergens marked.");
+  return [
+    contains ? `${t("Contains {list}", { list: contains })}.` : "",
+    may ? `${t("May contain {list}", { list: may })}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** One row per allergen on the Brand's list: no, contains, or may contain. */

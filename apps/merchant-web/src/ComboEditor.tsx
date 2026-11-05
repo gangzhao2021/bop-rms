@@ -1,6 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { useEffect, useState } from "react";
-import { dishEditorSource, type DishEditorSource } from "./DishEditor.js";
+import { dishEditorSource, type DishEditorSource } from "./dish-editor-source.js";
 import { newOperationReference } from "./operation-reference.js";
 import type { MenuSectionRow } from "./one-store-menu.js";
 import { taxClassText } from "./product-pages.js";

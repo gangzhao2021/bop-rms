@@ -5,6 +5,7 @@ import { SourceTime } from "./StoreTime.js";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
+import type { MenuApplyIntent } from "./OneStoreMenuPage.js";
 import {
   OptionSetPageError,
   choiceRule,
@@ -195,6 +196,8 @@ function OptionSetEditor({
   const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
   const [pending, setPending] = useState<OptionSetCommand | null>(null);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
+  // WP-2423 item 3 F: a new choice reaches no dish by itself: say so, and lead to where it is added.
+  const [newChoices, setNewChoices] = useState<MenuApplyIntent["applyChoice"] | null>(null);
   const [busy, setBusy] = useState(false);
   const [latest, setLatest] = useState<OptionSetRow | null>(null);
   const shown = (view: OptionSetListView | OptionSetEditView) =>
@@ -281,6 +284,23 @@ function OptionSetEditor({
       }
       setMessage({ tone: "neutral", text: t("Saved.") });
       if (result.optionSet) setLatest(result.optionSet);
+      const added =
+        command.action === "Save"
+          ? command.options
+              .filter((option) => option.optionReference === null && option.offered)
+              .map((option) => option.name)
+          : [];
+      setNewChoices(
+        added.length > 0 && result.optionSet
+          ? {
+              optionSetReference: result.optionSet.optionSetReference,
+              optionReferences: result.optionSet.options
+                .filter((option) => added.includes(option.name))
+                .map((option) => option.optionReference),
+              names: added,
+            }
+          : null,
+      );
       reload();
     } catch (error) {
       const code = error instanceof OptionSetPageError ? error.code : "Unavailable";
@@ -363,6 +383,14 @@ function OptionSetEditor({
           status
         >
           <p>{message.text}</p>
+          {newChoices !== null && message.tone === "neutral" ? (
+            <p>
+              {t("{choice} is not on any dish yet.", { choice: newChoices.names.join(t(", ")) })}{" "}
+              <Link to="/app/commerce/menus" state={{ applyChoice: newChoices }}>
+                {t("Add it to dishes")}
+              </Link>
+            </p>
+          ) : null}
         </StatePanel>
       ) : null}
       <form

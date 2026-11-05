@@ -403,6 +403,25 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
       assert.equal(await price(store2, sku), "7.25");
       assert.equal(await price(store1, sku), "6.50");
 
+      // WP-2423 item 3: edited from the Store with its own price and no price sent ("Use on other
+      // dishes", or the editor when the price was not touched): no price draft opens and nothing
+      // reaches the Brand price or the other Store. Sending the shown 7.25 back would have.
+      const priceEntries = () =>
+        owned(
+          "SELECT count(*)::int books,(SELECT count(*)::int FROM rms_pricing.price_entry WHERE brand_id=$1) entries FROM rms_pricing.price_book WHERE brand_id=$1",
+          [brandReference],
+        );
+      const pricesBefore = await priceEntries();
+      two.as(owner);
+      await two.dishes.command({
+        ...session,
+        body: { ...dish(saved.productReference, null), sectionCode: null, nameZh: "酸辣汤（改）" },
+      });
+      two.as(manager);
+      assert.deepEqual(await priceEntries(), pricesBefore);
+      assert.equal(await price(store2, sku), "7.25");
+      assert.equal(await price(store1, sku), "6.50");
+
       // 5. The Owner's next Brand price reaches Store 1; Store 2 keeps its own.
       await one.dishes.command({ ...session, body: dish(saved.productReference, "680") });
       await listAll();

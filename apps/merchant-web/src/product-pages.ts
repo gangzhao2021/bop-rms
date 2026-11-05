@@ -107,6 +107,8 @@ export interface ProductOptionSetChoice {
   readonly optionSetReference: string;
   readonly name: string;
   readonly archived: boolean;
+  /** WP-2423 item 3: a combo's part, not a choice a dish offers (absent from older views). */
+  readonly comboPart?: boolean;
   readonly displayStyle: string;
   readonly minimum: number;
   readonly maximum: number | null;

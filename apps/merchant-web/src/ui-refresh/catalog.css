@@ -268,7 +268,11 @@
 .one-menu .one-menu__filters button,
 .one-menu .one-menu__actions button,
 .one-menu .one-menu__sizes button,
-.one-menu .one-menu__pending-actions button {
+.one-menu .one-menu__pending-actions button,
+.one-menu .one-menu__note button,
+.one-menu .one-menu__message button,
+.one-menu .dish-editor__carried button,
+.one-menu .dish-editor__summary button {
   min-height: 44px;
   margin: 0;
   padding: 0 4px;
@@ -300,6 +304,13 @@
   border-radius: 8px;
   background: var(--bop-color-accent);
   color: var(--bop-color-on-accent-fill);
+}
+/* A button that can't be pressed yet must not look like the one to press. */
+.one-menu .one-menu__pending-actions .one-menu__primary:disabled,
+.one-menu .dish-editor__actions .one-menu__primary:disabled {
+  border: 1px solid var(--bop-color-border-control);
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-muted);
 }
 .one-menu .one-menu__pending {
   margin: 8px 0 16px;
@@ -403,6 +414,7 @@
   margin: 8px 0 4px;
 }
 .one-menu .dish-editor fieldset {
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
@@ -519,6 +531,63 @@
 .one-menu .dish-editor__choice-price input {
   width: 6em;
   min-height: 44px;
+}
+
+/* WP-2423 item 3: a form carried on from another dish, and its result beside where typing goes on. */
+.one-menu .dish-editor__result {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+.one-menu .dish-editor__carried {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+  min-height: 44px;
+  margin: 0;
+  font-size: 14px;
+}
+.one-menu .dish-editor__carried strong {
+  font-weight: 600;
+}
+.one-menu .dish-editor__carried--mark {
+  margin-top: 8px;
+}
+.one-menu .dish-editor__check {
+  margin-top: 16px;
+}
+.one-menu .dish-editor__summary {
+  margin: 0;
+  font-size: 14px;
+}
+/* WP-2423 item 3 F: "Use on other dishes" inside its group. */
+.one-menu .dish-editor__apply {
+  display: grid;
+  gap: 12px;
+  margin: 8px 0 8px 28px;
+}
+.one-menu .dish-editor__apply > * {
+  margin: 0;
+}
+.one-menu .dish-editor__apply-dishes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.one-menu .dish-editor__apply-dishes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 16px;
+  border-bottom: 1px solid var(--bop-color-row-divider, #e5e5e5);
+}
+.one-menu .dish-editor__apply-dishes li:last-child {
+  border-bottom: 0;
+}
+.one-menu .one-menu__need-allergens {
+  margin: 8px 0;
 }
 
 /* v15 2026-10-28 finding b: a dish's sizes inside its row. */

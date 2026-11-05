@@ -296,6 +296,7 @@ export function createMerchantOptionPrices(options: {
           const set = sets.find((item) => item.optionSetReference === binding.optionSetReference);
           return {
             bindingReference: String(binding.bindingReference),
+            optionSetReference: String(binding.optionSetReference),
             name: set ? name(set.draft.localizedNames, set.internalCode) : "",
             options: (set?.draft.options ?? [])
               .filter((option) => binding.enabledOptionReferences.includes(option.optionReference))
