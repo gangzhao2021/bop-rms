@@ -610,7 +610,9 @@ function EntryState({
         <p className="entry-context">
           {t("You pay on your phone each time you order. No account needed.")}
         </p>
-        {settled === null ? null : <p>{t("After you start, this receipt won’t open on this phone.")}</p>}
+        {settled === null ? null : (
+          <p>{t("After you start, this receipt won’t open on this phone.")}</p>
+        )}
         <button className="entry-action" type="button" onClick={() => onAnswer?.("Start")}>
           {t("Start ordering")}
         </button>

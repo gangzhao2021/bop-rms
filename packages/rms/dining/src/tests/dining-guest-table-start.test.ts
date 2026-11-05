@@ -156,11 +156,7 @@ describe("DEC-DINING-GUEST-TABLE-START: the next party", () => {
     ).toEqual({ ask: true });
     // An empty cart holds nothing, whenever it changed; its change still counts as activity.
     expect(
-      decideGuestNewParty(
-        quiet({ cartChangedAt: ago(1), activity: [ago(1)] }),
-        now,
-        starts(0),
-      ),
+      decideGuestNewParty(quiet({ cartChangedAt: ago(1), activity: [ago(1)] }), now, starts(0)),
     ).toEqual({ ask: false, hold: "Recent" });
   });
   it("isn't asked once the table's or the Store's starts are spent", () => {

@@ -209,7 +209,11 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a table a guest started", () =
         if (free === 0)
           await new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
-              reject(Object.assign(new Error("no connection"), { code: "TENANT_DATABASE_ACQUIRE_FAILED" }));
+              reject(
+                Object.assign(new Error("no connection"), {
+                  code: "TENANT_DATABASE_ACQUIRE_FAILED",
+                }),
+              );
             }, 300);
             waiting.push(() => {
               clearTimeout(timer);
@@ -291,7 +295,15 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a table a guest started", () =
       status: "Established",
       tableOpen: true,
     });
-    expect(x.events).toEqual(["begin", "sources", "rollback", "asks", "begin", "sources", "commit"]);
+    expect(x.events).toEqual([
+      "begin",
+      "sources",
+      "rollback",
+      "asks",
+      "begin",
+      "sources",
+      "commit",
+    ]);
     expect(x.inputs[1]?.intent).toBe("Join");
     expect(x.f.create).toHaveBeenCalledOnce();
   });
@@ -345,7 +357,6 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a table a guest started", () =
     const x = scan();
     owner.guestStarted.mockResolvedValue(null);
     const resolve = x.f.options.qr.contexts.resolve as ReturnType<typeof vi.fn>;
-    const answer = resolve.getMockImplementation();
     resolve.mockImplementationOnce(async () => null);
     expect((await x.service.establish(x.f.input())).status).toBe("Established");
     expect(x.inputs.map((input) => input.requestedAt)).toEqual([
@@ -361,7 +372,6 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a table a guest started", () =
     expect(await y.service.establish(y.f.input())).toEqual({ status: "EntryUnavailable" });
     expect(y.events.filter((event) => event === "sources")).toHaveLength(3);
     expect(y.f.create).not.toHaveBeenCalled();
-    void answer;
   });
   it("a pickup code has no table to read again", async () => {
     const x = scan();
@@ -378,15 +388,17 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a table a guest started", () =
     expect(x.events.filter((event) => event === "sources")).toHaveLength(1);
   });
   it("no start left: the scan answers as at any table nobody opened, and staff hear why", async () => {
-    const x = scan();
     owner.open.mockResolvedValue(false);
     owner.offer.mockResolvedValue({ kind: "Spent" });
     const spent = vi.fn();
     const f = fixture();
     owner.profile.mockReturnValue(f.options.profile);
     owner.session.mockReturnValue(f.options.session.store);
+    const tx = { query: vi.fn(async () => ({ rows: [] })) };
     const service = createPersistentCustomerEntryComposition({
-      transactions: { run: (async (work: (tx: unknown) => Promise<unknown>) => work({ query: vi.fn(async () => ({ rows: [] })) })) as never },
+      transactions: {
+        run: (async (work: (value: typeof tx) => Promise<unknown>) => work(tx)) as never,
+      },
       profile: { binding: { brandReference: id(1), storeReference: id(2) } } as never,
       session: f.options.session,
       guestTables: { asksNewParty: async () => false, startsSpent: spent },
@@ -399,6 +411,8 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a table a guest started", () =
     });
     expect((await service.establish(f.input())).status).toBe("TableNotOpen");
     expect(spent).toHaveBeenCalledOnce();
-    void x;
+    // Nothing was admitted and no visit started: the scan only answered.
+    expect(f.admission).not.toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
   });
 });

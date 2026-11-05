@@ -984,9 +984,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         !withSession || item.diningSessionReference === null || item.orderType !== "DineIn"
           ? null
           : reference(item.diningSessionReference),
-      ...(withGuestStart && item.startedByGuest === true
-        ? { startedByGuest: true as const }
-        : {}),
+      ...(withGuestStart && item.startedByGuest === true ? { startedByGuest: true as const } : {}),
       submittedAt,
       observedAt,
       initialBatchReference: reference(item.initialBatchReference),

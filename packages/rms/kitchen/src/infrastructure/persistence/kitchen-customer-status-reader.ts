@@ -181,10 +181,11 @@ export async function listStoreKitchenOrderProgress(
   transaction: ConsumerTransaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
   orderReferences: readonly string[],
-): Promise<
-  ReadonlyMap<string, { readonly lastChangedAt: string; readonly stillMaking: boolean }>
-> {
-  const found = new Map<string, { readonly lastChangedAt: string; readonly stillMaking: boolean }>();
+): Promise<ReadonlyMap<string, { readonly lastChangedAt: string; readonly stillMaking: boolean }>> {
+  const found = new Map<
+    string,
+    { readonly lastChangedAt: string; readonly stillMaking: boolean }
+  >();
   if (orderReferences.length === 0) return found;
   if (orderReferences.length > 200) return unavailable();
   try {

@@ -1307,13 +1307,13 @@ export function DiningSessionWorkspace({
                 const frees = selected.guestStart != null && guestStarts !== null;
                 void loadRef.current(false, true).then(() =>
                   setResult({
-                    text: (frees
+                    text: frees
                       ? t("Table {table} is closed and free for the next guest.", {
                           table: saidTable(selected.stableLabel),
                         })
                       : t("Table {table} is closed. Clean it, then mark it cleaned.", {
                           table: saidTable(selected.stableLabel),
-                        })),
+                        }),
                   }),
                 );
               }}

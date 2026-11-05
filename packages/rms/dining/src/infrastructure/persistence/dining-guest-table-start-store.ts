@@ -214,7 +214,10 @@ export async function loadDiningGuestTableStartPage(
   const setting = page?.setting as { version?: unknown; on?: unknown } | null | undefined;
   const listed = page?.started;
   if (!Array.isArray(listed) || listed.length > sessions.length) return fail();
-  const started = new Map<string, { readonly startedAt: string; readonly endedLastParty: boolean }>();
+  const started = new Map<
+    string,
+    { readonly startedAt: string; readonly endedLastParty: boolean }
+  >();
   for (const row of listed as readonly { session?: unknown; at?: unknown; ended?: unknown }[])
     started.set(
       String(parseDiningReference(row.session)),

@@ -54,9 +54,9 @@ describe("DEC-DINING-GUEST-TABLE-START: the worker's cycle", () => {
       Object.assign(new Error("changed"), { code: "DINING_CLOSING_VERSION_CONFLICT" }),
     );
     const failures: unknown[] = [];
-    expect(
-      await closer().runOnce({ limit: 10, onFailure: (error) => failures.push(error) }),
-    ).toBe(0);
+    expect(await closer().runOnce({ limit: 10, onFailure: (error) => failures.push(error) })).toBe(
+      0,
+    );
     expect(failures).toEqual([]);
   });
 });

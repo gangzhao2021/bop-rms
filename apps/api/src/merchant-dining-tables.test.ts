@@ -995,7 +995,9 @@ describe("DEC-DINING-GUEST-TABLE-START: when Tables says a table frees itself", 
     kitchen.remaking = new Map(changes.remake ? [[id(6), { openQuantity: 1 }]] : []);
     try {
       const view = (await f.read(f.input)) as unknown as {
-        items: readonly { guestStart?: { closesByItselfAt: string | null; endedLastParty?: true } }[];
+        items: readonly {
+          guestStart?: { closesByItselfAt: string | null; endedLastParty?: true };
+        }[];
       };
       return view.items[0]?.guestStart;
     } finally {

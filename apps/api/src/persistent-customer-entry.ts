@@ -228,9 +228,7 @@ export function createPersistentCustomerEntryComposition(
         if (answer.status === "TableAskNewParty" && askAt !== null) {
           // Nothing is held now. A database that can't answer is a retry, as above; anything else
           // the owners can't say is no reason to stop a guest: they join, as at any open table.
-          const asks = await (
-            options.guestTables as NonNullable<typeof options.guestTables>
-          )
+          const asks = await (options.guestTables as NonNullable<typeof options.guestTables>)
             .asksNewParty(askAt)
             .catch((error: unknown) => {
               const failed = (error as { code?: unknown } | null)?.code;

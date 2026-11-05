@@ -292,9 +292,9 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
       detail: "open the table",
     });
     expect(tableInTab(table(1), stuck, "Needs")).toBe(true);
-    expect(tableNeed(table(1, { guestStart: closes(-30) }), facts({ readyToServe: 1 }), now)).toMatchObject(
-      { tone: "action", words: "Hasn’t freed itself" },
-    );
+    expect(
+      tableNeed(table(1, { guestStart: closes(-30) }), facts({ readyToServe: 1 }), now),
+    ).toMatchObject({ tone: "action", words: "Hasn’t freed itself" });
     // The kitchen working on it, or a table checking out, is something else.
     expect(
       tableNeed(table(1, { guestStart: closes(-30) }), facts({ inKitchen: true }), now).words,
@@ -312,9 +312,11 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
   });
   it("in its last minutes it comes first among the seated", () => {
     const order = facts({ allServed: true });
-    const rows = [table(2), table(3, { guestStart: closes(5) }), table(4, { guestStart: closes(70) })].map(
-      (entry) => ({ table: entry, need: tableNeed(entry, order, now) }),
-    );
+    const rows = [
+      table(2),
+      table(3, { guestStart: closes(5) }),
+      table(4, { guestStart: closes(70) }),
+    ].map((entry) => ({ table: entry, need: tableNeed(entry, order, now) }));
     expect(rows.sort(compareTables).map((row) => row.table.stableLabel)).toEqual(["3", "2", "4"]);
   });
   it("the line at the top of Tables names what frees itself soon, soonest first", () => {
