@@ -51,6 +51,7 @@ it("a fresh browser's CSRF token comes from the first Store: it names no merchan
   const first = store(1, 1);
   const storeOf = routing([first, store(2, 2)]);
   expect(await storeOf({ method: "GET", url: "/api/v1/customer/session/csrf" })).toBe(first);
+  expect(await storeOf({ method: "GET", url: "/bff/customer/payment-configuration" })).toBe(first);
   // A guest of a Store gets it from their own Store.
   const second = store(2, 2, ["2:" + credential]);
   expect(
