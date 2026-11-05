@@ -356,7 +356,8 @@ function EntryNextSteps({
           onStateChange={(state) => {
             setJoined(state === "Bound" || state === "Unavailable");
             // Answered once: a refusal goes back to asking, and doesn't repeat the new party.
-            if (state !== "Joining" && state !== "Ready") setNewPartyJoin(false);
+            if (state !== "Joining" && state !== "Ready" && state !== "Unknown")
+              setNewPartyJoin(false);
             // Owner 2026-11-03 walkthrough: the guest came to order; joined, the menu opens.
             if (state === "Bound" && !opened.current) {
               opened.current = true;

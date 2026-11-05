@@ -1,6 +1,10 @@
 import { parseCanonicalInstant } from "@bop/tenant";
 import { createPostgresGuestSessionEntryStore } from "@bop/identity";
-import { loadDiningGuestTableStart, loadDiningTableOpen } from "@rms/dining";
+import {
+  loadDiningGuestStartedSessionAtTable,
+  loadDiningGuestTableStart,
+  loadDiningTableOpen,
+} from "@rms/dining";
 import {
   createCustomerEntryComposition,
   type CustomerEntryCompositionOptions,
@@ -34,7 +38,7 @@ export interface PersistentCustomerEntryOptions {
   transactions: { run<T>(work: (tx: Transaction) => Promise<T>): Promise<T> };
   session: Omit<CustomerEntryCompositionOptions["session"], "store">;
   /** WP-2423 DEC-DINING-GUEST-TABLE-START: the owners' facts behind "are you with these guests?". */
-  guestTables?: { asksNewParty(tx: Transaction, tableReference: string): Promise<boolean> };
+  guestTables?: { asksNewParty(tableReference: string): Promise<boolean> };
   /** All returned owner ports must use this transaction and retain current fences.
    * The binding is request-scoped; credentials are the shared configured provider.
    */
@@ -133,11 +137,18 @@ export function createPersistentCustomerEntryComposition(
               ...(options.guestTables === undefined
                 ? {}
                 : {
-                    asksNewParty: (where: { tableReference: string }) =>
-                      readOnly(() =>
-                        (
-                          options.guestTables as NonNullable<typeof options.guestTables>
-                        ).asksNewParty(tx, where.tableReference),
+                    // The cheap fact here, so any other open table pays one read and no second
+                    // connection; the owners' facts in a read of their own, holding nothing.
+                    asksNewParty: async (where: { tableReference: string }) =>
+                      (await readOnly(() =>
+                        loadDiningGuestStartedSessionAtTable(
+                          tx as never,
+                          scope,
+                          where.tableReference,
+                        ),
+                      )) !== null &&
+                      (options.guestTables as NonNullable<typeof options.guestTables>).asksNewParty(
+                        where.tableReference,
                       ),
                   }),
             },

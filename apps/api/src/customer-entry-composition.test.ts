@@ -450,3 +450,90 @@ it("WP-2423 item 8 ⑦ 1b: tells a guest at a pickup code that the Store takes d
   // A table code at the same Store still seats the guest.
   expect((await establish(fixture(), ["Pickup"])).status).toBe("Established");
 });
+
+describe("DEC-DINING-GUEST-TABLE-START: a scan at a Store where guests start tables", () => {
+  const table = (changes: object = {}) => ({
+    isOpen: vi.fn(async () => false),
+    guestStart: vi.fn(async () => "MayStart" as const),
+    ...changes,
+  });
+  const noVisit = (f: ReturnType<typeof fixture>) => {
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.records.size).toBe(0);
+  };
+  it("a scan alone starts nothing: no Session, no admission, nothing a link preview could occupy", async () => {
+    const f = fixture();
+    const result = await createCustomerEntryComposition({ ...f.options, table: table() }).establish(
+      f.input(),
+    );
+    expect(result).toMatchObject({
+      status: "TableMayStart",
+      storeDisplayName: expect.any(String),
+    });
+    expect(Object.hasOwn(result, "sessionCredential")).toBe(false);
+    noVisit(f);
+  });
+  it("the guest's tap starts the visit, and says the table isn't open yet", async () => {
+    const f = fixture();
+    const result = await createCustomerEntryComposition({ ...f.options, table: table() }).establish(
+      { ...f.input(), intent: "Start" },
+    );
+    expect(result).toMatchObject({ status: "Established", tableOpen: false });
+    expect(f.create).toHaveBeenCalledOnce();
+  });
+  it("a table waiting for cleaning starts no visit, whatever is sent", async () => {
+    const f = fixture();
+    const result = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({ guestStart: vi.fn(async () => "BeingCleaned" as const) }),
+    }).establish({ ...f.input(), intent: "Start" });
+    expect(result.status).toBe("TableBeingCleaned");
+    noVisit(f);
+  });
+  it.each([
+    ["the switch off", vi.fn(async () => "No" as const)],
+    ["a read that failed", vi.fn(async () => Promise.reject(new Error("read")))],
+  ])("%s answers exactly as before, whatever is sent", async (_name, guestStart) => {
+    const f = fixture();
+    const result = await createCustomerEntryComposition({
+      ...f.options,
+      table: table({ guestStart }),
+    }).establish({ ...f.input(), intent: "Start" });
+    expect(result.status).toBe("TableNotOpen");
+    noVisit(f);
+  });
+  it("an open table a new phone may be a new party at asks once, with no visit yet; the answer goes on", async () => {
+    const asked = table({
+      isOpen: vi.fn(async () => true),
+      asksNewParty: vi.fn(async () => true),
+    });
+    const f = fixture();
+    expect(
+      (await createCustomerEntryComposition({ ...f.options, table: asked }).establish(f.input()))
+        .status,
+    ).toBe("TableAskNewParty");
+    noVisit(f);
+    for (const intent of ["Join", "NewParty"] as const) {
+      const g = fixture();
+      expect(
+        await createCustomerEntryComposition({ ...g.options, table: asked }).establish({
+          ...g.input(),
+          intent,
+        }),
+      ).toMatchObject({ status: "Established", tableOpen: true });
+    }
+  });
+  it("an open table with nothing to ask, or a failed read, joins as before", async () => {
+    for (const asksNewParty of [
+      vi.fn(async () => false),
+      vi.fn(async () => Promise.reject(new Error("read"))),
+    ]) {
+      const f = fixture();
+      const result = await createCustomerEntryComposition({
+        ...f.options,
+        table: table({ isOpen: vi.fn(async () => true), asksNewParty }),
+      }).establish(f.input());
+      expect(result).toMatchObject({ status: "Established", tableOpen: true });
+    }
+  });
+});

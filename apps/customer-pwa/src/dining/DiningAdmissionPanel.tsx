@@ -231,6 +231,7 @@ export function DiningAdmissionPanel({
       codeMode={codeMode}
       onJoinByScan={() => run(false, true)}
       onUseCode={() => setCodeMode(true)}
+      starting={autoJoin}
     />
   );
 }
@@ -245,7 +246,10 @@ export function DiningAdmissionView({
   codeMode = false,
   onJoinByScan,
   onUseCode,
+  starting = false,
 }: {
+  /** The guest already answered; this is their table starting, not a table to join. */
+  readonly starting?: boolean;
   readonly state: DiningAdmissionUiState;
   readonly online: boolean;
   readonly inputRef?: RefObject<HTMLInputElement | null> | undefined;
@@ -267,7 +271,11 @@ export function DiningAdmissionView({
       aria-busy={state === "Joining"}
     >
       <h2 id="dining-admission-heading" ref={statusRef} tabIndex={-1}>
-        {state === "Bound" ? t("You’ve joined this table") : t("Join this table")}
+        {state === "Bound"
+          ? t("You’ve joined this table")
+          : starting
+            ? t("Order at this table")
+            : t("Join this table")}
       </h2>
       {!online && (
         <p role="status">

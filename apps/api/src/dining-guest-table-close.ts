@@ -494,16 +494,19 @@ export function createDiningGuestTableClose(options: DiningGuestTableCloseOption
       return close(session, "GUEST_NEW_PARTY", "CUSTOMER_PWA", tableReference);
     },
     /**
-     * Whether a scan of this table asks "are you with the people here?". In the caller's transaction,
-     * reads only; cheap facts first, so an ordinary open table pays one read.
+     * Whether a scan of this table asks "are you with the people here?". Reads only, in a read of
+     * its own: the scan's transaction already holds the table, and an Order fence after it would
+     * invert the order a paid event takes them in.
      */
-    async asksNewParty(tx: ConsumerTransaction, tableReference: string): Promise<boolean> {
-      const session = await loadDiningGuestStartedSessionAtTable(tx, owner, tableReference);
-      if (session === null) return false;
-      const at = options.now();
-      const current = await readFacts(tx, session, at);
-      if (current === null) return false;
-      return (await rule(tx, "GUEST_NEW_PARTY", tableReference, current.facts, at)) === null;
+    asksNewParty(tableReference: string): Promise<boolean> {
+      return (options.readTransactions ?? options.transactions).run(async (tx) => {
+        const session = await loadDiningGuestStartedSessionAtTable(tx, owner, tableReference);
+        if (session === null) return false;
+        const at = options.now();
+        const current = await readFacts(tx, session, at);
+        if (current === null) return false;
+        return (await rule(tx, "GUEST_NEW_PARTY", tableReference, current.facts, at)) === null;
+      });
     },
   });
 }

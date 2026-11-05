@@ -63,6 +63,12 @@ it("whoever may pause ordering stops guests starting tables, keeping every other
   });
 });
 
+it("turning it on stays with the owner: only the Store features command can, under its own permission", async () => {
+  const { storeFeaturesPermission } = await import("./merchant-store-features.js");
+  expect(storeFeaturesPermission).toBe("organization.manage");
+  expect(guestTableStartOffPermission).not.toBe(storeFeaturesPermission);
+});
+
 it("there is no way to turn it on from here, whatever is sent", async () => {
   await expect(
     setup()(input({ operationReference: id(6), expectedVersion: 4, guestTableStart: true })),

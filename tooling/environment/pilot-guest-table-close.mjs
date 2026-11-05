@@ -5,7 +5,6 @@ import {
 } from "../../apps/worker/dist/outbox-workload.js";
 import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 import { reportUnexpected } from "./pilot-unexpected.mjs";
-import { createInternalReadTransactions } from "./pilot-read-transactions.mjs";
 
 /** The System's closing of guest-started tables for this Store. */
 export function createPilotGuestTableClose(
@@ -23,7 +22,8 @@ export function createPilotGuestTableClose(
     providerAccountReference,
     environment: pilotProviderEnvironment(),
     transactions: resources.transactions,
-    readTransactions: createInternalReadTransactions(resources),
+    // One snapshot of every owner: a table refused takes no lock anyone waits for.
+    readTransactions: { run: (work) => resources.transactions.runSnapshot(work) },
     authorize: async () => allowed(),
     now: resources.now,
     newReference: resources.credentials.reference,

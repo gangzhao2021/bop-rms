@@ -74,7 +74,7 @@ export async function createInternalCustomerEntry(
     ));
   const persistent = {
     ...pickup.entry.persistent,
-    guestTables: { asksNewParty: (tx, table) => guestTables().asksNewParty(tx, table) },
+    guestTables: { asksNewParty: (table) => guestTables().asksNewParty(table) },
     sources: async (tx, input) => {
       // A hint selects a verifier, never authority. The selected owner verifies the complete signed QR.
       if (typeof input.qrToken !== "string" || input.qrToken.length > 4096)

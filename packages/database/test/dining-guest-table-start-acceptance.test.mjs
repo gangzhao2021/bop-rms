@@ -17,6 +17,8 @@ import {
   createPostgresDiningPublicTableReader,
   createPostgresDiningQrJoinStore,
   createPostgresDiningSessionJoinStore,
+  createPostgresDiningSessionStartStore,
+  buildDiningSessionStartRecord,
   loadDiningGuestTableStart,
   parseQrTableContextEvidence,
 } from "../../rms/dining/src/index.ts";
@@ -29,6 +31,7 @@ import {
 import { createCustomerDiningJoinComposition } from "../../../apps/api/src/customer-dining-join-composition.ts";
 import { createDiningGuestTableClose } from "../../../apps/api/src/dining-guest-table-close.ts";
 import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
+import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
 import {
   journeyRound,
   seedJourneyAcceptance,
@@ -38,6 +41,7 @@ import {
 } from "../test-support/dine-in-journey-seed.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { snapshotBegin, snapshotQuery } from "../test-support/snapshot-read-runner.mjs";
 
 const { Client } = pg;
 const id = (n) => "01a0ff10-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -88,6 +92,27 @@ async function setup(context) {
         await client.query("SET LOCAL statement_timeout='10s'");
         const result = await work({
           query: (sql, values) => client.query(sql, [...(values ?? [])]),
+        });
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        await client.end();
+      }
+    },
+  });
+  /** The pilot runner's snapshot read: same BEGIN and statement rules, no locks. */
+  transactions.snapshot = (role = api) => ({
+    async run(work) {
+      const client = new Client(context.clientConfig);
+      await client.connect();
+      try {
+        await client.query(snapshotBegin);
+        await client.query("SET LOCAL ROLE " + role);
+        const result = await work({
+          query: snapshotQuery((sql, values) => client.query(sql, [...(values ?? [])])),
         });
         await client.query("COMMIT");
         return result;
@@ -455,6 +480,43 @@ it("a guest starts a free table by scanning: one Session, the phone is its first
           [id(20)],
         ),
         1,
+      );
+      // Staff opening the table at the same moment hold the version from before: a plain conflict
+      // the page answers with "changed, refresh", never a failure.
+      const staffAt = new Date().toISOString();
+      const staffStart = buildDiningSessionStartRecord({
+        credentials,
+        pepperVersion: 1,
+        ...owner,
+        tableReference: id(20),
+        assignmentVersion: 2,
+        actorReference: id(8),
+        operationReference: fresh(),
+        joinKind: "HumanCode",
+        requestedAt: staffAt,
+      });
+      await assert.rejects(
+        createPostgresDiningSessionStartStore(transactions(), scope, credentials).start({
+          record: staffStart.record,
+          expectedAssignmentVersion: 2,
+          audit: {
+            auditId: fresh(),
+            brandId: scope.brandReference,
+            storeId: scope.storeReference,
+            actor: { type: "User", reference: id(8) },
+            actionCode: "DINING_SESSION_START",
+            targetType: "DiningTable",
+            targetId: id(20),
+            reasonCode: "AUTHORIZED_OPERATION",
+            correlationId: fresh(),
+            occurredAt: staffAt,
+            sourceChannel: "API",
+            dataClassification: "Restricted",
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          },
+        }),
+        { code: "DINING_SESSION_VERSION_CONFLICT" },
       );
       // History is append-only.
       await assert.rejects(admin.query("DELETE FROM rms_dining.dining_session_guest_start"));
@@ -955,7 +1017,14 @@ async function seedPaidGuestTable(admin, transactions, input) {
     acceptedAt: time(-minutes(127)),
     kitchenAt: time(-minutes(126)),
   });
-  return { ownerScope, session, refs, orderReference: r1.order.orderReference, roundTotal };
+  return {
+    ownerScope,
+    session,
+    refs,
+    orderReference: r1.order.orderReference,
+    roundTotal,
+    host: dining.host,
+  };
 }
 
 const closer = (transactions, ownerScope, now) =>
@@ -964,6 +1033,9 @@ const closer = (transactions, ownerScope, now) =>
     providerAccountReference: provider,
     environment: "Test",
     transactions: transactions(),
+    // As the pilot composes it: decided from one snapshot of every owner, under the same statement
+    // rules as a polled merchant read.
+    readTransactions: transactions.snapshot(),
     authorize: async () => true,
     now,
     newReference: fresh,
@@ -1374,7 +1446,7 @@ it("the next party after a 5-minute gap gets its own Session, once it says it is
         identity,
         closeForNewParty: (input) => system.closeForNewParty(input.tableReference),
       });
-      const asks = (table) => transactions().run((tx) => system.asksNewParty(tx, id(table)));
+      const asks = (table) => system.asksNewParty(id(table));
       // A party that sat down a minute ago: nobody is asked; a claim is refused.
       await startedAgo({ transactions, credentials }, 21, 1);
       assert.equal(await asks(21), false);
@@ -1449,7 +1521,7 @@ it("the next party after a 5-minute gap gets its own Session, once it says it is
 
 it("the question and the close are refused while a round is unfinished; a party still eating stays one Session; a paid event during a close doesn't deadlock", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_gs_owed" }, async (context) => {
-    const { admin, transactions, ownerRunner } = await setup(context);
+    const { admin, api, transactions, ownerRunner } = await setup(context);
     try {
       const base = Date.parse(
         (
@@ -1466,8 +1538,7 @@ it("the question and the close are refused while a round is unfinished; a party 
       const sessionReference = session.diningSessionReference;
       const now = () => new Date().toISOString();
       const system = closer(transactions, ownerScope, now);
-      const asks = () =>
-        transactions().run((tx) => system.asksNewParty(tx, session.tableReference));
+      const asks = () => system.asksNewParty(session.tableReference);
       // Paid, not finished: nobody is asked, a claim is refused, the System leaves it alone.
       assert.equal(await asks(), false);
       assert.deepEqual(await system.closeForNewParty(session.tableReference), {
@@ -1488,6 +1559,63 @@ it("the question and the close are refused while a round is unfinished; a party 
         status: "Held",
         hold: "Recent",
       });
+      // Other facts hold a table the rule would otherwise free. Each is set up inside the attempt
+      // only and rolled back, so the next starts from the same table.
+      const withFacts = (before) => {
+        const runner = () => ({
+          async run(work) {
+            const client = new Client(context.clientConfig);
+            await client.connect();
+            try {
+              await client.query("BEGIN");
+              await client.query(
+                "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+                [ownerScope.brandReference, ownerScope.storeReference],
+              );
+              await before(client);
+              await client.query("SET LOCAL ROLE " + api);
+              return await work({
+                query: (sql, values) => client.query(sql, [...(values ?? [])]),
+              });
+            } finally {
+              await client.query("ROLLBACK").catch(() => undefined);
+              await client.end();
+            }
+          },
+        });
+        runner.snapshot = runner;
+        return runner;
+      };
+      const longAgo = new Date(base - minutes(119)).toISOString();
+      const heldBy = async (before) =>
+        closer(withFacts(before), ownerScope, now).closeQuiet(sessionReference);
+      assert.deepEqual(
+        await heldBy((client) =>
+          client.query(
+            "INSERT INTO rms_dining.dining_staff_call (tenant_id,brand_id,store_id,call_id,session_id,participant_id,reason,intent_hash,called_at) VALUES ($1,$2,$3,$4,$5,$6,'Question',$7,$8)",
+            [
+              ownerScope.tenantReference,
+              ownerScope.brandReference,
+              ownerScope.storeReference,
+              fresh(),
+              sessionReference,
+              seeded.host.participantReference,
+              digest("call"),
+              longAgo,
+            ],
+          ),
+        ),
+        { status: "Held", hold: "StaffCall" },
+      );
+      const cartRound = journeyRound({
+        at: new Date(Date.now() - minutes(1)).toISOString(),
+        prefix: "01a00002",
+      });
+      assert.deepEqual(await heldBy((client) => seedSubmissionCart(client, cartRound.f)), {
+        status: "Held",
+        hold: "CartInUse",
+      });
+
       // Lock order: a paid event holds the Order fence, then wants the table. The close waits on
       // the fence holding nothing, so the paid event goes first and neither fails.
       const paid = new Client(context.clientConfig);
