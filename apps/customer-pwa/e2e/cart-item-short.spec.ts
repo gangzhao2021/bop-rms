@@ -211,7 +211,7 @@ for (const screen of [
       await press(proceed);
       const alert = page.getByRole("alert").filter({ hasText: "Synthetic flat white" });
       await expect(alert).toHaveText(
-        "Only 1 Synthetic flat white can be made right now — you have 2 in your cart. You haven’t been charged. Remove one Synthetic flat white, then try again. Change your cart",
+        "Only 1 Synthetic flat white can be made right now — you have 2 in your cart. This order hasn’t been charged. Remove one Synthetic flat white, then try again. Change your cart",
       );
       expect(payments).toEqual([]);
       await press(alert.getByRole("link", { name: "Change your cart" }));

@@ -190,7 +190,7 @@ for (const screen of [
       else await proceed.click();
       const alert = page.getByRole("alert").filter({ hasText: "Synthetic mocha" });
       await expect(alert).toHaveText(
-        "We can make only 1 Synthetic mocha along with the rest of your order — some items use the same ingredients. You haven’t been charged. Change Synthetic mocha to 1 or change other items, then try again. Change your cart",
+        "We can make only 1 Synthetic mocha along with the rest of your order — some items use the same ingredients. This order hasn’t been charged. Change Synthetic mocha to 1 or change other items, then try again. Change your cart",
       );
       await expect(alert.getByRole("link", { name: "Change your cart" })).toHaveAttribute(
         "href",
