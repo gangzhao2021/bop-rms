@@ -3,6 +3,7 @@ import {
   createPostgresGuestSessionEntryStore,
 } from "../../packages/bop/identity/src/index.ts";
 import {
+  CheckoutValidationError,
   createPostgresDiningOrderPreparationSource,
   parseCartAggregate,
   parseAnyCartQuoteAttachment,
@@ -46,18 +47,20 @@ export function createInternalAdditionalCheckout(resources, entry, preparation) 
         );
       };
       const cart = parseCartAggregate(await checkout.repository.loadCart(allocation.cartReference)),
-        quoteValue = await checkout.repository.loadQuote(allocation.cartReference),
-        // WP-2423: configured (version 2) quotes since 2026-10-08; a version-1 parse refused every
-        // additional round with 503.
-        quote = parseAnyCartQuoteAttachment(quoteValue);
+        quoteValue = await checkout.repository.loadQuote(allocation.cartReference);
+      if (cart.diningSessionReference === null || cart.cartReference !== allocation.cartReference)
+        throw new Error("ADDITIONAL_CART_UNAVAILABLE");
+      // WP-2423 item 6: another guest's change or Quote: a fixed answer, never an outage to wait out.
+      const movedOn = () => new CheckoutValidationError("CHECKOUT_CART_VERSION_CONFLICT");
+      if (quoteValue === null || cart.aggregateVersion !== allocation.cartVersion) throw movedOn();
+      // WP-2423: configured (version 2) quotes since 2026-10-08; a version-1 parse refused every
+      // additional round with 503.
+      const quote = parseAnyCartQuoteAttachment(quoteValue);
       if (
-        cart.diningSessionReference === null ||
-        cart.cartReference !== allocation.cartReference ||
-        cart.aggregateVersion !== allocation.cartVersion ||
         quote.quoteReference !== allocation.quoteReference ||
         quote.cartVersion !== cart.aggregateVersion
       )
-        throw new Error("ADDITIONAL_CART_CHANGED");
+        throw movedOn();
       const parent = await resources.transactions.run((transaction) =>
         createPostgresDiningOrderPreparationSource({
           ...resources.scope,

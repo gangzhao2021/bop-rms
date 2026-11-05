@@ -26,6 +26,10 @@ type Options<V extends 1 | 2> = Pick<
 const unavailable = (): never => {
   throw new CheckoutValidationError("CHECKOUT_DEPENDENCY_UNAVAILABLE");
 };
+/** WP-2423 item 6: another guest's change or Quote: asking again can never make this one current. */
+const movedOn = (): never => {
+  throw new CheckoutValidationError("CHECKOUT_CART_VERSION_CONFLICT");
+};
 function create<V extends 1 | 2>(
   options: Options<V>,
   quoteVersion: V,
@@ -107,21 +111,26 @@ function create<V extends 1 | 2>(
       const quoteValue = await options.checkout.repository.loadQuote(
         parseOrderingReference(allocation.cartReference),
       );
+      if (quoteValue === null) return movedOn();
       const quote = parseCartQuoteAttachmentOfVersion(quoteValue, quoteVersion);
       if (
         cart.cartReference !== allocation.cartReference ||
-        cart.aggregateVersion !== allocation.cartVersion ||
         cart.brandReference !== allocation.brandReference ||
         cart.storeReference !== allocation.storeReference ||
         cart.orderType !== "DineIn" ||
-        cart.lifecycle?.status !== "Active" ||
-        quote.quoteReference !== allocation.quoteReference ||
+        cart.lifecycle === null ||
         quote.cartReference !== cart.cartReference ||
-        quote.cartVersion !== cart.aggregateVersion ||
         quote.brandReference !== cart.brandReference ||
         quote.storeReference !== cart.storeReference
       )
         return unavailable();
+      if (
+        cart.aggregateVersion !== allocation.cartVersion ||
+        cart.lifecycle.status !== "Active" ||
+        quote.quoteReference !== allocation.quoteReference ||
+        quote.cartVersion !== cart.aggregateVersion
+      )
+        return movedOn();
       sourceValidUntil = new Date(
         Math.min(
           Date.parse(quote.quoteExpiresAt),

@@ -216,11 +216,45 @@ describe("Checkout Session creation", () => {
     const other = createCheckoutSessionService({
       ...f.ports,
       validate: async () => {
-        throw new CheckoutValidationError("CHECKOUT_QUOTE_EXPIRED");
+        throw new CheckoutValidationError("CHECKOUT_DEPENDENCY_UNAVAILABLE");
       },
     });
     await expect(other.create(f.input)).rejects.toMatchObject({ code: "DEPENDENCY_UNAVAILABLE" });
     expect(f.counts().writes).toBe(0);
+  });
+  it.each([
+    "CHECKOUT_CART_VERSION_CONFLICT",
+    "CHECKOUT_CART_EMPTY",
+    "CHECKOUT_CART_NOT_ACTIVE",
+    "CHECKOUT_QUOTE_MISSING",
+    "CHECKOUT_QUOTE_EXPIRED",
+    "CHECKOUT_REQUOTE_REQUIRED",
+  ] as const)(
+    "WP-2423 item 6: a cart or quote that moved on (%s) is a fixed answer, not an outage",
+    async (code) => {
+      const f = setup();
+      const movedOn = createCheckoutSessionService({
+        ...f.ports,
+        validate: async () => {
+          throw new CheckoutValidationError(code);
+        },
+      });
+      await expect(movedOn.create(f.input)).rejects.toMatchObject({ code: "INTENT_CONFLICT" });
+      expect(f.counts().writes).toBe(0);
+    },
+  );
+  it("WP-2423 item 6: knows the refusal when the pilot's entry loaded Ordering as a second copy", async () => {
+    const f = setup();
+    const copy = createCheckoutSessionService({
+      ...f.ports,
+      validate: async () => {
+        throw Object.assign(new Error("checkout is unavailable"), {
+          name: "CheckoutValidationError",
+          code: "CHECKOUT_CART_VERSION_CONFLICT",
+        });
+      },
+    });
+    await expect(copy.create(f.input)).rejects.toMatchObject({ code: "INTENT_CONFLICT" });
   });
   it("rejects extra client identities before authorization", async () => {
     const f = setup();

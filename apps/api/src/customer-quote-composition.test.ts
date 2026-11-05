@@ -123,6 +123,8 @@ describe("authorized Quote HTTP bridge", () => {
     ["CART_PERMISSION_DENIED", "NotFound"],
     ["CART_UNAVAILABLE", "NotFound"],
     ["CART_VERSION_CONFLICT", "VersionConflict"],
+    ["CART_EXPIRED", "VersionConflict"],
+    ["CART_ABANDONED", "VersionConflict"],
     ["CART_IDEMPOTENCY_CONFLICT", "IdempotencyConflict"],
     ["CART_QUOTE_INVALID", "InvalidConfiguration"],
     ["CART_DEPENDENCY_UNAVAILABLE", "Unavailable"],

@@ -12,6 +12,13 @@ vi.mock("../../packages/rms/ordering/src/index.ts", () => ({
   createPostgresDiningOrderPreparationSource: () => ({
     resolveAdditionalParent: async () => ({ orderVersion: 1 }),
   }),
+  CheckoutValidationError: class extends Error {
+    constructor(code) {
+      super("checkout is unavailable");
+      this.name = "CheckoutValidationError";
+      this.code = code;
+    }
+  },
   parseCartAggregate: (value) => value,
   parseCartQuoteAttachment: mocks.v1,
   parseConfiguredCartQuoteAttachment: mocks.v2,
@@ -82,4 +89,12 @@ it("still reads a version 1 quote with the version 1 parser", async () => {
   await prepareWith({ quoteVersion: 1 });
   expect(mocks.v1).toHaveBeenCalledOnce();
   expect(mocks.v2).not.toHaveBeenCalled();
+});
+
+it("WP-2423 item 6: a cart or quote that moved on is a fixed refusal, not an outage", async () => {
+  mocks.v2.mockReturnValue({ ...quote, quoteReference: "another guest's quote" });
+  const refusal = { name: "CheckoutValidationError", code: "CHECKOUT_CART_VERSION_CONFLICT" };
+  await expect(prepareWith({ quoteVersion: 2 })).rejects.toMatchObject(refusal);
+  await expect(prepareWith(null)).rejects.toMatchObject(refusal);
+  expect(mocks.prepare).not.toHaveBeenCalled();
 });

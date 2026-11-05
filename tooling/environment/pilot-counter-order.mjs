@@ -352,6 +352,8 @@ export async function createInternalCounterOrder(
           tableGuestDetails: staffDiningRound.details,
         }),
     ...(staffDiningRound === undefined ? {} : { diningPayLaterRound: staffDiningRound.payLater }),
+    // The table guest's own steps, for acceptance tests that stop between them; not served.
+    ...(staffDiningRound === undefined ? {} : { tableGuestSteps: staffDiningRound.pipeline }),
     cardMachineRefund: createMerchantCardMachineCancellationRefund({
       persistence,
       authentication,

@@ -142,6 +142,9 @@ function initialFailure(error: unknown): QuoteCartResult {
     case "CART_UNAVAILABLE":
       return { status: "NotFound" };
     case "CART_VERSION_CONFLICT":
+    case "CART_EXPIRED":
+    case "CART_ABANDONED":
+      // WP-2423 item 6: also a cart that ended while the page stayed open: reading it says so.
       return { status: "VersionConflict" };
     case "CART_IDEMPOTENCY_CONFLICT":
       return { status: "IdempotencyConflict" };

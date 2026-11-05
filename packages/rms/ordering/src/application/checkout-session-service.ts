@@ -8,6 +8,7 @@ import { parseCheckoutSession, type CheckoutSession } from "../domain/checkout-s
 import {
   CheckoutValidationError,
   type CheckoutLineRefusal,
+  type CheckoutValidationErrorCode,
 } from "../domain/checkout-validation.js";
 
 export interface CheckoutSessionRequest {
@@ -94,6 +95,27 @@ export function checkoutItemRefusal(error: unknown): CheckoutSessionServiceError
   if (error.code === "CHECKOUT_REQUOTE_REQUIRED")
     return new CheckoutSessionServiceError("REQUOTE_REQUIRED");
   return null;
+}
+/**
+ * WP-2423 item 6: the Cart or its Quote moved on after this request was made (another guest's change
+ * or Quote, prices that ran out, a Cart that ended). Nothing was created and asking again can't change
+ * that: a fixed answer, not an outage for a guest to wait out.
+ */
+const cartMovedOnCodes: ReadonlySet<CheckoutValidationErrorCode> = new Set([
+  "CHECKOUT_CART_VERSION_CONFLICT",
+  "CHECKOUT_CART_EMPTY",
+  "CHECKOUT_CART_NOT_ACTIVE",
+  "CHECKOUT_QUOTE_MISSING",
+  "CHECKOUT_QUOTE_EXPIRED",
+  "CHECKOUT_REQUOTE_REQUIRED",
+]);
+function cartMovedOn(error: unknown): boolean {
+  // By name as well: the pilot's entry and this build can load Ordering as two copies.
+  return (
+    (error instanceof CheckoutValidationError ||
+      (error instanceof Error && error.name === "CheckoutValidationError")) &&
+    cartMovedOnCodes.has((error as CheckoutValidationError).code)
+  );
 }
 const fail = (code: CheckoutSessionServiceError["code"]): never => {
   throw new CheckoutSessionServiceError(code);
@@ -245,6 +267,7 @@ export function createCheckoutSessionService(ports: CheckoutSessionPorts) {
         if (error instanceof CheckoutSessionServiceError) throw error;
         const refusal = checkoutItemRefusal(error);
         if (refusal !== null) throw refusal;
+        if (cartMovedOn(error)) return fail("INTENT_CONFLICT");
         return fail("DEPENDENCY_UNAVAILABLE");
       }
     },
