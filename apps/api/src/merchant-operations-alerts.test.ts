@@ -16,9 +16,11 @@ vi.mock("./merchant-store-scope.js", () => ({
 }));
 import {
   createPersistentMerchantOperationsAlerts,
+  createPersistentMerchantOrderingEnding,
   merchantOperationsAlertKeys,
   operationsAlertKeys,
   projectOperationsAlertBoard,
+  projectOrderingEndingNotice,
 } from "./merchant-operations-alerts.js";
 
 const board = () => ({
@@ -238,6 +240,7 @@ describe("a merchant's projection of its own board", () => {
       // Each is BOP's to renew or set up, by a tool, before any guest notices.
       "installation.validity",
       "settlement.not_covered",
+      "stores.unchecked",
       "stores.attention",
     ])
       expect(view.active.map((item) => item.key)).not.toContain(dropped);
@@ -280,6 +283,7 @@ describe("a merchant's projection of its own board", () => {
       "monitor.source",
       "channel.delivery",
       "settlement.not_covered",
+      "stores.unchecked",
       "stores.attention",
     ];
     const { ALERT_KEYS } = (await import(
@@ -362,6 +366,59 @@ describe("a merchant's projection of its own board", () => {
         "Ordering at this Store stops in 23 hours unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.",
     });
   });
+  it("keeps a stuck payment in view while the settlement scan cannot run, and says checks are incomplete", async () => {
+    const catalog = (await import(
+      /* @vite-ignore */ new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url)
+        .href
+    )) as {
+      advanceAlertState(
+        state: unknown,
+        conditions: unknown,
+        now: number,
+      ): { state: unknown; notifications: readonly { key: string }[] };
+      buildAlertBoard(state: unknown, options: unknown): unknown;
+      emptyAlertState(): unknown;
+      evaluateStoreConditions(observations: unknown): unknown;
+    };
+    const started = Date.parse(at);
+    const observations = (now: number, previous: unknown) => ({
+      now,
+      store: "tea",
+      probes: {},
+      supervisor: { maintenance: false, reportAgeMs: 0, attention: [] },
+      business: {
+        stuckUpdates: { count: 3, oldestAgeMs: 60_000 },
+        retryingUpdates: { count: 0, oldestAgeMs: 0 },
+        reconciliationDifferences: { count: 0, oldestAgeMs: 0 },
+        settlementExceptions: "unreadable",
+      },
+      installation: { validUntil: "2027-11-26T02:26:31.000Z" },
+      previous,
+    });
+    let state = catalog.emptyAlertState();
+    for (let minute = 0; minute <= 5; minute += 1) {
+      const now = started + minute * 60_000;
+      state = catalog.advanceAlertState(
+        state,
+        catalog.evaluateStoreConditions(observations(now, state)),
+        now,
+      ).state;
+    }
+    const observedAt = new Date(started + 5 * 60_000).toISOString();
+    const view = projectOperationsAlertBoard(
+      catalog.buildAlertBoard(state, {
+        observedAt,
+        channels: { email: false, webhooks: 0, heartbeat: false },
+        backup: null,
+        audience: "Merchant",
+      }),
+      observedAt,
+      { audience: "Merchant" },
+    );
+    expect(view.active.map((item) => item.key)).toEqual(["payment.updates"]);
+    expect(view.active[0]?.action).toContain("Do not take a second payment");
+    expect(view.checksIncompleteSince).toBe(observedAt);
+  });
   it("still refuses a board that is not one, whatever the audience", () => {
     const value = everything();
     Object.assign(value.active[0] as object, { phone: "555-0100" });
@@ -405,6 +462,148 @@ describe("a merchant's projection of its own board", () => {
       monitor: "NotRunning",
       active: [],
     });
+  });
+});
+
+describe('AGENTS.md "Warn before timeouts": what any of the Store\'s staff read', () => {
+  const persistence = {
+    now: () => "2026-10-15T08:01:00.000Z",
+    transactions: { run: async <T>(work: (tx: unknown) => Promise<T>) => work({ tx: 1 }) },
+  } as never;
+  const endsAt = "2026-10-16T07:00:00.000Z";
+  it("carries only when ordering stops and who to call", () => {
+    const support = { phone: "+14165550100", testOnly: true };
+    expect(
+      projectOrderingEndingNotice({ ...board(), orderingEndsAt: endsAt, support }),
+    ).toStrictEqual({ endsAt, support });
+    // No number set: the notice still says it, with nothing to call.
+    expect(projectOrderingEndingNotice({ ...board(), orderingEndsAt: endsAt })).toStrictEqual({
+      endsAt,
+      support: null,
+    });
+    // Nothing to say: not even who to call.
+    expect(projectOrderingEndingNotice({ ...board(), support })).toStrictEqual({
+      endsAt: null,
+      support: null,
+    });
+    expect(projectOrderingEndingNotice(null)).toStrictEqual({ endsAt: null, support: null });
+  });
+  it("refuses a board that is not one", () => {
+    for (const bad of [
+      [],
+      "board",
+      { schemaVersion: 2, orderingEndsAt: endsAt },
+      { schemaVersion: 1, orderingEndsAt: "tomorrow" },
+      { schemaVersion: 1, orderingEndsAt: endsAt, support: { phone: "call us", testOnly: false } },
+    ])
+      expect(() => projectOrderingEndingNotice(bad)).toThrow(
+        "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE",
+      );
+  });
+  it("the Home's read accepts the board with that fact on it, and does not repeat it", () => {
+    const view = projectOperationsAlertBoard(
+      { ...board(), orderingEndsAt: endsAt },
+      "2026-10-15T08:02:00.000Z",
+    );
+    expect(view).not.toHaveProperty("orderingEndsAt");
+    expect(() =>
+      projectOperationsAlertBoard(
+        { ...board(), orderingEndsAt: "tomorrow" },
+        "2026-10-15T08:02:00.000Z",
+      ),
+    ).toThrow("MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE");
+  });
+  it("from the monitor to the staff member: nothing at 25 hours, the instant at 23", async () => {
+    const catalog = (await import(
+      /* @vite-ignore */ new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url)
+        .href
+    )) as {
+      advanceAlertState(state: unknown, conditions: unknown, now: number): { state: unknown };
+      buildAlertBoard(state: unknown, options: unknown): unknown;
+      emptyAlertState(): unknown;
+      evaluateStoreConditions(observations: unknown): unknown;
+    };
+    const now = Date.parse("2026-10-15T08:00:00.000Z");
+    const notice = (hoursLeft: number) => {
+      const validUntil = new Date(now + hoursLeft * 3600_000).toISOString();
+      const { state } = catalog.advanceAlertState(
+        catalog.emptyAlertState(),
+        catalog.evaluateStoreConditions({
+          now,
+          store: "tea",
+          probes: {},
+          supervisor: { maintenance: false, reportAgeMs: 0, attention: [] },
+          business: {
+            stuckUpdates: { count: 0, oldestAgeMs: 0 },
+            retryingUpdates: { count: 0, oldestAgeMs: 0 },
+            reconciliationDifferences: { count: 0, oldestAgeMs: 0 },
+            settlementExceptions: { count: 0, oldestAgeMs: 0 },
+          },
+          installation: { validUntil },
+        }),
+        now,
+      );
+      return {
+        validUntil,
+        notice: projectOrderingEndingNotice(
+          catalog.buildAlertBoard(state, {
+            observedAt: new Date(now).toISOString(),
+            channels: { email: false, webhooks: 0, heartbeat: false },
+            backup: null,
+            audience: "Merchant",
+          }),
+        ),
+      };
+    };
+    expect(notice(25).notice.endsAt).toBe(null);
+    const soon = notice(23);
+    expect(soon.notice.endsAt).toBe(soon.validUntil);
+  });
+  it("asks only that the person may enter the Store: any of its staff, on any screen", async () => {
+    scope.allowed = true;
+    const readBoard = vi.fn(async () => ({ ...board(), orderingEndsAt: endsAt }));
+    const read = createPersistentMerchantOrderingEnding({
+      persistence,
+      storeReference: scope.storeReference,
+      readBoard,
+    });
+    expect(await read({ sessionCookie: "cookie" })).toStrictEqual({ endsAt, support: null });
+    expect(scope.calls.at(-1)?.slice(1)).toEqual(["cookie", "merchant.access"]);
+  });
+  it("refuses someone who may not, and another Store, without reading the board", async () => {
+    const readBoard = vi.fn(async () => board());
+    scope.allowed = false;
+    const read = createPersistentMerchantOrderingEnding({
+      persistence,
+      storeReference: scope.storeReference,
+      readBoard,
+    });
+    await expect(read({ sessionCookie: "cookie" })).rejects.toThrow(
+      "STORE_SERVICE_PERMISSION_DENIED",
+    );
+    scope.allowed = true;
+    const other = createPersistentMerchantOrderingEnding({
+      persistence,
+      storeReference: "0190ed90-0000-7000-8000-000000000009",
+      readBoard,
+    });
+    await expect(other({ sessionCookie: "cookie" })).rejects.toThrow(
+      "STORE_SERVICE_PERMISSION_DENIED",
+    );
+    expect(readBoard).not.toHaveBeenCalled();
+  });
+  it("a board that cannot be read is no refusal", async () => {
+    scope.allowed = true;
+    const read = createPersistentMerchantOrderingEnding({
+      persistence,
+      storeReference: scope.storeReference,
+      readBoard: async () => {
+        throw new Error("EACCES");
+      },
+    });
+    await expect(read({ sessionCookie: "cookie" })).rejects.toThrow(
+      "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE",
+    );
   });
 });
 

@@ -265,12 +265,27 @@ export async function readBusinessSignals({
   settlementExceptions = null,
   // DEC-PILOT-ALERTS-BACKUP correction 2: a Store's owner hears nothing of a check that could not
   // run, so BOP must be able to find out why. Not composed for the installation's own Store.
-  reportCheck = () => undefined,
+  reportCheck: reportOnStoreBoard = null,
 }) {
+  const reportCheck = reportOnStoreBoard ?? (() => undefined);
   /** An answer rather than a failure: the Store's published settings could not be read. */
   const reportSettingsUnread = (check, readiness) => {
     if (readiness?.reason === "StoreConfigurationUnavailable")
       reportCheck(check, readiness.cause ?? Error("STORE_CONFIGURATION_UNAVAILABLE"));
+  };
+  /**
+   * On a Store's board one part failing leaves the rest of the read standing: stuck updates must
+   * still say "Do not take a second payment" while the settlement scan cannot run. At the root it
+   * fails the read as a whole, as it always did.
+   */
+  const part = async (check, read) => {
+    if (reportOnStoreBoard === null) return read();
+    try {
+      return await read();
+    } catch (error) {
+      reportCheck(check, error);
+      return "unreadable";
+    }
   };
   const age = (instant) => (instant === null ? 0 : Math.max(0, now - Date.parse(instant)));
   const iso = (value) =>
@@ -317,20 +332,23 @@ export async function readBusinessSignals({
     oldestAgeMs: age(retryingOldest),
   };
 
-  const page = dependencies.createReconciliationExceptions(resources);
-  let after = null,
-    open = 0,
-    oldest = null;
-  for (let n = 0; n < 50; n++) {
-    const result = await page({ afterExceptionReference: after, limit: 100 });
-    for (const item of result.items)
-      if (item.state === "Open") {
-        open += 1;
-        if (oldest === null || item.openedAt < oldest) oldest = item.openedAt;
-      }
-    after = result.nextAfterExceptionReference;
-    if (after === null) break;
-  }
+  const reconciliationDifferences = await part("reconciliation", async () => {
+    const page = dependencies.createReconciliationExceptions(resources);
+    let after = null,
+      open = 0,
+      oldest = null;
+    for (let n = 0; n < 50; n++) {
+      const result = await page({ afterExceptionReference: after, limit: 100 });
+      for (const item of result.items)
+        if (item.state === "Open") {
+          open += 1;
+          if (oldest === null || item.openedAt < oldest) oldest = item.openedAt;
+        }
+      after = result.nextAfterExceptionReference;
+      if (after === null) break;
+    }
+    return { count: open, oldestAgeMs: age(oldest) };
+  });
 
   // DEC-PILOT-ALERTS-BACKUP correction 2: before a Store's Owner has published their own setup no
   // guest can be affected and the opening list is the right place, so these readiness checks wait.
@@ -427,35 +445,38 @@ export async function readBusinessSignals({
     workflow,
     heldStock,
     pickupCapacity,
-    reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
+    reconciliationDifferences,
   };
   // WP-2423: a recent clean settlement answer may be reused (see createBusinessObserver).
   if (settlementExceptions !== null) return { ...signals, settlementExceptions };
-  // DEC-PILOT-ALERTS-BACKUP correction 2: a Store whose first closed day is not recorded yet has
-  // no settlement to read: not checked, never "all settled", and BOP is told once a day has closed.
-  // Not composed for the installation's own Store, where a missing file stays unreadable.
-  if (
-    typeof dependencies.isSettlementCovered === "function" &&
-    (await dependencies.isSettlementCovered()) === false
-  )
+  const settlement = await part("settlement", async () => {
+    // DEC-PILOT-ALERTS-BACKUP correction 2: a Store whose first closed day is not recorded yet has
+    // no settlement to read: not checked, never "all settled", and BOP is told once a day has
+    // closed. Not composed for the installation's own Store, where a missing file stays unreadable.
+    if (
+      typeof dependencies.isSettlementCovered === "function" &&
+      (await dependencies.isSettlementCovered()) === false
+    )
+      return {
+        settlementExceptions: null,
+        settlementCovered: false,
+        closedBusinessDay:
+          opened === true && (await dependencies.readClosedBusinessDay(resources)) === true,
+      };
+    const status = await dependencies.readSettlementStatus({ resources, installation });
+    const problems = status.days.filter(
+      (day) =>
+        (day.state === "Recorded" && day.outcome !== "Matched") ||
+        (day.state === "Missing" && now - Date.parse(day.endsAt) > settlementMissingGraceMs),
+    );
+    const settlementOldest = problems.map((day) => day.endsAt).sort()[0] ?? null;
     return {
-      ...signals,
-      settlementExceptions: null,
-      settlementCovered: false,
-      closedBusinessDay:
-        opened === true && (await dependencies.readClosedBusinessDay(resources)) === true,
+      settlementExceptions: { count: problems.length, oldestAgeMs: age(settlementOldest) },
     };
-  const settlement = await dependencies.readSettlementStatus({ resources, installation });
-  const problems = settlement.days.filter(
-    (day) =>
-      (day.state === "Recorded" && day.outcome !== "Matched") ||
-      (day.state === "Missing" && now - Date.parse(day.endsAt) > settlementMissingGraceMs),
-  );
-  const settlementOldest = problems.map((day) => day.endsAt).sort()[0] ?? null;
-  return {
-    ...signals,
-    settlementExceptions: { count: problems.length, oldestAgeMs: age(settlementOldest) },
-  };
+  });
+  return settlement === "unreadable"
+    ? { ...signals, settlementExceptions: "unreadable" }
+    : { ...signals, ...settlement };
 }
 
 /**
@@ -475,7 +496,7 @@ export function createBusinessObserver({
   settlementIntervalMs = SETTLEMENT_SCAN_INTERVAL_MS,
   load,
   report = () => undefined,
-  reportCheck = () => undefined,
+  reportCheck = null,
 }) {
   let state = null;
   let last = undefined;
@@ -488,20 +509,28 @@ export function createBusinessObserver({
     if (last !== undefined && last !== "unreadable" && now - lastAt < intervalMs) return last;
     try {
       state ??= await load(runtimeDirectory);
+      // A scan that could not run waits like a clean one: it is the costliest read here, and
+      // running it every minute only to fail again gains nothing. What it last said stays raised.
       const reuse =
-        settlement !== null && settlement.count === 0 && now - settlementAt < settlementIntervalMs
+        settlement !== null &&
+        (settlement === "unreadable" || settlement.count === 0) &&
+        now - settlementAt < settlementIntervalMs
           ? settlement
           : null;
-      const failing = new Set();
+      const failing = new Set(reuse === "unreadable" ? ["settlement"] : []);
       last = await readBusinessSignals({
         ...state,
         now,
         settlementExceptions: reuse,
-        reportCheck: (check, error) => {
-          failing.add(check);
-          if (!reportedChecks.has(check)) reportCheck(check, error);
-          reportedChecks.add(check);
-        },
+        ...(reportCheck === null
+          ? {}
+          : {
+              reportCheck: (check, error) => {
+                failing.add(check);
+                if (!reportedChecks.has(check)) reportCheck(check, error);
+                reportedChecks.add(check);
+              },
+            }),
       });
       for (const check of reportedChecks) if (!failing.has(check)) reportedChecks.delete(check);
       if (reuse === null) {

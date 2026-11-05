@@ -104,3 +104,10 @@ it("DEC-PILOT-ALERTS-BACKUP correction 2: the composition's audience reaches the
   const read = pilot.slice(pilot.indexOf("createPersistentMerchantOperationsAlerts({"));
   expect(read.slice(0, read.indexOf("})"))).toContain("audience: operationsAlertAudience");
 });
+
+it("AGENTS.md \"Warn before timeouts\": any staff member's read comes from this Store's own board", async () => {
+  const pilot = await readFile(new URL("./pilot-merchant.mjs", import.meta.url), "utf8");
+  const read = pilot.slice(pilot.indexOf("createPersistentMerchantOrderingEnding({"));
+  expect(read.slice(0, read.indexOf("})"))).toContain("readBoard: readOperationsAlertBoard");
+  expect(pilot).toContain("...(orderingEnding === undefined ? {} : { orderingEnding })");
+});

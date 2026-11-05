@@ -12,6 +12,7 @@ import path from "node:path";
 import {
   DEFAULT_POLICY,
   PLANNED_MAINTENANCE_HELD_KEYS,
+  STORE_RAISE_AFTER_MS,
   advanceAlertState,
   buildAlertBoard,
   emptyAlertState,
@@ -149,6 +150,7 @@ export function createStoreMonitors({
         held: maintenance === null ? [] : PLANNED_MAINTENANCE_HELD_KEYS,
         // A read that timed out is not "the order rules check passes again" (WP-2423 item 9).
         unchecked: uncheckedAlertKeys(observations),
+        raiseAfterMs: STORE_RAISE_AFTER_MS,
       },
     );
     for (const item of advanced.notifications) {
@@ -195,7 +197,8 @@ export function createStoreMonitors({
     monitor.lastWrittenAt = now;
     monitor.raised = new Set(
       Object.entries(advanced.state.alerts)
-        .filter(([, entry]) => entry.raisedAt !== null)
+        // The process the Stores share is the root's to say, once; not each Store's.
+        .filter(([, entry]) => entry.raisedAt !== null && entry.params?.sharedHost !== true)
         .map(([key]) => key),
     );
   }
@@ -244,19 +247,24 @@ export function createStoreMonitors({
       }
     },
     /** For the root board: the Stores needing something only BOP can do, by name. */
-    summary(now) {
+    summary(now, { support = null } = {}) {
       const summary = {
         unchecked: [],
         checksFailing: [],
+        background: [],
         settlementNotCovered: [],
         setupEnding: [],
+        noSupportNumber: [],
       };
       for (const [name, monitor] of monitors) {
         if (now - (monitor.lastWrittenAt ?? monitor.firstSeenAt) > STORE_BOARD_STALE_MS)
           summary.unchecked.push(name);
         if (monitor.raised.has("monitor.source")) summary.checksFailing.push(name);
+        if (monitor.raised.has("service.attention")) summary.background.push(name);
         if (monitor.raised.has("settlement.not_covered")) summary.settlementNotCovered.push(name);
         if (monitor.raised.has("installation.validity")) summary.setupEnding.push(name);
+        // Their screens say "Call BOP support": BOP finds out before a merchant does.
+        if (support === null) summary.noSupportNumber.push(name);
       }
       return summary;
     },

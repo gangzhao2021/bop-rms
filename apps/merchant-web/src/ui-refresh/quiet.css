@@ -214,6 +214,46 @@
   color: var(--bop-color-success);
 }
 
+/* AGENTS.md "Warn before timeouts": ordering's last day, above the screen staff work in. A dot and
+   dark words like every status here, with no box or colour of its own. */
+.ordering-ending-notice {
+  padding: 16px 24px 0;
+  font-size: 14px;
+}
+.ordering-ending-notice p {
+  max-width: 72ch;
+  margin: 0;
+}
+.ordering-ending-notice .ordering-ending-notice__title {
+  margin-bottom: 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.ordering-ending-notice__title::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--bop-color-danger-mark);
+  vertical-align: 0.1em;
+}
+.ordering-ending-notice a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: var(--bop-color-accent);
+}
+@media (max-width: 48rem) {
+  .ordering-ending-notice {
+    padding-inline: 16px;
+  }
+}
+.workspace-page--overview .ordering-ending-notice {
+  padding: 8px 0 16px;
+}
+
 /* The borders that carry meaning. */
 .workspace-page.dining-floor .dining-table-tile[data-selected="true"] {
   outline: 2px solid var(--bop-color-text-default);

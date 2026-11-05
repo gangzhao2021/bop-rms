@@ -7698,6 +7698,73 @@ describe("WP-2423 Q13 operations alerts read route", () => {
   });
 });
 
+describe('AGENTS.md "Warn before timeouts": the ordering-ending read route', () => {
+  type Read = NonNullable<MerchantBffRouterOptions["orderingEnding"]>;
+  async function serve(read?: Read) {
+    const app = express();
+    app.use(
+      "/merchant",
+      createMerchantBffRouter({
+        service: fakeService(),
+        exactOrigin: "https://merchant.invalid",
+        acceptedHost: "merchant.invalid",
+        ...(read ? { orderingEnding: read } : {}),
+      }),
+    );
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("listener unavailable");
+    return `http://127.0.0.1:${address.port}`;
+  }
+  const headers = {
+    host: "merchant.invalid",
+    cookie: "__Host-bop-merchant=" + sessionCookie,
+    "sec-fetch-site": "same-origin",
+  };
+  const notice = { endsAt: "2026-11-26T02:26:31.000Z", support: null };
+  it("passes only the session cookie and answers without caching", async () => {
+    const read = vi.fn<Read>(async () => notice);
+    const root = await serve(read);
+    const result = await request(root, "/merchant/ordering-ending", { headers });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toEqual(notice);
+    expect(read).toHaveBeenCalledWith({ sessionCookie });
+  });
+  it("refuses parameters, a missing session and a cross-site read; 503 when not composed", async () => {
+    const read = vi.fn<Read>(async () => notice);
+    const root = await serve(read);
+    for (const [path, extra] of [
+      ["/merchant/ordering-ending?store=x", {}],
+      ["/merchant/ordering-ending", { cookie: "" }],
+      ["/merchant/ordering-ending", { "sec-fetch-site": "cross-site" }],
+    ] as const) {
+      const result = await request(root, path, { headers: { ...headers, ...extra } });
+      expect(result.status).toBe(403);
+    }
+    expect(read).not.toHaveBeenCalled();
+    const absent = await serve();
+    expect((await request(absent, "/merchant/ordering-ending", { headers })).status).toBe(503);
+  });
+  it("answers a refusal as denied, and a board it could not read as no refusal", async () => {
+    const refused = await serve(async () => {
+      throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+    });
+    const denied = await request(refused, "/merchant/ordering-ending", { headers });
+    expect(denied.status).toBe(403);
+    expect(await denied.text()).not.toContain("STORE_SERVICE");
+    const unreadable = await serve(async () => {
+      throw new Error("MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE");
+    });
+    const answer = await request(unreadable, "/merchant/ordering-ending", { headers });
+    expect(answer.status).toBe(503);
+    expect(answer.headers.get("cache-control")).toBe("no-store");
+    expect(await answer.json()).toEqual({ error: "ordering_ending_unavailable" });
+  });
+});
+
 describe("v15 finding: Store setup navigation for the Store Manager", () => {
   it("admits Store setup for staff who read the Store profile; only the Owner changes it", () => {
     // The pilot entry carries organization.manage (the Owner); a Store Manager holds

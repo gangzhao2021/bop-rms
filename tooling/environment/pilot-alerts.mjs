@@ -90,11 +90,29 @@ const storeNames = (names) => {
     : `${shown.join(", ")} and ${names.length - shown.length} more`;
 };
 const STORE_ATTENTION_PARTS = Object.freeze([
-  ["unchecked", "Not being checked"],
   ["checksFailing", "Some checks could not run"],
+  ["background", "Background work needs a person"],
   ["settlementNotCovered", "Closed business days with no day-end settlement"],
   ["setupEnding", "Ordering setup ending soon"],
+  ["noSupportNumber", "No support number to call"],
 ]);
+/** What BOP does about each cause: only those that apply, so the row never says what is not so. */
+const CHECKS_NOT_RUNNING_STEP =
+  "run the status check and find out why the checks named here are not running";
+const STORE_ATTENTION_STEPS = Object.freeze([
+  ["checksFailing", CHECKS_NOT_RUNNING_STEP],
+  ["background", "restart the background work named here"],
+  ["settlementNotCovered", "record the first closed business day of those with no settlement"],
+  [
+    "setupEnding",
+    "renew those named as ending soon, right after the installation itself (their owners hear only in the last day)",
+  ],
+  [
+    "noSupportNumber",
+    "set the support number in the alert settings, so their owners have someone to call",
+  ],
+]);
+const named = (p, field) => (p[field] ?? []).length > 0;
 
 /**
  * WP-2423 item 9: what an order Workflow the resolver refuses stops on the floor. A refusal stops that
@@ -447,16 +465,36 @@ export const ALERT_CATALOG = Object.freeze({
       "BOP support: record this Store's first closed business day so its day-end settlement starts.",
     runbook: "alert-settlement-none",
   },
+  // A Store nobody is checking is urgent: its money checks are not running, and it is the one thing
+  // no Store can say for itself. So it has a key of its own, and BOP hears each time it starts and
+  // ends, whatever else the row below has been saying for days.
+  "stores.unchecked": {
+    severity: "critical",
+    raiseAfterMs: 0,
+    title: () => "Some Stores are not being checked",
+    summary: (p) => `Not being checked: ${storeNames(p.stores ?? [])}.`,
+    action: () => `BOP support: ${CHECKS_NOT_RUNNING_STEP}.`,
+    runbook: "alert-stores-unchecked",
+  },
+  // On the root board only: each Store has said its own part on a line of its own.
   "stores.attention": {
     severity: "warning",
     raiseAfterMs: 0,
     title: () => "Some Stores need BOP support",
-    summary: (p) =>
-      STORE_ATTENTION_PARTS.filter(([field]) => (p[field] ?? []).length > 0)
-        .map(([field, label]) => `${label}: ${storeNames(p[field])}.`)
-        .join(" ") || "A Store needs checking.",
-    action: () =>
-      "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are told only when ordering is a day from stopping.",
+    summary: (p) => {
+      const sentences = STORE_ATTENTION_PARTS.filter(([field]) => named(p, field)).map(
+        ([field, label]) => `${label}: ${storeNames(p[field])}.`,
+      );
+      // The Home refuses a whole board with a longer summary; what matters most comes first.
+      while (sentences.join(" ").length > 600) sentences.pop();
+      return sentences.join(" ") || "A Store needs checking.";
+    },
+    action: (p) => {
+      const steps = STORE_ATTENTION_STEPS.filter(([field]) => named(p, field)).map(
+        ([, step]) => step,
+      );
+      return `BOP support: ${(steps.length === 0 ? ["run the status check"] : steps).join("; ")}.`;
+    },
     runbook: "alert-stores-attention",
   },
   "backup.failed": {
@@ -597,6 +635,8 @@ const SOURCE_NAMES = Object.freeze({
   pickupCapacity: "the check for pickup times",
   quoteTax: "the check that orders can be priced",
   workflow: "the check of the store's order rules",
+  reconciliation: "the check for payment differences",
+  settlement: "the day-end settlement check",
 });
 
 const PROBE_KEYS = Object.freeze({
@@ -721,7 +761,9 @@ export function evaluateBusinessConditions(
         ? "critical"
         : "warning",
     );
-  if (pick(business.reconciliationDifferences))
+  // "unreadable" only on a Store's board, where one part failing leaves the rest of the read standing.
+  if (business.reconciliationDifferences === "unreadable") unreadable.push("reconciliation");
+  else if (pick(business.reconciliationDifferences))
     raise(
       "reconciliation.differences",
       {
@@ -730,7 +772,8 @@ export function evaluateBusinessConditions(
       },
       business.reconciliationDifferences.oldestAgeMs > 24 * HOUR ? "critical" : "warning",
     );
-  if (pick(business.settlementExceptions))
+  if (business.settlementExceptions === "unreadable") unreadable.push("settlement");
+  else if (pick(business.settlementExceptions))
     raise("settlement.exceptions", {
       count: business.settlementExceptions.count,
       oldestAgeMs: business.settlementExceptions.oldestAgeMs,
@@ -767,8 +810,16 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
   if (supervisor === undefined || supervisor === "unreadable") unreadable.push("supervisor");
   else if (supervisor === null || supervisor.reportAgeMs > thresholds.supervisorSilentMs)
     raise("supervisor.silent", { reportAgeMs: supervisor?.reportAgeMs ?? null });
-  else if (supervisor.attention.length > 0)
-    raise("service.attention", { services: [...supervisor.attention].sort() });
+  else {
+    // DEC-PILOT-ALERTS-BACKUP correction 2: a Store's own work is on its own board, and BOP hears it
+    // once from there, by name. Saying it here too, nameless, would also spend the messages kept for
+    // the installation's own alerts. The process the Stores share stays (`store-workers`).
+    const own =
+      observations.stores === undefined
+        ? supervisor.attention
+        : supervisor.attention.filter((entry) => !String(entry).startsWith("stores/"));
+    if (own.length > 0) raise("service.attention", { services: [...own].sort() });
+  }
 
   evaluateBusinessConditions(observations.business, { raise, unreadable, thresholds });
 
@@ -838,17 +889,15 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
       failingMs: Math.max(...failing.map((channel) => now - Date.parse(channel.failingSince))),
     });
   // DEC-PILOT-ALERTS-BACKUP correction 2: the other Stores' problems only BOP can act on, on the
-  // one board BOP reads. A Store nobody is checking is urgent: its money checks are not running.
+  // one board BOP reads.
   const stores = observations.stores;
-  if (
-    stores !== undefined &&
-    STORE_ATTENTION_PARTS.some(([field]) => (stores[field] ?? []).length > 0)
-  )
+  if ((stores?.unchecked ?? []).length > 0) raise("stores.unchecked", { stores: stores.unchecked });
+  if (stores !== undefined && STORE_ATTENTION_PARTS.some(([field]) => named(stores, field)))
     raise(
       "stores.attention",
       Object.fromEntries(STORE_ATTENTION_PARTS.map(([field]) => [field, stores[field] ?? []])),
-      (stores.unchecked ?? []).length > 0 ? "critical" : "warning",
     );
+  evaluateOrderingEnding(observations, raise, thresholds);
   if (unreadable.length > 0)
     raise("monitor.source", { sources: unreadable.map((name) => SOURCE_NAMES[name]) });
   return conditions;
@@ -886,6 +935,8 @@ const HELD_WHILE_UNREADABLE = Object.freeze({
   workflow: ["orders.workflow", "orders.unpaid_rounds"],
   heldStock: ["orders.held_stock"],
   pickupCapacity: ["pickup.capacity_horizon"],
+  reconciliation: ["reconciliation.differences"],
+  settlement: ["settlement.exceptions", "settlement.not_covered"],
 });
 
 /** The name a Store's own background work goes by on its board. */
@@ -1015,11 +1066,32 @@ export function storeOutboundNotifications(notifications, store) {
     .map((item) => ({ ...item, store }));
 }
 
+/**
+ * What the root cycle itself sends. BOP has had the end of ordering from "installation.validity" and
+ * "certificate.expiring" for days, so "ordering.ending" stays for the Store's own staff. The roll-up
+ * repeats what each Store has already said on a line of its own: a second message about one Store's
+ * one change.
+ */
+const ROOT_BOARD_ONLY_KEYS = new Set(["ordering.ending", "stores.attention"]);
+export function rootOutboundNotifications(notifications) {
+  return notifications.filter((item) => !ROOT_BOARD_ONLY_KEYS.has(item.key));
+}
+
+/**
+ * How long a condition must hold on a Store's board before it is raised, where that differs from the
+ * catalog. The supervisor's flag on one Store's work often lasts seconds and clears by itself (v15:
+ * three in two and a half hours, none over 21 s, cleared with nobody acting). "Has kept failing and
+ * will not fix itself" must be true on a restaurant's Home: one sample of a minute is not "kept", and
+ * an Urgent row that fixes itself teaches an owner to ignore Urgent. A sample without it starts the
+ * wait again. The root board is read by BOP and raises at once, as it always did.
+ */
+export const STORE_RAISE_AFTER_MS = Object.freeze({ "service.attention": 5 * MINUTE });
+
 export const DEFAULT_POLICY = Object.freeze({
   clearAfterMs: 2 * MINUTE,
   remindAfterMs: Object.freeze({ critical: 3 * HOUR, warning: 24 * HOUR }),
   maxMessagesPerHour: 6,
-  // The rest of the hour's messages wait for an item of the installation's own.
+  // The rest of the hour's messages wait for an alert of the installation's own.
   maxStoreMessagesPerHour: 4,
   clearedVisibleMs: 24 * HOUR,
   pendingMaxAgeMs: 24 * HOUR,
@@ -1054,7 +1126,7 @@ export function advanceAlertState(
   conditions,
   now,
   policy = DEFAULT_POLICY,
-  { held = [], unchecked = [], plannedUpdate = false } = {},
+  { held = [], unchecked = [], plannedUpdate = false, raiseAfterMs = {} } = {},
 ) {
   const holding = new Set(held);
   const notChecked = new Set(unchecked);
@@ -1088,7 +1160,7 @@ export function advanceAlertState(
       // Held during a planned update: still tracked from its first sighting, so a failure that
       // outlasts the update is raised in the first cycle after the window ends.
       if (holding.has(key)) continue;
-      if (now - Date.parse(entry.firstSeenAt) >= catalog.raiseAfterMs) {
+      if (now - Date.parse(entry.firstSeenAt) >= (raiseAfterMs[key] ?? catalog.raiseAfterMs)) {
         entry.raisedAt = stamp;
         entry.notifiedAt = stamp;
         entry.notifiedSeverity = entry.severity;
@@ -1149,6 +1221,9 @@ export function advanceAlertState(
   return { state, notifications };
 }
 
+/** The installation's own, not about one Store: one Store's trouble cannot spend these messages. */
+const isInstallationItem = (item) => item.store === undefined && item.key !== "stores.unchecked";
+
 /**
  * Per-channel outbound queue with an hourly cap. All pending notifications for a channel are sent
  * as one message; when the cap is reached they wait (and are merged) until a slot frees up, so a
@@ -1164,7 +1239,7 @@ export function planChannelDelivery(channel, notifications, now, policy = DEFAUL
   next.pending.push(...notifications);
   next.pending = next.pending.filter((item) => now - Date.parse(item.at) < policy.pendingMaxAgeMs);
   next.sentAt = next.sentAt.filter((at) => now - Date.parse(at) < HOUR);
-  const limit = next.pending.some((item) => item.store === undefined)
+  const limit = next.pending.some(isInstallationItem)
     ? policy.maxMessagesPerHour
     : policy.maxStoreMessagesPerHour;
   const due = next.pending.length > 0 && next.sentAt.length < limit;
@@ -1230,10 +1305,16 @@ export function renderMessage(batch, { siteLabel, runbookBase, homeUrl = null })
   // DEC-PILOT-ALERTS-BACKUP correction 2: one message for a cycle, each line naming its Store.
   const where = (item) =>
     typeof item.store === "string" && STORE_NAME.test(item.store) ? item.store : null;
+  // A text message or Pushover keeps only its first 1000 or so characters, and each line is about
+  // 500: at equal severity the whole site being down comes first, then the rest of the
+  // installation's own, then the Stores'.
+  const place = (item) =>
+    item.key?.startsWith("entry.") === true ? 0 : isInstallationItem(item) ? 1 : 2;
   const ordered = [...batch].sort(
     (a, b) =>
       (a.kind === "cleared") - (b.kind === "cleared") ||
-      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity],
+      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
+      place(a) - place(b),
   );
   const open = ordered.filter((item) => item.kind !== "cleared" && item.kind !== "test");
   const top = ordered[0];
@@ -1278,8 +1359,12 @@ export function buildAlertBoard(
   state,
   { observedAt, channels, backup, maintenance = null, audience = "Installation", support = null },
 ) {
+  // At the root BOP reads the end of ordering in its own two rows; the instant below is for the
+  // Store's staff, on their own screens.
+  const shown = (key) => audience === "Merchant" || key !== "ordering.ending";
+  const ending = state.alerts["ordering.ending"];
   const active = Object.entries(state.alerts)
-    .filter(([, entry]) => entry.raisedAt !== null)
+    .filter(([key, entry]) => entry.raisedAt !== null && shown(key))
     .map(([key, entry]) => ({
       key,
       severity: entry.severity,
@@ -1297,6 +1382,7 @@ export function buildAlertBoard(
     observedAt,
     active,
     recentlyCleared: state.cleared
+      .filter((entry) => shown(entry.key))
       .map((entry) => ({
         key: entry.key,
         title: clearedAlertTitle(entry.key, entry.params),
@@ -1312,5 +1398,10 @@ export function buildAlertBoard(
         : { startedAt: maintenance.startedAt, expiresAt: maintenance.expiresAt },
     // Who staff call: only when the operator configured it.
     ...(support === null ? {} : { support: { phone: support.phone, testOnly: support.testOnly } }),
+    // AGENTS.md "Warn before timeouts": when ordering stops, only in its last day. Any of the Store's
+    // staff read this one fact on the screen they work in, never the rest of this board.
+    ...(typeof ending?.raisedAt === "string" && typeof ending.params?.endsAt === "string"
+      ? { orderingEndsAt: ending.params.endsAt }
+      : {}),
   };
 }

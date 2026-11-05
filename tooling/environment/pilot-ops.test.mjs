@@ -277,6 +277,51 @@ describe("WP-2423 Q13 monitor cycle", () => {
     expect(io.boards.at(-1).support).toEqual(support);
     expect(io.boards.at(-1).active).toEqual([]);
   });
+  it("at the root a settlement or difference read that fails still fails the read as a whole", async () => {
+    const reads = {
+      createReconciliationExceptions: () => async () => ({
+        items: [],
+        nextAfterExceptionReference: null,
+      }),
+      readSettlementStatus: async () => ({ days: [] }),
+    };
+    const run = async (dependencies) => {
+      const report = vi.fn();
+      const closed = vi.fn(async () => undefined);
+      const observe = createBusinessObserver({
+        runtimeDirectory: ".local/pilot-test",
+        report,
+        load: async () => ({
+          resources: {
+            scope: { brandReference: "b", storeReference: "s" },
+            transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+            database: {
+              transactions: () => ({
+                run: async (work) => work({ query: async () => ({ rows: [] }) }),
+              }),
+            },
+            close: closed,
+          },
+          installation: {},
+          dependencies,
+        }),
+      });
+      return { answer: await observe(T0), report, closed };
+    };
+    const failed = async () => {
+      throw Error("DAILY_SETTLEMENT_STATUS_UNAVAILABLE");
+    };
+    for (const dependencies of [
+      { ...reads, readSettlementStatus: failed },
+      { ...reads, createReconciliationExceptions: () => failed },
+    ]) {
+      const { answer, report, closed } = await run(dependencies);
+      expect(answer).toBe("unreadable");
+      expect(report).toHaveBeenCalledTimes(1);
+      expect(closed).toHaveBeenCalledTimes(1);
+    }
+    expect((await run(reads)).answer.settlementExceptions).toEqual({ count: 0, oldestAgeMs: 0 });
+  });
   it("WP-2423: an order pricing problem raises while settlement is clean (it was left out of the reused answer)", async () => {
     let cycles = 0;
     const resources = {

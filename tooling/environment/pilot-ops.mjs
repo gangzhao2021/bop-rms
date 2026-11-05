@@ -30,6 +30,7 @@ import {
   recordChannelDelivery,
   renderMessage,
   uncheckedAlertKeys,
+  rootOutboundNotifications,
 } from "./pilot-alerts.mjs";
 import {
   createAlertLog,
@@ -140,7 +141,9 @@ export async function runMonitorCycle({ now, state, config, io }) {
       failingSince: state.channels[channel.id]?.failingSince ?? null,
     })),
     // DEC-PILOT-ALERTS-BACKUP correction 2: what only BOP can act on at the other Stores.
-    ...(io.stores ? { stores: io.stores.summary(now) } : {}),
+    ...(io.stores ? { stores: io.stores.summary(now, { support: config.support ?? null }) } : {}),
+    // So the end of ordering is not forgotten while the read behind it cannot run.
+    previous: state.alert,
   };
   const conditions = evaluateAlertConditions(observations);
   // WP-2423 (2026-10-18): a planned update holds the "store system down" alerts for its window.
@@ -184,7 +187,7 @@ export async function runMonitorCycle({ now, state, config, io }) {
   const channels = await deliver({
     channels: io.channels,
     channelState: state.channels,
-    notifications: [...advanced.notifications, ...fromStores],
+    notifications: [...rootOutboundNotifications(advanced.notifications), ...fromStores],
     now,
     config,
     log: io.log,

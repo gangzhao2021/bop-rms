@@ -23,6 +23,8 @@ const config = parsePilotOpsConfig({ schemaVersion: 1, siteLabel: "Main St" }, "
 const healthyProbes = { api: { ok: true }, customer: { ok: true }, merchant: { ok: true } };
 const healthySupervisor = { maintenance: false, reportAgeMs: 1000, attention: [] };
 const directories = [];
+/** A flag on a Store's work that has held: six samples, a minute apart. */
+const HELD_FIVE_MINUTES = [0, 1, 2, 3, 4, 5];
 
 /** What one Store's database would say; tests change it between cycles. */
 const fact = (change = {}) => ({
@@ -47,10 +49,12 @@ function businessOf(facts, closes) {
     const name = path.basename(directory);
     const current = () => facts[name];
     if (current().loadFails) throw Error("LOCAL_DATABASE_UNAVAILABLE");
-    const rows = (sql) =>
-      sql.includes("dead_letter_item")
+    const rows = (sql) => {
+      answer(current().updatesRead);
+      return sql.includes("dead_letter_item")
         ? [{ count: current().dead, oldest: current().dead > 0 ? new Date(T0 - 5 * MIN) : null }]
         : [{ count: 0, oldest: null, oldest_deadline: null }];
+    };
     const run = { run: async (work) => work({ query: async (sql) => ({ rows: rows(sql) }) }) };
     return {
       resources: {
@@ -68,6 +72,7 @@ function businessOf(facts, closes) {
       dependencies: {
         createReconciliationExceptions: () => async () => {
           if (current().hangs) await new Promise(() => undefined);
+          answer(current().differencesRead);
           return {
             items: Array.from({ length: current().differences }, () => ({
               state: "Open",
@@ -76,9 +81,12 @@ function businessOf(facts, closes) {
             nextAfterExceptionReference: null,
           };
         },
-        readSettlementStatus: async () => ({ days: answer(current().days ?? []) }),
+        readSettlementStatus: async () => {
+          current().scans = (current().scans ?? 0) + 1;
+          return { days: answer(current().days ?? []) };
+        },
         readOwnerPublishedSetup: async () => answer(current().opened),
-        isSettlementCovered: async () => current().covered,
+        isSettlementCovered: async () => answer(current().covered),
         readClosedBusinessDay: async () => current().closedDay,
         readReceiptTemplate: async () => answer(current().receipt),
         readQuoteTaxConfiguration: async () => answer(current().quoteTax),
@@ -428,11 +436,11 @@ describe("BOP can find out why a Store's check could not run", () => {
     const facts = { tea: fact({ held: refused() }) };
     const { cycle, logs } = await monitorsFor(facts);
     await cycle(0);
-    // The settlement scan, read after the checks and due again now, fails the read as a whole.
-    facts.tea.days = refused();
+    // The stuck updates, read before the checks, fail the read as a whole.
+    facts.tea.updatesRead = refused();
     await cycle(6);
     await cycle(7);
-    facts.tea.days = [];
+    facts.tea.updatesRead = undefined;
     await cycle(8);
     expect(failedChecks(logs)).toHaveLength(1);
     expect(logs).toContainEqual({ event: "store_monitor_failed", store: "tea", stage: "read" });
@@ -475,6 +483,160 @@ function restartedMonitor(directory, facts) {
       config,
     });
 }
+
+describe("one part of a Store's read failing leaves the rest standing", () => {
+  const refused = () => Object.assign(Error("permission denied"), { code: "42501" });
+  const failedChecks = (logs) => logs.filter((entry) => entry.event === "store_check_failed");
+  it("stuck updates still say so while the settlement scan cannot run, and BOP can find out why", async () => {
+    const error = refused();
+    const facts = { "demo-2": fact({ days: error }) };
+    const { directory, cycle, logs, report, monitors } = await monitorsFor(facts);
+    for (let minute = 0; minute <= 30; minute += 1) {
+      facts["demo-2"].dead = minute >= 2 ? 3 : 0;
+      await cycle(minute);
+    }
+    const board = await boardOf(directory, "demo-2");
+    // "Do not take a second payment" on the merchant's Home; "could not run" for BOP.
+    expect(keysOf(board)).toEqual(["monitor.source", "payment.updates"]);
+    expect(board.active.find((item) => item.key === "monitor.source").summary).toContain(
+      "the day-end settlement check",
+    );
+    expect(failedChecks(logs)).toEqual([
+      { event: "store_check_failed", store: "demo-2", check: "settlement" },
+    ]);
+    expect(report.mock.calls).toEqual([
+      ["PILOT_OPS_STORE_READ_UNAVAILABLE", error, { store: "stores/demo-2", step: "settlement" }],
+    ]);
+    expect(monitors.summary(T0 + 30 * MIN).checksFailing).toEqual(["demo-2"]);
+    // Its costliest read is not run every minute only to fail again: every 5 minutes, as if clean.
+    expect(facts["demo-2"].scans).toBe(7);
+    // The read as a whole never failed: its connections were not thrown away either.
+    expect(logs.filter((entry) => entry.event === "store_monitor_failed")).toEqual([]);
+  });
+  it("stays quiet about a scan that failed once and came back within five minutes", async () => {
+    const facts = { tea: fact({ days: refused() }) };
+    const { directory, cycle } = await monitorsFor(facts);
+    for (const minute of [0, 1, 2, 3, 4]) await cycle(minute);
+    facts.tea.days = [];
+    await cycle(5);
+    expect((await boardOf(directory, "tea")).active).toEqual([]);
+  });
+  it("a settlement problem already raised stays while the scan cannot run, and clears after it can", async () => {
+    const day = { state: "Recorded", endsAt: new Date(T0 - 60 * MIN).toISOString() };
+    const facts = { tea: fact({ days: [{ ...day, outcome: "Difference" }] }) };
+    const { directory, cycle } = await monitorsFor(facts);
+    await cycle(0);
+    expect(keysOf(await boardOf(directory, "tea"))).toEqual(["settlement.exceptions"]);
+    facts.tea.days = refused();
+    for (const minute of [1, 3, 5, 6, 7]) await cycle(minute);
+    expect(keysOf(await boardOf(directory, "tea"))).toEqual([
+      "monitor.source",
+      "settlement.exceptions",
+    ]);
+    facts.tea.days = [];
+    for (const minute of [8, 9, 11, 13]) await cycle(minute);
+    expect((await boardOf(directory, "tea")).active).toEqual([]);
+  });
+  it("no coverage already told to BOP is not forgotten while coverage cannot be read", async () => {
+    const facts = { tea: fact({ covered: false, closedDay: true, dead: 1 }) };
+    const { directory, cycle, logs } = await monitorsFor(facts);
+    await cycle(0);
+    expect(keysOf(await boardOf(directory, "tea"))).toEqual([
+      "payment.updates",
+      "settlement.not_covered",
+    ]);
+    facts.tea.covered = refused();
+    for (const minute of [1, 3, 5, 6]) await cycle(minute);
+    expect(keysOf(await boardOf(directory, "tea"))).toEqual([
+      "monitor.source",
+      "payment.updates",
+      "settlement.not_covered",
+    ]);
+    expect(failedChecks(logs).map((entry) => entry.check)).toEqual(["settlement"]);
+  });
+  it("a payment difference already raised stays while its read cannot run, and the rest still rises", async () => {
+    const error = refused();
+    const facts = { tea: fact({ differences: 2 }) };
+    const { directory, cycle, logs, report } = await monitorsFor(facts);
+    await cycle(0);
+    Object.assign(facts.tea, { differencesRead: error, dead: 1 });
+    for (const minute of [1, 3, 5, 6]) await cycle(minute);
+    const board = await boardOf(directory, "tea");
+    expect(keysOf(board)).toEqual([
+      "monitor.source",
+      "payment.updates",
+      "reconciliation.differences",
+    ]);
+    expect(board.active.find((item) => item.key === "monitor.source").summary).toContain(
+      "the check for payment differences",
+    );
+    expect(failedChecks(logs).map((entry) => entry.check)).toEqual(["reconciliation"]);
+    expect(report).toHaveBeenCalledWith("PILOT_OPS_STORE_READ_UNAVAILABLE", error, {
+      store: "stores/tea",
+      step: "reconciliation",
+    });
+  });
+});
+
+describe("a flag on a Store's work that clears by itself is no alarm", () => {
+  const flagged = { ...healthySupervisor, attention: ["stores/hotpot:business-worker:events"] };
+  it("one sampled cycle gives no row and no outbound message", async () => {
+    const { directory, cycle, monitors, logs } = await monitorsFor({ hotpot: fact() });
+    await cycle(0, { supervisor: flagged });
+    expect((await boardOf(directory, "hotpot")).active).toEqual([]);
+    for (const minute of [1, 2, 3, 4, 5, 6]) {
+      await cycle(minute);
+      expect((await boardOf(directory, "hotpot")).active).toEqual([]);
+    }
+    expect(monitors.pending()).toEqual([]);
+    expect((await boardOf(directory, "hotpot")).recentlyCleared).toEqual([]);
+    expect(logs).toEqual([]);
+  });
+  it("six consecutive cycles give the Urgent row and one outbound message", async () => {
+    const { directory, cycle, monitors, logs } = await monitorsFor({ hotpot: fact() });
+    for (const minute of [0, 1, 2, 3, 4]) {
+      await cycle(minute, { supervisor: flagged });
+      expect((await boardOf(directory, "hotpot")).active).toEqual([]);
+    }
+    await cycle(5, { supervisor: flagged });
+    const [row] = (await boardOf(directory, "hotpot")).active;
+    expect(row.key).toBe("service.attention");
+    expect(row.severity).toBe("critical");
+    expect(row.summary).toBe(
+      "Order processing (order updates) has kept failing and will not fix itself.",
+    );
+    expect(monitors.pending().map((item) => [item.kind, item.key, item.store])).toEqual([
+      ["raised", "service.attention", "hotpot"],
+    ]);
+    monitors.acknowledge(monitors.pending());
+    await cycle(6, { supervisor: flagged });
+    expect(monitors.pending()).toEqual([]);
+    expect(logs).toEqual([
+      { event: "alert_raised", store: "hotpot", key: "service.attention", severity: "critical" },
+    ]);
+  });
+  it("a sample without it starts the wait again", async () => {
+    const { directory, cycle } = await monitorsFor({ hotpot: fact() });
+    for (const minute of [0, 1, 2, 3, 4]) await cycle(minute, { supervisor: flagged });
+    await cycle(5);
+    for (const minute of [6, 7, 8, 9, 10]) await cycle(minute, { supervisor: flagged });
+    expect((await boardOf(directory, "hotpot")).active).toEqual([]);
+    await cycle(11, { supervisor: flagged });
+    expect(keysOf(await boardOf(directory, "hotpot"))).toEqual(["service.attention"]);
+  });
+  it("a planned update does not start the wait again, and nothing rises until it ends", async () => {
+    const { directory, cycle } = await monitorsFor({ hotpot: fact() });
+    const window = {
+      startedAt: new Date(T0).toISOString(),
+      expiresAt: new Date(T0 + 15 * MIN).toISOString(),
+    };
+    for (const minute of [0, 1, 2, 3, 4, 5, 6])
+      await cycle(minute, { supervisor: flagged, maintenance: window });
+    expect((await boardOf(directory, "hotpot")).active).toEqual([]);
+    await cycle(7, { supervisor: flagged });
+    expect(keysOf(await boardOf(directory, "hotpot"))).toEqual(["service.attention"]);
+  });
+});
 
 describe("what the installation shares with every Store", () => {
   it("an entry probe failure and a planned window reach every Store's board", async () => {
@@ -521,7 +683,7 @@ describe("what the installation shares with every Store", () => {
         "stores/tea-2:daily-settlement-worker",
       ],
     };
-    await cycle(0, { supervisor });
+    for (const minute of HELD_FIVE_MINUTES) await cycle(minute, { supervisor });
     expect((await boardOf(directory, "tea")).active).toEqual([]);
     const hotpot = await boardOf(directory, "hotpot");
     expect(keysOf(hotpot)).toEqual(["service.attention"]);
@@ -540,17 +702,20 @@ describe("what the installation shares with every Store", () => {
   it("the shared worker process needing a person shows on every board, and BOP hears it once", async () => {
     const facts = { tea: fact(), hotpot: fact() };
     const { directory, cycle, monitors } = await monitorsFor(facts);
-    await cycle(0, {
-      supervisor: {
-        ...healthySupervisor,
-        attention: ["store-workers", "stores/hotpot", "stores/tea"],
-      },
-    });
+    for (const minute of HELD_FIVE_MINUTES)
+      await cycle(minute, {
+        supervisor: {
+          ...healthySupervisor,
+          attention: ["store-workers", "stores/hotpot", "stores/tea"],
+        },
+      });
     for (const name of ["tea", "hotpot"])
       expect((await boardOf(directory, name)).active[0].summary).toBe(
         "Background work has kept failing and will not fix itself.",
       );
     expect(monitors.pending()).toEqual([]);
+    // Nor is it named Store by Store on the root board: the root says "the other Stores" itself.
+    expect(monitors.summary(T0 + 5 * MIN).background).toEqual([]);
   });
   it("a supervisor that stopped reporting clears nothing and is not told to the merchant as all good", async () => {
     const { directory, cycle } = await monitorsFor({ hotpot: fact() });
@@ -558,8 +723,8 @@ describe("what the installation shares with every Store", () => {
       ...healthySupervisor,
       attention: ["stores/hotpot:business-worker:events"],
     };
-    await cycle(0, { supervisor: attention });
-    for (const minute of [1, 3, 5, 7]) await cycle(minute, { supervisor: null });
+    for (const minute of HELD_FIVE_MINUTES) await cycle(minute, { supervisor: attention });
+    for (const minute of [6, 8, 10, 12]) await cycle(minute, { supervisor: null });
     expect(keysOf(await boardOf(directory, "hotpot"))).toEqual([
       "monitor.source",
       "service.attention",
@@ -571,12 +736,12 @@ describe("what the installation shares with every Store", () => {
       ...healthySupervisor,
       attention: ["stores/hotpot:business-worker:events"],
     };
-    await cycle(0, { supervisor: attention });
+    for (const minute of HELD_FIVE_MINUTES) await cycle(minute, { supervisor: attention });
     const window = {
-      startedAt: new Date(T0).toISOString(),
-      expiresAt: new Date(T0 + 15 * MIN).toISOString(),
+      startedAt: new Date(T0 + 6 * MIN).toISOString(),
+      expiresAt: new Date(T0 + 21 * MIN).toISOString(),
     };
-    for (const minute of [1, 3, 5, 7, 9, 11])
+    for (const minute of [6, 8, 10, 12, 14, 16])
       await cycle(minute, { supervisor: null, maintenance: window });
     expect(keysOf(await boardOf(directory, "hotpot"))).toEqual(["service.attention"]);
   });
@@ -659,7 +824,14 @@ describe("a merchant hears before ordering stops", () => {
 });
 
 /** The whole monitor: the root cycle, its channels, and the Stores beside it. */
-function rootCycle({ directory, monitors, send, probe = async () => ({ ok: true }) }) {
+function rootCycle({
+  directory,
+  monitors,
+  send,
+  probe = async () => ({ ok: true }),
+  supervisor = () => healthySupervisor,
+  configured = config,
+}) {
   let state = { schemaVersion: 1, alert: emptyAlertState(), probes: {}, channels: {} };
   const boards = [];
   const io = {
@@ -668,7 +840,7 @@ function rootCycle({ directory, monitors, send, probe = async () => ({ ok: true 
         targets: { api: { url: "a" }, customer: { url: "c" }, merchant: { url: "m" } },
         probe,
       }),
-    observeSupervisor: async () => healthySupervisor,
+    observeSupervisor: async () => supervisor(),
     observeBusiness: async () => ({
       stuckUpdates: { count: 0, oldestAgeMs: 0 },
       retryingUpdates: { count: 0, oldestAgeMs: 0 },
@@ -684,14 +856,14 @@ function rootCycle({ directory, monitors, send, probe = async () => ({ ok: true 
     writeBoard: async (value) => boards.push(value),
     stores: monitors,
     onCycle: (cycle) => {
-      io.run = monitors.run({ ...cycle, config });
+      io.run = monitors.run({ ...cycle, config: configured });
     },
   };
   return {
     directory,
     boards,
     run: async (minute) => {
-      state = await runMonitorCycle({ now: T0 + minute * MIN, state, config, io });
+      state = await runMonitorCycle({ now: T0 + minute * MIN, state, config: configured, io });
       // As in the real loop the Stores finish beside the cycle; the next cycle sends their items.
       await io.run;
       return state;
@@ -820,21 +992,139 @@ describe("BOP hears one clear message", () => {
       validUntil: new Date(T0 + 10 * 86400_000).toISOString(),
     });
     const send = vi.fn(async () => undefined);
-    const root = rootCycle({ directory, monitors, send });
+    const root = rootCycle({
+      directory,
+      monitors,
+      send,
+      supervisor: () => ({
+        ...healthySupervisor,
+        attention: ["stores/hotpot:business-worker:events"],
+      }),
+    });
     // A Store that cannot be written at all is noticed once its board is 5 minutes old.
     await fs.writeFile(path.join(directory, "stores", "tea", "ops"), "not a directory");
     for (let minute = 0; minute <= 7; minute += 1) await root.run(minute);
     const board = root.boards.at(-1);
+    const unchecked = board.active.find((item) => item.key === "stores.unchecked");
+    expect(unchecked.severity).toBe("critical");
+    expect(unchecked.summary).toBe("Not being checked: tea.");
     const row = board.active.find((item) => item.key === "stores.attention");
-    expect(row.severity).toBe("critical");
-    expect(row.summary).toContain("Not being checked: tea.");
+    expect(row.severity).toBe("warning");
     expect(row.summary).toContain("Some checks could not run: dessert.");
+    expect(row.summary).toContain("Background work needs a person: hotpot.");
     expect(row.summary).toContain("Closed business days with no day-end settlement: hotpot.");
     expect(row.summary).toContain("Ordering setup ending soon: hotpot, dessert.");
+    expect(row.summary).toContain("No support number to call: tea, hotpot, dessert.");
     expect(row.summary.length).toBeLessThanOrEqual(600);
+    // Each cause it names has its step.
+    for (const step of [
+      "find out why the checks named here are not running",
+      "restart the background work named here",
+      "record the first closed business day",
+      "renew those named as ending soon",
+      "set the support number",
+    ])
+      expect(row.action).toContain(step);
+    // The Store's own work is not said again at the root, nameless.
+    expect(board.active.map((item) => item.key)).not.toContain("service.attention");
     // Nothing of this on a merchant's own actions.
     const hotpot = await boardOf(directory, "hotpot");
-    expect(keysOf(hotpot)).toEqual(["installation.validity", "settlement.not_covered"]);
+    expect(keysOf(hotpot)).toEqual([
+      "installation.validity",
+      "service.attention",
+      "settlement.not_covered",
+    ]);
+  });
+  it("names no missing support number once one is set, and none for a site with no other Store", async () => {
+    const { directory, monitors } = await monitorsFor({ tea: fact() });
+    const support = { phone: "+14165550100", testOnly: true };
+    const root = rootCycle({
+      directory,
+      monitors,
+      send: async () => undefined,
+      configured: { ...config, support },
+    });
+    await root.run(0);
+    await root.run(1);
+    expect(root.boards.at(-1).active).toEqual([]);
+    expect(monitors.summary(T0 + MIN, { support }).noSupportNumber).toEqual([]);
+    expect(monitors.summary(T0 + MIN, { support: null }).noSupportNumber).toEqual(["tea"]);
+    // A single-Store site's monitor has no Store to list, so nothing is raised.
+    const alone = (await monitorsFor({})).monitors;
+    expect(alone.summary(T0, { support: null }).noSupportNumber).toEqual([]);
+  });
+  it("one Store's work failing on and off: one message for each change, naming it, and the site-down message still leaves at once", async () => {
+    const facts = { tea: fact(), hotpot: fact() };
+    const { directory, monitors } = await monitorsFor(facts);
+    const sent = [];
+    let current = 0;
+    let flagged = false;
+    let apiDown = false;
+    const root = rootCycle({
+      directory,
+      monitors,
+      send: async (message) => sent.push({ minute: current, ...message }),
+      supervisor: () => ({
+        ...healthySupervisor,
+        attention: flagged ? ["stores/tea:business-worker:events"] : [],
+      }),
+      probe: async (target) => ({ ok: !(apiDown && target.url === "a") }),
+    });
+    for (current = 0; current <= 33; current += 1) {
+      // Six minutes failing, three well, until minute 28. Then the whole site from minute 30.
+      flagged = current < 28 && current % 9 < 6;
+      apiDown = current >= 30;
+      await root.run(current);
+    }
+    expect(sent.map((message) => [message.minute, message.subject])).toEqual([
+      [6, "Main St · tea: URGENT - A background service needs a person"],
+      [9, "Main St · tea: Resolved - A background service needs a person"],
+      [15, "Main St · tea: URGENT - A background service needs a person"],
+      [18, "Main St · tea: Resolved - A background service needs a person"],
+      // The Stores' four are spent: its next change waits, and the outage does not.
+      [32, "Main St: 2 problems (urgent)"],
+    ]);
+    const outage = sent.at(-1);
+    expect(outage.text).toMatch(/^Problem \(urgent\): Store system is not responding/u);
+    // What waited goes with it, each line naming its Store.
+    expect(outage.text).toMatch(/^tea - Problem \(urgent\): A background service/mu);
+    expect(outage.text).toMatch(/^tea - Resolved: A background service/mu);
+    // The root board said it too while it lasted, by name, with no message of its own.
+    expect(root.boards[6].active.find((item) => item.key === "stores.attention").summary).toContain(
+      "Background work needs a person: tea.",
+    );
+  });
+  it("BOP hears when a Store stops being checked and when that is over, however long the rest has been said", async () => {
+    const facts = { tea: fact(), hotpot: fact() };
+    const { directory, monitors } = await monitorsFor(facts);
+    const send = vi.fn(async () => undefined);
+    // No support number: the rest of the roll-up stays up all along, and sends nothing.
+    const root = rootCycle({ directory, monitors, send });
+    const ops = path.join(directory, "stores", "tea", "ops");
+    await fs.writeFile(ops, "not a directory");
+    for (let minute = 0; minute <= 5; minute += 1) await root.run(minute);
+    expect(send).not.toHaveBeenCalled();
+    // Older than the Home's limit: no Store can say this for itself.
+    await root.run(6);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].subject).toBe(
+      "Main St: URGENT - Some Stores are not being checked",
+    );
+    await fs.rm(ops);
+    for (let minute = 7; minute <= 10; minute += 1) await root.run(minute);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][0].subject).toBe(
+      "Main St: Resolved - Some Stores are not being checked",
+    );
+    // Another Store, later the same hour: told again, not lost in a row that never cleared.
+    const other = path.join(directory, "stores", "hotpot", "ops");
+    await fs.rm(other, { recursive: true });
+    await fs.writeFile(other, "not a directory");
+    for (let minute = 11; minute <= 17; minute += 1) await root.run(minute);
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(send.mock.calls[2][0].subject).toBe(
+      "Main St: URGENT - Some Stores are not being checked",
+    );
   });
   it("calls a Store unchecked only once its board is older than the Home's limit", async () => {
     const { monitors, cycle } = await monitorsFor({ tea: fact() });

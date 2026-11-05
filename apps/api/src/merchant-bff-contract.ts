@@ -210,7 +210,10 @@ import type {
 import { createMerchantStoreConfigurationWithdrawal } from "./merchant-store-configuration-withdrawal.js";
 import type { createMerchantOrderExceptionRead } from "./merchant-order-exception-read.js";
 import type { createMerchantSettlementRead } from "./merchant-settlement-read.js";
-import type { createPersistentMerchantOperationsAlerts } from "./merchant-operations-alerts.js";
+import type {
+  createPersistentMerchantOperationsAlerts,
+  createPersistentMerchantOrderingEnding,
+} from "./merchant-operations-alerts.js";
 import type { createPersistentMerchantStoreReports } from "./persistent-merchant-store-reports.js";
 import type { createMerchantStaffPin } from "./merchant-staff-pin.js";
 
@@ -735,6 +738,8 @@ export interface MerchantBffRouterOptions {
   readonly settlement?: ReturnType<typeof createMerchantSettlementRead>;
   /** WP-2423 Q13: the installation's operations alerts for the Home (Owner and Store Manager). */
   readonly operationsAlerts?: ReturnType<typeof createPersistentMerchantOperationsAlerts>;
+  /** AGENTS.md "Warn before timeouts": when ordering stops, for any of this Store's staff. */
+  readonly orderingEnding?: ReturnType<typeof createPersistentMerchantOrderingEnding>;
   /** WP-2423 Q14: the Store's sales, item, hourly and tip reports and their CSV export. */
   readonly storeReports?: ReturnType<typeof createPersistentMerchantStoreReports>;
   readonly service: MerchantBffService;

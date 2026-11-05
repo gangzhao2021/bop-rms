@@ -16,7 +16,10 @@ import { createInternalExceptionSnapshotTransactions } from "./pilot-exception-s
 import { readInternalExceptionCoverage } from "./pilot-exception-coverage.mjs";
 import { createPersistentMerchantOrderExceptions } from "../../apps/api/dist/persistent-merchant-order-exceptions.js";
 import { createPersistentMerchantSettlement } from "../../apps/api/dist/persistent-merchant-settlement.js";
-import { createPersistentMerchantOperationsAlerts } from "../../apps/api/dist/merchant-operations-alerts.js";
+import {
+  createPersistentMerchantOperationsAlerts,
+  createPersistentMerchantOrderingEnding,
+} from "../../apps/api/dist/merchant-operations-alerts.js";
 import { createPersistentMerchantStoreReports } from "../../apps/api/dist/persistent-merchant-store-reports.js";
 import {
   dailySettlementRunReference,
@@ -600,6 +603,18 @@ export async function createInternalMerchant(
             storeReference: selected.storeReference,
             readBoard: readOperationsAlertBoard,
             ...(operationsAlertAudience === undefined ? {} : { audience: operationsAlertAudience }),
+          }),
+        );
+  // AGENTS.md "Warn before timeouts": the one fact of that board any of this Store's staff read.
+  const orderingEnding =
+    readOperationsAlertBoard === undefined
+      ? undefined
+      : logUnexpected(
+          "INTERNAL_ORDERING_ENDING_UNAVAILABLE",
+          createPersistentMerchantOrderingEnding({
+            persistence,
+            storeReference: selected.storeReference,
+            readBoard: readOperationsAlertBoard,
           }),
         );
   // WP-2423 Q14: the Store's sales reports, over the same payment sources as the settlement.
@@ -1528,6 +1543,7 @@ export async function createInternalMerchant(
         void count;
       },
       ...(operationsAlerts === undefined ? {} : { operationsAlerts }),
+      ...(orderingEnding === undefined ? {} : { orderingEnding }),
       storeReports,
       compensationReconciliation,
       compensationQuery,

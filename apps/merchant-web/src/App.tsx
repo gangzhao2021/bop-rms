@@ -46,6 +46,7 @@ import {
 import { createStaffPinClient, StaffPinError } from "./staff-pin-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { loadLastKnownRefundDeadlines, type RefundDeadline } from "./refund-deadline-warning.js";
+import { OrderingEndingNotice } from "./OrderingEndingNotice.js";
 import type { MerchantDemoClients } from "./merchant-demo.js";
 import type { MerchantBrandWorkspaceClient } from "./merchant-brand-workspace.js";
 import { FULL_SIGN_IN_REQUIRED, needsFullSignIn } from "./full-sign-in.js";
@@ -2273,6 +2274,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             timeZone={remembered.timeZone ?? undefined}
             remember
           />
+        ) : null}
+        {/* AGENTS.md "Warn before timeouts": ordering's last day, for whoever works this screen. */}
+        {state.kind === "Ready" && !state.switching && demo === null && staffPage ? (
+          <OrderingEndingNotice key={state.workspace.selectedScope.storeReference + state.csrf} />
         ) : null}
         {refundRead !== null && !sessionless ? (
           <PaidOrderAlarmBanner watch={paidOrderWatch} />

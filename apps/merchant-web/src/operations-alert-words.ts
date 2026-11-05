@@ -155,12 +155,37 @@ export function alertAction(english: string): string {
       t(
         "BOP support: record this Store's first closed business day so its day-end settlement starts.",
       ),
-    "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are told only when ordering is a day from stopping.":
-      t(
-        "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are told only when ordering is a day from stopping.",
-      ),
   };
-  return lookup(words, english);
+  return Object.hasOwn(words, english)
+    ? (words[english] as string)
+    : (storesAttentionAction(english) ?? english);
+}
+
+/** The other Stores' row says one step for each cause it names, whichever apply. */
+function storesAttentionAction(english: string): string | null {
+  const [, steps] = /^BOP support: (.+)\.$/u.exec(english) ?? [];
+  if (steps === undefined) return null;
+  const words: Readonly<Record<string, string>> = {
+    "run the status check": t("run the status check"),
+    "run the status check and find out why the checks named here are not running": t(
+      "run the status check and find out why the checks named here are not running",
+    ),
+    "restart the background work named here": t("restart the background work named here"),
+    "record the first closed business day of those with no settlement": t(
+      "record the first closed business day of those with no settlement",
+    ),
+    "renew those named as ending soon, right after the installation itself (their owners hear only in the last day)":
+      t(
+        "renew those named as ending soon, right after the installation itself (their owners hear only in the last day)",
+      ),
+    "set the support number in the alert settings, so their owners have someone to call": t(
+      "set the support number in the alert settings, so their owners have someone to call",
+    ),
+  };
+  const said = steps.split("; ").map((step) => (Object.hasOwn(words, step) ? words[step] : null));
+  return said.every((step) => step !== null)
+    ? t("BOP support: {steps}.", { steps: said.join("；") })
+    : null;
 }
 
 function duration(english: string): string {
@@ -170,6 +195,19 @@ function duration(english: string): string {
   if (count === undefined) return english;
   if (unit === "minute") return t("{count} minutes", { count });
   return unit === "hour" ? t("{count} hours", { count }) : t("{count} days", { count });
+}
+
+/** Time left in the chosen language, by the monitor's own rule for the catalog's durations. */
+export function timeLeftWords(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const english =
+    minutes < 1
+      ? "less than a minute"
+      : minutes < 60
+        ? `${minutes} ${minutes === 1 ? "minute" : "minutes"}`
+        : `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  return currentLanguage() === "en" ? english : duration(english);
 }
 
 function serviceName(english: string): string {
@@ -255,6 +293,8 @@ function checkSource(english: string): string {
     "the check for pickup times": t("the check for pickup times"),
     "the check that orders can be priced": t("the check that orders can be priced"),
     "the check of the store's order rules": t("the check of the store's order rules"),
+    "the check for payment differences": t("the check for payment differences"),
+    "the day-end settlement check": t("the day-end settlement check"),
   };
   return lookup(words, english);
 }
@@ -445,12 +485,20 @@ const STORES_ATTENTION_RULES: readonly (readonly [RegExp, (names: string) => str
     (names) => t("Some checks could not run: {names}.", { names }),
   ],
   [
+    /^Background work needs a person: (.+)\.$/u,
+    (names) => t("Background work needs a person: {names}.", { names }),
+  ],
+  [
     /^Closed business days with no day-end settlement: (.+)\.$/u,
     (names) => t("Closed business days with no day-end settlement: {names}.", { names }),
   ],
   [
     /^Ordering setup ending soon: (.+)\.$/u,
     (names) => t("Ordering setup ending soon: {names}.", { names }),
+  ],
+  [
+    /^No support number to call: (.+)\.$/u,
+    (names) => t("No support number to call: {names}.", { names }),
   ],
 ];
 function storesAttentionSummary(english: string): string | null {

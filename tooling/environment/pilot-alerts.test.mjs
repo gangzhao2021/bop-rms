@@ -13,8 +13,10 @@ import {
   renderAlert,
   renderMessage,
   uncheckedAlertKeys,
+  rootOutboundNotifications,
   storeOutboundNotifications,
 } from "./pilot-alerts.mjs";
+import { buildWebhookRequest } from "./pilot-alert-channels.mjs";
 
 const T0 = Date.parse("2026-10-15T03:00:00.000Z");
 const MIN = 60_000;
@@ -774,6 +776,67 @@ describe("WP-2423 Q13 deduplication, reminders and clearing", () => {
   });
 });
 
+describe("what the root says about the other Stores", () => {
+  it("leaves a Store's own work to its own board, and keeps the process they share", () => {
+    const of = (attention, stores = {}) =>
+      evaluateAlertConditions({
+        ...healthy(),
+        supervisor: { maintenance: false, reportAgeMs: 1000, attention },
+        stores,
+      }).get("service.attention");
+    expect(of(["stores/tea:business-worker:events", "stores/hotpot"])).toBe(undefined);
+    expect(of(["store-workers", "stores/tea"]).params.services).toEqual(["store-workers"]);
+    expect(of(["business-worker:events", "stores/tea"]).params.services).toEqual([
+      "business-worker:events",
+    ]);
+  });
+  it("is unchanged where no Store has a board of its own", () => {
+    const conditions = evaluateAlertConditions({
+      ...healthy(),
+      supervisor: {
+        maintenance: false,
+        reportAgeMs: 1000,
+        attention: ["business-worker:events", "kitchen-queue-worker"],
+      },
+    });
+    expect(conditions.get("service.attention").params.services).toEqual([
+      "business-worker:events",
+      "kitchen-queue-worker",
+    ]);
+  });
+  it("a Store nobody is checking is its own alert, and the rest is said once by the Store itself", () => {
+    const of = (stores) =>
+      evaluateAlertConditions({
+        ...healthy(),
+        stores: {
+          unchecked: [],
+          checksFailing: [],
+          background: [],
+          settlementNotCovered: [],
+          setupEnding: [],
+          noSupportNumber: [],
+          ...stores,
+        },
+      });
+    expect(keys(of({}))).toEqual([]);
+    const unchecked = of({ unchecked: ["tea"] });
+    expect(keys(unchecked)).toEqual(["stores.unchecked"]);
+    expect(unchecked.get("stores.unchecked").severity).toBe("critical");
+    const rest = of({ noSupportNumber: ["tea"] });
+    expect(keys(rest)).toEqual(["stores.attention"]);
+    expect(rest.get("stores.attention").severity).toBe("warning");
+    const kinds = ["raised", "escalated", "reminder", "cleared"];
+    const notified = (key) =>
+      kinds.map((kind) => ({ id: kind, kind, key, severity: "critical", params: {}, at: "x" }));
+    // BOP hears each time a Store stops being checked and when that is over.
+    expect(rootOutboundNotifications(notified("stores.unchecked"))).toHaveLength(4);
+    expect(rootOutboundNotifications(notified("stores.attention"))).toEqual([]);
+    expect(rootOutboundNotifications(notified("ordering.ending"))).toEqual([]);
+    // Everything else the root raises goes out as it always did.
+    expect(rootOutboundNotifications(notified("entry.api"))).toHaveLength(4);
+  });
+});
+
 describe("WP-2423 Q13 rate limiting per channel", () => {
   const item = (n) => ({
     id: String(n),
@@ -831,6 +894,20 @@ describe("WP-2423 Q13 rate limiting per channel", () => {
     expect(
       planChannelDelivery(channel, [fromStore(12)], T0 + 63 * MIN).batch.map((entry) => entry.id),
     ).toEqual(["12"]);
+  });
+  it("a Store nobody is checking does not open the installation's messages either", () => {
+    const fromStore = (n) => ({ ...item(n), key: "payment.updates", store: "tea" });
+    const unchecked = (n) => ({ ...item(n), key: "stores.unchecked", params: { stores: ["tea"] } });
+    let channel;
+    for (let n = 0; n < 4; n++) {
+      const plan = planChannelDelivery(channel, [fromStore(n)], T0 + n * MIN);
+      channel = recordChannelDelivery(plan.channel, true, T0 + n * MIN);
+    }
+    const held = planChannelDelivery(channel, [unchecked(4)], T0 + 4 * MIN);
+    expect(held.batch).toEqual([]);
+    // It waits with the rest, and goes out with the next message of the installation's own.
+    const own = planChannelDelivery(held.channel, [item(5)], T0 + 5 * MIN);
+    expect(own.batch.map((entry) => entry.key)).toEqual(["stores.unchecked", "disk.low"]);
   });
   it("keeps pending items after a failed delivery and records since when the channel fails", () => {
     const plan = planChannelDelivery(undefined, [item(0)], T0);
@@ -906,10 +983,12 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
       failingMs: MIN,
       reportAgeMs: MIN,
       // The most the other Stores' summary can name: the board's limit still holds.
-      unchecked: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
+      stores: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
       checksFailing: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
       settlementNotCovered: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
       setupEnding: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
+      background: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
+      noSupportNumber: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
     };
     for (const key of ALERT_KEYS)
       for (const audience of ["Installation", "Merchant"]) {
@@ -925,6 +1004,111 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
     expect(renderAlert("entry.api", params).action).toContain("Ask BOP support");
     expect(renderAlert("entry.api", params).action).toContain("take paper orders");
     expect(renderAlert("payment.updates", params).action).toContain("Do not take a second payment");
+  });
+  it("the other Stores' row says only what to do about the causes it names", () => {
+    const action = (parts) => renderAlert("stores.attention", parts).action;
+    expect(action({ setupEnding: ["tea"] })).toBe(
+      "BOP support: renew those named as ending soon, right after the installation itself (their owners hear only in the last day).",
+    );
+    expect(action({ noSupportNumber: ["tea"] })).toBe(
+      "BOP support: set the support number in the alert settings, so their owners have someone to call.",
+    );
+    // "Checks are not running" only where that is so.
+    expect(action({ checksFailing: ["tea"] })).toBe(
+      "BOP support: run the status check and find out why the checks named here are not running.",
+    );
+    expect(renderAlert("stores.unchecked", { stores: ["tea"] }).action).toBe(
+      "BOP support: run the status check and find out why the checks named here are not running.",
+    );
+    expect(action({ setupEnding: ["tea"], background: ["hotpot"] })).toBe(
+      "BOP support: restart the background work named here; renew those named as ending soon, right after the installation itself (their owners hear only in the last day).",
+    );
+    expect(action({})).toBe("BOP support: run the status check.");
+  });
+  it("puts the whole site being down first at equal severity, where a phone keeps it", () => {
+    const at = (minute) => new Date(T0 + minute * MIN).toISOString();
+    const fromStore = (store, minute) => ({
+      id: `${store}-${minute}`,
+      kind: "raised",
+      key: "payment.updates",
+      severity: "critical",
+      params: { count: 1, oldestAgeMs: 5 * MIN },
+      at: at(minute),
+      store,
+    });
+    const siteDown = {
+      id: "root",
+      kind: "raised",
+      key: "entry.api",
+      severity: "critical",
+      params: { downMs: 2 * MIN },
+      at: at(7),
+    };
+    // The reserved case: these have been waiting, so they are ahead of it in the queue.
+    let channel;
+    for (const [minute, store] of ["tea", "hotpot", "dessert", "demo-2"].entries())
+      channel = recordChannelDelivery(
+        planChannelDelivery(channel, [fromStore(store, minute)], T0 + minute * MIN).channel,
+        true,
+        T0 + minute * MIN,
+      );
+    for (const [minute, store] of [
+      [4, "merchant-2"],
+      [5, "demo-3"],
+      [6, "tea"],
+    ])
+      channel = planChannelDelivery(channel, [fromStore(store, minute)], T0 + minute * MIN).channel;
+    const { batch } = planChannelDelivery(channel, [siteDown], T0 + 7 * MIN);
+    expect(batch.map((entry) => entry.store ?? "root")).toEqual([
+      "merchant-2",
+      "demo-3",
+      "tea",
+      "root",
+    ]);
+    const message = renderMessage(batch, { siteLabel: "BOP Pilot", runbookBase: "https://r.test" });
+    expect(message.text.indexOf("Store system is not responding")).toBeLessThan(50);
+    const said = "Store system is not responding";
+    const pushover = buildWebhookRequest(
+      { format: "pushover" },
+      { token: "t", userKey: "u" },
+      message,
+    );
+    expect(new globalThis.URLSearchParams(pushover.body).get("message")).toContain(said);
+    const sms = buildWebhookRequest(
+      { format: "twilio-sms", accountSid: "AC1", from: "+14165550100", to: ["+14165550101"] },
+      { authToken: "x" },
+      message,
+    );
+    expect(new globalThis.URLSearchParams(sms.perRecipient[0].body).get("Body")).toContain(said);
+  });
+  it("orders the lines of one severity: the site, the installation's own, then those about one Store", () => {
+    const line = (key, extra = {}) => ({
+      id: key,
+      kind: "raised",
+      key,
+      severity: "critical",
+      at: new Date(T0).toISOString(),
+      params: { downMs: MIN, count: 1, oldestAgeMs: MIN, ageMs: MIN, stores: ["tea"] },
+      ...extra,
+    });
+    const { text } = renderMessage(
+      [
+        line("payment.updates", { store: "tea" }),
+        line("stores.unchecked"),
+        line("backup.stale"),
+        line("entry.customer"),
+        // Severity still comes first: a Store's urgent line before the installation's "today".
+        line("disk.low", { severity: "warning", params: { disks: [] } }),
+      ],
+      { siteLabel: "Main St", runbookBase: "x" },
+    );
+    expect(text.split("\n\n").map((entry) => entry.split(":")[1].trim().split(".")[0])).toEqual([
+      "Customer ordering page is not loading",
+      "No recent backup",
+      "Order or payment updates are stuck",
+      "Some Stores are not being checked",
+      "Disk space is running low",
+    ]);
   });
   it("names the problem in the subject of a single alert, and resolution plainly", () => {
     const o = healthy();
@@ -1058,10 +1242,52 @@ describe("a Store's own conditions", () => {
     // Neither known: nothing to say about it (BOP hears the reads failed).
     expect(ending({ installation: "unreadable", certificate: "unreadable" })).toBe(undefined);
     expect(ending({ installation: null, certificate: null })).toBe(undefined);
-    // Never at the root, whose Owner has the renewal in hand.
-    const o = healthy();
-    o.installation = { validUntil: hours(23) };
-    expect(keys(evaluateAlertConditions(o))).toEqual(["installation.validity"]);
+  });
+  it("at the root it is for the Store's staff: no row on BOP's board, and no message of its own", () => {
+    const hours = (value) => new Date(T0 + value * 3600_000).toISOString();
+    const rootOf = (validUntil) => {
+      const conditions = evaluateAlertConditions({ ...healthy(), installation: { validUntil } });
+      const { state, notifications } = advanceAlertState(emptyAlertState(), conditions, T0);
+      return {
+        board: buildAlertBoard(state, {
+          observedAt: hours(0),
+          channels: { email: false, webhooks: 0, heartbeat: false },
+          backup: null,
+        }),
+        sent: rootOutboundNotifications(notifications),
+      };
+    };
+    const far = rootOf(hours(25));
+    expect(far.board.active.map((item) => item.key)).toEqual(["installation.validity"]);
+    expect(far.board).not.toHaveProperty("orderingEndsAt");
+    const near = rootOf(hours(23));
+    // BOP's own row says it, and the Store's staff read the instant on their screens.
+    expect(near.board.active.map((item) => item.key)).toEqual(["installation.validity"]);
+    expect(near.board.orderingEndsAt).toBe(hours(23));
+    expect(near.sent.map((item) => item.key)).toEqual(["installation.validity"]);
+  });
+  it("a Store's board carries when ordering stops only in the last day, and only while raised", () => {
+    const hours = (value) => new Date(T0 + value * 3600_000).toISOString();
+    const options = {
+      observedAt: hours(0),
+      channels: { email: false, webhooks: 0, heartbeat: false },
+      backup: null,
+      audience: "Merchant",
+    };
+    const boardAt = (validUntil) =>
+      buildAlertBoard(
+        advanceAlertState(
+          emptyAlertState(),
+          evaluateStoreConditions(store({ installation: { validUntil } })),
+          T0,
+        ).state,
+        options,
+      );
+    expect(boardAt(hours(25))).not.toHaveProperty("orderingEndsAt");
+    expect(boardAt(hours(23)).orderingEndsAt).toBe(hours(23));
+    expect(boardAt(hours(23)).active.map((item) => item.key)).toContain("ordering.ending");
+    // Past the end it still says when.
+    expect(boardAt(hours(-1)).orderingEndsAt).toBe(hours(-1));
   });
   it("keeps that warning, counting down, while the read behind it cannot run", () => {
     const hours = (value) => new Date(T0 + value * 3600_000).toISOString();
@@ -1108,6 +1334,38 @@ describe("a Store's own conditions", () => {
     expect(own.get("monitor.source").params.sources).toEqual([
       "the receipt template check",
       "the check that orders can be priced",
+    ]);
+  });
+  it("a failed read of one part names that part, and keeps only what that part said", () => {
+    const raisedAt = new Date(T0 - MIN).toISOString();
+    const previous = {
+      alerts: Object.fromEntries(
+        [
+          "payment.updates",
+          "reconciliation.differences",
+          "settlement.exceptions",
+          "settlement.not_covered",
+        ].map((key) => [
+          key,
+          { raisedAt, severity: "warning", params: { count: 1, oldestAgeMs: MIN } },
+        ]),
+      ),
+    };
+    const held = (business) =>
+      evaluateStoreConditions(
+        store({ previous, business: { ...healthy().business, ...business } }),
+      );
+    const scan = held({ settlementExceptions: "unreadable" });
+    expect(keys(scan)).toEqual([
+      "monitor.source",
+      "settlement.exceptions",
+      "settlement.not_covered",
+    ]);
+    expect(scan.get("monitor.source").params.sources).toEqual(["the day-end settlement check"]);
+    const differences = held({ reconciliationDifferences: "unreadable" });
+    expect(keys(differences)).toEqual(["monitor.source", "reconciliation.differences"]);
+    expect(differences.get("monitor.source").params.sources).toEqual([
+      "the check for payment differences",
     ]);
   });
   it("sends BOP only what is that Store's own", () => {
@@ -1165,11 +1423,14 @@ describe("a Store's own conditions", () => {
       "updates.retrying": { sent: true, stays: true },
       "receipts.template": { sent: true, stays: true },
       "pricing.tax_configuration": { sent: true, stays: true },
+      "orders.workflow": { sent: true, stays: true },
+      "orders.unpaid_rounds": { sent: true, stays: true },
       "orders.held_stock": { sent: true, stays: true },
       "pickup.capacity_horizon": { sent: true, stays: true },
       "reconciliation.differences": { sent: true, stays: true },
       "settlement.exceptions": { sent: true, stays: true },
       "settlement.not_covered": { sent: true, stays: true },
+      "stores.unchecked": { sent: false, stays: false },
       "stores.attention": { sent: false, stays: false },
       "backup.failed": { sent: false, stays: false },
       "backup.stale": { sent: false, stays: false },

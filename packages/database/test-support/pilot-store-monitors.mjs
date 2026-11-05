@@ -3,9 +3,13 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
-import { projectOperationsAlertBoard } from "../../../apps/api/dist/merchant-operations-alerts.js";
+import {
+  projectOperationsAlertBoard,
+  projectOrderingEndingNotice,
+} from "../../../apps/api/dist/merchant-operations-alerts.js";
 import { readInternalQuoteTaxReadiness } from "../../../tooling/environment/pilot-configured-quote.mjs";
 import { createPilotAlertBoardReader } from "../../../tooling/environment/pilot-ops-files.mjs";
+import { createInternalSettlementDays } from "../../../tooling/environment/pilot-settlement-window.mjs";
 import { createStoreMonitors } from "../../../tooling/environment/pilot-ops-stores.mjs";
 import { composeBusinessDependencies } from "../../../tooling/environment/pilot-ops.mjs";
 import { withTransactionConflictWait } from "../../../tooling/environment/pilot-transaction-conflict-wait.mjs";
@@ -157,6 +161,7 @@ export async function exercisePilotStoreMonitors(context) {
   const logs = [];
   const reported = [];
   const loaded = [];
+  const coverage = new Map();
   const monitors = createStoreMonitors({
     runtimeDirectory: directory,
     log: async (entry) => logs.push(entry),
@@ -174,6 +179,7 @@ export async function exercisePilotStoreMonitors(context) {
           database: "isolated",
           binding: resourcesOf(of).publicProfile.binding,
         }),
+        loadDailySettlementCoverage: async () => coverage.get(of.name),
       };
       const dependencies = await composeBusinessDependencies({
         directory: storeDirectory,
@@ -350,6 +356,78 @@ export async function exercisePilotStoreMonitors(context) {
       const answer = reported.find((item) => item.step === check && item.store === "stores/first");
       assert.equal(sqlStateOf(answer.error), "42501", check);
     }
+
+    // The money reads refused one at a time: stuck updates must still say "do not take a second
+    // payment" on the merchant's Home while the rest of the read cannot run. The second merchant's
+    // first closed day is recorded here, so its settlement is really scanned under the grants.
+    const keysOf = (board) => board.active.map((item) => item.key).sort();
+    const closedDays = createInternalSettlementDays({
+      resources: resourcesOf(second),
+      active: async () => true,
+    });
+    coverage.set(second.name, { firstWindow: await closedDays.window() });
+    await writeFile(
+      path.join(directory, "stores", "second", "daily-settlement-coverage.json"),
+      JSON.stringify({ schemaVersion: 1 }),
+    );
+    await run(T0 + 14 * 60_000);
+    assert.equal(failedChecks("second", "settlement").length, 0);
+    await asOwner(second, async () => {
+      await deadLetter(second, second.storeReference);
+    });
+    await asOwner(first, async () => undefined);
+
+    await admin.query(`REVOKE SELECT ON rms_payment.payment_reconciliation_run FROM ${api}`);
+    for (const minute of [20, 25]) await run(T0 + minute * 60_000);
+    await admin.query(`GRANT SELECT ON rms_payment.payment_reconciliation_run TO ${api}`);
+    const noScan = await boardOf("second");
+    assert.ok(keysOf(noScan).includes("payment.updates"), "stuck updates stay in view");
+    assert.ok(keysOf(noScan).includes("reconciliation.differences"));
+    assert.match(bySummary(noScan, "monitor.source"), /the day-end settlement check/u);
+    assert.equal(failedChecks("second", "settlement").length, 1);
+    const scan = reported.find(
+      (item) => item.step === "settlement" && item.store === "stores/second",
+    );
+    assert.equal(sqlStateOf(scan.error), "42501");
+    assert.ok(!JSON.stringify(noScan).includes("42501"));
+    const merchantHome = projectOperationsAlertBoard(noScan, noScan.observedAt, {
+      audience: "Merchant",
+    });
+    assert.ok(merchantHome.active.some((item) => item.key === "payment.updates"));
+    assert.ok(merchantHome.active.every((item) => item.key !== "monitor.source"));
+    assert.notEqual(merchantHome.checksIncompleteSince, null);
+
+    await admin.query(`REVOKE SELECT ON rms_payment.payment_reconciliation_exception FROM ${api}`);
+    for (const minute of [31, 32, 33, 34, 35, 36]) await run(T0 + minute * 60_000);
+    await admin.query(`GRANT SELECT ON rms_payment.payment_reconciliation_exception TO ${api}`);
+    const noDifferences = await boardOf("second");
+    assert.ok(keysOf(noDifferences).includes("payment.updates"), "stuck updates stay in view");
+    assert.ok(keysOf(noDifferences).includes("reconciliation.differences"), "what it said stays");
+    assert.match(bySummary(noDifferences, "monitor.source"), /the check for payment differences/u);
+    assert.equal(failedChecks("second", "reconciliation").length, 1);
+    const differences = reported.find(
+      (item) => item.step === "reconciliation" && item.store === "stores/second",
+    );
+    assert.equal(sqlStateOf(differences.error), "42501");
+
+    // What any staff member's screen reads, from the real board and through the real reader: the
+    // end of ordering in its last day, and nothing before it.
+    const staffRead = async () =>
+      projectOrderingEndingNotice(
+        await createPilotAlertBoardReader(path.join(directory, "stores", "second"))(),
+      );
+    assert.deepEqual(await staffRead(), { endsAt: null, support: null });
+    const profileOf = path.join(directory, "stores", "second", "internal-test-profile.json");
+    const endingIn = async (hours, minute) => {
+      const validUntil = new Date(T0 + minute * 60_000 + hours * 3600_000).toISOString();
+      await writeFile(profileOf, JSON.stringify({ binding: { validUntil } }));
+      await run(T0 + minute * 60_000);
+      return validUntil;
+    };
+    await endingIn(25, 40);
+    assert.deepEqual(await staffRead(), { endsAt: null, support: null });
+    const validEnd = await endingIn(23, 41);
+    assert.deepEqual(await staffRead(), { endsAt: validEnd, support: null });
   } finally {
     await pool.end().catch(() => undefined);
     await rm(directory, { recursive: true, force: true });

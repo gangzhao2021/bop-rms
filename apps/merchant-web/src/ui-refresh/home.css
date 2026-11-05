@@ -241,7 +241,8 @@
   font-size: 14px;
 }
 /* The evening reminder has already said what is left; "nothing" would contradict it. */
-.overview-needs:has(.closing-reminder__title[data-tone="action"]) .overview-attention__empty {
+.overview-needs:has(.closing-reminder__title[data-tone="action"]) .overview-attention__empty,
+.overview-needs:has(.ordering-ending-notice) .overview-attention__empty {
   display: none;
 }
 

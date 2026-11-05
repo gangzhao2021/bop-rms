@@ -259,6 +259,10 @@ async function pilotHome(
     named = true;
     return route.fulfill({ headers, json: { status: "Applied", profileVersion: 1 } });
   });
+  // Ordering is not about to stop, unless a test says so.
+  await page.route("**/merchant/ordering-ending", (route) =>
+    route.fulfill({ headers, json: { endsAt: null, support: null } }),
+  );
   await page.route("**/merchant/operations-alerts", (route) => {
     alertReads.push(route.request().method());
     return role === "front-of-house"
@@ -745,4 +749,156 @@ test("@production Home asks a member with no name to add it, and thanks them onc
   await expectNoInternalText(page);
   expect(home.errors).toEqual([]);
   expect(home.unexpected).toEqual([]);
+});
+
+// AGENTS.md "Warn before timeouts": ordering's last day reaches whoever works the floor, on the
+// screen they are working in, from a read that carries only that fact (not the alert board).
+const orderingNotice = (page: Page) => page.getByRole("region", { name: "Ordering at this Store" });
+const inHours = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
+async function orderingEnding(page: Page, answer: () => unknown) {
+  await page.route("**/merchant/ordering-ending", (route) =>
+    route.fulfill({ headers, json: answer() }),
+  );
+}
+
+test("@production a Front of House session on Tables sees ordering stop at 23 hours, not at 25", async ({
+  page,
+}) => {
+  const home = await pilotHome(page, "front-of-house", () => problem);
+  // At 25 hours the monitor has written nothing, so that is the server's answer.
+  let answer: { endsAt: string | null; support: unknown } = { endsAt: null, support: null };
+  await orderingEnding(page, () => answer);
+  await page.goto("/operations/dining");
+  await expect(page.getByRole("heading", { name: "Tables", exact: true })).toBeVisible();
+  await expect(orderingNotice(page)).toHaveCount(0);
+  answer = { endsAt: inHours(23.5), support: null };
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Tables", exact: true })).toBeVisible();
+  await expect(orderingNotice(page)).toContainText("Ordering at this Store stops in 23 hours");
+  await expect(orderingNotice(page)).toContainText(
+    "Only BOP support can renew it: call them now, or tell your manager.",
+  );
+  await expect(orderingNotice(page)).toContainText(
+    "keep taking orders on your own POS or on paper, and take payment on the card machine",
+  );
+  // No number configured: no link that goes nowhere.
+  await expect(orderingNotice(page).getByRole("link")).toHaveCount(0);
+  // This role's board stays closed: it read that one fact, never the alerts.
+  expect(home.alertReads).toEqual([]);
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(orderingNotice(page)).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/ordering-ending-tables-${width}.png` });
+  }
+});
+
+test("@production ordering's last day shows on Orders, Pickup and Kitchen, with the number to call", async ({
+  page,
+}) => {
+  await pilotHome(page, "owner", () => problem);
+  await orderingEnding(page, () => ({
+    endsAt: inHours(3.5),
+    support: { phone: "+14165550100", testOnly: true },
+  }));
+  for (const [path, name] of [
+    ["/operations/orders", "orders"],
+    ["/operations/pickup", "pickup"],
+    ["/operations/kitchen", "kitchen"],
+  ] as const) {
+    await page.goto(path);
+    await expect(orderingNotice(page)).toContainText("Ordering at this Store stops in 3 hours");
+    const call = orderingNotice(page).getByRole("link", {
+      name: "Call BOP support: (416) 555-0100",
+    });
+    await expect(call).toHaveAttribute("href", "tel:+14165550100");
+    await expect(orderingNotice(page)).toContainText("(test number)");
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(orderingNotice(page)).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({ path: `test-results/ordering-ending-${name}-${width}.png` });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+});
+
+test("@production Home: Front of House, who has no row of store system alerts, hears of ordering's last day", async ({
+  page,
+}) => {
+  const staff = await pilotHome(page, "front-of-house", () => problem);
+  await orderingEnding(page, () => ({ endsAt: inHours(23.5), support: null }));
+  await page.goto("/app");
+  await expect(page.getByRole("region", { name: "Right now" })).toBeVisible();
+  await expect(orderingNotice(page)).toContainText("Ordering at this Store stops in 23 hours");
+  // "Nothing needs attention" would contradict it.
+  await expect(page.getByText("Nothing needs attention right now.")).toBeHidden();
+  await page.screenshot({ path: "test-results/ordering-ending-home-staff.png" });
+  expect(staff.errors).toEqual([]);
+  expect(staff.unexpected).toEqual([]);
+});
+
+test("@production Home: the Owner reads ordering's last day in Needs attention only", async ({
+  page,
+}) => {
+  const ending = {
+    key: "ordering.ending",
+    severity: "critical",
+    title: "Ordering at this Store is about to stop",
+    summary:
+      "When it stops, guests cannot order and staff cannot use the store screens. Only BOP support can renew it.",
+    action:
+      "Ordering at this Store stops in 23 hours unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.",
+    raisedAt: "2026-10-15T15:56:00.000Z",
+  };
+  await pilotHome(page, "owner", () => ({ ...problem, active: [ending] }));
+  await orderingEnding(page, () => ({ endsAt: inHours(23.5), support: null }));
+  await page.goto("/app");
+  await expect(page.getByText("Ordering at this Store is about to stop")).toBeVisible();
+  await expect(orderingNotice(page)).toHaveCount(0);
+});
+
+test("@production past the end staff are told it has stopped, in Chinese too", async ({ page }) => {
+  await pilotHome(page, "front-of-house", () => problem);
+  await orderingEnding(page, () => ({ endsAt: inHours(-1), support: null }));
+  await page.goto("/operations/dining");
+  await expect(orderingNotice(page)).toContainText("Ordering at this Store has stopped");
+  await expect(orderingNotice(page)).not.toContainText("If it stops");
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  const chinese = page.getByRole("region", { name: "这家店的点单服务" });
+  await expect(chinese).toContainText("这家店的点单服务已经停止");
+  await expect(chinese).toContainText("继续用店里自己的收银机或纸单点单，用刷卡机收款");
+});
+
+test("@production a screen keeps counting down when the read fails, and the notice leaves after a renewal", async ({
+  page,
+}) => {
+  const start = Date.parse("2026-11-25T02:00:00.000Z");
+  await page.clock.install({ time: new Date(start) });
+  await pilotHome(page, "front-of-house", () => problem);
+  let read: "known" | "fails" | "renewed" = "known";
+  await page.route("**/merchant/ordering-ending", (route) =>
+    read === "fails"
+      ? route.fulfill({ status: 503, headers, json: { error: "ordering_ending_unavailable" } })
+      : route.fulfill({
+          headers,
+          json: {
+            endsAt: read === "known" ? new Date(start + 3.5 * 3_600_000).toISOString() : null,
+            support: null,
+          },
+        }),
+  );
+  await page.goto("/operations/dining");
+  await expect(orderingNotice(page)).toContainText("stops in 3 hours");
+  read = "fails";
+  await page.clock.runFor(61 * 60_000);
+  await expect(orderingNotice(page)).toContainText("stops in 2 hours");
+  read = "renewed";
+  await page.clock.runFor(5 * 60_000);
+  await expect(orderingNotice(page)).toHaveCount(0);
 });

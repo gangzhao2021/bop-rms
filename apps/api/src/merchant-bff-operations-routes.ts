@@ -107,6 +107,41 @@ export function installMerchantOperationsRoutes(
       .catch((error: unknown) => failed(response, error));
   });
 
+  // AGENTS.md "Warn before timeouts": when ordering at this Store stops, for any of its staff.
+  router.get("/ordering-ending", safeRead(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    if (
+      request.method !== "GET" ||
+      request.body !== undefined ||
+      sessionCookie === null ||
+      Object.keys(request.query).length !== 0 ||
+      rawHeaderValues(request, "origin").length > 1 ||
+      rawHeaderValues(request, "sec-fetch-site").length !== 1
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.orderingEnding) {
+      response
+        .status(503)
+        .set("Cache-Control", NO_STORE)
+        .json({ error: "ordering_ending_unavailable" });
+      return;
+    }
+    void options
+      .orderingEnding({ sessionCookie })
+      .then((notice) => response.set("Cache-Control", NO_STORE).json(notice))
+      .catch((error: unknown) => {
+        // A board that cannot be read is no refusal: the screen keeps what it last knew.
+        if (error instanceof Error && error.message === "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE")
+          response
+            .status(503)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "ordering_ending_unavailable" });
+        else denied(response);
+      });
+  });
+
   // WP-2423 Q21: "today" for this Store — its business day, not the calendar day.
   router.get("/business-day", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

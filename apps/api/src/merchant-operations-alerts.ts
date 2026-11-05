@@ -39,6 +39,7 @@ export const operationsAlertKeys = Object.freeze([
   "monitor.source",
   "channel.delivery",
   "settlement.not_covered",
+  "stores.unchecked",
   "stores.attention",
 ] as const);
 export type OperationsAlertKey = (typeof operationsAlertKeys)[number];
@@ -61,6 +62,9 @@ export const merchantOperationsAlertKeys: ReadonlySet<OperationsAlertKey> = new 
   "updates.retrying",
   "receipts.template",
   "pricing.tax_configuration",
+  // WP-2423 item 9: the Store's own order rules; its staff pause services and go on paper.
+  "orders.workflow",
+  "orders.unpaid_rounds",
   "orders.held_stock",
   "pickup.capacity_horizon",
   "reconciliation.differences",
@@ -182,15 +186,17 @@ export function projectOperationsAlertBoard(
     "lastSuccessfulBackupAt",
   ];
   // A board written before planned updates existed has no `maintenance` entry; one with no support
-  // contact configured has no `support` entry.
+  // contact configured has no `support` entry; `orderingEndsAt` is only there in ordering's last day,
+  // for the staff's own read below.
   const board = record(value, [
     ...boardKeys,
-    ...["maintenance", "support"].filter(
+    ...["maintenance", "support", "orderingEndsAt"].filter(
       (optional) => value !== null && typeof value === "object" && Object.hasOwn(value, optional),
     ),
   ]);
   if (board.schemaVersion !== 1) return unavailable();
   const observedAt = instant(board.observedAt);
+  if (board.orderingEndsAt !== undefined) instant(board.orderingEndsAt);
   if (!Array.isArray(board.active) || board.active.length > operationsAlertKeys.length)
     return unavailable();
   if (!Array.isArray(board.recentlyCleared) || board.recentlyCleared.length > 10)
@@ -279,6 +285,29 @@ export function projectOperationsAlertBoard(
   });
 }
 
+/**
+ * AGENTS.md "Warn before timeouts": what any of this Store's staff read on the screen they work in,
+ * in ordering's last day. That instant and who to call, and nothing else of the board: the rest stays
+ * with the permission above. The monitor writes it only in the last day.
+ */
+export interface OrderingEndingNotice {
+  readonly endsAt: string | null;
+  readonly support: OperationsAlertView["support"];
+}
+const noOrderingEnding: OrderingEndingNotice = Object.freeze({ endsAt: null, support: null });
+
+export function projectOrderingEndingNotice(value: unknown): OrderingEndingNotice {
+  if (value === null) return noOrderingEnding;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return unavailable();
+  const board = value as Record<string, unknown>;
+  if (board.schemaVersion !== 1) return unavailable();
+  if (board.orderingEndsAt === undefined) return noOrderingEnding;
+  return Object.freeze({
+    endsAt: instant(board.orderingEndsAt),
+    support: supportOf(board.support),
+  });
+}
+
 /** The answer for a signed-in staff member whose role does not handle store system alerts. */
 export interface OperationsAlertsNotPermitted {
   readonly permitted: false;
@@ -325,5 +354,38 @@ export function createPersistentMerchantOperationsAlerts(options: {
       persistence.now(),
       options.audience === undefined ? {} : { audience: options.audience },
     );
+  };
+}
+
+/**
+ * The read behind that notice, for anyone who may enter this Store's workspace. A refusal throws
+ * what any such refusal throws. A board that cannot be read is no refusal (the route answers 503),
+ * and the screen keeps what it last knew.
+ */
+export function createPersistentMerchantOrderingEnding(options: {
+  readonly persistence: PersistentMerchantBffOptions;
+  /** The Store this composition serves. */
+  readonly storeReference: string;
+  /** The monitor's published board for that Store, or null when it has never written one. */
+  readBoard(): Promise<unknown>;
+}) {
+  const persistence = options.persistence,
+    resolve = createMerchantStoreScope(persistence);
+  return async (input: { readonly sessionCookie: unknown }): Promise<OrderingEndingNotice> => {
+    const permitted = await persistence.transactions.run(async (tx) => {
+      const value = await resolve(tx, input.sessionCookie, "merchant.access");
+      return (
+        String(value.store.storeReference) === options.storeReference &&
+        (await value.allowed()) === true
+      );
+    });
+    if (!permitted) throw new Error("STORE_SERVICE_PERMISSION_DENIED");
+    let board: unknown;
+    try {
+      board = await options.readBoard();
+    } catch {
+      return unavailable();
+    }
+    return projectOrderingEndingNotice(board);
   };
 }

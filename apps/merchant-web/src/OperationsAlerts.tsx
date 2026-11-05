@@ -142,6 +142,7 @@ export function alertTitle(title: string): string {
     "Day-end settlement is not set up for this Store": t(
       "Day-end settlement is not set up for this Store",
     ),
+    "Some Stores are not being checked": t("Some Stores are not being checked"),
     "Some Stores need BOP support": t("Some Stores need BOP support"),
   };
   return words[title] ?? title;

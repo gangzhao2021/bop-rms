@@ -133,6 +133,8 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
         "the check for pickup times",
         "the check that orders can be priced",
         "the check of the store's order rules",
+        "the check for payment differences",
+        "the day-end settlement check",
       ],
     },
   ],
@@ -141,19 +143,29 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
     { channels: ["email", "webhook"], failingMs: 40 * MIN },
   ],
   "settlement.not_covered": [{}],
+  "stores.unchecked": [
+    { stores: ["t-1"] },
+    { stores: Array.from({ length: 30 }, (_, index) => `s-${index}`) },
+  ],
   "stores.attention": [
-    { unchecked: ["t-1"], checksFailing: [], settlementNotCovered: [], setupEnding: [] },
     {
-      unchecked: ["t-1", "h-2"],
       checksFailing: ["d-3"],
       settlementNotCovered: ["h-2", "d-3"],
       setupEnding: ["t-1", "h-2", "d-3"],
     },
+    { checksFailing: Array.from({ length: 30 }, (_, index) => `s-${index}`) },
+    // Each cause alone, and all together: each says its own step.
+    { checksFailing: ["t-1"] },
+    { background: ["t-1"] },
+    { settlementNotCovered: ["t-1"] },
+    { setupEnding: ["t-1"] },
+    { noSupportNumber: ["t-1"] },
     {
-      unchecked: Array.from({ length: 30 }, (_, index) => `s-${index}`),
-      checksFailing: [],
-      settlementNotCovered: [],
-      setupEnding: [],
+      checksFailing: ["t-1"],
+      background: ["t-1"],
+      settlementNotCovered: ["t-1"],
+      setupEnding: ["t-1"],
+      noSupportNumber: ["t-1"],
     },
   ],
 };
@@ -295,26 +307,39 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
   it("names the other Stores in the Chinese, as many as fit", () => {
     setLanguageForTest("zh-Hans");
     const say = (params: unknown) => alertSummary(renderAlert("stores.attention", params).summary);
+    const unchecked = (stores: readonly string[]) =>
+      alertSummary(renderAlert("stores.unchecked", { stores }).summary);
+    expect(unchecked(["tea", "hotpot"])).toBe("没有在检查：tea、hotpot。");
     expect(
       say({
-        unchecked: ["tea"],
         checksFailing: ["hotpot", "dessert"],
         settlementNotCovered: [],
         setupEnding: ["tea"],
       }),
-    ).toBe("没有在检查：tea。部分检查无法运行：hotpot、dessert。点单服务快到期：tea。");
+    ).toBe("部分检查无法运行：hotpot、dessert。点单服务快到期：tea。");
+    expect(say({ background: ["tea"], noSupportNumber: ["tea", "hotpot"] })).toBe(
+      "后台工作需要人处理：tea。没有可打的技术支持电话：tea、hotpot。",
+    );
     const many = Array.from({ length: 30 }, (_, index) => `s-${index}`);
-    const summary = say({
-      unchecked: many,
-      checksFailing: [],
-      settlementNotCovered: [],
-      setupEnding: [],
-    });
+    const summary = unchecked(many);
     expect(summary).toMatch(/^没有在检查：s-0、.*和另外 \d+ 家。$/u);
     // A Store's own background work, in the merchant's language.
     expect(
       alertSummary(renderAlert("service.attention", { services: ["store-background"] }).summary),
     ).toBe("后台工作一直出错，不会自行恢复。");
+  });
+  it("says what BOP does about each cause it names, in the Chinese too", () => {
+    setLanguageForTest("zh-Hans");
+    const action = (params: unknown) => alertAction(renderAlert("stores.attention", params).action);
+    expect(action({ setupEnding: ["tea"] })).toBe(
+      "BOP 技术支持：安装本身续期后，马上给列出的快到期门店续期（这些门店的老板只在最后一天才会收到提醒）。",
+    );
+    expect(action({ background: ["tea"], noSupportNumber: ["tea"] })).toBe(
+      "BOP 技术支持：重启这里列出的门店的后台工作；在告警设置里填上技术支持电话，这些门店的老板才有电话可打。",
+    );
+    expect(action({ setupEnding: ["tea"] })).not.toContain("没有运行");
+    // A step this version does not know keeps the monitor's own words.
+    expect(alertAction("BOP support: do something new.")).toBe("BOP support: do something new.");
   });
   it("shows the monitor's own words when a text matches nothing, never blank", () => {
     setLanguageForTest("zh-Hans");

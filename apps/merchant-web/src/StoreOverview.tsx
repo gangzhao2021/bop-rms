@@ -22,6 +22,7 @@ import { createPickupClient } from "./pickup-client.js";
 import { parsePickupQueueView } from "./pickup.js";
 import { storeTime } from "./StoreTime.js";
 import { ClosingReminder, closingReminderScreen } from "./ClosingReminder.js";
+import { OrderingEndingNotice } from "./OrderingEndingNotice.js";
 import { formatContactPhone } from "./contact-phone.js";
 import {
   StoreSystemLine,
@@ -1224,8 +1225,16 @@ export function StoreOverview({
         settlement={settlement}
         system={system.read}
         timeZone={timeZone}
-        // WP-2423 item 8 ②: in the evening, what is still open before closing.
-        reminder={<ClosingReminder screens={screens} fetcher={fetcher} />}
+        // WP-2423 item 8 ②: in the evening, what is still open before closing. Staff with no row of
+        // store system alerts here hear of ordering's last day as on their other screens.
+        reminder={
+          <>
+            {system.read.kind === "NotPermitted" ? (
+              <OrderingEndingNotice fetcher={fetcher} />
+            ) : null}
+            <ClosingReminder screens={screens} fetcher={fetcher} />
+          </>
+        }
         onRefresh={() => void load(true)}
         onCheckSystem={() => void system.refresh()}
       />

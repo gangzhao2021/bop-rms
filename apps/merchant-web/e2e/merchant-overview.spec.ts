@@ -442,6 +442,13 @@ test("@production Home reads only the summaries the staff member's screens permi
       json: { name: "Recorded", displayName: "Ava" },
     }),
   );
+  // Staff with no row of store system alerts read when ordering stops; it is not about to.
+  await page.route("**/merchant/ordering-ending", (route) =>
+    route.fulfill({
+      headers: { "cache-control": "no-store" },
+      json: { endsAt: null, support: null },
+    }),
+  );
   // WP-2423: the BFF tells a role without store system alerts so in an ordinary answer.
   await page.route("**/merchant/operations-alerts", (route) => {
     requested.push(new URL(route.request().url()).pathname);

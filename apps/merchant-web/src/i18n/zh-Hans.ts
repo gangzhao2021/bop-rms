@@ -7506,11 +7506,27 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这家店已有结束的营业日，但还没有日结，所以它的付款没有与支付方核对。",
   "BOP support: record this Store's first closed business day so its day-end settlement starts.":
     "BOP 技术支持：记录这家店第一个已结束的营业日，让它的日结开始运行。",
+  "Some Stores are not being checked": "有门店没有在检查",
   "Some Stores need BOP support": "有门店需要 BOP 技术支持处理",
-  "BOP support: run the status check, find out why these Stores' checks are not running, and set up what is missing. Their owners are told only when ordering is a day from stopping.":
-    "BOP 技术支持：运行状态检查，查清这些门店的检查为什么没有运行，并补上缺少的设置。只有点单服务不到一天就要停止时，这些门店的老板才会收到提醒。",
+  "BOP support: {steps}.": "BOP 技术支持：{steps}。",
+  "run the status check": "运行状态检查",
+  "run the status check and find out why the checks named here are not running":
+    "运行状态检查，查清这里列出的门店的检查为什么没有运行",
+  "restart the background work named here": "重启这里列出的门店的后台工作",
+  "record the first closed business day of those with no settlement":
+    "给没有日结的门店记录第一个已结束的营业日",
+  "renew those named as ending soon, right after the installation itself (their owners hear only in the last day)":
+    "安装本身续期后，马上给列出的快到期门店续期（这些门店的老板只在最后一天才会收到提醒）",
+  "set the support number in the alert settings, so their owners have someone to call":
+    "在告警设置里填上技术支持电话，这些门店的老板才有电话可打",
   "Ordering at this Store is about to stop": "这家店的点单服务快要停止了",
   "Ordering at this Store has stopped": "这家店的点单服务已经停止",
+  "Ordering at this Store": "这家店的点单服务",
+  "Ordering at this Store stops in {duration}": "这家店的点单服务还有{duration}就会停止",
+  "Only BOP support can renew it: call them now, or tell your manager. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.":
+    "只有 BOP 技术支持能续期：请马上联系他们，或告诉经理。如果停了，继续用店里自己的收银机或纸单点单，用刷卡机收款。",
+  "Only BOP support can renew it: call them now, or tell your manager. Keep taking orders on your own POS or on paper, and take payment on the card machine.":
+    "只有 BOP 技术支持能续期：请马上联系他们，或告诉经理。继续用店里自己的收银机或纸单点单，用刷卡机收款。",
   "Ordering at this Store stops in {duration} unless BOP support renews it. Call BOP support now. If it stops, keep taking orders on your own POS or on paper, and take payment on the card machine.":
     "这家店的点单服务还有{duration}就会停止，除非 BOP 技术支持完成续期。请马上联系 BOP 技术支持。如果停了，继续用店里自己的收银机或纸单点单，用刷卡机收款。",
   "Call BOP support now. Keep taking orders on your own POS or on paper, and take payment on the card machine.":
@@ -7521,7 +7537,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "在 BOP 技术支持完成续期之前，客人无法点单，员工也无法使用门店页面。",
   "Not being checked: {names}.": "没有在检查：{names}。",
   "Some checks could not run: {names}.": "部分检查无法运行：{names}。",
+  "Background work needs a person: {names}.": "后台工作需要人处理：{names}。",
   "Closed business days with no day-end settlement: {names}.": "营业日已结束但没有日结：{names}。",
+  "No support number to call: {names}.": "没有可打的技术支持电话：{names}。",
   "Ordering setup ending soon: {names}.": "点单服务快到期：{names}。",
   "{names} and {count} more": "{names} 和另外 {count} 家",
   "System details": "系统详情",
@@ -7643,6 +7661,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "the check for pickup times": "自取时间检查",
   "the check that orders can be priced": "订单能否计价的检查",
   "the check of the store's order rules": "门店订单规则的检查",
+  "the check for payment differences": "支付差异检查",
+  "the day-end settlement check": "日结检查",
   "Email alerts": "邮件",
   "Phone alerts": "电话或消息",
   "Another alert channel": "某个提醒渠道",
