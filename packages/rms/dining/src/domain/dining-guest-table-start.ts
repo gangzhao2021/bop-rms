@@ -149,14 +149,18 @@ export function decideGuestTableQuietClose(
 export function decideGuestNewParty(
   facts: GuestTableCloseFacts,
   now: string,
-  startsAtTableInWindow: number,
+  startsInWindow: { readonly table: number; readonly store: number },
 ): { readonly ask: true } | { readonly ask: false; readonly hold: GuestTableHold | "Budget" } {
   const standing = standingHold(facts);
   if (standing !== null) return Object.freeze({ ask: false, hold: standing });
   if (facts.cartHasItems) return Object.freeze({ ask: false, hold: "CartInUse" });
   if (at(now) - guestTableLastActivity(facts) < guestTableNewPartyGapMinutes * minutes)
     return Object.freeze({ ask: false, hold: "Recent" });
-  if (startsAtTableInWindow >= guestTableStartBudget.perTable)
+  // With no start left, "we just sat down" would close the table and then send them to staff.
+  if (
+    startsInWindow.table >= guestTableStartBudget.perTable ||
+    startsInWindow.store >= guestTableStartBudget.perStore
+  )
     return Object.freeze({ ask: false, hold: "Budget" });
   return Object.freeze({ ask: true });
 }

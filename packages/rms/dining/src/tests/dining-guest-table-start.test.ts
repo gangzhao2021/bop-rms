@@ -8,6 +8,7 @@ import {
 } from "../domain/dining-guest-table-start.js";
 
 const now = "2026-11-05T12:00:00.000Z";
+const starts = (table: number) => ({ table, store: table });
 const ago = (minutes: number) => new Date(Date.parse(now) - minutes * 60_000).toISOString();
 
 describe("DEC-DINING-GUEST-TABLE-START: who may start a table", () => {
@@ -117,11 +118,13 @@ describe("DEC-DINING-GUEST-TABLE-START: the quiet rule", () => {
 
 describe("DEC-DINING-GUEST-TABLE-START: the next party", () => {
   it("is asked only after 5 quiet minutes", () => {
-    expect(decideGuestNewParty(quiet({ startedAt: ago(4) }), now, 1)).toEqual({
+    expect(decideGuestNewParty(quiet({ startedAt: ago(4) }), now, starts(1))).toEqual({
       ask: false,
       hold: "Recent",
     });
-    expect(decideGuestNewParty(quiet({ startedAt: ago(5) }), now, 1)).toEqual({ ask: true });
+    expect(decideGuestNewParty(quiet({ startedAt: ago(5) }), now, starts(1))).toEqual({
+      ask: true,
+    });
   });
   it.each([
     ["a dish not finished", { order: { ...paid, unfinishedItems: 1 } }, "Unfinished"],
@@ -130,9 +133,15 @@ describe("DEC-DINING-GUEST-TABLE-START: the next party", () => {
     ["a merged table", { merged: true }, "Merged"],
     ["a cart in use", { cartHasItems: true }, "CartInUse"],
   ] as const)("isn't asked with %s", (_name, changes, hold) => {
-    expect(decideGuestNewParty(quiet(changes as never), now, 0)).toEqual({ ask: false, hold });
+    expect(decideGuestNewParty(quiet(changes as never), now, starts(0))).toEqual({
+      ask: false,
+      hold,
+    });
   });
-  it("isn't asked once the table's starts are spent", () => {
-    expect(decideGuestNewParty(quiet(), now, 3)).toEqual({ ask: false, hold: "Budget" });
+  it("isn't asked once the table's or the Store's starts are spent", () => {
+    const budget = { ask: false, hold: "Budget" };
+    expect(decideGuestNewParty(quiet(), now, starts(3))).toEqual(budget);
+    expect(decideGuestNewParty(quiet(), now, { table: 0, store: 40 })).toEqual(budget);
+    expect(decideGuestNewParty(quiet(), now, { table: 2, store: 39 })).toEqual({ ask: true });
   });
 });

@@ -215,7 +215,7 @@ export function createDiningGuestTableClose(options: DiningGuestTableCloseOption
       return decided.close ? null : decided.hold;
     }
     const spent = await countDiningGuestTableStarts(tx, owner, tableReference ?? fail(), at);
-    const decided = decideGuestNewParty(facts, at, spent.table);
+    const decided = decideGuestNewParty(facts, at, spent);
     return decided.ask ? null : decided.hold;
   };
 
