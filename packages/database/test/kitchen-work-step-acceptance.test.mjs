@@ -586,3 +586,290 @@ it("a Store with 150 finished and 10 open tickets and 400 dishes in 24 hours rea
     assert.equal(await f.as((tx) => countUnfinishedKitchenTickets(tx, f.scope)), 9);
   });
 });
+
+/** A combo as the Catalog records it: each chosen option stands for one dish (a product). */
+const comboOf = (f, count) => {
+  const options = Array.from({ length: count }, (_, n) => f.id(0x800 + n));
+  const products = Array.from({ length: count }, (_, n) => f.id(0x900 + n));
+  return {
+    options,
+    products,
+    selected: () =>
+      options.map((optionReference, n) => ({
+        optionReference,
+        quantity: 1,
+        localizedNames: { "en-CA": "TEST dish choice " + (n + 1) },
+      })),
+    comboChoices: async (_tx, asked) =>
+      new Map(
+        asked.flatMap((option) => {
+          const index = options.indexOf(option);
+          return index < 0 ? [] : [[option, products[index]]];
+        }),
+      ),
+  };
+};
+const doneFacts = (f, workItem) =>
+  f.rows(
+    "SELECT option_id::text AS option,actor_id::text AS actor FROM rms_kitchen.kitchen_combo_part_done WHERE kitchen_work_item_id=$1 ORDER BY option_id",
+    [workItem],
+  );
+const readyResults = (f, ticket) =>
+  f.rows(
+    "SELECT order_item_id::text AS line FROM rms_kitchen.kitchen_order_item_ready_result WHERE kitchen_ticket_id=$1",
+    [ticket],
+  );
+
+it("a combo dish done first on a Queued combo records Accept and Start", async () => {
+  await withFixture("wp2423_ks_combofirst", async (f) => {
+    const combo = comboOf(f, 2);
+    const round = await f.createTicket({ lines: 1, options: combo.selected });
+    const [line] = linesOf(round);
+    const reply = await f.tap({
+      step: "Finish",
+      actor: f.id(0x700),
+      comboChoices: combo.comboChoices,
+      lines: [{ ...line, options: [combo.options[0]] }],
+    });
+    assert.deepEqual(
+      reply.lines.map((entry) => [entry.outcome, entry.workItemStatus, entry.dishesDone]),
+      [["DishDone", "In Progress", [combo.options[0]]]],
+    );
+    assert.deepEqual(
+      (await operations(f, round.ticket)).map((row) => [row.action_code, row.actor]),
+      [
+        ["KITCHEN_WORK_ITEM_ACCEPTED", f.id(0x700)],
+        ["KITCHEN_WORK_ITEM_STARTED", f.id(0x700)],
+      ],
+    );
+    assert.deepEqual(await readyResults(f, round.ticket), []);
+    // A choice this work item does not have is refused outright.
+    await assert.rejects(
+      f.tap({
+        step: "Finish",
+        actor: f.id(0x700),
+        comboChoices: combo.comboChoices,
+        lines: [{ ...line, options: [f.id(0x8ff)] }],
+      }),
+      { code: "KITCHEN_WORK_INPUT_INVALID" },
+    );
+  });
+});
+
+it("a combo is ready only when its last dish is done, in one commit, by whichever operator", async () => {
+  await withFixture("wp2423_ks_combolast", async (f) => {
+    const combo = comboOf(f, 2);
+    const round = await f.createTicket({ lines: 1, options: combo.selected });
+    const [line] = linesOf(round);
+    const finish = (actor, option) =>
+      f.tap({
+        step: "Finish",
+        actor,
+        comboChoices: combo.comboChoices,
+        lines: [{ ...line, options: [option] }],
+      });
+    const first = await finish(f.id(0x700), combo.options[0]);
+    assert.equal(first.lines[0].outcome, "DishDone");
+    assert.deepEqual(await readyResults(f, round.ticket), []);
+    const last = await finish(f.id(0x701), combo.options[1]);
+    assert.deepEqual(
+      last.lines.map((entry) => [entry.outcome, entry.workItemStatus]),
+      [["Finished", "Completed"]],
+    );
+    assert.deepEqual(await readyResults(f, round.ticket), [{ line: line.orderItem }]);
+    // Each dish keeps its own who; the combo's lifecycle keeps its own.
+    assert.deepEqual(await doneFacts(f, line.workItem), [
+      { option: combo.options[0], actor: f.id(0x700) },
+      { option: combo.options[1], actor: f.id(0x701) },
+    ]);
+    assert.deepEqual(
+      (await operations(f, round.ticket)).map((row) => [row.action_code, row.actor]),
+      [
+        ["KITCHEN_WORK_ITEM_ACCEPTED", f.id(0x700)],
+        ["KITCHEN_WORK_ITEM_STARTED", f.id(0x700)],
+        ["KITCHEN_WORK_ITEM_COMPLETION_RECORDED", f.id(0x701)],
+        ["KITCHEN_ORDER_ITEM_READY", null],
+      ],
+    );
+    // A second tap on a dish already done changes nothing and says so without any fuss.
+    const again = await finish(f.id(0x702), combo.options[1]);
+    assert.equal(again.lines[0].outcome, "AlreadyFinished");
+    assert.equal((await doneFacts(f, line.workItem)).length, 2);
+  });
+});
+
+it("the last two dishes finished at the same moment complete the combo once", async () => {
+  await withFixture("wp2423_ks_combotwo", async (f) => {
+    const combo = comboOf(f, 2);
+    const round = await f.createTicket({ lines: 1, options: combo.selected });
+    const [line] = linesOf(round);
+    const holder = await f.connect();
+    await holder.query("BEGIN");
+    await holder.query(
+      "SELECT 1 FROM rms_kitchen.kitchen_ticket WHERE kitchen_ticket_id=$1 FOR NO KEY UPDATE",
+      [round.ticket],
+    );
+    const taps = combo.options.map((option, index) =>
+      f.tap({
+        step: "Finish",
+        actor: f.id(0x700 + index),
+        comboChoices: combo.comboChoices,
+        lines: [{ ...line, options: [option] }],
+      }),
+    );
+    assert.equal(await f.someoneWaits(), true);
+    await holder.query("COMMIT");
+    await holder.end();
+    const results = await Promise.all(taps);
+    assert.deepEqual(results.map((reply) => reply.lines[0].outcome).sort(), [
+      "DishDone",
+      "Finished",
+    ]);
+    assert.equal(
+      (await operations(f, round.ticket)).filter(
+        (row) => row.action_code === "KITCHEN_WORK_ITEM_COMPLETION_RECORDED",
+      ).length,
+      1,
+    );
+    assert.equal((await readyResults(f, round.ticket)).length, 1);
+    assert.equal((await doneFacts(f, line.workItem)).length, 2);
+  });
+});
+
+it("a dish the kitchen does not prepare never holds up its combo, and a later change of the mark moves nothing", async () => {
+  await withFixture("wp2423_ks_combonp", async (f) => {
+    const { changeKitchenNotPreparedProduct } = await import("../../rms/kitchen/src/index.ts");
+    const combo = comboOf(f, 2);
+    const mark = (product, notPrepared, expectedVersion, observedAt) =>
+      f.as((tx) =>
+        changeKitchenNotPreparedProduct(
+          tx,
+          { ...f.scope, tenantReference: f.tenant },
+          {
+            productReference: product,
+            operationReference: f.next(),
+            expectedVersion,
+            notPrepared,
+            actorReference: f.id(0x702),
+            observedAt,
+          },
+        ),
+      );
+    // The bottled drink was marked before this work reached the kitchen.
+    await mark(combo.products[1], true, 0, new Date(Date.now() - 2 * 3_600_000).toISOString());
+    const round = await f.createTicket({ lines: 1, options: combo.selected });
+    const [line] = linesOf(round);
+    // The mark changing mid-service does not move work already issued.
+    await mark(combo.products[1], false, 1, new Date().toISOString());
+    await mark(combo.products[0], true, 0, new Date().toISOString());
+    const tap = await f.tap({
+      step: "Finish",
+      actor: f.id(0x700),
+      comboChoices: combo.comboChoices,
+      lines: [{ ...line, options: [combo.options[0]] }],
+    });
+    // The last dish to make completes the combo, with the drink needing no done fact.
+    assert.deepEqual(
+      tap.lines.map((entry) => [entry.outcome, entry.workItemStatus]),
+      [["Finished", "Completed"]],
+    );
+    assert.deepEqual(await doneFacts(f, line.workItem), [
+      { option: combo.options[0], actor: f.id(0x700) },
+    ]);
+    assert.equal((await readyResults(f, round.ticket)).length, 1);
+
+    // A combo already in flight with nothing left to make can still be finished as a whole.
+    await mark(combo.products[1], true, 2, new Date(Date.now() - 1_000).toISOString());
+    const flight = await f.createTicket({
+      lines: 1,
+      createdAgoMs: 0,
+      order: round.order,
+      options: () => [combo.selected()[1]],
+    });
+    const whole = await f.tap({
+      step: "Finish",
+      actor: f.id(0x701),
+      comboChoices: combo.comboChoices,
+      lines: linesOf(flight),
+    });
+    assert.deepEqual(
+      whole.lines.map((entry) => entry.outcome),
+      ["Finished"],
+    );
+  });
+});
+
+it("a combo of only not-prepared dishes makes no kitchen work and does not hold up the order", async () => {
+  await withFixture("wp2423_ks_comboall", async (f) => {
+    const {
+      changeKitchenNotPreparedProduct,
+      createKitchenNotPreparedIntakeAdapter,
+      listKitchenNotPreparedOrderItems,
+      parseConfirmedOrderIntakeReceipt,
+    } = await import("../../rms/kitchen/src/index.ts");
+    const combo = comboOf(f, 2);
+    for (const product of combo.products)
+      await f.as((tx) =>
+        changeKitchenNotPreparedProduct(
+          tx,
+          { ...f.scope, tenantReference: f.tenant },
+          {
+            productReference: product,
+            operationReference: f.next(),
+            expectedVersion: 0,
+            notPrepared: true,
+            actorReference: f.id(0x702),
+            observedAt: new Date(Date.now() - 3_600_000).toISOString(),
+          },
+        ),
+      );
+    const receipt = parseConfirmedOrderIntakeReceipt({
+      consumerName: "kitchen.confirmed-order:v1",
+      consumerVersion: 1,
+      sourceEventReference: f.next(),
+      ...f.scope,
+      orderReference: f.next(),
+      orderBatchReference: f.next(),
+      confirmationReference: f.next(),
+      sourceAggregateVersion: 3n,
+      sourceSnapshotDigest: f.sha256("order-snapshot"),
+      confirmedAt: new Date().toISOString(),
+      correlationReference: f.next(),
+      semanticEventBindingDigest: f.sha256("semantic-order-confirmed"),
+    });
+    const comboLine = f.next();
+    let innerCalled = false;
+    const adapter = createKitchenNotPreparedIntakeAdapter({
+      inner: {
+        resolveByIdentity: async () => ({ status: "NotFound" }),
+        accept: async () => {
+          innerCalled = true;
+          return { status: "Created", receipt };
+        },
+      },
+      scope: f.scope,
+      now: () => new Date().toISOString(),
+      allLines: async () => [
+        {
+          orderItemReference: comboLine,
+          productReference: f.id(0x950),
+          optionReferences: combo.options,
+        },
+      ],
+      comboChoices: combo.comboChoices,
+    });
+    const result = await f.as((transaction) => adapter.accept({ receipt, transaction }));
+    assert.equal(result.status, "Created");
+    assert.equal(innerCalled, false);
+    assert.deepEqual(
+      await f.rows("SELECT count(*)::int AS n FROM rms_kitchen.kitchen_ticket WHERE order_id=$1", [
+        receipt.orderReference,
+      ]),
+      [{ n: 0 }],
+    );
+    const notPrepared = await f.as((tx) =>
+      listKitchenNotPreparedOrderItems(tx, f.scope, receipt.orderReference),
+    );
+    assert.deepEqual([...notPrepared], [comboLine]);
+  });
+});

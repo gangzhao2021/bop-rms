@@ -162,6 +162,7 @@ export function StoreKitchenSections({
           "Name the sections of your kitchen (for example wok, steamer, roast). Give each dish its section on the menu; a kitchen screen can then show one section, and says how many orders wait in the others.",
         )}
       </p>
+      <p className="store-features__detail">{t("A combo's dishes go to their own sections.")}</p>
       <ul className="store-kitchen-sections">
         {draft.map((section, index) => (
           <li key={section.sectionReference}>

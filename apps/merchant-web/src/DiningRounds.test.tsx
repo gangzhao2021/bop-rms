@@ -5,6 +5,8 @@ import { parseCurrentOrderDetail } from "./current-order-queue-client.js";
 import { parseDiningProgress } from "./dining-progress-client.js";
 import { readyToServe } from "./dining-serve-ready.js";
 import {
+  comboPartServable,
+  comboPartStateText,
   DiningRoundsContext,
   roundServedCount,
   roundStateText,
@@ -299,5 +301,37 @@ describe("WP-2423 item 8 ⑤ decision 4: which phone sent each round", () => {
     const sections = html.split('class="order-round order-round--lines"').slice(1);
     expect(text(sections[0] ?? "")).toContain("Round 1 · Phone 2");
     expect(text(sections[1] ?? "")).not.toContain("Phone");
+  });
+});
+
+describe("a combo's dishes read as the combo until the kitchen finishes each", () => {
+  const part = (done = false, served = false) => ({ done, served });
+  const item = (phase: string, remakingQuantity = 0) => ({ phase, remakingQuantity }) as never;
+  it("never says Being made before the kitchen has them", () => {
+    expect(comboPartStateText(item("Submitted"), part(), 0)).toBe("Waiting for staff");
+    expect(comboPartStateText(item("Accepted"), part(), 0)).toBe("Sent to the kitchen");
+    expect(comboPartStateText(item("InProgress"), part(), 0)).toBe("Being made");
+  });
+  it("a dish done reads ready to serve, and is said to be served when it is", () => {
+    expect(comboPartStateText(item("InProgress"), part(true), 0)).toBe("Ready to serve");
+    expect(comboPartStateText(item("Ready"), part(), 1)).toBe("Ready to serve");
+    expect(comboPartStateText(item("Ready"), part(true, true), 0)).toBe("Served");
+    expect(comboPartStateText(item("Fulfilled"), part(), 0)).toBe("Served");
+  });
+  it("a cancelled or refused combo's dishes say so, whatever they read before", () => {
+    expect(comboPartStateText(item("Cancelled"), part(), 0)).toBe("Cancelled");
+    expect(comboPartStateText(item("Rejected"), part(true), 0)).toBe("Not accepted");
+  });
+  it("a dish being remade is never offered to serve", () => {
+    expect(comboPartStateText(item("Ready", 1), part(true), 0)).toBe("Being remade");
+    expect(comboPartServable(item("Ready", 1), part(true))).toBe(false);
+  });
+  it("a dish the kitchen does not prepare waits for acceptance, then can be handed over", () => {
+    // It reads done from the kitchen's rule; the round being accepted is what makes it true.
+    expect(comboPartStateText(item("Submitted"), part(true), 0)).toBe("Waiting for staff");
+    expect(comboPartServable(item("Submitted"), part(true))).toBe(false);
+    expect(comboPartStateText(item("Accepted"), part(true), 0)).toBe("Ready to serve");
+    expect(comboPartServable(item("Accepted"), part(true))).toBe(true);
+    expect(comboPartServable(item("Accepted"), part(true, true))).toBe(false);
   });
 });

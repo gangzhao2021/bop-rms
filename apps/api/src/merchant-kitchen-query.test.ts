@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createMerchantKitchenQuery, kdsOperatorStatus } from "./merchant-kitchen-query.js";
+import {
+  createMerchantKitchenQuery,
+  kdsOperatorStatus,
+  kitchenComboPartFields,
+} from "./merchant-kitchen-query.js";
 const doubles = vi.hoisted(() => ({
   scope: vi.fn(),
   service: vi.fn(),
@@ -533,4 +537,29 @@ it("WP-2423 v15: names today's orders waiting for acceptance on the first page o
     query: { ...f.input.query, cursor: { afterWorkItemReference: id(5) } },
   })) as Record<string, unknown>;
   expect(Object.hasOwn(next, "awaitingAcceptance")).toBe(false);
+});
+
+describe("combos by section on the wire", () => {
+  const part = {
+    optionReference: "01909985-0000-7000-8000-000000000001",
+    nameZh: "奶茶",
+    name: "Milk tea",
+    done: false,
+    served: false,
+    kitchenSection: "饮品",
+  };
+  it("keeps a dish's five keys, so a tablet on the previous page keeps reading the board", () => {
+    const fields = kitchenComboPartFields([part]);
+    expect(Object.keys(fields.comboParts?.[0] ?? {}).sort()).toEqual([
+      "done",
+      "name",
+      "nameZh",
+      "optionReference",
+      "served",
+    ]);
+    expect(fields.comboPartSections).toEqual({ [part.optionReference]: "饮品" });
+  });
+  it("says nothing for a line that is not a combo", () => {
+    expect(kitchenComboPartFields(undefined)).toEqual({});
+  });
 });

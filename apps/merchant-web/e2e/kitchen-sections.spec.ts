@@ -161,3 +161,165 @@ test("@production a kitchen screen shows one section and counts the orders in th
   expect(await page.evaluate(() => localStorage.getItem("bop.kitchen.section"))).toBeNull();
   for (const name of ["担担面", "炒饭", "虾饺", "拍黄瓜"]) await expect(ticket(name)).toBeVisible();
 });
+
+test("@production a combo's dishes go to their own sections' screens, each with its own step", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date(at));
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-28",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "KIT-KITCHEN-QUEUE",
+              label: "Kitchen",
+              href: "/operations/kitchen",
+              permission: "kitchen.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const tea = id(41),
+    fries = id(42);
+  const done = new Set<string>();
+  const combo = () => ({
+    workItemReference: id(1),
+    ticketReference: id(51),
+    orderReference: id(71),
+    orderItemReference: id(21),
+    stationReference: id(52),
+    localizedDisplayNames: { "zh-Hans": "下午茶套餐" },
+    allergens: { status: "Unavailable" },
+    orderLabel: { orderNumber: "11", orderType: "DineIn", tableLabel: "T1" },
+    customerNote: null,
+    selectedOptions: [
+      { optionReference: tea, quantity: 1, localizedNames: { "zh-Hans": "奶茶" } },
+      { optionReference: fries, quantity: 1, localizedNames: { "zh-Hans": "薯条" } },
+    ],
+    comboParts: [
+      { optionReference: tea, nameZh: "奶茶", name: "Milk tea (TEST)" },
+      { optionReference: fries, nameZh: "薯条", name: "Fries (TEST)" },
+    ].map((part) => ({ ...part, done: done.has(part.optionReference), served: false })),
+    comboPartSections: { [tea]: "饮品", [fries]: "小食" },
+    kitchenSection: null,
+    status: "Queued",
+    requiredQuantity: 1,
+    completedQuantity: 0,
+    workItemCreatedAt: "2026-10-29T00:10:00.000Z",
+    acceptedAt: null,
+    orderItemReadyAt: null,
+    ticketAggregateVersion: "1",
+    workItemVersion: "1",
+  });
+  await page.route("**/merchant/kitchen/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        storeReference: scope.storeReference,
+        operatorStatus: "Named",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        projectionGenerationReference: id(6),
+        projectedAt: at,
+        partial: false,
+        stale: false,
+        freshnessStatus: "Fresh",
+        kitchenSections: ["饮品", "小食"],
+        items: [combo()],
+        nextCursor: null,
+      },
+    }),
+  );
+  const steps: { lines: { optionReferences: readonly string[] | null }[] }[] = [];
+  await page.route("**/merchant/kitchen/step", (route) => {
+    const body = route.request().postDataJSON() as (typeof steps)[number];
+    steps.push(body);
+    for (const option of body.lines[0]?.optionReferences ?? []) done.add(option);
+    const complete = done.size === 2;
+    return route.fulfill({
+      headers,
+      json: {
+        projectionName: "kitchen_work_queue_v1",
+        projectionPending: true,
+        occurredAt: at,
+        lines: [
+          {
+            workItemReference: id(1),
+            orderItemReference: id(21),
+            ticketReference: id(51),
+            outcome: complete ? "Finished" : "DishDone",
+            refusedReason: null,
+            ticketVersion: complete ? "4" : "3",
+            workItemVersion: complete ? "4" : "3",
+            workItemStatus: complete ? "Completed" : "In Progress",
+            completedQuantity: complete ? 1 : 0,
+            requiredQuantity: 1,
+            acceptedAt: at,
+            readyAt: complete ? at : null,
+            dishesDone: [...done],
+          },
+        ],
+      },
+    });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/operations/kitchen");
+  // All sections: the combo is one card with its dishes under it, one tap for a one-screen shop.
+  const card = page.locator(".kitchen-ticket");
+  await expect(card.locator(".kitchen-work-item__combo-name")).toHaveText(["奶茶", "薯条"]);
+  // One section: only that section's dish, its own line, its own Done, no Start.
+  const section = page.getByLabel("Kitchen section");
+  await section.selectOption("饮品");
+  await expect(card.locator(".kitchen-work-item h3")).toHaveText(["1×奶茶"]);
+  await expect(card.locator(".kitchen-work-item__combo-note")).toHaveText(
+    "Combo: 下午茶套餐 · also 薯条",
+  );
+  await expect(card.locator(".kitchen-ticket__state")).toHaveText("To make");
+  await expect(card.getByRole("button", { name: "Start cooking" })).toHaveCount(0);
+  await expect(page.locator(".kitchen-section-others")).toContainText(
+    "Other sections: 小食 1 order",
+  );
+  const axe = await new AxeBuilder({ page }).include(".kitchen-ticket").analyze();
+  expect(axe.violations).toEqual([]);
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await expect(card.locator(".kitchen-ticket__next")).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await card.locator(".kitchen-ticket__next").click();
+  await expect.poll(() => steps.length, { timeout: 8_000 }).toBe(1);
+  expect(steps[0]?.lines[0]?.optionReferences).toEqual([tea]);
+  // Its dish done, it leaves this screen; the combo goes on waiting on the other.
+  await expect(page.locator(".kitchen-ticket")).toHaveCount(0);
+  await section.selectOption("小食");
+  await expect(card.locator(".kitchen-work-item h3")).toHaveText(["1×薯条"]);
+  await expect(card.locator(".kitchen-work-item__combo-note")).toHaveText(
+    "Combo: 下午茶套餐 · last dish of it",
+  );
+  await page.waitForTimeout(700);
+  await card.locator(".kitchen-ticket__next").click();
+  await expect.poll(() => steps.length, { timeout: 8_000 }).toBe(2);
+  expect(steps[1]?.lines[0]?.optionReferences).toEqual([fries]);
+});

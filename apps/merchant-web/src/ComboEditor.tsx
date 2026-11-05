@@ -460,6 +460,7 @@ export function ComboEditor({
           {t("Each part needs a name and at least as many dishes as guests choose.")}
         </p>
       ) : null}
+      <p className="dish-editor__note">{t("A combo's dishes go to their own sections.")}</p>
       {problem ? (
         <p className="dish-editor__problem" role="alert">
           {problem}

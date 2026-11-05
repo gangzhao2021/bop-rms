@@ -29,8 +29,12 @@ import {
   listKitchenWorkItemsToMake,
   rebindKitchenRoutingEvidence,
   recordKitchenWorkChase,
+  changeKitchenNotPreparedProduct,
+  changeKitchenProductSection,
+  changeKitchenSections,
 } from "../../rms/kitchen/src/index.ts";
 import {
+  comboChoiceProducts,
   comboPartsByOrderItem,
   markDiningComboPartServed,
   markKitchenComboPartDone,
@@ -1233,6 +1237,64 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           ["炒饭", "Fried rice (TEST)", false, false],
         ],
       );
+      // Combos by section: each chosen dish's kitchen section comes from the dish's own mark, read
+      // with the Store selected under the pilot API role. Another Store's marks are not seen.
+      const productOf = await asStore((tx) => comboChoiceProducts(tx, diningScope, chosen));
+      assert.equal(productOf.size, 2);
+      const withSections = async () =>
+        (
+          await asStore((tx) =>
+            comboPartsByOrderItem(tx, { ...diningScope }, "en-CA", [line], { withSections: true }),
+          )
+        ).get(orderItemReference);
+      assert.deepEqual(
+        (await withSections()).map((p) => p.kitchenSection),
+        [null, null],
+      );
+      const hot = op();
+      await asStore((tx) =>
+        changeKitchenSections(tx, diningScope, {
+          operationReference: op(),
+          expectedVersion: 0,
+          sections: [{ sectionReference: hot, name: "热菜" }],
+          actorReference: owner,
+          observedAt: new Date().toISOString(),
+        }),
+      );
+      await asStore((tx) =>
+        changeKitchenProductSection(tx, diningScope, {
+          productReference: productOf.get(chosen[0]),
+          operationReference: op(),
+          expectedVersion: 0,
+          sectionReference: hot,
+          actorReference: owner,
+          observedAt: new Date().toISOString(),
+        }),
+      );
+      assert.deepEqual(
+        (await withSections()).map((p) => p.kitchenSection),
+        ["热菜", null],
+      );
+      const otherStore = await asStore(async (tx) => {
+        const other = { ...diningScope, storeReference: op() };
+        const elsewhere = await comboPartsByOrderItem(tx, other, "en-CA", [line], {
+          withSections: true,
+        });
+        return elsewhere.get(orderItemReference)?.map((p) => p.kitchenSection) ?? [];
+      });
+      assert.deepEqual(
+        otherStore.filter((name) => name !== null),
+        [],
+      );
+      // A read that does not ask keeps the five keys a tablet on the previous page reads strictly.
+      assert.deepEqual(Object.keys((await parts())[0]).sort(), [
+        "done",
+        "name",
+        "nameZh",
+        "optionReference",
+        "served",
+      ]);
+
       // WP-2423 item 8 ⑦ (Owner decision 4): the owner turns chasing on (off until then); a
       // server chases the combo while it is being made. A round is chased at most once in any 5
       // minutes; the same chase again records nothing; a dish no longer being made is not chased.
@@ -1352,6 +1414,69 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
           ["炒饭", true, true],
         ],
       );
+      // A set with a bottled drink: the drink was marked "not prepared" before this line reached the
+      // kitchen, so it reads done for the kitchen and the server hands it over at once; the dish
+      // still to make keeps the combo open.
+      const drinkLine = op();
+      await asStore((tx) =>
+        changeKitchenNotPreparedProduct(tx, diningScope, {
+          productReference: productOf.get(chosen[1]),
+          operationReference: op(),
+          expectedVersion: 0,
+          notPrepared: true,
+          actorReference: owner,
+          observedAt: new Date(Date.now() - 60_000).toISOString(),
+        }),
+      );
+      await admin.query(
+        "INSERT INTO rms_kitchen.kitchen_work_item SELECT (jsonb_populate_record(w,jsonb_build_object('kitchen_work_item_id',$2::text,'order_item_id',$3::text,'source_item_ordinal',2,'status','Queued','version',1,'completed_quantity',0,'created_at',$4::text,'updated_at',$4::text))).* FROM rms_kitchen.kitchen_work_item w WHERE kitchen_work_item_id=$1",
+        [workItem, op(), drinkLine, new Date().toISOString()],
+      );
+      const drinkParts = (
+        await asStore((tx) =>
+          comboPartsByOrderItem(tx, { ...diningScope }, "en-CA", [
+            { orderItemReference: drinkLine, optionReferences: chosen },
+          ]),
+        )
+      ).get(drinkLine);
+      assert.deepEqual(
+        drinkParts.map((p) => [p.nameZh, p.done]),
+        [
+          ["馄饨汤", false],
+          ["炒饭", true],
+        ],
+      );
+      assert.deepEqual(
+        await asStore((tx) =>
+          markDiningComboPartServed(tx, diningScope, {
+            diningSessionReference: sessionReference,
+            orderItemReference: drinkLine,
+            optionReferences: chosen,
+            optionReference: chosen[1],
+            operationReference: op(),
+            actorReference: owner,
+            at: new Date().toISOString(),
+            locale: "en-CA",
+          }),
+        ),
+        { allServed: false },
+      );
+      await assert.rejects(
+        asStore((tx) =>
+          markDiningComboPartServed(tx, diningScope, {
+            diningSessionReference: sessionReference,
+            orderItemReference: drinkLine,
+            optionReferences: chosen,
+            optionReference: chosen[0],
+            operationReference: op(),
+            actorReference: owner,
+            at: new Date().toISOString(),
+            locale: "en-CA",
+          }),
+        ),
+        /DINING_COMBO_PART_NOT_READY/u,
+      );
+
       // The kitchen finished it (owner record): nothing of it is still being made, and the
       // database refuses a chase of finished work.
       await admin.query(

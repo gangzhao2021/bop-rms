@@ -12,6 +12,7 @@ import {
   listDeclaredChargeSkus,
 } from "../../packages/rms/recipe/src/index.ts";
 import { createKitchenRecipePreparationSource } from "../../apps/api/src/kitchen-recipe-preparation-source.ts";
+import { comboChoiceProducts } from "../../apps/api/dist/merchant-combo-parts.js";
 import {
   createPostgresKitchenRoutingConfigurationStore,
   createPostgresKitchenTicketStore,
@@ -221,7 +222,11 @@ export function createInternalKitchen(resources) {
             productReference: String(item.productReference),
             skuReference: String(item.skuReference),
             quantity: item.quantity,
+            optionReferences: (item.selectedOptions ?? []).map((option) =>
+              String(option.optionReference),
+            ),
           })),
+        comboChoices: (tx, optionReferences) => comboChoiceProducts(tx, scope, optionReferences),
       }),
       digests: { sha256: hash },
     });

@@ -1,11 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 
-test("@production a combo is served dish by dish; the last dish serves the combo", async ({
-  page,
-}) => {
-  const id = (n: number) => "01a0f0d0-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const id = (n: number) => "01a0f0d0-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+
+/** The table's page with one combo on it; `startingPhase` fixes the combo's phase for a read. */
+async function mockCombo(page: Page, startingPhase?: string) {
   const scope = {
     brandLabel: "Synthetic Brand",
     storeLabel: "Synthetic Store",
@@ -47,7 +47,8 @@ test("@production a combo is served dish by dish; the last dish serves the combo
   const partCalls: Record<string, string>[] = [];
   const serveCalls: Record<string, unknown>[] = [];
   const option = (key: string) => (key === "wonton" ? id(61) : id(62));
-  const phase = () => (committed ? "Fulfilled" : done.size === 2 ? "Ready" : "InProgress");
+  const phase = () =>
+    startingPhase ?? (committed ? "Fulfilled" : done.size === 2 ? "Ready" : "InProgress");
   await page.route("**/merchant/orders", (route) =>
     route.fulfill({
       headers,
@@ -139,6 +140,13 @@ test("@production a combo is served dish by dish; the last dish serves the combo
     committed = true;
     return route.fulfill({ headers, json: { status: "Committed", itemServiceVersion: 1 } });
   });
+  return { partCalls, serveCalls, done };
+}
+
+test("@production a combo is served dish by dish; the last dish serves the combo", async ({
+  page,
+}) => {
+  const { partCalls, serveCalls, done } = await mockCombo(page);
   await page.goto("/operations/orders");
   const round = page.getByRole("region", { name: "Round 1", exact: true });
   const dishes = round.getByRole("list", { name: "Dishes in this combo" });
@@ -182,4 +190,23 @@ test("@production a combo is served dish by dish; the last dish serves the combo
   );
   await expect(dishes.locator("li")).toHaveText([/馄饨汤.*Served/u, /炒饭.*Served/u]);
   await expect(dishes.getByRole("button")).toHaveCount(0);
+});
+
+test("@production a combo's dishes do not say Being made before the kitchen has them", async ({
+  page,
+}) => {
+  await mockCombo(page, "Submitted");
+  await page.goto("/operations/orders");
+  const round = page.getByRole("region", { name: "Round 1", exact: true });
+  const dishes = round.getByRole("list", { name: "Dishes in this combo" });
+  // One rule: a dish has no state of its own until it is done; until then it reads as its combo.
+  await expect(dishes.locator("li")).toHaveText([
+    /馄饨汤.*Waiting for staff/u,
+    /炒饭.*Waiting for staff/u,
+  ]);
+  await expect(dishes).not.toContainText("Being made");
+  await expect(dishes.getByRole("button", { name: /Mark .* served/u })).toHaveCount(0);
+  await expectNoInternalText(page);
+  const axe = await new AxeBuilder({ page }).include(".dining-round-item__combo").analyze();
+  expect(axe.violations).toEqual([]);
 });

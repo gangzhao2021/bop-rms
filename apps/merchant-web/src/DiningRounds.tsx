@@ -60,6 +60,41 @@ export const diningItemPhaseText: Readonly<Record<string, string>> = {
   Cancelled: t("Cancelled"),
 };
 
+/**
+ * A combo's dish has no state of its own until the kitchen is done with it; until then it reads as
+ * its combo, in the same words as the line above it and the kitchen's. Submitted comes before done:
+ * a dish the kitchen does not prepare reads done from the moment its round is accepted, not before.
+ */
+export function comboPartStateText(
+  item: Pick<Item, "phase" | "remakingQuantity">,
+  part: Pick<ComboPartView, "done" | "served">,
+  servable: number,
+): string {
+  if (part.served || item.phase === "Fulfilled") return t("Served");
+  if (item.phase === "Cancelled" || item.phase === "Rejected")
+    return diningItemPhaseText[item.phase] ?? t("Checking");
+  if (item.phase === "Submitted") return t("Waiting for staff");
+  if ((item.remakingQuantity ?? 0) > 0 && servable === 0) return t("Being remade");
+  if (part.done || item.phase === "Ready") return t("Ready to serve");
+  return diningItemPhaseText[item.phase] ?? t("Checking");
+}
+
+/** Whether a combo's dish can be handed over on its own now. */
+export function comboPartServable(
+  item: Pick<Item, "phase" | "remakingQuantity">,
+  part: Pick<ComboPartView, "done" | "served">,
+): boolean {
+  return (
+    part.done &&
+    !part.served &&
+    item.phase !== "Fulfilled" &&
+    item.phase !== "Submitted" &&
+    item.phase !== "Cancelled" &&
+    item.phase !== "Rejected" &&
+    (item.remakingQuantity ?? 0) === 0
+  );
+}
+
 /** A round's dishes served so far, of all it ordered (cancelled dishes leave the count). */
 export function roundServedCount(
   items: readonly Item[],
@@ -439,9 +474,11 @@ export function DiningRoundItemState({
           · <SourceTime instant={item.chase.lastChasedAt} withDate={false} />
         </span>
       ) : null}
+      {/* Not at Submitted: no kitchen work exists yet, so there is nothing to hurry. It is accepted
+          on Orders first (correcting DEC-STORE-FEATURES, which listed it as chaseable). */}
       {open &&
       rounds.view.chaseDish &&
-      (item.phase === "Submitted" || item.phase === "Accepted" || item.phase === "InProgress") ? (
+      (item.phase === "Accepted" || item.phase === "InProgress") ? (
         <button
           type="button"
           className="dining-round-item__chase"
@@ -456,15 +493,14 @@ export function DiningRoundItemState({
         <ul className="dining-round-item__combo" aria-label={t("Dishes in this combo")}>
           {item.comboParts.map((part) => {
             const label = part.nameZh || part.name;
-            const served = part.served || item.phase === "Fulfilled";
             const partKey = "part:" + item.orderItemReference + ":" + part.optionReference;
             return (
               <li key={part.optionReference}>
                 <span lang={part.nameZh ? "zh-Hans" : "en"}>{label}</span>
                 <span className="dining-round-item__state">
-                  {served ? t("Served") : part.done ? t("Ready to serve") : t("Being made")}
+                  {comboPartStateText(item, part, servable)}
                 </span>
-                {open && part.done && !served ? (
+                {open && comboPartServable(item, part) ? (
                   <button
                     type="button"
                     className="dining-round-item__serve"
@@ -483,8 +519,11 @@ export function DiningRoundItemState({
       {open &&
       item.phase === "Ready" &&
       servable > 0 &&
-      // A combo is served dish by dish (its last dish serves it).
-      (item.comboParts === undefined || item.comboParts.every((part) => part.served)) ? (
+      // A combo is served dish by dish (its last dish serves it). A ticket closed as made leaves a
+      // dish with no done fact: the whole line is offered then, never a dead end.
+      (item.comboParts === undefined ||
+        item.comboParts.every((part) => part.served) ||
+        item.comboParts.some((part) => !part.done)) ? (
         <button
           type="button"
           className="dining-round-item__serve"

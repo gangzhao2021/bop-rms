@@ -253,7 +253,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " onward": " 起",
   " other than the person who saved it": " （保存者以外的人）",
   " other than you": " （你以外的人）",
-  " plus the items not started": "，以及尚未开始制作的商品",
+  " plus the items not marked started": "，以及后厨还没标记开始的商品",
   " to {effectiveUntil}": " 至 {effectiveUntil}",
   " until {effectiveUntil}": " 至 {effectiveUntil}",
   " with no end date": " 无结束日期",
@@ -449,6 +449,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "About {value} before tax and tip. The final total comes when you send the order.":
     "约 {value}，未含税和小费。发送后显示最终合计。",
   "Start cooking": "开始做",
+  "A combo's dishes go to their own sections.": "套餐里的每道菜去各自的档口。",
+  "The kitchen got this {minutes} min ago and may already be making it. Ask them first.":
+    "后厨收到已 {minutes} 分钟，可能已经在做了，先问一声后厨。",
   "All finished": "全部做好了",
   "Round finished": "这一轮做好了",
   "To make": "待做",
@@ -2543,10 +2546,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "只有未提出此退款申请的店主或财务人员可以批准。",
   "Only an owner or finance member who didn't ask for this refund can decline it.":
     "只有未提出此退款申请的店主或财务人员可以拒绝。",
-  "Only before the kitchen starts.": "只能在后厨开始前取消。",
+  "Only before the kitchen marks it started.": "只能在后厨标记开始前取消。",
   "Only in this Store (other Stores keep the Brand recipe)": "仅限本门店（其他门店仍使用品牌配方）",
-  "Only items the kitchen has not started. The customer is refunded for the cancelled items, their tax and their share of any tip; the rest of the order continues.":
-    "只限后厨尚未开始制作的商品。顾客会获得所取消商品、其税款以及相应小费份额的退款；订单其余部分继续。",
+  "Only items the kitchen has not marked started. The customer is refunded for the cancelled items, their tax and their share of any tip; the rest of the order continues.":
+    "只限后厨还没标记开始的商品。顾客会获得所取消商品、其税款以及相应小费份额的退款；订单其余部分继续。",
   "Only one option can be the default when customers choose one.":
     "顾客只能选一项时，只能有一个默认选项。",
   "Only recorded milestones are shown.": "只显示已记录的节点。",
@@ -4386,7 +4389,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "后厨完成的订单用量多于上次盘点数，说明盘点漏了部分库存，或有收货未记录。请重新清点这些品项以修正库存。",
   "The kitchen has started one of these items. Close to refresh; use a refund for items already started.":
     "后厨已开始制作其中一项。关闭以刷新；已开始制作的商品请改用退款。",
-  "The kitchen has started — use a refund instead.": "后厨已开始制作 — 请改用退款。",
   "{choice} is not on any dish yet. Open a dish that uses {group} and tick it.":
     "{choice} 还没有加到任何菜品上。请打开使用「{group}」的菜品，勾选它。",
   "{choice} is not on any dish yet. Open a dish that uses its group and tick it.":
@@ -4398,6 +4400,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choose {min} to {max}": "请选择 {min} 到 {max} 项",
   "{name} allows at most {max}. Choose fewer.": "{name} 最多可选 {max} 份，请减少。",
   "Nothing to prepare: hand it over or refund it.": "这单无需后厨制作：请直接交给顾客，或退款。",
+  "The kitchen has marked it started — use a refund instead.": "后厨已标记开始 — 请改用退款。",
   "The kitchen hasn't finished recording this order yet. Check again in a minute.":
     "后厨尚未完成这笔订单的记录。请一分钟后再查看。",
   "The kitchen is still remaking {value} for this order. Closing it also cancels the remake and takes it off the Kitchen screen. Tell the kitchen to stop making it.":
@@ -5706,15 +5709,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{name}: the guest started paying online but hasn't finished. It will be cancelled now and their unfinished payment stopped, so they can't be charged for it. If it was in fact paid, it stays open and shows here again.":
     "{name}：顾客开始在线付款但尚未完成。现在会取消它并停止未完成的付款，顾客不会因此被扣款。如果实际已付款，它会保持未关闭并再次显示在这里。",
   "{name}: {before} becomes {after}": "{name}：{before} 变为 {after}",
-  "{name}: {length} not started will be cancelled and ": "{name}：{length} 项未开始的将被取消，并",
+  "{name}: {length} not marked started will be cancelled and ":
+    "{name}：{length} 项后厨还没标记开始的将被取消，并",
   "{name}: {openItemCount} already being made or paid on the card machine. Serve them, or mark them served on the Orders page.":
     "{name}：{openItemCount}已在制作或已用刷卡机付款。请上桌，或在订单页标记为已上桌。",
-  "{name}: {openItemCount} not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.":
-    "{name}：{openItemCount}后厨尚未开始，已全额退款。它将被取消；没有剩余可退金额。",
-  "{name}: {openItemCount} not started in the kitchen. It will be cancelled and {value} refunded to the guest.":
-    "{name}：{openItemCount}后厨尚未开始。它将被取消，并向顾客退款 {value}。",
-  "{name}: {openItemCount} not started in the kitchen. It will be cancelled; then refund {value} on the card machine and record that on the Orders page.":
-    "{name}：{openItemCount}后厨尚未开始。它将被取消；之后请在刷卡机上退款 {value}，并在订单页记录。",
+  "{name}: {openItemCount} not marked started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.":
+    "{name}：{openItemCount}后厨还没标记开始，已全额退款。它将被取消；没有剩余可退金额。",
+  "{name}: {openItemCount} not marked started in the kitchen. It will be cancelled and {value} refunded to the guest.":
+    "{name}：{openItemCount}后厨还没标记开始。它将被取消，并向顾客退款 {value}。",
+  "{name}: {openItemCount} not marked started in the kitchen. It will be cancelled; then refund {value} on the card machine and record that on the Orders page.":
+    "{name}：{openItemCount}后厨还没标记开始。它将被取消；之后请在刷卡机上退款 {value}，并在订单页记录。",
   "{name}: {openItemCount}. Serve them, or mark them served on the Orders page.":
     "{name}：{openItemCount}。请上桌，或在订单页标记为已上桌。",
   "{name}: {value} being made or paid on the card machine and {readyItemCount} ready to serve. Serve them, or mark them served on the Orders page.":
@@ -6175,8 +6179,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "从账单删菜被拒绝。请让店长操作。",
   "This table has paid. Give the guest money back from its payment instead.":
     "这桌已经付款。请改为从这笔付款里退钱给客人。",
-  "The kitchen has started one of these dishes, so it stays on the bill. To not charge the table for it, comp it with a reason instead; the comp is recorded.":
-    "后厨已经开始做其中一道菜，所以它留在账单上。如果不想向这桌收这道菜的钱，请改为填写原因免单，免单会被记录。",
+  "The kitchen has marked one of these dishes started, so it stays on the bill. To not charge the table for it, comp it with a reason instead; the comp is recorded.":
+    "后厨已把其中一道菜标记开始，所以它留在账单上。不想收这桌的钱，请注明原因免单，免单会被记录。",
   "This order changed since it was shown. Refresh it, then try again.":
     "这张订单在显示后有变动。请刷新后再试。",
   "These dishes were already made or served, so they stay on the bill. To not charge the table for them, comp them with a reason instead; the comp is recorded.":
@@ -6333,8 +6337,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only a manager can comp or discount dishes.": "只有店长可以免单或折让。",
   "A guest is paying the table on their phone. Wait for it, or stop it first.":
     "客人正在用手机付这桌的钱。请等付款结束，或先停止手机付款。",
-  "The kitchen hasn't started one of these dishes. Take it off the bill instead, so the kitchen stops it.":
-    "其中有菜后厨还没开始做。请改为从账单删菜，后厨会停做。",
+  "One of these dishes hasn't reached the kitchen yet. Take it off the bill instead, so it isn't made.":
+    "其中有菜还没到后厨。请把它从账单上取消，这样就不会做了。",
   "One of these dishes already has a comp or discount. Refresh the table.":
     "其中有菜已经免单或折让过。请刷新这桌。",
   "This table changed since it was shown. Refresh it, then try again.":
@@ -6449,8 +6453,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "此后收的刷卡和现金还没算进来。打烊时用刷卡机批结单和钱箱里本系统记下的桌台现金对照纸单；纸单补录后，这一页和营业日结束时的日结都会算上。",
   "Business day from {startsAt}": "营业日从 {startsAt} 开始",
   "Paid, guests still seated": "已付清，客人还在座",
-  "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't started can come off the bill before the table pays.":
-    "{name}：还有 {openItemCount}没上桌。做好后上桌（在上面点“全部上了”）。后厨还没开始做的菜，可以在付款前从账单删掉。",
+  "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't marked started can come off the bill before the table pays.":
+    "{name}：{openItemCount}还没上。做好后上菜（在桌台上点“全部上桌”）。后厨还没标记开始的菜，可以在这桌付款前从账单上取消。",
   "{name}: paid with the table, {openItemCount} not served yet. Serve them when they're ready, then close the table. If the guests left without them, a manager gives the money back from the table's payment.":
     "{name}：已随整桌付清，还有 {openItemCount}没上桌。做好后上桌，再关台。如果客人没等到就走了，由店长从这桌的付款里退钱。",
   "Dishes still to serve": "还没上的菜",

@@ -35,6 +35,8 @@ export interface KitchenRoundLine {
   readonly productReference: string;
   readonly skuReference: string;
   readonly quantity: number;
+  /** The options chosen on the line; a combo's stand for its dishes. */
+  readonly optionReferences?: readonly string[];
 }
 
 /**
@@ -46,11 +48,17 @@ export function kitchenLinesNotPrepared(
   lines: readonly KitchenRoundLine[],
   marks: ReadonlyMap<string, { readonly notPrepared: boolean }>,
   notPreparedByDefault: ReadonlySet<string>,
+  /** A combo line's dishes (products); a combo whose dishes are all marked is not prepared. */
+  dishesOf: (line: KitchenRoundLine) => readonly string[] = () => [],
 ): readonly KitchenRoundLine[] {
-  return lines.filter(
-    (line) =>
-      marks.get(line.productReference)?.notPrepared ?? notPreparedByDefault.has(line.skuReference),
-  );
+  const marked = (product: string) => marks.get(product)?.notPrepared === true;
+  return lines.filter((line) => {
+    const dishes = dishesOf(line);
+    if (dishes.length > 0 && dishes.every(marked)) return true;
+    return (
+      marks.get(line.productReference)?.notPrepared ?? notPreparedByDefault.has(line.skuReference)
+    );
+  });
 }
 
 /**
@@ -87,6 +95,15 @@ export function createKitchenNotPreparedIntakeAdapter(options: {
   ): Promise<"DineIn" | "Pickup">;
   /** A stable reference for this purpose and identity. */
   derive(purpose: string, identity: string): string;
+  /**
+   * The Catalog's combo record: which dish (product) each of these options stands for. A combo whose
+   * chosen dishes are all marked is not prepared by the kitchen either, so it never sits on a board
+   * with no line on any screen.
+   */
+  comboChoices?(
+    transaction: ConsumerTransaction,
+    optionReferences: readonly string[],
+  ): Promise<ReadonlyMap<string, string>>;
   now(): string;
 }): Intakes {
   const tx = (transaction: ConsumerTransaction) => transaction as unknown as Transaction;
@@ -183,8 +200,18 @@ export function createKitchenNotPreparedIntakeAdapter(options: {
         });
       }
       const lines = await options.allLines(input.transaction, input.receipt);
+      const chosen = [...new Set(lines.flatMap((line) => line.optionReferences ?? []))];
+      const dishOf =
+        options.comboChoices === undefined || chosen.length === 0
+          ? new Map<string, string>()
+          : await options.comboChoices(input.transaction, chosen);
+      const dishesOf = (line: (typeof lines)[number]) =>
+        (line.optionReferences ?? []).flatMap((option) => {
+          const product = dishOf.get(option);
+          return product === undefined ? [] : [product];
+        });
       const marks = await loadKitchenNotPreparedProducts(tx(input.transaction), options.scope, [
-        ...new Set(lines.map((line) => line.productReference)),
+        ...new Set(lines.flatMap((line) => [line.productReference, ...dishesOf(line)])),
       ]);
       const unmarked = [
         ...new Set(
@@ -197,7 +224,7 @@ export function createKitchenNotPreparedIntakeAdapter(options: {
         unmarked.length === 0
           ? new Set<string>()
           : await options.notPreparedByDefault(input.transaction, unmarked);
-      const notPrepared = kitchenLinesNotPrepared(lines, marks, byDefault).map(
+      const notPrepared = kitchenLinesNotPrepared(lines, marks, byDefault, dishesOf).map(
         (line) => line.orderItemReference,
       );
       const allNotPrepared = lines.length > 0 && notPrepared.length === lines.length;
