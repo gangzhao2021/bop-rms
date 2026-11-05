@@ -157,6 +157,16 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     expect(ports.readTable).toHaveBeenCalledTimes(1);
   });
 
+  it("a retry with no price to hand still compares with what the guest saw", async () => {
+    const { controller, ports } = setUp();
+    ports.quote.mockRejectedValueOnce(lost());
+    await controller.send(cart(), seen);
+    expect(controller.getState()).toEqual({ status: "unconfirmed" });
+    await controller.send(cart(), null);
+    expect(controller.getState()).toEqual({ status: "sent", held: false });
+    expect(ports.quote.mock.calls[1]?.[1]).toBe(ports.quote.mock.calls[0]?.[1]);
+  });
+
   it("a lost checkout repeats with the same key after a changed cart read", async () => {
     const { controller, ports } = setUp();
     ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("unknown"));

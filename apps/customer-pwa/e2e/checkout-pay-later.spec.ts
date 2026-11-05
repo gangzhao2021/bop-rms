@@ -445,6 +445,20 @@ for (const screen of [
       await expect(main).not.toContainText("Checkout");
       await expect(main).not.toContainText("Prices confirmed for");
       await expectNoInternalText(page);
+      // The notes qualify the button: they read with it at every width, not across the page.
+      const widths = screen.touch ? [screen.width] : [1024, screen.width];
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: screen.height });
+        const note = main.getByText("Nothing is charged now.");
+        expect((await button.boundingBox())?.x).toBe((await note.boundingBox())?.x);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+          width,
+        );
+        await page.screenshot({
+          path: `test-results/cart-place-order-${width}.png`,
+          fullPage: true,
+        });
+      }
       await button.click();
       await expect(page).toHaveURL(/\/dine-in\/session$/u);
       await expect(main.getByText("Save details", { exact: true })).toHaveCount(0);
@@ -836,8 +850,9 @@ test.describe("@production Pay-later table, the round just placed", () => {
 
   test("a menu that doesn't answer doesn't hold the guest up for long", async ({ page }) => {
     await stubTable(page);
-    await page.route(`**/api/v1/public/stores/${publicStore}/menu**`, () =>
-      new Promise<void>(() => undefined),
+    await page.route(
+      `**/api/v1/public/stores/${publicStore}/menu**`,
+      () => new Promise<void>(() => undefined),
     );
     await openCart(page);
     // After two seconds it asks once with the total instead of waiting.

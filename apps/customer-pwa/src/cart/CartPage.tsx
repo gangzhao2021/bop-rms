@@ -655,7 +655,7 @@ function CartContent({
             {cartText.continueWaiting}
           </button>
         ) : payLater ? (
-          <>
+          <div className="cart-next-actions__place">
             {othersItems === 0 ? null : (
               <p className="cart-next-actions__note">{cartText.alsoPlacesOthers(othersItems)}</p>
             )}
@@ -678,9 +678,13 @@ function CartContent({
                   : cartText.placeOrder}
             </button>
             <SlowWaitNote active={sending}>{cartText.placedSlowly}</SlowWaitNote>
-            <SendRoundMessage round={round} cart={cart} onRetry={() => onPlace(cart, null)} />
+            <SendRoundMessage
+              round={round}
+              cart={cart}
+              onRetry={() => onPlace(cart, cartLinesSubtotal(prices))}
+            />
             <p className="cart-next-actions__note">{checkoutText.sendToKitchenNote}</p>
-          </>
+          </div>
         ) : (
           <Link className="cart-checkout-link" to="/checkout">
             {cartText.checkout}

@@ -326,14 +326,15 @@ function PreparedSessionPaymentPage({
   const demo = config?.mode === "simulation";
   const cardOffered = wasCheckoutCardOffered();
   const failedStart =
-    status === "start_failed" ||
-    status === "expired" ||
-    (status === "denied" && !cardOffered) ||
-    status === "retry";
+    status === "start_failed" || status === "expired" || (status === "denied" && !cardOffered);
   const back = useCheckoutReturn(failedStart, store?.serviceMode === "DineIn");
   // While a payment may be under way (or just failed), a second checkout is the last thing to offer.
   const inFlow =
-    status === "loading" || status === "ready" || status === "creating" || status === "card";
+    status === "loading" ||
+    status === "ready" ||
+    status === "creating" ||
+    status === "card" ||
+    status === "unavailable";
   return (
     <CustomerPage step="payment" store={store} className="payment-page">
       <PageHeading title={demo ? t("DEMO payment") : t("Secure payment")}>
@@ -361,10 +362,15 @@ function PreparedSessionPaymentPage({
         <section className="checkout-attention" role="alert">
           <h2>{t("This checkout has ended")}</h2>
           <p>
-            {t(
-              "You haven’t been charged for it. Go back to your cart to check out again, or ask a staff member for help.",
-            )}
+            {back === "cart"
+              ? t(
+                  "You haven’t been charged for it. Go back to your cart to check out again, or ask a staff member for help.",
+                )
+              : t(
+                  "You haven’t been charged for it. See your table, or ask a staff member for help.",
+                )}
           </p>
+          <SavedOnTable to={back} />
           <CheckoutReturnLink to={back} cartPath="/cart" cartText={t("Back to your cart")} />
         </section>
       ) : null}

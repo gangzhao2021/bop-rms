@@ -1416,6 +1416,11 @@
 .cart-next-actions > a:not([class]) {
   justify-self: start;
 }
+.cart-next-actions__place {
+  display: grid;
+  gap: var(--bop-space-3);
+  min-width: 0;
+}
 .cart-checkout-link {
   width: 100%;
   font-size: 1.0625rem !important;
@@ -1489,6 +1494,11 @@
 }
 .checkout-attention p {
   color: var(--bop-color-text-muted);
+}
+/* A next step beside another: never touching, and the row wraps on a narrow phone. */
+.checkout-attention button + a,
+.checkout-attention a + button {
+  margin-inline-start: var(--bop-space-3);
 }
 .checkout-attention button,
 .checkout-totals button,
@@ -2490,6 +2500,10 @@
     grid-template-columns: auto minmax(0, 20rem);
     justify-content: space-between;
     align-items: center;
+  }
+  /* The notes belong with the button they qualify, under the summary. */
+  .cart-next-actions:has(> .cart-next-actions__place) {
+    align-items: start;
   }
   .checkout-continue {
     position: static;

@@ -415,6 +415,24 @@ test("@production when the Provider fails after the round was placed, the panel 
   // Asking for help is one tap for a seated guest.
   await expect(main.getByRole("heading", { name: "Need a staff member?" })).toBeVisible();
   await expectNoInternalText(page);
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(true);
+    await page.screenshot({
+      path: `test-results/payment-start-failed-${width}.png`,
+      fullPage: true,
+    });
+  }
   await main.getByRole("button", { name: "Try again", exact: true }).click();
   await expect(main.getByText("Synthetic secure card component")).toBeVisible();
   expect(intentCalls[1]?.key).toBe(intentCalls[0]?.key);

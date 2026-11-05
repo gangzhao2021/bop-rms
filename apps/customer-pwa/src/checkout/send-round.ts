@@ -113,6 +113,8 @@ export interface SeenSubtotal {
 
 interface Plan {
   readonly cart: CartView;
+  /** What the guest saw when they tapped; a retry from a lost answer has nothing newer. */
+  seen: SeenSubtotal | null;
   quoteOperation: string;
   quote: CheckoutQuote | null;
   /** Read once: a details draft is frozen with its operation, so a retry replays it exactly. */
@@ -168,6 +170,7 @@ export function createSendRoundController(
   };
   const newPlan = (cart: CartView, carried?: Plan): Plan => ({
     cart,
+    seen: carried?.seen ?? null,
     quoteOperation: keyFactory(),
     quote: null,
     priorDetails: undefined,
@@ -185,13 +188,13 @@ export function createSendRoundController(
     quoteRenewed: false,
   });
   /** Conflict: a whole new plan with new keys, once; after that the guest decides to try again. */
-  const restart = (active: Plan, seen: SeenSubtotal | null, options: CheckoutMutationOptions) => {
+  const restart = (active: Plan, options: CheckoutMutationOptions) => {
     if (active.restarted) {
       plan = null;
       return Promise.resolve<SendRoundState>({ status: "unconfirmed" });
     }
     plan = newPlan(active.cart, active);
-    return advance(plan, seen, options);
+    return advance(plan, options);
   };
   const quoteStep = async (
     active: Plan,
@@ -372,7 +375,6 @@ export function createSendRoundController(
   };
   const advance = async (
     active: Plan,
-    seen: SeenSubtotal | null,
     options: CheckoutMutationOptions,
   ): Promise<SendRoundState> => {
     // A send may already have happened: finish it first, whatever the cart or table say now.
@@ -409,7 +411,7 @@ export function createSendRoundController(
       if (!active.sessionAttempted) {
         // Prices that ran out while the guest looked are read again, before anything is sent.
         if (active.quote !== null && Date.parse(active.quote.expiresAt) <= now()) {
-          if (active.draft !== null) return restart(active, seen, options);
+          if (active.draft !== null) return restart(active, options);
           active.quote = null;
           active.quoteOperation = keyFactory();
         }
@@ -434,7 +436,7 @@ export function createSendRoundController(
           plan = null;
           return { status: "needs-page" };
         }
-        const difference = priceCheck(quote, seen);
+        const difference = priceCheck(quote, active.seen);
         if (
           difference !== null &&
           active.confirmedQuote !== quote.quoteReference &&
@@ -443,7 +445,7 @@ export function createSendRoundController(
           return { status: "confirm-total", total: quote.total, reason: difference };
         if (!active.detailsSaved) {
           const saved = await detailsStep(active, quote, options);
-          if (saved === "restart") return restart(active, seen, options);
+          if (saved === "restart") return restart(active, options);
           if (saved !== null) return saved;
         }
       }
@@ -453,7 +455,7 @@ export function createSendRoundController(
     const session = active.session;
     if (session === null) return { status: "unconfirmed" };
     const sent = await sendStep(active, session, options);
-    return sent === "restart" ? restart(active, seen, options) : sent;
+    return sent === "restart" ? restart(active, options) : sent;
   };
   const run = async (cart: CartView | null, seen: SeenSubtotal | null) => {
     const manual = state.status === "unconfirmed" || state.status === "busy";
@@ -479,11 +481,12 @@ export function createSendRoundController(
       }
       plan = newPlan(cart);
     }
+    if (seen !== null) plan.seen = seen;
     publish({ status: "sending" });
     const options: CheckoutMutationOptions = manual ? { busyTotalMs: manualRetryBusyTotalMs } : {};
     let outcome: SendRoundState;
     try {
-      outcome = await advance(plan, seen, options);
+      outcome = await advance(plan, options);
     } catch {
       outcome = { status: "unconfirmed" };
     }

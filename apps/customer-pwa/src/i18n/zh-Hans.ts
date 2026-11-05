@@ -1347,6 +1347,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Still working on it.": "还在处理，请稍等。",
   "Your payment is still being set up": "付款还在准备中",
   "This order hasn’t been charged.": "这一单没有扣款。",
+  "You haven’t been charged for it. See your table, or ask a staff member for help.":
+    "这一单没有扣款。请查看本桌，或请店员帮忙。",
   "We can’t confirm where your payment stands": "暂时无法确认付款状态",
   "If you already entered your card, check the result first and don’t pay again. If you haven’t, you can continue.":
     "如果你已经输入过银行卡，请先查看结果，不要重复付款；如果还没有，可以继续付款。",
