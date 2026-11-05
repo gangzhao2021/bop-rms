@@ -266,6 +266,9 @@ export function createOrderAutoAcceptanceEvaluator(options: {
         if (!switchState.on) return null;
         const orderReference = String(p.orderReference);
         const orderBatchReference = String(p.orderBatchReference);
+        // These two never clear: the wait workload comes back every second, so read nothing more.
+        const recorded = await loadOrderAutoAcceptanceSkip(tx, ownerScope, orderBatchReference);
+        if (recorded === "PaidBeforeSwitch" || recorded === "PaidTooLongAgo") return null;
         const card = await createPostgresCardMachinePaymentStore({
           scope: ownerScope,
           authorize: () => options.authorize(tx),

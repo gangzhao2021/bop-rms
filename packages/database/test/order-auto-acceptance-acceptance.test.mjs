@@ -5,6 +5,9 @@ import { withAutoAcceptWorld, hashText } from "../test-support/auto-accept-world
 import {
   changeOrderAutoAcceptanceSetting,
   createPostgresStaffOrderCancellationReader,
+  createPostgresStaffOrderCancellationStore,
+  createPostgresStoreSalesOrderSource,
+  listStoreOpenAutoAcceptedBatches,
   loadOrderAutoAcceptanceSetting,
   OrderAutoAcceptanceSettingConflictError,
 } from "../../rms/ordering/src/index.ts";
@@ -144,6 +147,60 @@ it("a paid first round and a paid later round at a pay-first table go straight t
       2,
     );
     assert.deepEqual(await reasonsOf(world, later.orderBatchReference), ["Accepted"]);
+    // A table round is never refunded automatically: the guest is in the room.
+    assert.deepEqual(
+      await world.worker().run((tx) =>
+        listStoreOpenAutoAcceptedBatches(tx, world.scope, {
+          since: world.time(-world.minutes(60)),
+          limit: 10,
+          onlyPickup: true,
+        }),
+      ),
+      [],
+    );
+    // Whoever can accept gives one round back; the table's order carries on.
+    const server = await world.session([], "01a6aa07");
+    const cantMake = createMerchantOrderStaffCancellation({
+      persistence: { ...server.persistence, now: world.now },
+      authentication: server.authentication,
+      nextReference: world.fresh,
+      autoAcceptedOnly: true,
+      installContext: async (tx, selected) => {
+        await tx.query(
+          "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+          [selected.tenantReference, selected.brandReference, selected.storeReference],
+        );
+      },
+      resolveRefundConfiguration: async () => ({
+        providerAccountReference: world.provider,
+        environment: "Test",
+      }),
+    });
+    const given = await cantMake({
+      sessionCookie: server.sessionCookie,
+      csrf: server.csrf,
+      command: {
+        orderReference: later.orderReference,
+        orderBatchReference: later.orderBatchReference,
+        expectedOrderVersion: acceptedLater[0].accepted,
+        operationReference: world.fresh(),
+        reasonCode: "GUEST_LEFT",
+      },
+    });
+    assert.equal(given.status, "Cancelled");
+    assert.deepEqual(
+      await query(
+        "SELECT permission_code,actor_id FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1",
+        [later.orderBatchReference],
+      ),
+      [{ permission_code: "ordering.order.accept", actor_id: server.actor }],
+    );
+    assert.deepEqual(
+      await query("SELECT 1 FROM rms_ordering.order_termination_record WHERE order_id=$1", [
+        first.orderReference,
+      ]),
+      [],
+    );
   });
 });
 
@@ -243,7 +300,11 @@ it("an order it does not accept waits for a person, says why, and goes once the 
     assert.equal((await resume()).status, "AwaitingOrderAcceptance");
     operating.current = { state: "Open", availableServiceModes: ["DineIn"] };
     assert.equal((await resume()).status, "AwaitingOrderAcceptance");
-    operating.current = { state: "Open", availableServiceModes: ["Pickup"], notReadyForOrders: true };
+    operating.current = {
+      state: "Open",
+      availableServiceModes: ["Pickup"],
+      notReadyForOrders: true,
+    };
     assert.equal((await resume()).status, "AwaitingOrderAcceptance");
     // An unreadable status, even one that aborts the transaction, counts as not open and never
     // fails the payment outcome.
@@ -258,7 +319,9 @@ it("an order it does not accept waits for a person, says why, and goes once the 
     await holder.connect();
     try {
       await holder.query("BEGIN");
-      await holder.query("LOCK TABLE rms_store.store_configuration_operation IN ROW EXCLUSIVE MODE");
+      await holder.query(
+        "LOCK TABLE rms_store.store_configuration_operation IN ROW EXCLUSIVE MODE",
+      );
       operating.read = async (tx) => {
         await tx.query("LOCK TABLE rms_store.store_configuration_operation IN SHARE MODE");
         return operating.current;
@@ -299,7 +362,9 @@ it("an order it does not accept waits for a person, says why, and goes once the 
     ]);
     assert.equal((await acceptanceOf(world, batch))[0].actor_type, "System");
     assert.equal(
-      (await transactions().run((tx) => paid.listUnresolved(tx, 100))).includes(order.event.eventId),
+      (await transactions().run((tx) => paid.listUnresolved(tx, 100))).includes(
+        order.event.eventId,
+      ),
       false,
     );
 
@@ -405,9 +470,11 @@ it("staff pressing Accept while the System accepts: one acceptance, one confirma
       await holder.query("COMMIT");
       const [system, person] = await Promise.all(outcomes);
       assert.ok(
-        ["ORDER_ACCEPTANCE_ALREADY_ACCEPTED", "ORDER_ACCEPTANCE_VERSION_CONFLICT", "Accepted"].includes(
-          person,
-        ),
+        [
+          "ORDER_ACCEPTANCE_ALREADY_ACCEPTED",
+          "ORDER_ACCEPTANCE_VERSION_CONFLICT",
+          "Accepted",
+        ].includes(person),
         String(person),
       );
       assert.ok(["OrderConfirmed", "AwaitingOrderAcceptance"].includes(system), String(system));
@@ -529,7 +596,8 @@ it("the database refuses an automatic acceptance while the switch is off, and th
 
 it("staff give back an automatically accepted order, and a pickup nobody touched refunds itself", async () => {
   await withAutoAcceptWorld({ caseId: "wp2423_aa_refund", orderType: "Pickup" }, async (world) => {
-    const { assert, paid, setting, kitchenScreen, transactions, seedPaidPickup, query, fresh } = world;
+    const { assert, paid, setting, kitchenScreen, transactions, seedPaidPickup, query, fresh } =
+      world;
     const { scope, ownerScope, provider, systemActor } = world;
     await setting.change({ pickup: true, dineIn: false, at: world.time(-world.minutes(120)) });
     await kitchenScreen.seenNow();
@@ -648,6 +716,35 @@ it("staff give back an automatically accepted order, and a pickup nobody touched
     await frontOfHouse.accept(accepted);
     await transactions().run((tx) => paid.consume(tx, accepted.event));
     await assert.rejects(refuse(accepted), { code: "ORDER_CANCELLATION_NOT_CANCELLABLE" });
+    // The database holds the same line, whatever a caller asks of the store.
+    await assert.rejects(
+      transactions().run(async (tx) => {
+        const direct = createPostgresStaffOrderCancellationStore({
+          ...scope,
+          authorize: async () => true,
+        });
+        const prepared = await direct.prepare(tx, {
+          orderReference: accepted.orderReference,
+          orderBatchReference: accepted.orderBatchReference,
+          expectedOrderVersion: 2,
+          actorReference: frontOfHouse.actor,
+        });
+        assert.equal(prepared.status, "Ready");
+        return direct.commit(tx, {
+          plan: prepared.plan,
+          cancellationReference: fresh(),
+          operationReference: fresh(),
+          actorReference: frontOfHouse.actor,
+          reasonCode: "SOLD_OUT",
+          kitchenEvidenceDigest: hashText("no kitchen work"),
+          auditReference: fresh(),
+          terminationAuditReference: fresh(),
+          cancelledAt: world.now(),
+          permissionCode: "ordering.order.accept",
+        });
+      }),
+      { code: "STAFF_ORDER_CANCELLATION_CONFLICT" },
+    );
 
     assert.equal(
       (await transactions().run((tx) => paid.consume(tx, recent.event))).result.status,
@@ -667,12 +764,14 @@ it("staff give back an automatically accepted order, and a pickup nobody touched
     });
     // A kitchen step on this ticket stops it; a ticket nobody touched does not.
     await world.seedKitchenTicket(started, { step: "KITCHEN_WORK_ITEM_ACCEPTED" });
-    const touches = await world.worker().run((tx) =>
-      listStoreKitchenBatchTouches(tx, scope, [
-        untouched.orderBatchReference,
-        started.orderBatchReference,
-      ]),
-    );
+    const touches = await world
+      .worker()
+      .run((tx) =>
+        listStoreKitchenBatchTouches(tx, scope, [
+          untouched.orderBatchReference,
+          started.orderBatchReference,
+        ]),
+      );
     assert.equal(touches.get(started.orderBatchReference), "Touched");
     assert.equal(touches.has(untouched.orderBatchReference), false);
     assert.match(
@@ -716,13 +815,49 @@ it("staff give back an automatically accepted order, and a pickup nobody touched
       }),
     );
     assert.equal(refund.reason, "CancelledByStaff");
+    // Reports read what was sold, never who accepted it: the same order, by either route, is the
+    // same sale; one given back is cancelled, whoever gave it back.
+    const sales = createPostgresStoreSalesOrderSource({
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      locale: "en-CA",
+      authorize: async () => true,
+    });
+    const sold = await world
+      .worker()
+      .run((tx) =>
+        sales(tx, [
+          accepted.orderReference,
+          recent.orderReference,
+          order.orderReference,
+          untouched.orderReference,
+        ]),
+      );
+    const saleOf = (reference) => {
+      const row = sold.find((entry) => entry.orderReference === reference);
+      assert.ok(row);
+      return JSON.parse(
+        JSON.stringify(row, (key, value) =>
+          /Reference$|Number$|At$/u.test(key)
+            ? undefined
+            : typeof value === "bigint"
+              ? value.toString()
+              : value,
+        ),
+      );
+    };
+    assert.deepEqual(saleOf(recent.orderReference), saleOf(accepted.orderReference));
+    assert.notEqual(
+      saleOf(order.orderReference).cancelled,
+      saleOf(recent.orderReference).cancelled,
+    );
+    assert.deepEqual(saleOf(untouched.orderReference), saleOf(order.orderReference));
     // The one the kitchen touched, and the one just sent, stay open.
     for (const open of [started, recent])
       assert.deepEqual(
-        await query(
-          "SELECT 1 FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1",
-          [open.orderBatchReference],
-        ),
+        await query("SELECT 1 FROM rms_ordering.order_staff_cancellation WHERE order_batch_id=$1", [
+          open.orderBatchReference,
+        ]),
         [],
       );
   });

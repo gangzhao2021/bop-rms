@@ -53,7 +53,7 @@ export function PaidOrderSwitchLine({
     }
   };
   return (
-    <p className="paid-order-switch-line">
+    <div className="paid-order-switch-line">
       <span>{t("Paid orders go straight to the kitchen")}</span>
       {watch.canTurnOff ? (
         state === "Asking" || state === "Busy" ? (
@@ -81,6 +81,6 @@ export function PaidOrderSwitchLine({
       {state === "Changed" ? (
         <span role="alert"> {t("Someone else changed this just now. Check it again.")}</span>
       ) : null}
-    </p>
+    </div>
   );
 }

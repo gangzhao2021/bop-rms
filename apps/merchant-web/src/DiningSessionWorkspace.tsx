@@ -1081,7 +1081,6 @@ export function DiningSessionWorkspace({
       status={
         tables.length > 0 ? (
           <span className="dining-floor-summary">
-            <PaidOrderSwitchLine csrf={csrf} />
             <span>{t("{seatedCount} seated", { seatedCount: String(seatedCount) })}</span>
             {needCount > 0 ? (
               <span data-attention="true">
@@ -1108,6 +1107,8 @@ export function DiningSessionWorkspace({
         </>
       }
     >
+      {/* DEC-PAID-ORDER-AUTO-ACCEPT: the brake, at a Store sending paid rounds straight through. */}
+      <PaidOrderSwitchLine csrf={csrf} />
       {/* WP-2423 item 8 ③ follow-up: guests' last orders coming, or passed (staff still can). */}
       <LastOrdersNotice timeZone={timeZone} />
       {stale ? <StaleReadNotice stale={stale} /> : null}
