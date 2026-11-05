@@ -100,6 +100,8 @@ const apiLogEvents = [
   "http_request_completed",
   "http_request_failed",
   "listening",
+  // WP-2423 item 10: a merchant request that failed for a reason that is not a refusal.
+  "merchant_request_unexpected",
   "startup_failed",
   "shutdown_complete",
   "shutdown_failed",

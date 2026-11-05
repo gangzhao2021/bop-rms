@@ -595,6 +595,40 @@ describe("WP-2207 runtime dependency wiring", () => {
       expect(output.records.join("")).not.toContain(sensitive);
     }
   });
+
+  it("WP-2423 item 10: logs a merchant request that failed for a reason that is not a refusal", async () => {
+    const bootstrap = vi.fn(async (): Promise<never> => {
+      throw new TypeError("synthetic private detail");
+    });
+    const service = { bootstrap } as unknown as MerchantBffService;
+    const output = logger();
+    const runtime = createApiServerRuntime({
+      port: 0,
+      logger: output.logger,
+      merchantBff: { exactOrigin: syntheticOrigin, acceptedHost: "merchant.invalid", service },
+    });
+    runtimes.push(runtime);
+    await runtime.listen();
+    const session = await merchantRequest(
+      origin(runtime),
+      {
+        host: "merchant.invalid",
+        origin: syntheticOrigin,
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bop-merchant=synthetic-session",
+      },
+      "/merchant/session",
+    );
+    expect(session.status).toBe(503);
+    expect(bootstrap).toHaveBeenCalledOnce();
+    const failures = output.records
+      .map((record) => JSON.parse(record) as { event?: string; resultCode?: string })
+      .filter((record) => record.event === "merchant_request_unexpected");
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.resultCode).toBe("INTERNAL_ERROR");
+    expect(output.records.join("")).not.toContain("synthetic private detail");
+    expect(output.records.join("")).not.toContain("synthetic-session");
+  });
 });
 
 function logger() {
