@@ -471,9 +471,14 @@ section on a phone in both languages and on the kitchen screen before testing wi
 Store where guests pay each round first.
 
 - **Who can do what.** Turning it on: the Owner, on `Store features` (`Guests starting tables`).
-  Turning it off: the Owner, or anyone who may pause ordering (Store Manager, Area Manager), from the
-  line at the top of `Tables` (`Guests can start free tables. Turn off`). Front of house and kitchen
-  can't turn it off today; they ask a manager, or pause scanning on one table from its panel.
+  Turning it off: the Owner, or anyone who may pause ordering (Store Manager, Area Manager, and Front
+  of House once permission catalog v26 is installed), from the line at the top of `Tables`
+  (`Guests can start free tables. Turn off`). Anyone else asks a manager, or pauses scanning on one
+  table from its panel.
+- **Too many starts.** Each Store allows 40 scanned starts in 10 minutes, each table 3. Past that a
+  guest at a free table is told to ask staff, and `Tables` says `Many tables started by scanning`. It
+  clears by itself. If it isn't your guests (photos of the codes), turn the switch off and open tables
+  for the guests in front of you.
 - **Queue at the door.** Turn it off: new tables then need staff, and tables already started finish
   as usual. Turning it off never strands a table.
 - **Tables that free themselves.** With nothing owed and nothing unfinished: 20 minutes after the last

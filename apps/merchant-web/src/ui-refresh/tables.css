@@ -24,10 +24,12 @@
 }
 @media (max-width: 640px) {
   /* On its own line here, so no separator starts it. */
-  .dining-floor .dining-floor-summary > .dining-floor-guest-starts {
+  .dining-floor .dining-floor-summary > .dining-floor-guest-starts,
+  .dining-floor .dining-floor-summary > .dining-floor-guest-starts-busy {
     flex-basis: 100%;
   }
-  .dining-floor .dining-floor-summary > .dining-floor-guest-starts::before {
+  .dining-floor .dining-floor-summary > .dining-floor-guest-starts::before,
+  .dining-floor .dining-floor-summary > .dining-floor-guest-starts-busy::before {
     content: none;
   }
 }

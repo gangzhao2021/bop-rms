@@ -103,7 +103,7 @@ export function StoreGuestTableStart({
         <p role="note">
           {tableAutoAccept === false
             ? t(
-                "Each paid round still waits for Accept on Orders. Turn on “Send paid table rounds straight to the kitchen” if nobody watches Orders.",
+                "Each paid round still waits for Accept on Orders. Turn on “Send paid orders straight to the kitchen” if nobody watches Orders.",
               )
             : t("Each paid round still waits for Accept on Orders.")}
         </p>

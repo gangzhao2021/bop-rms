@@ -1095,7 +1095,7 @@ export function DiningSessionWorkspace({
               </span>
             ) : null}
             {guestStarts?.startsBusy === true ? (
-              <span data-attention="true">
+              <span className="dining-floor-guest-starts-busy" data-attention="true">
                 {t(
                   "Many tables started by scanning · new guests are sent to staff for a few minutes",
                 )}

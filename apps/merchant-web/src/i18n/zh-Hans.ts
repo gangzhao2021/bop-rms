@@ -6639,8 +6639,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人扫空桌的码就能点餐，每一轮在手机上付款。吃完的桌子会自动空出，不用清理这一步：没点单的 20 分钟后，点过单的最后一次动作 90 分钟后。有人拿着桌码照片也能在别处开始这张桌，但不付款拿不到东西。",
   "Only for stores where guests pay each round first.": "只适用于客人每轮先付款的门店。",
   "Each paid round still waits for Accept on Orders.": "每一轮付款后还要在订单页接单。",
-  "Each paid round still waits for Accept on Orders. Turn on “Send paid table rounds straight to the kitchen” if nobody watches Orders.":
-    "每一轮付款后还要在订单页接单。如果没人看订单页，请打开“已付款的桌边订单直接进后厨”。",
+  "Each paid round still waits for Accept on Orders. Turn on “Send paid orders straight to the kitchen” if nobody watches Orders.":
+    "每一轮付款后还要在订单页接单。如果没人看订单页，请打开“已付款的订单直接进后厨”。",
   "Saved. Guests can start free tables now.": "已保存。客人现在可以自己开始用空桌。",
   "Saved. New tables need staff to open them; tables already started finish as usual.":
     "已保存。新开桌需要店员操作；已经开始的桌子照常结束。",
