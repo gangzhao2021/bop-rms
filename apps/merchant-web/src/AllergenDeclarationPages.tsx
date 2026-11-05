@@ -24,6 +24,7 @@ import {
   type DeclarationStatus,
 } from "./allergen-declaration-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: Brand allergen registry and ingredient declarations. */
 const copy: Record<AllergenErrorCode | "Loading", string> = {
@@ -70,6 +71,7 @@ function useAllergenView<V>(
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load(itemReference)
@@ -86,7 +88,15 @@ function useAllergenView<V>(
   }, [client, itemReference, parse, generation]);
   return { state, reload };
 }
-function Failure({ code }: { readonly code: AllergenErrorCode | "Loading" }) {
+function Failure({
+  code,
+  onRetry,
+}: {
+  readonly code: AllergenErrorCode | "Loading";
+  readonly onRetry?: () => void;
+}) {
+  if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
+    return <PageDidNotLoad code={code} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Allergens")}
@@ -134,7 +144,7 @@ export function AllergenListPage({
 }) {
   const { state, reload } = useAllergenView(client, null, parseAllergenListView);
   const { send, busy, pending, message } = useCommand(client, reload);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view: AllergenListView = state.view;
   const missing = view.items.filter((item) => item.status !== "Current").length;
   return (
@@ -361,7 +371,7 @@ function AllergenItem({
     setValidUntil(oneYearAfter(view.sourceAsOf));
     setConfirmed(false);
   }, [state, loadedFor]);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view: AllergenItemView = state.view;
   const item = view.item;
   const registry = view.registry;

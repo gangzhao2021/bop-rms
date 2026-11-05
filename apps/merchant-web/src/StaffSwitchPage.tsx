@@ -80,7 +80,7 @@ export function switchMessageText(
         { minutes: message.minutes, value: message.minutes === 1 ? "minute" : "minutes" },
       );
     case "Unavailable":
-      return t("Couldn't check the PIN. Check the connection and try again.");
+      return t("Couldn't check the PIN. Try again.");
     case "SigningIn":
       return t("Signing in {name}…", { name: name });
   }
@@ -185,7 +185,7 @@ export function StaffSwitchView({
                   "This tablet can't reach the store system, and PINs need the connection. Check the Wi-Fi or network cable, then try again. Once the connection is back, you can also sign in with your account.",
                 )
               : t(
-                  "The staff list couldn't be loaded. Check the connection and try again. If it keeps happening, sign in with your account.",
+                  "The staff list couldn't be loaded. Try again. If it keeps happening, sign in with your account.",
                 )}
           </p>
           <button type="button" className="staff-switch__action" onClick={onRetry}>

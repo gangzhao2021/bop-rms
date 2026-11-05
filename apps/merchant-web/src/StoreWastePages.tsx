@@ -19,6 +19,7 @@ import {
   type WasteRecordView,
 } from "./store-waste-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-INV-WASTE: record waste as it happens; managers review high-value records. */
 const copy: Record<StoreWasteErrorCode | "Loading", string> = {
@@ -77,6 +78,7 @@ function useWaste(
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load({ wasteReference, needsReviewOnly })
@@ -93,7 +95,15 @@ function useWaste(
   }, [client, screenId, wasteReference, needsReviewOnly, generation]);
   return { state, reload };
 }
-function Failure({ code }: { code: StoreWasteErrorCode | "Loading" }) {
+function Failure({
+  code,
+  onRetry,
+}: {
+  code: StoreWasteErrorCode | "Loading";
+  onRetry?: () => void;
+}) {
+  if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
+    return <PageDidNotLoad code={code} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Waste")}
@@ -119,8 +129,8 @@ export function StoreWasteListPage({
   readonly client?: StoreWasteClient;
 }) {
   const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
-  const { state } = useWaste(client, "INV-WASTE-LIST", null, needsReviewOnly);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  const { state, reload } = useWaste(client, "INV-WASTE-LIST", null, needsReviewOnly);
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view = state.view;
   const itemName = (reference: string) =>
     view.items.find((item) => item.itemReference === reference)?.name ?? "Item";
@@ -223,7 +233,7 @@ export function StoreWasteFormPage({
 }: {
   readonly client?: StoreWasteClient;
 }) {
-  const { state } = useWaste(client, "INV-WASTE-LIST", null, false);
+  const { state, reload } = useWaste(client, "INV-WASTE-LIST", null, false);
   const navigate = useNavigate();
   const timeZone = useContext(StoreTimeZoneContext);
   const [lines, setLines] = useState<EditableLine[]>([]),
@@ -261,7 +271,7 @@ export function StoreWasteFormPage({
     if (view && lines.length === 0 && view.stock.length > 0) setLines([blank()]);
   }, [view, lines.length, blank]);
   if (state.kind !== "Found" || !view)
-    return <Failure code={state.kind === "Found" ? "Unavailable" : state.kind} />;
+    return <Failure code={state.kind === "Found" ? "Unavailable" : state.kind} onRetry={reload} />;
   if (!view.permissions.mayRecord) return <Failure code="PermissionDenied" />;
   const update = (index: number, patch: Partial<EditableLine>) =>
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
@@ -494,7 +504,7 @@ export function StoreWasteDetailPage({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<StoreWasteErrorCode | null>(null),
     [voidReason, setVoidReason] = useState("");
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view = state.view;
   const record = view.records[0] as WasteRecordView;
   const itemName = (reference: string) =>

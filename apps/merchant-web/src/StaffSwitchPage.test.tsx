@@ -84,7 +84,7 @@ describe("messages", () => {
       ),
     ).toBe("Too many tries on this tablet. Wait 1 minute, or sign in with your account.");
     expect(switchMessageText(switchMessageFor(new Error("x")), "Ana", undefined)).toBe(
-      "Couldn't check the PIN. Check the connection and try again.",
+      "Couldn't check the PIN. Try again.",
     );
   });
 });

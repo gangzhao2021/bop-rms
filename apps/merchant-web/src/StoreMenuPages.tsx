@@ -42,6 +42,7 @@ import {
   type StoredMenuDraft,
 } from "./store-menu-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-MENU-REVISION: Brand menus — edit, review, publish and revise. */
 export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
@@ -136,6 +137,7 @@ function useMenuView<V>(
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load(menuReference)
@@ -151,7 +153,19 @@ function useMenuView<V>(
   }, [client, menuReference, parse, generation]);
   return { state, reload };
 }
-function Failure({ code }: { readonly code: MenuErrorCode | "Loading" }) {
+function Failure({
+  code,
+  onRetry,
+}: {
+  readonly code: MenuErrorCode | "Loading";
+  readonly onRetry?: () => void;
+}) {
+  if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
+    return (
+      <WorkspacePage title={t("Menus")}>
+        <PageDidNotLoad code={code} onRetry={onRetry} />
+      </WorkspacePage>
+    );
   return (
     <WorkspacePage title={t("Menus")}>
       <StatePanel
@@ -179,7 +193,7 @@ export function StoreMenuListPage({
   /** WP-2423 item 8 ⑥: with it, a single store's one menu opens as the one-page menu. */
   readonly availability?: AvailabilityClient;
 }) {
-  const { state } = useMenuView(client, null, parseMenuListView);
+  const { state, reload } = useMenuView(client, null, parseMenuListView);
   const [multiStore, setMultiStore] = useState(false);
   const showList = useCallback(() => setMultiStore(true), []);
   const location = useLocation();
@@ -199,7 +213,7 @@ export function StoreMenuListPage({
     // Once: a reload does not say it again.
     if (listShown && newChoice !== null) void navigate(".", { replace: true, state: null });
   }, [listShown, newChoice, navigate]);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view: MenuListView = state.view;
   const only = view.menus.length === 1 ? view.menus[0] : undefined;
   if (only !== undefined && onePage)
@@ -521,7 +535,7 @@ function MenuBuilder({
         section.key === key ? { ...section, items: change(section.items) } : section,
       ),
     );
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view: MenuBuilderView = state.view;
   const menu = view.menu;
   const stage = menuStage(view.publication);

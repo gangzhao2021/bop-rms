@@ -26,6 +26,7 @@ import {
   type PriceSellable,
 } from "./store-price-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-PRICE-STORE-ASSIGNMENT: Brand price books and the price book this Store charges. */
 const copy: Record<PriceErrorCode | "Loading", string> = {
@@ -68,6 +69,7 @@ function usePriceView<V>(
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load(priceBookReference)
@@ -107,7 +109,15 @@ export function PriceCommandMessage({
     </StatePanel>
   );
 }
-function Failure({ code }: { readonly code: PriceErrorCode | "Loading" }) {
+function Failure({
+  code,
+  onRetry,
+}: {
+  readonly code: PriceErrorCode | "Loading";
+  readonly onRetry?: () => void;
+}) {
+  if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
+    return <PageDidNotLoad code={code} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Prices")}
@@ -258,8 +268,8 @@ export function StorePriceListPage({
   /** For the authenticator check (tests). */
   readonly fetcher?: typeof fetch;
 }) {
-  const { state } = usePriceView(client, null, parsePriceBookListView);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  const { state, reload } = usePriceView(client, null, parsePriceBookListView);
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   return <StorePriceList view={state.view} client={client} csrf={csrf} fetcher={fetcher} />;
 }
 
@@ -545,7 +555,7 @@ function PriceBookEditor({
       ),
     );
   }, [state, loadedVersion]);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view: PriceBookEditorView = state.view;
   const book = view.book;
   const draft = book.lifecycle === "Draft";

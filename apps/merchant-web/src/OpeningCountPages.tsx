@@ -17,6 +17,7 @@ import {
   type OpeningLine,
 } from "./opening-count-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<OpeningCountErrorCode | "Loading", string> = {
   Loading: t("Loading the opening count…"),
@@ -63,6 +64,7 @@ function useCount(client: OpeningCountClient, countReference: string | null) {
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load(countReference)
@@ -418,6 +420,8 @@ export function OpeningCountPage({
   const { state, reload } = useCount(client, reference);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<OpeningCountErrorCode | null>(null);
+  if (state.kind === "Unavailable" || state.kind === "Offline")
+    return <PageDidNotLoad code={state.kind} onRetry={reload} />;
   if (state.kind !== "Found")
     return (
       <StatePanel

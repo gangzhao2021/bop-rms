@@ -17,6 +17,7 @@ import {
   type StoreReceiptPageView,
 } from "./store-receipt-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<StoreReceiptErrorCode | "Loading", string> = {
   Loading: t("Loading receiving…"),
@@ -50,6 +51,7 @@ function useReceipts(
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load({ receiptReference, before: null })
@@ -66,7 +68,15 @@ function useReceipts(
   }, [client, screenId, receiptReference, generation]);
   return { state, reload };
 }
-function Failure({ code }: { code: StoreReceiptErrorCode | "Loading" }) {
+function Failure({
+  code,
+  onRetry,
+}: {
+  code: StoreReceiptErrorCode | "Loading";
+  onRetry?: () => void;
+}) {
+  if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
+    return <PageDidNotLoad code={code} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Receiving")}
@@ -85,8 +95,8 @@ export function StoreReceiptListPage({
 }: {
   readonly client?: StoreReceiptClient;
 }) {
-  const { state } = useReceipts(client, "INV-RECEIPT-LIST", null);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  const { state, reload } = useReceipts(client, "INV-RECEIPT-LIST", null);
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view = state.view;
   return (
     <AppFrame title={t("Receiving")} description="">
@@ -176,7 +186,7 @@ export function StoreReceiptFormPage({
 }: {
   readonly client?: StoreReceiptClient;
 }) {
-  const { state } = useReceipts(client, "INV-RECEIPT-LIST", null);
+  const { state, reload } = useReceipts(client, "INV-RECEIPT-LIST", null);
   const navigate = useNavigate();
   const [supplier, setSupplier] = useState(""),
     [document, setDocument] = useState(""),
@@ -195,7 +205,7 @@ export function StoreReceiptFormPage({
       setLines([blank(view)]);
   }, [view, lines.length]);
   if (state.kind !== "Found" || !view)
-    return <Failure code={state.kind === "Found" ? "Unavailable" : state.kind} />;
+    return <Failure code={state.kind === "Found" ? "Unavailable" : state.kind} onRetry={reload} />;
   if (!view.permissions.mayReceive) return <Failure code="PermissionDenied" />;
   const update = (index: number, patch: Partial<EditableLine>) =>
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
@@ -458,7 +468,7 @@ export function StoreReceiptDetailPage({
     [busy, setBusy] = useState(false),
     [error, setError] = useState<{ code: StoreReceiptErrorCode; line: string | null } | null>(null);
   if (reference === null) return <Failure code="NotFound" />;
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view = state.view;
   const receipt = view.receipts[0];
   if (!receipt) return <Failure code="NotFound" />;

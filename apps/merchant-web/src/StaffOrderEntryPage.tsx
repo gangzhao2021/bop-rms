@@ -151,7 +151,7 @@ const menuError: Record<string, [string, string]> = {
   Unavailable: [
     t("The menu could not be loaded"),
     t(
-      "Check the connection and try again. If the system stays down, take the order on paper and record it here afterwards.",
+      "Try again. If the system stays down, take the order on paper and record it here afterwards.",
     ),
   ],
 };

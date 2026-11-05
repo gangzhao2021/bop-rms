@@ -39,6 +39,7 @@ import {
   type StorePricesView,
 } from "./store-prices-client.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 8.5: which items this Store sells now — offer, sold out, back in stock. */
 const copy: Record<AvailabilityErrorCode | "Loading", string> = {
@@ -185,6 +186,7 @@ export function StoreAvailabilityPage({
     }
   };
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load()
@@ -201,15 +203,18 @@ export function StoreAvailabilityPage({
   }, [client, generation]);
   if (handover === "SignedOut") return <KitchenSignedOutPanel />;
   if (state.kind !== "Found") {
-    const panel = (
-      <StatePanel
-        heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Item availability")}
-        tone={state.kind === "Loading" ? "neutral" : "error"}
-        status
-      >
-        <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
-      </StatePanel>
-    );
+    const panel =
+      state.kind === "Unavailable" || state.kind === "Offline" ? (
+        <PageDidNotLoad code={state.kind} onRetry={reload} />
+      ) : (
+        <StatePanel
+          heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Item availability")}
+          tone={state.kind === "Loading" ? "neutral" : "error"}
+          status
+        >
+          <p>{state.kind === "PermissionDenied" ? pageAccessDeniedText : copy[state.kind]}</p>
+        </StatePanel>
+      );
     // From the kitchen display there is no workspace frame around the page; keep the way back.
     return navigation ? <AppFrame {...frame}>{panel}</AppFrame> : panel;
   }

@@ -22,6 +22,7 @@ import {
   type OptionSetRow,
 } from "./store-option-set-page.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /**
  * WP-2423 slice 4: Brand option sets — the choices a customer makes on an item (milk, extra shot).
@@ -45,6 +46,7 @@ function useView<V>(load: () => Promise<unknown>, parse: (value: unknown) => V, 
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void load()
       .then((value) => {
@@ -61,7 +63,15 @@ function useView<V>(load: () => Promise<unknown>, parse: (value: unknown) => V, 
   }, [key, generation]);
   return { state, reload };
 }
-function Failure({ code }: { readonly code: OptionSetErrorCode | "Loading" }) {
+function Failure({
+  code,
+  onRetry,
+}: {
+  readonly code: OptionSetErrorCode | "Loading";
+  readonly onRetry?: () => void;
+}) {
+  if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
+    return <PageDidNotLoad code={code} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Options")}
@@ -82,8 +92,8 @@ export function StoreOptionSetListPage({
 }: {
   readonly client?: OptionSetClient;
 }) {
-  const { state } = useView(() => client.list(), parseOptionSetListView, "list");
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  const { state, reload } = useView(() => client.list(), parseOptionSetListView, "list");
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view: OptionSetListView = state.view;
   const current = view.optionSets.filter((set) => !set.archived);
   return (
@@ -236,7 +246,7 @@ function OptionSetEditor({
     );
   }, [state, latest, loadedVersion]);
 
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view = state.view;
   const set = shown(view);
   const mayEdit = view.permissions.mayEdit && !(set?.archived ?? false);

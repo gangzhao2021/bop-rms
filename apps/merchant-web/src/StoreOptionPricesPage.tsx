@@ -21,6 +21,7 @@ import {
   type OptionPriceView,
 } from "./store-option-prices-page.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 slice 4.3: what each option costs on each product; another approver publishes, or the
  * author alone as sole operator (DEC-SOLE-OPERATOR-APPROVAL). */
@@ -75,6 +76,7 @@ export function StoreOptionPricesPage({
   } | null>(null);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load()
@@ -89,6 +91,8 @@ export function StoreOptionPricesPage({
       active = false;
     };
   }, [client, generation]);
+  if (state.kind === "Unavailable" || state.kind === "Offline")
+    return <PageDidNotLoad code={state.kind} onRetry={reload} />;
   if (state.kind !== "Found")
     return (
       <StatePanel

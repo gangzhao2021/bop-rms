@@ -1053,8 +1053,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check refund": "查看退款",
   "Check refund again": "再次查看退款",
   "Check serving result": "检查上桌结果",
-  "Check the connection and try again. If the system stays down, take the order on paper and record it here afterwards.":
-    "请检查网络后重试。如果系统一直无法使用，请用纸质记录订单，之后再在此录入。",
+  "Try again. If the system stays down, take the order on paper and record it here afterwards.":
+    "请重试。如果系统一直无法使用，请用纸质记录订单，之后再在此录入。",
   "Check the edited settings. Each service interval needs valid times and at least one service mode. Wait times are whole minutes, up to 24 hours (1,440 minutes). A service charge or delivery fee that is On needs a tax classification that is still in use, and every fee that is On needs at least one order type.":
     "请检查已编辑的设置。每个服务时段需要有效的时间和至少一种服务方式。等待时间为整数分钟，最长 24 小时（1,440 分钟）。开启的服务费或配送费需要仍在使用的税类，且每项开启的费用至少需要一种订单类型。",
   "Check the entered details. Phone numbers need a country code; websites must use HTTPS.":
@@ -1276,13 +1276,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Could not be read": "无法读取",
   "Couldn't check for sent orders waiting for payment. Orders lists them too.":
     "无法检查已发送但待付款的订单。订单页也会列出它们。",
-  "Couldn't check the PIN. Check the connection and try again.": "无法核对 PIN。请检查网络后重试。",
-  "Couldn't check whether the order can be closed. Check the connection and try again.":
-    "无法检查订单能否关闭。请检查网络后重试。",
+  "Couldn't check the PIN. Try again.": "无法核对 PIN。请重试。",
+  "Couldn't check whether the order can be closed. Try again.": "无法检查订单能否关闭。请重试。",
   "Couldn't load the staff list": "无法加载员工列表",
   "Couldn't load this page": "无法加载此页面",
-  "Couldn't read the amount to charge. Check the connection and try again.":
-    "无法读取应收金额。请检查网络后重试。",
+  "Couldn't read the amount to charge. Try again.": "无法读取应收金额。请重试。",
   "Count one storage location at a time, ideally while the Store is closed. Counters count blind; a manager explains the differences and posts them. Source as of":
     "一次清点一个存放位置，最好在门店不营业时进行。清点人盲盘；由店长说明差异并过账。数据截至",
   "Count what the Store holds before it opens. Posting turns the count into the Store's opening stock, once. Source as of":
@@ -1893,8 +1891,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Issue, print, replace and turn off table QR codes": "生成、打印、更换和关闭桌台二维码",
   "Issuer, Store, order number, issue time, items, subtotal, discount, fee, tax, tip, total, payment status and refunded total. Professional and legal review have not been evaluated.":
     "开票方、门店、单号、开票时间、商品、小计、折扣、费用、税、小费、合计、付款状态和已退款合计。尚未经过专业和法律审核。",
-  "It could not be checked right now; check the connection. If an action is refused, sign in again.":
-    "目前无法检查；请检查网络。如果操作被拒绝，请重新登录。",
+  "It could not be checked right now. If an action is refused, sign in again.":
+    "目前无法检查。如果操作被拒绝，请重新登录。",
   "It has been approved and can now be published. Customers see the new hours once it is published.":
     "它已被批准，现在可以发布。发布后顾客会看到新的营业时间。",
   "It has been sent for approval and is waiting for an Owner to approve it.":
@@ -3723,7 +3721,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sign-in check": "登录检查",
   "Sign-in ending": "登录即将结束",
   "Sign-in was cancelled.": "登录已取消。",
-  "Sign-out did not finish. Check the connection and try again.": "退出未完成。请检查网络后重试。",
+  "Sign-out did not finish. Try again.": "退出未完成。请重试。",
   "Signed in with PIN. Refunds, price changes and staff changes need your authenticator code or a full sign-in.":
     "已用 PIN 登录。退款、价格更改和员工更改需要你的验证器验证码或完整登录。",
   "Signing in again isn't available right now, so nothing was changed. Try again in a few minutes; if it keeps happening, tell your manager.":
@@ -4551,8 +4549,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The settlement run compares the day's totals with the provider's statement after the business day closes.":
     "营业日结束后，结算运行会把当天合计与支付方对账单进行比较。",
   "The sign-in page could not be reached.": "无法打开登录页面。",
-  "The staff list couldn't be loaded. Check the connection and try again. If it keeps happening, sign in with your account.":
-    "无法加载员工列表。请检查网络后重试。如果一直如此，请用你的账号登录。",
+  "The staff list couldn't be loaded. Try again. If it keeps happening, sign in with your account.":
+    "无法加载员工列表。请重试。如果一直如此，请用你的账号登录。",
   "The staff list has changed. Choose your name again.": "员工列表已变更。请重新选择你的名字。",
   "The staff member who asked": "提出申请的员工",
   "The staff or role state changed. Refresh and try again.": "员工或角色状态已变更。请刷新后重试。",
@@ -4916,8 +4914,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Unable to load": "无法加载",
   "Unable to load current service status. Check your connection and refresh.":
     "无法加载当前服务状态。请检查网络后刷新。",
-  "Unable to refresh this information. Check your connection and try again.":
-    "无法刷新这些信息。请检查网络后重试。",
+  "Unable to refresh this information. Try again.": "无法刷新这些信息。请重试。",
   Unassigned: "未指派",
   Unavailable: "不可用",
   "Unavailable — not zero": "不可用 — 并非为零",
@@ -7797,6 +7794,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Making it by hand": "正在手工做",
   "Noted. It no longer shows as waiting for the kitchen. If you can't make it after all, tap Can't make it.":
     "记下了，不再显示为等后厨。如果最后还是做不了，点“做不了”。",
+  "Something went wrong on our side. Nothing you saved is affected.":
+    "我们这边出了问题。已保存的内容不受影响。",
   "Something went wrong on our side. If you just saved, open it to see whether it is there, then try again.":
     "我们这边出了问题。如果刚才在保存，请打开看看是否已经存上，然后再试一次。",
   "Our system has a problem": "我们的系统出了问题",

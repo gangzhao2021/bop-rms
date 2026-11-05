@@ -365,14 +365,15 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     page.getByText("There are saved changes not listed yet.", { exact: false }),
   ).toHaveCount(0);
   const listings = menuCommands.filter((command) => command.action === "List");
-  expect(listings).toHaveLength(2);
+  expect(listings).toHaveLength(3);
   expect(Object.keys(listings[1] ?? {}).sort()).toEqual([
     "action",
     "menuReference",
     "operationReference",
   ]);
-  // A refused listing is finished; the next press is a new listing.
+  // A refused listing is finished; the next press is a new listing, and a stopped one goes on.
   expect(listings[0]?.operationReference).not.toBe(listings[1]?.operationReference);
+  expect(listings[2]?.operationReference).toBe(listings[1]?.operationReference);
 });
 
 test("@production one dish edited on the one-page menu: names, price, choices, allergens; new dish and section; List it", async ({

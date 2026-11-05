@@ -118,7 +118,7 @@ export function StaffRoundPaymentAction({
                   "This round is no longer waiting for a card-machine payment. The order list will update.",
                 )
             : reading === "Failed" || loadAmountDue === undefined
-              ? t("Couldn't read the amount to charge. Check the connection and try again.")
+              ? t("Couldn't read the amount to charge. Try again.")
               : t("Reading the amount to charge…")}
         </p>
         <div className="card-actions">

@@ -704,3 +704,82 @@ test("@production DEC-TAX-WHOLE-RECEIPT: the bill shows its tax rounding on its 
   ).toBeEnabled();
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
+
+test("@production a table payment the server failed goes again as the same request, so it is recorded once", async ({
+  page,
+}) => {
+  await floor(page, { phase: "Closing", version: 7 });
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: unpaidBill("Closing", 7) }),
+  );
+  const settles: { operationReference: string }[] = [];
+  let failing = true;
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    settles.push(route.request().postDataJSON() as { operationReference: string });
+    if (failing) return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
+    const paid = unpaidBill("Closing", 8);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        bill: {
+          ...paid,
+          rounds: paid.rounds.map((round) => ({ ...round, paid: true })),
+          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          settlement: {
+            method: "Cash",
+            roundsMinor: "3393",
+            tipMinor: "0",
+            roundingMinor: "2",
+            totalMinor: "3395",
+            tenderedMinor: "5000",
+            changeMinor: "1605",
+            recordedAt: "2026-10-15T19:05:00.000Z",
+            recordedAfterOutage: false,
+          },
+        },
+      },
+    });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await checkout.getByRole("radio", { name: "No tip" }).check();
+  await checkout.getByRole("radio", { name: "Cash" }).check();
+  await checkout.getByRole("textbox", { name: "Cash received" }).fill("50");
+  const pay = async () => {
+    await checkout.getByRole("button", { name: "Cash received · $33.95" }).click();
+    await checkout
+      .getByRole("alertdialog", { name: "Confirm the payment" })
+      .getByRole("button", { name: "Confirm $33.95 cash received" })
+      .click();
+  };
+  await pay();
+  await expect(
+    checkout.getByText("We couldn't confirm the result. Press again: it is never recorded twice.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  const words = (await checkout.innerText()).toLowerCase();
+  expect(words).not.toContain("connection");
+  expect(words).not.toContain("permission");
+  failing = false;
+  await pay();
+  await expect(checkout.getByLabel("Receipt for table T2")).toContainText("$33.95");
+  expect(settles).toHaveLength(2);
+  expect(settles[1]?.operationReference).toBe(settles[0]?.operationReference);
+});

@@ -138,7 +138,7 @@ export function StaffSwitchButton({
       </button>
       {state === "Failed" ? (
         <p role="alert" className="staff-session__hint">
-          {t("Sign-out did not finish. Check the connection and try again.")}
+          {t("Sign-out did not finish. Try again.")}
         </p>
       ) : null}
     </div>
@@ -438,9 +438,7 @@ export function StaffSessionGuard({
       <section className="staff-session__notice" role="alert" aria-label={t("Sign-in check")}>
         <p>
           <strong>{t("Your sign-in may have ended.")}</strong>{" "}
-          {t(
-            "It could not be checked right now; check the connection. If an action is refused, sign in again.",
-          )}
+          {t("It could not be checked right now. If an action is refused, sign in again.")}
         </p>
       </section>
     ) : null;

@@ -44,9 +44,7 @@ const texts: Readonly<Record<string, string>> = {
   FINANCIAL_FINALITY_REQUIRED: t(
     "The order's payments aren't settled yet. Check the order on the Orders page.",
   ),
-  CLOSE_CHECK_UNAVAILABLE: t(
-    "Couldn't check whether the order can be closed. Check the connection and try again.",
-  ),
+  CLOSE_CHECK_UNAVAILABLE: t("Couldn't check whether the order can be closed. Try again."),
 };
 const fallback = t(
   "Something on this order still needs attention. Check the order on the Orders page.",

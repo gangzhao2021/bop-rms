@@ -39,6 +39,7 @@ import {
   type ProductTaxClass,
 } from "./product-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Products and their sizes (SKUs). */
 const copy: Record<ProductErrorCode | "Loading", string> = {
@@ -78,6 +79,7 @@ function useProductView<V>(
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load(productReference)
@@ -94,7 +96,15 @@ function useProductView<V>(
   }, [client, productReference, parse, generation]);
   return { state, reload };
 }
-function Failure({ code }: { readonly code: ProductErrorCode | "Loading" }) {
+function Failure({
+  code,
+  onRetry,
+}: {
+  readonly code: ProductErrorCode | "Loading";
+  readonly onRetry?: () => void;
+}) {
+  if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
+    return <PageDidNotLoad code={code} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Products")}
@@ -116,8 +126,8 @@ export function ProductListPage({
 }: {
   readonly client?: ProductClient;
 }) {
-  const { state } = useProductView(client, null, parseProductListView);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  const { state, reload } = useProductView(client, null, parseProductListView);
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view: ProductListView = state.view;
   return (
     <AppFrame title={t("Products")} description="">
@@ -304,7 +314,7 @@ function ProductEditor({
     }
   }, [state, latest, loadedVersion, taxClass]);
 
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view = state.view;
   const product = shown(view);
   const mayEdit = product === null ? view.permissions.mayCreate : view.permissions.mayEdit;

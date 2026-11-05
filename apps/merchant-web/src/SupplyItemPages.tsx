@@ -20,6 +20,7 @@ import {
   type SupplyItemView,
 } from "./supply-item-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<SupplyItemErrorCode | "Loading", string> = {
   Loading: t("Loading inventory items…"),
@@ -68,6 +69,8 @@ function routeReference(value: unknown): string | null {
   }
 }
 function Failure({ code, onRefresh }: { code: SupplyItemErrorCode; onRefresh?: () => void }) {
+  if (onRefresh !== undefined && (code === "Unavailable" || code === "Offline"))
+    return <PageDidNotLoad code={code} onRetry={onRefresh} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Inventory items")}
@@ -90,6 +93,7 @@ function useView(
   const [pages, setPages] = useState<SupplyItemView[]>([]);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     setPages([]);
     void client

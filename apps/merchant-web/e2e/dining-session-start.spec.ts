@@ -69,7 +69,7 @@ test("@production staff starts a table and recovers a lost join code without dup
             aggregateVersion: 2,
             // Opened once the start went through (the list is read again after it).
             currentDiningSessionReference: starts.length >= 2 ? id(3) : null,
-            elapsedMinutes: null,
+            elapsedMinutes: starts.length >= 2 ? 0 : null,
             qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
           },
           {

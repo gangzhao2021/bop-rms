@@ -23,6 +23,7 @@ import {
 } from "./store-option-recipes-page.js";
 import { unitText } from "./recipe-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 slice 4.4: what each option does to a product's recipes, reviewed and published. */
 const copy: Record<OptionRecipeErrorCode | "Loading", string> = {
@@ -100,6 +101,7 @@ export function StoreOptionRecipesPage({
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load()
@@ -114,6 +116,8 @@ export function StoreOptionRecipesPage({
       active = false;
     };
   }, [client, generation]);
+  if (state.kind === "Unavailable" || state.kind === "Offline")
+    return <PageDidNotLoad code={state.kind} onRetry={reload} />;
   if (state.kind !== "Found")
     return (
       <StatePanel

@@ -67,7 +67,7 @@ const kitchenNavigation = [
 
 /** Neither the router nor the person's role is what staff should go and look at. */
 async function expectNoBlame(page: Page) {
-  const text = (await page.locator("main").innerText()).toLowerCase();
+  const text = (await page.locator("body").innerText()).toLowerCase();
   expect(text).not.toContain("connection");
   expect(text).not.toContain("permission");
 }
@@ -179,7 +179,10 @@ test("@production a table action the server failed goes again as the same reques
     }),
   ).toBeVisible();
   await expectNoBlame(page);
-  await page.getByRole("button", { name: "Try opening again", exact: true }).click();
+  await page
+    .getByLabel("Open this table")
+    .getByRole("button", { name: "Try opening again", exact: true })
+    .click();
   await expect.poll(() => starts.length).toBe(2);
   expect(starts[1]).toBe(starts[0]);
 });
@@ -205,6 +208,21 @@ test("@production the Kitchen board says what to do when the server fails", asyn
   await session(page, kitchenNavigation);
   await page.route("**/merchant/kitchen/query", (route) => route.fulfill(retryLater));
   await page.goto("/operations/kitchen");
+  await expect(page.getByText(words)).toBeVisible();
+  await expectNoBlame(page);
+});
+
+test("@production Pickup says what to do when the server fails", async ({ page }) => {
+  await session(page, [
+    {
+      screenId: "FUL-PICKUP-QUEUE",
+      label: "Pickup",
+      href: "/operations/pickup",
+      permission: "fulfillment.operate",
+    },
+  ]);
+  await page.route("**/merchant/pickup/query", (route) => route.fulfill(retryLater));
+  await page.goto("/operations/pickup");
   await expect(page.getByText(words)).toBeVisible();
   await expectNoBlame(page);
 });
@@ -336,4 +354,77 @@ test("@production a refused cash refund still says who may do it, and starts ove
   await page.getByRole("button", { name: /10\.00 in cash$/u }).click();
   await page.getByRole("button", { name: /^Confirm: give back/u }).click();
   await expect(page.getByText(/A manager gives cash back/u)).toBeVisible();
+});
+
+const backOfficePages = [
+  ["CAT-PRODUCT-LIST", "/app/commerce/products", "catalog.manage"],
+  ["RECIPE-LIST", "/app/commerce/recipes", "recipe.read"],
+  ["CMP-ALLERGEN-REVIEW", "/app/compliance/allergens", "catalog.allergen.read"],
+  ["PRICE-BOOK-LIST", "/app/commerce/pricing", "pricing.price_book.read"],
+  ["PRICE-OPTION-LIST", "/app/commerce/option-prices", "pricing.price_book.read"],
+  ["CAT-OPTIONSET-LIST", "/app/commerce/option-sets", "catalog.option_set.read"],
+  ["RECIPE-OPTION-LIST", "/app/commerce/option-recipes", "recipe.read"],
+  ["CAT-AVAILABILITY", "/app/commerce/availability", "catalog.sku.read"],
+  ["INV-ITEM-LIST", "/app/supply/items", "inventory.item.read"],
+  ["INV-LOCATION-LIST", "/app/supply/locations", "inventory.location.read"],
+  ["INV-RECEIPT-LIST", "/operations/receiving", "inventory.receipt.read"],
+  ["INV-WASTE-RECORD", "/operations/inventory/waste", "inventory.waste.record"],
+  ["INV-OPENING-COUNT", "/app/supply/opening-count", "inventory.count.read"],
+  ["TAX-STORE-REVIEW", "/app/commerce/tax-review", "pricing.tax_config.read"],
+  ["IAM-USER-LIST", "/app/organization/users", "organization.staff.read"],
+  ["IAM-ROLE-LIST", "/app/organization/roles", "identity.role.read"],
+  ["CAT-MENU-LIST", "/app/commerce/menus", "catalog.menu.read"],
+] as const;
+
+for (const [screenId, href, permission] of backOfficePages)
+  test(`@production ${screenId} says it didn't load, and reads again when asked`, async ({
+    page,
+  }) => {
+    const reads: string[] = [];
+    await page.route("**/merchant/**", (route) => {
+      reads.push(new URL(route.request().url()).pathname);
+      return route.fulfill(retryLater);
+    });
+    await session(page, [{ screenId, label: "Page", href, permission }]);
+    await page.goto(href);
+    await expect(page.getByRole("heading", { name: "This page didn't load" })).toBeVisible();
+    await expect(page.getByText("Nothing you saved is affected.", { exact: false })).toBeVisible();
+    await expectNoBlame(page);
+    const before = reads.length;
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect.poll(() => reads.length).toBeGreaterThan(before);
+    await expect(page.getByRole("heading", { name: "This page didn't load" })).toBeVisible();
+  });
+
+test("@production a back office page opens once a try works", async ({ page }) => {
+  let down = true;
+  await page.route("**/merchant/commerce/products/query", (route) =>
+    down
+      ? route.fulfill(retryLater)
+      : route.fulfill({
+          headers,
+          json: {
+            screenId: "CAT-PRODUCT-LIST",
+            sourceAsOf: "2026-11-05T20:00:00.000Z",
+            permissions: {},
+            taxClasses: [],
+            productTypes: [],
+            products: [],
+          },
+        }),
+  );
+  await session(page, [
+    {
+      screenId: "CAT-PRODUCT-LIST",
+      label: "Products",
+      href: "/app/commerce/products",
+      permission: "catalog.manage",
+    },
+  ]);
+  await page.goto("/app/commerce/products");
+  await expect(page.getByRole("heading", { name: "This page didn't load" })).toBeVisible();
+  down = false;
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "No products yet" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "This page didn't load" })).toHaveCount(0);
 });

@@ -5,6 +5,7 @@ import { SourceTime, StoreDate } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 8.7: TAX-STORE-REVIEW — the Store's tax rates and every product's tax class, read only. */
 export interface TaxReviewView {
@@ -191,7 +192,9 @@ export function StoreTaxReviewPage({
   const [state, setState] = useState<
     { readonly kind: keyof typeof copy } | { readonly kind: "Found"; readonly view: TaxReviewView }
   >({ kind: "Loading" });
+  const [generation, setGeneration] = useState(0);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load()
@@ -205,7 +208,9 @@ export function StoreTaxReviewPage({
     return () => {
       active = false;
     };
-  }, [client]);
+  }, [client, generation]);
+  if (state.kind === "Unavailable" || state.kind === "Offline")
+    return <PageDidNotLoad code={state.kind} onRetry={() => setGeneration((value) => value + 1)} />;
   if (state.kind !== "Found")
     return (
       <StatePanel

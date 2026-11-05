@@ -25,6 +25,7 @@ import {
 } from "./role-administration-pages.js";
 import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 type State =
   | { readonly kind: "Loading" | RoleAdministrationPageErrorCode }
   | { readonly kind: "Found"; readonly view: RoleAdministrationPageView };
@@ -58,7 +59,15 @@ const reasonCodes: Record<RoleAdministrationOperation, string> = {
   Activate: "ROLE_ACTIVATED",
   Deactivate: "ROLE_DEACTIVATED",
 };
-function Status({ state }: { readonly state: Exclude<State["kind"], "Found"> }) {
+function Status({
+  state,
+  onRetry,
+}: {
+  readonly state: Exclude<State["kind"], "Found">;
+  readonly onRetry: () => void;
+}) {
+  if (state === "Unavailable" || state === "Offline")
+    return <PageDidNotLoad code={state} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={
@@ -483,6 +492,7 @@ function Page({
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true,
       request: Promise<unknown>;
     try {
@@ -514,7 +524,7 @@ function Page({
   return state.kind === "Found" ? (
     <RoleAdministrationScreen view={state.view} client={client} csrf={csrf} reload={reload} />
   ) : (
-    <Status state={state.kind} />
+    <Status state={state.kind} onRetry={reload} />
   );
 }
 export function RoleListPage({

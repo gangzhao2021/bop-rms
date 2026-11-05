@@ -27,6 +27,7 @@ import {
   unitText,
 } from "./recipe-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-RECIPE-AUTHORING: Brand recipes — drafts, independent review, publication, SKUs. */
 const copy: Record<RecipeErrorCode | "Loading", string> = {
@@ -80,6 +81,7 @@ function useRecipeView<V>(
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     void client
       .load(recipeReference)
@@ -96,7 +98,9 @@ function useRecipeView<V>(
   }, [client, recipeReference, parse, generation]);
   return { state, reload };
 }
-function Failure({ code }: { code: RecipeErrorCode | "Loading" }) {
+function Failure({ code, onRetry }: { code: RecipeErrorCode | "Loading"; onRetry?: () => void }) {
+  if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
+    return <PageDidNotLoad code={code} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Recipes")}
@@ -115,8 +119,8 @@ export function RecipeListPage({
 }: {
   readonly client?: RecipeClient;
 }) {
-  const { state } = useRecipeView(client, null, parseRecipeListView);
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  const { state, reload } = useRecipeView(client, null, parseRecipeListView);
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view: RecipeListView = state.view;
   return (
     <AppFrame title={t("Recipes")} description="">
@@ -1024,7 +1028,7 @@ function RecipeEditor({
     [client, reload],
   );
   if (reference === undefined) return <Failure code="NotFound" />;
-  if (state.kind !== "Found") return <Failure code={state.kind} />;
+  if (state.kind !== "Found") return <Failure code={state.kind} onRetry={reload} />;
   const view = state.view;
   const errorPanel = error ? (
     <StatePanel heading={t("Not recorded")} tone="error" status>

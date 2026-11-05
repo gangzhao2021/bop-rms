@@ -24,7 +24,7 @@ export const refundErrorText = (error: unknown) =>
         ? t("This order changed while it was loading. Refresh to see the latest.")
         : error instanceof OrdinaryRefundClientError && error.code === "Conflict"
           ? t("The payment or refund selection changed. Refresh before trying again.")
-          : t("Unable to refresh this information. Check your connection and try again.");
+          : t("Unable to refresh this information. Try again.");
 
 export function OrderPaymentLinks({
   orderReference,

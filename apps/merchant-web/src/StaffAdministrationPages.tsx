@@ -23,6 +23,7 @@ import {
 } from "./staff-administration-pages.js";
 import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { serverProblemText } from "./failure-words.js";
+import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 const copy: Record<StaffPageErrorCode | "Loading", string> = {
   Loading: t("Loading Store staff…"),
@@ -769,6 +770,7 @@ function Page({
   const [added, setAdded] = useState("");
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   useEffect(() => {
+    setState(readingAgain);
     let active = true;
     let request: Promise<unknown>;
     try {
@@ -791,6 +793,8 @@ function Page({
       active = false;
     };
   }, [client, id, screenId, generation]);
+  if (state.kind === "Unavailable" || state.kind === "Offline")
+    return <PageDidNotLoad code={state.kind} onRetry={reload} />;
   if (state.kind !== "Found")
     return (
       <StatePanel
