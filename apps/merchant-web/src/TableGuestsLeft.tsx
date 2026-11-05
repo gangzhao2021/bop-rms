@@ -1,4 +1,5 @@
 import { t, saidTable } from "./i18n/i18n.js";
+import { KitchenMayHaveStartedNote, kitchenMayHaveStartedText } from "./kitchen-cancel-warning.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createTableClosePlanClient,
@@ -78,12 +79,12 @@ export function guestsLeftRoundText(
       // Refunded in full item by item already: nothing is left to refund or record.
       if (round.refund !== null && BigInt(round.refund.amountMinor) === 0n)
         return t(
-          "{name}: {openItemCount} not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
+          "{name}: {openItemCount} not marked started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
           { name: name, openItemCount: items(round.openItemCount) },
         );
       return machine
         ? t(
-            "{name}: {openItemCount} not started in the kitchen. It will be cancelled; then refund {value} on the card machine and record that on the Orders page.",
+            "{name}: {openItemCount} not marked started in the kitchen. It will be cancelled; then refund {value} on the card machine and record that on the Orders page.",
             {
               name: name,
               openItemCount: items(round.openItemCount),
@@ -91,7 +92,7 @@ export function guestsLeftRoundText(
             },
           )
         : t(
-            "{name}: {openItemCount} not started in the kitchen. It will be cancelled and {value} refunded to the guest.",
+            "{name}: {openItemCount} not marked started in the kitchen. It will be cancelled and {value} refunded to the guest.",
             {
               name: name,
               openItemCount: items(round.openItemCount),
@@ -100,7 +101,7 @@ export function guestsLeftRoundText(
           );
     case "PartlyStarted":
       return (
-        t("{name}: {length} not started will be cancelled and ", {
+        t("{name}: {length} not marked started will be cancelled and ", {
           name: name,
           length: items(round.cancellableItemReferences.length),
         }) +
@@ -132,7 +133,7 @@ export function guestsLeftRoundText(
     case "OnTableBill":
       // v15 2026-10-28: a round of a table that pays at the end, not paid yet.
       return t(
-        "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't started can come off the bill before the table pays.",
+        "{name}: {openItemCount} not served yet. Serve them when they're ready (Serve all on the table). Dishes the kitchen hasn't marked started can come off the bill before the table pays.",
         { name: name, openItemCount: items(round.openItemCount) },
       );
     case "PaidWithTable":
@@ -357,6 +358,19 @@ export function TableGuestsLeft({
           </li>
         ))}
       </ul>
+      {actionable.some(
+        (round) =>
+          kitchenMayHaveStartedText(round.kitchenReceivedAt, Date.now()) !== null &&
+          (round.state === "NotStarted" || round.state === "PartlyStarted"),
+      ) ? (
+        <KitchenMayHaveStartedNote
+          receivedAt={
+            actionable.find(
+              (round) => round.state === "NotStarted" || round.state === "PartlyStarted",
+            )?.kitchenReceivedAt
+          }
+        />
+      ) : null}
       {actionable.length > 0 ? (
         <>
           <p>
@@ -368,7 +382,7 @@ export function TableGuestsLeft({
               <>
                 {t("refunds {online} to the guest online{value}{value2}", {
                   online: cad(online),
-                  value: unknownPartly ? t(" plus the items not started") : "",
+                  value: unknownPartly ? t(" plus the items not marked started") : "",
                   value2:
                     machine > 0n
                       ? t(" and {machine} to refund on the card machine", { machine: cad(machine) })

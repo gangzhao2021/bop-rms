@@ -29,6 +29,7 @@ import {
   orderPriceReductionPermission,
 } from "@rms/ordering";
 import {
+  listStoreKitchenBatchReceivedAt,
   listStoreKitchenBatchTouches,
   listStoreKitchenBatchesNotPrepared,
   listStoreKitchenBatchesWithNothingToPrepare,
@@ -1077,9 +1078,10 @@ export function createPersistentMerchantOrderQueue(options: {
                 )) {
                   if (cancelAllowed && state === "NotStarted" && !removed.has(line))
                     unpaidRemovable.set(batch, [...(unpaidRemovable.get(batch) ?? []), line]);
+                  // DEC-KITCHEN-ONE-TAP: any dish that reached the kitchen (see the comp command).
                   if (
                     compAllowed &&
-                    state === "Started" &&
+                    state !== "Cancelled" &&
                     !removed.has(line) &&
                     !reduced.has(line)
                   )
@@ -1087,6 +1089,21 @@ export function createPersistentMerchantOrderQueue(options: {
                 }
               }
             }
+          }
+          // DEC-KITCHEN-ONE-TAP: a dish with no Start fact may already be in the pan, so what takes it
+          // back (cancel, take off the bill) says how long the kitchen has had it.
+          const kitchenReceived = new Map<string, string>();
+          if (cancelAllowed && scoped !== null) {
+            const rounds = result.items.flatMap((item) =>
+              item.batches.map((batch) => String(batch.orderBatchReference)),
+            );
+            for (let index = 0; index < rounds.length; index += 100)
+              for (const [round, at] of await listStoreKitchenBatchReceivedAt(
+                businessTransaction,
+                scoped,
+                rounds.slice(index, index + 100),
+              ))
+                kitchenReceived.set(round, at);
           }
           const batchOpen = (
             item: (typeof result.items)[number],
@@ -1503,6 +1520,7 @@ export function createPersistentMerchantOrderQueue(options: {
                             Object.freeze(entry),
                           ),
                         ),
+                        kitchenReceivedAt: kitchenReceived.get(batch.orderBatchReference) ?? null,
                       });
                     }),
                   ),

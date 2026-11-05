@@ -44,7 +44,7 @@ export function itemCompFailureText(failure: Failure) {
       return t("A guest is paying the table on their phone. Wait for it, or stop it first.");
     case "NotStarted":
       return t(
-        "The kitchen hasn't started one of these dishes. Take it off the bill instead, so the kitchen stops it.",
+        "One of these dishes hasn't reached the kitchen yet. Take it off the bill instead, so it isn't made.",
       );
     case "AlreadyComped":
       return t("One of these dishes already has a comp or discount. Refresh the table.");
@@ -100,8 +100,8 @@ export function compAmountMinor(
 }
 
 /**
- * WP-2423 item 8 ① segment 2 (Owner decision 2, Figma 45:315): a manager comps or discounts dishes
- * the kitchen started or the table was served, before the table pays. Money, so it is confirmed:
+ * WP-2423 item 8 ① segment 2 (Owner decision 2, Figma 45:315; DEC-KITCHEN-ONE-TAP): a manager comps
+ * or discounts any dish that reached the kitchen, before the table pays; the kitchen still makes it. Money, so it is confirmed:
  * the dishes, how much (shown exactly), and a reason; recorded as a compensating record that stays
  * in the reports. On a shared tablet the manager confirms with a full sign-in.
  */

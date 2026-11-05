@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { KitchenMayHaveStartedNote } from "./kitchen-cancel-warning.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type CurrentOrderLine,
@@ -287,9 +288,10 @@ export function StaffItemCancelAction({
         </h2>
         <p>
           {t(
-            "Only items the kitchen has not started. The customer is refunded for the cancelled items, their tax and their share of any tip; the rest of the order continues.",
+            "Only items the kitchen has not marked started. The customer is refunded for the cancelled items, their tax and their share of any tip; the rest of the order continues.",
           )}
         </p>
+        <KitchenMayHaveStartedNote receivedAt={batch.kitchenReceivedAt} />
         <form
           hidden={!formOpen}
           onSubmit={(event) => {

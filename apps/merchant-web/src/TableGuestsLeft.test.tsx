@@ -19,6 +19,7 @@ const round = (overrides: Partial<TableCloseRound>): TableCloseRound => ({
   cancellableItemReferences: [],
   refund: { method: "Online", amountMinor: "1130" },
   cancelsAt: null,
+  kitchenReceivedAt: null,
   ...overrides,
 });
 const wire = {
@@ -37,6 +38,7 @@ const wire = {
       cancellableItemReferences: [],
       refund: { method: "Online", amountMinor: "1130" },
       cancelsAt: null,
+      kitchenReceivedAt: null,
     },
     {
       orderBatchReference: id(21),
@@ -48,6 +50,7 @@ const wire = {
       cancellableItemReferences: [],
       refund: { method: "Online", amountMinor: "0" },
       cancelsAt: null,
+      kitchenReceivedAt: null,
     },
   ],
   totals: { onlineMinor: "1130", cardMachineMinor: "0" },
@@ -119,7 +122,7 @@ it("DEC-TABLE-CLOSE-GUESTS-LEFT: words each round for staff, with amounts and no
     now,
   );
   expect(refunded).toBe(
-    "Round 4: 1 item not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
+    "Round 4: 1 item not marked started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
   );
   texts.push(refunded);
   for (const text of texts) expect(text).not.toMatch(/[0-9a-f]{8}-|GUEST_LEFT|PaidNotSent|Batch/u);
@@ -215,7 +218,7 @@ it("WP-2423: started items are worded by kitchen readiness (ready to serve vs be
       "450",
     ),
   ).toBe(
-    "Round 4: 1 item not started will be cancelled and $4.50 refunded. 1 item ready to serve: serve them, or mark them served on the Orders page.",
+    "Round 4: 1 item not marked started will be cancelled and $4.50 refunded. 1 item ready to serve: serve them, or mark them served on the Orders page.",
   );
 });
 

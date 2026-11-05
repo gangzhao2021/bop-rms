@@ -220,8 +220,11 @@ export function createMerchantDiningItemComp(options: {
               )
             )
               return fail("ITEM_COMP_GUEST_PAYING");
-            // Comps are for dishes the kitchen started or the table was served; a dish not
-            // started yet is taken off the bill instead (the kitchen stops it).
+            // DEC-KITCHEN-ONE-TAP (the default recorded for the Owner, changing Owner decision 2):
+            // Start is optional now, so "no Start fact" no longer says the kitchen has not begun. A
+            // comp leaves the kitchen's work alone, so any dish that reached the kitchen may have
+            // one. A dish that never reached it comes off the bill instead. Reversed by requiring
+            // "Started" here and in the order queue's offer.
             const states = await listStoreKitchenOrderItemStates(
               tx,
               { brandReference: selected.brandReference, storeReference: selected.storeReference },
@@ -231,7 +234,7 @@ export function createMerchantDiningItemComp(options: {
             for (const line of prepared.plan.lines) {
               const state = states.get(line.orderItemReference);
               if (state === "Cancelled") return fail("ITEM_COMP_NOT_ELIGIBLE");
-              if (state !== "Started") return fail("ITEM_COMP_NOT_STARTED");
+              if (state === undefined) return fail("ITEM_COMP_NOT_STARTED");
             }
             const records = await ordering.commit(tx, {
               plan: prepared.plan,

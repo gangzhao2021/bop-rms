@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { KitchenMayHaveStartedNote } from "./kitchen-cancel-warning.js";
 import { useRef, useState } from "react";
 import { Link } from "react-router";
 import {
@@ -191,7 +192,7 @@ export function staffCancelOutcome(
 const message: Record<Exclude<Outcome, "Idle">, string> = {
   Pending: "Cancelling…",
   Cancelled: t("Cancelled. The customer's refund has started."),
-  PreparationStarted: t("The kitchen has started — use a refund instead."),
+  PreparationStarted: t("The kitchen has marked it started — use a refund instead."),
   NothingToPrepare: t("Nothing to prepare: hand it over or refund it."),
   VersionConflict: t(
     "This order changed since it was shown. Close to refresh it, then cancel again if needed.",
@@ -383,8 +384,9 @@ export function StaffOrderCancelAction({
             ? t(
                 "It was never accepted, so it hasn't reached the kitchen. The reason and your name are recorded.",
               )
-            : t("Only before the kitchen starts.")}
+            : t("Only before the kitchen marks it started.")}
         </p>
+        {refusing ? null : <KitchenMayHaveStartedNote receivedAt={batch.kitchenReceivedAt} />}
         <p className="order-cancel-refund" aria-live="polite">
           {staffCancelRefundText(pickup, preview)}
           {preview === "Failed" ? (

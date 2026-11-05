@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { KitchenMayHaveStartedNote } from "./kitchen-cancel-warning.js";
 import { Link } from "react-router";
 import { t } from "./i18n/i18n.js";
 import {
@@ -38,7 +39,7 @@ export function payLaterRemoveFailureText(failure: Failure) {
       );
     case "Started":
       return t(
-        "The kitchen has started one of these dishes, so it stays on the bill. To not charge the table for it, comp it with a reason instead; the comp is recorded.",
+        "The kitchen has marked one of these dishes started, so it stays on the bill. To not charge the table for it, comp it with a reason instead; the comp is recorded.",
       );
     case "Changed":
       return t("This order changed since it was shown. Refresh it, then try again.");
@@ -247,6 +248,7 @@ export function PayLaterItemRemoveAction({
       className="pay-later-remove order-cancel-actions"
     >
       <p>{t("Tick the dishes the table won't be charged for. The kitchen stops them.")}</p>
+      <KitchenMayHaveStartedNote receivedAt={batch.kitchenReceivedAt} />
       <ul className="pay-later-remove__lines">
         {offered.map((line) => (
           <li key={line.orderItemReference}>

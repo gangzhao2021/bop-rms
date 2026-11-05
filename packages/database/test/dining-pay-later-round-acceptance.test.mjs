@@ -201,6 +201,8 @@ it("a manager comps and discounts served dishes before the table pays; it stays 
   journey("Comped"));
 
 // v15 2026-10-27 follow-up: a table whose every dish was comped owes nothing and closes as usual.
+it("a manager comps a dish with no Start fact and its kitchen work stays open", () =>
+  journey("CompBeforeStart"));
 it("a table comped in full owes nothing and closes without a payment", () =>
   journey("CompedWhole"));
 
@@ -826,7 +828,10 @@ async function realTeaRounds() {
   });
 }
 
-async function journey(ending) {
+async function journey(journeyEnding) {
+  // DEC-KITCHEN-ONE-TAP: the comp journey up to the comp, with no Start fact on the dish.
+  const compBeforeStartOnly = journeyEnding === "CompBeforeStart";
+  const ending = compBeforeStartOnly ? "Comped" : journeyEnding;
   await withIsolatedDatabase(
     {
       caseId:
@@ -3080,6 +3085,7 @@ async function journey(ending) {
                   kitchenAt,
                 ],
               );
+            if (options.queuedOnly) return;
             // ── The kitchen accepts, starts and completes each dish (the pilot kitchen lifecycle,
             // its current-source check over the real Ordering kitchen source); synthetic admission
             // and Expo decisions, as in the pilot kitchen command.
@@ -3499,12 +3505,52 @@ async function journey(ending) {
          * 1 is discounted 50 % and paid in cash. The comped dish stays in the sales, the comps are
          * their own line, and reports, the day-end settlement and the export all say so.
          */
+        /**
+         * DEC-KITCHEN-ONE-TAP: Start is optional, so a dish with no Start fact may well be in the wok.
+         * A comp leaves the kitchen's work alone: a manager comps the dish the table has waited 40
+         * minutes for, and the kitchen still makes it. (The default the coordinator recorded for
+         * the Owner; reversed by restoring the one check in merchant-dining-item-comp.ts.)
+         */
+        async function compBeforeStart() {
+          const mocha = String(items2[0].orderItemReference);
+          // On the kitchen board, nobody tapped anything.
+          await cookAndServeRound1([round2], { queuedOnly: true });
+          const comped = await comp(manager, { orderItemReferences: [mocha] });
+          assert.deepEqual(
+            comped.reductions.map((entry) => [entry.kind, entry.reasonCode]),
+            [["Comp", "QUALITY"]],
+          );
+          const work = await admin.query(
+            "SELECT status,completed_quantity FROM rms_kitchen.kitchen_work_item WHERE order_item_id=$1",
+            [mocha],
+          );
+          assert.deepEqual(work.rows, [{ status: "Queued", completed_quantity: 0 }]);
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT count(*)::int AS n FROM rms_kitchen.kitchen_work_lifecycle_operation WHERE order_item_id=$1",
+                [mocha],
+              )
+            ).rows[0].n,
+            0,
+          );
+          assert.equal(
+            (
+              await admin.query(
+                "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='ORDER_ITEM_COMPED' AND actor_reference=$1",
+                [id(0x701)],
+              )
+            ).rows[0].n,
+            1,
+          );
+          // Cancelling is still another way to refuse what is on the table's bill: a second decision
+          // on the dish is refused, and the money stays on record.
+          await assert.rejects(comp(manager, { orderItemReferences: [mocha] }), {
+            code: "ITEM_COMP_ALREADY_COMPED",
+          });
+        }
         async function compedEnding() {
           const mocha = String(items2[0].orderItemReference);
-          // Before the kitchen starts a dish it is taken off the bill instead (the kitchen stops it).
-          await assert.rejects(comp(manager, { orderItemReferences: [mocha] }), {
-            code: "ITEM_COMP_NOT_STARTED",
-          });
           await cookAndServeRound1([round1, round2]);
           // A server (no comp permission) is refused; nothing is written.
           await assert.rejects(comp(server, { orderItemReferences: [mocha] }), {
@@ -5421,6 +5467,10 @@ async function journey(ending) {
         if (ending === "WrittenOff") {
           await writtenOffEnding();
           await assertSalesCountEveryRoundOnce();
+          return;
+        }
+        if (compBeforeStartOnly) {
+          await compBeforeStart();
           return;
         }
         if (ending === "Comped") {

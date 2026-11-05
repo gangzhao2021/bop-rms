@@ -88,6 +88,7 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
       "cancellableItemReferences",
       "refund",
       "cancelsAt",
+      "kitchenReceivedAt",
     ]);
     const batch = reference(round.orderBatchReference);
     if (seen.has(batch)) return fail();
@@ -123,6 +124,7 @@ export function parseTableClosePlan(value: unknown, expected: { order: string; s
       cancellableItemReferences: Object.freeze(cancellable),
       refund,
       cancelsAt: round.cancelsAt === null ? null : instant(round.cancelsAt),
+      kitchenReceivedAt: round.kitchenReceivedAt === null ? null : instant(round.kitchenReceivedAt),
     });
   });
   const totals = exact(raw.totals, ["onlineMinor", "cardMachineMinor"]);

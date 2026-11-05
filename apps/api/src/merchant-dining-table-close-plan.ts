@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
+import { listStoreKitchenBatchReceivedAt } from "@rms/kitchen";
 import {
   createPostgresDiningOrderItemStateReader,
   createPostgresMerchantOrderIndex,
@@ -82,6 +83,8 @@ export interface TableCloseRound {
   };
   /** NotPaid: when the System cancels it. */
   readonly cancelsAt: string | null;
+  /** When this round reached the kitchen; null: it has not. */
+  readonly kitchenReceivedAt: string | null;
 }
 
 export interface TableClosePlan {
@@ -296,6 +299,13 @@ export function createMerchantDiningTableClosePlan(options: {
             });
             return { method: "Online" as const, amountMinor: position.remainingMinor };
           };
+          // DEC-KITCHEN-ONE-TAP: a round with no Start fact may already be in the pan; closing out
+          // says how long the kitchen has had it.
+          const kitchenReceived = await listStoreKitchenBatchReceivedAt(
+            tx,
+            owner,
+            state.batches.map((batch) => String(batch.orderBatchReference)).slice(0, 100),
+          );
           const rounds: TableCloseRound[] = [];
           for (const batch of state.batches) {
             const reference = String(batch.orderBatchReference);
@@ -322,6 +332,7 @@ export function createMerchantDiningTableClosePlan(options: {
               cancellableItemReferences: Object.freeze([] as string[]),
               refund: null,
               cancelsAt: null,
+              kitchenReceivedAt: kitchenReceived.get(reference) ?? null,
             };
             if (batch.cancellation !== null) continue;
             const cancelled = staffCancellations.get(reference);

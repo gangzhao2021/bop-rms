@@ -1175,3 +1175,10 @@
   font-size: 16px;
   font-weight: 600;
 }
+
+/* A warning, never a block: said where staff take a dish back. Words, no box. */
+.kitchen-may-have-started {
+  margin: 8px 0;
+  color: var(--bop-color-danger-text);
+  font-size: 14px;
+}

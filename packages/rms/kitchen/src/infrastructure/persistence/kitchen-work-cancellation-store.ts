@@ -731,6 +731,41 @@ export function createPostgresKitchenBatchCancellation(options: {
   });
 }
 
+/**
+ * DEC-KITCHEN-ONE-TAP: when each of these rounds reached the kitchen (at most 100). Start is optional,
+ * so a dish with no Start fact may already be in the pan; staff taking it back are told how long the
+ * kitchen has had it.
+ */
+export async function listStoreKitchenBatchReceivedAt(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderBatchReferences: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  const brand = guarded(() => parseKitchenTicketReference(scope.brandReference));
+  const store = guarded(() => parseKitchenTicketReference(scope.storeReference));
+  if (!Array.isArray(orderBatchReferences) || orderBatchReferences.length > 100)
+    return unavailable();
+  const batches = guarded(() =>
+    [...new Set(orderBatchReferences)].map((value) => parseKitchenTicketReference(value)),
+  );
+  if (batches.length === 0) return new Map();
+  try {
+    const result = await tx.query(
+      "SELECT order_batch_id::text AS batch,created_at FROM rms_kitchen.kitchen_ticket " +
+        "WHERE brand_id=$1 AND store_id=$2 AND order_batch_id=ANY($3::uuid[])",
+      [brand, store, batches],
+    );
+    return new Map(
+      result.rows.map((row) => [
+        String(row.batch),
+        new Date(row.created_at as string | Date).toISOString(),
+      ]),
+    );
+  } catch {
+    return unavailable();
+  }
+}
+
 /** Per order line kitchen state of a store's batches (at most 100 batch references). A line is
  * Started when any of its work items left Queued/Held or recorded a Start; Cancelled when all of
  * its work items were cancelled by staff. */

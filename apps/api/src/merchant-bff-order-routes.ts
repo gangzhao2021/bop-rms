@@ -157,6 +157,10 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       // WP-2423 item 8 ① segment 2: dishes a manager may comp or discount, and those comped.
       compableItems: batch.compableItems,
       compedItems: batch.compedItems,
+      // DEC-KITCHEN-ONE-TAP: how long the kitchen has had this round (null: it has not).
+      ...(batch.kitchenReceivedAt === undefined
+        ? {}
+        : { kitchenReceivedAt: batch.kitchenReceivedAt }),
     })),
     currentPhase: item.currentPhase,
     currentVersion: item.currentVersion,

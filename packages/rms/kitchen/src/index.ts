@@ -312,6 +312,7 @@ export {
 } from "./application/kitchen-work-cancelled-event.js";
 export {
   createPostgresKitchenBatchCancellation,
+  listStoreKitchenBatchReceivedAt,
   listStoreKitchenOrderItemStates,
   listStoreKitchenBatchTouches,
   listStoreKitchenBatchesNotPrepared,

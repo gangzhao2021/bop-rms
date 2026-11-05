@@ -719,6 +719,9 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
             Object.hasOwn(value as object, key),
           )
         : [];
+      // DEC-KITCHEN-ONE-TAP: absent from an older server (no warning then).
+      const withKitchenReceived =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenReceivedAt");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -736,6 +739,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ...(withWaitingSince ? ["awaitingAcceptanceSince"] : []),
         ...(withUnpaidRemoval ? ["unpaidRemovableItems", "unpaidRemovedItems"] : []),
         ...(withComps ? ["compableItems", "compedItems"] : []),
+        ...(withKitchenReceived ? ["kitchenReceivedAt"] : []),
       ]);
       const references = (list: unknown) =>
         Array.isArray(list) && list.length <= 500
@@ -925,6 +929,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         compableItems,
         /** Comps and discounts on this round (tax included), never removed. */
         compedItems,
+        /** DEC-KITCHEN-ONE-TAP: when this round reached the kitchen; null: not yet or unknown. */
+        kitchenReceivedAt:
+          withKitchenReceived && typeof batch.kitchenReceivedAt === "string"
+            ? batch.kitchenReceivedAt
+            : null,
       });
     });
     const counter = parseCounter(item.counter, item.sourceChannel);
