@@ -449,6 +449,52 @@ test("@production a table whose dishes are still in the cart goes back to the ca
   await expect(main).not.toContainText("saved on your table page");
 });
 
+test("@production last orders before any card says so, with the way back to where the dishes are", async ({
+  page,
+}) => {
+  // The first start placed the round and then failed; by the guest's retry the kitchen had stopped.
+  let placed = false;
+  const { intentCalls } = await checkout(page, {
+    channel: "DineIn",
+    cartLines: () => (placed ? 0 : 1),
+    intents: (route, call) => {
+      placed = true;
+      return call === 1
+        ? refused(503)(route, call)
+        : refused(409, "payment_store_closed")(route, call);
+    },
+  });
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(main.getByRole("heading", { name: "We couldn’t start your payment" })).toBeVisible();
+  await main.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(
+    main.getByRole("heading", { name: "The store stopped taking orders" }),
+  ).toBeVisible();
+  // No card was offered in this tab, so this much is known.
+  await expect(main).toContainText("so this order hasn’t been charged");
+  await expect(main.getByRole("button", { name: "Try again", exact: true })).toHaveCount(0);
+  await expect(main.getByRole("link", { name: "See your table" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Back to your cart" })).toHaveCount(0);
+  await expect(main.getByRole("link", { name: "Back to checkout" })).toHaveCount(0);
+  await expect(main.getByRole("heading", { name: "Need a staff member?" })).toBeVisible();
+  await expectNoInternalText(page);
+  expect(intentCalls[1]?.key).toBe(intentCalls[0]?.key);
+});
+
+test("@production last orders at pickup goes back to the cart, with no table to call from", async ({
+  page,
+}) => {
+  await checkout(page, { channel: "Pickup", intents: refused(409, "payment_store_closed") });
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(
+    main.getByRole("heading", { name: "The store stopped taking orders" }),
+  ).toBeVisible();
+  await expect(main.getByRole("link", { name: "Back to your cart" })).toBeVisible();
+  await expect(main.getByText("Need a staff member?")).toHaveCount(0);
+});
+
 test("@production a checkout whose order needs checking again says so, without a charge claim to break", async ({
   page,
 }) => {
