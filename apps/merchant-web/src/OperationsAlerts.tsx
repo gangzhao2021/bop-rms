@@ -51,6 +51,7 @@ export function alertTitle(title: string): string {
     ),
     "Receipts are not being issued": t("Receipts are not being issued"),
     "Orders cannot be priced": t("Orders cannot be priced"),
+    "The store's order rules cannot be used": t("The store's order rules cannot be used"),
     "Pickup orders cannot be taken": t("Pickup orders cannot be taken"),
     "Pickup times are running out": t("Pickup times are running out"),
     "Secure connection certificate has expired": t("Secure connection certificate has expired"),

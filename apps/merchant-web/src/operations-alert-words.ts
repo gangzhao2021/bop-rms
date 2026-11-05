@@ -54,6 +54,13 @@ export function alertAction(english: string): string {
       t(
         "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.",
       ),
+    "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. BOP support has to fix this.":
+      t(
+        "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. BOP support has to fix this.",
+      ),
+    "Nothing changes for guests yet. Tell BOP support today: they have to fix this.": t(
+      "Nothing changes for guests yet. Tell BOP support today: they have to fix this.",
+    ),
     'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
       t(
         'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
@@ -189,6 +196,7 @@ function checkSource(english: string): string {
     "the check for orders holding stock": t("the check for orders holding stock"),
     "the check for pickup times": t("the check for pickup times"),
     "the check that orders can be priced": t("the check that orders can be priced"),
+    "the check of the store's order rules": t("the check of the store's order rules"),
   };
   return lookup(words, english);
 }
@@ -392,6 +400,14 @@ export function alertSummary(english: string): string {
     "The tax settings published in Store setup are not the ones this store is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.":
       t(
         "The tax settings published in Store setup are not the ones this store is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.",
+      ),
+    "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.":
+      t(
+        "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.",
+      ),
+    "Rounds a table did not pay for stay open and keep their ingredients set aside. New orders and payments still work.":
+      t(
+        "Rounds a table did not pay for stay open and keep their ingredients set aside. New orders and payments still work.",
       ),
     "No successful backup has been recorded for this store yet.": t(
       "No successful backup has been recorded for this store yet.",

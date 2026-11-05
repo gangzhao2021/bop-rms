@@ -216,6 +216,20 @@ export const ALERT_CATALOG = Object.freeze({
       'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.',
     runbook: "alert-pricing-tax-configuration",
   },
+  "orders.workflow": {
+    severity: "critical",
+    raiseAfterMs: 2 * MINUTE,
+    title: () => "The store's order rules cannot be used",
+    summary: (p) =>
+      p.reason === "Cancellation"
+        ? "Rounds a table did not pay for stay open and keep their ingredients set aside. New orders and payments still work."
+        : "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.",
+    action: (p) =>
+      p.reason === "Cancellation"
+        ? "Nothing changes for guests yet. Tell BOP support today: they have to fix this."
+        : "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. BOP support has to fix this.",
+    runbook: "alert-orders-workflow",
+  },
   "reconciliation.differences": {
     severity: "warning",
     raiseAfterMs: 0,
@@ -353,6 +367,7 @@ const SOURCE_NAMES = Object.freeze({
   heldStock: "the check for orders holding stock",
   pickupCapacity: "the check for pickup times",
   quoteTax: "the check that orders can be priced",
+  workflow: "the check of the store's order rules",
 });
 
 const PROBE_KEYS = Object.freeze({
@@ -437,6 +452,18 @@ export function evaluateAlertConditions(observations, thresholds = DEFAULT_THRES
             ? "StoreConfigurationUnavailable"
             : "TaxConfigurationMismatch",
       });
+    if (business.workflow === "unreadable") unreadable.push("workflow");
+    else if (business.workflow?.ready === false)
+      raise(
+        "orders.workflow",
+        {
+          reason: business.workflow.reason === "Cancellation" ? "Cancellation" : "Orders",
+          rule: /^[A-Za-z]{1,40}$/u.test(business.workflow.rule ?? "")
+            ? business.workflow.rule
+            : "Refused",
+        },
+        business.workflow.reason === "Cancellation" ? "warning" : "critical",
+      );
     if (business.heldStock === "unreadable") unreadable.push("heldStock");
     else if (pick(business.heldStock))
       raise("orders.held_stock", {

@@ -231,6 +231,56 @@ describe("WP-2423 Q13 alert rules", () => {
       "the check that orders can be priced",
     ]);
   });
+  it("WP-2423 item 9: says so when the store's order rules cannot be used, and what staff do", () => {
+    const o = healthy();
+    o.business.workflow = { ready: true };
+    expect(keys(evaluateAlertConditions(o))).toEqual([]);
+    o.business.workflow = { ready: false, reason: "Orders", rule: "TwoBrandVersions" };
+    const c = evaluateAlertConditions(o);
+    expect(keys(c)).toEqual(["orders.workflow"]);
+    expect(c.get("orders.workflow").severity).toBe("critical");
+    expect(c.get("orders.workflow").params).toEqual({
+      reason: "Orders",
+      rule: "TwoBrandVersions",
+    });
+    const text = renderAlert("orders.workflow", c.get("orders.workflow").params);
+    expect(text.title).toBe("The store's order rules cannot be used");
+    expect(text.summary).toContain("cannot order or pay on their phones");
+    expect(text.action).toContain("on paper");
+    expect(text.action).toContain("card machine");
+    expect(text.action).toContain("BOP support");
+    expect(text.runbook).toBe("alert-orders-workflow");
+    // The rule stays in BOP's log: it never reaches the words a person reads.
+    expect(`${text.title} ${text.summary} ${text.action}`).not.toContain("TwoBrandVersions");
+    const { state } = advanceAlertState(emptyAlertState(), c, T0);
+    const raised = advanceAlertState(state, c, T0 + 2 * MIN);
+    expect(raised.notifications.map((n) => [n.kind, n.key])).toEqual([
+      ["raised", "orders.workflow"],
+    ]);
+    const shown = buildAlertBoard(raised.state, {
+      observedAt: new Date(T0).toISOString(),
+      channels: [],
+      backup: null,
+    });
+    expect(shown.active.map(({ key }) => key)).toEqual(["orders.workflow"]);
+    expect(JSON.stringify(shown)).not.toContain("TwoBrandVersions");
+    // Only the cancellation Workflow refused: guests are not stopped, so it is not urgent.
+    o.business.workflow = { ready: false, reason: "Cancellation", rule: "BrandVersionNotActive" };
+    const later = evaluateAlertConditions(o);
+    expect(later.get("orders.workflow").severity).toBe("warning");
+    const quiet = renderAlert("orders.workflow", later.get("orders.workflow").params);
+    expect(quiet.summary).toContain("New orders and payments still work");
+    expect(quiet.action).toContain("Nothing changes for guests yet");
+    // A rule that is not one fixed word never reaches the log.
+    o.business.workflow = { ready: false, reason: "Orders", rule: "guest Sam at table 4" };
+    expect(evaluateAlertConditions(o).get("orders.workflow").params.rule).toBe("Refused");
+    // A read that could not run is "could not check", never the alarm itself.
+    o.business.workflow = "unreadable";
+    expect(keys(evaluateAlertConditions(o))).toEqual(["monitor.source"]);
+    expect(evaluateAlertConditions(o).get("monitor.source").params.sources).toEqual([
+      "the check of the store's order rules",
+    ]);
+  });
   it("says no backup exists until the first one, and nothing about the supervisor during maintenance", () => {
     const o = healthy();
     o.backup = { lastSuccessAt: null };

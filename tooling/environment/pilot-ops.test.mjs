@@ -50,6 +50,32 @@ function fakeIo({ apiUp = () => true, channels = [] } = {}) {
 const fresh = () => ({ schemaVersion: 1, alert: emptyAlertState(), probes: {}, channels: {} });
 
 describe("WP-2423 Q13 monitor cycle", () => {
+  it("WP-2423 item 9: names the rule that refused in BOP's log, and only there", async () => {
+    const sent = [];
+    const channel = { id: "email", kind: "email", send: vi.fn(async (m) => sent.push(m)) };
+    const io = fakeIo({ apiUp: () => true, channels: [channel] });
+    const observeBusiness = io.observeBusiness;
+    io.observeBusiness = async () => ({
+      ...(await observeBusiness()),
+      workflow: { ready: false, reason: "Orders", rule: "TwoBrandVersions" },
+    });
+    const config = parsePilotOpsConfig(null, ".local/pilot-test");
+    let state = fresh();
+    for (const m of [0, 1, 2, 3])
+      state = await runMonitorCycle({ now: T0 + m * MIN, state, config, io });
+    const raised = io.logs.filter((line) => line.event === "alert_raised");
+    expect(raised).toEqual([
+      {
+        event: "alert_raised",
+        key: "orders.workflow",
+        severity: "critical",
+        rule: "TwoBrandVersions",
+      },
+    ]);
+    expect(JSON.stringify(io.boards.at(-1))).not.toContain("TwoBrandVersions");
+    expect(io.boards.at(-1).active.map(({ key }) => key)).toEqual(["orders.workflow"]);
+    expect(JSON.stringify(sent)).not.toContain("TwoBrandVersions");
+  });
   it("raises a down entry once on each channel, survives a restart without re-sending and clears", async () => {
     let down = true;
     const sent = [];
@@ -253,6 +279,8 @@ describe("WP-2423 Q13 observations", () => {
       receiptTemplate: null,
       // No order pricing check composed: not checked.
       quoteTax: null,
+      // No order rules check composed: not checked.
+      workflow: null,
       // No held-stock check composed: not checked.
       heldStock: null,
       // No pickup time check composed: not checked.
@@ -268,6 +296,70 @@ describe("WP-2423 Q13 observations", () => {
       [expect.any(String), [4, "2026-10-16T15:50:00.000Z"]],
       [expect.any(String), [4, "2026-10-16T15:50:00.000Z"]],
     ]);
+  });
+  it("WP-2423 item 9: reports whether orders can move through the Store's Workflows, on every read", async () => {
+    const now = Date.parse("2026-10-15T16:00:00.000Z");
+    const empty = { run: async (work) => work({ query: async () => ({ rows: [] }) }) };
+    const resources = {
+      scope: { brandReference: "b", storeReference: "s" },
+      transactions: empty,
+      database: { transactions: () => empty },
+    };
+    const read = (readWorkflowReadiness, settlementExceptions) =>
+      readBusinessSignals({
+        resources,
+        installation: {},
+        now,
+        settlementExceptions,
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          readSettlementStatus: async () => ({ days: [] }),
+          readWorkflowReadiness,
+        },
+      });
+    const clean = { count: 0, oldestAgeMs: 0 };
+    for (const settlement of [clean, null]) {
+      expect(
+        (
+          await read(async (r) => {
+            expect(r).toBe(resources);
+            return { ready: true };
+          }, settlement)
+        ).workflow,
+      ).toEqual({ ready: true });
+      expect(
+        (
+          await read(
+            async () => ({ ready: false, reason: "Orders", rule: "NoBrandVersion" }),
+            settlement,
+          )
+        ).workflow,
+      ).toEqual({ ready: false, reason: "Orders", rule: "NoBrandVersion" });
+      expect(
+        (
+          await read(
+            async () => ({ ready: false, reason: "Cancellation", rule: "BrandVersionNotActive" }),
+            settlement,
+          )
+        ).workflow,
+      ).toEqual({ ready: false, reason: "Cancellation", rule: "BrandVersionNotActive" });
+      expect(
+        (
+          await read(async () => {
+            throw Error("lock timeout");
+          }, settlement)
+        ).workflow,
+      ).toBe("unreadable");
+    }
+    // A reason outside the closed pair reads as the worse one.
+    expect((await read(async () => ({ ready: false }), clean)).workflow).toEqual({
+      ready: false,
+      reason: "Orders",
+      rule: "Refused",
+    });
   });
   it("WP-2423: reports whether a receipt can be issued with the Store's published template", async () => {
     const now = Date.parse("2026-10-15T16:00:00.000Z");

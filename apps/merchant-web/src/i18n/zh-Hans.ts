@@ -5807,6 +5807,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Orders from earlier days are still holding stock": "较早营业日的订单仍占用库存",
   "Receipts are not being issued": "收据没有开出",
   "Orders cannot be priced": "订单无法计价",
+  "The store's order rules cannot be used": "门店的订单规则无法使用",
   "Payment differences need checking": "付款差异需要核对",
   "Day-end settlement has open problems": "日结还有未解决的问题",
   "Last night's backup failed": "昨晚备份失败",
@@ -7075,6 +7076,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "客人暂时不受影响。今天内请 BOP 技术支持检查自取时间；如果只剩最后一小时，自取订单改记在纸上。",
   "Tell guests who ask that their receipt will appear on their order page once this is fixed. Owner: in Store setup choose a receipt template that is published (step 5), then send, approve and publish the setup (step 8). Receipts for orders paid meanwhile then follow automatically; if this lasted over 30 minutes, ask BOP support to send stuck updates again.":
     "有客人问起，告诉他们修好后收据会显示在订单页面上。店主：在“门店设置”里选择一个已发布的收据模板（第 5 步），然后发送、批准并发布设置（第 8 步）。这段时间已付款订单的收据之后会自动补上；如果持续超过 30 分钟，请 BOP 技术支持重新发送卡住的更新。",
+  "Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. BOP support has to fix this.":
+    "新订单先记在纸上（菜品、姓名、桌号或自取时间），在刷卡机上收款，等这条提醒消失后再录入系统。这个问题需要 BOP 技术支持处理。",
+  "Nothing changes for guests yet. Tell BOP support today: they have to fix this.":
+    "客人暂时不受影响。请今天告知 BOP 技术支持，这个问题需要他们处理。",
   'Take new orders on paper (items, name, table or pickup time) and take payment on the card machine, then enter them once this clears. Owner: Store setup step 8, choose "Use the live Store\'s settings" for tax, then send, approve and publish. Otherwise ask BOP support.':
     "新订单先记在纸上（菜品、姓名、桌号或自取时间），在刷卡机上收款，等这条提醒消失后再录入系统。店主：在“门店设置”第 8 步，税务选择“使用当前门店的设置”，然后发送、批准并发布。否则请联系 BOP 技术支持。",
   "Open Exceptions to see each difference. For a business day's totals, open Settlement and choose that day; it explains the difference and what to do.":
@@ -7150,6 +7155,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "the check for orders holding stock": "订单占用库存的检查",
   "the check for pickup times": "自取时间检查",
   "the check that orders can be priced": "订单能否计价的检查",
+  "the check of the store's order rules": "门店订单规则的检查",
   "Email alerts": "邮件",
   "Phone alerts": "电话或消息",
   "Another alert channel": "某个提醒渠道",
@@ -7179,6 +7185,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "读取不到门店已发布的设置，所以现在付款的客人暂时拿不到收据。",
   "The receipt template chosen in Store setup cannot be used, so guests who pay now do not get a receipt. Orders, payments and the kitchen are not affected.":
     "“门店设置”里选择的收据模板无法使用，所以现在付款的客人拿不到收据。订单、付款和后厨不受影响。",
+  "Guests cannot order or pay on their phones, and staff may not be able to enter, accept or finish orders on these screens.":
+    "客人无法在手机上点餐或付款，员工也可能无法在这些页面录入、接单或完成订单。",
+  "Rounds a table did not pay for stay open and keep their ingredients set aside. New orders and payments still work.":
+    "桌上未付款的那一轮不会自动取消，占用的配料也不会释放。新订单和付款仍可正常进行。",
   "The Store's published settings could not be read, so no new order can be priced, online or at the counter. Orders already paid are not affected.":
     "读取不到门店已发布的设置，所以线上和柜台的新订单都无法计价。已付款的订单不受影响。",
   "The tax settings published in Store setup are not the ones this store is set up to charge, so no new order can be priced, online or at the counter. Orders already paid are not affected.":

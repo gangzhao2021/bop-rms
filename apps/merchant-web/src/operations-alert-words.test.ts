@@ -57,6 +57,7 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
     { reason: "StoreConfigurationUnavailable" },
     { reason: "TaxConfigurationMismatch" },
   ],
+  "orders.workflow": [{ reason: "Orders" }, { reason: "Cancellation" }],
   "reconciliation.differences": [
     { count: 1, oldestAgeMs: 2 * 60 * MIN },
     { count: 3, oldestAgeMs: 5 * MIN },
@@ -100,6 +101,7 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
         "the check for orders holding stock",
         "the check for pickup times",
         "the check that orders can be priced",
+        "the check of the store's order rules",
       ],
     },
   ],
@@ -165,6 +167,8 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     expect(action("pickup.capacity_horizon", { coveredMs: 5 })).toContain("客人暂时不受影响");
     expect(action("orders.held_stock", { count: 1, oldestAgeMs: 1 })).toContain("释放占用的配料");
     expect(action("backup.restore_check")).toContain("保留之前的备份");
+    expect(action("orders.workflow", { reason: "Orders" })).toContain("刷卡机");
+    expect(action("orders.workflow", { reason: "Cancellation" })).toContain("客人暂时不受影响");
   });
   it("shows the monitor's own words when a text matches nothing, never blank", () => {
     setLanguageForTest("zh-Hans");

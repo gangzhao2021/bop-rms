@@ -156,7 +156,13 @@ export async function runMonitorCycle({ now, state, config, io }) {
     held: maintenance === null ? [] : PLANNED_MAINTENANCE_HELD_KEYS,
   });
   for (const item of advanced.notifications)
-    await io.log({ event: `alert_${item.kind}`, key: item.key, severity: item.severity });
+    await io.log({
+      event: `alert_${item.kind}`,
+      key: item.key,
+      severity: item.severity,
+      // Which rule refused (a fixed word): for BOP's log only, never on a screen or in a message.
+      ...(typeof item.params?.rule === "string" ? { rule: item.params.rule } : {}),
+    });
   const channels = await deliver({
     channels: io.channels,
     channelState: state.channels,
@@ -240,6 +246,7 @@ async function loadBusiness(runtimeDirectory) {
     pickupCapacity,
     quote,
     pricing,
+    workflow,
   ] = await Promise.all([
     import("./pilot-installation.mjs"),
     import("./pilot-configured-resources.mjs"),
@@ -250,6 +257,7 @@ async function loadBusiness(runtimeDirectory) {
     import("./pilot-pickup-capacity-schedule.mjs"),
     import("./pilot-configured-quote.mjs"),
     import("./pilot-pricing-policy.mjs"),
+    import("./pilot-workflow-readiness.mjs"),
   ]);
   const directory = path.resolve(runtimeDirectory);
   const installation = await loadPilotInstallation(directory);
@@ -263,6 +271,8 @@ async function loadBusiness(runtimeDirectory) {
       readReceiptTemplate: receipt.readInternalReceiptTemplateReadiness,
       readHeldStockOrders: heldStock.readInternalHeldStockOrders,
       readPickupCapacityHorizon: pickupCapacity.readInternalPickupCapacityHorizon,
+      readWorkflowReadiness: (current) =>
+        workflow.readInternalWorkflowReadiness(current, installation),
       readQuoteTaxConfiguration: (current) =>
         quote.readInternalQuoteTaxReadiness(current, () =>
           pricing.createInternalPricingPolicy({

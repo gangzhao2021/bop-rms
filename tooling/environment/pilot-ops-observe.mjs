@@ -332,6 +332,24 @@ export async function readBusinessSignals({
       quoteTax = "unreadable";
     }
 
+  // WP-2423 item 9: can orders still move through this Store's Workflows (read only; ready, reason
+  // and the refusing rule only)? null when not composed.
+  let workflow = null;
+  if (typeof dependencies.readWorkflowReadiness === "function")
+    try {
+      const readiness = await dependencies.readWorkflowReadiness(resources);
+      workflow =
+        readiness?.ready === true
+          ? { ready: true }
+          : {
+              ready: false,
+              reason: readiness?.reason === "Cancellation" ? "Cancellation" : "Orders",
+              rule: String(readiness?.rule ?? "Refused"),
+            };
+    } catch {
+      workflow = "unreadable";
+    }
+
   // WP-2423 (2026-10-16 v15 stock leak): Orders of earlier business days still holding stock.
   // null when not composed; "unreadable" when the check itself failed.
   let heldStock = null;
@@ -365,6 +383,7 @@ export async function readBusinessSignals({
       stuckUpdates,
       retryingUpdates,
       receiptTemplate,
+      workflow,
       heldStock,
       pickupCapacity,
       reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
@@ -382,6 +401,7 @@ export async function readBusinessSignals({
     retryingUpdates,
     receiptTemplate,
     quoteTax,
+    workflow,
     heldStock,
     pickupCapacity,
     reconciliationDifferences: { count: open, oldestAgeMs: age(oldest) },
