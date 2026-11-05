@@ -13,6 +13,7 @@ import {
 import { createPostgresPublishingMutationStore } from "../../packages/bop/publishing/src/index.ts";
 import {
   matchesPlatformWorkflow,
+  orderWorkflowReleases,
   orderWorkflowRules,
   platformWorkflows,
 } from "./platform-workflows.mjs";
@@ -44,8 +45,11 @@ import { uuidV7 } from "./permission-catalog-install.mjs";
  * Brand and can be bound (moving a family is a future release step, not guessed here). Refused,
  * printing the code and exit 1: a Brand holding two families (`WORKFLOW_RELEASE_DUPLICATE_FAMILIES`),
  * a family that cannot serve this release (`WORKFLOW_RELEASE_ALREADY_INSTALLED_DIFFERENT`), an
- * `--output` named for another release (`WORKFLOW_RELEASE_OUTPUT_MISMATCH`), and an existing file
- * that names anything else (`WORKFLOW_RELEASE_BINDING_CONFLICT`; nothing is written, a person looks).
+ * `--output` named for another release (`WORKFLOW_RELEASE_OUTPUT_MISMATCH`), an existing file that
+ * names anything else (`WORKFLOW_RELEASE_BINDING_CONFLICT`; nothing is written, a person looks), and
+ * a Store whose order bindings name purposes this tool does not release
+ * (`WORKFLOW_RELEASE_STORE_ON_OTHER_PURPOSE`): it was installed before this tool, and a rerun would
+ * leave it unable to restart.
  *
  * Releases (platform-workflows.mjs): `UnpaidDineInBatchCancellation` writes the cancellation
  * runtime file (`cancellation-workflow-draft-result.json`); the order Workflows
@@ -544,6 +548,26 @@ export function requireSameBinding(existing, next) {
     throw new Error("WORKFLOW_RELEASE_BINDING_CONFLICT");
 }
 
+/**
+ * A Store's services load its order bindings together, and its worker does not start on Pickup and
+ * DineIn of different purposes (pilot-paid-outcome `INTERNAL_PAID_SCOPE_MISMATCH`). A Store installed
+ * before this tool runs on other purposes: looking up the release's purpose finds nothing there, so
+ * a rerun for a lost file would start a new family and write a binding that stops the Store at its
+ * next restart. Files say which purpose a Store is on; a damaged one says nothing here (its own
+ * rerun reports it). The cancellation runs on its own and is not held to this.
+ */
+export async function requireReleasedOrderPurposes(directory, release) {
+  if (platformWorkflows[release].binding === undefined) return;
+  for (const name of orderWorkflowReleases) {
+    const binding = await readExistingBinding(path.join(directory, runtimeFileName(name))).catch(
+      () => null,
+    );
+    const purposeCode = binding?.workflow?.purposeCode;
+    if (typeof purposeCode === "string" && purposeCode !== platformWorkflows[name].purposeCode)
+      throw new Error("WORKFLOW_RELEASE_STORE_ON_OTHER_PURPOSE");
+  }
+}
+
 /** Owner-only (0600) file replaced atomically, so a reader never sees a partial binding. */
 export async function writePrivateFileAtomically(file, text) {
   const staging = file + ".staging-" + randomBytes(6).toString("hex");
@@ -593,11 +617,13 @@ export async function installWorkflowRelease(args, now = () => Date.now()) {
   };
   // DEC-PILOT-INSTALLATION: written into an issued runtime directory, the binding must belong to
   // its profile (same environment, database and Store) before anything is released.
-  await requireMatchingProfile(path.dirname(path.resolve(options.output)), {
+  const directory = path.dirname(path.resolve(options.output));
+  await requireMatchingProfile(directory, {
     environment: options.runtimeEnvironment,
     database: config.database,
     scope,
   });
+  await requireReleasedOrderPurposes(directory, options.release);
   const existing = await readExistingBinding(options.output);
   const client = new pg.Client({
     application_name: "bop-rms-workflow-release",

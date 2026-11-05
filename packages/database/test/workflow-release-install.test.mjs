@@ -19,6 +19,7 @@ import {
   commitPlannedRelease,
   installWorkflowRelease,
   planWorkflowRelease,
+  runtimeFileName,
   workflowRuntimeFile,
 } from "../../../tooling/environment/workflow-release-install.mjs";
 import {
@@ -623,6 +624,79 @@ it("the tool writes a lost or second Store's binding, and refuses to move one th
       });
       assert.equal(await families(admin, brand, "OrderFulfillment", "DineIn"), 0);
       assert.deepEqual(await counts(admin), before);
+
+      // A Store from before this tool, as the first Store and its DEMO Stores on v15: its Brand's
+      // order Workflows have other purposes. The lost Pickup file cannot be rebuilt by a rerun: the
+      // new family's binding would sit beside a DineIn file naming another purpose, and that Store's
+      // worker refuses to start on them (INTERNAL_PAID_SCOPE_MISMATCH) at the restart the runbook
+      // asks for. Nothing is written, in the database or the directory.
+      const legacyBrand = id(30);
+      const legacyDirectory = join(directory, "legacy");
+      await mkdir(legacyDirectory);
+      for (const [release, purposeCode] of [
+        ["OrderFulfillmentDineIn", "InternalTestSubmissionInventory"],
+        ["OrderFulfillmentAdditionalRound", "InternalTestAdditionalRelease"],
+      ]) {
+        const planned = {
+          ...options,
+          brandReference: legacyBrand,
+          release,
+          operationReference: operationAt(Date.now(), ++n),
+        };
+        const plan = planWorkflowRelease(planned, { ...platformWorkflows[release], purposeCode });
+        await inTransaction(admin, () => commitPlannedRelease(admin, plan, planned));
+        const file = workflowRuntimeFile(plan, {
+          environment: "InternalTest",
+          database: context.databaseName,
+          scope: { tenantReference: id(1), brandReference: legacyBrand, storeReference: id(3) },
+          operationReference: planned.operationReference,
+          release,
+        });
+        // Files from before the tool name no release.
+        await writeFile(
+          join(legacyDirectory, runtimeFileName(release)),
+          JSON.stringify({ ...file, release: undefined }),
+          { mode: 0o600 },
+        );
+      }
+      const legacyBefore = await counts(admin);
+      const installLegacy = (workflow, output) =>
+        installWorkflowRelease(
+          Object.entries({
+            "--env-file": envFile,
+            "--confirm-target": "test:" + context.databaseName,
+            "--workflow": workflow,
+            "--runtime-environment": "InternalTest",
+            "--tenant": id(1),
+            "--brand": legacyBrand,
+            "--store": id(3),
+            "--operator": id(5),
+            "--approved-by": id(6),
+            "--approval-evidence": id(7),
+            "--operation": operationAt(Date.now(), ++n),
+            "--output": output,
+          }).flat(),
+        );
+      const lostPickup = join(legacyDirectory, "internal-test-workflow-Pickup.json");
+      await assert.rejects(installLegacy("OrderFulfillmentPickup", lostPickup), {
+        message: "WORKFLOW_RELEASE_STORE_ON_OTHER_PURPOSE",
+      });
+      await assert.rejects(stat(lostPickup), { code: "ENOENT" });
+      assert.equal(await families(admin, legacyBrand, "OrderFulfillment", "Pickup"), 0);
+      assert.deepEqual(await counts(admin), legacyBefore);
+      // The same for the file naming that other purpose: it is not moved either.
+      const heldDineIn = join(legacyDirectory, "internal-test-workflow-DineIn.json");
+      const heldBefore = await readFile(heldDineIn, "utf8");
+      await assert.rejects(installLegacy("OrderFulfillmentDineIn", heldDineIn), {
+        message: "WORKFLOW_RELEASE_STORE_ON_OTHER_PURPOSE",
+      });
+      assert.equal(await readFile(heldDineIn, "utf8"), heldBefore);
+      assert.deepEqual(await counts(admin), legacyBefore);
+      // The cancellation runs on its own, so it stays repairable at such a Store.
+      const cancellationFile = join(legacyDirectory, "cancellation-workflow-draft-result.json");
+      const cancellation = await installLegacy("UnpaidDineInBatchCancellation", cancellationFile);
+      assert.equal(cancellation.status, "Applied");
+      assert.equal(cancellation.bindingFile, "Written");
     } finally {
       await rm(directory, { recursive: true, force: true });
       await roles.drop();

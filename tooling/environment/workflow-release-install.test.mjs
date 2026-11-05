@@ -16,6 +16,7 @@ import {
   parseArguments,
   planWorkflowRelease,
   readExistingBinding,
+  requireReleasedOrderPurposes,
   requireSameBinding,
   runtimeFileName,
   workflowRuntimeFile,
@@ -291,6 +292,48 @@ it("reads an existing binding, none, or refuses one it cannot read", async () =>
       await assert.rejects(readExistingBinding(file), /WORKFLOW_RELEASE_BINDING_UNREADABLE/u);
     }
     await assert.rejects(readExistingBinding(directory), /WORKFLOW_RELEASE_BINDING_UNREADABLE/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("refuses a Store on purposes from before this tool, whichever of its files is lost", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "workflow-release-"));
+  const binding = (file, purposeCode) =>
+    writeFile(join(directory, file), JSON.stringify({ workflow: { purposeCode } }));
+  const refused = { message: "WORKFLOW_RELEASE_STORE_ON_OTHER_PURPOSE" };
+  try {
+    // An empty directory is a new Store, and a Store on the released purposes is an ordinary rerun.
+    for (const release of orderWorkflowReleases)
+      await requireReleasedOrderPurposes(directory, release);
+    await binding("internal-test-workflow-DineIn.json", "OrderFulfillment");
+    await binding(
+      "internal-test-workflow-AdditionalRelease.json",
+      "OrderFulfillmentAdditionalRound",
+    );
+    await requireReleasedOrderPurposes(directory, "OrderFulfillmentPickup");
+
+    // v15's first Store, DEMO 2 and DEMO 3: whichever file is gone, the others say so.
+    await binding("internal-test-workflow-DineIn.json", "InternalTestSubmissionInventory");
+    await assert.rejects(
+      requireReleasedOrderPurposes(directory, "OrderFulfillmentPickup"),
+      refused,
+    );
+    await binding("internal-test-workflow-DineIn.json", "OrderFulfillment");
+    await binding("internal-test-workflow-AdditionalRelease.json", "InternalTestAdditionalRelease");
+    await assert.rejects(
+      requireReleasedOrderPurposes(directory, "OrderFulfillmentDineIn"),
+      refused,
+    );
+
+    // The cancellation runs on its own, and is repairable whatever the orders run on.
+    await requireReleasedOrderPurposes(directory, "UnpaidDineInBatchCancellation");
+    // A damaged file says nothing about the Store; its own rerun reports it.
+    await writeFile(
+      join(directory, "internal-test-workflow-AdditionalRelease.json"),
+      "{ half a fi",
+    );
+    await requireReleasedOrderPurposes(directory, "OrderFulfillmentPickup");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
