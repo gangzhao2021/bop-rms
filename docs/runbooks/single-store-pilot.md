@@ -473,23 +473,31 @@ Store where guests pay each round first.
 - **Who can do what.** Turning it on: the Owner, on `Store features` (`Guests starting tables`).
   Turning it off: the Owner, or anyone who may pause ordering (Store Manager, Area Manager, and Front
   of House once permission catalog v26 is installed), from the line at the top of `Tables`
-  (`Guests can start free tables. Turn off`). Anyone else asks a manager, or pauses scanning on one
-  table from its panel.
+  (`Guests can start free tables. Turn off`, then `Yes, turn off`: it asks once, because only the
+  Owner can turn it back on). Anyone else asks a manager, or pauses scanning on one table from its
+  panel.
 - **Too many starts.** Each Store allows 40 scanned starts in 10 minutes, each table 3. Past that a
-  guest at a free table is told to ask staff, and `Tables` says `Many tables started by scanning`. It
-  clears by itself. If it isn't your guests (photos of the codes), turn the switch off and open tables
+  guest scanning a free table is told to ask staff (they get no Start button), and `Tables` says
+  `Many tables started by scanning`. It clears by itself. If it isn't your guests (photos of the codes), turn the switch off and open tables
   for the guests in front of you.
 - **Queue at the door.** Turn it off: new tables then need staff, and tables already started finish
   as usual. Turning it off never strands a table.
 - **Tables that free themselves.** With nothing owed and nothing unfinished: 20 minutes after the last
-  activity if nobody ordered, 90 minutes if they did. `Tables` says so in the last 10 minutes. A
-  finished dish nobody marked served counts as handed over; there is no cleaning step. The System
-  never closes a table with an unpaid round, an unfinished dish, a refund in progress, an open call or
-  a merge: those stay on `Tables` for staff, as any other table.
+  activity if nobody ordered, 90 minutes if they did (the kitchen's last step counts as activity).
+  In the last 10 minutes the table's row and the top of `Tables` say `frees itself in N min`. A
+  finished dish nobody marked served counts as handed over; there is no cleaning step, and Home
+  doesn't list those dishes as waiting to be served. The System never closes a table with an unpaid
+  round, an unfinished dish, a refund in progress, an open call or a merge: those stay on `Tables`
+  for staff, as any other table. A table still open 10 minutes past its time reads
+  `Hasn’t freed itself · open the table`: something holds it (open the table to see what), or the
+  workload below has stopped.
 - **Next party at a quiet table.** After 5 quiet minutes with nothing owed, a new phone is asked
   whether it is with the people there. "No, we just sat down" closes the table and starts a new one;
-  the earlier party's phones go to their receipt. A party still at the table that wants more scans
-  again.
+  the earlier party's phones go to their receipt, and the new table's row on `Tables` says
+  `a new party ended the last visit`. Nobody is asked while staff have paused scanning at that table
+  (the pause is the brake: a phone asked before it can't end the table either), while a dish put in
+  the table's cart in the last 20 minutes is still there, or when the Store has no scanned start
+  left. A party still at the table that wants more scans again.
 - **A table closed by hand** needs no `Cleaned` tap at such a Store. Any other table waiting for
   cleaning stops refusing guests after 5 minutes, and `Tables` says `guests can start it now`.
 - **Network or device down.** Store network down: guests on mobile data can still start tables and
