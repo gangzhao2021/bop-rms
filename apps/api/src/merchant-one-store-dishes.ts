@@ -203,6 +203,9 @@ function parseSaveCombo(r: Record<string, unknown>): SaveComboBody {
   };
 }
 
+/** The most rules one choice-price publish takes (`parseOptionPriceCommandBody`). */
+const OPTION_PRICE_PUBLISH_LIMIT = 100;
+
 export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBody | SaveComboBody {
   const r = value as Record<string, unknown> | null;
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
@@ -1008,19 +1011,23 @@ export function createMerchantOneStoreDishes(options: {
       p.optionSets.flatMap((s) => s.options.filter((o) => o.pending !== null)),
     );
     if (waiting.some((o) => o.pending?.byViewer !== true)) return fail("OthersPending");
-    if (waiting.length > 0)
+    // A drinks menu easily waits on more choice prices than one publish takes; a retry after a
+    // stop part-way carries on from what is still waiting.
+    for (let at = 0; at < waiting.length; at += OPTION_PRICE_PUBLISH_LIMIT) {
+      const rules = waiting.slice(at, at + OPTION_PRICE_PUBLISH_LIMIT).map((o) => ({
+        ruleReference: o.ruleReference ?? fail("NotFound"),
+        expectedAggregateVersion: o.aggregateVersion ?? fail("NotFound"),
+      }));
       await options.optionPrices.command({
         ...session,
         body: {
           action: "Publish",
-          operationReference: step("choice-prices"),
-          rules: waiting.map((o) => ({
-            ruleReference: o.ruleReference ?? fail("NotFound"),
-            expectedAggregateVersion: o.aggregateVersion ?? fail("NotFound"),
-          })),
+          operationReference: step("choice-prices-" + (rules[0]?.ruleReference ?? "")),
+          rules,
           approvalMode: "SingleStoreListing",
         },
       });
+    }
     // Every dish on the menu that was never decided at the store is offered with it.
     const menu = await loadMenu(session, body.menuReference);
     await offerUndecided(

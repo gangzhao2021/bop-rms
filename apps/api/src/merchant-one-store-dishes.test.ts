@@ -44,6 +44,7 @@ function fakes() {
     }[],
     assigned: null as string | null,
     optionPrices: new Map<string, { price: string | null; pending: string | null }>(),
+    publishedRuleCounts: [] as number[],
     menu: {
       aggregateVersion: 1,
       versionReference: id(90),
@@ -173,16 +174,18 @@ function fakes() {
                   optionSets: [
                     {
                       bindingReference: id(30),
-                      options: [MILD, HOT].map((o) => ({
-                        optionReference: o,
-                        ruleReference: id(31),
-                        aggregateVersion: 1,
-                        priceMinor: state.optionPrices.get(o)?.price ?? null,
-                        pending:
-                          state.optionPrices.get(o)?.pending == null
-                            ? null
-                            : { priceMinor: state.optionPrices.get(o)?.pending, byViewer: true },
-                      })),
+                      options: [MILD, HOT, ...state.optionPrices.keys()]
+                        .filter((o, n, all) => all.indexOf(o) === n)
+                        .map((o) => ({
+                          optionReference: o,
+                          ruleReference: o,
+                          aggregateVersion: 1,
+                          priceMinor: state.optionPrices.get(o)?.price ?? null,
+                          pending:
+                            state.optionPrices.get(o)?.pending == null
+                              ? null
+                              : { priceMinor: state.optionPrices.get(o)?.pending, byViewer: true },
+                        })),
                     },
                   ],
                 },
@@ -196,9 +199,15 @@ function fakes() {
               price: state.optionPrices.get(p.optionReference)?.price ?? null,
               pending: p.amountMinor,
             });
-        else
-          for (const [k, v] of state.optionPrices)
-            state.optionPrices.set(k, { price: v.pending ?? v.price, pending: null });
+        else {
+          const rules = body.rules as { ruleReference: string }[];
+          state.publishedRuleCounts.push(rules.length);
+          for (const { ruleReference } of rules) {
+            const v = state.optionPrices.get(ruleReference);
+            if (v)
+              state.optionPrices.set(ruleReference, { price: v.pending ?? v.price, pending: null });
+          }
+        }
         return {};
       },
     },
@@ -395,6 +404,19 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
     });
     expect(calls).toEqual(["price:CreateDraft", "price:SaveDraft", "menu:Revise"]);
     expect(state.books[1]?.prices).toEqual([{ sellableReference: id(11), amountMinor: "1388" }]);
+  });
+
+  it("publishes a long list of waiting choice prices in steps one publish can take", async () => {
+    const { state, dishes } = fakes();
+    await dishes.command({ ...session, body: save() });
+    for (let n = 0; n < 230; n++)
+      state.optionPrices.set(id(5000 + n), { price: null, pending: "80" });
+    await dishes.command({
+      ...session,
+      body: { action: "ListAll", operationReference: id(104), menuReference: MENU },
+    });
+    expect(state.publishedRuleCounts.every((count) => count <= 100)).toBe(true);
+    expect([...state.optionPrices.values()].every((v) => v.pending === null)).toBe(true);
   });
 
   it("accepts only a whole dish or a listing", () => {

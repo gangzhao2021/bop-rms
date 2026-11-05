@@ -796,6 +796,8 @@ describe("migration catalog", () => {
       "2000_152_create_product_alcohol_mark",
       "2000_153_alter_store_feature_alcohol",
       "2000_154_create_dining_table_split_part_item",
+      "2000_155_alter_store_opening_first_store",
+      "2000_156_alter_product_frozen_commit_guard",
     ]);
     expect(
       first.migrations.every((migration) => /^[0-9a-f]{64}$/u.test(migration.checksumSha256)),
