@@ -219,7 +219,7 @@ test("@production staff add a description and a described photo to a product and
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await save.click();
-  await expect(page.getByText("Saved.")).toBeVisible();
+  await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
   expect(commands[0]).toMatchObject({
     action: "SaveDraft",
     productReference: id(71),

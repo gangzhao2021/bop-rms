@@ -2985,7 +2985,7 @@ export function CurrentOrderQueuePage({
                 {stale === "No" ? null : (
                   <p className="order-queue-stale" role="status">
                     {stale === "ServerProblem"
-                      ? floorServerProblemText
+                      ? floorServerProblemText + " " + t("Showing the last update.")
                       : t(
                           "Orders could not be refreshed. Showing the last update; retrying automatically.",
                         )}
