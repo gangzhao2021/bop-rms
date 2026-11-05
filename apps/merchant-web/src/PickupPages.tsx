@@ -30,6 +30,7 @@ import {
   type PickupQueueView,
   type PickupWorkstation,
 } from "./pickup.js";
+import { floorServerProblemHeading, floorServerProblemText } from "./failure-words.js";
 export type PickupLoadState = State;
 type State =
   | { readonly kind: "Loading" }
@@ -56,6 +57,7 @@ export function PickupStatePanel({ state }: { readonly state: Exclude<State["kin
       t("Pickups unavailable"),
       t("The pickup queue could not be loaded. Refresh to try again."),
     ],
+    ServerProblem: [floorServerProblemHeading, floorServerProblemText],
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>

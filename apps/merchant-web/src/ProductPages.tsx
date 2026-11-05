@@ -38,6 +38,7 @@ import {
   type ProductOptionSetInput,
   type ProductTaxClass,
 } from "./product-pages.js";
+import { serverProblemText } from "./failure-words.js";
 
 /** WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Products and their sizes (SKUs). */
 const copy: Record<ProductErrorCode | "Loading", string> = {
@@ -57,7 +58,7 @@ const copy: Record<ProductErrorCode | "Loading", string> = {
     "The product is not valid. A name, a code (capital letters, digits, hyphen), a tax class and at least one size with its own code and name are required; size names must differ.",
   ),
   Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
-  Unavailable: t("Products are unavailable."),
+  Unavailable: serverProblemText,
 };
 const lifecycleText: Record<string, string> = {
   Draft: t("Not selling yet"),

@@ -23,6 +23,7 @@ import {
   type AllergenListView,
   type DeclarationStatus,
 } from "./allergen-declaration-pages.js";
+import { serverProblemText } from "./failure-words.js";
 
 /** WP-2423 / DEC-ALLERGEN-DECLARATIONS: Brand allergen registry and ingredient declarations. */
 const copy: Record<AllergenErrorCode | "Loading", string> = {
@@ -44,7 +45,7 @@ const copy: Record<AllergenErrorCode | "Loading", string> = {
   ),
   NeedsReverification: t("Confirm it is you with your authenticator code, then approve again."),
   Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
-  Unavailable: t("Allergens are unavailable."),
+  Unavailable: serverProblemText,
 };
 const statusText: Record<DeclarationStatus, string> = {
   Current: t("Declared"),

@@ -41,6 +41,7 @@ import {
   type MenuDraftContent,
   type StoredMenuDraft,
 } from "./store-menu-pages.js";
+import { serverProblemText } from "./failure-words.js";
 
 /** WP-2423 / DEC-MENU-REVISION: Brand menus — edit, review, publish and revise. */
 export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
@@ -78,7 +79,7 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
     "The menu is not valid. Each section needs a distinct name, and an item may appear once per section.",
   ),
   Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
-  Unavailable: t("Menus are unavailable."),
+  Unavailable: serverProblemText,
   SoleOperatorNotInEffect: t(
     "Someone else now holds menu approval, so they must approve this version. Refresh to see who.",
   ),
@@ -105,7 +106,7 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   ManySizes: t("This dish has more than one size. Change it on the Products page."),
   NotADish: t("A combo can only offer dishes on sale, not another combo. Choose its dishes again."),
   StoppedPartWay: t(
-    "Saving stopped part-way. What was saved stays; guests see nothing new. Save it again to finish, and tell the manager if it stops again.",
+    "Saving stopped part-way. What was saved stays; guests see nothing new. Save it again to finish.",
   ),
   DishAllergensMissing: t(
     "A dish in this combo has no allergens declared yet. Declare its allergens (Edit the dish), then save the combo.",

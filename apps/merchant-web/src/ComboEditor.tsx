@@ -1,17 +1,16 @@
 import { t } from "./i18n/i18n.js";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dishEditorSource, type DishEditorSource } from "./dish-editor-source.js";
 import { newOperationReference } from "./operation-reference.js";
 import type { MenuSectionRow } from "./one-store-menu.js";
 import { taxClassText } from "./product-pages.js";
 import { dollarsToMinor, minorToDollars } from "./store-price-pages.js";
-import { menuErrorText } from "./StoreMenuPages.js";
+import { type MenuClient, type MenuCombo, type SaveComboCommand } from "./store-menu-pages.js";
 import {
-  MenuPageError,
-  type MenuClient,
-  type MenuCombo,
-  type SaveComboCommand,
-} from "./store-menu-pages.js";
+  formChangedAfterStopText,
+  oneStoreSaveFailureText,
+  oneStoreSaveMayContinue,
+} from "./one-store-save-words.js";
 
 /** A dish (size) a combo slot can offer. */
 export interface ComboDishChoice {
@@ -179,6 +178,7 @@ export function ComboEditor({
   const [problem, setProblem] = useState<string | null>(null);
   // One reference per intended save, kept until it is answered (a retry continues it).
   const [operation, setOperation] = useState<string | null>(null);
+  const sent = useRef<string | null>(null);
   useEffect(() => {
     let active = true;
     if (client.loadDish === undefined) return;
@@ -232,6 +232,15 @@ export function ComboEditor({
     if (client.oneStore === undefined || busy || command === null) return;
     setBusy(true);
     setProblem(null);
+    // WP-2423 item 10: a save that stopped goes again as the same operation, so it finishes rather
+    // than making a second combo. Different content must not go under it.
+    const fingerprint = JSON.stringify(command);
+    if (operation !== null && sent.current !== fingerprint) {
+      setBusy(false);
+      setProblem(formChangedAfterStopText);
+      return;
+    }
+    sent.current = fingerprint;
     const reference = operation ?? newOperationReference();
     setOperation(reference);
     try {
@@ -239,22 +248,8 @@ export function ComboEditor({
       setOperation(null);
       onSaved(t("{item} saved. Guests see it when the menu is listed.", { item: command.name }));
     } catch (error) {
-      if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
-      // v15 2026-10-29: a new combo that stopped after it was made is on the menu now; it is
-      // finished with Edit (saving this form again would make a second combo).
-      if (combo === null && error instanceof MenuPageError && error.code === "StoppedPartWay") {
-        onSaved(
-          t("{item} was saved only in part. Open it with Edit and save it again to finish it.", {
-            item: command.name,
-          }),
-        );
-        return;
-      }
-      setProblem(
-        error instanceof MenuPageError
-          ? menuErrorText[error.code]
-          : t("That didn't go through. Read the menu again and retry."),
-      );
+      if (!oneStoreSaveMayContinue(error)) setOperation(null);
+      setProblem(oneStoreSaveFailureText(error, combo !== null));
     } finally {
       setBusy(false);
     }

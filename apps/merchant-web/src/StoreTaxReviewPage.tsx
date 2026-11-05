@@ -4,6 +4,7 @@ import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime, StoreDate } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { serverProblemText } from "./failure-words.js";
 
 /** WP-2423 8.7: TAX-STORE-REVIEW — the Store's tax rates and every product's tax class, read only. */
 export interface TaxReviewView {
@@ -108,7 +109,7 @@ const copy = {
   Loading: t("Loading tax review…"),
   PermissionDenied: t("You do not have permission to read this Store's tax configuration."),
   Offline: t("Offline. Check your connection and refresh."),
-  Unavailable: t("Tax review is unavailable."),
+  Unavailable: serverProblemText,
 } as const;
 const endText = {
   Configuration: t("the configuration ends"),

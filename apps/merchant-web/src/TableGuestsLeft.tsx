@@ -255,7 +255,7 @@ export function TableGuestsLeft({
   if (load.kind === "Failed")
     return load.denied ? null : (
       <p role="status">
-        {t("Couldn't check the table's open rounds. Check the connection and try again.")}{" "}
+        {t("Couldn't check the table's open rounds. Try again.")}{" "}
         <button type="button" onClick={() => setReload((value) => value + 1)}>
           {t("Check again")}
         </button>

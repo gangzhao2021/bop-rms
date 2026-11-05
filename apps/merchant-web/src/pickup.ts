@@ -69,7 +69,13 @@ export interface PickupClient {
 export class PickupClientError extends Error {
   constructor(
     readonly code:
-      "PermissionDenied" | "NotFound" | "Offline" | "Conflict" | "CommandFailed" | "Unavailable",
+      | "PermissionDenied"
+      | "NotFound"
+      | "Offline"
+      | "Conflict"
+      | "CommandFailed"
+      | "Unavailable"
+      | "ServerProblem",
   ) {
     super(t("Pickup is unavailable"));
     this.name = "PickupClientError";

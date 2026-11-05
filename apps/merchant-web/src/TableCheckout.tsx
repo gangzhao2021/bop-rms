@@ -17,6 +17,7 @@ import {
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
 import { compedText } from "./ItemCompAction.js";
 import { TableSplitControls } from "./TableSplit.js";
+import { floorServerProblemText, notConfirmedPressAgainText } from "./failure-words.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -33,6 +34,14 @@ export function dollarsToMinor(value: string): bigint | null {
   const match = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,2}))?$/u.exec(value.trim());
   if (!match) return null;
   return BigInt(match[1] as string) * 100n + BigInt((match[2] ?? "0").padEnd(2, "0"));
+}
+
+/** No answer, or a server failure: it may have been recorded, so the same operation goes again. */
+function outcomeUnknown(error: unknown): boolean {
+  return (
+    error instanceof TableCheckoutError &&
+    (error.code === "OutcomeUnknown" || error.code === "ServerProblem")
+  );
 }
 
 function errorText(error: unknown): string {
@@ -79,8 +88,10 @@ function errorText(error: unknown): string {
       return t("This table changed since it was shown. It has been read again: try again.");
     case "OutcomeUnknown":
       return t(
-        "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
+        "We couldn't confirm the result. Press the button again: it is never recorded twice.",
       );
+    case "ServerProblem":
+      return notConfirmedPressAgainText + " " + floorServerProblemText;
     default:
       return t("This couldn't be done right now. Try again.");
   }
@@ -388,8 +399,7 @@ export function TableCheckout({
       );
       onChanged();
     } catch (error) {
-      if (!(error instanceof TableCheckoutError) || error.code !== "OutcomeUnknown")
-        operation.current = null;
+      if (!outcomeUnknown(error)) operation.current = null;
       setProblem(errorText(error));
       if (
         error instanceof TableCheckoutError &&
@@ -422,8 +432,7 @@ export function TableCheckout({
       setReload((value) => value + 1);
       onChanged();
     } catch (error) {
-      if (!(error instanceof TableCheckoutError) || error.code !== "OutcomeUnknown")
-        operation.current = null;
+      if (!outcomeUnknown(error)) operation.current = null;
       setProblem(errorText(error));
     } finally {
       setBusy(false);

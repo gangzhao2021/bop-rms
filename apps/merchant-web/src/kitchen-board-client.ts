@@ -184,6 +184,8 @@ export function createKitchenBoardClient(options: {
         throw new KitchenBoardClientError("PermissionDenied");
       if (response.status === 404) throw new KitchenBoardClientError("NotFound");
       if (response.status === 409) throw new KitchenBoardClientError("Conflict");
+      // WP-2423 item 10: the server answered, and failed: the kitchen's wifi is fine.
+      if (response.status >= 500) throw new KitchenBoardClientError("ServerProblem");
       if (
         !response.ok ||
         response.headers.get("cache-control") !== "no-store" ||

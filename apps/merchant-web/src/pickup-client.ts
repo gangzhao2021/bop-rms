@@ -57,6 +57,8 @@ export function createPickupClient(options: {
           throw new PickupClientError("PermissionDenied");
         if (response.status === 404) throw new PickupClientError("NotFound");
         if (response.status === 409) throw new PickupClientError("Conflict");
+        // WP-2423 item 10: the server answered, and failed: the store's wifi is fine.
+        if (response.status >= 500) throw new PickupClientError("ServerProblem");
         if (
           !response.ok ||
           response.headers.get("cache-control") !== "no-store" ||

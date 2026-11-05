@@ -21,6 +21,7 @@ import {
   type OptionSetListView,
   type OptionSetRow,
 } from "./store-option-set-page.js";
+import { serverProblemText } from "./failure-words.js";
 
 /**
  * WP-2423 slice 4: Brand option sets — the choices a customer makes on an item (milk, extra shot).
@@ -35,7 +36,7 @@ const copy: Record<OptionSetErrorCode | "Loading", string> = {
     "The option set is not valid. It needs a name, at least one option, different option names, and limits that customers can meet with the options offered.",
   ),
   Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
-  Unavailable: t("Options are unavailable."),
+  Unavailable: serverProblemText,
 };
 type State<V> =
   { readonly kind: "Loading" | OptionSetErrorCode } | { readonly kind: "Found"; readonly view: V };

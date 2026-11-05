@@ -29,7 +29,19 @@ import {
   type MenuClient,
   type SaveDishCommand,
 } from "./store-menu-pages.js";
+import {
+  formChangedAfterStopText,
+  oneStoreSaveFailureText,
+  oneStoreSaveMayContinue,
+} from "./one-store-save-words.js";
 
+/** A save asked to go on under an operation that stopped, with different content. */
+class FormChangedAfterStop extends Error {
+  constructor() {
+    super("FORM_CHANGED_AFTER_STOP");
+    this.name = "FormChangedAfterStop";
+  }
+}
 const dishLabel = (dish: Pick<MenuDish, "name" | "nameZh">) =>
   dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
 
@@ -187,6 +199,7 @@ export function DishEditor({
   // Once a save sent the price, the price read earlier is no longer what the dish has: a save that
   // stopped part-way may have set it, so a price put back is sent too, not taken as unchanged.
   const priceSent = useRef(false);
+  const sent = useRef<string | null>(null);
   useEffect(() => {
     let active = true;
     if (client.loadDish === undefined) return;
@@ -364,6 +377,11 @@ export function DishEditor({
     const content = dishContent(allergenValues);
     if (client.oneStore === undefined) throw new MenuPageError("Unavailable");
     if (loaded.current !== null && JSON.stringify(content) === loaded.current) return "Unchanged";
+    // WP-2423 item 10: a save that stopped goes again as the same operation, so it finishes rather
+    // than making a second product. Different content must not go under it.
+    const fingerprint = JSON.stringify(content);
+    if (operation !== null && sent.current !== fingerprint) throw new FormChangedAfterStop();
+    sent.current = fingerprint;
     const reference = operation ?? newOperationReference();
     setOperation(reference);
     if (content.priceMinor !== null) priceSent.current = true;
@@ -386,17 +404,19 @@ export function DishEditor({
     };
   };
   const saveFailed = (error: unknown) => {
+    if (error instanceof FormChangedAfterStop) {
+      setProblem(formChangedAfterStopText);
+      return;
+    }
     const known = error instanceof MenuPageError ? error : null;
-    // Offline: no answer, so the same save is tried again. Otherwise the server answered: a dish
-    // that now exists goes on as an edit with a fresh operation (a reused one would replay its
-    // steps and quietly ignore a corrected price), and nothing makes a second copy of it.
-    if (known?.code !== "Offline") setOperation(null);
-    if (known !== null && known.productReference !== null) setAdopted(known.productReference);
-    setProblem(
-      known !== null
-        ? menuErrorText[known.code]
-        : t("That didn't go through. Read the menu again and retry."),
-    );
+    const exists = known !== null && known.productReference !== null;
+    // No answer, or a save that stopped (WP-2423 item 10): the same save is tried again as the same
+    // operation. A dish the server says now exists goes on as an edit with a fresh operation (a
+    // reused one would replay its steps and quietly ignore a corrected price), and nothing makes a
+    // second copy of it.
+    if (exists || !oneStoreSaveMayContinue(error)) setOperation(null);
+    if (exists) setAdopted(known.productReference);
+    setProblem(oneStoreSaveFailureText(error, productReference !== null || exists));
   };
   // The result of a save in the owner's words, including a mark that could not be set.
   const savedText = (
@@ -592,7 +612,8 @@ export function DishEditor({
       if (result === "Unchanged") return "Unchanged";
       return result.undeclared || result.choicesWaiting ? "Waiting" : "Saved";
     } catch (error) {
-      if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
+      if (!(error instanceof FormChangedAfterStop) && !oneStoreSaveMayContinue(error))
+        setOperation(null);
       throw error;
     }
   };

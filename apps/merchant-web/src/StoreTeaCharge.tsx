@@ -71,7 +71,9 @@ export function StoreTeaCharge({
                 ),
       });
     } catch (error) {
-      operation.current = null;
+      // WP-2423 item 10: an unknown outcome keeps its operation, so saving again is not a new one.
+      const lost = !(error instanceof StoreFeaturesClientError) || error.code === "Unavailable";
+      if (!lost) operation.current = null;
       setMessage({
         tone: "alert",
         text:
@@ -87,7 +89,7 @@ export function StoreTeaCharge({
                 ? t(
                     "Someone else changed these settings. The page now shows them; check and save again.",
                   )
-                : t("This wasn't saved. Check the connection and try again."),
+                : t("We couldn't confirm this was saved. Save again: it is never recorded twice."),
       });
     } finally {
       setBusy(false);

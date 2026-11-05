@@ -80,6 +80,11 @@ import {
   ordersAwaitingAcceptance,
   type OrderPickupContact,
 } from "./current-order-queue-client.js";
+import {
+  floorServerProblemHeading,
+  floorServerProblemText,
+  isServerProblem,
+} from "./failure-words.js";
 
 /** WP-2423: the list orders staff opened, and how the rows change it. */
 export interface ExpandedOrders {
@@ -87,7 +92,7 @@ export interface ExpandedOrders {
   readonly setOpened: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
 }
 export type OrderPageState =
-  | { kind: "Loading" | "PermissionDenied" | "NotFound" | "Unavailable" }
+  | { kind: "Loading" | "PermissionDenied" | "NotFound" | "Unavailable" | "ServerProblem" }
   | { kind: "Ready"; view: CurrentOrderQueue; detail?: CurrentOrderDetail };
 type State = OrderPageState;
 /** WP-2423: what the Orders page reads: one page of the list, or the one order with its detail. */
@@ -2546,7 +2551,7 @@ export function CurrentOrderQueuePage({
     void navigate({ search: listSearch }, { replace: true });
   }, [listSearch, location.search, navigate, orderReference]);
   const [now, setNow] = useState(() => Date.now());
-  const [stale, setStale] = useState(false);
+  const [stale, setStale] = useState<"No" | "NoAnswer" | "ServerProblem">("No");
   /** Orders v2: when the list was last read without error (the header's "Updated 9:40"). */
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -2658,14 +2663,15 @@ export function CurrentOrderQueuePage({
       void readCurrentOrders(client, after, orderReference, controller.signal)
         .then((next) => {
           if (controller.signal.aborted) return;
-          setStale(false);
+          setStale("No");
           setUpdatedAt(Date.now());
           setState((previous) => refreshedOrderState(previous, next));
           // Opened orders reread their lines and refund totals with the list.
           setLinesRevision((value) => value + 1);
         })
-        .catch(() => {
-          if (!controller.signal.aborted) setStale(true);
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted)
+            setStale(isServerProblem(error) ? "ServerProblem" : "NoAnswer");
         })
         .finally(() => {
           if (background.current === controller) background.current = null;
@@ -2722,7 +2728,7 @@ export function CurrentOrderQueuePage({
     if (servingOrders.current.size > 0) return;
     restoreFocus.current = true;
     // WP-2423 Q6: a fresh read replaces the "could not be refreshed" notice from earlier polls.
-    setStale(false);
+    setStale("No");
     setState({ kind: "Loading" });
     setAfter(cursor);
     setRefresh((value) => value + 1);
@@ -2742,12 +2748,13 @@ export function CurrentOrderQueuePage({
     void readCurrentOrders(client, after, orderReference, controller.signal)
       .then((next) => {
         if (controller.signal.aborted) return;
-        setStale(false);
+        setStale("No");
         setUpdatedAt(Date.now());
         setState((previous) => refreshedOrderState(previous, next));
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setStale(true);
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setStale(isServerProblem(error) ? "ServerProblem" : "NoAnswer");
       })
       .finally(() => {
         if (background.current === controller) background.current = null;
@@ -2950,13 +2957,15 @@ export function CurrentOrderQueuePage({
                         )}
                   </p>
                 ) : null}
-                {stale ? (
+                {stale === "No" ? null : (
                   <p className="order-queue-stale" role="status">
-                    {t(
-                      "Orders could not be refreshed. Showing the last update; retrying automatically.",
-                    )}
+                    {stale === "ServerProblem"
+                      ? floorServerProblemText
+                      : t(
+                          "Orders could not be refreshed. Showing the last update; retrying automatically.",
+                        )}
                   </p>
-                ) : null}
+                )}
                 {single ? null : (
                   <OrderAttention
                     view={state.view}
@@ -3616,9 +3625,11 @@ export function CurrentOrderQueuePage({
                   ? t("Permission denied")
                   : state.kind === "NotFound"
                     ? t("Order not found")
-                    : single
-                      ? t("Order unavailable")
-                      : t("Orders unavailable")
+                    : state.kind === "ServerProblem"
+                      ? floorServerProblemHeading
+                      : single
+                        ? t("Order unavailable")
+                        : t("Orders unavailable")
             }
             status
           >
@@ -3631,7 +3642,9 @@ export function CurrentOrderQueuePage({
                   ? t("Your current session or Store permissions do not allow this queue.")
                   : state.kind === "NotFound"
                     ? t("This order is not at the selected Store.")
-                    : t("Orders could not be refreshed. Check your connection and try again.")}
+                    : state.kind === "ServerProblem"
+                      ? floorServerProblemText
+                      : t("Orders could not be refreshed. Check your connection and try again.")}
             </p>
           </StatePanel>
         )}

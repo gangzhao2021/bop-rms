@@ -406,10 +406,14 @@ export function OneStoreMenuPage({
       setProblemNeedsAllergens(false);
       reload();
     } catch (error) {
+      const code = error instanceof MenuPageError ? error.code : null;
+      // WP-2423 item 10: a stop on the server may be after the prices went live: the same listing
+      // reference goes again, so the steps already done are not done twice.
+      const stopped = code === "Unavailable" || code === "StoppedPartWay";
       // No answer (offline, or the page is going away): the listing may still be running on the
       // server, so it stays shown in progress until the menu says listed (or three minutes pass).
-      if (!(error instanceof MenuPageError) || error.code !== "Offline") {
-        setListing(null);
+      if (code !== "Offline") {
+        if (!stopped) setListing(null);
         setListingSince(null);
         writeListingMarker(menuReference, null);
       }
@@ -429,9 +433,9 @@ export function OneStoreMenuPage({
             ? menuReviewProblemText(
                 undeclared ? { ...error.problem, storeName: null } : error.problem,
               )
-            : error.code === "StoppedPartWay"
+            : stopped
               ? t(
-                  "Listing stopped part-way. List it again to finish; it carries on from where it stopped.",
+                  "Listing stopped part-way. New prices may already be showing to guests; the menu is not updated yet. List it again to finish.",
                 )
               : menuErrorText[error.code]
           : t("That didn't go through. Read the menu again and retry."),

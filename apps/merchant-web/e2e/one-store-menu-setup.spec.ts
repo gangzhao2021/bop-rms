@@ -1292,7 +1292,7 @@ test("@production a listing stopped by a dish with no allergens points to those 
   await page.getByRole("button", { name: "List it" }).click();
   await expect(
     page.getByText(
-      "Listing stopped part-way. List it again to finish; it carries on from where it stopped.",
+      "Listing stopped part-way. New prices may already be showing to guests; the menu is not updated yet. List it again to finish.",
     ),
   ).toBeVisible();
 });

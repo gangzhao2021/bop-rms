@@ -18,6 +18,7 @@ import {
   type StoreWasteView,
   type WasteRecordView,
 } from "./store-waste-pages.js";
+import { serverProblemText } from "./failure-words.js";
 
 /** WP-2423 / DEC-INV-WASTE: record waste as it happens; managers review high-value records. */
 const copy: Record<StoreWasteErrorCode | "Loading", string> = {
@@ -35,7 +36,7 @@ const copy: Record<StoreWasteErrorCode | "Loading", string> = {
   ),
   Invalid: t("The waste record is not valid."),
   Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
-  Unavailable: t("Waste is unavailable."),
+  Unavailable: serverProblemText,
 };
 /**
  * DEC-INV-COUNT-SHORT amendment (2026-10-18): staff see what is physically there and what open

@@ -120,8 +120,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "菜单没能重新读取。你的表单还在；读取成功后会显示已保存的内容。",
   "{choice} is not on any dish yet, and no dish uses its group. Open a dish and tick the group.":
     "{choice} 还没有用在任何菜品上，也没有菜品使用它的规格组。请打开一道菜，勾选这个规格组。",
-  "Listing stopped part-way. List it again to finish; it carries on from where it stopped.":
-    "上架中途停止了。请再点上架完成，会从停下的地方继续。",
   "1 dish still needs allergens": "还有 1 道菜需要申报过敏原",
   "{count} dishes still need allergens": "还有 {count} 道菜需要申报过敏原",
   "Show them": "查看",
@@ -523,7 +521,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "其间有人改过了。这是现在的设置，需要的话请重新选择。",
   "Saved. Tables opened from now on use it; tables already open keep theirs.":
     "已保存。之后新开的桌按这个方式；已经开着的桌不变。",
-  "Not saved. Check your connection and save again.": "没有保存。请检查网络后再保存一次。",
   "Dine-in payment": "堂食付款",
   "The dine-in payment setting could not be read. Refresh to retry.":
     "读不到堂食付款设置，请刷新重试。",
@@ -654,7 +651,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Allergens: "过敏原",
   "Allergens (this version)": "过敏原（此版本）",
   "Allergens are unavailable": "过敏原信息暂不可用",
-  "Allergens are unavailable.": "过敏原信息暂不可用。",
   "Allergens from ingredients:": "来自配料的过敏原：",
   "Allergens not available · check the recipe": "过敏原信息不可用 · 请查看配方",
   "Allergens · Brand": "过敏原 · 品牌",
@@ -1281,10 +1277,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Couldn't check for sent orders waiting for payment. Orders lists them too.":
     "无法检查已发送但待付款的订单。订单页也会列出它们。",
   "Couldn't check the PIN. Check the connection and try again.": "无法核对 PIN。请检查网络后重试。",
-  "Couldn't check the table's open rounds. Check the connection and try again.":
-    "无法检查该桌未完成的轮次。请检查网络后重试。",
-  "Couldn't check this table's orders. Check the connection and try again.":
-    "无法检查这张桌台的订单。请检查网络后重试。",
   "Couldn't check whether the order can be closed. Check the connection and try again.":
     "无法检查订单能否关闭。请检查网络后重试。",
   "Couldn't load the staff list": "无法加载员工列表",
@@ -1742,8 +1734,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Home: "首页",
   "Host transfer recorded at {value}. Refresh participants to see the current host.":
     "已于 {value} 记录主持人转让。刷新参与者查看当前主持人。",
-  "Host transfer was not confirmed. Refresh participants and check your permissions.":
-    "主持人转让未确认。请刷新参与者并检查你的权限。",
   Hour: "小时",
   Hours: "营业时间",
   "Hours & ordering": "营业时间与点单",
@@ -1882,7 +1872,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Inventory item update": "库存品项更新",
   "Inventory items": "库存品项",
   "Inventory items are unavailable": "库存品项暂不可用",
-  "Inventory items are unavailable.": "库存品项暂不可用。",
   "Inventory items, receiving, counts, adjustments and waste": "库存品项、收货、盘点、调整和报损",
   "Inventory movement read": "库存变动查看",
   "Inventory transfer execute": "执行库存调拨",
@@ -1938,7 +1927,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Item actions": "品项操作",
   "Item availability": "商品供应",
   "Item availability is unavailable": "商品供应暂不可用",
-  "Item availability is unavailable.": "商品供应暂不可用。",
   "Item missing": "缺少商品",
   "Item sales": "商品销售",
   "Item type": "品项类型",
@@ -2143,7 +2131,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Menu · Brand": "菜单 · 品牌",
   Menus: "菜单",
   "Menus are unavailable": "菜单暂不可用",
-  "Menus are unavailable.": "菜单暂不可用。",
   "Menu{value}": "菜单{value}",
   "Metric {version}": "指标 {version}",
   Milk: "奶类",
@@ -2645,11 +2632,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Option names must differ.": "选项名称不能重复。",
   "Option prices": "选项价格",
   "Option prices are unavailable": "选项价格暂不可用",
-  "Option prices are unavailable.": "选项价格暂不可用。",
   "Option prices · Brand": "选项价格 · 品牌",
   "Option recipes": "选项配方",
   "Option recipes are unavailable": "选项配方暂不可用",
-  "Option recipes are unavailable.": "选项配方暂不可用。",
   "Option recipes · Brand": "选项配方 · 品牌",
   "Option set": "选项组",
   "Option sets": "选项组",
@@ -2657,7 +2642,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Option {value} Chinese name": "选项 {value} 中文名称",
   "Option {value} name": "选项 {value} 名称",
   Options: "选项",
-  "Options are unavailable.": "选项暂不可用。",
   "Options from {name} on this product": "此商品上来自{name}的选项",
   "Options offered": "提供的选项",
   "Options · Brand": "选项 · 品牌",
@@ -2923,7 +2907,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Price of {productName} {sizeName}": "{productName} {sizeName} 的价格",
   Prices: "价格",
   "Prices are unavailable": "价格暂不可用",
-  "Prices are unavailable.": "价格暂不可用。",
   "Prices changed since you opened the page. Refresh and check again.":
     "你打开页面后价格已变更。请刷新后再核对。",
   "Prices needed": "需要价格",
@@ -2949,7 +2932,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Products and their sizes are shared by every Store of the Brand. A size is what a customer orders; prices, menus and recipes refer to it.":
     "商品及其规格由品牌下所有门店共用。规格就是顾客点的东西；价格、菜单和配方都引用它。",
   "Products are unavailable": "商品暂不可用",
-  "Products are unavailable.": "商品暂不可用。",
   "Products that cannot be taxed": "无法计税的商品",
   "Products · Brand": "商品 · 品牌",
   "Products, menus and prices, including approving another person's changes":
@@ -3116,7 +3098,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Received: "已收货",
   Receiving: "收货",
   "Receiving is unavailable": "收货暂不可用",
-  "Receiving is unavailable.": "收货暂不可用。",
   "Recent changes": "最近更改",
   "Recently finished · {length}": "最近完成 · {length}",
   Recipe: "配方",
@@ -3129,7 +3110,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Recipes are shared by every Store of the Brand. A recipe is published after an independent cost review and food safety review; a SKU uses its recipe to reserve and consume stock and to show kitchen instructions. Source as of":
     "配方由品牌下所有门店共用。配方经独立的成本审核和食品安全审核后发布；SKU 用其配方预留和消耗库存，并显示后厨做法。数据截至",
   "Recipes are unavailable": "配方暂不可用",
-  "Recipes are unavailable.": "配方暂不可用。",
   "Recipes · Brand": "配方 · 品牌",
   "Recipes, menu and products, pricing, supply items and Brand staff roles":
     "配方、菜单和商品、定价、物料以及品牌员工角色",
@@ -3453,7 +3433,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Role actions": "角色操作",
   "Role administration is disabled.": "角色管理已停用。",
   "Role administration is unavailable": "角色管理暂不可用",
-  "Role administration metadata is unavailable.": "角色管理信息暂不可用。",
   "Role administration unavailable": "角色管理暂不可用",
   "Role and permission governance": "角色与权限管理",
   "Role code (lowercase, e.g. shift_lead)": "角色代码（小写，例如 shift_lead）",
@@ -3906,7 +3885,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff PIN request was not completed": "员工 PIN 请求未完成",
   "Staff PINs": "员工 PIN",
   "Staff administration is unavailable": "员工管理暂不可用",
-  "Staff administration is unavailable.": "员工管理暂不可用。",
   "Staff can then switch to themselves here with their 6-digit PIN. Refunds, price and staff changes still need a full sign-in. Do this on the shared tablet itself, not on a personal phone or computer.":
     "之后员工可以在这里用 6 位 PIN 换成自己。退款、价格和员工更改仍需要完整登录。请在共享平板本身上操作，不要在个人手机或电脑上操作。",
   "Staff member": "员工",
@@ -3987,7 +3965,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这个库位仍有库存、预留或待到货。请先移走或盘出。",
   "Stock locations": "库位",
   "Stock locations are unavailable": "库位暂不可用",
-  "Stock locations are unavailable.": "库位暂不可用。",
   "Stock moved on the highlighted lines after they were counted (sales, receipts or waste). Send the count back; the counter refreshes those lines and counts them again.":
     "高亮的行在清点后库存有变动（销售、收货或报损）。请退回盘点；清点人会刷新这些行并重新清点。",
   "Stock moved on {value} since counting started (sales, deliveries or waste). Refresh them and count them again.":
@@ -4164,7 +4141,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tax rates and tax names are set in Tax review.": '税率和税名在"税务核对"中设置。',
   "Tax review": "税务核对",
   "Tax review is unavailable": "税务核对暂不可用",
-  "Tax review is unavailable.": "税务核对暂不可用。",
   "Tax review · Store": "税务核对 · 门店",
   "Tax settings": "税务设置",
   "Tax settings (see Tax review): {value}": '税务设置（见"税务核对"）：{value}',
@@ -4437,7 +4413,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "下一位具名操作员需先登录才能使用此看板。",
   "The number on the ticket or receipt, or the table. Shows only that order's work.":
     "票据或收据上的单号，或桌台号。只显示该订单的工作。",
-  "The opening count is unavailable.": "期初盘点暂不可用。",
   "The option set changed since you opened it. Refresh and check again.":
     "你打开后选项组已变更。请刷新后再核对。",
   "The option set is not valid. It needs a name, at least one option, different option names, and limits that customers can meet with the options offered.":
@@ -4526,8 +4501,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The request could not be confirmed. Recover its original save or submission before writing again.":
     "无法确认请求。再次写入前，请先恢复原来的保存或提交。",
   "The request is not valid.": "请求无效。",
-  "The request was not confirmed. Refresh the table and check your permissions.":
-    "请求未确认。请刷新桌台并检查你的权限。",
   "The requested Task Inbox route was not found.": "未找到请求的任务收件箱路由。",
   "The requested role is unavailable in this scope.": "此范围内没有所请求的角色。",
   "The response was lost. Retry this same operation to recover its result; do not create another operation.":
@@ -4599,8 +4572,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '系统无法下这笔订单（是我们这边的问题，不是订单的问题）。没有收费。请再发送一次。如果仍然失败，请用纸质记录订单，在刷卡机上收款，之后在"纸质订单"中录入。首页会显示提醒。',
   "The system couldn't send this round for {table} (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.":
     '系统无法为{table}发送这一轮（是我们这边的问题，不是订单的问题）。没有发送到后厨，也没有收费。请再发送一次。如果仍然失败，请用纸质记录订单，在刷卡机上收款，之后在"纸质订单"中录入。首页会显示提醒。',
-  "The table request was not confirmed. Refresh and check current permissions.":
-    "桌台请求未确认。请刷新并检查当前权限。",
   "The table wasn't closed yet:": "桌台尚未关闭：",
   "The table wasn't closed: it changed while it was being closed (for example a payment or refund came in). It has been checked again; review it and try again.":
     "桌台未关闭：关台过程中它发生了变化（例如收到付款或退款）。已重新检查；请核对后重试。",
@@ -5080,7 +5051,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Waiting for {assigneeReference} to start counting.": "等待 {assigneeReference} 开始清点。",
   Waste: "报损",
   "Waste is unavailable": "报损暂不可用",
-  "Waste is unavailable.": "报损暂不可用。",
   "Waste record": "报损记录",
   "Waste record · {record}": "报损记录 · {record}",
   "Waste recorded": "已记录报损",
@@ -6068,8 +6038,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The cash received is less than the cash total.": "收到的现金少于现金应付。",
   "This table has already paid.": "这桌已经付过了。",
   "Every dish must be served or cancelled first.": "每道菜都要先上齐或取消。",
-  "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.":
-    "没能确认结果。请检查网络后再按一次，不会重复记录。",
   "This couldn't be done right now. Try again.": "现在无法完成，请再试一次。",
   Checkout: "结账",
   "This table pays once at the end. When the guests ask for the bill, start checkout: no more rounds can be sent from the table.":
@@ -6134,7 +6102,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "It also shows in the kitchen, marked as from a paper slip. If it was already made, the kitchen marks it done and you mark it served.":
     "后厨屏也会显示这一轮，并标明来自纸单。已经做过的，请后厨直接点做好，你再点已上。",
   "Refunded {amount}": "已退 {amount}",
-  "Last bills seen before the connection dropped": "断网前最后看到的账单",
   "As of": "更新于",
   "Rounds taken since then aren't here: add the paper slips.":
     "断网后新点的菜不在这里，要加上纸单。",
@@ -6380,7 +6347,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Comps and discounts by a manager · {dishes}": "店长免单/折让 · {dishes}",
   Comps: "免单/折让",
   "Comp or discount dishes before the table pays": "付款前给菜免单或折让",
-  "While the connection is down": "断网期间怎么做",
   "Take new rounds on paper slips (table and round) and pass them to the kitchen.":
     "新点的菜写在纸单上（桌号和第几轮），交给后厨。",
   "Tick each dish on the slip when it is served.": "每道菜上桌后在纸单上打勾。",
@@ -6388,7 +6354,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "免单或折让由店长决定：在纸单上写明哪道菜、减多少、原因和店长姓名。",
   "Take the table's payment on the card machine or in cash as usual. Write the table, amount, tip, time and the slip's reference code (cash: received and change). Never write a card number.":
     "照常用刷卡机或现金收这桌的钱。记下桌号、金额、小费、时间和刷卡单上的单号（现金记实收和找零）。不要记卡号。",
-  "When the connection is back, for each table": "恢复联网后，每桌按顺序补录",
   "Enter its paper rounds: Take order for table, tick Recorded after an outage.":
     "补录纸单上的轮次：点“为桌台点单”，勾选“停电/断网后补录”。",
   "Mark the dishes served.": "把菜记为已上桌。",
@@ -6716,10 +6681,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Mark {displayName} served": "{displayName} 已上",
   "That dish is not done in the kitchen yet.": "这道菜厨房还没做好。",
   "Combo: {parts} · allergens by choice": "套餐：{parts} · 过敏原按所选菜",
-  "Saving stopped part-way. What was saved stays; guests see nothing new. Save it again to finish, and tell the manager if it stops again.":
-    "保存中途停了。已保存的部分保留，客人看不到任何变化。请再保存一次完成；如果还停，请告诉店长。",
-  "{item} was saved only in part. Open it with Edit and save it again to finish it.":
-    "{item} 只保存了一部分。请点它的“编辑”，再保存一次完成。",
   "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.":
     "菜单审核在 {item} 处停下，但没有指出缺什么（代码 {reason}）。没有上架任何内容。请把这个代码告诉运维。",
   "Guests can't be shown {count}: {items}. They can still order everything else. Tell the operator so it can be fixed.":
@@ -6918,8 +6879,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "后厨已经不在做这道菜了，请看看是否已经可以上菜。",
   "Chasing a dish is turned off for this store.": "本店没有打开催菜。",
   "The kitchen was not told. Your access may have changed.": "没有通知到后厨，你的权限可能已改变。",
-  "The kitchen was not told. Check the connection and try again.":
-    "没有通知到后厨，请检查网络后重试。",
   "Chased once": "催过 1 次",
   "Chased {count} times": "催过 {count} 次",
   "Chase {displayName} with the kitchen": "向后厨催 {displayName}",
@@ -7010,8 +6969,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You don't have permission to move tables.": "你没有换桌的权限。",
   "The tables changed meanwhile. They are read again: check and retry.":
     "桌台刚有变化，已重新读取：请检查后再试。",
-  "The move wasn't confirmed. Check the connection and retry.":
-    "换桌没有确认成功。请检查网络后重试。",
   "Move this party to another table": "把这桌客人换到另一张桌",
   "Move to…": "换到…",
   "Choose a table": "选择一张桌",
@@ -7840,4 +7797,47 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Making it by hand": "正在手工做",
   "Noted. It no longer shows as waiting for the kitchen. If you can't make it after all, tap Can't make it.":
     "记下了，不再显示为等后厨。如果最后还是做不了，点“做不了”。",
+  "Something went wrong on our side. If you just saved, open it to see whether it is there, then try again.":
+    "我们这边出了问题。如果刚才在保存，请打开看看是否已经存上，然后再试一次。",
+  "Our system has a problem": "我们的系统出了问题",
+  "Our system has a problem; your wifi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.":
+    "我们的系统出了问题，您的网络没有问题。请继续营业：新点的菜写纸单，付款用刷卡机。这个页面会一直重试。",
+  "We couldn't confirm the result. Press again: it is never recorded twice.":
+    "没能确认结果。请再按一次，不会重复记录。",
+  "We couldn't confirm the result. Press the button again: it is never recorded twice.":
+    "没能确认结果。请再按一次，不会重复记录。",
+  "This table changed. It has been read again.": "这张桌子有变动，已重新读取。",
+  "Showing the last update from": "显示的是以下时间的最近更新：",
+  ". Actions are paused until it is back.": "。恢复前操作暂停。",
+  "Table {table}: not confirmed. Press it again: it is never recorded twice.":
+    "{table} 桌：没能确认。请再按一次，不会重复记录。",
+  "Your access doesn't allow this table action. Ask a manager.":
+    "您的权限不能做这个桌台操作，请找经理。",
+  "This didn't go through. The table has been read again: try again.":
+    "这次没有办成。桌台已重新读取，请再试一次。",
+  "While Tables isn't working": "桌台页面不能用时怎么做",
+  "When Tables works again, for each table": "桌台页面恢复后，每桌按顺序补录",
+  "Last bills seen before this stopped": "停用前最后看到的账单",
+  "The move wasn't confirmed. Try again.": "没能确认换桌结果，请再试一次。",
+  "The merge wasn't confirmed. Try again.": "没能确认并桌结果，请再试一次。",
+  "The number of guests could not be read. Try again.": "没能读取人数，请再试一次。",
+  "We couldn't confirm the number of guests was saved. Save again: it is never recorded twice.":
+    "没能确认人数已保存。请再保存一次，不会重复记录。",
+  "The tea wasn't changed. Try again.": "茶位没有改动，请再试一次。",
+  "Couldn't check the table's open rounds. Try again.": "没能查看这桌未结的轮次，请再试一次。",
+  "Couldn't check this table's orders. Try again.": "没能查看这桌的订单，请再试一次。",
+  "The kitchen was not told. Try again.": "厨房没有收到通知，请再试一次。",
+  "We couldn't confirm this was saved. Save again: it is never recorded twice.":
+    "没能确认已保存。请再保存一次，不会重复记录。",
+  "We couldn't confirm this was saved. It has been read again: check it, and press again if it isn't.":
+    "没能确认已保存。已重新读取：请查看一下，如果没有存上请再按一次。",
+  "Your access doesn't allow moving the host. Ask a manager.": "您的权限不能转交主持人，请找经理。",
+  "The host wasn't moved. Refresh the guests and try again.":
+    "主持人没有转交。请刷新客人名单后再试一次。",
+  "Saving stopped part-way. What was saved stays; guests see nothing new. Save it again to finish.":
+    "保存中途停止了。已保存的部分不会丢，客人看不到任何变化。请再保存一次来完成。",
+  "Listing stopped part-way. New prices may already be showing to guests; the menu is not updated yet. List it again to finish.":
+    "上架中途停止了。新价格可能已经显示给客人，菜单还没有更新。请再上架一次来完成。",
+  "This form changed after saving stopped. Close it and open the item again to change it; nothing is lost.":
+    "保存停止后这份表单又改动过。请关闭后重新打开这一项再改，已保存的内容不会丢。",
 });

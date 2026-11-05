@@ -58,6 +58,12 @@ import {
   useStaleRetry,
   type StaleRead,
 } from "./stale-read.js";
+import {
+  floorServerProblemText,
+  isServerProblem,
+  notConfirmedPressAgainText,
+  tableChangedText,
+} from "./failure-words.js";
 type Operation = ReturnType<ReturnType<typeof createDiningSessionClient>["prepareStart"]>;
 type AvailabilityOperation = ReturnType<
   ReturnType<typeof createDiningSessionClient>["prepareAvailability"]
@@ -399,6 +405,33 @@ interface TableResult {
  * and closes the table. Everyday steps (serve, open, clean, close) are not confirmed: they say what
  * happened, and cleaning can be undone. Only money and cancelling are confirmed.
  */
+/** No answer, or a server failure (a lost COMMIT looks the same): the same request goes again. */
+function tableActionOutcomeUnknown(error: unknown): boolean {
+  return (
+    error instanceof DiningSessionClientError &&
+    (error.code === "Unknown" || error.code === "ServerProblem")
+  );
+}
+/**
+ * WP-2423 item 10: what a table action that did not go through says. A refused one is the only one
+ * that may mention access; the screen has read the table again first, so it is not a stale screen.
+ */
+function tableActionFailureText(error: unknown): string {
+  const code = error instanceof DiningSessionClientError ? error.code : "Unavailable";
+  switch (code) {
+    case "Unknown":
+      return t("The result is unknown. Press it again: the same request is sent, never twice.");
+    case "ServerProblem":
+      return notConfirmedPressAgainText + " " + floorServerProblemText;
+    case "Changed":
+      return tableChangedText;
+    case "Denied":
+      return t("Your access doesn't allow this table action. Ask a manager.");
+    default:
+      return t("This didn't go through. The table has been read again: try again.");
+  }
+}
+
 export function DiningSessionWorkspace({
   csrf,
   storeLabel,
@@ -447,6 +480,8 @@ export function DiningSessionWorkspace({
   const [hostLocked, setHostLocked] = useState(false);
   // IDR-0039: a failed refresh keeps the last loaded tables on screen, read-only, and retries.
   const [stale, setStale] = useState<StaleRead | null>(null);
+  // WP-2423 item 10: the server answered 5xx before any table was shown: consecutive failures.
+  const [firstReadFailures, setFirstReadFailures] = useState<number | null>(null);
   const loadedAt = useRef<string | null>(null);
   const paused = stale !== null;
   const locked = state !== "Idle" || hostLocked;
@@ -480,11 +515,15 @@ export function DiningSessionWorkspace({
       setResult({
         text: t("Table {table}: marked as handled.", { table: saidTable(table.stableLabel) }),
       });
-    } catch {
+    } catch (error) {
       setResult({
-        text: t("Table {table}: not confirmed. Check the connection and try again.", {
-          table: saidTable(table.stableLabel),
-        }),
+        text: isServerProblem(error)
+          ? t("Table {table}: not confirmed. Press it again: it is never recorded twice.", {
+              table: saidTable(table.stableLabel),
+            })
+          : t("Table {table}: not confirmed. Check the connection and try again.", {
+              table: saidTable(table.stableLabel),
+            }),
       });
     } finally {
       setAnswering(null);
@@ -555,6 +594,8 @@ export function DiningSessionWorkspace({
       if (!controller.signal.aborted) {
         loadedAt.current = new Date().toISOString();
         setStale(null);
+        setFirstReadFailures(null);
+        setMessage((shown) => (shown === floorServerProblemText ? "" : shown));
         const items = more ? [...tables, ...loaded.items] : loaded.items;
         setTables(items);
         setNext(loaded.next);
@@ -572,10 +613,11 @@ export function DiningSessionWorkspace({
     } catch (error) {
       if (!controller.signal.aborted) {
         const denied = error instanceof DiningSessionClientError && error.code === "Denied";
+        const server = isServerProblem(error);
         const lastLoadedAt = loadedAt.current;
         if (!denied && lastLoadedAt !== null && tables.length > 0) {
           setStale((prior) => ({
-            reason: "Unavailable",
+            reason: server ? "ServerProblem" : "Unavailable",
             lastLoadedAt,
             attempts: (prior?.attempts ?? 0) + 1,
           }));
@@ -585,10 +627,13 @@ export function DiningSessionWorkspace({
           setTables([]);
           setNext(null);
           setCanOperateTables(false);
+          setFirstReadFailures((prior) => (server ? (prior ?? 0) + 1 : null));
           setMessage(
             denied
               ? t("Your current permissions do not allow table operations.")
-              : t("Tables unavailable. Check your connection and refresh."),
+              : server
+                ? floorServerProblemText
+                : t("Tables unavailable. Check your connection and refresh."),
           );
         }
       }
@@ -602,7 +647,7 @@ export function DiningSessionWorkspace({
   const loadRef = useRef(load);
   loadRef.current = load;
   const reread = () => void loadRef.current(false, true);
-  useStaleRetry(stale?.attempts ?? null, reread);
+  useStaleRetry(stale?.attempts ?? firstReadFailures, reread);
   // v15 cbff9d6f: no reads once this screen's sign-in has ended.
   const live = useStaffSessionLive();
   useEffect(() => {
@@ -662,6 +707,7 @@ export function DiningSessionWorkspace({
     setState("Submitting");
     setCode(null);
     setResult(null);
+    let readAgain = false;
     try {
       const client = createDiningSessionClient();
       if (!operation.current) {
@@ -718,22 +764,21 @@ export function DiningSessionWorkspace({
                 "The request already completed. Its code cannot be displayed again. Replace the join code to get a new one.",
               ),
         });
-        reread();
+        readAgain = true;
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        const unknown = error instanceof DiningSessionClientError && error.code === "Unknown";
+        const unknown = tableActionOutcomeUnknown(error);
         setState(unknown ? "Unknown" : "Idle");
         setUnknownAction(unknown ? "Session" : null);
         if (!unknown) operation.current = null;
-        setResult({
-          text: unknown
-            ? t("The result is unknown. Press it again: the same request is sent, never twice.")
-            : t("The request was not confirmed. Refresh the table and check your permissions."),
-        });
+        setResult({ text: tableActionFailureText(error) });
+        readAgain = !unknown;
       }
     } finally {
       if (pending.current === controller) pending.current = null;
+      // After `pending` is clear, or the read would not run; a stale screen is corrected first.
+      if (readAgain) reread();
     }
   };
   /** Mark a table unavailable or available again; cleaning is undone the same way. */
@@ -758,6 +803,7 @@ export function DiningSessionWorkspace({
     pending.current = controller;
     setState("Submitting");
     setResult(null);
+    let readAgain = false;
     try {
       const prepared =
         availabilityOperations.current.get(key) ??
@@ -804,19 +850,16 @@ export function DiningSessionWorkspace({
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        const unknown = error instanceof DiningSessionClientError && error.code === "Unknown";
+        const unknown = tableActionOutcomeUnknown(error);
         setState(unknown ? "Unknown" : "Idle");
         setUnknownAction(unknown ? "Availability" : null);
         if (!unknown) availabilityOperations.current.delete(key);
-        setResult({
-          text: unknown
-            ? t("The result is unknown. Press it again: the same request is sent, never twice.")
-            : t("The table request was not confirmed. Refresh and check current permissions."),
-        });
-        if (!unknown) reread();
+        setResult({ text: tableActionFailureText(error) });
+        readAgain = !unknown;
       }
     } finally {
       if (pending.current === controller) pending.current = null;
+      if (readAgain) reread();
     }
   };
   /** "Serve all" from the list: everything ready at the pass for the table, said in words. */
@@ -1177,7 +1220,7 @@ export function DiningSessionWorkspace({
       <LastOrdersNotice timeZone={timeZone} />
       {stale ? <StaleReadNotice stale={stale} /> : null}
       {/* Operating continuity: what servers do while the page can't reach the store system. */}
-      {stale ? <TablesOfflineGuide /> : null}
+      {stale || firstReadFailures !== null ? <TablesOfflineGuide /> : null}
       <nav className="table-tabs" aria-label={t("Show tables")}>
         {tableTabs.map((value) => (
           <button

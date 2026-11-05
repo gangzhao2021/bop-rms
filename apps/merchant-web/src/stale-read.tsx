@@ -3,6 +3,7 @@ import { useContext, useEffect, useRef } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { StatePanel } from "@bop-rms/ui";
 import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
+import { floorServerProblemHeading, floorServerProblemText } from "./failure-words.js";
 
 /**
  * IDR-0039 (Handoff §87.11.1): when a re-read fails, a work screen keeps the last data it loaded in
@@ -10,7 +11,14 @@ import { StoreTimeZoneContext, storeTime } from "./StoreTime.js";
  * action stays disabled until a fresh read succeeds.
  */
 export type ReadFailure =
-  "PermissionDenied" | "NotFound" | "Offline" | "Conflict" | "CommandFailed" | "Unavailable";
+  | "PermissionDenied"
+  | "NotFound"
+  | "Offline"
+  | "Conflict"
+  | "CommandFailed"
+  | "Unavailable"
+  /** WP-2423 item 10: the server answered 5xx. The network is fine; staff are told so. */
+  | "ServerProblem";
 
 export interface StaleRead {
   readonly reason: ReadFailure;
@@ -88,6 +96,19 @@ export function StaleReadNotice({
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
   const offline = stale.reason === "Offline";
+  if (stale.reason === "ServerProblem")
+    return (
+      <div className={className ?? "stale-read-notice"} data-stale-reason={stale.reason}>
+        <StatePanel heading={floorServerProblemHeading} tone="offline" status>
+          <p>{floorServerProblemText}</p>
+          <p>
+            {t("Showing the last update from")}{" "}
+            <time dateTime={stale.lastLoadedAt}>{storeTime(stale.lastLoadedAt, timeZone)}</time>
+            {t(". Actions are paused until it is back.")}
+          </p>
+        </StatePanel>
+      </div>
+    );
   return (
     <div className={className ?? "stale-read-notice"} data-stale-reason={stale.reason}>
       <StatePanel heading={t("Read-only until reconnected")} tone="offline" status>

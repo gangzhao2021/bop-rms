@@ -350,7 +350,7 @@ export function DiningRoundsProvider({
                 ? t("Chasing a dish is turned off for this store.")
                 : error instanceof DiningChaseClientError && error.code === "PermissionDenied"
                   ? t("The kitchen was not told. Your access may have changed.")
-                  : t("The kitchen was not told. Check the connection and try again."),
+                  : t("The kitchen was not told. Try again."),
       );
     },
     serveRound: (sequence) => {

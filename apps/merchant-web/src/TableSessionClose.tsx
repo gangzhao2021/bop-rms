@@ -431,7 +431,7 @@ export function TableSessionClose({
               ? t(
                   "This table's order wasn't found at this store. Refresh the tables and try again.",
                 )
-              : t("Couldn't check this table's orders. Check the connection and try again.")}{" "}
+              : t("Couldn't check this table's orders. Try again.")}{" "}
           {check.denied ? null : (
             <button type="button" onClick={() => setAttempt((value) => value + 1)}>
               {t("Check again")}

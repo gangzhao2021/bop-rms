@@ -5,6 +5,7 @@ import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { dollarsToMinor } from "./TableCheckout.js";
+import { notConfirmedPressAgainText } from "./failure-words.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -304,6 +305,13 @@ function TablePaymentBlock({
         setSlip("");
         return;
       }
+      // WP-2423 item 10: a server failure covers a lost COMMIT, so the refund may be on record, and
+      // a new operation would give the money back twice. The same request goes again.
+      if (status >= 500) {
+        setProblem(notConfirmedPressAgainText);
+        onStale();
+        return;
+      }
       operation.current = null;
       setReviewing(false);
       if (isFullSignInRequired(status, payload)) {
@@ -332,9 +340,7 @@ function TablePaymentBlock({
       onStale();
     } catch {
       setProblem(
-        t(
-          "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
-        ),
+        t("We couldn't confirm the result. Press the button again: it is never recorded twice."),
       );
     } finally {
       setBusy(false);

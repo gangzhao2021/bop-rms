@@ -38,6 +38,7 @@ import {
   type StorePricesClient,
   type StorePricesView,
 } from "./store-prices-client.js";
+import { serverProblemText } from "./failure-words.js";
 
 /** WP-2423 8.5: which items this Store sells now — offer, sold out, back in stock. */
 const copy: Record<AvailabilityErrorCode | "Loading", string> = {
@@ -51,7 +52,7 @@ const copy: Record<AvailabilityErrorCode | "Loading", string> = {
   ),
   Invalid: t("That request is not valid."),
   Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
-  Unavailable: t("Item availability is unavailable."),
+  Unavailable: serverProblemText,
 };
 const statusText = {
   Available: t("Available"),

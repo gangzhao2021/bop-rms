@@ -24,6 +24,7 @@ import {
   type RoleCommandRequest,
 } from "./role-administration-pages.js";
 import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { serverProblemText } from "./failure-words.js";
 type State =
   | { readonly kind: "Loading" | RoleAdministrationPageErrorCode }
   | { readonly kind: "Found"; readonly view: RoleAdministrationPageView };
@@ -37,7 +38,7 @@ const copy = {
   Conflict: t("The role or policy changed, or the role is still assigned. Refresh and try again."),
   CommandFailed: t("The change was refused. No role or permission outcome was inferred."),
   Offline: t("Offline. Your change was not confirmed; retry sends the same request again."),
-  Unavailable: t("Role administration metadata is unavailable."),
+  Unavailable: serverProblemText,
 } as const;
 const operationLabels: Record<RoleAdministrationOperation, string> = {
   Duplicate: t("Duplicate as custom role"),

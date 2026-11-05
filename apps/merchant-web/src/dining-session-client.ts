@@ -1,6 +1,6 @@
 import { t } from "./i18n/i18n.js";
 export class DiningSessionClientError extends Error {
-  constructor(readonly code: "Denied" | "Unavailable" | "Unknown") {
+  constructor(readonly code: "Denied" | "Unavailable" | "Unknown" | "Changed" | "ServerProblem") {
     super(t("Dining session request unavailable"));
   }
 }
@@ -182,8 +182,12 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         },
         body,
       });
-      if (response.status === 401 || response.status === 403 || response.status === 409)
+      if (response.status === 401 || response.status === 403)
         throw new DiningSessionClientError("Denied");
+      // WP-2423 item 10: another server got there first, or the table moved on: not a refusal.
+      if (response.status === 409) throw new DiningSessionClientError("Changed");
+      // The server answered, and failed. Told apart from no answer at all.
+      if (response.status >= 500) throw new DiningSessionClientError("ServerProblem");
       if (
         !response.ok ||
         response.headers.get("cache-control") !== "no-store" ||
@@ -194,7 +198,11 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
       if (text.length > 100000 || controller.signal.aborted) return fail();
       return obj(JSON.parse(text));
     } catch (error) {
-      if (error instanceof DiningSessionClientError && error.code === "Denied") throw error;
+      if (
+        error instanceof DiningSessionClientError &&
+        (error.code === "Denied" || error.code === "Changed" || error.code === "ServerProblem")
+      )
+        throw error;
       throw new DiningSessionClientError(mutation ? "Unknown" : "Unavailable");
     } finally {
       clearTimeout(timer);

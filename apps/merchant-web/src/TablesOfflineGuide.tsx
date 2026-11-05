@@ -15,7 +15,7 @@ export function TablesOfflineGuide() {
   const last = loadLastBills();
   return (
     <section className="tables-offline" aria-labelledby="tables-offline-title" role="note">
-      <h2 id="tables-offline-title">{t("While the connection is down")}</h2>
+      <h2 id="tables-offline-title">{t("While Tables isn't working")}</h2>
       <ul>
         <li>
           {t("Take new rounds on paper slips (table and round) and pass them to the kitchen.")}
@@ -33,7 +33,7 @@ export function TablesOfflineGuide() {
         </li>
       </ul>
       <details>
-        <summary>{t("When the connection is back, for each table")}</summary>
+        <summary>{t("When Tables works again, for each table")}</summary>
         <ol>
           <li>
             {t("Enter its paper rounds: Take order for table, tick Recorded after an outage.")}
@@ -55,7 +55,7 @@ export function TablesOfflineGuide() {
       {/* Owner 2026-11-03: what each table owed, so a table can pay while the list can't be read. */}
       {last === null ? null : (
         <div className="tables-offline__bills">
-          <h3>{t("Last bills seen before the connection dropped")}</h3>
+          <h3>{t("Last bills seen before this stopped")}</h3>
           <p>
             {t("As of")} <SourceTime instant={last.savedAt} withDate={false} /> ·{" "}
             {t("Rounds taken since then aren't here: add the paper slips.")}

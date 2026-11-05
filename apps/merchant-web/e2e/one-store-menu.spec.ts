@@ -31,6 +31,8 @@ const sellable = (n: number, name: string, nameZh: string, price: string | null)
 });
 let released: string | null = null;
 let refuseListing = false;
+let listingStops = false;
+let dishSaveStops = false;
 function builder(version: number, order: number[][]) {
   return {
     screenId: "CAT-MENU-BUILDER",
@@ -190,6 +192,8 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   await page.route("**/merchant/commerce/one-store-dishes/command", (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     menuCommands.push({ ...body, action: body.action === "ListAll" ? "List" : body.action });
+    if (listingStops)
+      return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
     if (refuseListing)
       return route.fulfill({
         status: 409,
@@ -337,7 +341,20 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     }),
   ).toBeVisible();
   refuseListing = false;
+  // WP-2423 item 10: a stop on the server may be after the prices went live, so it does not say
+  // guests see nothing new; listing again carries on as the same listing.
+  listingStops = true;
   await page.getByRole("button", { name: "List it" }).click();
+  await expect(
+    page.getByText(
+      "Listing stopped part-way. New prices may already be showing to guests; the menu is not updated yet. List it again to finish.",
+    ),
+  ).toBeVisible();
+  const stopped = menuCommands.at(-1);
+  listingStops = false;
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect.poll(() => menuCommands.at(-1)).not.toBe(stopped);
+  expect(menuCommands.at(-1)?.operationReference).toBe(stopped?.operationReference);
   await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
   await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
   // Still listed after a reload: no "List it", no "saved changes not listed".
@@ -610,6 +627,10 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await page.route("**/merchant/commerce/one-store-dishes/command", (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     dishCommands.push(body);
+    if (dishSaveStops) {
+      dishSaveStops = false;
+      return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
+    }
     if (body.action === "SaveDish" && body.allergens === "NoIngredients") teaSaved = true;
     if (body.action === "SaveDish" && body.productReference !== null) {
       const sku = id(Number.parseInt(String(body.productReference).slice(-12), 16) - 100);
@@ -790,8 +811,25 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await fresh.getByLabel("Price ($)").fill("6.50");
   await fresh.getByRole("combobox", { name: "Section", exact: true }).selectOption("SOUPS-TEST");
   await fresh.getByRole("radiogroup", { name: "Wheat 小麦" }).getByLabel("Contains").check();
+  // WP-2423 item 10: the server fails on a new dish: nothing is claimed about what was saved, the
+  // form stays, and saving again is the same operation, so it can't make a second dish.
+  dishSaveStops = true;
+  await fresh.getByRole("button", { name: "Save dish" }).click();
+  await expect(
+    fresh.getByText("Something went wrong on our side.", { exact: false }),
+  ).toBeVisible();
+  const stoppedSave = dishCommands.at(-1);
+  // Different content can't go under that operation.
+  await fresh.getByLabel("Price ($)").fill("6.75");
+  await fresh.getByRole("button", { name: "Save dish" }).click();
+  await expect(
+    fresh.getByText("This form changed after saving stopped.", { exact: false }),
+  ).toBeVisible();
+  expect(dishCommands.at(-1)).toBe(stoppedSave);
+  await fresh.getByLabel("Price ($)").fill("6.50");
   await fresh.getByRole("button", { name: "Save dish" }).click();
   await expect(page.getByText("Hot and sour soup (TEST) saved.", { exact: false })).toBeVisible();
+  expect(dishCommands.at(-1)?.operationReference).toBe(stoppedSave?.operationReference);
   expect(dishCommands.at(-1)).toMatchObject({
     action: "SaveDish",
     productReference: null,

@@ -52,7 +52,7 @@ export function itemCompFailureText(failure: Failure) {
       return t("This table changed since it was shown. Refresh it, then try again.");
     case "Unknown":
       return t(
-        "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
+        "We couldn't confirm the result. Press the button again: it is never recorded twice.",
       );
   }
 }

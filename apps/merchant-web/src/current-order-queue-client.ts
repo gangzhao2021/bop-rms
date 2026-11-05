@@ -1,7 +1,7 @@
 import { t } from "./i18n/i18n.js";
 import { parsePaidOrderWatch } from "./paid-order-watch.js";
 export class CurrentOrderQueueError extends Error {
-  constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable") {
+  constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable" | "ServerProblem") {
     super(t("Current orders could not be loaded"));
     this.name = "CurrentOrderQueueError";
   }
@@ -1444,6 +1444,8 @@ async function get<T>(
     if (response.status === 401 || response.status === 403)
       throw new CurrentOrderQueueError("PermissionDenied");
     if (response.status === 404) throw new CurrentOrderQueueError("NotFound");
+    // WP-2423 item 10: the server answered, and failed: the restaurant's wifi is fine.
+    if (response.status >= 500) throw new CurrentOrderQueueError("ServerProblem");
     if (
       !response.ok ||
       response.headers.get("cache-control") !== "no-store" ||

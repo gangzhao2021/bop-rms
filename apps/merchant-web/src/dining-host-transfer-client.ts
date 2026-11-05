@@ -1,6 +1,6 @@
 import { t } from "./i18n/i18n.js";
 export class DiningHostClientError extends Error {
-  constructor(readonly code: "Denied" | "Unavailable" | "Unknown") {
+  constructor(readonly code: "Denied" | "Unavailable" | "Unknown" | "Changed") {
     super(t("Dining host operation unavailable"));
   }
 }
@@ -111,7 +111,10 @@ export function createDiningHostTransferClient(fetcher: typeof fetch = fetch) {
         body,
       });
       if (controller.signal.aborted) return fail();
-      if ([401, 403, 409].includes(response.status)) throw new DiningHostClientError("Denied");
+      if (response.status === 401 || response.status === 403)
+        throw new DiningHostClientError("Denied");
+      // WP-2423 item 10: the party moved on since it was shown.
+      if (response.status === 409) throw new DiningHostClientError("Changed");
       if (
         !response.ok ||
         response.redirected ||
@@ -139,7 +142,11 @@ export function createDiningHostTransferClient(fetcher: typeof fetch = fetch) {
       }
       return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
     } catch (error) {
-      if (error instanceof DiningHostClientError && error.code === "Denied") throw error;
+      if (
+        error instanceof DiningHostClientError &&
+        (error.code === "Denied" || error.code === "Changed")
+      )
+        throw error;
       throw new DiningHostClientError(mutation ? "Unknown" : "Unavailable");
     } finally {
       clearTimeout(timer);

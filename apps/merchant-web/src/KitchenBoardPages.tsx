@@ -1119,6 +1119,7 @@ import {
   type KitchenWorkItemDetailView,
 } from "./kitchen-board.js";
 import { StaffSignInLink, StaffSwitchButton } from "./StaffSession.js";
+import { floorServerProblemHeading, floorServerProblemText } from "./failure-words.js";
 
 export type LoadState<T> =
   | { readonly kind: "Loading" }
@@ -1243,6 +1244,7 @@ export function KitchenBoardStatePanel({
       t("Kitchen unavailable"),
       t("The kitchen queue could not be loaded. Refresh to try again."),
     ],
+    ServerProblem: [floorServerProblemHeading, floorServerProblemText],
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>

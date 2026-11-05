@@ -161,7 +161,13 @@ export interface KitchenQueueSearch {
 export class KitchenBoardClientError extends Error {
   constructor(
     readonly code:
-      "PermissionDenied" | "NotFound" | "Offline" | "Conflict" | "CommandFailed" | "Unavailable",
+      | "PermissionDenied"
+      | "NotFound"
+      | "Offline"
+      | "Conflict"
+      | "CommandFailed"
+      | "Unavailable"
+      | "ServerProblem",
   ) {
     super(t("Kitchen Board is unavailable"));
     this.name = "KitchenBoardClientError";

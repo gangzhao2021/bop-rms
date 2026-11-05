@@ -19,6 +19,7 @@ import {
   type SupplyItemPageView,
   type SupplyItemView,
 } from "./supply-item-pages.js";
+import { serverProblemText } from "./failure-words.js";
 
 const copy: Record<SupplyItemErrorCode | "Loading", string> = {
   Loading: t("Loading inventory items…"),
@@ -35,7 +36,7 @@ const copy: Record<SupplyItemErrorCode | "Loading", string> = {
   ),
   Invalid: t("Some values are not valid. Check the code, name and tracking settings."),
   Offline: t("Offline. The change was not confirmed; retry sends the same request again."),
-  Unavailable: t("Inventory items are unavailable."),
+  Unavailable: serverProblemText,
 };
 const itemTypes = [
   ["RawMaterial", t("Raw material")],

@@ -22,6 +22,7 @@ import {
   type StaffPageView,
 } from "./staff-administration-pages.js";
 import { actionAccessDeniedText, noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { serverProblemText } from "./failure-words.js";
 
 const copy: Record<StaffPageErrorCode | "Loading", string> = {
   Loading: t("Loading Store staff…"),
@@ -42,7 +43,7 @@ const copy: Record<StaffPageErrorCode | "Loading", string> = {
     "That's not the email this invitation was sent to. Cancel this invitation and invite again with the new address.",
   ),
   Offline: t("Offline. Your change was not confirmed; retry sends the same request again."),
-  Unavailable: t("Staff administration is unavailable."),
+  Unavailable: serverProblemText,
 };
 type State =
   | { readonly kind: "Loading" | StaffPageErrorCode }

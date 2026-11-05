@@ -16,6 +16,7 @@ import {
   type StoreReceiptErrorCode,
   type StoreReceiptPageView,
 } from "./store-receipt-pages.js";
+import { serverProblemText } from "./failure-words.js";
 
 const copy: Record<StoreReceiptErrorCode | "Loading", string> = {
   Loading: t("Loading receiving…"),
@@ -33,7 +34,7 @@ const copy: Record<StoreReceiptErrorCode | "Loading", string> = {
   ),
   Invalid: t("The receipt is not valid. A supplier name and at least one line are required."),
   Offline: t("Offline. The receipt was not confirmed; retry sends the same request again."),
-  Unavailable: t("Receiving is unavailable."),
+  Unavailable: serverProblemText,
 };
 const reasonLabel = (reason: string) =>
   reason.charAt(0) + reason.slice(1).toLowerCase().replaceAll("_", " ");

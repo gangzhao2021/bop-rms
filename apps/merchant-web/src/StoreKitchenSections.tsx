@@ -152,8 +152,9 @@ export function StoreKitchenSections({
       setDraft(view.sections);
       setMessage({ tone: "status", text: t("Saved. Give each dish its section on the menu.") });
     } catch (error) {
-      operation.current = null;
       const code = error instanceof KitchenSectionsClientError ? error.code : "Unavailable";
+      // WP-2423 item 10: an unknown outcome keeps its operation, so saving again is not a new one.
+      if (code !== "Unavailable") operation.current = null;
       setMessage({
         tone: "alert",
         text:
@@ -161,7 +162,7 @@ export function StoreKitchenSections({
             ? t("Someone else changed the sections. They are read again: check and save again.")
             : code === "Denied"
               ? t("Your access doesn't allow this. Ask a manager.")
-              : t("This wasn't saved. Check the connection and try again."),
+              : t("We couldn't confirm this was saved. Save again: it is never recorded twice."),
       });
       if (code === "Changed") setReload((current) => current + 1);
     } finally {

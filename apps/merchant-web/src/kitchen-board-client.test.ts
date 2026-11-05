@@ -176,7 +176,9 @@ it.each([
   [403, "PermissionDenied"],
   [404, "NotFound"],
   [409, "Conflict"],
-  [503, "Unavailable"],
+  // WP-2423 item 10: the server answered and failed, told apart from no answer.
+  [503, "ServerProblem"],
+  [500, "ServerProblem"],
 ] as const)("maps status %s without exposing response details", async (status, code) => {
   const f = setup();
   f.fetcher.mockImplementation(async () => response({ private: "not shown" }, status));

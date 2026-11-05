@@ -16,6 +16,7 @@ import {
   type OpeningCountPageView,
   type OpeningLine,
 } from "./opening-count-pages.js";
+import { serverProblemText } from "./failure-words.js";
 
 const copy: Record<OpeningCountErrorCode | "Loading", string> = {
   Loading: t("Loading the opening count…"),
@@ -33,7 +34,7 @@ const copy: Record<OpeningCountErrorCode | "Loading", string> = {
   ),
   Invalid: t("The count is not valid. A count needs at least one line before it is submitted."),
   Offline: t("Offline. The change was not confirmed; retry sends the same request again."),
-  Unavailable: t("The opening count is unavailable."),
+  Unavailable: serverProblemText,
 };
 type State =
   | { readonly kind: "Loading" | OpeningCountErrorCode }

@@ -172,9 +172,9 @@ test("@production Tables keeps the last tables read-only after a failed refresh 
   await expect(select).toBeDisabled();
   await expect(page.getByText("Tables unavailable", { exact: false })).toHaveCount(0);
   // Operating continuity (WP-2423 item 8 ①): what servers do instead, on this screen.
-  const guide = page.getByRole("note", { name: "While the connection is down" });
+  const guide = page.getByRole("note", { name: "While Tables isn't working" });
   await expect(guide).toContainText("Never write a card number.");
-  await guide.getByText("When the connection is back, for each table").click();
+  await guide.getByText("When Tables works again, for each table").click();
   await expect(guide).toContainText(
     "Manager: record the comps and discounts from the slips first.",
   );

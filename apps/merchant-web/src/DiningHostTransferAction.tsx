@@ -117,9 +117,9 @@ export function DiningHostTransferAction({
             ? t(
                 "The result is unknown. Retry the same host transfer before choosing another table or operation.",
               )
-            : t(
-                "Host transfer was not confirmed. Refresh participants and check your permissions.",
-              ),
+            : error instanceof DiningHostClientError && error.code === "Denied"
+              ? t("Your access doesn't allow moving the host. Ask a manager.")
+              : t("The host wasn't moved. Refresh the guests and try again."),
         );
       }
     } finally {

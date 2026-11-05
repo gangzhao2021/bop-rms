@@ -165,7 +165,7 @@ export function DiningPaymentTimingPanel({
             : t("Saved. Tables opened from now on use it; tables already open keep theirs."),
       );
     } catch {
-      setMessage(t("Not saved. Check your connection and save again."));
+      setMessage(t("We couldn't confirm this was saved. Save again: it is never recorded twice."));
     } finally {
       setState("Ready");
     }

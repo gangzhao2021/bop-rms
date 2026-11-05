@@ -101,11 +101,21 @@ export function DishKitchenMark({
         });
       else setReload((current) => current + 1);
     } catch (error) {
-      operation.current = null;
+      // WP-2423 item 10: no answer or a server failure may have saved it; the key holds the version
+      // and the choice, so pressing the same choice again sends the same operation.
+      const lost =
+        !(error instanceof MenuPageError) ||
+        error.code === "Offline" ||
+        error.code === "Unavailable";
+      if (!lost) operation.current = null;
       setProblem(
         error instanceof MenuPageError && error.code === "PermissionDenied"
           ? t("Your access doesn't allow this. Ask a manager.")
-          : t("This wasn't saved. It has been read again: check it and try again."),
+          : lost
+            ? t(
+                "We couldn't confirm this was saved. It has been read again: check it, and press again if it isn't.",
+              )
+            : t("This wasn't saved. It has been read again: check it and try again."),
       );
       setReload((current) => current + 1);
     } finally {
@@ -316,11 +326,21 @@ function DishKitchenSection({
       );
       operation.current = null;
     } catch (error) {
-      operation.current = null;
+      // WP-2423 item 10: no answer or a server failure may have saved it; the key holds the version
+      // and the choice, so pressing the same choice again sends the same operation.
+      const lost =
+        !(error instanceof MenuPageError) ||
+        error.code === "Offline" ||
+        error.code === "Unavailable";
+      if (!lost) operation.current = null;
       setProblem(
         error instanceof MenuPageError && error.code === "PermissionDenied"
           ? t("Your access doesn't allow this. Ask a manager.")
-          : t("This wasn't saved. It has been read again: check it and try again."),
+          : lost
+            ? t(
+                "We couldn't confirm this was saved. It has been read again: check it, and press again if it isn't.",
+              )
+            : t("This wasn't saved. It has been read again: check it and try again."),
       );
       setReload((current) => current + 1);
     } finally {

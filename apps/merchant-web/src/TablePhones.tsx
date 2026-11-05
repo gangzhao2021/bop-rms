@@ -98,9 +98,7 @@ export function TablePanelPhones({
     } catch (error) {
       setProblem(
         error instanceof TablePhonesError && error.code === "OutcomeUnknown"
-          ? t(
-              "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
-            )
+          ? t("We couldn't confirm the result. Press the button again: it is never recorded twice.")
           : t("That didn't go through. Read the table again and retry."),
       );
     } finally {
@@ -247,9 +245,7 @@ export function TableHeldRounds({
     } catch (error) {
       setProblem(
         error instanceof TablePhonesError && error.code === "OutcomeUnknown"
-          ? t(
-              "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
-            )
+          ? t("We couldn't confirm the result. Press the button again: it is never recorded twice.")
           : t("That didn't go through. Read the table again and retry."),
       );
     } finally {

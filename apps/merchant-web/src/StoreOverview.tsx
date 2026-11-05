@@ -40,6 +40,7 @@ import {
   type SettlementView,
 } from "./settlement-client.js";
 import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { floorServerProblemText, isServerProblem } from "./failure-words.js";
 
 /** WP-2423 P2: what the Store is dealing with right now, from the pilot projections. */
 export interface OrdersSummary {
@@ -215,7 +216,8 @@ export type OverviewRead<T> =
   | { readonly kind: "Hidden" }
   | { readonly kind: "Loading" }
   | { readonly kind: "Ready"; readonly value: T }
-  | { readonly kind: "Unavailable" };
+  /** `server`: the server answered 5xx (WP-2423 item 10), as told apart from no answer. */
+  | { readonly kind: "Unavailable"; readonly server?: boolean };
 export interface OverviewTodayState {
   readonly orders: OverviewRead<OrdersSummary>;
   readonly pickups: OverviewRead<PickupsSummary>;
@@ -446,7 +448,13 @@ export function attentionItems(
     items.push({
       key: "unread",
       title: t("This list may be missing something"),
-      detail: t("Could not read: {value}", { value: unread.join(" · ") }),
+      detail:
+        t("Could not read: {value}", { value: unread.join(" · ") }) +
+        ([state.orders, state.pickups, state.tables, state.exceptions].some(
+          (read) => read.kind === "Unavailable" && read.server === true,
+        )
+          ? " " + floorServerProblemText
+          : ""),
       state: t("Not read"),
       tone: "danger",
       href: null,
@@ -1102,8 +1110,9 @@ export function StoreOverview({
         try {
           const value = await run();
           if (!controller.signal.aborted) apply({ kind: "Ready", value });
-        } catch {
-          if (!controller.signal.aborted) apply({ kind: "Unavailable" });
+        } catch (error) {
+          if (!controller.signal.aborted)
+            apply({ kind: "Unavailable", server: isServerProblem(error) });
         }
       };
       await Promise.all([

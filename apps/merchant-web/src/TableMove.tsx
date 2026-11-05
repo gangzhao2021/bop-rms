@@ -158,7 +158,7 @@ export function TableMove({
                     ? t("You don't have permission to move tables.")
                     : code === "Changed" || code === "NotSeated"
                       ? t("The tables changed meanwhile. They are read again: check and retry.")
-                      : t("The move wasn't confirmed. Check the connection and retry."),
+                      : t("The move wasn't confirmed. Try again."),
       );
       if (code === "Changed" || code === "NotSeated") onMoved("", null);
     } finally {

@@ -21,7 +21,9 @@ export type TableCheckoutErrorCode =
   | "SplitLocked"
   | "NotReady"
   | "Unavailable"
-  | "OutcomeUnknown";
+  | "OutcomeUnknown"
+  /** WP-2423 item 10: the server answered 5xx: a lost COMMIT looks the same as nothing saved. */
+  | "ServerProblem";
 export class TableCheckoutError extends Error {
   constructor(
     readonly code: TableCheckoutErrorCode,
@@ -486,8 +488,8 @@ export function createTableCheckoutClient(fetcher: typeof fetch = fetch) {
     if (!response.ok) {
       const body = (payload ?? {}) as { error?: unknown; reasons?: unknown };
       const code = typeof body.error === "string" ? codes[body.error] : undefined;
-      if (response.status >= 500 && code === undefined)
-        throw new TableCheckoutError("OutcomeUnknown");
+      if (response.status >= 500 && (code === undefined || code === "Unavailable"))
+        throw new TableCheckoutError("ServerProblem");
       throw new TableCheckoutError(
         code ?? "Unavailable",
         Array.isArray(body.reasons)
