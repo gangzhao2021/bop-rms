@@ -451,8 +451,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你的订单有一部分正在重做，请等做好后再来取。",
   "Part of your order is being remade. Please wait until it's ready before showing this code.":
     "你的订单有一部分正在重做，请等做好后再出示这个代码。",
-  "Part of your order sold out while we were getting it ready, so we didn’t place it and you haven’t been charged. Go back to your cart to change your order.":
-    "准备过程中你订单里有商品售罄了，所以没有下单，你也没有被扣款。请返回购物车修改订单。",
+  "Part of your order sold out while we were getting it ready, so we didn’t place it and this order hasn’t been charged. Go back to your cart to change your order.":
+    "准备过程中你订单里有商品售罄了，所以没有下单，这一单也没有扣款。请返回购物车修改订单。",
   "Partly refunded": "部分退款",
   "Partly served": "部分已上",
   "Pay by {value1}, or it is cancelled and nobody is charged.":
@@ -608,7 +608,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Return to menu": "返回菜单",
   "Review cart": "查看购物车",
   "Review this item": "查看这件商品",
-  Round: "轮次",
   "Round total": "本轮合计",
   "Round total including tax": "本轮合计（含税）",
   "Round {round}": "第 {round} 轮",
@@ -636,7 +635,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Secure card payment": "安全刷卡付款",
   "Secure payment": "安全付款",
   "See everything your table ordered": "查看这桌点的所有东西",
-  "See your table": "查看你的桌位",
+  "See your table": "查看本桌",
   "Selected option quantities must be positive whole numbers.": "所选选项的数量必须是正整数。",
   "Sent to the kitchen": "已送到厨房",
   Served: "已上",
@@ -961,8 +960,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You haven’t been charged for it. Go back to your cart to check out again, or ask a staff member for help.":
     "这一份没有向你收费。请返回购物车重新结账，或向店员求助。",
   "You haven’t been charged.": "你没有被扣款。",
-  "You haven’t been charged. Check your connection and try again.":
-    "你没有被扣款。请检查网络后重试。",
+  "This order hasn’t been charged. Check your connection and try again.":
+    "这一单没有扣款。请检查网络后重试。",
   "You ordered at a table from this phone. You can check your order and everything your table ordered.":
     "你在这部手机上为餐桌点过单，可以查看你的订单和这桌点的所有东西。",
   "You placed a pickup order from this phone. Check its status and your pickup code.":
@@ -1085,8 +1084,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "handles your contact details:": "对你联系方式的处理：",
   "isn’t taking orders right now": "现在不接单",
   "may contain {value1}": "可能含有 {value1}",
-  "none of the listed allergens are declared. Ask staff if you have an allergy.":
-    "未声明所列的任何过敏原。如有过敏请询问店员。",
+  "no allergens listed. Ask staff if you have an allergy.": "未标注过敏原。如有过敏请询问店员。",
   of: "/",
   "opens at {value1}": "{value1} 开始营业",
   "plus tax": "另加税",
@@ -1229,8 +1227,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The restaurant stopped taking tips": "餐厅已停止收小费",
   "The restaurant updated its menu while you were checking out, so you haven’t been charged. Go back to checkout to see your total and pay.":
     "您结账时餐厅更新了菜单，因此没有向您收费。请返回结账页查看总价后再付款。",
-  "Tips were turned off while you were checking out, so you haven’t been charged. Go back to checkout to pay without a tip.":
-    "你结账时餐厅关掉了小费，还没有扣款。请回到结账页，不加小费付款。",
+  "Tips were turned off while you were checking out, so this order hasn’t been charged. Go back to checkout to pay without a tip.":
+    "你结账时门店关闭了小费，这一单没有扣款。请回到结账页，不加小费付款。",
   "Your table is checking out. To add dishes, ask a staff member.":
     "这桌正在结账，要加菜请找店员。",
   Closed: "不营业",
@@ -1261,10 +1259,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The kitchen has stopped taking orders for today.": "厨房今天已停止接单。",
   "You can’t send a new order from your phone now. To add something, ask a staff member.":
     "现在不能用手机下新单。要加菜请找店员。",
-  "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so you haven’t been charged. To add something, ask a staff member.":
-    "门店现在不接新单（已打烊，或厨房今天已停止接单），你没有被扣款。要加菜请找店员。",
-  "The store stopped taking orders before payment started (it closed, or the kitchen stopped taking orders for today), so you haven’t been charged. To add something, ask a staff member.":
-    "付款开始前门店已停止接单（已打烊，或厨房今天已停止接单），你没有被扣款。要加菜请找店员。",
+  "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so this order hasn’t been charged. To add something, ask a staff member.":
+    "门店现在不接新单（已打烊，或厨房今天已停止接单），这一单没有扣款。要加菜请找店员。",
+  "It stopped before payment started (it closed, or the kitchen stopped taking orders for today), so this order hasn’t been charged. To add something, ask a staff member.":
+    "付款开始前门店已停止接单（已打烊，或厨房今天已停止接单），这一单没有扣款。要加菜请找店员。",
   "The kitchen stopped taking orders at {time}": "厨房 {time} 已停止接单",
   "kitchen stopped taking orders at {time}": "厨房 {time} 已停止接单",
   "Paying {amount} for part {number}, tip included.": "正在为第 {number} 份付 {amount}（含小费）。",
@@ -1315,8 +1313,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Place order · {total}": "下单 · {total}",
   "Placing your order…": "正在下单…",
   Continue: "继续",
+  "This also places 1 item another guest added.": "会一起下单同桌其他人加的 1 样。",
   "This also places {count} items other guests added.": "会一起下单同桌其他人加的 {count} 样。",
   "Check your table": "查看本桌",
+  "We couldn’t place your order, so nothing was sent. Try again, or tell a staff member what you’d like.":
+    "这一单没有下成，什么都没有发出去。请重试，或者告诉店员你想点什么。",
+  "The store stopped taking orders": "门店已停止接单",
+  "Your cart changed while you were checking out, so nothing was placed. Check it, then continue.":
+    "你结账时购物车有变化，所以没有下单。请看一下再继续。",
+  "Your last order was placed.": "上一单已下单。",
+  "Your last order was placed. Staff confirm it first.": "上一单已下单，店员确认后开始做。",
+  "The dishes below are still in your cart and haven’t been ordered.":
+    "下面这些菜还在购物车里，还没有下单。",
   "We couldn’t confirm your order was placed. Try again — it is never placed twice. You can also tell a staff member what you’d like.":
     "没能确认下单成功。请重试，不会重复下单；也可以直接告诉店员。",
   "We couldn’t confirm your order was placed. Try again — it is never placed twice.":
@@ -1376,7 +1384,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "less than a minute": "不到 1 分钟",
   "about 1 hour": "约 1 小时",
   "Ask staff about allergens in your choices.": "所选菜品的过敏原请询问店员。",
-  "Your choices: no listed allergens declared.": "所选菜品：未申报所列过敏原。",
+  "Your choices: no allergens listed. Ask staff if you have an allergy.":
+    "所选菜品：未标注过敏原。如有过敏请询问店员。",
   "Your choices: {allergens}.": "所选菜品：{allergens}。",
   "{store} takes dine-in orders only": "{store}只做堂食",
   "Pickup orders aren’t taken here. To eat in, scan the QR code on your table or ask a staff member for a table.":
@@ -1384,6 +1393,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Back to your table": "回到本桌",
   "Back to the menu": "回到菜单",
   "Staff took this round off the bill. It is not charged.": "店员已从账单去掉这一轮，不收费。",
+  "Staff took off 1 charge. It isn’t charged.": "店员撤下了 1 项收费，不收费。",
   "Staff took off {count} charges. They aren’t charged.": "店员撤下了 {count} 项收费，不收费。",
   "Your table moved to table {table}": "您这桌已换到 {table} 桌",
   "Your table was merged into table {table}": "你们这桌已并到 {table} 桌",

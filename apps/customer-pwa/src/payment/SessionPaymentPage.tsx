@@ -326,7 +326,10 @@ function PreparedSessionPaymentPage({
   const demo = config?.mode === "simulation";
   const cardOffered = wasCheckoutCardOffered();
   const failedStart =
-    status === "start_failed" || status === "expired" || (status === "denied" && !cardOffered);
+    status === "start_failed" ||
+    status === "expired" ||
+    status === "closed" ||
+    (status === "denied" && !cardOffered);
   const back = useCheckoutReturn(failedStart, store?.serviceMode === "DineIn");
   // While a payment may be under way (or just failed), a second checkout is the last thing to offer.
   const inFlow =
@@ -380,7 +383,7 @@ function PreparedSessionPaymentPage({
           <p>
             {cardOffered
               ? t("Check your connection and try again.")
-              : t("You haven’t been charged. Check your connection and try again.")}
+              : t("This order hasn’t been charged. Check your connection and try again.")}
           </p>
           <button
             type="button"
@@ -395,18 +398,22 @@ function PreparedSessionPaymentPage({
         </section>
       ) : null}
       {status === "closed" ? (
-        <p role="alert">
-          {t(
-            "The store stopped taking orders before payment started (it closed, or the kitchen stopped taking orders for today), so you haven’t been charged. To add something, ask a staff member.",
-          )}
-        </p>
+        <section className="checkout-attention" role="alert">
+          <h2>{t("The store stopped taking orders")}</h2>
+          <p>
+            {t(
+              "It stopped before payment started (it closed, or the kitchen stopped taking orders for today), so this order hasn’t been charged. To add something, ask a staff member.",
+            )}
+          </p>
+          <CheckoutReturnLink to={back} cartPath="/cart" cartText={t("Back to your cart")} />
+        </section>
       ) : null}
       {status === "items_short" ? (
         <section className="checkout-attention" role="alert">
           <h2>{t("Some items just ran out")}</h2>
           <p>
             {t(
-              "Part of your order sold out while we were getting it ready, so we didn’t place it and you haven’t been charged. Go back to your cart to change your order.",
+              "Part of your order sold out while we were getting it ready, so we didn’t place it and this order hasn’t been charged. Go back to your cart to change your order.",
             )}
           </p>
           <Link to="/cart">{t("Back to your cart")}</Link>
@@ -417,7 +424,7 @@ function PreparedSessionPaymentPage({
           <h2>{t("The restaurant stopped taking tips")}</h2>
           <p>
             {t(
-              "Tips were turned off while you were checking out, so you haven’t been charged. Go back to checkout to pay without a tip.",
+              "Tips were turned off while you were checking out, so this order hasn’t been charged. Go back to checkout to pay without a tip.",
             )}
           </p>
           <Link to="/checkout">{t("Back to checkout")}</Link>
@@ -482,7 +489,11 @@ function PreparedSessionPaymentPage({
         </section>
       ) : null}
       {store?.serviceMode === "DineIn" &&
-      (status === "start_failed" || status === "processing" || status === "unknown") ? (
+      (status === "start_failed" ||
+        status === "processing" ||
+        status === "unknown" ||
+        status === "closed" ||
+        (status === "denied" && cardOffered)) ? (
         // Asking for help is one tap for a seated guest; the panel hides itself if none is offered.
         <DiningStaffCallPanel />
       ) : null}

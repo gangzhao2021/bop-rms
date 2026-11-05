@@ -20,7 +20,7 @@ it("never turns a lost connection into a checkout refusal", async () => {
 });
 
 it("keeps the refusal text for real server refusals only", () => {
-  for (const status of ["denied", "conflict", "invalid"] as const)
+  for (const status of ["denied", "invalid"] as const)
     expect(checkoutSessionAlert({ status, canRetry: false }, false)).toBe(
       checkoutText.checkoutRefused,
     );
@@ -36,7 +36,7 @@ it("keeps the refusal text for real server refusals only", () => {
   expect(checkoutSessionAlert({ status: "requote_required", canRetry: false }, false)).toBeNull();
 });
 
-it("maps a server conflict through the controller to the refusal text", async () => {
+it("maps a server conflict through the controller to the cart that changed", async () => {
   const create = vi.fn().mockRejectedValue(new CheckoutSessionClientError("conflict"));
   const c = createCheckoutSessionController({ create }, () => "key");
   await c.start({
@@ -45,7 +45,8 @@ it("maps a server conflict through the controller to the refusal text", async ()
     quoteReference: "q",
     quoteVersion: 1,
   });
-  expect(checkoutSessionAlert(c.getState(), false)).toBe(checkoutText.checkoutRefused);
+  expect(checkoutSessionAlert(c.getState(), false)).toBe(checkoutText.checkoutCartChanged);
+  expect(checkoutText.checkoutCartChanged).not.toContain("scan");
 });
 
 it("WP-2423 item 2: an unconfirmed checkout says this order wasn't charged only before any card", () => {

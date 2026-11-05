@@ -94,14 +94,25 @@ interface TableOptions {
   /** The store's documents, for the policy read. */
   readonly documents?: readonly unknown[];
   readonly checkingOut?: boolean;
+  /** More dishes in the cart than the one: a long list, with the button far down the page. */
+  readonly moreDishes?: number;
+  /** The status a placed round is read with (default: sent to the kitchen). */
+  readonly roundStatus?: string;
 }
 
 interface Table {
   readonly sent: { body: unknown; key: string | undefined }[];
   readonly calls: string[];
+  readonly sessionKeys: (string | undefined)[];
   /** The cart is empty: a round was placed, here or by another phone. */
   emptyCart(): void;
   placeRound(): void;
+  /** A guest changed the cart: it has this dish on top, at a new version. */
+  addDish(name: string): void;
+  /** Another guest's quote is attached to the same cart version now. */
+  attachQuote(reference: string): void;
+  /** Where the placed round is on the next read of the table. */
+  moveRound(status: string): void;
 }
 
 async function stubTable(
@@ -112,8 +123,56 @@ async function stubTable(
   const expiresAt = new Date(Date.now() + 600_000).toISOString();
   const now = new Date().toISOString();
   let roundSent = false;
-  let cartEmpty = false;
+  let roundStatus = options.roundStatus ?? "Queued";
+  let cartVersion = 3;
+  let attachedQuote: string | null = null;
+  const dish = (reference: number, name: string, quantity = 2) => ({
+    cartItemReference: id(reference),
+    sellableReference: id(3),
+    displayName: name,
+    quantity,
+    configuration: [],
+    customerNote: null,
+    lineEstimate: { status: "Unavailable", reasonCode: "QUOTE_REQUIRED" },
+    warnings: [],
+  });
+  let dishes = [
+    dish(2, "Synthetic noodles"),
+    ...Array.from({ length: options.moreDishes ?? 0 }, (_, index) =>
+      dish(60 + index, `Synthetic dish ${index + 1}`),
+    ),
+  ];
+  const cartView = () => ({
+    schemaVersion: 1,
+    cart: {
+      cartReference: id(1),
+      version: cartVersion,
+      orderType: "DineIn",
+      serviceMode: "DineIn",
+      context: { brandName: "Synthetic Brand", storeName: "Synthetic Table Store" },
+      lifecycle: { status: "Active", idleExpiresAt: expiresAt, absoluteExpiresAt: expiresAt },
+      items: dishes,
+      quote:
+        attachedQuote === null
+          ? null
+          : {
+              quoteReference: attachedQuote,
+              quoteVersion: 1,
+              cartVersion,
+              subtotal: { amountMinor: "2000", currency: "CAD" },
+              discount: { amountMinor: "0", currency: "CAD" },
+              tax: { amountMinor: "260", currency: "CAD" },
+              fee: { amountMinor: "0", currency: "CAD" },
+              total: { amountMinor: "2260", currency: "CAD" },
+              expiresAt,
+              warnings: [],
+              blockingReasons: [],
+            },
+      warnings: [],
+    },
+  });
   const calls: string[] = [];
+  const sessionKeys: (string | undefined)[] = [];
   const subtotal = options.subtotalMinor ?? "2000";
   const total = options.totalMinor ?? "2260";
   await page.route("**/api/v1/customer/order-messages", (route) =>
@@ -148,37 +207,18 @@ async function stubTable(
       route.fulfill({ status: 200, json: pricedMenu() }),
     );
   await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, (route) =>
-    route.fulfill({
-      status: 200,
-      json: {
-        schemaVersion: 1,
-        cart: {
-          cartReference: id(1),
-          version: 3,
-          orderType: "DineIn",
-          serviceMode: "DineIn",
-          context: { brandName: "Synthetic Brand", storeName: "Synthetic Table Store" },
-          lifecycle: { status: "Active", idleExpiresAt: expiresAt, absoluteExpiresAt: expiresAt },
-          items: cartEmpty
-            ? []
-            : [
-                {
-                  cartItemReference: id(2),
-                  sellableReference: id(3),
-                  displayName: "Synthetic noodles",
-                  quantity: 2,
-                  configuration: [],
-                  customerNote: null,
-                  lineEstimate: { status: "Unavailable", reasonCode: "QUOTE_REQUIRED" },
-                  warnings: [],
-                },
-              ],
-          quote: null,
-          warnings: [],
-        },
-      },
-    }),
+    route.fulfill({ status: 200, json: cartView() }),
   );
+  await page.route("**/api/v1/carts/*/items/*", (route) => {
+    const change = route.request().postDataJSON() as { quantity: number };
+    dishes = dishes.map((item) =>
+      route.request().url().includes(item.cartItemReference)
+        ? { ...item, quantity: change.quantity }
+        : item,
+    );
+    cartVersion += 1;
+    return route.fulfill({ status: 200, json: cartView() });
+  });
   await page.route("**/api/v1/dine-in/table-payment", (route) => {
     calls.push("table");
     return route.fulfill({
@@ -229,7 +269,7 @@ async function stubTable(
         quote: {
           quoteReference: id(6),
           quoteVersion: 1,
-          cartVersion: 3,
+          cartVersion,
           currency: "CAD",
           subtotal: { amountMinor: subtotal, currency: "CAD" },
           discount: { amountMinor: "0", currency: "CAD" },
@@ -249,7 +289,7 @@ async function stubTable(
     return route.fulfill({
       json: {
         schemaVersion: 1,
-        checkout: { cartReference: id(1), cartVersion: 3, orderType: "DineIn", details: null },
+        checkout: { cartReference: id(1), cartVersion, orderType: "DineIn", details: null },
       },
     });
   });
@@ -260,7 +300,7 @@ async function stubTable(
         schemaVersion: 1,
         policy: {
           cartReference: id(1),
-          cartVersion: 3,
+          cartVersion,
           orderType: "DineIn",
           checkedAt: new Date(Date.now() - 1000).toISOString(),
           validUntil: expiresAt,
@@ -284,7 +324,7 @@ async function stubTable(
           detailsReference: body.detailsReference,
           detailsVersion: 1,
           cartReference: id(1),
-          cartVersion: 3,
+          cartVersion,
           quoteReference: body.quoteReference,
           quoteVersion: 1,
           orderType: "DineIn",
@@ -296,6 +336,7 @@ async function stubTable(
   });
   await page.route("**/api/v1/carts/*/checkout-sessions", (route) => {
     calls.push("session");
+    sessionKeys.push(route.request().headers()["idempotency-key"]);
     const answered = options.session?.(route);
     if (answered !== undefined) return answered;
     const body = route.request().postDataJSON() as { quoteReference: string };
@@ -306,7 +347,7 @@ async function stubTable(
         session: {
           checkoutSessionReference: id(10),
           cartReference: id(1),
-          cartVersion: 3,
+          cartVersion,
           quoteReference: body.quoteReference,
           quoteVersion: 1,
           createdAt: now,
@@ -333,7 +374,8 @@ async function stubTable(
     const answered = options.send?.(route, sent.length);
     if (answered !== undefined) return answered;
     roundSent = true;
-    cartEmpty = true;
+    dishes = [];
+    cartVersion += 1;
     await route.fulfill(placed(201));
   });
   const earlier = options.earlierRounds ?? [];
@@ -346,7 +388,7 @@ async function stubTable(
               roundNumber: earlier.length + 1,
               orderedBy: "You",
               submittedAt: now,
-              status: "Queued",
+              status: roundStatus,
               payment: "OnTableBill",
               cancelsAt: null,
               storeCancellationReason: null,
@@ -391,12 +433,26 @@ async function stubTable(
   return {
     sent,
     calls,
+    sessionKeys,
     emptyCart() {
-      cartEmpty = true;
+      dishes = [];
+      cartVersion += 1;
     },
     placeRound() {
       roundSent = true;
-      cartEmpty = true;
+      dishes = [];
+      cartVersion += 1;
+    },
+    addDish(name) {
+      dishes = [dish(70 + dishes.length, name, 1), ...dishes];
+      cartVersion += 1;
+      attachedQuote = null;
+    },
+    attachQuote(reference) {
+      attachedQuote = reference;
+    },
+    moveRound(status) {
+      roundStatus = status;
     },
   };
 }
@@ -407,11 +463,28 @@ async function openCart(page: Page) {
   await expect(
     page.getByRole("heading", { level: 1, name: "Synthetic Table Store", exact: true }),
   ).toBeVisible();
-  await page.evaluate(() => {
-    history.pushState(null, "", "/cart");
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  });
+  await goTo(page, "/cart");
 }
+
+/** The address changes without a tap on the page: the browser's back and forward do this too. */
+const goTo = (page: Page, path: string) =>
+  page.evaluate((target) => {
+    history.pushState(null, "", target);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, path);
+
+const roundPlacedAnswer = (status: "Sent" | "AlreadySent") => ({
+  status: status === "Sent" ? 201 : 200,
+  json: {
+    schemaVersion: 1,
+    round: {
+      checkoutSessionReference: id(10),
+      orderReference: id(20),
+      status,
+      total: { amountMinor: "2260", currency: "CAD" },
+    },
+  },
+});
 
 const placeOrder = (page: Page) => page.getByRole("button", { name: "Place order", exact: true });
 const roundReference = /^[0-9a-f-]{36}$/u;
@@ -734,14 +807,8 @@ test.describe("@production Pay-later table, the round just placed", () => {
     const tryAgain = main.getByRole("button", { name: "Try again", exact: true });
     await expect(tryAgain).toBeVisible();
     // The guest refreshes the cart: it reads empty, and the way to finish is still on top.
-    await page.evaluate(() => {
-      history.pushState(null, "", "/menu");
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    });
-    await page.evaluate(() => {
-      history.pushState(null, "", "/cart");
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    });
+    await goTo(page, "/menu");
+    await goTo(page, "/cart");
     await expect(main.getByText("Your cart is empty")).toBeVisible();
     await expect(tryAgain).toBeVisible();
     await tryAgain.click();
@@ -811,10 +878,11 @@ test.describe("@production Pay-later table, the round just placed", () => {
   test("while it's on its way the cart holds still", async ({ page }) => {
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => (release = resolve));
-    await stubTable(page, [], {
-      session: async (route) => {
+    const table: Table = await stubTable(page, [], {
+      send: async (route) => {
         await held;
-        await route.fallback();
+        table.placeRound();
+        await route.fulfill(roundPlacedAnswer("Sent"));
       },
     });
     await openCart(page);
@@ -826,7 +894,407 @@ test.describe("@production Pay-later table, the round just placed", () => {
       "aria-disabled",
       "true",
     );
+    // Its answer is only said on this page, so the journey bar holds still too.
+    const journey = page.getByRole("navigation", { name: "Customer journey" });
+    for (const name of ["Menu", "Your table"])
+      await expect(journey.getByRole("link", { name })).toHaveAttribute("aria-disabled", "true");
+    await journey.getByRole("link", { name: "Menu" }).click({ force: true });
+    await expect(page).toHaveURL(/\/cart$/u);
     release();
+    await expect(page).toHaveURL(/\/dine-in\/session$/u);
+    await expect(journey.getByRole("link", { name: "Menu" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  // The server's side of these is the checkout-moved-on acceptance test.
+  const movedOn = (route: Route) =>
+    route.fulfill({
+      status: 409,
+      json: {
+        schemaVersion: 1,
+        error: {
+          code: "checkout_session_intent_conflict",
+          messageKey: "customer.checkoutSession.intent_conflict",
+        },
+      },
+    });
+
+  test("a cart that moved on says so at once, and the next tap places it as it is", async ({
+    page,
+  }) => {
+    let refused = false;
+    const table: Table = await stubTable(page, [], {
+      session: (route) => {
+        if (refused) return undefined;
+        refused = true;
+        // Another guest added a dish just after this phone's quote.
+        table.addDish("Mom's dumplings");
+        return movedOn(route);
+      },
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("alert")).toContainText("The latest cart was loaded.");
+    await expect(main.getByRole("button", { name: "Try again", exact: true })).toHaveCount(0);
+    await expect(main.getByRole("article", { name: "Mom's dumplings" })).toBeVisible();
+    await expect(main.getByRole("button", { name: "Remove" }).first()).toBeEnabled();
+    expect(table.sent).toEqual([]);
+    await placeOrder(page).click();
+    await expect(page).toHaveURL(/\/dine-in\/session$/u);
+    expect(table.sent).toHaveLength(1);
+    expect(table.sessionKeys[1]).not.toBe(table.sessionKeys[0]);
+  });
+
+  test("an answer lost before the send says nothing was placed and leaves the cart free", async ({
+    page,
+  }) => {
+    let lost = false;
+    const table = await stubTable(page, [], {
+      session: (route) => {
+        if (lost) return undefined;
+        lost = true;
+        return route.abort("internetdisconnected");
+      },
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    const main = page.getByRole("main");
+    const panel = main.getByRole("alert").filter({ hasText: "We couldn’t place your order" });
+    await expect(panel).toContainText("nothing was sent");
+    await expect(main).not.toContainText("We couldn’t confirm");
+    await expect(main.getByRole("heading", { name: "Need a staff member?" })).toBeVisible();
+    await expect(main.getByRole("button", { name: "Remove" })).toBeEnabled();
+    await expect(placeOrder(page)).toBeEnabled();
+    await expect(
+      page.getByRole("navigation", { name: "Customer journey" }).getByRole("link", {
+        name: "Menu",
+      }),
+    ).not.toHaveAttribute("aria-disabled", "true");
+    // Trying again finds the same checkout: same key, nothing else repeated.
+    await panel.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(page).toHaveURL(/\/dine-in\/session$/u);
+    expect(table.sessionKeys).toHaveLength(2);
+    expect(table.sessionKeys[1]).toBe(table.sessionKeys[0]);
+    expect(table.calls.filter((call) => call === "quote")).toHaveLength(1);
+    expect(table.sent).toHaveLength(1);
+  });
+
+  test("a price read that keeps failing never locks the cart, and leaving forgets it", async ({
+    page,
+  }) => {
+    const table = await stubTable(page, [], {
+      quote: (route) =>
+        route.fulfill({
+          status: 503,
+          json: {
+            schemaVersion: 1,
+            error: { code: "quote_service_unavailable", messageKey: "customer.quote.unavailable" },
+          },
+        }),
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("alert")).toContainText("We couldn’t place your order");
+    // The dish that makes pricing fail can always be taken out.
+    await expect(main.getByRole("button", { name: "Remove" })).toBeEnabled();
+    await goTo(page, "/menu");
+    await goTo(page, "/cart");
+    await expect(main.getByRole("article", { name: "Synthetic noodles" })).toBeVisible();
+    await expect(main.getByRole("alert")).toHaveCount(0);
+    await expect(placeOrder(page)).toBeEnabled();
+    expect(table.sent).toEqual([]);
+  });
+
+  test("a lost checkout whose cart moved on is no longer a retry: another guest's dish", async ({
+    page,
+  }) => {
+    const table: Table = await stubTable(page, [], {
+      session: (route) => {
+        table.addDish("Mom's dumplings");
+        return route.abort("internetdisconnected");
+      },
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("alert")).toContainText("The latest cart was loaded.");
+    await expect(main).not.toContainText("We couldn’t");
+    await expect(main.getByRole("article", { name: "Mom's dumplings" })).toBeVisible();
+    await expect(placeOrder(page)).toBeEnabled();
+    expect(table.sessionKeys).toHaveLength(1);
+  });
+
+  test("a lost checkout whose cart moved on is no longer a retry: another guest's quote", async ({
+    page,
+  }) => {
+    const table: Table = await stubTable(page, [], {
+      session: (route) => {
+        table.attachQuote(id(66));
+        return route.abort("internetdisconnected");
+      },
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("alert")).toContainText("The latest cart was loaded.");
+    await expect(main).not.toContainText("We couldn’t");
+    expect(table.sessionKeys).toHaveLength(1);
+  });
+
+  test("a lost checkout when someone else placed the cart says so, never 'may have been placed'", async ({
+    page,
+  }) => {
+    const table: Table = await stubTable(page, [], {
+      session: (route) => {
+        table.placeRound();
+        return route.abort("internetdisconnected");
+      },
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    const main = page.getByRole("main");
+    await expect(
+      main.getByRole("heading", { name: "Someone at your table just placed this order." }),
+    ).toBeVisible();
+    await expect(main).not.toContainText("We couldn’t");
+    await expect(main.getByRole("link", { name: "See your table" })).toBeVisible();
+    expect(table.sent).toEqual([]);
+  });
+
+  test("a stop ends when the cart changes: the old total isn't left beside it", async ({
+    page,
+  }) => {
+    const table = await stubTable(page, [], { noMenu: true });
+    await openCart(page);
+    await placeOrder(page).click();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("alert")).toContainText("This order comes to $22.60 with tax.");
+    const withTotal = page.getByRole("button", { name: "Place order · $22.60", exact: true });
+    await expect(withTotal).toBeVisible();
+    await expect.poll(() => table.calls.filter((call) => call === "quote").length).toBe(1);
+    await main.getByRole("button", { name: "Increase Synthetic noodles quantity" }).click();
+    await expect(main.getByRole("alert")).toHaveCount(0);
+    await expect(withTotal).toHaveCount(0);
+    await expect(placeOrder(page)).toBeEnabled();
+    expect(table.sent).toEqual([]);
+    // The next tap asks again about what the cart comes to now, with nothing saved before it.
+    await placeOrder(page).click();
+    await expect(main.getByRole("alert")).toContainText("This order comes to");
+    expect(table.calls.filter((call) => call === "quote")).toHaveLength(2);
+    expect(table.calls).not.toContain("details-save");
+  });
+
+  test("a stop stays in view at the bottom of a long cart", async ({ page }) => {
+    for (const [name, options, said] of [
+      [
+        "sold out",
+        {
+          session: (route: Route) =>
+            route.fulfill({
+              status: 409,
+              json: {
+                schemaVersion: 1,
+                error: {
+                  code: "checkout_session_item_short",
+                  messageKey: "customer.checkout.item_short",
+                  line: { cartItemReference: id(2), available: 1, sharedStock: false },
+                },
+              },
+            }),
+        },
+        "Only 1",
+      ],
+      ["total", { subtotalMinor: "16000", totalMinor: "18080" }, "$180.80"],
+    ] as const) {
+      await page.unrouteAll({ behavior: "wait" });
+      await routeStorefrontReads(page.context());
+      await stubTable(page, [], { ...options, moreDishes: 6 });
+      // Each read takes a moment, as it does on a phone: nothing may jump meanwhile.
+      await page.route(/\/bff\/customer\/cart(?:\?.*)?$/u, async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await route.fallback();
+      });
+      await openCart(page);
+      const button = placeOrder(page);
+      await button.scrollIntoViewIfNeeded();
+      const before = await page.evaluate(() => window.scrollY);
+      expect(before, name).toBeGreaterThan(300);
+      await button.click();
+      const main = page.getByRole("main");
+      const alert = main.getByRole("alert");
+      await expect(alert, name).toContainText(said);
+      // Give the read after the stop time to finish, then check nothing threw the guest back.
+      await page.waitForTimeout(600);
+      expect(await page.evaluate(() => window.scrollY), name).toBeGreaterThan(300);
+      await inView(page, alert);
+      await inView(page, main.locator(".cart-checkout-link"));
+      await page.screenshot({ path: `test-results/cart-stop-${name.replace(" ", "-")}-390.png` });
+    }
+  });
+
+  test("a lost answer is said in view, above a long cart", async ({ page }) => {
+    await stubTable(page, [], {
+      moreDishes: 6,
+      send: (route) => route.abort("internetdisconnected"),
+    });
+    await openCart(page);
+    const button = placeOrder(page);
+    await button.scrollIntoViewIfNeeded();
+    await button.click();
+    const main = page.getByRole("main");
+    await inView(page, main.getByRole("alert").filter({ hasText: "We couldn’t confirm" }));
+  });
+
+  test("a send that finished after the guest left never claims what's in the cart now", async ({
+    page,
+  }) => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let answered = false;
+    const table: Table = await stubTable(page, [], {
+      send: async (route) => {
+        await held;
+        table.placeRound();
+        await route.fulfill(roundPlacedAnswer("Sent"));
+        answered = true;
+      },
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    await expect.poll(() => table.sent.length).toBe(1);
+    // The browser's back button during the send: on to the menu, one more dish.
+    await goTo(page, "/menu");
+    release();
+    await expect.poll(() => answered).toBe(true);
+    table.addDish("Added later");
+    await goTo(page, "/cart");
+    const main = page.getByRole("main");
+    await expect(main.getByRole("article", { name: "Added later" })).toBeVisible();
+    await expect(page).toHaveURL(/\/cart$/u);
+    const note = main.getByRole("status").filter({ hasText: "Your last order was placed." });
+    await expect(note).toContainText("still in your cart");
+    await expect(note.getByRole("link", { name: "See your table" })).toBeVisible();
+    await expect(main.getByText("Order placed.", { exact: true })).toHaveCount(0);
+    // Its own tap is about what's left, and the note about the last one goes. The stub's quote
+    // answers more than this one dish, so it asks first; that's the proof it's a new order.
+    await placeOrder(page).click();
+    await expect(note).toHaveCount(0);
+    await expect(main.getByRole("alert")).toContainText("$22.60");
+    expect(table.sent).toHaveLength(1);
+  });
+
+  test("Try again finishing an older round doesn't say the dishes added since were placed", async ({
+    page,
+  }) => {
+    const table: Table = await stubTable(page, [], {
+      send: (route, call) => {
+        if (call !== 1) return route.fulfill(roundPlacedAnswer("AlreadySent"));
+        table.placeRound();
+        return route.abort("internetdisconnected");
+      },
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    const main = page.getByRole("main");
+    const tryAgain = main.getByRole("button", { name: "Try again", exact: true });
+    await expect(tryAgain).toBeVisible();
+    // The guest checks the table and adds a dish before they come back to the panel.
+    await goTo(page, "/menu");
+    table.addDish("Added later");
+    await goTo(page, "/cart");
+    await expect(main.getByRole("article", { name: "Added later" })).toBeVisible();
+    await tryAgain.click();
+    const note = main.getByRole("status").filter({ hasText: "Your last order was placed." });
+    await expect(note).toContainText("still in your cart");
+    await expect(page).toHaveURL(/\/cart$/u);
+    await expect(main.getByRole("article", { name: "Added later" })).toBeVisible();
+    expect(table.sent).toHaveLength(2);
+    expect(table.sent[1]?.key).toBe(table.sent[0]?.key);
+  });
+
+  test("the line about a round placed lasts until that round moves on", async ({ page }) => {
+    const table = await stubTable(page);
+    await openCart(page);
+    await placeOrder(page).click();
+    await expect(page).toHaveURL(/\/dine-in\/session$/u);
+    const main = page.getByRole("main");
+    const line = main.getByRole("status").filter({ hasText: "Order placed." });
+    await expect(line).toBeVisible();
+    const refresh = main.getByRole("button", { name: "Refresh now" });
+    await refresh.click();
+    await expect(refresh).toBeEnabled();
+    await expect(line).toBeVisible();
+    table.moveRound("Preparing");
+    await refresh.click();
+    await expect(line).toHaveCount(0);
+    await expect(main.getByText("Being prepared", { exact: true })).toBeVisible();
+  });
+
+  test("a round waiting for staff stops saying so once staff confirm it", async ({ page }) => {
+    const table = await stubTable(page, [], {
+      roundStatus: "WaitingForStaff",
+      send: (route) => {
+        table.placeRound();
+        return route.fulfill({
+          status: 202,
+          json: {
+            schemaVersion: 1,
+            round: {
+              checkoutSessionReference: id(10),
+              orderReference: id(20),
+              status: "Held",
+              waitingReason: "FirstOrder",
+              total: { amountMinor: "2260", currency: "CAD" },
+            },
+          },
+        });
+      },
+    });
+    await openCart(page);
+    await placeOrder(page).click();
+    await expect(page).toHaveURL(/\/dine-in\/session$/u);
+    const main = page.getByRole("main");
+    const line = main.getByRole("status").filter({ hasText: "Staff confirm it first." });
+    await expect(line).toBeVisible();
+    const refresh = main.getByRole("button", { name: "Refresh now" });
+    await refresh.click();
+    await expect(refresh).toBeEnabled();
+    await expect(line).toBeVisible();
+    table.moveRound("Queued");
+    await refresh.click();
+    await expect(line).toHaveCount(0);
+    await expect(main.getByText("Sent to the kitchen", { exact: true })).toBeVisible();
+  });
+
+  test("in Chinese: one name for the table on these screens", async ({ page }) => {
+    const table: Table = await stubTable(page, [], {
+      quote: (route, call) => {
+        if (call !== 1) return undefined;
+        table.placeRound();
+        return route.fulfill({
+          status: 409,
+          json: {
+            schemaVersion: 1,
+            error: {
+              code: "quote_version_conflict",
+              messageKey: "customer.quote.version_conflict",
+            },
+          },
+        });
+      },
+    });
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await page.getByRole("button", { name: "切换到中文" }).click();
+    await goTo(page, "/cart");
+    await page.getByRole("button", { name: "下单", exact: true }).click();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "同桌刚刚下单了这些菜。" })).toBeVisible();
+    await expect(main.getByRole("link", { name: "查看本桌", exact: true })).toBeVisible();
+    await expect(main).not.toContainText("桌位");
   });
 
   test("the button waits a moment for prices, so an ordinary guest needs one tap", async ({

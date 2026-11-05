@@ -325,7 +325,7 @@ function RoundCard({
   return (
     <article className="order-status__card order-status__batch" aria-labelledby={headingId}>
       <h3 id={headingId}>
-        {t("Round")} {round.roundNumber} ·{" "}
+        {t("Round {round}", { round: String(round.roundNumber) })} ·{" "}
         {!charge
           ? orderedByText[round.orderedBy]
           : round.tea === true
@@ -638,7 +638,7 @@ export function DiningSessionPage({
   // address keeps no record of it, so coming back to this page later doesn't claim it again.
   const location = useLocation();
   const navigate = useNavigate();
-  const [placed] = useState<RoundPlaced | null>(() => placedRound(location.state));
+  const [placed, setPlaced] = useState<RoundPlaced | null>(() => placedRound(location.state));
   useEffect(() => {
     if (placedRound(location.state) !== null)
       void navigate(location.pathname, { replace: true, state: null });
@@ -751,6 +751,23 @@ export function DiningSessionPage({
       pending.current = null;
     };
   }, [load]);
+  // The line about the round just placed lasts until that round moves on.
+  const placedRoundSeen = useRef<string | null>(null);
+  useEffect(() => {
+    if (placed === null || state.status === "loading" || state.status === "unavailable") return;
+    if (state.status !== "ready") {
+      setPlaced(null);
+      return;
+    }
+    const seen = placedRoundFact(state.view);
+    if (seen === null) return;
+    placedRoundSeen.current ??= seen;
+    if (
+      placedRoundSeen.current !== seen ||
+      (placed === "Held" && !seen.includes("|WaitingForStaff|"))
+    )
+      setPlaced(null);
+  }, [placed, state]);
   const showingTable = keepsReadingTable(state);
   // Owner 2026-11-03 walkthrough: staff start checkout at any moment; the pay panel reads with it.
   const [billReadKey, setBillReadKey] = useState(0);
@@ -825,6 +842,11 @@ export type RoundPlaced = "Sent" | "Held";
 const placedRound = (state: unknown): RoundPlaced | null => {
   const placed = (state as { placed?: unknown } | null)?.placed;
   return placed === "Sent" || placed === "Held" ? placed : null;
+};
+/** Where this guest's newest round stands, as one comparable fact; null before they have one. */
+const placedRoundFact = (view: DiningSessionView): string | null => {
+  const own = [...view.rounds].reverse().find((round) => round.orderedBy === "You");
+  return own === undefined ? null : `${own.roundNumber}|${own.status}|${own.payment}`;
 };
 
 export function DiningSessionScreen({
@@ -1020,9 +1042,11 @@ export function DiningSessionScreen({
           {((count) =>
             count === 0 ? null : (
               <p className="dining-session__tea-adjusted">
-                {t("Staff took off {count} charges. They aren’t charged.", {
-                  count: String(count),
-                })}
+                {count === 1
+                  ? t("Staff took off 1 charge. It isn’t charged.")
+                  : t("Staff took off {count} charges. They aren’t charged.", {
+                      count: String(count),
+                    })}
               </p>
             ))(view.rounds.filter(chargeTakenOff).length)}
           {/* WP-2423 item 6: newest first, numbers unchanged: the round just placed is the first

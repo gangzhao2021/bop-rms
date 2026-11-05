@@ -45,12 +45,17 @@ import type { CheckoutQuote } from "./types.js";
  * - The quote's price is checked against what the guest saw; a total that went up, any fee or a total
  *   never shown stops before anything is saved, and the second tap continues with the same quote.
  * - A lost answer is never a failure the guest pays for: each step repeats with the same key and the
- *   same body, and the server returns what it already did. Once a session or a send was attempted the
- *   plan outlives the cart: the send empties the cart, so a retry must not start from the cart.
+ *   same body, and the server returns what it already did.
+ * - Nothing can be placed before the send. So before one was attempted, a plan only means something
+ *   for the cart it was made for: a read showing another version or another guest's quote ends it, and
+ *   the guest is free to change the cart. After one was attempted the plan outlives the cart (the send
+ *   empties it), and a retry repeats that send whatever the cart says.
  * - Reconnection never sends anything; a retry is always a guest's tap.
  * - Leaving the page doesn't stop the steps, and no navigation happens from a page that is gone.
  */
 export interface SendRoundPorts {
+  /** What the cart holds now, read fresh. A failed read decides nothing. */
+  readCart(): Promise<CartView | null>;
   /** Whether the table is checking out (staff started it). A failed read decides nothing. */
   readTable(): Promise<{ readonly checkingOut: boolean }>;
   readDetails(selection: CheckoutDetailsReadSelection): Promise<CheckoutDetailsCurrentView>;
@@ -78,8 +83,11 @@ export interface SendRoundPorts {
 
 export type SendRoundState =
   | { readonly status: "idle" | "sending" }
-  /** The round is placed. Held: it waits for staff before the kitchen. */
-  | { readonly status: "sent"; readonly held: boolean }
+  /**
+   * The round is placed. Held: it waits for staff before the kitchen. More: a retry finished it and
+   * the cart holds other dishes (or couldn't be read), so "placed" doesn't cover what's on screen.
+   */
+  | { readonly status: "sent"; readonly held: boolean; readonly more?: true }
   /** Something only the checkout page can ask (the Store's documents, a quote's warnings). */
   | { readonly status: "needs-page" }
   /** The table pays as it orders after all: the checkout page and payment follow. */
@@ -102,8 +110,11 @@ export type SendRoundState =
       readonly wait: "order-processing" | "checkout-in-progress";
       readonly retryAfterSeconds: number | null;
     }
-  /** The outcome isn't known: trying again repeats the same step and can't place it twice. */
-  | { readonly status: "unconfirmed" };
+  /**
+   * The answer got lost: trying again repeats the same step and can't place it twice. mayBePlaced: a
+   * send was attempted, so the round may exist. Otherwise nothing was placed and the cart stays free.
+   */
+  | { readonly status: "unconfirmed"; readonly mayBePlaced: boolean };
 
 /** What the guest saw for the cart before tax, when every line had a price. */
 export interface SeenSubtotal {
@@ -135,6 +146,23 @@ interface Plan {
 }
 
 const asBig = (money: CartMoney) => BigInt(money.amountMinor);
+
+/** The cart isn't the one this plan was made for: another version, or another guest's quote on it. */
+function movedOn(active: Plan, cart: CartView | null): boolean {
+  if (
+    cart === null ||
+    cart.cart.items.length === 0 ||
+    cart.cart.cartReference !== active.cart.cart.cartReference ||
+    cart.cart.version !== active.cart.cart.version
+  )
+    return true;
+  const attached = cart.cart.quote;
+  return (
+    active.quote !== null &&
+    attached !== null &&
+    attached.quoteReference !== active.quote.quoteReference
+  );
+}
 
 /** What a total the guest is asked to confirm says, or null when the price stands as seen. */
 function priceCheck(quote: CheckoutQuote, seen: SeenSubtotal | null) {
@@ -168,6 +196,16 @@ export function createSendRoundController(
     state = Object.freeze(next);
     listeners.forEach((listener) => listener());
   };
+  const unconfirmed = (): SendRoundState => ({
+    status: "unconfirmed",
+    mayBePlaced: plan?.sendAttempted === true,
+  });
+  /** undefined: the read failed, which decides nothing. */
+  const readCart = () =>
+    ports.readCart().then(
+      (cart) => cart,
+      () => undefined,
+    );
   const newPlan = (cart: CartView, carried?: Plan): Plan => ({
     cart,
     seen: carried?.seen ?? null,
@@ -191,7 +229,7 @@ export function createSendRoundController(
   const restart = (active: Plan, options: CheckoutMutationOptions) => {
     if (active.restarted) {
       plan = null;
-      return Promise.resolve<SendRoundState>({ status: "unconfirmed" });
+      return Promise.resolve(unconfirmed());
     }
     plan = newPlan(active.cart, active);
     return advance(plan, options);
@@ -225,7 +263,7 @@ export function createSendRoundController(
           plan = null;
           return { status: "table-checking-out" };
         case "quote_operation_expired":
-          if (active.quoteRenewed) return { status: "unconfirmed" };
+          if (active.quoteRenewed) return unconfirmed();
           active.quoteRenewed = true;
           active.quoteOperation = keyFactory();
           return quoteStep(active, options);
@@ -234,7 +272,7 @@ export function createSendRoundController(
           plan = null;
           return { status: "needs-page" };
         default:
-          return { status: "unconfirmed" };
+          return unconfirmed();
       }
     }
   };
@@ -277,7 +315,7 @@ export function createSendRoundController(
           plan = null;
           return { status: "session-ended" };
         default:
-          return { status: "unconfirmed" };
+          return unconfirmed();
       }
     }
   };
@@ -330,7 +368,7 @@ export function createSendRoundController(
           plan = null;
           return { status: "cart-changed" };
         default:
-          return { status: "unconfirmed" };
+          return unconfirmed();
       }
     }
   };
@@ -369,7 +407,7 @@ export function createSendRoundController(
           plan = null;
           return { status: "cart-changed" };
         default:
-          return { status: "unconfirmed" };
+          return unconfirmed();
       }
     }
   };
@@ -405,7 +443,7 @@ export function createSendRoundController(
           plan = null;
           return { status: "cart-changed" };
         }
-        return { status: "unconfirmed" };
+        return unconfirmed();
       }
       if (details.value !== null) active.priorDetails = details.value.details;
       if (!active.sessionAttempted) {
@@ -423,7 +461,7 @@ export function createSendRoundController(
     }
     const quote = active.quote;
     if (active.session === null) {
-      if (quote === null) return { status: "unconfirmed" };
+      if (quote === null) return unconfirmed();
       if (!active.sessionAttempted) {
         if (quote.blockingReasons.length > 0) {
           plan = null;
@@ -453,7 +491,7 @@ export function createSendRoundController(
       if (created !== null) return created;
     }
     const session = active.session;
-    if (session === null) return { status: "unconfirmed" };
+    if (session === null) return unconfirmed();
     const sent = await sendStep(active, session, options);
     return sent === "restart" ? restart(active, options) : sent;
   };
@@ -464,15 +502,20 @@ export function createSendRoundController(
       plan.confirmedQuote = plan.quote.quoteReference;
       plan.confirmedTotalMinor = asBig(plan.quote.total);
     }
-    // Before a session exists a changed cart simply starts over; after that the plan finishes.
+    publish({ status: "sending" });
     const hadPlan = plan !== null;
-    if (
-      plan !== null &&
-      !plan.sessionAttempted &&
-      cart !== null &&
-      cart.cart.version !== plan.cart.cart.version
-    )
-      plan = null;
+    if (plan !== null && !plan.sendAttempted) {
+      // A tap about the cart on screen starts over if it changed. A retry is about the old cart: what
+      // it holds now is read first, and if that isn't it, the guest gets to see it before anything.
+      const fresh = manual ? await readCart() : undefined;
+      if (fresh === undefined ? cart !== null && movedOn(plan, cart) : movedOn(plan, fresh)) {
+        plan = null;
+        if (manual) {
+          publish({ status: "cart-changed" });
+          return;
+        }
+      }
+    }
     if (plan === null) {
       if (cart === null || cart.cart.items.length === 0) {
         // The cart emptied under an unfinished plan: someone at the table placed it.
@@ -482,13 +525,25 @@ export function createSendRoundController(
       plan = newPlan(cart);
     }
     if (seen !== null) plan.seen = seen;
-    publish({ status: "sending" });
     const options: CheckoutMutationOptions = manual ? { busyTotalMs: manualRetryBusyTotalMs } : {};
     let outcome: SendRoundState;
     try {
       outcome = await advance(plan, options);
     } catch {
-      outcome = { status: "unconfirmed" };
+      outcome = unconfirmed();
+    }
+    if (outcome.status === "unconfirmed" && plan !== null && !plan.sendAttempted) {
+      // Nothing was placed: this may just be a cart that moved on, with no outage behind it.
+      const fresh = await readCart();
+      if (fresh !== undefined && movedOn(plan, fresh)) {
+        plan = null;
+        outcome = { status: "cart-changed" };
+      }
+    } else if (outcome.status === "sent" && manual) {
+      // An older round is finished; the cart may have gained dishes since.
+      const fresh = await readCart();
+      if (fresh === undefined || (fresh !== null && fresh.cart.items.length > 0))
+        outcome = { ...outcome, more: true };
     }
     publish(outcome);
   };
@@ -511,7 +566,7 @@ export function createSendRoundController(
     reset() {
       if (flight !== null) return;
       // Something a send may have done stays to be finished; anything else starts again next time.
-      if (plan !== null && !plan.sessionAttempted && !plan.sendAttempted) plan = null;
+      if (plan !== null && !plan.sendAttempted) plan = null;
       publish({ status: "idle" });
     },
   });
@@ -526,6 +581,7 @@ export function httpSendRoundPorts(): SendRoundPorts {
   const sessions = createCheckoutSessionClient();
   const payments = createSessionPaymentClient();
   return Object.freeze({
+    readCart: () => quotes.loadCart(),
     readTable: () => table.read(),
     readDetails: (selection: CheckoutDetailsReadSelection) => reader.read(selection),
     quote: quotes.quote,

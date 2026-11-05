@@ -204,7 +204,9 @@ export const cartText = Object.freeze({
     return t("Allergies? Ask a staff member before you order.");
   },
   alsoPlacesOthers: (count: number) =>
-    t("This also places {count} items other guests added.", { count }),
+    count === 1
+      ? t("This also places 1 item another guest added.")
+      : t("This also places {count} items other guests added.", { count }),
   get placedSlowly() {
     return t("Still working on it.");
   },
@@ -215,6 +217,20 @@ export const cartText = Object.freeze({
     return t(
       "We couldn’t confirm your order was placed. Try again — it is never placed twice. You can also tell a staff member what you’d like.",
     );
+  },
+  get orderNotPlaced() {
+    return t(
+      "We couldn’t place your order, so nothing was sent. Try again, or tell a staff member what you’d like.",
+    );
+  },
+  get lastOrderPlaced() {
+    return t("Your last order was placed.");
+  },
+  get lastOrderPlacedHeld() {
+    return t("Your last order was placed. Staff confirm it first.");
+  },
+  get stillInYourCart() {
+    return t("The dishes below are still in your cart and haven’t been ordered.");
   },
   priceChangedTotal: (total: string) =>
     t("The price changed since you added this. It now comes to {total} with tax.", { total }),
@@ -604,7 +620,7 @@ export const checkoutText = Object.freeze({
   },
   get storeClosed() {
     return t(
-      "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so you haven’t been charged. To add something, ask a staff member.",
+      "The store isn’t taking new orders right now — it’s closed, or the kitchen has stopped taking orders for today — so this order hasn’t been charged. To add something, ask a staff member.",
     );
   },
   /** WP-2423: the restaurant listed a menu change while this guest was checking out. */
@@ -622,6 +638,11 @@ export const checkoutText = Object.freeze({
   get checkoutRefused() {
     return t(
       "We couldn’t continue this checkout. Review your cart and scan the QR code again if needed.",
+    );
+  },
+  get checkoutCartChanged() {
+    return t(
+      "Your cart changed while you were checking out, so nothing was placed. Check it, then continue.",
     );
   },
   get retryCheckout() {

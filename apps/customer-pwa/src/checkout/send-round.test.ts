@@ -48,7 +48,10 @@ const seen = { amountMinor: 2000n, currency: "CAD" };
 function setUp(overrides: Partial<SendRoundPorts> = {}) {
   const calls: string[] = [];
   let quoted = 0;
+  let placed = false;
   const ports: { [K in keyof SendRoundPorts]: ReturnType<typeof vi.fn<SendRoundPorts[K]>> } = {
+    // As the server: a round placed took everything out of the cart.
+    readCart: vi.fn<SendRoundPorts["readCart"]>(async () => (placed ? cart(4, 0) : cart())),
     readTable: vi.fn<SendRoundPorts["readTable"]>(async () => {
       calls.push("table");
       return { checkingOut: false };
@@ -83,6 +86,7 @@ function setUp(overrides: Partial<SendRoundPorts> = {}) {
     }),
     send: vi.fn<SendRoundPorts["send"]>(async () => {
       calls.push("send");
+      placed = true;
       return { status: "Sent" as const };
     }),
   };
@@ -96,6 +100,8 @@ function setUp(overrides: Partial<SendRoundPorts> = {}) {
 }
 
 const lost = () => new CartClientError("network_unknown");
+const unsent = { status: "unconfirmed", mayBePlaced: false };
+const maybeSent = { status: "unconfirmed", mayBePlaced: true };
 
 describe("WP-2423 item 6: placing a round from the cart", () => {
   it("places a round in one tap: table, quote, details, checkout, send, in that order", async () => {
@@ -126,8 +132,9 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
   it("retry after a lost answer repeats the same keys", async () => {
     const { controller, ports } = setUp();
     ports.send.mockRejectedValueOnce(new SessionPaymentClientError("unknown"));
+    ports.readCart.mockResolvedValue(cart(4, 0));
     await controller.send(cart(), seen);
-    expect(controller.getState()).toEqual({ status: "unconfirmed" });
+    expect(controller.getState()).toEqual(maybeSent);
     await controller.send(cart(), seen);
     expect(controller.getState()).toEqual({ status: "sent", held: false });
     const [[, firstSelection], [, secondSelection]] = ports.send.mock.calls as [
@@ -148,6 +155,7 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     const { controller, ports } = setUp();
     ports.send.mockRejectedValueOnce(new SessionPaymentClientError("unknown"));
     ports.send.mockResolvedValueOnce({ status: "AlreadySent" });
+    ports.readCart.mockResolvedValue(cart(4, 0));
     await controller.send(cart(), seen);
     // The order transaction emptied the cart before the answer got lost: nothing to quote now.
     await controller.send(null, null);
@@ -161,28 +169,146 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     const { controller, ports } = setUp();
     ports.quote.mockRejectedValueOnce(lost());
     await controller.send(cart(), seen);
-    expect(controller.getState()).toEqual({ status: "unconfirmed" });
+    expect(controller.getState()).toEqual(unsent);
     await controller.send(cart(), null);
     expect(controller.getState()).toEqual({ status: "sent", held: false });
     expect(ports.quote.mock.calls[1]?.[1]).toBe(ports.quote.mock.calls[0]?.[1]);
   });
 
-  it("a lost checkout repeats with the same key after a changed cart read", async () => {
+  it("a lost checkout repeats with the same key while the cart and quote are unchanged", async () => {
     const { controller, ports } = setUp();
     ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("unknown"));
     await controller.send(cart(), seen);
-    expect(controller.getState()).toEqual({ status: "unconfirmed" });
-    await controller.send(cart(4), null);
+    expect(controller.getState()).toEqual(unsent);
+    await controller.send(cart(), null);
     expect(ports.createSession.mock.calls[1]?.[1]).toBe(ports.createSession.mock.calls[0]?.[1]);
     expect(ports.createSession.mock.calls[1]?.[0]).toEqual(ports.createSession.mock.calls[0]?.[0]);
     expect(controller.getState()).toEqual({ status: "sent", held: false });
+  });
+
+  it("nothing was placed before a send, so a cart that moved on ends a lost checkout", async () => {
+    const version = setUp();
+    version.ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("unknown"));
+    await version.controller.send(cart(), seen);
+    expect(version.controller.getState()).toEqual(unsent);
+    // Another guest added a dish: Try again finds that out before anything else.
+    version.ports.readCart.mockResolvedValue(cart(4));
+    await version.controller.send(cart(), null);
+    expect(version.controller.getState()).toEqual({ status: "cart-changed" });
+    expect(version.ports.createSession).toHaveBeenCalledTimes(1);
+    expect(version.ports.readTable).toHaveBeenCalledTimes(1);
+    // The next tap is about the cart as the guest now sees it: all new keys.
+    await version.controller.send(cart(4), seen);
+    expect(version.controller.getState()).toEqual({ status: "sent", held: false });
+    expect(version.ports.quote.mock.calls[1]?.[1]).not.toBe(version.ports.quote.mock.calls[0]?.[1]);
+    expect(version.ports.createSession.mock.calls[1]?.[1]).not.toBe(
+      version.ports.createSession.mock.calls[0]?.[1],
+    );
+    expect(version.ports.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("another guest's quote on the same cart version ends a lost checkout too", async () => {
+    const { controller, ports } = setUp();
+    ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("unknown"));
+    await controller.send(cart(), seen);
+    const replaced = cart();
+    ports.readCart.mockResolvedValue({
+      ...replaced,
+      cart: { ...replaced.cart, quote: quote({ quoteReference: id(99) }) },
+    } as unknown as CartView);
+    await controller.send(cart(), null);
+    expect(controller.getState()).toEqual({ status: "cart-changed" });
+    expect(ports.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("the guest's own quote on the cart is no change", async () => {
+    const { controller, ports } = setUp();
+    ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("unknown"));
+    await controller.send(cart(), seen);
+    const attached = ports.createSession.mock.calls[0]?.[0].quoteReference;
+    const own = cart();
+    ports.readCart.mockResolvedValueOnce({
+      ...own,
+      cart: { ...own.cart, quote: quote({ quoteReference: attached ?? "" }) },
+    } as unknown as CartView);
+    await controller.send(cart(), null);
+    expect(ports.createSession.mock.calls[1]?.[1]).toBe(ports.createSession.mock.calls[0]?.[1]);
+    expect(controller.getState()).toEqual({ status: "sent", held: false });
+  });
+
+  it("a lost answer before any send is looked into at once, without a tap", async () => {
+    const moved = setUp();
+    moved.ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("unknown"));
+    moved.ports.readCart.mockResolvedValue(cart(4));
+    await moved.controller.send(cart(), seen);
+    expect(moved.controller.getState()).toEqual({ status: "cart-changed" });
+    // Someone else's round emptied it: that's what the page says, never "may have been placed".
+    const placed = setUp();
+    placed.ports.quote.mockRejectedValueOnce(lost());
+    placed.ports.readCart.mockResolvedValue(cart(5, 0));
+    await placed.controller.send(cart(), seen);
+    expect(placed.controller.getState()).toEqual({ status: "cart-changed" });
+    // No answer to that read either: it stays a retry, and nothing sends by itself.
+    const dark = setUp();
+    dark.ports.quote.mockRejectedValue(lost());
+    dark.ports.readCart.mockRejectedValue(lost());
+    await dark.controller.send(cart(), seen);
+    expect(dark.controller.getState()).toEqual(unsent);
+  });
+
+  it("a cart read that fails decides nothing, unless the tap's own cart already moved on", async () => {
+    const { controller, ports } = setUp();
+    ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("unknown"));
+    await controller.send(cart(), seen);
+    ports.readCart.mockRejectedValue(lost());
+    await controller.send(cart(), null);
+    expect(ports.createSession.mock.calls[1]?.[1]).toBe(ports.createSession.mock.calls[0]?.[1]);
+    const stale = setUp();
+    stale.ports.createSession.mockRejectedValueOnce(new CheckoutSessionClientError("unknown"));
+    await stale.controller.send(cart(), seen);
+    stale.ports.readCart.mockRejectedValue(lost());
+    await stale.controller.send(cart(4), null);
+    expect(stale.controller.getState()).toEqual({ status: "cart-changed" });
+    expect(stale.ports.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("once a send was attempted the plan outlives any cart, and says the round may exist", async () => {
+    const { controller, ports } = setUp();
+    ports.send.mockRejectedValueOnce(new SessionPaymentClientError("unknown"));
+    ports.readCart.mockResolvedValue(cart(4));
+    await controller.send(cart(), seen);
+    expect(controller.getState()).toEqual(maybeSent);
+    await controller.send(cart(4), null);
+    expect(ports.send.mock.calls[1]?.[1]).toBe(ports.send.mock.calls[0]?.[1]);
+    expect(ports.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("a retry that finishes an older round says when the cart holds more", async () => {
+    const dish = setUp();
+    dish.ports.send.mockRejectedValueOnce(new SessionPaymentClientError("unknown"));
+    await dish.controller.send(cart(), seen);
+    // A dish added while the answer was unknown is still in the cart afterwards.
+    dish.ports.readCart.mockResolvedValue(cart(5));
+    await dish.controller.send(cart(5), null);
+    expect(dish.controller.getState()).toEqual({ status: "sent", held: false, more: true });
+    // No answer about the cart either: placed is all that can be said.
+    const dark = setUp();
+    dark.ports.send.mockRejectedValueOnce(new SessionPaymentClientError("unknown"));
+    await dark.controller.send(cart(), seen);
+    dark.ports.readCart.mockRejectedValue(lost());
+    await dark.controller.send(null, null);
+    expect(dark.controller.getState()).toEqual({ status: "sent", held: false, more: true });
+    // An ordinary tap costs no extra read: the round took the cart it was made from.
+    const tap = setUp();
+    await tap.controller.send(cart(), seen);
+    expect(tap.ports.readCart).not.toHaveBeenCalled();
   });
 
   it("a lost details save retried sends the identical body", async () => {
     const { controller, ports } = setUp();
     ports.saveDetails.mockRejectedValueOnce(new CheckoutDetailsClientError("unknown"));
     await controller.send(cart(), seen);
-    expect(controller.getState()).toEqual({ status: "unconfirmed" });
+    expect(controller.getState()).toEqual(unsent);
     // What a re-read would answer now if the lost save had landed.
     ports.readDetails.mockResolvedValue({
       cartReference: id(1),
@@ -356,7 +482,7 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     const { controller, ports } = setUp();
     ports.quote.mockRejectedValueOnce(lost());
     await controller.send(cart(), seen);
-    expect(controller.getState()).toEqual({ status: "unconfirmed" });
+    expect(controller.getState()).toEqual(unsent);
     ports.readTable.mockResolvedValue({ checkingOut: true });
     await controller.send(cart(), seen);
     expect(controller.getState()).toEqual({ status: "table-checking-out" });
@@ -450,7 +576,8 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     const { controller, ports } = setUp();
     ports.quote.mockRejectedValueOnce(lost());
     await controller.send(cart(), seen);
-    expect(controller.getState()).toEqual({ status: "unconfirmed" });
+    expect(controller.getState()).toEqual(unsent);
+    ports.readCart.mockResolvedValue(cart(5, 0));
     await controller.send(cart(5, 0), null);
     expect(controller.getState()).toEqual({ status: "cart-changed" });
     expect(ports.send).not.toHaveBeenCalled();
@@ -473,6 +600,17 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     lostSend.controller.reset();
     await lostSend.controller.send(null, null);
     expect(lostSend.ports.send.mock.calls[1]?.[1]).toBe(lostSend.ports.send.mock.calls[0]?.[1]);
+    // A checkout that was never sent placed nothing: coming back starts over.
+    const lostCheckout = setUp();
+    lostCheckout.ports.createSession.mockRejectedValueOnce(
+      new CheckoutSessionClientError("unknown"),
+    );
+    await lostCheckout.controller.send(cart(), seen);
+    lostCheckout.controller.reset();
+    await lostCheckout.controller.send(cart(), seen);
+    expect(lostCheckout.ports.createSession.mock.calls[1]?.[1]).not.toBe(
+      lostCheckout.ports.createSession.mock.calls[0]?.[1],
+    );
   });
 
   it("a details conflict restarts once with a whole new plan, then asks the guest", async () => {
@@ -486,7 +624,7 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     const twice = setUp();
     twice.ports.saveDetails.mockRejectedValue(new CheckoutDetailsClientError("requote"));
     await twice.controller.send(cart(), seen);
-    expect(twice.controller.getState()).toEqual({ status: "unconfirmed" });
+    expect(twice.controller.getState()).toEqual(unsent);
     expect(twice.ports.saveDetails).toHaveBeenCalledTimes(2);
   });
 

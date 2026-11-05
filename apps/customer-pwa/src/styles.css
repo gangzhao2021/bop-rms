@@ -1432,9 +1432,20 @@
   color: var(--bop-color-text-muted);
   font-size: 0.875rem;
 }
-.cart-next-actions [aria-disabled="true"] {
+.cart-next-actions [aria-disabled="true"],
+.customer-page .bop-shell__nav > a[aria-disabled="true"] {
   color: var(--bop-color-text-muted);
   pointer-events: none;
+}
+.cart-page .checkout-attention {
+  scroll-margin-top: calc(var(--customer-nav-height) + 1rem);
+}
+/* WP-2423 item 6: an order placed that this page didn't leave for. */
+.cart-last-order {
+  margin-bottom: var(--bop-space-4);
+}
+.cart-last-order p {
+  margin: 0 0 var(--bop-space-2);
 }
 .dining-session__placed {
   margin: 0;

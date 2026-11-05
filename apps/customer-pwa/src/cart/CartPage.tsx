@@ -365,15 +365,7 @@ function ErrorState({
  * WP-2423 item 6: what a stopped send says, under the button. Nothing here repeats an unknown answer:
  * that one has its own panel, above everything, because the cart it was about may be gone.
  */
-function SendRoundMessage({
-  round,
-  cart,
-  onRetry,
-}: {
-  readonly round: SendRoundState;
-  readonly cart: CartView;
-  readonly onRetry: () => void;
-}) {
+function sendRoundMessage(round: SendRoundState, cart: CartView, onRetry: () => void) {
   switch (round.status) {
     case "confirm-total": {
       const total = formatCartMoney(round.total);
@@ -430,25 +422,69 @@ function SendRoundMessage({
   }
 }
 
-/** The answer to a send got lost: it may or may not have been placed, and asking again is safe. */
+/** The button can be at the bottom of a long cart: a stop is said where the guest is looking. */
+function SendRoundMessage({
+  round,
+  cart,
+  onRetry,
+}: {
+  readonly round: SendRoundState;
+  readonly cart: CartView;
+  readonly onRetry: () => void;
+}) {
+  const said = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    said.current?.scrollIntoView?.({ block: "nearest" });
+  }, [round.status, cart.cart.version]);
+  const message = sendRoundMessage(round, cart, onRetry);
+  return message === null ? null : <div ref={said}>{message}</div>;
+}
+
+/**
+ * The answer got lost. A send was attempted: it may or may not have been placed, and asking again is
+ * safe. Otherwise nothing was placed, and the guest can try again or change the cart.
+ */
 function UnconfirmedOrder({
   online,
+  mayBePlaced,
   onRetry,
 }: {
   readonly online: boolean;
+  readonly mayBePlaced: boolean;
   readonly onRetry: () => void;
 }) {
+  const said = useRef<HTMLElement>(null);
+  useEffect(() => {
+    said.current?.scrollIntoView?.({ block: "nearest" });
+  }, []);
   return (
     <>
-      <section className="checkout-attention" role="alert">
-        <p>{cartText.orderUnconfirmed}</p>
+      <section className="checkout-attention" role="alert" ref={said}>
+        <p>{mayBePlaced ? cartText.orderUnconfirmed : cartText.orderNotPlaced}</p>
         <button type="button" disabled={!online} onClick={onRetry}>
           {commonText.tryAgain}
         </button>
-        <Link to="/dine-in/session">{cartText.checkYourTable}</Link>
+        {mayBePlaced ? <Link to="/dine-in/session">{cartText.checkYourTable}</Link> : null}
       </section>
       <DiningStaffCallPanel />
     </>
+  );
+}
+
+/** A round placed that this page didn't send the guest away for: said once, and what it doesn't cover. */
+function LastOrderPlaced({
+  held,
+  cartHoldsMore,
+}: {
+  readonly held: boolean;
+  readonly cartHoldsMore: boolean;
+}) {
+  return (
+    <section className="cart-last-order" role="status">
+      <p>{held ? cartText.lastOrderPlacedHeld : cartText.lastOrderPlaced}</p>
+      {cartHoldsMore ? <p>{cartText.stillInYourCart}</p> : null}
+      <Link to="/dine-in/session">{cartText.seeYourTable}</Link>
+    </section>
   );
 }
 
@@ -531,9 +567,10 @@ function CartContent({
   const count = cart.cart.items.reduce((total, item) => total + item.quantity, 0);
   const payLater = timing === "PayLater";
   // WP-2423 item 6: while a round is on its way the cart holds still: a change now would refuse the
-  // round, and leaving would hide what it answers. An unknown answer holds it too.
+  // round, and leaving would hide what it answers. So does a send whose answer got lost: the cart it
+  // was about may have just been emptied by it.
   const sending = round.status === "sending";
-  const held = sending || round.status === "unconfirmed";
+  const held = sending || (round.status === "unconfirmed" && round.mayBePlaced);
   const othersItems = cart.cart.items
     .filter((item) => item.warnings.includes("OTHER_PARTICIPANT_ITEM"))
     .reduce((total, item) => total + item.quantity, 0);
@@ -698,6 +735,18 @@ function CartContent({
 /** Cart prices come from a full menu read; an ordinary guest gets one tap once it's in. */
 const menuPriceWaitMs = 2_000;
 
+/** What a stop says holds for the cart as it stood: any later change to the cart ends it. */
+const aboutThisCart = (round: SendRoundState) =>
+  round.status === "confirm-total" ||
+  round.status === "refused" ||
+  round.status === "busy" ||
+  round.status === "blocked" ||
+  round.status === "cart-changed" ||
+  (round.status === "unconfirmed" && !round.mayBePlaced);
+
+const cartVersionOf = (state: CartState) =>
+  "cart" in state && state.cart !== null ? state.cart.cart.version : null;
+
 export function CartPage({
   controller: provided,
   store,
@@ -769,36 +818,80 @@ export function CartPage({
     return () => window.clearTimeout(timer);
   }, []);
   const timing = useTablePaymentTiming(cart?.orderType === "DineIn", diningClient);
-  // Leaving forgets a stop; an answer still unknown stays, to be finished when the guest is back.
+  // Leaving forgets a stop; a send that may have happened stays, to be finished when the guest is back.
   useEffect(
     () => () => {
-      const left = round.getState().status;
-      if (left !== "sending" && left !== "unconfirmed") round.reset();
+      const left = round.getState();
+      if (left.status !== "sending" && !(left.status === "unconfirmed" && left.mayBePlaced))
+        round.reset();
     },
     [round],
   );
+  const [lastOrder, setLastOrder] = useState<{
+    readonly held: boolean;
+    /** The cart was read after it: what it holds is what's left. */
+    readonly cartRead: boolean;
+  } | null>(null);
+  // A send's answer is only acted on by the page that sent it: the guest may have changed the cart
+  // since, and another page instance doesn't know what they're looking at.
+  const startedHere = useRef(false);
+  const place = (placed: CartView | null, seen: SeenSubtotal | null) => {
+    startedHere.current = true;
+    setLastOrder(null);
+    void round.send(placed, seen);
+  };
   // What the send's answer means for this page, once.
   const acted = useRef<SendRoundState | null>(null);
+  /** The cart as read right after a stop: the stop is about that one. */
+  const stoppedAt = useRef<{ readonly version: number | null } | null>(null);
   useEffect(() => {
     if (acted.current === roundState) return;
     acted.current = roundState;
+    stoppedAt.current = null;
+    if (roundState.status === "sending") return;
+    const mine = startedHere.current;
+    startedHere.current = false;
+    if (roundState.status === "idle") return;
     if (roundState.status === "sent") {
       round.reset();
-      void navigate("/dine-in/session", {
-        replace: true,
-        state: { placed: roundState.held ? "Held" : "Sent" },
+      if (mine && roundState.more !== true) {
+        void navigate("/dine-in/session", {
+          replace: true,
+          state: { placed: roundState.held ? "Held" : "Sent" },
+        });
+        return;
+      }
+      setLastOrder({ held: roundState.held, cartRead: false });
+      void controller.refresh().then(() => {
+        setLastOrder((note) => (note === null ? null : { ...note, cartRead: true }));
       });
-    } else if (roundState.status === "needs-page" || roundState.status === "pay-first") {
+      return;
+    }
+    if (roundState.status === "needs-page" || roundState.status === "pay-first") {
       round.reset();
-      void navigate("/checkout");
-    } else if (
-      roundState.status === "confirm-total" ||
-      roundState.status === "cart-changed" ||
-      roundState.status === "refused"
-    )
-      // The summary shows the quote's total; a changed cart shows what it holds now.
-      void controller.load();
+      if (mine) void navigate("/checkout");
+      return;
+    }
+    // A question or a wait nobody here asked for: the next tap asks again if it still applies.
+    if (!mine && (roundState.status === "confirm-total" || roundState.status === "busy")) {
+      round.reset();
+      return;
+    }
+    // The summary shows the quote's total; a changed cart shows what it holds now.
+    void controller.refresh().then(() => {
+      if (acted.current === roundState)
+        stoppedAt.current = { version: cartVersionOf(controller.getState()) };
+    });
   }, [controller, navigate, round, roundState]);
+  useEffect(() => {
+    if (
+      stoppedAt.current !== null &&
+      aboutThisCart(roundState) &&
+      state.status !== "loading" &&
+      cartVersionOf(state) !== stoppedAt.current.version
+    )
+      round.reset();
+  }, [round, roundState, state]);
   const resolvedStore: CustomerStoreContext | undefined =
     store ??
     (cart
@@ -809,15 +902,27 @@ export function CartPage({
         }
       : undefined);
   return (
-    <CustomerPage step="cart" store={resolvedStore} className="cart-page">
+    <CustomerPage
+      step="cart"
+      store={resolvedStore}
+      className="cart-page"
+      navigationHeld={roundState.status === "sending"}
+    >
       <PageHeading title={cartText.pageHeading} />
       <div id="cart-content">
         {roundState.status === "unconfirmed" ? (
           <UnconfirmedOrder
             online={online}
-            onRetry={() => void round.send("cart" in state ? state.cart : null, null)}
+            mayBePlaced={roundState.mayBePlaced}
+            onRetry={() => place("cart" in state ? state.cart : null, null)}
           />
         ) : null}
+        {lastOrder === null ? null : (
+          <LastOrderPlaced
+            held={lastOrder.held}
+            cartHoldsMore={lastOrder.cartRead && (cart?.items.length ?? 0) > 0}
+          />
+        )}
         <CartContent
           state={state}
           controller={controller}
@@ -826,7 +931,7 @@ export function CartPage({
           timing={timing}
           round={roundState}
           menuSettled={settled || menuWaitOver}
-          onPlace={(placed, seen) => void round.send(placed, seen)}
+          onPlace={place}
         />
       </div>
       <div className="sr-only" role="status" aria-live="polite">

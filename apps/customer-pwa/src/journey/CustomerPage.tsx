@@ -1,6 +1,6 @@
 import { LanguageSwitch, t, useLanguage } from "../i18n/i18n.js";
 import { AppFrame } from "@bop-rms/ui";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 
 export type CustomerJourneyStep =
@@ -22,6 +22,7 @@ export function CustomerPage({
   orderReference,
   className,
   fallbackTitle,
+  navigationHeld = false,
   children,
 }: {
   readonly step: CustomerJourneyStep;
@@ -31,6 +32,8 @@ export function CustomerPage({
   readonly className?: string | undefined;
   /** Title while no Store is known yet (defaults to "Order"). */
   readonly fallbackTitle?: string | undefined;
+  /** WP-2423 item 6: the page's answer is on its way, and only this page can say what it was. */
+  readonly navigationHeld?: boolean;
   readonly children: ReactNode;
 }) {
   const { language } = useLanguage();
@@ -69,7 +72,17 @@ export function CustomerPage({
             {link.label}
           </span>
         ) : (
-          <Link key={link.step} to={link.href}>
+          <Link
+            key={link.step}
+            to={link.href}
+            {...(navigationHeld
+              ? {
+                  "aria-disabled": true,
+                  tabIndex: -1,
+                  onClick: (event: MouseEvent) => event.preventDefault(),
+                }
+              : {})}
+          >
             {link.label}
           </Link>
         ),

@@ -1768,7 +1768,7 @@ function ChoiceAllergens({
     <p className="configure-allergens" aria-live="polite">
       <span>{t("With your choices:")} </span>
       {allergens.length === 0
-        ? t("none of the listed allergens are declared. Ask staff if you have an allergy.")
+        ? t("no allergens listed. Ask staff if you have an allergy.")
         : [
             contains.length === 0
               ? null

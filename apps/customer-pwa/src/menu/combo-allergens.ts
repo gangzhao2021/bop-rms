@@ -18,7 +18,8 @@ export function comboLineAllergenText(
   if (sellable === undefined || !isCombo(sellable)) return null;
   const allergens = allergensForChoice(sellable, optionReferences);
   if (allergens === null) return t("Ask staff about allergens in your choices.");
-  if (allergens.length === 0) return t("Your choices: no listed allergens declared.");
+  if (allergens.length === 0)
+    return t("Your choices: no allergens listed. Ask staff if you have an allergy.");
   const contains = allergens.filter((item) => item.classification === "Contains");
   const may = allergens.filter((item) => item.classification !== "Contains");
   return t("Your choices: {allergens}.", {

@@ -729,7 +729,15 @@ export function CheckoutPage({
               <Link to="/cart">{checkoutText.changeYourCart}</Link>
             </p>
           ) : sessionAlert !== null ? (
-            <p role="alert">{sessionAlert}</p>
+            <p role="alert">
+              {sessionAlert}
+              {sessionState.status === "conflict" ? (
+                <>
+                  {" "}
+                  <Link to="/cart">{checkoutText.changeYourCart}</Link>
+                </>
+              ) : null}
+            </p>
           ) : null}
           {(sendState === "failed" || sendState === "pay_first") &&
           sessionState.status === "ready" &&

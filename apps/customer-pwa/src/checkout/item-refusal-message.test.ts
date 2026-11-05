@@ -35,7 +35,7 @@ describe("WP-2423 checkout item refusal text", () => {
         items,
       ),
     ).toBe(
-      "Only 1 Flat White (Small) can be made right now — you have 2 in your cart. You haven’t been charged. Remove one Flat White (Small), then try again.",
+      "Only 1 Flat White (Small) can be made right now — you have 2 in your cart. This order hasn’t been charged. Remove one Flat White (Small), then try again.",
     );
   });
 
@@ -48,7 +48,7 @@ describe("WP-2423 checkout item refusal text", () => {
         one,
       ),
     ).toBe(
-      "Only 1 Latte can be made right now — you have 3 in your cart. You haven’t been charged. Change Latte to 1, then try again.",
+      "Only 1 Latte can be made right now — you have 3 in your cart. This order hasn’t been charged. Change Latte to 1, then try again.",
     );
     const three = [item("a", "Latte", 2), item("b", "Latte", 1), item("c", "Latte", 1)];
     expect(
@@ -65,7 +65,7 @@ describe("WP-2423 checkout item refusal text", () => {
         three,
       ),
     ).toBe(
-      "Latte just sold out. You haven’t been charged. Remove every Latte from your cart, then try again.",
+      "Latte just sold out. This order hasn’t been charged. Remove every Latte from your cart, then try again.",
     );
   });
 
@@ -77,7 +77,7 @@ describe("WP-2423 checkout item refusal text", () => {
         items,
       ),
     ).toBe(
-      "We can make only 1 Mocha along with the rest of your order — some items use the same ingredients. You haven’t been charged. Change Mocha to 1 or change other items, then try again.",
+      "We can make only 1 Mocha along with the rest of your order — some items use the same ingredients. This order hasn’t been charged. Change Mocha to 1 or change other items, then try again.",
     );
     expect(
       checkoutItemRefusalMessage(
@@ -93,7 +93,7 @@ describe("WP-2423 checkout item refusal text", () => {
         items,
       ),
     ).toBe(
-      "Mocha just sold out. You haven’t been charged. Remove Mocha from your cart, then try again.",
+      "Mocha just sold out. This order hasn’t been charged. Remove Mocha from your cart, then try again.",
     );
   });
 
@@ -105,11 +105,11 @@ describe("WP-2423 checkout item refusal text", () => {
         items,
       ),
     ).toBe(
-      "Mocha isn’t available right now. You haven’t been charged. Remove Mocha from your cart, then try again.",
+      "Mocha isn’t available right now. This order hasn’t been charged. Remove Mocha from your cart, then try again.",
     );
     const unknown = checkoutItemRefusalMessage("item_short", null, items);
     expect(unknown).toBe(
-      "Some items in your cart can’t be made right now. You haven’t been charged. Edit your cart, then try again.",
+      "Some items in your cart can’t be made right now. This order hasn’t been charged. Edit your cart, then try again.",
     );
     expect(unknown).not.toMatch(/[A-Z]{2,}_|[0-9a-f]{8}-/u);
   });

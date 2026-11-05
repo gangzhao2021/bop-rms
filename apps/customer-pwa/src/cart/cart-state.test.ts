@@ -44,10 +44,12 @@ function fixture() {
   let current: CartView | null = cart();
   let updateFailure: Error | null = null;
   let removeFailure: Error | null = null;
+  let loadFailure: Error | null = null;
   const calls: { name: string; operationReference?: string }[] = [];
   const client: CustomerCartClient = {
     async loadCurrent() {
       calls.push({ name: "load" });
+      if (loadFailure !== null) throw loadFailure;
       return current;
     },
     async createCart() {
@@ -89,6 +91,9 @@ function fixture() {
     },
     setCurrent(value: CartView | null) {
       current = value;
+    },
+    failLoad(error: Error | null) {
+      loadFailure = error;
     },
   };
 }
@@ -154,6 +159,29 @@ describe("WP-1205 in-memory Cart state", () => {
     state.setCurrent(null);
     await state.controller.load();
     expect(state.controller.getState()).toEqual({ status: "empty" });
+  });
+
+  it("WP-2423 item 6: a quiet read keeps the cart on screen, also when it fails", async () => {
+    const f = fixture();
+    await f.controller.load();
+    const seen: string[] = [];
+    f.controller.subscribe(() => seen.push(f.controller.getState().status));
+    await f.controller.refresh();
+    expect(seen).toEqual(["ready"]);
+    f.failLoad(new CartClientError("cart_service_unavailable"));
+    await f.controller.refresh();
+    expect(f.controller.getState()).toMatchObject({ status: "ready" });
+    expect(seen).toEqual(["ready"]);
+    // A plain load still says it's loading, and says what failed.
+    await f.controller.load();
+    expect(seen.slice(1)).toEqual(["loading", "unavailable"]);
+  });
+
+  it("WP-2423 item 6: with nothing on screen yet a quiet read is a load", async () => {
+    const f = fixture();
+    f.failLoad(new CartClientError("cart_service_unavailable"));
+    await f.controller.refresh();
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable" });
   });
 
   it("applies a mutation and advances only from the server result", async () => {

@@ -35,8 +35,10 @@ export function checkoutSessionAlert(
         : wasCheckoutCardOffered()
           ? checkoutText.checkoutUnconfirmedAfterCard
           : checkoutText.checkoutUnconfirmed;
-    case "denied":
     case "conflict":
+      // WP-2423 item 6: the cart or its quote moved on: it's the cart that needs looking at.
+      return checkoutText.checkoutCartChanged;
+    case "denied":
     case "invalid":
       return checkoutText.checkoutRefused;
   }

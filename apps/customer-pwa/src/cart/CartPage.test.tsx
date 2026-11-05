@@ -66,6 +66,7 @@ function controller(state: CartState): CartStateController {
   return {
     getState: () => state,
     load: async () => undefined,
+    refresh: async () => undefined,
     removeItem: async () => undefined,
     retry: async () => undefined,
     setOnline: () => undefined,
@@ -598,6 +599,9 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
     expect(html).toMatch(/disabled="">Remove/u);
     expect(html).toContain('aria-disabled="true"');
+    // Its answer is only said here, so the journey bar holds still with Continue shopping.
+    expect(html).toMatch(/<a aria-disabled="true"[^>]*href="\/menu"[^>]*>Menu<\/a>/u);
+    expect(html).toMatch(/<a aria-disabled="true"[^>]*href="\/dine-in\/session"[^>]*>Your table</u);
     const idle = page({ status: "ready", cart: tableCart() });
     expect(idle).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
     expect(idle).not.toContain('aria-disabled="true"');
@@ -614,6 +618,12 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
       "This also places 2 items other guests added.",
     );
     expect(page({ status: "ready", cart: base })).not.toContain("other guests added");
+    const one = tableCart({
+      items: [{ ...item, quantity: 1, warnings: ["OTHER_PARTICIPANT_ITEM"] }],
+    });
+    expect(page({ status: "ready", cart: one })).toContain(
+      "This also places 1 item another guest added.",
+    );
   });
 
   it("asks once about a total that went up, with the total on the button", () => {
@@ -652,7 +662,8 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
   });
 
   it("an answer that got lost is said above an emptied cart, with the way to finish it", () => {
-    const html = page({ status: "empty" }, { status: "unconfirmed" });
+    const maybePlaced = { status: "unconfirmed", mayBePlaced: true } as const;
+    const html = page({ status: "empty" }, maybePlaced);
     expect(html).toContain("We couldn’t confirm your order was placed. Try again");
     expect(html).toContain(">Try again</button>");
     expect(html).toContain('href="/dine-in/session"');
@@ -665,11 +676,25 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
       { status: "offline-readonly", cart: null },
       { status: "loading" },
     ] as const)
-      expect(page(state, { status: "unconfirmed" })).toContain(">Try again</button>");
+      expect(page(state, maybePlaced)).toContain(">Try again</button>");
     // The cart it may have emptied can't be changed meanwhile.
-    expect(page({ status: "ready", cart: tableCart() }, { status: "unconfirmed" })).toContain(
+    expect(page({ status: "ready", cart: tableCart() }, maybePlaced)).toContain(
       'disabled="" aria-label="Increase Synthetic tea quantity"',
     );
+  });
+
+  it("an answer lost before any send says nothing was placed, and leaves the cart free", () => {
+    const html = page(
+      { status: "ready", cart: tableCart() },
+      { status: "unconfirmed", mayBePlaced: false },
+    );
+    expect(html).toContain("We couldn’t place your order, so nothing was sent.");
+    expect(html).not.toContain("We couldn’t confirm");
+    expect(html).toContain(">Try again</button>");
+    expect(html).not.toContain("Check your table");
+    expect(html).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+    expect(html).not.toMatch(/disabled="">Remove/u);
+    expect(html).toMatch(/type="button">Place order</u);
   });
 
   it("when someone else just placed it, an empty cart says so and points at the table", () => {

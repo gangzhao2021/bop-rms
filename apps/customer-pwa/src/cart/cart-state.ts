@@ -50,6 +50,11 @@ type PendingOperation =
 export interface CartStateController {
   getState(): CartState;
   load(): Promise<void>;
+  /**
+   * Reads the cart again with what's on screen kept there (and the guest's place on the page with it);
+   * a failed read changes nothing. With nothing on screen yet it is a load.
+   */
+  refresh(): Promise<void>;
   removeItem(cartItemReference: string): Promise<void>;
   replaceExpiredCart?(): Promise<void>;
   retry(): Promise<void>;
@@ -93,7 +98,7 @@ export function createCartStateController({
   };
   const currentCart = () => ("cart" in state ? state.cart : null);
 
-  const load = async () => {
+  const read = async (quiet: boolean) => {
     if (commandFlight !== null) return commandFlight;
     if (!online) {
       publish({ status: "offline-readonly", cart: currentCart() });
@@ -101,7 +106,8 @@ export function createCartStateController({
     }
     const priorCart = currentCart();
     const revision = ++readRevision;
-    if (pending === null) publish({ status: "loading" });
+    const keep = quiet && state.status !== "loading";
+    if (pending === null && !keep) publish({ status: "loading" });
     try {
       const cart = await client.loadCurrent();
       if (revision !== readRevision) return;
@@ -112,9 +118,10 @@ export function createCartStateController({
       if (revision !== readRevision) return;
       if (!online) publish({ status: "offline-readonly", cart: priorCart });
       else if (pending !== null) mapError(new CartClientError("network_unknown"), priorCart, true);
-      else mapError(error, priorCart, false);
+      else if (!keep) mapError(error, priorCart, false);
     }
   };
+  const load = () => read(false);
 
   const mapError = (
     error: unknown,
@@ -254,6 +261,7 @@ export function createCartStateController({
   return Object.freeze({
     getState: () => state,
     load,
+    refresh: () => read(true),
     ...(client.replaceExpiredCart === undefined
       ? {}
       : {

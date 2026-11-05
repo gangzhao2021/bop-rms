@@ -12,6 +12,7 @@ import {
 import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
 import { formatClockTime } from "../journey/format.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
+import { zhHans } from "../i18n/zh-Hans.js";
 import { parseSettledTableReceipt, SettledTableReceiptView } from "./SettledTableReceipt.js";
 
 const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
@@ -336,6 +337,25 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
       );
       expect(page).toContain("Staff took off 2 charges. They aren’t charged.");
       expect(page).not.toContain("<article");
+      // One charge reads as one, in both languages' dictionaries.
+      const one = html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              orderedBy: "Staff",
+              charge: true,
+              status: "StoreCancelled",
+              payment: "NotCharged",
+            }),
+          ],
+        }),
+      );
+      expect(one).toContain("Staff took off 1 charge. It isn’t charged.");
+      expect(one).not.toContain("1 charges");
+      expect(zhHans["Staff took off 1 charge. It isn’t charged."]).toBe(
+        "店员撤下了 1 项收费，不收费。",
+      );
     });
 
     it("a staff charge waiting for payment names the card machine, never the kitchen", () => {

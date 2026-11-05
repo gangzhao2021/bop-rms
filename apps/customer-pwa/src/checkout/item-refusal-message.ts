@@ -52,7 +52,7 @@ export function checkoutItemRefusalMessage(
   line: CheckoutRefusedLine | null,
   items: readonly CartItemView[],
 ): string {
-  const notCharged = t("You haven’t been charged.");
+  const notCharged = t("This order hasn’t been charged.");
   const item =
     line === null
       ? undefined
