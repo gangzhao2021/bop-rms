@@ -127,6 +127,20 @@ export function createPostgresWorkforceBrowserSessionStore(
     revokeSession: store.revokeSession,
   });
 }
+/**
+ * WP-2423 DEC-MERCHANT-LOCK-SCOPE: everything that starts or replaces one person's Workforce session
+ * takes this fence first, and holds it until COMMIT: it keeps the person's session limit, and makes
+ * "sign out everywhere" wait for a sign-in in flight and then end it too. It replaces a lock on the
+ * whole session table, which made one merchant's sign-in, held up by anything, stop every merchant's.
+ */
+async function holdWorkforceSessions(
+  tx: { query(sql: string, values: readonly unknown[]): Promise<unknown> },
+  actorReference: string,
+) {
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+    "WorkforceSessions:" + actorReference,
+  ]);
+}
 function createStore(options: Options, profile: Profile) {
   const strong = profile.options !== undefined;
   const assertStrongCurrent =
@@ -344,11 +358,24 @@ function createStore(options: Options, profile: Profile) {
     const row = found[0];
     return row ? decode(tx, row, observedAt) : null;
   }
-  async function lock(tx: OidcAuthorizationTransaction) {
+  const platform = profile.kind === "Platform";
+  /** The Platform directory's lifecycle changes hold the whole table (0200_027); only they do. */
+  async function platformDirectoryLock(tx: OidcAuthorizationTransaction) {
     await tx.query(
       "LOCK TABLE bop_identity.authentication_session IN SHARE ROW EXCLUSIVE MODE",
       [],
     );
+  }
+  /** The session this selector names (no row lock): its person's fence comes before its row. */
+  async function holdSessionsOfSelector(tx: OidcAuthorizationTransaction, selector: string) {
+    const found = rows(
+      await tx.query(
+        "SELECT actor_id FROM bop_identity.authentication_session WHERE session_selector_hash=decode($1,'hex')",
+        [parseSelectorHash(selector)],
+      ),
+    );
+    if (found.length > 1) return denied();
+    if (found[0]) await holdWorkforceSessions(tx, String(found[0].actor_id));
   }
   function newSession(
     reference: unknown,
@@ -443,7 +470,8 @@ function createStore(options: Options, profile: Profile) {
         if (supplied.actorReference === null) return denied();
         // Platform directory lifecycle changes lock Sessions before the Actor
         // head. Take the same order before currentActor acquires that head.
-        if (strong) await lock(tx);
+        if (platform) await platformDirectoryLock(tx);
+        else if (strong) await holdWorkforceSessions(tx, supplied.actorReference);
         const current = await actor(
           tx,
           supplied.actorReference,
@@ -464,14 +492,19 @@ function createStore(options: Options, profile: Profile) {
         });
         const proof = await platformSecrets(record);
         if (proof) assertStrongCurrent(record.session, proof.mfa, observedAt);
-        if (!strong) await lock(tx);
+        if (!strong) await holdWorkforceSessions(tx, String(current.actorReference));
+        // WP-2423 DEC-MERCHANT-LOCK-SCOPE: this person's fence serializes their sign-ins, so their
+        // active sessions cannot change under the limit except by ending. Business transactions
+        // hold their own session row until COMMIT: a second device signing in waits only when the
+        // limit ends that very session.
         const active = rows(
           await tx.query(
             "SELECT session_id,created_at" +
               (strong
                 ? ",created_at=date_trunc('milliseconds',created_at) AS exact_created_at"
                 : "") +
-              " FROM bop_identity.authentication_session WHERE actor_id=$1 AND status='Active' AND idle_expires_at>$2 AND absolute_expires_at>$2 ORDER BY created_at,session_id LIMIT 1025 FOR UPDATE",
+              " FROM bop_identity.authentication_session WHERE actor_id=$1 AND status='Active' AND idle_expires_at>$2 AND absolute_expires_at>$2 ORDER BY created_at,session_id LIMIT 1025" +
+              (platform ? " FOR UPDATE" : ""),
             [current.actorReference, observedAt],
           ),
         );
@@ -488,7 +521,7 @@ function createStore(options: Options, profile: Profile) {
           Math.max(0, active.length - session.policy.maxActiveSessions + 1),
         )) {
           await tx.query(
-            "UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason='ConcurrentLimit',revoked_at=$2,version=version+1 WHERE session_id=$1",
+            "UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason='ConcurrentLimit',revoked_at=$2,version=version+1 WHERE session_id=$1 AND status='Active'",
             [oldest.session_id, observedAt],
           );
         }
@@ -516,7 +549,8 @@ function createStore(options: Options, profile: Profile) {
           ].includes(command.reason)
         )
           return denied();
-        await lock(tx);
+        // A rotation ends a session and starts its successor: to a sign-in beside it, both or neither.
+        await holdSessionsOfSelector(tx, command.currentSelectorHash);
         const current = await load(tx, command.currentSelectorHash, observedAt, true);
         if (!current || current.session.version !== parseSessionVersion(command.expectedVersion))
           throw new BrowserSessionError("BROWSER_SESSION_VERSION_CONFLICT");
@@ -556,7 +590,8 @@ function createStore(options: Options, profile: Profile) {
       return safe(async (tx) => {
         const observedAt = parseCanonicalInstant(command.observedAt),
           originalQuery = tx.query;
-        await lock(tx);
+        if (platform) await platformDirectoryLock(tx);
+        else await holdSessionsOfSelector(tx, command.currentSelectorHash);
         const current = await load(tx, command.currentSelectorHash, observedAt, true);
         if (
           !current ||
@@ -690,7 +725,8 @@ function createStore(options: Options, profile: Profile) {
     async revokeSession(command: Parameters<BrowserSessionStorePort["revokeSession"]>[0]) {
       return safe(async (tx) => {
         const observedAt = parseCanonicalInstant(command.observedAt);
-        await lock(tx);
+        // A Workforce session's own row lock is enough: ending one only lowers the count.
+        if (platform) await platformDirectoryLock(tx);
         const current = await load(tx, command.selectorHash, observedAt, true);
         if (!current) return null;
         const s = current.session;
@@ -744,6 +780,7 @@ export async function revokeActorSessions(
     readonly at: string;
   },
 ): Promise<number> {
+  await holdWorkforceSessions(tx, input.actorReference);
   const rows = (
     await tx.query(
       `UPDATE bop_identity.authentication_session SET status='Revoked',revocation_reason=$2,revoked_at=$3,version=version+1

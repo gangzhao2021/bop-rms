@@ -47,7 +47,11 @@ function fixture(alterInserted?: (row: Record<string, unknown>) => void) {
   const tx: OidcAuthorizationTransaction = {
     async query(text, values) {
       sql.push(text);
-      if (text.startsWith("LOCK TABLE")) return { rows: [] };
+      if (text.startsWith("SELECT pg_advisory_xact_lock")) return { rows: [] };
+      if (text.startsWith("SELECT actor_id")) {
+        const r = records.get(String(values[0]));
+        return { rows: r ? [{ actor_id: r.actor_id }] : [] };
+      }
       if (text.startsWith("SELECT *")) {
         const r = records.get(String(values[0]));
         return { rows: r ? [r] : [] };
@@ -189,6 +193,16 @@ it("stores genuine Workforce kind with proof-required fixed Privileged policy an
     c.sessionReference,
   );
   expect(f.sql.some((s) => s.includes("authenticated_at=date_trunc"))).toBe(true);
+});
+it("takes the person's fence, never the session table: a merchant's step-up stops no one else", async () => {
+  const f = fixture(),
+    c = await f.command();
+  await f.store.createSession(c);
+  expect(f.sql[0]).toBe("SELECT pg_advisory_xact_lock(hashtextextended($1,0))");
+  expect(f.sql.some((sql) => sql.startsWith("LOCK TABLE"))).toBe(false);
+  expect(
+    f.sql.some((sql) => sql.startsWith("SELECT session_id") && sql.includes("FOR UPDATE")),
+  ).toBe(false);
 });
 it.each(["profile", "session", "csrf", "policy"])(
   "rejects mismatched %s rather than legacy fallback",
