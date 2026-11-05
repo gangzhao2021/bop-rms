@@ -21,6 +21,15 @@ export const kitchenWorkStepMaxLines = 50;
  * Measured in kitchen-work-step-acceptance: a chunk of 8 from Queued holds it well under 500 ms.
  */
 export const kitchenWorkStepChunkLines = 8;
+/**
+ * DEC-KITCHEN-ONE-TAP: what the live board carries. Every unfinished ticket up to this limit, oldest
+ * first (the board says when more wait); finished tickets newest first within these bounds, for
+ * Recently finished and Remake. A finished ticket beyond them is no longer offered a Remake on the
+ * board, although its 12-hour window may still run: a remake is asked for within minutes.
+ */
+export const kitchenBoardOpenTicketLimit = 100;
+export const kitchenBoardFinishedTickets = 60;
+export const kitchenBoardFinishedDishes = 100;
 /** A chosen-dish list on one line (the kitchen read's own limit for one combo). */
 export const kitchenWorkStepMaxOptions = 20;
 

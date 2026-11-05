@@ -212,7 +212,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   // Work state is written out, never colour alone; waiting time is tiered on the card.
   const stateChips = page.locator(".kitchen-work-item__state strong");
   // WP-2423 Q2: the board opens on active work, which includes completed work awaiting "ready".
-  await expect(stateChips).toHaveText(["Queued", "In progress", "Completed"]);
+  await expect(stateChips).toHaveText(["To make", "Being made", "Completed"]);
   await expect(page.locator(".kitchen-work-item[data-age='late']")).toHaveCount(3);
   await expect(page.locator(".kitchen-work-item__state span").first()).toHaveText("18 min");
   await expect(page.locator(".kitchen-work-item__state span").first()).toHaveAttribute(
@@ -236,12 +236,12 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   // Kitchen v3: each ticket's one main step, disabled for a view-only sign-in.
   // A view-only screen shows no dead steps; the step stays disabled underneath.
   await expect(
-    page.getByRole("button", { name: "Accept order", exact: true, includeHidden: true }),
+    page.getByRole("button", { name: "Finished", exact: true, includeHidden: true }).first(),
   ).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Accept order", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Finished", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Start cooking", exact: true })).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Finished", exact: true, includeHidden: true }),
+    page.getByRole("button", { name: "Finished", exact: true, includeHidden: true }).first(),
   ).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Mark ready", exact: true, includeHidden: true }),
@@ -301,9 +301,9 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.getByRole("heading", { name: "View only on this screen" })).toBeVisible();
   // No dead step on a view-only screen; it stays disabled underneath.
   await expect(
-    page.getByRole("button", { name: "Accept order", exact: true, includeHidden: true }),
+    page.getByRole("button", { name: "Finished", exact: true, includeHidden: true }).first(),
   ).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Accept order", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Finished", exact: true })).toHaveCount(0);
 
   await page.setViewportSize({ width: 1024, height: 900 });
   await expect(page.getByRole("heading", { name: "Queue", exact: true })).toBeVisible();
@@ -473,7 +473,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   // A match the filters hide is named as such, not reported missing.
   await page
     .getByRole("group", { name: "Show kitchen work" })
-    .getByRole("button", { name: /^Queued/u })
+    .getByRole("button", { name: /^To make/u })
     .click();
   await orderInput.fill("16");
   await orderInput.press("Enter");
@@ -499,7 +499,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
   await page
     .getByRole("group", { name: "Show kitchen work" })
-    .getByRole("button", { name: /^Queued/u })
+    .getByRole("button", { name: /^To make/u })
     .click();
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
 
@@ -564,7 +564,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(
     page
       .getByRole("group", { name: "Show kitchen work" })
-      .getByRole("button", { name: /^Queued/u }),
+      .getByRole("button", { name: /^To make/u }),
   ).toHaveAttribute("aria-pressed", "true");
 
   // Denied reads clear the board and keep the Store frame; nothing is cached.
@@ -582,7 +582,7 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
   await expect(
     page
       .getByRole("group", { name: "Show kitchen work" })
-      .getByRole("button", { name: /^Queued/u }),
+      .getByRole("button", { name: /^To make/u }),
   ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Clear filters" }).click();
   denied = true;
@@ -876,8 +876,8 @@ test("@production Kitchen queue writes out work states and tiers waiting time", 
   await expect(page.locator(".kitchen-work-item")).toHaveCount(5);
   const card = (name: string) => page.locator(".kitchen-work-item").filter({ hasText: name });
   const expectations = [
-    ["Synthetic queued", "Queued", "1 min", "ok"],
-    ["Synthetic in progress", "In progress", "9 min", "warning"],
+    ["Synthetic queued", "To make", "1 min", "ok"],
+    ["Synthetic in progress", "Being made", "9 min", "warning"],
     ["Synthetic held", "Held", "20 min", "late"],
     ["Synthetic completed", "Completed", "30 min", "late"],
     ["Synthetic cancelled", "Cancelled", "Done", "ok"],
@@ -987,65 +987,54 @@ test("@production Kitchen commands preserve intent and wait for projection versi
   await page.route("**/merchant/kitchen/query", (route) =>
     route.fulfill({ headers, json: { ...metadata, items: [item], nextCursor: null } }),
   );
-  const commands: Record<string, unknown>[] = [];
-  let conflict = false;
-  let releaseFirstCommand!: () => void;
-  let notifyFirstCommand!: () => void;
-  const firstCommandBarrier = new Promise<void>((resolve) => (releaseFirstCommand = resolve));
-  const firstCommandStarted = new Promise<void>((resolve) => (notifyFirstCommand = resolve));
-  await page.route("**/merchant/kitchen/work", async (route) => {
-    const command = route.request().postDataJSON();
-    commands.push(command);
-    expect(command.authority).toBe("CurrentMerchantSession");
-    expect(command.storeReference).toBe(scope.storeReference);
-    expect(command).not.toHaveProperty("actorReference");
-    if (commands.length === 1) {
-      notifyFirstCommand();
-      await firstCommandBarrier;
-      return route.abort("failed");
-    }
-    // WP-2423 (v15 2026-10-16): the server was busy (a database conflict after its own reruns).
-    if (commands.length === 2)
+  const bodies: string[] = [];
+  await page.route("**/merchant/kitchen/step", async (route) => {
+    const raw = route.request().postData() ?? "";
+    bodies.push(raw);
+    const body = JSON.parse(raw) as {
+      step: string;
+      storeReference: string;
+      lines: Record<string, unknown>[];
+    };
+    expect(body.storeReference).toBe(scope.storeReference);
+    expect(raw).not.toContain("actorReference");
+    expect(raw).not.toContain("expected");
+    // The first answer is lost, the second says the server is busy; both go again by themselves.
+    if (bodies.length === 1) return route.abort("failed");
+    if (bodies.length === 2)
       return route.fulfill({ headers, status: 503, json: { error: "retry_later" } });
-    if (conflict)
-      return route.fulfill({ headers, status: 409, json: { error: "version_conflict" } });
     return route.fulfill({
       headers,
       json: {
-        action: command.action,
-        ticketReference: item.ticketReference,
-        workItemReference: item.workItemReference,
-        orderItemReference: item.orderItemReference,
-        ticketVersion: (BigInt(command.expectedTicketVersion) + 1n).toString(),
-        workItemVersion: (BigInt(command.expectedWorkItemVersion) + 1n).toString(),
-        outcome:
-          command.action === "AcceptKitchenWorkItem"
-            ? "Accepted"
-            : command.action === "StartKitchenWorkItem"
-              ? "Started"
-              : "CompletedAndOrderItemReady",
-        // The work item as the command left it (the real API returns these with every result).
-        workItemStatus:
-          command.action === "AcceptKitchenWorkItem"
-            ? "Queued"
-            : command.action === "StartKitchenWorkItem"
-              ? "In Progress"
-              : "Completed",
-        completedQuantity: command.action === "CompleteKitchenWorkItem" ? 2 : 0,
-        requiredQuantity: 2,
-        occurredAt: at,
         projectionName: "kitchen_work_queue_v1",
         projectionPending: true,
+        occurredAt: at,
+        lines: [
+          {
+            workItemReference: item.workItemReference,
+            orderItemReference: item.orderItemReference,
+            ticketReference: item.ticketReference,
+            outcome: "Finished",
+            refusedReason: null,
+            ticketVersion: "9007199254740996",
+            workItemVersion: "4",
+            workItemStatus: "Completed",
+            completedQuantity: 2,
+            requiredQuantity: 2,
+            acceptedAt: at,
+            readyAt: at,
+            dishesDone: null,
+          },
+        ],
       },
     });
   });
   await page.goto("/operations/kitchen");
-  // Kitchen v3: the ticket's one main step at its foot.
-  const accept = page.getByRole("button", { name: "Accept order", exact: true }),
-    start = page.getByRole("button", { name: "Start cooking", exact: true }),
-    complete = page.getByRole("button", { name: "Finished", exact: true }),
+  // The ticket's one main step at its foot: Done, whether or not anyone tapped Start.
+  const complete = page.getByRole("button", { name: "Finished", exact: true }),
     refresh = page.getByRole("button", { name: "Refresh", exact: true });
-  await expect(accept).toBeEnabled();
+  await expect(complete).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Accept order", exact: true })).toHaveCount(0);
   // WP-2423: the kitchen display sign-in hands over; it is not asked to start the display again.
   await expect(page.getByRole("button", { name: "Hand over / sign out" })).toBeVisible();
   await expect(
@@ -1073,84 +1062,37 @@ test("@production Kitchen commands preserve intent and wait for projection versi
     });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  await tabTo(page, accept);
-  await expect(accept).toHaveCSS("outline-style", "solid");
+  await tabTo(page, complete);
+  await expect(complete).toHaveCSS("outline-style", "solid");
   await page.keyboard.press("Enter");
-  await firstCommandStarted;
-  await tabTo(page, refresh);
-  releaseFirstCommand();
-  await expect(page.getByRole("heading", { name: "Action result unknown" })).toBeVisible();
-  await expect(refresh).toBeFocused();
-  await expect(accept).toBeDisabled();
-  expect(commands).toHaveLength(1);
-  const retry = page.getByRole("button", { name: "Retry same operation" });
-  await tabTo(page, retry);
-  await page.keyboard.press("Enter");
-  // A busy server changed nothing: "try again", never a permission message.
-  await expect(page.getByRole("heading", { name: "Kitchen busy, try again" })).toBeVisible();
+  // The hold, then the same body by itself after a lost answer and a busy server.
+  const ticket = page.locator(".kitchen-ticket");
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect.poll(() => bodies.length, { timeout: 7_000 }).toBe(1);
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Recording…");
   await expect(page.getByText("Your current permission", { exact: false })).toHaveCount(0);
-  const tryAgain = page.getByRole("button", { name: "Try again", exact: true });
-  await expect(tryAgain).toBeFocused();
-  await page.keyboard.press("Enter");
+  await expect.poll(() => bodies.length, { timeout: 5_000 }).toBe(2);
+  await expect.poll(() => bodies.length, { timeout: 10_000 }).toBe(3);
+  expect(bodies[1]).toBe(bodies[0]);
+  expect(bodies[2]).toBe(bodies[0]);
   // WP-2423: the confirmed step shows at once, in plain words, before the queue catches up.
-  await expect(
-    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice accepted." }),
-  ).toBeVisible();
+  await expect(page.locator(".kitchen-status-row__line")).toContainText("Synthetic rice done.");
   await expect(page.getByText("The queue now reflects", { exact: false })).toHaveCount(0);
-  expect(commands[1]).toEqual(commands[0]);
-  expect(commands[2]).toEqual(commands[0]);
-  await expect(accept).toHaveCount(0);
-  await expect(start).toBeEnabled();
+  await expect(ticket).toHaveCount(0);
   // A re-read of the queue that has not caught up yet does not take the confirmed step back.
   await refresh.click();
-  await expect(accept).toHaveCount(0);
-  await expect(start).toBeEnabled();
-  Object.assign(item, {
-    acceptedAt: at,
-    ticketAggregateVersion: "9007199254740994",
-    workItemVersion: "2",
-  });
-  await refresh.click();
-  await expect(start).toBeEnabled();
-  conflict = true;
-  await tabTo(page, start);
-  await page.keyboard.press("Enter");
-  await expect(page.getByText("The work item changed.", { exact: false })).toBeVisible();
-  await expect(start).toBeDisabled();
-  await refresh.click();
-  await expect(start).toBeEnabled();
-  conflict = false;
-  await start.click();
-  await expect(
-    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice started." }),
-  ).toBeVisible();
-  await expect(complete).toBeEnabled();
-  Object.assign(item, {
-    status: "In Progress",
-    ticketAggregateVersion: "9007199254740995",
-    workItemVersion: "3",
-  });
-  await refresh.click();
-  await expect(complete).toBeEnabled();
-  await complete.click();
-  await expect(
-    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice done and ready." }),
-  ).toBeVisible();
-  expect(commands[5]?.quantityDelta).toBe(2);
+  await expect(ticket).toHaveCount(0);
   Object.assign(item, {
     status: "Completed",
     completedQuantity: 2,
+    acceptedAt: at,
     orderItemReadyAt: at,
     ticketAggregateVersion: "9007199254740996",
     workItemVersion: "4",
   });
   await refresh.click();
-  await expect(
-    page.getByRole("heading", { name: "Pickup · Order 21 · Synthetic rice done and ready." }),
-  ).toBeVisible();
   await expect(complete).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Mark ready", exact: true })).toHaveCount(0);
-  expect(new Set(commands.slice(1).map((command) => command.idempotencyKey)).size).toBe(4);
   expect(
     // Only the display's own sound preference (WP-2423 Q33) stays on the device, never orders.
     await page.evaluate(() => ({
@@ -1274,6 +1216,52 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
       },
     }),
   );
+  await page.route("**/merchant/kitchen/step", (route) => {
+    const body = route.request().postDataJSON() as {
+      lines: { workItemReference: string }[];
+    };
+    const occurredAt = new Date().toISOString();
+    return route.fulfill({
+      headers,
+      json: {
+        projectionName: "kitchen_work_queue_v1",
+        projectionPending: true,
+        occurredAt,
+        lines: body.lines.map((line) => {
+          const index = items.findIndex(
+            (candidate) => candidate.workItemReference === line.workItemReference,
+          );
+          const current = items[index] as (typeof items)[number];
+          const ticketVersion = (BigInt(current.ticketAggregateVersion) + 3n).toString();
+          const workItemVersion = (BigInt(current.workItemVersion) + 3n).toString();
+          items[index] = {
+            ...current,
+            status: "Completed",
+            completedQuantity: current.requiredQuantity,
+            ticketAggregateVersion: ticketVersion,
+            workItemVersion,
+            acceptedAt: occurredAt,
+            orderItemReadyAt: occurredAt,
+          };
+          return {
+            workItemReference: current.workItemReference,
+            orderItemReference: current.orderItemReference,
+            ticketReference: current.ticketReference,
+            outcome: "Finished",
+            refusedReason: null,
+            ticketVersion,
+            workItemVersion,
+            workItemStatus: "Completed",
+            completedQuantity: current.requiredQuantity,
+            requiredQuantity: current.requiredQuantity,
+            acceptedAt: occurredAt,
+            readyAt: occurredAt,
+            dishesDone: null,
+          };
+        }),
+      },
+    });
+  });
   await page.route("**/merchant/kitchen/work", (route) => {
     const command = route.request().postDataJSON();
     const reference =
@@ -1323,7 +1311,7 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
   const ticketOf = (name: string) => page.locator(".kitchen-ticket").filter({ has: card(name) });
   const step = (name: string, label: string) =>
     ticketOf(name).getByRole("button", { name: label, exact: true });
-  await expect(step("Synthetic rice", "Accept order")).toBeEnabled();
+  await expect(step("Synthetic rice", "Finished")).toBeEnabled();
 
   // The kitchen only: the board and marking an item sold out (Q17), no back-office navigation.
   const kitchenNav = page.getByRole("navigation", { name: "Primary" });
@@ -1376,22 +1364,21 @@ test("@production a kitchen display shows the kitchen only and keeps focus on th
       0,
     );
   };
-  // Accepting keeps the cook on the same ticket, now on its next step.
-  await step("Synthetic rice", "Accept order").click();
-  await expect(step("Synthetic rice", "Start cooking")).toBeFocused();
-  await skipHidden();
-  // By keyboard too.
-  await page.keyboard.press("Enter");
-  await expect(step("Synthetic rice", "Finished")).toBeFocused();
-  await skipHidden();
   // A ticket that leaves the board hands focus to the next ticket's step.
   await step("Synthetic soup", "Mark ready").click();
   await expect(card("Synthetic soup")).toHaveCount(0);
-  await expect(step("Synthetic bread", "Start cooking")).toBeFocused();
+  await expect(step("Synthetic bread", "Finished")).toBeFocused();
+  await skipHidden();
+  // By keyboard too: the ticket's hold keeps it in its place, then the next ticket has the focus.
+  // (A slot ignores taps for a moment after what is in it changes.)
+  await page.waitForTimeout(700);
+  await page.keyboard.press("Enter");
+  await expect(card("Synthetic bread")).toHaveAttribute("data-pending", "Holding");
+  await expect(card("Synthetic bread")).toHaveCount(0, { timeout: 9_000 });
   await skipHidden();
   // The skip link still appears for a keyboard user who reaches it.
   await page.reload();
-  await expect(card("Synthetic bread")).toBeVisible();
+  await expect(card("Synthetic rice")).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(skip).toBeFocused();
   await expect(skip).toBeInViewport();
@@ -1570,9 +1557,10 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
     });
   });
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/merchant/kitchen/work") commands++;
+    const { pathname } = new URL(request.url());
+    if (pathname === "/merchant/kitchen/work" || pathname === "/merchant/kitchen/step") commands++;
   });
-  const accept = page.getByRole("button", { name: "Accept order", exact: true });
+  const accept = page.getByRole("button", { name: "Finished", exact: true });
   const notice = page.getByRole("status").filter({ hasText: "Read-only until reconnected" });
   await page.goto("/operations/kitchen");
   await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
@@ -1584,7 +1572,7 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
   // tickets stay read-only, and it keeps retrying (first after 5 s) until a read succeeds.
   offline = true;
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(notice).toContainText("Connection lost — showing the last update from");
+  await expect(notice).toContainText("Connection lost");
   await expect(accept).toBeDisabled();
   const before = reads;
   await expect.poll(() => reads, { timeout: 8_000 }).toBeGreaterThan(before);
@@ -1603,9 +1591,13 @@ test("@production Kitchen keeps the last tickets read-only offline and recovers 
     // The device loses its network: read-only at once, without waiting for a read to fail.
     await context.setOffline(true);
     await expect(notice).toBeVisible({ timeout: 2_000 });
-    await expect(notice).toContainText(
+    await expect(notice).toContainText("Offline");
+    // Why, and since when, is a tap away; the row keeps its height and no ticket moves.
+    await page.getByRole("button", { name: "Details", exact: true }).click();
+    await expect(page.locator(".kitchen-status-row__detail")).toContainText(
       /Offline — showing the last update from \d\d:\d\d.*\. Actions are paused until the connection returns\./u,
     );
+    await page.getByRole("button", { name: "Details", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Synthetic rice", exact: true })).toBeVisible();
     await expect(accept).toBeDisabled();
     await expect(

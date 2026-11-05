@@ -1,5 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createPostgresKitchenQueueReadModel } from "../../packages/rms/kitchen/src/index.ts";
+import {
+  createPostgresKitchenQueueReadModel,
+  kitchenBoardFinishedDishes,
+  kitchenBoardFinishedTickets,
+  kitchenBoardOpenTicketLimit,
+} from "../../packages/rms/kitchen/src/index.ts";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export function createInternalKitchenQueue(resources, { actorReference }) {
   if (!isPilotRuntime()) throw new Error("INTERNAL_KITCHEN_ONLY");
@@ -43,11 +48,13 @@ export function createInternalKitchenQueue(resources, { actorReference }) {
   return createPostgresKitchenQueueReadModel({
     source: {
       ...scope,
-      maxTickets: 100,
+      maxTickets: kitchenBoardOpenTicketLimit,
       maxItemsPerTicket: 100,
       maxOperationsPerTicket: 1000,
       // DEC-KITCHEN-STALE-TICKETS: finished tickets unchanged for a day leave the live board.
       retireFinishedAfterMs: 24 * 3_600_000,
+      // DEC-KITCHEN-ONE-TAP: finished work never fails a read and never crowds out what is open.
+      keepFinished: { tickets: kitchenBoardFinishedTickets, dishes: kitchenBoardFinishedDishes },
       creationValidation: { references: refs, digests: { sha256: hash } },
       lifecycleValidation: { references: refs, digests: { sha256: hash } },
       nextSnapshotReference: next,

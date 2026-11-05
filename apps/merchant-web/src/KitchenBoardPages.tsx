@@ -1,13 +1,16 @@
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { listSeparator, t, saidTable, systemText } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
-import { kitchenActionNotice, kitchenStepText, useKitchenActions } from "./use-kitchen-actions.js";
+import { useKitchenActions, type KitchenStepTarget } from "./use-kitchen-actions.js";
+import type { KitchenTap } from "./kitchen-step-queue.js";
+import type { KitchenStepKind } from "./kitchen-step-client.js";
 import { useKitchenClock } from "./kitchen-clock.js";
 import {
   KitchenRecentlyFinished,
   KitchenRemakeCancelDialog,
   KitchenRemakeDialog,
   KitchenRemakeLane,
+  kitchenReworkStatusHeading,
   KitchenReworkStatus,
   recentlyFinishedKitchenItems,
   remakeOffered,
@@ -21,6 +24,7 @@ import {
   fromEarlierKitchenDay,
   KitchenCloseTicketDialog,
   KitchenEarlierDayConfirm,
+  kitchenStaleCloseHeading,
   KitchenStaleCloseStatus,
   kitchenWaitText,
   useKitchenStaleClose,
@@ -28,7 +32,6 @@ import {
 } from "./KitchenEarlierDays.js";
 import type { KitchenStaleCloseReason } from "./kitchen-stale-close-client.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
-import type { KitchenAction } from "./kitchen-work-client.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { Freshness, SourceTime } from "./StoreTime.js";
@@ -83,55 +86,144 @@ export const combosDishesDone = (item: KitchenBoardItem) =>
   item.comboParts === undefined || item.comboParts.every((part) => part.done);
 
 /**
- * Kitchen v3 (Owner 2026-10-26): a ticket's one main step — the earliest step any of its open items
- * is at — and every item at that step. Accept, then Start, then Done (the rest of each quantity),
- * then Ready for any done item not yet marked ready. Null when nothing on it takes a step here.
+ * DEC-KITCHEN-ONE-TAP: a table's card is one Order across its rounds, oldest round first. Each round
+ * is one ticket. The foot button and the quiet Start act on the oldest round still open, never on a
+ * round that reached the card after the cook read it.
  */
-export function kitchenTicketNextStep(items: readonly KitchenBoardItem[]): {
-  readonly action: KitchenAction;
-  readonly items: readonly KitchenBoardItem[];
-  readonly label: string;
-} | null {
-  const open = items.filter((item) => item.execution !== undefined && isActiveKitchenWork(item));
-  const at = (test: (item: KitchenBoardItem) => boolean) => open.filter(test);
-  const accept = at((item) => item.status === "Queued" && item.execution?.acceptedAt === null);
-  if (accept.length > 0)
-    return {
-      action: "AcceptKitchenWorkItem",
-      items: accept,
-      label: accept.length > 1 ? t("Accept all") : t("Accept order"),
-    };
-  const start = at((item) => item.status === "Queued" && item.execution?.acceptedAt !== null);
-  if (start.length > 0)
-    return {
-      action: "StartKitchenWorkItem",
-      items: start,
-      label: start.length > 1 ? t("Start all") : t("Start cooking"),
-    };
-  const done = at(
-    (item) =>
-      item.status === "In Progress" &&
-      item.completedQuantity < item.requiredQuantity &&
-      // WP-2423 item 8 ⑥ part 4: a combo is finished by its dishes, each marked done on its own.
-      combosDishesDone(item),
+export function kitchenTicketRounds(items: readonly KitchenBoardItem[]) {
+  const rounds = new Map<string, KitchenBoardItem[]>();
+  for (const item of items) {
+    const round = rounds.get(item.ticketReference);
+    if (round) round.push(item);
+    else rounds.set(item.ticketReference, [item]);
+  }
+  const oldest = (round: readonly KitchenBoardItem[]) =>
+    Math.min(...round.map((item) => Date.parse(item.createdAt)));
+  return [...rounds.entries()]
+    .map(([ticketReference, round]) => ({
+      ticketReference,
+      items: round,
+      createdAt: oldest(round),
+    }))
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** Whether a line can still be finished here (Held work and a combo's undone dishes cannot). */
+export function kitchenLineFinishable(item: KitchenBoardItem): boolean {
+  return (
+    item.execution !== undefined &&
+    item.comboPartOf?.done !== true &&
+    (item.status === "Queued" || item.status === "In Progress") &&
+    item.completedQuantity < item.requiredQuantity
   );
-  if (done.length > 0)
-    return { action: "CompleteKitchenWorkItem", items: done, label: t("Finished") };
-  const ready = at((item) => item.status === "Completed" && item.execution?.readyAt === null);
-  if (ready.length > 0)
-    return { action: "MarkKitchenOrderItemReady", items: ready, label: t("Mark ready") };
+}
+/**
+ * WP-1407: Start is the allergen check before cooking. A line that needs that check always shows
+ * Start as its step, and Done only after Start: never a refusal after the food is made.
+ */
+export function kitchenLineNeedsStartFirst(item: KitchenBoardItem): boolean {
+  return (
+    item.execution !== undefined &&
+    item.status === "Queued" &&
+    item.allergenCue === "ReviewRequired"
+  );
+}
+
+/** The oldest round on the card with anything still to do. */
+function oldestOpenRound(items: readonly KitchenBoardItem[]) {
+  const rounds = kitchenTicketRounds(items);
+  const open = rounds.find((round) =>
+    round.items.some((item) => item.execution !== undefined && isActiveKitchenWork(item)),
+  );
+  return { open, later: open === undefined ? 0 : rounds.length - 1 - rounds.indexOf(open) };
+}
+
+export type KitchenTicketStep =
+  | {
+      readonly kind: "Finish" | "Start";
+      readonly items: readonly KitchenBoardItem[];
+      readonly label: string;
+    }
+  | {
+      readonly kind: "MarkReady";
+      readonly items: readonly KitchenBoardItem[];
+      readonly label: string;
+    };
+
+/**
+ * DEC-KITCHEN-ONE-TAP: the card's one main step, always Done: on the oldest round still open. Dishes
+ * that need their allergens checked come first with Start. Mark ready (Expo Enabled) follows when a
+ * round is all done. Null when nothing on it takes a step here.
+ */
+export function kitchenTicketNextStep(
+  items: readonly KitchenBoardItem[],
+): KitchenTicketStep | null {
+  const { open, later } = oldestOpenRound(items);
+  if (open === undefined) return null;
+  const lines = open.items.filter(
+    (item) => item.execution !== undefined && isActiveKitchenWork(item),
+  );
+  const startFirst = lines.filter(kitchenLineNeedsStartFirst);
+  if (startFirst.length > 0)
+    return {
+      kind: "Start",
+      items: startFirst,
+      label: startFirst.length > 1 ? t("Start all") : t("Start cooking"),
+    };
+  const finish = lines.filter(kitchenLineFinishable);
+  if (finish.length > 0)
+    return {
+      kind: "Finish",
+      items: finish,
+      label:
+        later > 0 && finish.length > 1
+          ? t("Round finished")
+          : finish.length > 1
+            ? t("All finished")
+            : t("Finished"),
+    };
+  const ready = lines.filter(
+    (item) => item.status === "Completed" && item.execution?.readyAt === null,
+  );
+  if (ready.length > 0) return { kind: "MarkReady", items: ready, label: t("Mark ready") };
   return null;
 }
 
-/** Kitchen v3: what the whole ticket is at, in the three status meanings. */
+/**
+ * The quiet Start at the top of the card, on the oldest round still open: for kitchens that want
+ * guests to see Being made and want to close the cancel window. Never on a dish line of a section's
+ * screen: that section did not start the combo, and its Done records it.
+ */
+export function kitchenTicketStartStep(items: readonly KitchenBoardItem[]) {
+  const { open } = oldestOpenRound(items);
+  if (open === undefined) return null;
+  const lines = open.items.filter(
+    (item) =>
+      item.execution !== undefined &&
+      item.status === "Queued" &&
+      item.comboPartOf === undefined &&
+      !kitchenLineNeedsStartFirst(item),
+  );
+  if (lines.length === 0) return null;
+  return {
+    items: lines,
+    label: lines.length > 1 ? t("Start all") : t("Start cooking"),
+  };
+}
+
+/**
+ * What the whole ticket is at, in words true whether or not anyone tapped Start: "to make" says what
+ * is left, not whether a pan is on. A dish line of a section's screen reads to make until it is done,
+ * whatever another section did with its combo.
+ */
 export function kitchenTicketState(
   items: readonly KitchenBoardItem[],
-): "ToAccept" | "InProgress" | "Done" {
+): "ToMake" | "Making" | "Done" {
   const open = items.filter(isActiveKitchenWork);
   if (open.length === 0) return "Done";
-  return open.some((item) => item.status === "Queued" && !item.execution?.acceptedAt)
-    ? "ToAccept"
-    : "InProgress";
+  return open.some((item) => item.status === "In Progress" && item.comboPartOf === undefined)
+    ? "Making"
+    : "ToMake";
 }
 
 import { playKitchenChime } from "./alert-chime.js";
@@ -156,13 +248,16 @@ export function mergeIdenticalKitchenItems(items: readonly KitchenBoardItem[]) {
       (item.status === "Queued" || item.status === "Held" || item.status === "In Progress") &&
       item.completedQuantity === 0 &&
       item.comboParts === undefined &&
+      item.comboPartOf === undefined &&
       item.chase === undefined;
+    // DEC-KITCHEN-ONE-TAP: a merged line never spans rounds, so a tap never takes a dish of a round
+    // the cook has not read.
     const key = mergeable
       ? JSON.stringify([
+          item.ticketReference,
           item.displayName,
           item.otherName ?? null,
           item.status,
-          Boolean(item.execution?.acceptedAt),
           item.selectedOptions,
           item.customerNote ?? null,
           item.allergens ?? null,
@@ -228,6 +323,8 @@ export function groupKitchenItemsByOrder(items: readonly KitchenBoardItem[]) {
  */
 export function isActiveKitchenWork(item: KitchenBoardItem): boolean {
   if (item.status === "Cancelled") return false;
+  // Combos by section: a dish done leaves this screen, whatever its combo is still waiting for.
+  if (item.comboPartOf?.done === true) return false;
   if (item.status !== "Completed") return true;
   return item.execution !== undefined && item.execution.readyAt === null;
 }
@@ -680,25 +777,52 @@ export function KitchenAllergenLine({ item }: { readonly item: KitchenBoardItem 
   );
 }
 
-/** WP-2423 Q33: how often an unanswered new-work announcement rings again. */
-export const kitchenArrivalRepeatMs = 20_000;
+/** A slot ignores taps this long after what is in it changes. */
+export const kitchenSlotSettleMs = 600;
+/** A new line rings once and keeps its mark this long; the kitchen no longer accepts anything. */
+export const kitchenArrivalFreshMs = 60_000;
+/** One reminder while nobody has touched this screen since the ticket appeared (WP-2423 Q33). */
+export const kitchenArrivalReminderMs = 120_000;
+
+/** The key a line has on this screen: its work item, or its work item and chosen dish. */
+export function kitchenLineKey(item: KitchenBoardItem): string {
+  return item.comboPartOf === undefined
+    ? item.workItemReference
+    : item.workItemReference + ":" + item.comboPartOf.optionReference;
+}
+
+/** Whether this line is work this screen has not made yet. */
+function waitingToBeMade(item: KitchenBoardItem): boolean {
+  return item.comboPartOf !== undefined
+    ? !item.comboPartOf.done && item.status !== "Cancelled" && item.status !== "Completed"
+    : item.status === "Queued";
+}
 
 /**
- * WP-2423 Q33: the announced arrivals after a read: the ones still waiting to be accepted, plus
- * the newly arrived ones.
+ * The lines still announced after a read: those already announced that are still to be made, with
+ * when they arrived, plus the newly arrived ones.
  */
 export function unansweredArrivals(
-  current: readonly string[],
+  current: ReadonlyMap<string, number>,
   arrived: readonly string[],
-  view: KitchenBoardView,
-): readonly string[] {
-  const queued = new Set(
-    view.items.filter((item) => item.status === "Queued").map((item) => item.workItemReference),
-  );
-  const next = [...current, ...arrived].filter((reference) => queued.has(reference));
-  return next.length === current.length && next.every((ref, i) => ref === current[i])
+  lines: readonly KitchenBoardItem[],
+  now: number,
+): ReadonlyMap<string, number> {
+  const waiting = new Set(lines.filter(waitingToBeMade).map(kitchenLineKey));
+  const next = new Map<string, number>();
+  for (const [key, at] of current) if (waiting.has(key)) next.set(key, at);
+  for (const key of arrived) if (waiting.has(key) && !next.has(key)) next.set(key, now);
+  return next.size === current.size && [...next.keys()].every((key) => current.has(key))
     ? current
-    : [...new Set(next)];
+    : next;
+}
+
+/** Whether a line arrived after anyone last touched this screen (the back-to-the-screen case). */
+export function kitchenArrivalsUnattended(
+  arrivals: ReadonlyMap<string, number>,
+  lastTouchAt: number,
+): boolean {
+  return [...arrivals.values()].some((at) => at > lastTouchAt);
 }
 
 const KITCHEN_SOUND_KEY = "bop.kitchen.sound";
@@ -738,46 +862,171 @@ function storeKitchenSection(section: string): void {
     // Private browsing: the choice holds until this page reloads.
   }
 }
+/** The section this device's choice means on this board (a Store without sections shows all). */
+function kitchenSectionOnBoard(view: KitchenBoardView, section: string): string {
+  const known =
+    (view.kitchenSections ?? []).length > 0 ||
+    view.items.some(
+      (item) =>
+        item.kitchenSection != null ||
+        Object.values(item.comboPartSections ?? {}).some((name) => name !== null),
+    );
+  return known || (section !== "All" && section !== "None") ? section : "All";
+}
 /** The section a work item is in: its name, or "None" for a dish with no section. */
 const sectionOf = (item: KitchenBoardItem) => item.kitchenSection ?? "None";
 
-/** WP-2423 Q33: new work, announced across the board until a cook says they saw it. */
-export function KitchenArrivals({
-  view,
-  arrivals,
-  onSeen,
+/** One thing the board has to say, in one line. */
+export interface KitchenStatusEntry {
+  readonly key: string;
+  readonly tone: "Info" | "New" | "Problem";
+  readonly text: string;
+}
+/**
+ * DEC-KITCHEN-ONE-TAP: nothing above the tickets changes height during service, so a message arriving
+ * as a finger lands never puts that finger on another order's button. This row always keeps its
+ * height. It says the newest thing in one line, and more on a tap, laid over the board.
+ */
+export function KitchenStatusRow({
+  entries,
+  details,
 }: {
-  readonly view: KitchenBoardView;
-  readonly arrivals: readonly string[];
-  readonly onSeen?: (() => void) | undefined;
+  readonly entries: readonly KitchenStatusEntry[];
+  /** What a status needs beyond one line (a retry, a dismiss). */
+  readonly details?: ReactNode;
 }) {
-  if (arrivals.length === 0) return null;
-  const wanted = new Set(arrivals);
-  const orders = [
-    ...new Set(
-      view.items
-        .filter((item) => wanted.has(item.workItemReference))
-        .map((item) => kitchenOrderLabel(item)),
-    ),
-  ];
-  if (orders.length === 0) return null;
+  const [open, setOpen] = useState(false);
+  const [first] = entries;
+  const hasMore = entries.length > 1 || details !== undefined;
+  const opened = open && hasMore;
+  const hasDetails = details !== undefined;
+  useEffect(() => {
+    setOpen(false);
+  }, [hasDetails]);
   return (
-    <section className="kitchen-arrivals" role="alert" aria-labelledby="kitchen-arrivals-heading">
-      <div>
-        <h3 id="kitchen-arrivals-heading">
-          {orders.length === 1
-            ? t("New order to accept")
-            : t("{count} new orders to accept", { count: orders.length })}
-        </h3>
-        <p>{orders.join(listSeparator())}</p>
-      </div>
-      {onSeen ? (
-        <button type="button" onClick={onSeen}>
-          {t("Seen")}
+    <div className="kitchen-status-row" data-tone={first?.tone}>
+      <p role="status" className="kitchen-status-row__line">
+        {first?.text ?? ""}
+      </p>
+      {hasMore ? (
+        <button
+          type="button"
+          className="kitchen-status-row__more"
+          aria-expanded={opened}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {details === undefined ? t("{count} more", { count: entries.length - 1 }) : t("Details")}
         </button>
       ) : null}
-    </section>
+      {opened ? (
+        <div className="kitchen-status-row__detail">
+          {entries.length > 0 ? (
+            <ul>
+              {entries.map((entry) => (
+                <li key={entry.key} data-tone={entry.tone}>
+                  {entry.text}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {details}
+        </div>
+      ) : null}
+    </div>
   );
+}
+
+/** Where a line of a combo's dish says how its combo stands, short enough for a wet glance. */
+export function kitchenComboDishNote(line: KitchenBoardItem["comboPartOf"]): string | null {
+  if (line === undefined) return null;
+  const { comboName, stillToMake } = line;
+  const count = stillToMake.length;
+  if (count === 0) return t("Combo: {comboName} · last dish of it", { comboName });
+  return count <= 2
+    ? t("Combo: {comboName} · also {dishes}", {
+        comboName,
+        dishes: stillToMake.join(listSeparator()),
+      })
+    : t("Combo: {comboName} · {count} more dishes", { comboName, count });
+}
+
+/**
+ * Combos by section. "All sections": the combo stays one card with its dishes under it. One section:
+ * a regular dish shows if it is in that section; a combo is replaced by one line per chosen dish in
+ * that section, each with its own Done, reading to make whatever another section did. A dish with no
+ * section shows on every section's screen until someone finishes it, in a Store that has sections. A
+ * combo still open with no dish left to make shows on every screen as one line, so it can be finished.
+ */
+export function kitchenScreenLines(
+  items: readonly KitchenBoardItem[],
+  section: string,
+  options: { readonly storeHasSections: boolean },
+): readonly KitchenBoardItem[] {
+  if (section === "All") return items;
+  return items.flatMap((item) => {
+    const parts = item.comboParts;
+    const sections = item.comboPartSections;
+    if (parts === undefined || sections === undefined)
+      return sectionOf(item) === section ? [item] : [];
+    const open = item.status === "Queued" || item.status === "In Progress";
+    if (open && parts.every((part) => part.done)) return [item];
+    return parts.flatMap((part) => {
+      const dishSection = sections[part.optionReference] ?? null;
+      const here =
+        (dishSection ?? "None") === section ||
+        (dishSection === null && options.storeHasSections && !part.done);
+      if (!here) return [];
+      const label = part.nameZh || part.name;
+      const line = Object.fromEntries(
+        Object.entries(item).filter(
+          ([key]) => !["comboParts", "comboPartSections", "otherName"].includes(key),
+        ),
+      ) as unknown as KitchenBoardItem;
+      return [
+        Object.freeze({
+          ...line,
+          displayName: label,
+          ...(part.nameZh && part.name !== part.nameZh ? { otherName: part.name } : {}),
+          selectedOptions: Object.freeze([]),
+          comboPartOf: Object.freeze({
+            comboName: item.displayName,
+            optionReference: part.optionReference,
+            done: part.done,
+            stillToMake: Object.freeze(
+              parts
+                .filter((other) => other !== part && !other.done)
+                .map((other) => other.nameZh || other.name),
+            ),
+          }),
+        }),
+      ];
+    });
+  });
+}
+
+/** Whether a line belongs under a work-state tab or filter. */
+function kitchenLineInStatus(item: KitchenBoardItem, value: string): boolean {
+  if (value === "All") return true;
+  if (value === "Active") return isActiveKitchenWork(item);
+  if (item.comboPartOf !== undefined)
+    return item.status === "Cancelled"
+      ? value === "Cancelled"
+      : item.comboPartOf.done
+        ? value === "Completed"
+        : value === "Queued";
+  return item.status === value;
+}
+
+/** The sections that still have something to make of this work. */
+function sectionsWithWork(item: KitchenBoardItem): readonly string[] {
+  const parts = item.comboParts;
+  const sections = item.comboPartSections;
+  if (parts === undefined || sections === undefined) return [sectionOf(item)];
+  return [
+    ...new Set(
+      parts.filter((part) => !part.done).map((part) => sections[part.optionReference] ?? "None"),
+    ),
+  ];
 }
 
 /**
@@ -802,20 +1051,43 @@ export function newKitchenChases(
     .map((item) => item.workItemReference);
 }
 
-/** The queued work item references that were not in the previous read. */
+/**
+ * The lines to make on this screen that were not on it at the previous read. The first read sounds
+ * nothing. A chosen dish alerts its own screen even if another section already started its combo.
+ */
 export function newQueuedReferences(
-  previous: KitchenBoardView | null,
-  next: KitchenBoardView,
+  previous: readonly KitchenBoardItem[] | null,
+  next: readonly KitchenBoardItem[],
 ): readonly string[] {
   if (previous === null) return [];
-  const seen = new Set(previous.items.map((item) => item.workItemReference));
-  return next.items
-    .filter((item) => item.status === "Queued" && !seen.has(item.workItemReference))
-    .map((item) => item.workItemReference);
+  const seen = new Set(previous.map(kitchenLineKey));
+  return next
+    .filter((item) => waitingToBeMade(item) && !seen.has(kitchenLineKey(item)))
+    .map(kitchenLineKey);
+}
+
+/** A line stays on its card this long once cancelled, so a cook does not keep making it. */
+export const kitchenCancelledNoticeMs = 60_000;
+/**
+ * Lines on this screen that became cancelled since the previous read: the kitchen is told, because a
+ * dish nobody tapped Start on may already be in the pan.
+ */
+export function newKitchenCancellations(
+  previous: readonly KitchenBoardItem[] | null,
+  next: readonly KitchenBoardItem[],
+): readonly string[] {
+  if (previous === null) return [];
+  const before = new Map(previous.map((item) => [kitchenLineKey(item), item.status]));
+  return next
+    .filter((item) => {
+      const status = before.get(kitchenLineKey(item));
+      return item.status === "Cancelled" && status !== undefined && status !== "Cancelled";
+    })
+    .map(kitchenLineKey);
 }
 import {
+  Fragment,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -824,7 +1096,6 @@ import {
   type RefObject,
 } from "react";
 import { useStaffSessionLive } from "./staff-session-reads.js";
-import { ComboPartDoneContext, markComboPartDone } from "./combo-part-client.js";
 import type { ComboPartView } from "./combo-parts.js";
 import { Link, useLocation, useParams } from "react-router";
 import {
@@ -1033,12 +1304,19 @@ export function kitchenFocusTarget(
   };
 }
 
+/** What a tap asks of a line. */
+export type KitchenBoardStep = KitchenStepKind | "MarkReady";
+
 function WorkCard({
   item,
   readOnly,
   observedAt,
   ageAt,
-  onAction,
+  onStep,
+  onDishDone,
+  pending,
+  pendingLines,
+  cancelledNotice = false,
   onRemake,
   showDetails = true,
   showActions = true,
@@ -1056,7 +1334,15 @@ function WorkCard({
   readonly observedAt: string;
   /** The ticking clock ages are measured against (falls back to the projection time). */
   readonly ageAt?: string;
-  readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
+  readonly onStep?: (item: KitchenBoardItem, step: KitchenBoardStep) => void;
+  /** Combos: one chosen dish done, on the screen that shows the whole combo. */
+  readonly onDishDone?: ((item: KitchenBoardItem, part: ComboPartView) => void) | undefined;
+  /** What a tap currently holds of this line, if anything. */
+  readonly pending?: KitchenTap<KitchenStepTarget> | undefined;
+  /** The same for a combo's dishes, by each dish's line key. */
+  readonly pendingLines?: ReadonlyMap<string, KitchenTap<KitchenStepTarget>> | undefined;
+  /** This line was just cancelled: it stays struck through so nobody keeps making it. */
+  readonly cancelledNotice?: boolean;
   /** WP-2423 Q26: offered on finished dishes when the operator may remake them. */
   readonly onRemake?: ((item: KitchenBoardItem) => void) | undefined;
   readonly showDetails?: boolean;
@@ -1077,12 +1363,14 @@ function WorkCard({
   return (
     <article
       className={`kitchen-work-item${!showDetails && !showActions ? " kitchen-work-item--detail" : ""}`}
-      data-work-item={showActions ? item.workItemReference : undefined}
+      data-work-item={showActions ? kitchenLineKey(item) : undefined}
       tabIndex={showActions ? -1 : undefined}
       aria-label={showActions ? item.displayName : undefined}
       data-read-only={readOnly}
       data-age={kitchenAgeTier(age)}
       data-status={item.status}
+      data-pending={pending?.phase}
+      data-cancelled-notice={cancelledNotice ? "true" : undefined}
       data-in-ticket={inTicket ? "true" : undefined}
       data-finished={inTicket && !isActiveKitchenWork(item) ? "true" : undefined}
       data-chased={item.chase !== undefined && isActiveKitchenWork(item) ? "true" : undefined}
@@ -1116,6 +1404,14 @@ function WorkCard({
             {item.otherName}
           </p>
         )}
+        {cancelledNotice ? (
+          <p className="kitchen-work-item__cancelled" role="alert">
+            {t("Cancelled · don't make it")}
+          </p>
+        ) : null}
+        {item.comboPartOf === undefined ? null : (
+          <p className="kitchen-work-item__combo-note">{kitchenComboDishNote(item.comboPartOf)}</p>
+        )}
         {item.takenOnPaper !== true || !isActiveKitchenWork(item) ? null : (
           // Owner 2026-11-03: it came from a paper slip, so the kitchen may have made it already.
           <p className="kitchen-work-item__paper" role="note">
@@ -1136,11 +1432,15 @@ function WorkCard({
       </div>
       <div className="kitchen-work-item__state">
         <strong data-status={item.status}>
-          {item.status === "In Progress"
-            ? t("In progress")
-            : item.status === "Queued" && item.execution?.acceptedAt
-              ? t("Accepted")
-              : systemText(item.status)}
+          {item.comboPartOf !== undefined
+            ? item.comboPartOf.done
+              ? t("Done")
+              : t("To make")
+            : item.status === "In Progress"
+              ? t("Being made")
+              : item.status === "Queued"
+                ? t("To make")
+                : systemText(item.status)}
         </strong>
         {!isActiveKitchenWork(item) ? (
           <span data-age="done">{t("Done")}</span>
@@ -1157,7 +1457,12 @@ function WorkCard({
         </dl>
         {/* Owner 2026-11-03 walkthrough: what to make comes first, then what it contains. */}
         {item.comboParts !== undefined ? (
-          <KitchenComboParts item={item} actionable={showActions === true && inTicket === true} />
+          <KitchenComboParts
+            item={item}
+            readOnly={readOnly}
+            onDishDone={showActions === true && inTicket === true ? onDishDone : undefined}
+            pendingLines={pendingLines}
+          />
         ) : !showModifiers && item.selectedOptions.length > 0 ? (
           <ul className="kitchen-work-item__options" aria-label={t("Modifiers")}>
             {item.selectedOptions.map((option, index) => (
@@ -1242,16 +1547,22 @@ function WorkCard({
                     {t("No kitchen steps for this item on this screen")}
                   </span>
                 )}
-                {item.execution &&
-                item.status === "In Progress" &&
-                item.completedQuantity < item.requiredQuantity &&
-                // A combo is finished when every dish of it is done.
-                combosDishesDone(item) ? (
+                {kitchenLineNeedsStartFirst(item) ? (
                   <button
                     className="kitchen-work-item__done"
-                    disabled={readOnly || !onAction}
+                    disabled={readOnly || !onStep || pending !== undefined}
+                    onClick={() => onStep?.(item, "Start")}
+                  >
+                    {t("Start cooking")}
+                  </button>
+                ) : kitchenLineFinishable(item) &&
+                  // A combo is finished when every dish of it is done; each has its own Done.
+                  combosDishesDone(item) ? (
+                  <button
+                    className="kitchen-work-item__done"
+                    disabled={readOnly || !onStep || pending !== undefined}
                     aria-label={t("Mark {displayName} finished", { displayName: item.displayName })}
-                    onClick={() => onAction?.(item, "CompleteKitchenWorkItem")}
+                    onClick={() => onStep?.(item, "Finish")}
                   >
                     {t("Finished")}
                   </button>
@@ -1268,36 +1579,28 @@ function WorkCard({
               </>
             ) : item.execution ? (
               <>
-                {item.status === "Queued" && item.execution.acceptedAt === null ? (
+                {item.status === "Queued" ? (
                   <button
-                    disabled={readOnly || !onAction}
-                    onClick={() => onAction?.(item, "AcceptKitchenWorkItem")}
+                    disabled={readOnly || !onStep || pending !== undefined}
+                    onClick={() => onStep?.(item, "Start")}
                   >
-                    {t("Accept")}
+                    {t("Start cooking")}
                   </button>
                 ) : null}
-                {item.status === "Queued" && item.execution.acceptedAt !== null ? (
+                {kitchenLineFinishable(item) &&
+                combosDishesDone(item) &&
+                !kitchenLineNeedsStartFirst(item) ? (
                   <button
-                    disabled={readOnly || !onAction}
-                    onClick={() => onAction?.(item, "StartKitchenWorkItem")}
+                    disabled={readOnly || !onStep || pending !== undefined}
+                    onClick={() => onStep?.(item, "Finish")}
                   >
-                    {t("Start")}
-                  </button>
-                ) : null}
-                {item.status === "In Progress" &&
-                item.completedQuantity < item.requiredQuantity &&
-                combosDishesDone(item) ? (
-                  <button
-                    disabled={readOnly || !onAction}
-                    onClick={() => onAction?.(item, "CompleteKitchenWorkItem")}
-                  >
-                    {t("Complete quantity")}
+                    {t("Finished")}
                   </button>
                 ) : null}
                 {item.status === "Completed" && item.execution.readyAt === null ? (
                   <button
-                    disabled={readOnly || !onAction}
-                    onClick={() => onAction?.(item, "MarkKitchenOrderItemReady")}
+                    disabled={readOnly || !onStep}
+                    onClick={() => onStep?.(item, "MarkReady")}
                   >
                     {t("Mark ready")}
                   </button>
@@ -1372,8 +1675,7 @@ export function KitchenBoardScreen({
   view,
   onRefresh,
   refreshButtonRef,
-  onAction,
-  onActionAll,
+  steps,
   actionsBlocked = true,
   navigation,
   soundOn,
@@ -1381,7 +1683,9 @@ export function KitchenBoardScreen({
   soundResumes = false,
   onSoundToggle,
   arrivals = [],
-  onArrivalsSeen,
+  cancelledLines,
+  section: chosenSection,
+  onSection,
   autoRefresh = false,
   stale,
   checkedAt,
@@ -1389,14 +1693,18 @@ export function KitchenBoardScreen({
   remakes,
   earlierDays,
   headerStatus,
-  notices,
+  statusEntries = [],
+  statusDetails,
+  pauseOrdering,
   workspaceFrame,
 }: {
   readonly view: KitchenBoardView;
   /** A counter or office sign-in: the app's workspace frame instead of the kitchen display's. */
   readonly workspaceFrame?: KitchenWorkspaceFrame | undefined;
-  /** What happened to the last kitchen step, remake or ticket close. */
-  readonly notices?: ReactNode;
+  /** What happened to the last kitchen step, remake or ticket close, newest first. */
+  readonly statusEntries?: readonly KitchenStatusEntry[];
+  /** What those need beyond one line (a retry, a dismiss), shown on a tap. */
+  readonly statusDetails?: ReactNode;
   /** WP-2423: the kitchen display's own controls (screen awake, handover) in the header. */
   readonly headerStatus?: ReactNode;
   /** When this device last read the board successfully (shown as "Last checked"). */
@@ -1421,9 +1729,17 @@ export function KitchenBoardScreen({
         readonly onCancel?: (rework: KitchenReworkView, reason: KitchenReworkCancelReason) => void;
       }
     | undefined;
-  readonly onAction?: (item: KitchenBoardItem, action: KitchenAction) => void;
-  /** Kitchen v3: one step for every item of a ticket at that step, one after another. */
-  readonly onActionAll?: (items: readonly KitchenBoardItem[], action: KitchenAction) => void;
+  /** DEC-KITCHEN-ONE-TAP: the board's steps, when this screen can take them. */
+  readonly steps?:
+    | {
+        readonly pendingLines: ReadonlyMap<string, KitchenTap<KitchenStepTarget>>;
+        readonly onStep: (targets: readonly KitchenStepTarget[], step: KitchenStepKind) => void;
+        readonly onMarkReady: (items: readonly KitchenBoardItem[]) => void;
+        readonly onUndo: (taps: readonly number[]) => void;
+        readonly onRetry: (taps: readonly number[]) => void;
+        readonly onDismiss: (taps: readonly number[]) => void;
+      }
+    | undefined;
   readonly actionsBlocked?: boolean;
   readonly onRefresh?: () => void;
   readonly refreshButtonRef?: RefObject<HTMLButtonElement | null>;
@@ -1432,12 +1748,18 @@ export function KitchenBoardScreen({
   readonly soundOn?: boolean | undefined;
   /** One chime on this screen, when sound is on. */
   readonly onRing?: (() => void) | undefined;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: the Store's Pause, for whoever may pause (absent: not offered). */
+  readonly pauseOrdering?: ReactNode;
   readonly onSoundToggle?: (() => void) | undefined;
   /** WP-2423 Q33: sound was on before this page loaded; it returns at the next tap. */
   readonly soundResumes?: boolean | undefined;
-  /** WP-2423 Q33: work that arrived since the cook last said they saw new work. */
+  /** The lines of this screen that arrived in the last minute. */
   readonly arrivals?: readonly string[] | undefined;
-  readonly onArrivalsSeen?: (() => void) | undefined;
+  /** The lines of this screen just cancelled, kept on their card for a minute. */
+  readonly cancelledLines?: ReadonlySet<string> | undefined;
+  /** The section this screen shows, when the page keeps it (it decides what rings here). */
+  readonly section?: string | undefined;
+  readonly onSection?: ((section: string) => void) | undefined;
   /** Whether the board re-reads itself; shown so the operator knows nothing is stuck. */
   readonly autoRefresh?: boolean;
   /** IDR-0039: the last re-read failed; the board shows the last loaded work, read-only. */
@@ -1450,7 +1772,8 @@ export function KitchenBoardScreen({
   const location = useLocation();
   const restored = restoredQueueScope(location.state);
   const [station, setStation] = useState(restored?.station ?? "All");
-  const [section, setSection] = useState(storedKitchenSection);
+  const [ownSection, setOwnSection] = useState(storedKitchenSection);
+  const section = chosenSection ?? ownSection;
   const [status, setStatus] = useState(restored?.status ?? "Active");
   const [allergen, setAllergen] = useState(restored?.allergen ?? "All");
   const [exception, setException] = useState(restored?.exception ?? "All");
@@ -1488,11 +1811,10 @@ export function KitchenBoardScreen({
       });
     else proceed();
   };
-  const actionLabels: Record<KitchenAction, string> = {
-    AcceptKitchenWorkItem: t("Accept"),
-    StartKitchenWorkItem: t("Start"),
-    CompleteKitchenWorkItem: t("Complete quantity"),
-    MarkKitchenOrderItemReady: t("Mark ready"),
+  const stepLabels: Record<KitchenBoardStep, string> = {
+    Start: t("Start cooking"),
+    Finish: t("Finished"),
+    MarkReady: t("Mark ready"),
   };
   // WP-2423: after a kitchen step the cook stays where they were: on the same card (its next
   // step once the board shows it), or on the next card when this one has left the list.
@@ -1518,26 +1840,53 @@ export function KitchenBoardScreen({
     if (target.element && document.activeElement !== target.element && focusLost(root, pending))
       target.element.focus();
   });
-  const guardedAction = onAction
-    ? (item: KitchenBoardItem, action: KitchenAction) =>
-        guarded(item, actionLabels[action], () => {
-          pendingFocus.current = kitchenFocusIntent(workspaceRef.current, item.workItemReference);
-          onAction(item, action);
-        })
-    : undefined;
-  const guardedActionAll = onAction
-    ? (group: readonly KitchenBoardItem[], action: KitchenAction) => {
-        const first = group[0];
-        if (first === undefined) return;
-        guarded(first, actionLabels[action], () => {
-          pendingFocus.current = kitchenFocusIntent(workspaceRef.current, first.workItemReference);
-          if (onActionAll) onActionAll(group, action);
-          else onAction(first, action);
-        });
+  // DEC-KITCHEN-ONE-TAP: a slot ignores taps for a moment after what is in it changes, so a double
+  // tap, or a ticket leaving because of a read, never lands on another order's button.
+  const slots = useRef(new Map<string, { signature: string; changedAt: number }>());
+  const slotsSeeded = useRef(false);
+  const slotSettled = (key: string) =>
+    performance.now() - (slots.current.get(key)?.changedAt ?? -Infinity) >= kitchenSlotSettleMs;
+  const pendingLines = steps?.pendingLines;
+  const tapLines = (
+    slot: string,
+    lines: readonly KitchenBoardItem[],
+    step: KitchenBoardStep,
+  ): void => {
+    const first = lines[0];
+    if (first === undefined || steps === undefined || !slotSettled(slot)) return;
+    guarded(first, stepLabels[step], () => {
+      pendingFocus.current = kitchenFocusIntent(workspaceRef.current, kitchenLineKey(first));
+      if (step === "MarkReady") {
+        steps.onMarkReady(lines);
+        return;
       }
-    : undefined;
+      steps.onStep(
+        lines.map((line) => ({
+          lineKey: kitchenLineKey(line),
+          item: line,
+          optionReferences: line.comboPartOf ? [line.comboPartOf.optionReference] : null,
+        })),
+        step,
+      );
+    });
+  };
+  const tapDish = (slot: string, item: KitchenBoardItem, part: ComboPartView) => {
+    if (steps === undefined || !slotSettled(slot)) return;
+    guarded(item, stepLabels.Finish, () =>
+      steps.onStep(
+        [
+          {
+            lineKey: item.workItemReference + ":" + part.optionReference,
+            item,
+            optionReferences: [part.optionReference],
+          },
+        ],
+        "Finish",
+      ),
+    );
+  };
   const onRemake = remakes?.canRework
-    ? (item: KitchenBoardItem) => guarded(item, "Remake", () => setRemakeTarget(item))
+    ? (item: KitchenBoardItem) => guarded(item, t("Remake"), () => setRemakeTarget(item))
     : undefined;
   const board = kitchenBoardSearch({
     items: view.items,
@@ -1593,9 +1942,11 @@ export function KitchenBoardScreen({
       ...(view.kitchenSections ?? []),
       ...view.items
         .flatMap((item) =>
-          item.kitchenSection === undefined || item.kitchenSection === null
-            ? []
-            : [item.kitchenSection],
+          item.comboPartSections !== undefined
+            ? Object.values(item.comboPartSections).filter((name) => name !== null)
+            : item.kitchenSection === undefined || item.kitchenSection === null
+              ? []
+              : [item.kitchenSection],
         )
         .sort((a, b) => a.localeCompare(b)),
     ]),
@@ -1610,34 +1961,40 @@ export function KitchenBoardScreen({
   ];
   const activeSection = sectionFilterAvailable ? section : "All";
   const chooseSection = (value: string) => {
-    setSection(value);
+    setOwnSection(value);
+    onSection?.(value);
     storeKitchenSection(value);
   };
-  // What waits in the other sections, so nothing is hidden quietly: orders (tickets) per section.
+  // What waits in the other sections, so nothing is hidden quietly: orders (tickets) per section. A
+  // combo's dish with no section is on this screen too, so it is not said to wait elsewhere.
+  const storeHasSections = (view.kitchenSections ?? []).length > 0;
   const otherSections =
     activeSection === "All"
       ? []
       : [
-          ...searchMatches
-            .filter((item) => isActiveKitchenWork(item) && sectionOf(item) !== activeSection)
-            .reduce((found, item) => {
-              const tickets = found.get(sectionOf(item)) ?? new Set<string>();
+          ...searchMatches.filter(isActiveKitchenWork).reduce((found, item) => {
+            for (const name of sectionsWithWork(item)) {
+              if (name === activeSection) continue;
+              if (name === "None" && item.comboParts !== undefined && storeHasSections) continue;
+              const tickets = found.get(name) ?? new Set<string>();
               tickets.add(item.ticketReference);
-              return found.set(sectionOf(item), tickets);
-            }, new Map<string, Set<string>>()),
+              found.set(name, tickets);
+            }
+            return found;
+          }, new Map<string, Set<string>>()),
         ]
           .map(([name, tickets]) => ({ name, count: tickets.size }))
           .sort((a, b) =>
             a.name === "None" ? 1 : b.name === "None" ? -1 : a.name.localeCompare(b.name),
           );
   const sectionText = (name: string) => (name === "None" ? t("No section") : name);
+  const screenLines = kitchenScreenLines(searchMatches, activeSection, { storeHasSections });
   const itemsInStatus = (value: string) =>
-    searchMatches.filter(
+    screenLines.filter(
       (item) =>
-        (activeSection === "All" || sectionOf(item) === activeSection) &&
         (activeStation === "All" || item.stationLabel === activeStation) &&
-        (value === "All" ||
-          (value === "Active" ? isActiveKitchenWork(item) : item.status === value)) &&
+        (kitchenLineInStatus(item, value) ||
+          (value === "Active" && cancelledLines?.has(kitchenLineKey(item)) === true)) &&
         (activeAllergen === "All" || item.allergenCue === activeAllergen) &&
         (activeException === "All" || item.exceptionStatus === activeException),
     );
@@ -1696,7 +2053,7 @@ export function KitchenBoardScreen({
   // Held work is rare: its tab shows only while there is some, or while it is chosen.
   const statusTabs: readonly (readonly [string, string])[] = [
     ["Active", t("Open work")],
-    ["Queued", t("Queued")],
+    ["Queued", t("To make")],
     ...(status === "Held" || itemsInStatus("Held").length > 0
       ? ([["Held", t("Held")]] as const)
       : []),
@@ -1891,9 +2248,9 @@ export function KitchenBoardScreen({
           <select value={status} onChange={(event) => setStatus(event.currentTarget.value)}>
             <option value="Active">{t("Active work")}</option>
             <option value="All">{t("All states")}</option>
-            <option value="Queued">{t("Queued")}</option>
+            <option value="Queued">{t("To make")}</option>
             <option value="Held">{t("Held")}</option>
-            <option value="In Progress">{t("In Progress")}</option>
+            <option value="In Progress">{t("Being made")}</option>
             <option value="Completed">{t("Completed")}</option>
             <option value="Cancelled">{t("Cancelled")}</option>
           </select>
@@ -1977,6 +2334,27 @@ export function KitchenBoardScreen({
       </div>
     </div>
   );
+  const arrivalLabels = [
+    ...new Set(
+      screenLines
+        .filter((item) => arrivals.includes(kitchenLineKey(item)))
+        .map((item) => kitchenOrderLabel(item)),
+    ),
+  ];
+  const groupsByLane = stationLanes.map((lane) => groupKitchenItemsByOrder(lane.items));
+  // What sits in each slot now, in board order (see slotSettled).
+  groupsByLane.flat().forEach((group, index) => {
+    const signature = index + ":" + group.items.map(kitchenLineKey).join(",");
+    const known = slots.current.get(group.orderReference);
+    if (known === undefined)
+      slots.current.set(group.orderReference, {
+        signature,
+        changedAt: slotsSeeded.current ? performance.now() : -Infinity,
+      });
+    else if (known.signature !== signature)
+      slots.current.set(group.orderReference, { signature, changedAt: performance.now() });
+  });
+  slotsSeeded.current = true;
   return (
     <KitchenFrame
       workspaceFrame={workspaceFrame}
@@ -2081,19 +2459,103 @@ export function KitchenBoardScreen({
             {workspaceFrame ? <LanguageSwitch className="workspace-page__language" /> : null}
           </div>
         </header>
-        {onSoundToggle && !soundOn ? (
-          // The toggle already says the sound is off; the line shows only when it is about to return.
-          <p
-            className="kitchen-sound-reminder"
-            role="status"
-            data-resumes={soundResumes ? "true" : undefined}
-          >
-            {soundResumes
-              ? t("Sound turns back on at your next tap on this screen.")
-              : t("Sound is off. New orders will not ring on this screen.")}
-          </p>
-        ) : null}
-        <KitchenArrivals view={view} arrivals={arrivals} onSeen={onArrivalsSeen} />
+        <KitchenStatusRow
+          entries={[
+            ...(stale
+              ? [
+                  {
+                    key: "stale",
+                    tone: "Problem" as const,
+                    text:
+                      t("Read-only until reconnected") +
+                      " · " +
+                      (stale.reason === "Offline" ? t("Offline") : t("Connection lost")),
+                  },
+                ]
+              : view.operatorStatus === "Named" && view.freshnessStatus !== "Fresh"
+                ? [
+                    {
+                      key: "catching-up",
+                      tone: "Problem" as const,
+                      text: t("Catching up with new orders"),
+                    },
+                  ]
+                : []),
+            ...statusEntries,
+            ...(arrivalLabels.length === 0
+              ? []
+              : [
+                  {
+                    key: "arrivals",
+                    tone: "New" as const,
+                    text:
+                      arrivalLabels.length === 1
+                        ? t("New order: {list}", { list: arrivalLabels.join(listSeparator()) })
+                        : t("{count} new orders: {list}", {
+                            count: arrivalLabels.length,
+                            list: arrivalLabels.join(listSeparator()),
+                          }),
+                  },
+                ]),
+            ...(view.moreWaiting === undefined
+              ? []
+              : [
+                  {
+                    key: "more-waiting",
+                    tone: "Problem" as const,
+                    text:
+                      view.moreWaiting === true
+                        ? t("More orders are waiting. They show as you finish these.")
+                        : t("{count} more orders are waiting. They show as you finish these.", {
+                            count: view.moreWaiting,
+                          }),
+                  },
+                ]),
+            ...(remakes?.readFailed
+              ? [
+                  {
+                    key: "remakes-read",
+                    tone: "Problem" as const,
+                    text: t("Remakes could not be refreshed. The board keeps trying."),
+                  },
+                ]
+              : []),
+            ...(board.reworks.length > 0
+              ? [
+                  {
+                    key: "remakes",
+                    tone: "New" as const,
+                    text: t("Remakes below: {count}", { count: board.reworks.length }),
+                  },
+                ]
+              : []),
+            // The toggle already says the sound is off; this says what that means.
+            ...(onSoundToggle && !soundOn
+              ? [
+                  {
+                    key: "sound",
+                    tone: "Info" as const,
+                    text: soundResumes
+                      ? t("Sound turns back on at your next tap on this screen.")
+                      : t("Sound is off. New orders will not ring on this screen."),
+                  },
+                ]
+              : []),
+          ]}
+          details={
+            stale || statusDetails ? (
+              <>
+                {stale ? (
+                  <StaleReadNotice
+                    stale={stale}
+                    className="kitchen-board-lock kitchen-board-stale"
+                  />
+                ) : null}
+                {statusDetails}
+              </>
+            ) : undefined
+          }
+        />
         {/* DEC-PAID-ORDER-AUTO-ACCEPT: says nothing at a Store that doesn't use it. */}
         <KitchenPaidOrderNotices
           view={view}
@@ -2102,11 +2564,9 @@ export function KitchenBoardScreen({
           onSoundOn={onSoundToggle}
           onRing={() => onRing?.()}
         />
-        {notices}
+        {pauseOrdering}
         {workspaceFrame ? null : filterToggle}
-        {stale ? (
-          <StaleReadNotice stale={stale} className="kitchen-board-lock kitchen-board-stale" />
-        ) : readOnly ? (
+        {!stale && readOnly && !(view.operatorStatus === "Named") ? (
           <KitchenBoardLock
             operatorStatus={view.operatorStatus}
             freshnessStatus={view.freshnessStatus}
@@ -2150,22 +2610,6 @@ export function KitchenBoardScreen({
           {renderOrderSearch("mobile")}
           {renderFilters("mobile")}
         </dialog>
-        {remakes?.readFailed ? (
-          <p className="kitchen-remake-read-failed" role="status">
-            {t("Remakes could not be refreshed. The board keeps trying.")}
-          </p>
-        ) : null}
-        {remakes ? (
-          <div className="kitchen-board-lanes kitchen-board-remakes">
-            <KitchenRemakeLane
-              items={board.reworks}
-              today={today}
-              readOnly={remakeReadOnly}
-              onAdvance={remakes.onAdvance}
-              onCancel={remakes.canRework && remakes.onCancel ? setCancelTarget : undefined}
-            />
-          </div>
-        ) : null}
         {!workspaceFrame && earlierTickets.length > 0 ? (
           <details className="kitchen-earlier-days">
             <summary>
@@ -2232,7 +2676,13 @@ export function KitchenBoardScreen({
                         key={item.workItemReference}
                         item={item}
                         readOnly={readOnly || actionsBlocked || stale !== undefined}
-                        {...(guardedAction ? { onAction: guardedAction } : {})}
+                        {...(steps
+                          ? {
+                              onStep: (line: KitchenBoardItem, step: KitchenBoardStep) =>
+                                tapLines(ticket.ticketReference, [line], step),
+                            }
+                          : {})}
+                        pending={pendingLines?.get(kitchenLineKey(item))}
                         onRemake={onRemake}
                         observedAt={view.projectedAt}
                         ageAt={clockAt}
@@ -2314,7 +2764,7 @@ export function KitchenBoardScreen({
           </div>
         ) : (
           <div className="kitchen-board-lanes">
-            {stationLanes.map((lane) => {
+            {stationLanes.map((lane, laneIndex) => {
               // WP-2423: a Store without named stations sees its work as one "All work" lane, or
               // numbered lanes when the source separates stations without naming them.
               const unnamed = stationLanes.filter((entry) => entry.stationLabel === null);
@@ -2342,21 +2792,48 @@ export function KitchenBoardScreen({
                     </span>
                   </header>
                   <div className="kitchen-station-lane__items">
-                    {groupKitchenItemsByOrder(stationItems).map((group) => {
+                    {(groupsByLane[laneIndex] ?? []).map((group) => {
                       const ticket = kitchenTicketAge(group.items, clockAt);
                       const tierText = kitchenTicketTierText(ticket.tier);
                       const first = group.items[0] as KitchenBoardItem;
                       const label = first.orderLabel;
                       const state = kitchenTicketState(group.items);
+                      const allCancelled =
+                        state === "Done" &&
+                        group.items.every((item) => item.status === "Cancelled");
                       const next = kitchenTicketNextStep(group.items);
+                      const start = kitchenTicketStartStep(group.items);
                       const ticketReadOnly = readOnly || actionsBlocked || stale !== undefined;
+                      const slot = group.orderReference;
+                      const heldOf = (line: KitchenBoardItem) =>
+                        pendingLines?.get(kitchenLineKey(line));
+                      // A combo's dishes are held under the combo's work item.
+                      const cardTaps = [
+                        ...new Map(
+                          [...(pendingLines?.entries() ?? [])]
+                            .filter(([key]) =>
+                              group.items.some(
+                                (item) =>
+                                  key === kitchenLineKey(item) ||
+                                  key.startsWith(item.workItemReference + ":"),
+                              ),
+                            )
+                            .map(([, tap]) => [tap.id, tap] as const),
+                        ).values(),
+                      ];
+                      const ids = (phases: readonly string[]) =>
+                        cardTaps.filter((tap) => phases.includes(tap.phase)).map((tap) => tap.id);
+                      const holding = cardTaps.filter((tap) => tap.phase === "Holding");
+                      const failed = ids(["Failed"]);
+                      const sending = ids(["Waiting", "Sending", "Retrying"]).length > 0;
+                      const rounds = kitchenTicketRounds(group.items);
                       return (
                         <section
                           className="kitchen-order-group kitchen-ticket"
                           key={group.orderReference}
                           data-age={ticket.tier}
                           data-fresh={
-                            group.items.some((item) => arrivals.includes(item.workItemReference))
+                            group.items.some((item) => arrivals.includes(kitchenLineKey(item)))
                               ? "true"
                               : undefined
                           }
@@ -2398,15 +2875,62 @@ export function KitchenBoardScreen({
                                 </span>
                               ) : null}
                             </h4>
+                            {/* Away from the Done just tapped, so undo is never a stray second tap. */}
+                            <div className="kitchen-ticket__top" aria-live="polite">
+                              {failed.length > 0 ? (
+                                <>
+                                  <span className="kitchen-ticket__top-text" data-tone="problem">
+                                    {t("Not recorded yet")}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={ticketReadOnly}
+                                    onClick={() => steps?.onRetry(failed)}
+                                  >
+                                    {t("Try again")}
+                                  </button>
+                                  <button type="button" onClick={() => steps?.onDismiss(failed)}>
+                                    {t("Never mind")}
+                                  </button>
+                                </>
+                              ) : holding.length > 0 ? (
+                                <>
+                                  <span className="kitchen-ticket__top-text">
+                                    {holding.every((tap) => tap.step === "Start")
+                                      ? t("Marked started")
+                                      : t("Marked done")}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => steps?.onUndo(holding.map((tap) => tap.id))}
+                                  >
+                                    {t("Undo")}
+                                  </button>
+                                </>
+                              ) : sending ? (
+                                <span className="kitchen-ticket__top-text">{t("Recording…")}</span>
+                              ) : start !== null && steps !== undefined ? (
+                                <button
+                                  type="button"
+                                  className="kitchen-ticket__start"
+                                  disabled={ticketReadOnly}
+                                  onClick={() => tapLines(slot, start.items, "Start")}
+                                >
+                                  {start.label}
+                                </button>
+                              ) : null}
+                            </div>
                           </header>
                           {/* The ticket's state and its wait share one row, on every ticket. */}
                           <div className="kitchen-ticket__status">
                             <p className="kitchen-ticket__state" data-state={state}>
-                              {state === "ToAccept"
-                                ? t("Kitchen to accept")
-                                : state === "InProgress"
-                                  ? t("In progress")
-                                  : t("Done")}
+                              {allCancelled
+                                ? t("Cancelled")
+                                : state === "ToMake"
+                                  ? t("To make")
+                                  : state === "Making"
+                                    ? t("Being made")
+                                    : t("Done")}
                             </p>
                             <p className="kitchen-ticket__wait">
                               {ticket.minutes === null ? (
@@ -2422,38 +2946,67 @@ export function KitchenBoardScreen({
                             </p>
                           </div>
                           <KitchenOrderOrigin label={label} />
-                          {mergeIdenticalKitchenItems(group.items).map((line) => (
-                            <WorkCard
-                              key={line.item.workItemReference}
-                              item={line.item}
-                              inTicket
-                              readOnly={ticketReadOnly}
-                              {...(guardedAction
-                                ? {
-                                    onAction:
-                                      line.items.length > 1 && guardedActionAll
-                                        ? (_item: KitchenBoardItem, action: KitchenAction) =>
-                                            guardedActionAll(line.items, action)
-                                        : guardedAction,
+                          {rounds.map((round, roundIndex) => (
+                            <Fragment key={round.ticketReference}>
+                              {roundIndex === 0 ? null : (
+                                // A later round of the table: read apart, and left out of the foot
+                                // button until the round above it is done.
+                                <p className="kitchen-ticket__round">
+                                  {t("Added · {minutes} min ago", {
+                                    minutes: Math.max(
+                                      0,
+                                      Math.floor((Date.parse(clockAt) - round.createdAt) / 60_000),
+                                    ),
+                                  })}
+                                </p>
+                              )}
+                              {mergeIdenticalKitchenItems(round.items).map((line) => (
+                                <WorkCard
+                                  key={kitchenLineKey(line.item)}
+                                  item={line.item}
+                                  inTicket
+                                  readOnly={ticketReadOnly}
+                                  {...(steps
+                                    ? {
+                                        onStep: (_item: KitchenBoardItem, step: KitchenBoardStep) =>
+                                          tapLines(slot, line.items, step),
+                                      }
+                                    : {})}
+                                  onDishDone={(item, part) => tapDish(slot, item, part)}
+                                  pending={line.items.map(heldOf).find(Boolean)}
+                                  pendingLines={pendingLines}
+                                  cancelledNotice={
+                                    line.item.status === "Cancelled" &&
+                                    cancelledLines?.has(kitchenLineKey(line.item)) === true
                                   }
-                                : {})}
-                              onRemake={onRemake}
-                              observedAt={view.projectedAt}
-                              ageAt={clockAt}
-                              detailState={{
-                                station: activeStation,
-                                status,
-                                allergen,
-                                exception,
-                              }}
-                            />
+                                  onRemake={onRemake}
+                                  observedAt={view.projectedAt}
+                                  ageAt={clockAt}
+                                  detailState={{
+                                    station: activeStation,
+                                    status,
+                                    allergen,
+                                    exception,
+                                  }}
+                                />
+                              ))}
+                            </Fragment>
                           ))}
-                          {next && guardedActionAll ? (
+                          {next && steps !== undefined ? (
                             <button
                               type="button"
                               className="kitchen-ticket__next"
-                              disabled={ticketReadOnly}
-                              onClick={() => guardedActionAll(next.items, next.action)}
+                              disabled={
+                                ticketReadOnly ||
+                                next.items.every((item) => heldOf(item) !== undefined)
+                              }
+                              onClick={() =>
+                                tapLines(
+                                  slot,
+                                  next.items.filter((item) => heldOf(item) === undefined),
+                                  next.kind,
+                                )
+                              }
                             >
                               {next.label}
                             </button>
@@ -2467,6 +3020,19 @@ export function KitchenBoardScreen({
             })}
           </div>
         )}
+        {remakes ? (
+          // Below the tickets: a remake from another tablet never moves a ticket under a finger.
+          // The row at the top says it is here.
+          <div className="kitchen-board-lanes kitchen-board-remakes">
+            <KitchenRemakeLane
+              items={board.reworks}
+              today={today}
+              readOnly={remakeReadOnly}
+              onAdvance={remakes.onAdvance}
+              onCancel={remakes.canRework && remakes.onCancel ? setCancelTarget : undefined}
+            />
+          </div>
+        ) : null}
         {remakes?.canRework && remakes.onCancel ? (
           <KitchenRemakeCancelDialog
             rework={cancelTarget}
@@ -2501,19 +3067,28 @@ export function KitchenBoardScreen({
  */
 function KitchenComboParts({
   item,
-  actionable,
+  readOnly,
+  onDishDone,
+  pendingLines,
 }: {
   readonly item: KitchenBoardItem;
-  readonly actionable: boolean;
+  readonly readOnly: boolean;
+  readonly onDishDone?: ((item: KitchenBoardItem, part: ComboPartView) => void) | undefined;
+  readonly pendingLines?: ReadonlyMap<string, KitchenTap<KitchenStepTarget>> | undefined;
 }) {
-  const markDone = useContext(ComboPartDoneContext);
   const parts = item.comboParts ?? [];
+  const open = item.status === "Queued" || item.status === "In Progress";
   return (
     <ul className="kitchen-work-item__combo" aria-label={t("Dishes in this combo")}>
       {parts.map((part) => {
         const label = part.nameZh || part.name;
+        const pending = pendingLines?.get(item.workItemReference + ":" + part.optionReference);
         return (
-          <li key={part.optionReference} data-done={part.done ? "true" : undefined}>
+          <li
+            key={part.optionReference}
+            data-done={part.done ? "true" : undefined}
+            data-pending={pending?.phase}
+          >
             <span className="kitchen-work-item__combo-name" lang={part.nameZh ? "zh-Hans" : "en"}>
               {label}
             </span>
@@ -2524,14 +3099,15 @@ function KitchenComboParts({
             ) : null}
             {part.done ? (
               <span className="kitchen-work-item__combo-done">{t("Done")}</span>
-            ) : actionable && markDone !== null && item.status === "In Progress" ? (
+            ) : onDishDone !== undefined && open ? (
               <button
                 type="button"
                 className="kitchen-work-item__combo-step"
+                disabled={readOnly || pending !== undefined}
                 aria-label={t("Mark {displayName} done", { displayName: label })}
-                onClick={() => markDone(item.workItemReference, part)}
+                onClick={() => onDishDone(item, part)}
               >
-                {t("Done")}
+                {t("Finished")}
               </button>
             ) : null}
           </li>
@@ -2560,7 +3136,7 @@ export function KitchenWorkItemScreen({
   const milestones = [
     { label: t("Work item created"), at: view.item.createdAt },
     ...(view.item.execution?.acceptedAt
-      ? [{ label: t("Accepted"), at: view.item.execution.acceptedAt }]
+      ? [{ label: t("Taken by the kitchen"), at: view.item.execution.acceptedAt }]
       : []),
     ...(view.item.execution?.readyAt
       ? [{ label: t("Order item marked ready"), at: view.item.execution.readyAt }]
@@ -2742,6 +3318,8 @@ function KitchenBoardContent(
     setRevision((value) => value + 1);
   };
   const [soundOn, setSoundOn] = useState(false);
+  const soundOnRef = useRef(soundOn);
+  soundOnRef.current = soundOn;
   // WP-2423 Q33: this display remembers that the cook wanted sound. Browsers only allow audio
   // after a tap, so after a reload the sound comes back at the next tap anywhere on the board.
   const [soundResumes, setSoundResumes] = useState(() => storedKitchenSound());
@@ -2794,18 +3372,16 @@ function KitchenBoardContent(
     csrf: props.csrf,
     storeReference: props.storeReference,
     view: state.kind === "Found" ? state.view : null,
-    revision,
+    stale: stale !== undefined,
   });
-  // WP-2423 Q26: a confirmed command re-reads the board at once (not at the next 10 s refresh), so
-  // an accepted ticket does not keep showing "Accept".
-  // The queue projection may lag the command by a moment: re-read a few more times, 1.5 s apart.
-  const confirmedState = actions.state.kind === "Confirmed" ? actions.state : null;
+  // WP-2423 Q26: a confirmed step re-reads the board at once (not at the next 10 s refresh). The
+  // queue projection may lag the command by a moment: re-read a few more times, 1.5 s apart.
+  const { confirmedCount, awaitingProjection } = actions;
   const followUps = useRef(0);
   useEffect(() => {
     followUps.current = 0;
-    if (confirmedState !== null) setRevision((value) => value + 1);
-  }, [confirmedState]);
-  const awaitingProjection = confirmedState !== null && !actions.reflected;
+    if (confirmedCount > 0) setRevision((value) => value + 1);
+  }, [confirmedCount]);
   useEffect(() => {
     if (!awaitingProjection || followUps.current >= 4 || typeof window === "undefined") return;
     const timer = window.setTimeout(() => {
@@ -2826,98 +3402,140 @@ function KitchenBoardContent(
     csrf: props.csrf,
     onChanged: useCallback(() => setRevision((value) => value + 1), []),
   });
-  const refreshButtonRef = useRef<HTMLButtonElement>(null),
-    retryButtonRef = useRef<HTMLButtonElement>(null),
-    restoreRetryFocus = useRef(false);
-  // M3: re-read the queue on its own while the board is visible and no action is in flight.
-  const submitting = actions.state.kind === "Submitting";
+  const refreshButtonRef = useRef<HTMLButtonElement>(null);
+  // M3: re-read the queue on its own while the board is visible.
   const found = state.kind === "Found" && stale === undefined;
   // v15 cbff9d6f: no reads once this screen's sign-in has ended.
   const live = useStaffSessionLive();
   useEffect(() => {
     if (!found || !live || typeof window === "undefined") return;
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && !submitting) setRevision((value) => value + 1);
+      if (document.visibilityState === "visible") setRevision((value) => value + 1);
     }, kitchenRefreshIntervalMs);
     return () => window.clearInterval(timer);
-  }, [found, live, submitting]);
+  }, [found, live]);
   // IDR-0039: after a failed read, keep trying with backoff (and at once when the network returns).
   useStaleRetry(retryAttempts(state), () => setRevision((value) => value + 1));
-  // M3: chime once for work that arrived since the previous read, when the operator asked for it.
-  // WP-2423 Q33: new work also stays announced on screen until a cook says they saw it, or until
-  // it is no longer waiting to be accepted; the chime repeats while it is unanswered.
-  const previousView = useRef<KitchenBoardView | null>(null);
+  // Combos by section: what this screen shows decides what rings on it. A drinks screen stops
+  // ringing for wok orders, and a dish alerts its own screen even if its combo was already started.
+  const [section, setSection] = useState(storedKitchenSection);
+  const boardView = state.kind === "Found" ? state.view : null;
+  const screenLines = useMemo(
+    () =>
+      boardView === null
+        ? null
+        : kitchenScreenLines(boardView.items, kitchenSectionOnBoard(boardView, section), {
+            storeHasSections: (boardView.kitchenSections ?? []).length > 0,
+          }),
+    [boardView, section],
+  );
+  const previousLines = useRef<readonly KitchenBoardItem[] | null>(null);
+  const previousSection = useRef(section);
   const previousChases = useRef<KitchenBoardView | null>(null);
-  const [arrivals, setArrivals] = useState<readonly string[]>([]);
+  const [arrivals, setArrivals] = useState<ReadonlyMap<string, number>>(new Map());
+  const [cancelled, setCancelled] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    if (state.kind !== "Found") return;
-    const arrived = newQueuedReferences(previousView.current, state.view);
-    previousView.current = state.view;
-    setArrivals((current) => unansweredArrivals(current, arrived, state.view));
+    if (boardView === null || screenLines === null) return;
+    // Changing section sets a new baseline without ringing.
+    const baseline = previousSection.current === section ? previousLines.current : null;
+    previousSection.current = section;
+    const arrived = newQueuedReferences(baseline, screenLines);
+    const justCancelled = newKitchenCancellations(baseline, screenLines);
+    previousLines.current = screenLines;
+    setArrivals((current) => unansweredArrivals(current, arrived, screenLines, performance.now()));
     // WP-2423 item 8 ⑦: a server chased a dish since the previous read.
-    const chased = newKitchenChases(previousChases.current, state.view);
-    previousChases.current = state.view;
-    if (soundOn && (arrived.length > 0 || chased.length > 0) && audio.current)
+    const chased = newKitchenChases(previousChases.current, boardView);
+    previousChases.current = boardView;
+    // Start is optional, so the kitchen is told: a dish nobody marked started may be in the pan.
+    if (justCancelled.length > 0) {
+      setCancelled((current) => new Set([...current, ...justCancelled]));
+      window.setTimeout(() => {
+        setCancelled((current) => {
+          const next = new Set(current);
+          for (const key of justCancelled) next.delete(key);
+          return next;
+        });
+      }, kitchenCancelledNoticeMs);
+    }
+    if (
+      soundOnRef.current &&
+      (arrived.length > 0 || chased.length > 0 || justCancelled.length > 0) &&
+      audio.current
+    )
       playKitchenChime(audio.current);
-  }, [soundOn, state]);
-  const waiting = arrivals.length > 0;
+  }, [boardView, screenLines, section]);
+  // A new line rings once and keeps its mark for a minute. A reminder rings only while nobody has
+  // touched this screen since it appeared: that is someone away from the screen (WP-2423 Q33).
+  const lastTouch = useRef(typeof performance === "undefined" ? 0 : performance.now());
   useEffect(() => {
-    if (!waiting || !soundOn || typeof window === "undefined") return;
-    const timer = window.setInterval(() => {
-      if (audio.current) playKitchenChime(audio.current);
-    }, kitchenArrivalRepeatMs);
-    return () => window.clearInterval(timer);
-  }, [waiting, soundOn]);
-  const runAction = (item: KitchenBoardItem, action: KitchenAction) => {
-    // Never send while offline or stale; nothing is queued for later (IDR-0039).
-    if (stale !== undefined || browserOffline()) return;
-    restoreRetryFocus.current = document.activeElement instanceof HTMLButtonElement;
-    actions.act(item, action);
-  };
-  // WP-2423 item 8 ⑥ part 4: one dish of a combo done; the last one finishes the combo.
-  const comboPartDone = (workItemReference: string, part: ComboPartView) => {
-    if (stale !== undefined || browserOffline() || props.csrf === undefined) return;
-    void markComboPartDone(props.csrf, {
-      workItemReference,
-      optionReference: part.optionReference,
-    })
-      .then((allDone) => {
-        const item =
-          state.kind === "Found"
-            ? (actions.view ?? state.view).items.find(
-                (candidate) => candidate.workItemReference === workItemReference,
-              )
-            : undefined;
-        if (allDone && item !== undefined && item.status === "In Progress")
-          runAction(
-            {
-              ...item,
-              comboParts: (item.comboParts ?? []).map((p) => ({ ...p, done: true })),
-            },
-            "CompleteKitchenWorkItem",
-          );
-        else setRevision((value) => value + 1);
-      })
-      .catch(() => setRevision((value) => value + 1));
-  };
-  const runActionAll = (items: readonly KitchenBoardItem[], action: KitchenAction) => {
-    if (stale !== undefined || browserOffline()) return;
-    restoreRetryFocus.current = document.activeElement instanceof HTMLButtonElement;
-    actions.actAll(items, action);
-  };
-  const retry = () => {
-    if (stale !== undefined || browserOffline()) return;
-    restoreRetryFocus.current = document.activeElement === retryButtonRef.current;
-    actions.retry();
-  };
+    const touched = () => {
+      lastTouch.current = performance.now();
+    };
+    document.addEventListener("pointerdown", touched, { capture: true });
+    return () => document.removeEventListener("pointerdown", touched, { capture: true });
+  }, []);
+  const [arrivalClock, setArrivalClock] = useState(0);
+  const anyArrival = arrivals.size > 0;
   useEffect(() => {
-    if (actions.state.kind !== "Unknown" || !restoreRetryFocus.current) return;
-    restoreRetryFocus.current = false;
-    // The acted card holds focus while the step is sent; an unknown result moves it to Retry.
-    const active = document.activeElement;
-    if (active === document.body || active?.matches("[data-work-item]"))
-      retryButtonRef.current?.focus();
-  }, [actions.state.kind]);
+    if (!anyArrival || typeof window === "undefined") return;
+    const tick = window.setInterval(() => setArrivalClock(performance.now()), 5_000);
+    const reminder = window.setInterval(() => {
+      if (
+        soundOnRef.current &&
+        audio.current &&
+        kitchenArrivalsUnattended(arrivalsRef.current, lastTouch.current)
+      )
+        playKitchenChime(audio.current);
+    }, kitchenArrivalReminderMs);
+    return () => {
+      window.clearInterval(tick);
+      window.clearInterval(reminder);
+    };
+  }, [anyArrival]);
+  const arrivalsRef = useRef(arrivals);
+  arrivalsRef.current = arrivals;
+  const freshArrivals = useMemo(() => {
+    const now = Math.max(arrivalClock, typeof performance === "undefined" ? 0 : performance.now());
+    return [...arrivals].filter(([, at]) => now - at < kitchenArrivalFreshMs).map(([key]) => key);
+  }, [arrivals, arrivalClock]);
+  const statusEntries: readonly KitchenStatusEntry[] = [
+    ...actions.notices.map((notice) => ({
+      key: "step-" + notice.id,
+      tone: notice.tone === "Done" ? ("Info" as const) : ("Problem" as const),
+      text: notice.text,
+    })),
+    ...(rework.state.kind === "Idle"
+      ? []
+      : [
+          {
+            key: "rework",
+            tone:
+              rework.state.kind === "Confirmed" || rework.state.kind === "Submitting"
+                ? ("Info" as const)
+                : ("Problem" as const),
+            text: kitchenReworkStatusHeading(rework),
+          },
+        ]),
+    ...(staleClose.state.kind === "Idle"
+      ? []
+      : [
+          {
+            key: "stale-close",
+            tone:
+              staleClose.state.kind === "Confirmed" || staleClose.state.kind === "Submitting"
+                ? ("Info" as const)
+                : ("Problem" as const),
+            text: kitchenStaleCloseHeading(staleClose),
+          },
+        ]),
+  ];
+  const statusDetails =
+    rework.state.kind === "Idle" && staleClose.state.kind === "Idle" ? undefined : (
+      <>
+        <KitchenReworkStatus rework={rework} />
+        <KitchenStaleCloseStatus close={staleClose} />
+      </>
+    );
   const settled = state.kind !== "Loading" && !(state.kind === "Found" && state.reloading);
   useEffect(() => {
     if (revision > 0 && settled && manualRefresh.current) {
@@ -2943,113 +3561,84 @@ function KitchenBoardContent(
     ? props.workspaceFrame
     : undefined;
   const headerStatus = props.headerStatus?.(operator);
-  // WP-2423: what happened to the last step is said inside the board, under its heading, not
-  // above the page frame.
-  const notices = (
-    <>
-      {actions.state.kind !== "Idle" ? (
-        <StatePanel
-          heading={
-            actions.state.kind === "Confirmed"
-              ? // WP-2423: what the cook just did, said plainly; the card already shows it.
-                kitchenStepText(
-                  kitchenOrderLabel(actions.state.attempt.item),
-                  actions.state.attempt.item,
-                  actions.state.result,
-                )
-              : kitchenActionNotice(actions.state, actions.rejectedRefreshed).heading
-          }
-          status
-        >
-          {actions.state.kind === "Confirmed" ? null : (
-            <p>{kitchenActionNotice(actions.state, actions.rejectedRefreshed).text}</p>
-          )}
-          {actions.state.kind === "Unknown" ? (
-            <button
-              ref={retryButtonRef}
-              disabled={!actions.canRetry || stale !== undefined}
-              onClick={retry}
-            >
-              {kitchenActionNotice(actions.state, actions.rejectedRefreshed).retry}
-            </button>
-          ) : null}
-        </StatePanel>
+  // DEC-PAID-ORDER-AUTO-ACCEPT: the Store's Pause, for whoever may pause.
+  const pauseOrdering =
+    props.csrf !== undefined && props.storeReference !== undefined && props.csrf !== "" ? (
+      <PauseOrderingControl csrf={props.csrf} storeReference={props.storeReference} />
+    ) : null;
+  return state.kind === "Found" ? (
+    <KitchenBoardScreen
+      view={actions.view ?? state.view}
+      statusEntries={statusEntries}
+      statusDetails={statusDetails}
+      pauseOrdering={pauseOrdering}
+      onRefresh={refresh}
+      refreshButtonRef={refreshButtonRef}
+      steps={{
+        pendingLines: actions.pendingLines,
+        onStep: actions.step,
+        onMarkReady: actions.markReady,
+        onUndo: actions.undo,
+        onRetry: actions.retry,
+        onDismiss: actions.dismiss,
+      }}
+      actionsBlocked={actions.blocked || stale !== undefined}
+      navigation={navigation}
+      headerStatus={headerStatus}
+      workspaceFrame={workspaceFrame}
+      soundOn={soundOn}
+      onRing={() => {
+        if (audio.current) playKitchenChime(audio.current);
+      }}
+      soundResumes={soundResumes}
+      onSoundToggle={toggleSound}
+      arrivals={freshArrivals}
+      cancelledLines={cancelled}
+      section={section}
+      onSection={setSection}
+      autoRefresh
+      stale={stale}
+      checkedAt={state.loadedAt}
+      // The kitchen display offers marking an item sold out in its own navigation (Q17).
+      soldOutHref={kitchenDisplay ? undefined : props.soldOutHref}
+      earlierDays={
+        props.csrf
+          ? {
+              blocked: staleClose.busy || browserOffline(),
+              onClose: staleClose.close,
+            }
+          : undefined
+      }
+      remakes={
+        rework.board
+          ? {
+              items: rework.board.items,
+              canRework: rework.board.canRework,
+              readFailed: rework.readFailed,
+              blocked: rework.busy || browserOffline(),
+              onCreate: rework.create,
+              onAdvance: rework.advance,
+              onCancel: rework.cancel,
+            }
+          : undefined
+      }
+    />
+  ) : (
+    <KitchenFrame
+      workspaceFrame={workspaceFrame}
+      title={props.storeLabel ?? t("Kitchen")}
+      navigation={navigation}
+      headerStatus={headerStatus}
+    >
+      {workspaceFrame ? <h1 className="kitchen-workspace-title">{t("Kitchen")}</h1> : null}
+      <KitchenBoardStatePanel state={state.kind} />
+      {state.kind !== "Loading" ? (
+        <button ref={refreshButtonRef} onClick={refresh}>
+          {t("Refresh")}
+        </button>
       ) : null}
-      <KitchenReworkStatus rework={rework} />
-      <KitchenStaleCloseStatus close={staleClose} />
-      {/* DEC-PAID-ORDER-AUTO-ACCEPT: the Store's Pause, for whoever may pause. */}
-      {props.csrf !== undefined && props.storeReference !== undefined && props.csrf !== "" ? (
-        <PauseOrderingControl csrf={props.csrf} storeReference={props.storeReference} />
-      ) : null}
-    </>
-  );
-  return (
-    <ComboPartDoneContext.Provider value={comboPartDone}>
-      {state.kind === "Found" ? (
-        <KitchenBoardScreen
-          view={actions.view ?? state.view}
-          notices={notices}
-          onRefresh={refresh}
-          refreshButtonRef={refreshButtonRef}
-          onAction={runAction}
-          onActionAll={runActionAll}
-          actionsBlocked={actions.blocked || stale !== undefined}
-          navigation={navigation}
-          headerStatus={headerStatus}
-          workspaceFrame={workspaceFrame}
-          soundOn={soundOn}
-          onRing={() => {
-            if (audio.current) playKitchenChime(audio.current);
-          }}
-          soundResumes={soundResumes}
-          onSoundToggle={toggleSound}
-          arrivals={arrivals}
-          onArrivalsSeen={() => setArrivals([])}
-          autoRefresh
-          stale={stale}
-          checkedAt={state.loadedAt}
-          // The kitchen display offers marking an item sold out in its own navigation (Q17).
-          soldOutHref={kitchenDisplay ? undefined : props.soldOutHref}
-          earlierDays={
-            props.csrf
-              ? {
-                  blocked: staleClose.busy || browserOffline(),
-                  onClose: staleClose.close,
-                }
-              : undefined
-          }
-          remakes={
-            rework.board
-              ? {
-                  items: rework.board.items,
-                  canRework: rework.board.canRework,
-                  readFailed: rework.readFailed,
-                  blocked: rework.busy || browserOffline(),
-                  onCreate: rework.create,
-                  onAdvance: rework.advance,
-                  onCancel: rework.cancel,
-                }
-              : undefined
-          }
-        />
-      ) : (
-        <KitchenFrame
-          workspaceFrame={workspaceFrame}
-          title={props.storeLabel ?? t("Kitchen")}
-          navigation={navigation}
-          headerStatus={headerStatus}
-        >
-          {workspaceFrame ? <h1 className="kitchen-workspace-title">{t("Kitchen")}</h1> : null}
-          {notices}
-          <KitchenBoardStatePanel state={state.kind} />
-          {state.kind !== "Loading" ? (
-            <button ref={refreshButtonRef} onClick={refresh}>
-              {t("Refresh")}
-            </button>
-          ) : null}
-        </KitchenFrame>
-      )}
-    </ComboPartDoneContext.Provider>
+      {pauseOrdering}
+    </KitchenFrame>
   );
 }
 /**

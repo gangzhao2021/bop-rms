@@ -25,6 +25,12 @@ import {
   kitchenTicketTierText,
   kitchenLateMinutes,
   kitchenWarningMinutes,
+  isActiveKitchenWork,
+  kitchenArrivalsUnattended,
+  kitchenComboDishNote,
+  kitchenLineKey,
+  kitchenScreenLines,
+  newKitchenCancellations,
   newQueuedReferences,
   unansweredArrivals,
   playKitchenChime,
@@ -49,6 +55,15 @@ import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
 import { StoreTimeZoneContext } from "./StoreTime.js";
 import { findInternalText, staticText } from "../e2e/internal-text-patterns.js";
 import { earlierDayTickets, fromEarlierKitchenDay, kitchenWaitText } from "./KitchenEarlierDays.js";
+const noSteps = {
+  pendingLines: new Map(),
+  onStep: () => undefined,
+  onMarkReady: () => undefined,
+  onUndo: () => undefined,
+  onRetry: () => undefined,
+  onDismiss: () => undefined,
+};
+
 describe("WP-1804 Kitchen Board screens", () => {
   it("WP-2423: says when the board was last checked, not only when its work last changed", () => {
     const view = parseKitchenBoardView(kitchenBoardFixture());
@@ -316,7 +331,7 @@ describe("WP-1804 Kitchen Board screens", () => {
     expect(html).toContain('aria-label="Work item milestones"');
     expect(html).toContain('<time dateTime="2026-08-12T15:00:00.000Z"');
     expect(html).toContain('<time dateTime="2026-08-12T15:04:00.000Z"');
-    expect(html).toContain("Accepted");
+    expect(html).toContain("Taken by the kitchen");
     expect(html).toContain('<time dateTime="2026-08-12T15:17:00.000Z"');
     expect(html).toContain("Order item marked ready");
     // WP-2423: without the Store's zone the time is labelled UTC, never the raw machine instant.
@@ -324,8 +339,10 @@ describe("WP-1804 Kitchen Board screens", () => {
       '<time dateTime="2026-08-12T15:17:00.000Z" title="2026-08-12T15:17:00.000Z">Aug 12, 2026, 3:17 PM UTC</time>',
     );
     expect(html).not.toContain("unavailable from this projection");
-    expect(html.indexOf("Work item created")).toBeLessThan(html.indexOf("Accepted"));
-    expect(html.indexOf("Accepted")).toBeLessThan(html.indexOf("Order item marked ready"));
+    expect(html.indexOf("Work item created")).toBeLessThan(html.indexOf("Taken by the kitchen"));
+    expect(html.indexOf("Taken by the kitchen")).toBeLessThan(
+      html.indexOf("Order item marked ready"),
+    );
     expect(html).not.toContain("<dd>Unavailable</dd>");
   });
   it("distinguishes a projection-backed empty modifier list", () => {
@@ -419,9 +436,9 @@ describe("WP-2423 M3 kitchen display", () => {
       ...kitchenBoardFixture(),
       items: [kitchenItemFixture(), arrived, started],
     });
-    expect(newQueuedReferences(null, next)).toEqual([]);
-    expect(newQueuedReferences(previous, next)).toEqual([arrived.workItemReference]);
-    expect(newQueuedReferences(next, next)).toEqual([]);
+    expect(newQueuedReferences(null, next.items)).toEqual([]);
+    expect(newQueuedReferences(previous.items, next.items)).toEqual([arrived.workItemReference]);
+    expect(newQueuedReferences(next.items, next.items)).toEqual([]);
   });
   it("offers the sound toggle, auto-refresh note and plain state labels", () => {
     const view = parseKitchenBoardView({
@@ -442,7 +459,7 @@ describe("WP-2423 M3 kitchen display", () => {
     expect(html).toContain('aria-pressed="false"');
     expect(html).toContain(">Sound off</button>");
     expect(html).toContain("Auto-refresh every 10 s");
-    expect(html).toContain('<strong data-status="In Progress">In progress</strong>');
+    expect(html).toContain('<strong data-status="In Progress">Being made</strong>');
     expect(html).not.toContain("KIT-KITCHEN-QUEUE");
     const on = renderToStaticMarkup(
       <MemoryRouter>
@@ -552,27 +569,31 @@ describe("WP-2423 M3 kitchen display", () => {
     expect(render("Named")).toContain('data-alert="true"');
     expect(render("Unverified")).not.toContain("data-alert");
   });
-  it("WP-2423 Q33: keeps new work announced until it is seen or no longer waiting", () => {
+  it("WP-2423 Q33: announces new work once and in one row, and keeps nothing to dismiss", () => {
     const first = kitchenItemFixture();
     const second = {
       ...kitchenItemFixture(),
       workItemReference: "018f0f58-767a-7f3b-a1d0-000000000451",
     };
     const view = parseKitchenBoardView({ ...kitchenBoardFixture(), items: [first, second] });
-    const announced = unansweredArrivals([], [first.workItemReference], view);
-    expect(announced).toEqual([first.workItemReference]);
+    const announced = unansweredArrivals(new Map(), [first.workItemReference], view.items, 100);
+    expect([...announced]).toEqual([[first.workItemReference, 100]]);
     // Unchanged reads keep the same list, so the board does not re-render for nothing.
-    expect(unansweredArrivals(announced, [], view)).toBe(announced);
-    expect(unansweredArrivals(announced, [second.workItemReference], view)).toEqual([
-      first.workItemReference,
-      second.workItemReference,
-    ]);
-    // Accepted on another screen: the announcement ends without anyone pressing Seen.
-    const accepted = parseKitchenBoardView({
+    expect(unansweredArrivals(announced, [], view.items, 200)).toBe(announced);
+    expect(
+      [...unansweredArrivals(announced, [second.workItemReference], view.items, 200)].map(
+        ([, at]) => at,
+      ),
+    ).toEqual([100, 200]);
+    // Taken up on another screen: the announcement ends by itself.
+    const started = parseKitchenBoardView({
       ...kitchenBoardFixture(),
       items: [{ ...first, status: "In Progress" }, second],
     });
-    expect(unansweredArrivals(announced, [], accepted)).toEqual([]);
+    expect(unansweredArrivals(announced, [], started.items, 200).size).toBe(0);
+    // A reminder is for someone away from the screen: a touch since the arrival silences it.
+    expect(kitchenArrivalsUnattended(announced, 50)).toBe(true);
+    expect(kitchenArrivalsUnattended(announced, 150)).toBe(false);
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <KitchenBoardScreen
@@ -580,17 +601,15 @@ describe("WP-2423 M3 kitchen display", () => {
           soundOn={false}
           onSoundToggle={() => undefined}
           arrivals={[first.workItemReference]}
-          onArrivalsSeen={() => undefined}
         />
       </MemoryRouter>,
     );
-    expect(html).toContain('role="alert"');
-    expect(html).toContain("New order to accept");
     const [shown] = view.items;
     if (shown === undefined) throw new Error("fixture has no items");
-    expect(html).toContain(kitchenOrderLabel(shown));
-    expect(html).toContain(">Seen</button>");
-    expect(html).toContain("Sound is off. New orders will not ring on this screen.");
+    expect(html).toContain("New order: " + kitchenOrderLabel(shown));
+    expect(html).not.toContain(">Seen</button>");
+    // Lower in the row than the new order, and still there on a tap.
+    expect(html).toContain("1 more");
     const resuming = renderToStaticMarkup(
       <MemoryRouter>
         <KitchenBoardScreen
@@ -602,13 +621,47 @@ describe("WP-2423 M3 kitchen display", () => {
       </MemoryRouter>,
     );
     expect(resuming).toContain("Sound turns back on at your next tap on this screen.");
-    expect(resuming).not.toContain('role="alert"');
+    const quiet = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={view} soundOn={false} onSoundToggle={() => undefined} />
+      </MemoryRouter>,
+    );
+    expect(quiet).toContain("Sound is off. New orders will not ring on this screen.");
     const on = renderToStaticMarkup(
       <MemoryRouter>
         <KitchenBoardScreen view={view} soundOn onSoundToggle={() => undefined} />
       </MemoryRouter>,
     );
-    expect(on).not.toContain("kitchen-sound-reminder");
+    expect(on).not.toContain("Sound is off");
+    expect(on).toContain('class="kitchen-status-row"');
+  });
+  it("a line cancelled since the last read is told to the kitchen once", () => {
+    const first = kitchenItemFixture();
+    const before = parseKitchenBoardView({ ...kitchenBoardFixture(), items: [first] });
+    const after = parseKitchenBoardView({
+      ...kitchenBoardFixture(),
+      items: [{ ...first, status: "Cancelled" }],
+    });
+    expect(newKitchenCancellations(null, after.items)).toEqual([]);
+    expect(newKitchenCancellations(before.items, after.items)).toEqual([first.workItemReference]);
+    expect(newKitchenCancellations(after.items, after.items)).toEqual([]);
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen
+          view={after}
+          cancelledLines={new Set([first.workItemReference])}
+          actionsBlocked={false}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Cancelled · don&#x27;t make it");
+    expect(html).toContain('data-cancelled-notice="true"');
+    const later = renderToStaticMarkup(
+      <MemoryRouter>
+        <KitchenBoardScreen view={after} actionsBlocked={false} />
+      </MemoryRouter>,
+    );
+    expect(later).not.toContain("don&#x27;t make it");
   });
   it("plays nothing where audio is unavailable", () => {
     expect(() => playKitchenChime()).not.toThrow();
@@ -1038,23 +1091,19 @@ describe("IDR-0039 kitchen stale read-only mode", () => {
   it("shows the last tickets read-only with the time of the last update", () => {
     const live = renderToStaticMarkup(
       <MemoryRouter>
-        <KitchenBoardScreen
-          view={view}
-          onAction={() => undefined}
-          actionsBlocked={false}
-          autoRefresh
-        />
+        <KitchenBoardScreen view={view} steps={noSteps} actionsBlocked={false} autoRefresh />
       </MemoryRouter>,
     );
+    // The fixture's dish needs its allergens checked, so its main step is Start.
     expect(live).toContain(
-      '<button type="button" class="kitchen-ticket__next">Accept order</button>',
+      '<button type="button" class="kitchen-ticket__next">Start cooking</button>',
     );
     expect(live).not.toContain("Read-only until reconnected");
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <KitchenBoardScreen
           view={view}
-          onAction={() => undefined}
+          steps={noSteps}
           actionsBlocked={false}
           autoRefresh
           stale={{ reason: "Offline", lastLoadedAt: found.loadedAt, attempts: 1 }}
@@ -1064,11 +1113,7 @@ describe("IDR-0039 kitchen stale read-only mode", () => {
     expect(html).toContain("Mushroom rice bowl");
     expect(html).toContain("Read-only until reconnected");
     expect(html).toContain(
-      'Offline — showing the last update from <time dateTime="2026-08-12T15:12:30.000Z">15:12 UTC</time>. Actions are paused until the connection returns.',
-    );
-    expect(html).toContain("Trying again automatically.");
-    expect(html).toContain(
-      '<button type="button" class="kitchen-ticket__next" disabled="">Accept order</button>',
+      '<button type="button" class="kitchen-ticket__next" disabled="">Start cooking</button>',
     );
     expect(html).toContain("Data may be out of date");
     expect(html).not.toContain("Auto-refresh every 10 s");
@@ -1081,7 +1126,9 @@ describe("IDR-0039 kitchen stale read-only mode", () => {
         />
       </MemoryRouter>,
     );
-    expect(lost).toContain("Connection lost — showing the last update from");
+    // The reason stays one tap away, in the row that never moves the tickets.
+    expect(lost).toContain("Read-only until reconnected");
+    expect(lost).toContain(">Details</button>");
   });
 });
 
@@ -1274,7 +1321,7 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
               canCloseEarlierDayTickets: canClose,
             })}
             earlierDays={{ blocked: false, onClose: () => undefined }}
-            onAction={() => undefined}
+            steps={noSteps}
             actionsBlocked={false}
           />
         </MemoryRouter>
@@ -1660,5 +1707,134 @@ describe("Owner 2026-11-03: identical dishes read as one line on a ticket", () =
     ["a finished dish", { status: "Completed", completedQuantity: 1 }],
   ])("keeps a dish with %s on its own line", (_name, change) => {
     expect(mergeIdenticalKitchenItems([dish("a"), dish("b", change)])).toHaveLength(2);
+  });
+});
+
+describe("combos by section: what each kitchen section's screen shows", () => {
+  const tea = "018f0f58-767a-7f3b-a1d0-000000000501";
+  const fries = "018f0f58-767a-7f3b-a1d0-000000000502";
+  const cola = "018f0f58-767a-7f3b-a1d0-000000000503";
+  const part = (optionReference: string, nameZh: string, name: string, done = false) => ({
+    optionReference,
+    nameZh,
+    name,
+    done,
+    served: false,
+  });
+  const combo = (change: Record<string, unknown> = {}) => ({
+    ...kitchenItemFixture(),
+    workItemReference: "018f0f58-767a-7f3b-a1d0-000000000500",
+    displayName: "TEST set",
+    comboParts: [part(tea, "奶茶", "Milk tea"), part(fries, "薯条", "Fries")],
+    comboPartSections: { [tea]: "Drinks", [fries]: "Snacks" },
+    kitchenSection: null,
+    ...change,
+  });
+  const lines = (section: string, item: Record<string, unknown>, storeHasSections = true) =>
+    kitchenScreenLines(
+      parseKitchenBoardView({ ...kitchenBoardFixture(), items: [item] }).items,
+      section,
+      { storeHasSections },
+    );
+  it("a combo becomes one line per dish per section, and All sections keeps its card", () => {
+    expect(lines("All", combo()).map((line) => line.displayName)).toEqual(["TEST set"]);
+    const drinks = lines("Drinks", combo());
+    expect(drinks.map((line) => line.displayName)).toEqual(["奶茶"]);
+    expect(drinks[0]).toMatchObject({ otherName: "Milk tea", selectedOptions: [] });
+    expect(drinks[0]?.comboPartOf).toEqual({
+      comboName: "TEST set",
+      optionReference: tea,
+      done: false,
+      stillToMake: ["薯条"],
+    });
+    expect(lines("Snacks", combo()).map((line) => line.displayName)).toEqual(["薯条"]);
+    expect(lines("Grill", combo())).toEqual([]);
+  });
+  it("gives each dish line its own key, so focus and arrivals follow the line", () => {
+    const [drink] = lines("Drinks", combo());
+    if (drink === undefined) throw new Error("no line");
+    expect(kitchenLineKey(drink)).toBe("018f0f58-767a-7f3b-a1d0-000000000500:" + tea);
+  });
+  it("a done dish leaves its screen; a dish with no mark shows under None and on every screen", () => {
+    const done = combo({
+      status: "In Progress",
+      comboParts: [part(tea, "奶茶", "Milk tea", true), part(fries, "薯条", "Fries")],
+    });
+    const [gone] = lines("Drinks", done);
+    expect(gone === undefined ? null : isActiveKitchenWork(gone)).toBe(false);
+    const unmarked = combo({ comboPartSections: { [tea]: "Drinks", [fries]: null } });
+    expect(lines("None", unmarked).map((line) => line.displayName)).toEqual(["薯条"]);
+    expect(lines("Drinks", unmarked).map((line) => line.displayName)).toEqual(["奶茶", "薯条"]);
+    // In a Store with no sections there is no other screen for it to be lost on.
+    expect(lines("Drinks", unmarked, false).map((line) => line.displayName)).toEqual(["奶茶"]);
+  });
+  it("a dish line reads to make whatever its combo's status, and its real status stays", () => {
+    const [line] = lines("Snacks", combo({ status: "In Progress" }));
+    expect(line).toMatchObject({ status: "In Progress" });
+    expect(line?.comboPartOf?.done).toBe(false);
+  });
+  it("a combo still open with no dish left to make shows on every screen as one whole line", () => {
+    const allDone = combo({
+      status: "In Progress",
+      comboParts: [part(tea, "奶茶", "Milk tea", true), part(fries, "薯条", "Fries", true)],
+    });
+    for (const section of ["Drinks", "Snacks", "None"])
+      expect(lines(section, allDone).map((line) => line.displayName)).toEqual(["TEST set"]);
+    expect(lines("Drinks", allDone)[0]?.comboPartOf).toBeUndefined();
+  });
+  it("a tablet reading an older server keeps the whole combo under its own section", () => {
+    const old = combo({ comboPartSections: undefined, kitchenSection: "Drinks" });
+    delete (old as { comboPartSections?: unknown }).comboPartSections;
+    expect(lines("Drinks", old).map((line) => line.displayName)).toEqual(["TEST set"]);
+  });
+  it("says in one short line how the combo stands", () => {
+    const note = (stillToMake: readonly string[]) =>
+      kitchenComboDishNote({
+        comboName: "Set A",
+        optionReference: tea,
+        done: false,
+        stillToMake,
+      });
+    expect(note([])).toBe("Combo: Set A · last dish of it");
+    expect(note(["Fries"])).toBe("Combo: Set A · also Fries");
+    expect(note(["Fries", "Cola", cola])).toBe("Combo: Set A · 3 more dishes");
+  });
+  it("a chosen dish alerts its own screen even if its combo was already started elsewhere", () => {
+    const before = lines(
+      "Drinks",
+      combo({ comboPartSections: { [tea]: "Snacks", [fries]: "Snacks" } }),
+    );
+    const after = lines("Drinks", combo({ status: "In Progress" }));
+    expect(before).toEqual([]);
+    expect(newQueuedReferences(before, after)).toEqual([
+      "018f0f58-767a-7f3b-a1d0-000000000500:" + tea,
+    ]);
+  });
+  it("a drinks screen does not ring for a wok order", () => {
+    const wok = (workItemReference: string) => ({
+      ...kitchenItemFixture(),
+      workItemReference,
+      kitchenSection: "Wok",
+    });
+    const previous = kitchenScreenLines(
+      parseKitchenBoardView({
+        ...kitchenBoardFixture(),
+        items: [wok("018f0f58-767a-7f3b-a1d0-000000000510")],
+      }).items,
+      "Drinks",
+      { storeHasSections: true },
+    );
+    const next = kitchenScreenLines(
+      parseKitchenBoardView({
+        ...kitchenBoardFixture(),
+        items: [
+          wok("018f0f58-767a-7f3b-a1d0-000000000510"),
+          wok("018f0f58-767a-7f3b-a1d0-000000000511"),
+        ],
+      }).items,
+      "Drinks",
+      { storeHasSections: true },
+    );
+    expect(newQueuedReferences(previous, next)).toEqual([]);
   });
 });

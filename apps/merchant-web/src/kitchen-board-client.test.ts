@@ -238,7 +238,7 @@ it("treats failed network reads as offline and never replays automatically", asy
   expect(f.fetcher).toHaveBeenCalledTimes(1);
 });
 
-it("bounds reads instead of silently truncating a larger queue", async () => {
+it("bounds reads and says more work waits, instead of failing the whole board", async () => {
   const f = setup();
   let page = 10;
   f.fetcher.mockImplementation(async () => {
@@ -253,8 +253,20 @@ it("bounds reads instead of silently truncating a larger queue", async () => {
       },
     });
   });
-  await expect(f.client.loadQueue()).rejects.toMatchObject({ code: "Unavailable" });
-  expect(f.fetcher).toHaveBeenCalledTimes(4);
+  const view = await f.client.loadQueue();
+  expect(f.fetcher).toHaveBeenCalledTimes(6);
+  expect(parseKitchenBoardView(view)).toMatchObject({ moreWaiting: true });
+  expect(parseKitchenBoardView(view).items).toHaveLength(6);
+});
+
+it("says how many tickets wait past what the board carries, when the server knows", async () => {
+  const f = setup();
+  f.fetcher.mockResolvedValue(
+    response({ ...metadata, moreWaitingTickets: 7, items: [item(10)], nextCursor: null }),
+  );
+  expect(parseKitchenBoardView(await f.client.loadQueue()).moreWaiting).toBe(7);
+  f.fetcher.mockResolvedValue(response({ ...metadata, items: [item(10)], nextCursor: null }));
+  expect(parseKitchenBoardView(await f.client.loadQueue()).moreWaiting).toBeUndefined();
 });
 
 it("rejects a response for a different selected Store", async () => {

@@ -4,11 +4,11 @@ import {
   parseKitchenWorkItemView,
   type KitchenBoardItem,
 } from "./kitchen-board.js";
-export type KitchenAction =
-  | "AcceptKitchenWorkItem"
-  | "StartKitchenWorkItem"
-  | "CompleteKitchenWorkItem"
-  | "MarkKitchenOrderItemReady";
+/**
+ * DEC-KITCHEN-ONE-TAP: Accept, Start and Done go through kitchen-step-client.ts. This keeps the one
+ * command that names its versions: Mark ready, with Expo enabled, after the work is complete.
+ */
+export type KitchenAction = "MarkKitchenOrderItemReady";
 export type KitchenActionOutcome =
   | "Accepted"
   | "Started"
@@ -58,16 +58,7 @@ export function createKitchenWorkClient(fetcher: typeof fetch = fetch) {
     }) {
       const item = parseKitchenWorkItemView(input.item),
         execution = item.execution;
-      if (
-        !execution ||
-        ![
-          "AcceptKitchenWorkItem",
-          "StartKitchenWorkItem",
-          "CompleteKitchenWorkItem",
-          "MarkKitchenOrderItemReady",
-        ].includes(input.action)
-      )
-        return fail("Invalid");
+      if (!execution || input.action !== "MarkKitchenOrderItemReady") return fail("Invalid");
       const action = input.action;
       const command = {
         authority: "CurrentMerchantSession",
@@ -78,25 +69,13 @@ export function createKitchenWorkClient(fetcher: typeof fetch = fetch) {
         expectedTicketVersion: execution.ticketVersion,
         idempotencyKey: parseKitchenRouteReference(input.idempotencyKey),
         correlationReference: parseKitchenRouteReference(input.correlationReference),
-        ...(action === "MarkKitchenOrderItemReady"
-          ? {
-              workItems: [
-                {
-                  workItemReference: item.workItemReference,
-                  expectedWorkItemVersion: execution.workItemVersion,
-                },
-              ],
-            }
-          : {
-              workItemReference: item.workItemReference,
-              expectedWorkItemVersion: execution.workItemVersion,
-            }),
-        ...(action === "CompleteKitchenWorkItem"
-          ? { quantityDelta: item.requiredQuantity - item.completedQuantity }
-          : {}),
+        workItems: [
+          {
+            workItemReference: item.workItemReference,
+            expectedWorkItemVersion: execution.workItemVersion,
+          },
+        ],
       };
-      if (action === "CompleteKitchenWorkItem" && item.requiredQuantity <= item.completedQuantity)
-        return fail("Invalid");
       const body = JSON.stringify(command);
       return Object.freeze({
         async execute(csrf: string, signal?: AbortSignal) {

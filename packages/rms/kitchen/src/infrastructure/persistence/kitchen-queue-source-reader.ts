@@ -57,6 +57,13 @@ export function createPostgresKitchenQueueSourceReader(options: {
    * ticket is read. Production compositions set it (24 hours).
    */
   readonly retireFinishedAfterMs?: number;
+  /**
+   * DEC-KITCHEN-ONE-TAP: finished work must never fail a read. Every unfinished ticket stays in the
+   * feed (the oldest `maxTickets` of them, never an error when more wait); finished tickets are kept
+   * newest first up to these bounds, so a busy day's history cannot crowd out what the kitchen still
+   * has to make. Omitted: `maxTickets` bounds all of them and more is a failure.
+   */
+  readonly keepFinished?: { readonly tickets: number; readonly dishes: number };
 }) {
   const brand = parseKitchenTicketReference(options.brandReference);
   const store = parseKitchenTicketReference(options.storeReference);
@@ -67,6 +74,14 @@ export function createPostgresKitchenQueueSourceReader(options: {
   if (
     retireAfter !== undefined &&
     (!Number.isSafeInteger(retireAfter) || retireAfter < 3_600_000 || retireAfter > 31 * 86_400_000)
+  )
+    return unavailable();
+  const keepFinished = options.keepFinished;
+  if (
+    keepFinished !== undefined &&
+    [keepFinished.tickets, keepFinished.dishes].some(
+      (limit) => !Number.isSafeInteger(limit) || limit < 1 || limit > 10000,
+    )
   )
     return unavailable();
   const retirement =
@@ -111,25 +126,50 @@ export function createPostgresKitchenQueueSourceReader(options: {
             // one and every refresh failed.
             "ORDER BY kitchen_work_cancellation.result_ticket_version LIMIT $4) c) AS cancellations " +
             // DEC-KITCHEN-STALE-TICKETS: a ticket a manager closed leaves the live board.
-            "FROM (SELECT * FROM rms_kitchen.kitchen_ticket k WHERE k.brand_id=$1 AND k.store_id=$2 AND k.status='Open' " +
-            "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c WHERE c.brand_id=k.brand_id " +
-            "AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
-            retirement +
-            "ORDER BY k.kitchen_ticket_id LIMIT $3) t " +
+            "FROM (" +
+            (keepFinished === undefined
+              ? "SELECT * FROM rms_kitchen.kitchen_ticket k WHERE k.brand_id=$1 AND k.store_id=$2 AND k.status='Open' " +
+                "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c WHERE c.brand_id=k.brand_id " +
+                "AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
+                retirement +
+                "ORDER BY k.kitchen_ticket_id LIMIT $3"
+              : // Unfinished: the oldest first, up to the limit. Finished: the newest first.
+                "SELECT * FROM (SELECT k.*,f.finished,row_number() OVER w AS keep_rank,sum(f.dishes) OVER w AS keep_dishes " +
+                "FROM rms_kitchen.kitchen_ticket k CROSS JOIN LATERAL (SELECT " +
+                "(SELECT count(*) FROM rms_kitchen.kitchen_work_item i WHERE i.brand_id=k.brand_id AND i.store_id=k.store_id AND i.kitchen_ticket_id=k.kitchen_ticket_id) AS dishes," +
+                "(NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_work_item w WHERE w.brand_id=k.brand_id AND w.store_id=k.store_id AND w.kitchen_ticket_id=k.kitchen_ticket_id " +
+                "AND (w.status IN ('Queued','Held','In Progress') OR (w.status='Completed' AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_order_item_ready_result x " +
+                "WHERE x.brand_id=w.brand_id AND x.store_id=w.store_id AND x.kitchen_ticket_id=w.kitchen_ticket_id AND x.order_item_id=w.order_item_id)))) " +
+                "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_rework_item y WHERE y.brand_id=k.brand_id AND y.store_id=k.store_id AND y.kitchen_ticket_id=k.kitchen_ticket_id AND y.status IN ('Queued','In Progress'))) AS finished) f " +
+                "WHERE k.brand_id=$1 AND k.store_id=$2 AND k.status='Open' " +
+                "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c WHERE c.brand_id=k.brand_id " +
+                "AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
+                retirement +
+                "WINDOW w AS (PARTITION BY f.finished ORDER BY CASE WHEN f.finished THEN k.updated_at END DESC,k.created_at,k.kitchen_ticket_id)) ranked " +
+                "WHERE (NOT finished AND keep_rank<=$3) OR (finished AND keep_rank<=$7 AND keep_dishes<=$8) " +
+                "ORDER BY kitchen_ticket_id") +
+            ") t " +
             "LEFT JOIN rms_kitchen.kitchen_creation_record r ON r.brand_id=t.brand_id AND r.store_id=t.store_id AND r.kitchen_ticket_id=t.kitchen_ticket_id) s",
           [
             brand,
             store,
-            options.maxTickets + 1,
+            keepFinished === undefined ? options.maxTickets + 1 : options.maxTickets,
             options.maxItemsPerTicket + 1,
             options.maxOperationsPerTicket + 1,
-            ...(retireAfter === undefined ? [] : [retireAfter / 1000]),
+            // $6 is unused without retirement; PostgreSQL still needs its type when $7 follows.
+            ...(retireAfter === undefined && keepFinished === undefined
+              ? []
+              : [retireAfter === undefined ? null : retireAfter / 1000]),
+            ...(keepFinished === undefined ? [] : [keepFinished.tickets, keepFinished.dishes]),
           ],
         );
         phase = "verify";
         if (result.rows.length !== 1 || !result.rows[0]) return unavailable();
         const snapshot = result.rows[0];
-        const tickets = rows(snapshot.tickets, options.maxTickets).map((row) => {
+        const tickets = rows(
+          snapshot.tickets,
+          options.maxTickets + (keepFinished?.tickets ?? 0),
+        ).map((row) => {
           const creation = decodeKitchenTicketCreationRecord(
             row.record,
             options.creationValidation,
@@ -346,4 +386,24 @@ export function createPostgresKitchenQueueSourceReader(options: {
       }
     },
   };
+}
+
+/**
+ * DEC-KITCHEN-ONE-TAP: how many tickets the kitchen still has to finish, from Kitchen's own facts, so
+ * a board that cannot show them all says so instead of failing.
+ */
+export async function countUnfinishedKitchenTickets(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+): Promise<number> {
+  const { rows: found } = await tx.query(
+    "SELECT count(*)::int AS n FROM rms_kitchen.kitchen_ticket k WHERE k.brand_id=$1 AND k.store_id=$2 AND k.status='Open' " +
+      "AND NOT EXISTS (SELECT 1 FROM rms_kitchen.kitchen_ticket_closure c WHERE c.brand_id=k.brand_id AND c.store_id=k.store_id AND c.kitchen_ticket_id=k.kitchen_ticket_id) " +
+      "AND EXISTS (SELECT 1 FROM rms_kitchen.kitchen_work_item w WHERE w.brand_id=k.brand_id AND w.store_id=k.store_id AND w.kitchen_ticket_id=k.kitchen_ticket_id AND w.status IN ('Queued','Held','In Progress'))",
+    [
+      parseKitchenTicketReference(scope.brandReference),
+      parseKitchenTicketReference(scope.storeReference),
+    ],
+  );
+  return Number(found[0]?.n ?? 0);
 }

@@ -21,7 +21,7 @@ const response = (value: unknown, status = 200) =>
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
 const success = () => ({
-  action: "AcceptKitchenWorkItem",
+  action: "MarkKitchenOrderItemReady",
   ticketReference: item().ticketReference,
   workItemReference: item().workItemReference,
   orderItemReference: id(4),
@@ -42,7 +42,7 @@ function setup() {
   const fetcher = vi.fn<typeof fetch>(),
     client = createKitchenWorkClient(fetcher);
   const input = {
-    action: "AcceptKitchenWorkItem" as const,
+    action: "MarkKitchenOrderItemReady" as const,
     storeReference: id(3),
     item: item(),
     idempotencyKey: id(1),
@@ -130,9 +130,4 @@ it("builds ready and remaining-quantity completion from exact item versions", as
   expect(JSON.parse(String(f.fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
     workItems: [{ workItemReference: item().workItemReference, expectedWorkItemVersion: "1" }],
   });
-  f.fetcher.mockResolvedValue(response({}, 409));
-  await expect(
-    f.client.prepare({ ...f.input, action: "CompleteKitchenWorkItem" }).execute("a".repeat(43)),
-  ).rejects.toThrow();
-  expect(JSON.parse(String(f.fetcher.mock.calls[1]?.[1]?.body)).quantityDelta).toBe(2);
 });

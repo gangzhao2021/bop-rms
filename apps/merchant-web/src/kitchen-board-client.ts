@@ -1,6 +1,7 @@
 import { allergenName, kitchenDishNames } from "./i18n/i18n.js";
 import {
   KitchenBoardClientError,
+  kitchenBoardMaxItems,
   parseKitchenBoardView,
   parseKitchenRouteReference,
   parseKitchenWorkItemView,
@@ -115,6 +116,8 @@ function item(value: unknown) {
     displayName,
     ...(otherName === null ? {} : { otherName }),
     ...("comboParts" in raw ? { comboParts: raw.comboParts } : {}),
+    // Combos by section: each chosen dish's section, when this server gives it.
+    ...("comboPartSections" in raw ? { comboPartSections: raw.comboPartSections } : {}),
     ...("chase" in raw ? { chase: raw.chase } : {}),
     ...("takenOnPaper" in raw ? { takenOnPaper: raw.takenOnPaper } : {}),
     // WP-2423 item 8 ⑧: the dish's kitchen section, when this source gives it.
@@ -221,11 +224,37 @@ export function createKitchenBoardClient(options: {
     }
   }
   async function readQueue(search: KitchenQueueSearch | undefined, reference: string | null) {
-    const items = [],
+    const items: unknown[] = [],
       seen = new Set<string>();
     let cursor: unknown = null,
       first: Record<string, unknown> | undefined;
-    for (let page = 0; page < 4; page++) {
+    // DEC-KITCHEN-ONE-TAP: oldest work first; open work past this read is said, never a failure.
+    const pages = Math.ceil(kitchenBoardMaxItems / 50);
+    const view = (found: Record<string, unknown>, cut: boolean) => {
+      const waiting = found.moreWaitingTickets;
+      const moreWaiting = typeof waiting === "number" && waiting > 0 ? waiting : cut ? true : null;
+      return parseKitchenBoardView({
+        screenId: "KIT-KITCHEN-QUEUE",
+        projectionName: "kitchen_work_queue_v1",
+        projectionVersion: 1,
+        storeLabel: options.storeLabel,
+        projectedAt: found.projectedAt,
+        freshnessStatus: found.stale ? "Stale" : found.freshnessStatus,
+        operatorStatus: found.operatorStatus,
+        items,
+        ...(typeof found.canCloseEarlierDayTickets === "boolean"
+          ? { canCloseEarlierDayTickets: found.canCloseEarlierDayTickets }
+          : {}),
+        // WP-2423 (v15): read with the first page; the parser checks it.
+        ...("awaitingAcceptance" in found ? { awaitingAcceptance: found.awaitingAcceptance } : {}),
+        // WP-2423 item 8 ⑧: the Store's kitchen sections, read with the first page.
+        ...("kitchenSections" in found ? { kitchenSections: found.kitchenSections } : {}),
+        // DEC-PAID-ORDER-AUTO-ACCEPT: read with the first page, at a Store that uses it.
+        ...("paidOrderWatch" in found ? { paidOrderWatch: found.paidOrderWatch } : {}),
+        ...(moreWaiting === null ? {} : { moreWaiting }),
+      });
+    };
+    for (let page = 0; page < pages; page++) {
       const result = await query({
         kind: "List",
         filters: {
@@ -250,36 +279,15 @@ export function createKitchenBoardClient(options: {
         items.push(mapped);
       }
       cursor = result.nextCursor;
-      if (cursor === null)
-        return parseKitchenBoardView({
-          screenId: "KIT-KITCHEN-QUEUE",
-          projectionName: "kitchen_work_queue_v1",
-          projectionVersion: 1,
-          storeLabel: options.storeLabel,
-          projectedAt: first.projectedAt,
-          freshnessStatus: first.stale ? "Stale" : first.freshnessStatus,
-          operatorStatus: first.operatorStatus,
-          items,
-          ...(typeof first.canCloseEarlierDayTickets === "boolean"
-            ? { canCloseEarlierDayTickets: first.canCloseEarlierDayTickets }
-            : {}),
-          // WP-2423 (v15): read with the first page; the parser checks it.
-          ...("awaitingAcceptance" in first
-            ? { awaitingAcceptance: first.awaitingAcceptance }
-            : {}),
-          // WP-2423 item 8 ⑧: the Store's kitchen sections, read with the first page.
-          ...("kitchenSections" in first ? { kitchenSections: first.kitchenSections } : {}),
-          // DEC-PAID-ORDER-AUTO-ACCEPT: read with the first page, at a Store that uses it.
-          ...("paidOrderWatch" in first ? { paidOrderWatch: first.paidOrderWatch } : {}),
-        });
+      if (cursor === null) return view(first, false);
       const next = record(cursor);
       // A page may be empty when every ticket on it was just closed (DEC-KITCHEN-STALE-TICKETS);
-      // reading stays bounded to four pages.
+      // reading stays bounded.
       if (next.projectionGenerationReference !== first.projectionGenerationReference) return fail();
       parseKitchenRouteReference(next.afterWorkItemReference);
       if (typeof next.afterCreatedAt !== "string") return fail();
     }
-    return fail();
+    return first === undefined ? fail() : view(first, true);
   }
   // Warn before timeouts (WP-2423 2026-10-17): the first page alone carries them; one ticket keeps
   // the read small for the store-wide refund warning. DEC-PAID-ORDER-AUTO-ACCEPT: asked as a

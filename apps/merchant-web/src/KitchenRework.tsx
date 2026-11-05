@@ -159,6 +159,31 @@ export function notReadyOffered(item: KitchenBoardItem, observedAt: string): boo
   return Date.parse(observedAt) - Date.parse(readyAt) <= kitchenReworkNotReadyWindowMs;
 }
 
+/** The remake's last step in one line, for the board's status row. */
+export function kitchenReworkStatusHeading(rework: ReturnType<typeof useKitchenRework>): string {
+  const { state } = rework;
+  if (state.kind === "Idle") return "";
+  const creating = state.body.action === "CreateKitchenRework";
+  const cancelling = state.body.action === "CancelKitchenRework";
+  return state.kind === "Submitting"
+    ? creating
+      ? t("Sending remake")
+      : cancelling
+        ? t("Cancelling remake")
+        : t("Updating remake")
+    : state.kind === "Unknown"
+      ? t("Remake result unknown")
+      : state.kind === "Confirmed"
+        ? creating
+          ? t("Remake sent to the kitchen")
+          : cancelling
+            ? t("Remake cancelled")
+            : t("Remake updated")
+        : cancelling
+          ? t("Remake not cancelled")
+          : t("Remake not recorded");
+}
+
 export function KitchenReworkStatus({
   rework,
 }: {
@@ -168,24 +193,7 @@ export function KitchenReworkStatus({
   if (state.kind === "Idle") return null;
   const creating = state.body.action === "CreateKitchenRework";
   const cancelling = state.body.action === "CancelKitchenRework";
-  const heading =
-    state.kind === "Submitting"
-      ? creating
-        ? t("Sending remake")
-        : cancelling
-          ? t("Cancelling remake")
-          : t("Updating remake")
-      : state.kind === "Unknown"
-        ? t("Remake result unknown")
-        : state.kind === "Confirmed"
-          ? creating
-            ? t("Remake sent to the kitchen")
-            : cancelling
-              ? t("Remake cancelled")
-              : t("Remake updated")
-          : cancelling
-            ? t("Remake not cancelled")
-            : t("Remake not recorded");
+  const heading = kitchenReworkStatusHeading(rework);
   const text =
     state.kind === "Submitting"
       ? t("Please wait.")

@@ -94,34 +94,39 @@ test("@production a combo's dishes are made and marked done one by one on the ki
       },
     }),
   );
-  const partCommands: Record<string, string>[] = [];
-  await page.route("**/merchant/kitchen/combo-part-done", (route) => {
-    const body = route.request().postDataJSON() as Record<string, string>;
-    partCommands.push(body);
-    done.add(body.optionReference ?? "");
-    return route.fulfill({ headers, json: { allDone: done.size === 2 } });
-  });
-  const workCommands: Record<string, string>[] = [];
-  await page.route("**/merchant/kitchen/work", (route) => {
-    const command = route.request().postDataJSON() as Record<string, string>;
-    workCommands.push(command);
-    completed = true;
+  const steps: {
+    step: string;
+    lines: { workItemReference: string; optionReferences: readonly string[] | null }[];
+  }[] = [];
+  await page.route("**/merchant/kitchen/step", (route) => {
+    const body = route.request().postDataJSON() as (typeof steps)[number];
+    steps.push(body);
+    const [line] = body.lines;
+    for (const option of line?.optionReferences ?? [wonton, rice]) done.add(option);
+    completed = done.size === 2;
     return route.fulfill({
       headers,
       json: {
-        action: command.action,
-        ticketReference: command.ticketReference,
-        workItemReference: command.workItemReference,
-        orderItemReference: id(21),
-        ticketVersion: "8",
-        workItemVersion: "4",
-        outcome: "Accepted",
-        workItemStatus: "Completed",
-        completedQuantity: 1,
-        requiredQuantity: 1,
-        occurredAt: at,
         projectionName: "kitchen_work_queue_v1",
         projectionPending: true,
+        occurredAt: at,
+        lines: [
+          {
+            workItemReference: id(1),
+            orderItemReference: id(21),
+            ticketReference: combo().ticketReference,
+            outcome: completed ? "Finished" : "DishDone",
+            refusedReason: null,
+            ticketVersion: completed ? "8" : "7",
+            workItemVersion: completed ? "4" : "3",
+            workItemStatus: completed ? "Completed" : "In Progress",
+            completedQuantity: completed ? 1 : 0,
+            requiredQuantity: 1,
+            acceptedAt: "2026-10-29T00:11:00.000Z",
+            readyAt: completed ? at : null,
+            dishesDone: [...done],
+          },
+        ],
       },
     });
   });
@@ -132,10 +137,10 @@ test("@production a combo's dishes are made and marked done one by one on the ki
   // Each chosen dish is its own line under the combo, Chinese name first.
   await expect(dishes.locator(".kitchen-work-item__combo-name")).toHaveText(["馄饨汤", "炒饭"]);
   await expect(dishes).toContainText("Wonton soup (TEST)");
-  // The combo is not finished while a dish is still being made: not on the card, not by the
-  // ticket's own step.
+  // Each dish has its own Done; the ticket's main step finishes every dish still to make, for the
+  // one-screen shop.
   const ticket = page.locator(".kitchen-ticket").filter({ hasText: "二人套餐" });
-  await expect(ticket.getByRole("button", { name: /finish/iu })).toHaveCount(0);
+  await expect(ticket.locator(".kitchen-ticket__next")).toHaveText("Finished");
   await expect(dishes.getByRole("button", { name: "Mark 馄饨汤 done" })).toHaveCSS(
     "min-height",
     "48px",
@@ -158,14 +163,16 @@ test("@production a combo's dishes are made and marked done one by one on the ki
   await page.setViewportSize({ width: 1440, height: 900 });
 
   await dishes.getByRole("button", { name: "Mark 馄饨汤 done" }).click();
+  // Held first, then recorded: that dish only, and the combo stays until its last dish.
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect.poll(() => steps.length, { timeout: 8_000 }).toBe(1);
+  expect(steps[0]?.step).toBe("Finish");
+  expect(steps[0]?.lines[0]?.optionReferences).toEqual([wonton]);
   await expect(dishes.getByRole("button", { name: "Mark 馄饨汤 done" })).toHaveCount(0);
   await expect(dishes.locator("li").first()).toContainText("Done");
-  await expect(ticket.getByRole("button", { name: /finish/iu })).toHaveCount(0);
-  expect(workCommands).toEqual([]);
-  // The last dish done finishes the combo with the kitchen's own step.
+  await expect(ticket).toBeVisible();
+  // The last dish done finishes the combo in the same step, whichever cook taps it.
   await dishes.getByRole("button", { name: "Mark 炒饭 done" }).click();
-  await expect.poll(() => workCommands.map((c) => c.action)).toEqual(["CompleteKitchenWorkItem"]);
-  expect(workCommands[0]?.workItemReference).toBe(id(1));
-  expect(partCommands.map((c) => c.optionReference)).toEqual([wonton, rice]);
-  expect(new Set(partCommands.map((c) => c.operationReference)).size).toBe(2);
+  await expect.poll(() => steps.length, { timeout: 8_000 }).toBe(2);
+  expect(steps[1]?.lines[0]?.optionReferences).toEqual([rice]);
 });

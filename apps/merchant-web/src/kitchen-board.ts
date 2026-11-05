@@ -48,6 +48,16 @@ export interface KitchenBoardItem {
   readonly otherName?: string;
   /** WP-2423 item 8 ⑥ part 4: a combo's chosen dishes, each made and marked done on its own. */
   readonly comboParts?: readonly ComboPartView[];
+  /**
+   * Combos by section: each chosen dish's kitchen section by its option, by the dish's own mark now
+   * (null: no section). Beside `comboParts`, so a tablet on an older page keeps reading the board.
+   */
+  readonly comboPartSections?: Readonly<Record<string, string | null>>;
+  /**
+   * Combos by section: this line of a section's screen is one chosen dish of a combo. It keeps the
+   * work item's real status; the dish's own state is here. Never read from the server.
+   */
+  readonly comboPartOf?: KitchenComboDishLine;
   /** WP-2423 item 8 ⑦: a server chased this dish (how often, and when last). */
   readonly chase?: { readonly count: number; readonly lastChasedAt: string };
   /** Owner 2026-11-03: entered after an outage from a paper slip: it may already be made. */
@@ -85,6 +95,14 @@ export interface KitchenBoardItem {
   };
 }
 
+export interface KitchenComboDishLine {
+  readonly comboName: string;
+  readonly optionReference: string;
+  readonly done: boolean;
+  /** The combo's other dishes still to make. */
+  readonly stillToMake: readonly string[];
+}
+
 export interface KitchenBoardView {
   readonly screenId: "KIT-KITCHEN-QUEUE";
   readonly projectionName: "kitchen_work_queue_v1";
@@ -105,6 +123,11 @@ export interface KitchenBoardView {
   readonly kitchenSections?: readonly string[];
   /** DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that sends paid orders straight here. */
   readonly paidOrderWatch?: PaidOrderWatch | null;
+  /**
+   * DEC-KITCHEN-ONE-TAP: open work this board could not carry (it shows the oldest): how many
+   * tickets when the server knows, true when only that some were left out. Omitted: none.
+   */
+  readonly moreWaiting?: number | true;
 }
 /** A paid order not accepted yet; a pickup carries when it is refunded unless someone accepts it. */
 export interface KitchenAwaitingLabel extends KitchenOrderLabel {
@@ -144,6 +167,9 @@ export class KitchenBoardClientError extends Error {
     this.name = "KitchenBoardClientError";
   }
 }
+
+/** DEC-KITCHEN-ONE-TAP: what one board read carries; open work past it is said, never a failure. */
+export const kitchenBoardMaxItems = 300;
 
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -347,6 +373,8 @@ function item(value: unknown): KitchenBoardItem {
     value !== null && typeof value === "object" && Object.hasOwn(value, "takenOnPaper");
   const hasSection =
     value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSection");
+  const hasPartSections =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "comboPartSections");
   const input = closed(value, [
     "workItemReference",
     "ticketReference",
@@ -370,6 +398,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasChase ? ["chase"] : []),
     ...(hasPaper ? ["takenOnPaper"] : []),
     ...(hasSection ? ["kitchenSection"] : []),
+    ...(hasPartSections ? ["comboPartSections"] : []),
   ]);
   if (
     hasSection &&
@@ -407,6 +436,7 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasOtherName ? { otherName: input.otherName as string } : {}),
     ...(hasComboParts ? { comboParts: parseComboParts(input.comboParts) } : {}),
     ...(hasSection ? { kitchenSection: input.kitchenSection as string | null } : {}),
+    ...(hasPartSections ? { comboPartSections: comboPartSections(input.comboPartSections) } : {}),
     ...(input.takenOnPaper === true ? { takenOnPaper: true } : {}),
     ...(chase === null
       ? {}
@@ -429,6 +459,30 @@ function item(value: unknown): KitchenBoardItem {
     ...(hasBusinessDate ? { businessDate: parseKitchenBusinessDate(input.businessDate) } : {}),
     ...(hasExecution ? { execution: execution(input.execution) } : {}),
   });
+}
+
+/** Option → the dish's section: a closed record, at most one combo's worth of dishes. */
+function comboPartSections(value: unknown): Readonly<Record<string, string | null>> {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Reflect.ownKeys(value).length > 20
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
+  const sections: Record<string, string | null> = {};
+  for (const key of Reflect.ownKeys(value)) {
+    const option = parseKitchenRouteReference(key);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable)
+      throw new Error("KITCHEN_BOARD_INVALID");
+    const name: unknown = descriptor.value;
+    if (name !== null && (typeof name !== "string" || !SAFE_TEXT.test(name)))
+      throw new Error("KITCHEN_BOARD_INVALID");
+    sections[option] = name as string | null;
+  }
+  return Object.freeze(sections);
 }
 
 function execution(value: unknown): NonNullable<KitchenBoardItem["execution"]> {
@@ -470,6 +524,8 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSections");
   const hasWatch =
     value !== null && typeof value === "object" && Object.hasOwn(value, "paidOrderWatch");
+  const hasMoreWaiting =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "moreWaiting");
   const input = closed(value, [
     "screenId",
     "projectionName",
@@ -483,7 +539,14 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     ...(hasAwaiting ? ["awaitingAcceptance"] : []),
     ...(hasSections ? ["kitchenSections"] : []),
     ...(hasWatch ? ["paidOrderWatch"] : []),
+    ...(hasMoreWaiting ? ["moreWaiting"] : []),
   ]);
+  if (
+    hasMoreWaiting &&
+    input.moreWaiting !== true &&
+    (!Number.isSafeInteger(input.moreWaiting) || Number(input.moreWaiting) < 1)
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
   if (
     hasSections &&
     (!Array.isArray(input.kitchenSections) ||
@@ -517,7 +580,7 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
       String(input.operatorStatus),
     ) ||
     !Array.isArray(input.items) ||
-    input.items.length > 200
+    input.items.length > kitchenBoardMaxItems
   )
     throw new Error("KITCHEN_BOARD_INVALID");
   const items = Object.freeze(input.items.map(item));
@@ -540,6 +603,7 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
       ? { kitchenSections: Object.freeze([...(input.kitchenSections as string[])]) }
       : {}),
     ...(hasWatch ? { paidOrderWatch: parsePaidOrderWatch(input.paidOrderWatch) } : {}),
+    ...(hasMoreWaiting ? { moreWaiting: input.moreWaiting as number | true } : {}),
   });
 }
 

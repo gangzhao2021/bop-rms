@@ -181,7 +181,6 @@
   .full-sign-in-prompt,
   .counter-order__ticket [role="alert"],
   .kitchen-screen-awake,
-  .kitchen-sound-reminder,
   .orders-page .order-queue-awaiting,
   .orders-page .order-queue-stale,
   .orders-page .order-queue-released,
@@ -207,7 +206,6 @@
   color: var(--bop-color-danger);
 }
 .workspace-page .overview-card--alerts-warning header h3,
-.kitchen-sound-reminder,
 .orders-page .order-queue-awaiting,
 .orders-page .order-queue-stale {
   color: var(--bop-color-warning);

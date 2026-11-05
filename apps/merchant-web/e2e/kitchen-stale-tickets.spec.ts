@@ -121,9 +121,32 @@ async function board(
     }),
   );
   const commands: Record<string, unknown>[] = [];
-  await page.route("**/merchant/kitchen/work", (route) => {
-    commands.push(route.request().postDataJSON() as Record<string, unknown>);
-    return route.fulfill({ headers, status: 409, json: { error: "KITCHEN_WORK_CONFLICT" } });
+  await page.route("**/merchant/kitchen/step", (route) => {
+    const body = route.request().postDataJSON() as { lines: Record<string, unknown>[] };
+    commands.push(...body.lines);
+    return route.fulfill({
+      headers,
+      json: {
+        projectionName: "kitchen_work_queue_v1",
+        projectionPending: true,
+        occurredAt: new Date().toISOString(),
+        lines: body.lines.map((line) => ({
+          workItemReference: line.workItemReference,
+          orderItemReference: line.orderItemReference,
+          ticketReference: line.ticketReference,
+          outcome: "Finished",
+          refusedReason: null,
+          ticketVersion: "9",
+          workItemVersion: "5",
+          workItemStatus: "Completed",
+          completedQuantity: 1,
+          requiredQuantity: 1,
+          acceptedAt: new Date().toISOString(),
+          readyAt: new Date().toISOString(),
+          dishesDone: null,
+        })),
+      },
+    });
   });
   const closes: Record<string, unknown>[] = [];
   await page.route("**/merchant/kitchen/stale-ticket/close", (route) => {
@@ -182,7 +205,7 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   const { commands, closes, old } = await board(page, true);
   await page.goto("/operations/kitchen");
   // Today's Order 2 is on the board; the earlier one is collapsed apart.
-  const lanes = page.locator(".kitchen-board-lanes").last();
+  const lanes = page.locator(".kitchen-board-lanes").first();
   await expect(lanes.getByText("Beef noodle soup")).toBeVisible();
   await expect(lanes.getByText("Pork dumplings")).toHaveCount(0);
   const earlier = page.locator("details.kitchen-earlier-days");
@@ -197,13 +220,13 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   await expectLayout(page, "kitchen-earlier-days");
 
   // A kitchen step on it asks first; going back sends nothing.
-  await ticket.getByRole("button", { name: "Accept" }).click();
+  await ticket.getByRole("button", { name: "Finished" }).click();
   const confirm = page.getByRole("dialog", { name: "This ticket is from Fri, Oct 9 — continue?" });
   await expect(confirm).toBeVisible();
   await expect(confirm.getByText("is not today's order with the same number")).toBeVisible();
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
-    await expect(confirm.getByRole("button", { name: "Continue — Accept" })).toBeInViewport();
+    await expect(confirm.getByRole("button", { name: "Continue — Finished" })).toBeInViewport();
     await page.screenshot({ path: `test-results/kitchen-earlier-confirm-${width}.png` });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -211,9 +234,9 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   await expect(confirm).toBeHidden();
   expect(commands).toEqual([]);
   // Continuing sends exactly that step for the old ticket.
-  await ticket.getByRole("button", { name: "Accept" }).click();
-  await confirm.getByRole("button", { name: "Continue — Accept" }).click();
-  await expect.poll(() => commands.length).toBe(1);
+  await ticket.getByRole("button", { name: "Finished" }).click();
+  await confirm.getByRole("button", { name: "Continue — Finished" }).click();
+  await expect.poll(() => commands.length, { timeout: 8_000 }).toBe(1);
   expect(commands[0]).toMatchObject({ workItemReference: old.workItemReference });
 
   // The manager closes it as never made; the dialog says plainly that nothing is refunded.
@@ -240,7 +263,8 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await submit.click();
-  await expect(page.getByRole("heading", { name: "Ticket closed" })).toBeVisible();
+  await expect(page.locator(".kitchen-status-row__line")).toHaveText("Ticket closed");
+  await page.getByRole("button", { name: "Details", exact: true }).click();
   await expect(page.getByText("cancel or refund it in Orders", { exact: false })).toBeVisible();
   expect(closes).toEqual([
     expect.objectContaining({
@@ -251,7 +275,7 @@ test("@production DEC-KITCHEN-STALE-TICKETS: an earlier day's ticket is kept apa
   ]);
   await expect(page.locator("details.kitchen-earlier-days")).toHaveCount(0);
   await expect(
-    page.locator(".kitchen-board-lanes").last().getByText("Beef noodle soup"),
+    page.locator(".kitchen-board-lanes").first().getByText("Beef noodle soup"),
   ).toBeVisible();
   expect(
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),

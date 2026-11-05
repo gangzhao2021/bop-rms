@@ -1,41 +1,55 @@
 import { t } from "./i18n/i18n.js";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { KitchenWorkClientError, createKitchenWorkClient } from "./kitchen-work-client.js";
 import {
-  createKitchenWorkClient,
-  KitchenWorkClientError,
-  type KitchenAction,
-} from "./kitchen-work-client.js";
+  kitchenStepMaxLines,
+  prepareKitchenStep,
+  type KitchenStepKind,
+  type KitchenStepLineResult,
+  type KitchenStepReply,
+} from "./kitchen-step-client.js";
+import { createKitchenStepQueue, type KitchenTap } from "./kitchen-step-queue.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import type { KitchenBoardItem, KitchenBoardView } from "./kitchen-board.js";
+import { browserOffline } from "./stale-read.js";
 
-type Operation = ReturnType<ReturnType<typeof createKitchenWorkClient>["prepare"]>;
-type Result = Awaited<ReturnType<Operation["execute"]>>;
-interface Attempt {
-  item: KitchenBoardItem;
-  operation: Operation;
-  revision: number;
+/** One line the cook tapped: a dish on the screen, or one chosen dish of a combo. */
+export interface KitchenStepTarget {
+  /** The key this line has on the screen (work item, or work item and chosen dish). */
+  readonly lineKey: string;
+  readonly item: KitchenBoardItem;
+  /** The chosen dishes this tap finishes; null: the whole work item. */
+  readonly optionReferences: readonly string[] | null;
 }
-export type KitchenActionState =
-  | { kind: "Idle" }
-  | { kind: "Submitting"; attempt: Attempt }
-  /** The outcome is not known (lost answer), or the server was busy and changed nothing. */
-  | { kind: "Unknown"; attempt: Attempt; busy: boolean }
-  | { kind: "Confirmed"; attempt: Attempt; result: Result }
-  | { kind: "Rejected"; attempt: Attempt; code: KitchenWorkClientError["code"] };
 
-/** A kitchen step the server confirmed, kept until the queue projection shows it. */
+/** What the board says about steps, in one line each, newest first. */
+export interface KitchenStepNotice {
+  readonly id: number;
+  readonly tone: "Done" | "Problem";
+  readonly text: string;
+}
+/** Confirmed steps show at once; a problem stays long enough to read it. */
+export const kitchenNoticeDoneMs = 6_000;
+export const kitchenNoticeProblemMs = 30_000;
+
+/** A step the server confirmed, kept until the queue projection shows it. */
 export interface KitchenConfirmedStep {
   readonly workItemReference: string;
   readonly ticketReference: string;
-  readonly result: Result;
+  readonly result: KitchenStepLineResult;
 }
 
 function behind(item: KitchenBoardItem, step: KitchenConfirmedStep): boolean {
   const execution = item.execution;
-  return Boolean(
-    execution &&
-    (BigInt(execution.ticketVersion) < BigInt(step.result.ticketVersion) ||
-      BigInt(execution.workItemVersion) < BigInt(step.result.workItemVersion)),
+  const { result } = step;
+  if (!execution || result.ticketVersion === null || result.workItemVersion === null) return false;
+  return (
+    BigInt(execution.ticketVersion) < BigInt(result.ticketVersion) ||
+    BigInt(execution.workItemVersion) < BigInt(result.workItemVersion) ||
+    // A combo's dish is its own fact: the work item's versions need not move.
+    (result.dishesDone ?? []).some((option) =>
+      (item.comboParts ?? []).some((part) => part.optionReference === option && !part.done),
+    )
   );
 }
 
@@ -43,8 +57,7 @@ function behind(item: KitchenBoardItem, step: KitchenConfirmedStep): boolean {
  * WP-2423: the board shows a kitchen step as soon as the server confirms it, instead of waiting for
  * the queue projection (which a background worker updates, and which can lag or stop). Only what
  * the server's result states is applied, and only while the projection is older than that result;
- * once the projection reaches the confirmed versions it is the source again. Other work on the same
- * ticket takes the confirmed ticket version, so its next step is not refused as out of date.
+ * once the projection reaches the confirmed versions it is the source again.
  */
 export function applyConfirmedKitchenSteps(
   view: KitchenBoardView,
@@ -58,71 +71,208 @@ export function applyConfirmedKitchenSteps(
   if (pending.length === 0) return view;
   const items = view.items.map((item) => {
     const execution = item.execution;
-    if (!execution) return item;
     const own = pending.find((step) => step.workItemReference === item.workItemReference);
-    const ticketVersion = pending
-      .filter((step) => step.ticketReference === item.ticketReference)
-      .reduce(
-        (latest, step) =>
-          BigInt(step.result.ticketVersion) > BigInt(latest) ? step.result.ticketVersion : latest,
-        execution.ticketVersion,
-      );
-    if (!own)
-      return ticketVersion === execution.ticketVersion
-        ? item
-        : Object.freeze({
-            ...item,
-            execution: Object.freeze({ ...execution, ticketVersion }),
-          });
+    if (!execution || !own) return item;
     const { result } = own;
     return Object.freeze({
       ...item,
-      status: result.workItemStatus,
-      completedQuantity: result.completedQuantity,
+      status: result.workItemStatus ?? item.status,
+      completedQuantity: result.completedQuantity ?? item.completedQuantity,
+      ...(item.comboParts === undefined || result.dishesDone === null
+        ? {}
+        : {
+            comboParts: Object.freeze(
+              item.comboParts.map((part) =>
+                result.dishesDone?.includes(part.optionReference) && !part.done
+                  ? Object.freeze({ ...part, done: true })
+                  : part,
+              ),
+            ),
+          }),
       execution: Object.freeze({
         ...execution,
-        ticketVersion,
-        workItemVersion: result.workItemVersion,
-        acceptedAt: result.outcome === "Accepted" ? result.occurredAt : execution.acceptedAt,
-        readyAt:
-          result.outcome === "CompletedAndOrderItemReady" || result.outcome === "OrderItemReady"
-            ? result.occurredAt
-            : execution.readyAt,
+        ticketVersion: result.ticketVersion ?? execution.ticketVersion,
+        workItemVersion: result.workItemVersion ?? execution.workItemVersion,
+        acceptedAt: result.acceptedAt ?? execution.acceptedAt,
+        readyAt: result.readyAt ?? execution.readyAt,
       }),
     });
   });
   return Object.freeze({ ...view, items: Object.freeze(items) });
 }
 
-/** WP-2423: what the cook just did, in their words ("Order 6 · Latte accepted."). */
+/** What the cook just did, in their words ("Order 6 · Latte done."); null when nothing changed. */
 export function kitchenStepText(
   orderLabel: string,
-  item: Pick<KitchenBoardItem, "displayName" | "requiredQuantity">,
-  result: Pick<Result, "outcome" | "completedQuantity">,
-): string {
-  const done = {
-    Accepted: "accepted",
-    Started: "started",
-    ProgressRecorded: t("{completedQuantity} of {requiredQuantity} done", {
-      completedQuantity: result.completedQuantity,
-      requiredQuantity: item.requiredQuantity,
-    }),
-    Completed: "done",
-    CompletedAndOrderItemReady: t("done and ready"),
-    OrderItemReady: "ready",
-  }[result.outcome];
-  return `${orderLabel} · ${item.displayName} ${done}.`;
+  displayName: string,
+  result: Pick<KitchenStepLineResult, "outcome">,
+): string | null {
+  switch (result.outcome) {
+    case "Started":
+      return t("{orderLabel} · {displayName} started.", { orderLabel, displayName });
+    case "Finished":
+      return t("{orderLabel} · {displayName} done.", { orderLabel, displayName });
+    case "DishDone":
+      return t("{orderLabel} · {displayName} done.", { orderLabel, displayName });
+    default:
+      return null;
+  }
 }
 
-/** One current intent survives refresh and explicit retry, but never browser storage. */
+/** Why a line of a tap was left out: what happened to it and that nothing was recorded for it. */
+export function kitchenRefusalText(
+  displayName: string,
+  reason: KitchenStepLineResult["refusedReason"],
+): string {
+  switch (reason) {
+    case "Cancelled":
+      return t("{displayName} was cancelled, so nothing was recorded for it.", { displayName });
+    case "Closed":
+      return t("{displayName}: its ticket was closed, so nothing was recorded.", { displayName });
+    case "Held":
+      return t("{displayName} is on hold, so nothing was recorded for it.", { displayName });
+    case "Blocked":
+      return t("{displayName} needs its allergens checked before cooking. Nothing was recorded.", {
+        displayName,
+      });
+    case "OrderChanged":
+      return t(
+        "{displayName}: the order changed, so nothing was recorded. Check with the server.",
+        {
+          displayName,
+        },
+      );
+    default:
+      return t("{displayName} is no longer on this ticket. Nothing was recorded.", {
+        displayName,
+      });
+  }
+}
+
+/**
+ * DEC-KITCHEN-ONE-TAP: the board's steps. A tap is one immutable body; the queue holds it, sends it
+ * and retries it. Taps live here and never in browser storage: a tablet that dies during a hold
+ * loses the tap and the ticket is still on the board, which is the safe side.
+ */
 export function useKitchenActions(input: {
   csrf: string | undefined;
   storeReference: string | undefined;
   view: KitchenBoardView | null;
-  revision: number;
+  /** The last read failed: nothing is sent until a fresh read succeeds. */
+  stale: boolean;
 }) {
-  const [state, setState] = useState<KitchenActionState>({ kind: "Idle" });
+  const [taps, setTaps] = useState<readonly KitchenTap<KitchenStepTarget>[]>([]);
   const [confirmed, setConfirmed] = useState<readonly KitchenConfirmedStep[]>([]);
+  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [notices, setNotices] = useState<readonly KitchenStepNotice[]>([]);
+  const [readyBusy, setReadyBusy] = useState(false);
+  const noticeId = useRef(0);
+  const authority = Boolean(
+    input.csrf &&
+    input.storeReference &&
+    !input.stale &&
+    input.view?.freshnessStatus === "Fresh" &&
+    input.view.operatorStatus === "Named",
+  );
+  // Read inside timers: the render that scheduled a send may be long past when it fires.
+  const latest = useRef({ authority, csrf: input.csrf, view: input.view });
+  latest.current = { authority, csrf: input.csrf, view: input.view };
+  const say = (tone: KitchenStepNotice["tone"], text: string) => {
+    noticeId.current += 1;
+    const id = noticeId.current;
+    setNotices((current) => [{ id, tone, text }, ...current].slice(0, 6));
+    if (typeof window !== "undefined")
+      window.setTimeout(
+        () => setNotices((current) => current.filter((notice) => notice.id !== id)),
+        tone === "Done" ? kitchenNoticeDoneMs : kitchenNoticeProblemMs,
+      );
+  };
+  const sayRef = useRef(say);
+  sayRef.current = say;
+  const queueRef = useRef<ReturnType<typeof createKitchenStepQueue<KitchenStepTarget>> | null>(
+    null,
+  );
+  const bodies = useRef(new Map<number, ReturnType<typeof prepareKitchenStep>>());
+  useEffect(() => {
+    const controller = new AbortController();
+    const queue = createKitchenStepQueue<KitchenStepTarget>({
+      authority: () => latest.current.authority && !browserOffline(),
+      send: async (tap) => {
+        const csrf = latest.current.csrf;
+        const body = bodies.current.get(tap.id);
+        if (csrf === undefined || body === undefined) throw new Error("KITCHEN_STEP_UNAVAILABLE");
+        return body.execute(csrf, controller.signal);
+      },
+      onChange: setTaps,
+      onConfirmed: (tap, reply: KitchenStepReply) => {
+        bodies.current.delete(tap.id);
+        const lines = reply.lines;
+        setConfirmed((steps) => {
+          const others = steps.filter(
+            (step) => !lines.some((line) => line.workItemReference === step.workItemReference),
+          );
+          return [
+            ...others,
+            ...lines
+              .filter((line) => line.ticketVersion !== null)
+              .map((line) => ({
+                workItemReference: line.workItemReference,
+                ticketReference: line.ticketReference,
+                result: line,
+              })),
+          ];
+        });
+        setConfirmedCount((count) => count + 1);
+        const nameOf = (workItemReference: string) =>
+          tap.targets.find((target) => target.item.workItemReference === workItemReference)?.item;
+        const orderLabel = (item: KitchenBoardItem | undefined) =>
+          item?.orderLabel ? kitchenOrderLabelText(item) : "";
+        for (const line of lines) {
+          const item = nameOf(line.workItemReference);
+          const target = tap.targets.find(
+            (candidate) => candidate.item.workItemReference === line.workItemReference,
+          );
+          const name = target?.item.displayName ?? "";
+          if (line.outcome === "Refused")
+            sayRef.current("Problem", kitchenRefusalText(name, line.refusedReason));
+          else if (line.outcome === "NotAttempted")
+            sayRef.current(
+              "Problem",
+              t("{displayName} was not recorded. Tap it again.", { displayName: name }),
+            );
+          else {
+            const text = kitchenStepText(orderLabel(item), name, line);
+            if (text !== null) sayRef.current("Done", text);
+          }
+        }
+      },
+      onRefused: (tap, code) => {
+        bodies.current.delete(tap.id);
+        sayRef.current(
+          "Problem",
+          code === "PermissionDenied"
+            ? t(
+                "Your current permission or Store scope no longer allows this action. Refresh before continuing.",
+              )
+            : t("The action was not accepted. Refresh and review the current work item."),
+        );
+      },
+      onNotSent: (unsent) => {
+        for (const tap of unsent) bodies.current.delete(tap.id);
+        sayRef.current("Problem", t("The network dropped. That step was not recorded."));
+      },
+    });
+    queueRef.current = queue;
+    return () => {
+      controller.abort();
+      queue.dispose();
+      queueRef.current = null;
+    };
+  }, []);
+  // The connection or authority going sends every unsent tap back to the cook at once.
+  useEffect(() => {
+    if (!authority) queueRef.current?.authorityLost();
+  }, [authority]);
   // A confirmed step is dropped once the projection shows it (or no longer lists the work).
   useEffect(() => {
     const view = input.view;
@@ -138,177 +288,175 @@ export function useKitchenActions(input: {
     () => (input.view ? applyConfirmedKitchenSteps(input.view, confirmed) : null),
     [input.view, confirmed],
   );
-  const inFlight = useRef(false);
-  const lifetime = useRef<AbortController | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    lifetime.current = controller;
-    return () => controller.abort();
-  }, []);
-  const authority = Boolean(
-    input.csrf &&
-    input.storeReference &&
-    input.view?.freshnessStatus === "Fresh" &&
-    input.view.operatorStatus === "Named",
-  );
-  const reflected =
-    state.kind === "Confirmed" &&
-    Boolean(
-      input.view?.items.some(
-        (item) =>
-          item.workItemReference === state.attempt.item.workItemReference &&
-          item.execution &&
-          BigInt(item.execution.ticketVersion) >= BigInt(state.result.ticketVersion) &&
-          BigInt(item.execution.workItemVersion) >= BigInt(state.result.workItemVersion),
-      ),
-    );
-  const rejectedRefreshed =
-    state.kind === "Rejected" && input.revision > state.attempt.revision && authority;
-  // A confirmed step no longer holds the board: the card already shows the confirmed result.
-  const blocked =
-    !authority ||
-    inFlight.current ||
-    !(state.kind === "Idle" || state.kind === "Confirmed" || rejectedRefreshed);
-  /** The server's result, or null when the step was not confirmed (the state says why). */
-  async function execute(attempt: Attempt): Promise<Result | null> {
-    const controller = lifetime.current;
-    if (inFlight.current || !input.csrf || !controller || controller.signal.aborted) return null;
-    inFlight.current = true;
-    setState({ kind: "Submitting", attempt });
-    try {
-      const result = await attempt.operation.execute(input.csrf, controller.signal);
-      if (!controller.signal.aborted) {
-        setConfirmed((steps) => [
-          ...steps.filter((step) => step.workItemReference !== attempt.item.workItemReference),
-          {
-            workItemReference: attempt.item.workItemReference,
-            ticketReference: attempt.item.ticketReference,
-            result,
-          },
-        ]);
-        setState({ kind: "Confirmed", attempt, result });
-        return result;
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        const code = error instanceof KitchenWorkClientError ? error.code : "OutcomeUnknown";
-        // WP-2423 (v15 2026-10-16): a busy server (503) committed nothing; the same operation is
-        // offered again, like a lost answer, never reported as a permission refusal.
-        setState(
-          code === "OutcomeUnknown" || code === "Busy"
-            ? { kind: "Unknown", attempt, busy: code === "Busy" }
-            : { kind: "Rejected", attempt, code },
-        );
-      }
-    } finally {
-      inFlight.current = false;
-    }
-    return null;
-  }
+  const pendingLines = useMemo(() => {
+    const lines = new Map<string, KitchenTap<KitchenStepTarget>>();
+    for (const tap of taps) for (const target of tap.targets) lines.set(target.lineKey, tap);
+    return lines;
+  }, [taps]);
   return {
-    blocked,
+    /** Whether a step can be tapped at all right now. */
+    blocked: !authority || readyBusy,
     /** The board as the server last confirmed it: the projection plus confirmed steps it lacks. */
     view,
-    state,
-    reflected,
-    rejectedRefreshed,
-    act(item: KitchenBoardItem, action: KitchenAction) {
-      if (blocked || inFlight.current || !input.storeReference) return;
-      const operation = createKitchenWorkClient().prepare({
-        action,
-        item,
-        storeReference: input.storeReference,
-        idempotencyKey: serviceOperationReference(),
-        correlationReference: serviceOperationReference(),
-      });
-      void execute({ item, operation, revision: input.revision });
-    },
+    taps,
+    /** Each line a tap holds, by its key on the screen. */
+    pendingLines,
+    notices,
+    /** Goes up with each confirmed tap, so the board reads again at once. */
+    confirmedCount,
+    /** Confirmed steps the projection has not shown yet. */
+    awaitingProjection: confirmed.length > 0,
     /**
-     * Kitchen v3 (Owner 2026-10-26, one main step per ticket): the same step for each of these
-     * items, one after another. Each is still its own recorded step; the next item expects the
-     * ticket version the server just confirmed. Stops at the first step not confirmed, which the
-     * board then reports (and offers to retry) as for a single item.
+     * One tap. Each line's own step is recorded; a set larger than one body is split, in order, and
+     * each part keeps the same hold.
      */
-    actAll(items: readonly KitchenBoardItem[], action: KitchenAction) {
+    step(targets: readonly KitchenStepTarget[], step: KitchenStepKind) {
+      const queue = queueRef.current;
       const storeReference = input.storeReference;
-      if (blocked || inFlight.current || !storeReference || items.length === 0) return;
-      const revision = input.revision;
+      if (!authority || browserOffline() || !queue || !storeReference) return;
+      const open = targets.filter((target) => !pendingLines.has(target.lineKey));
+      for (let start = 0; start < open.length; start += kitchenStepMaxLines) {
+        const part = open.slice(start, start + kitchenStepMaxLines);
+        const body = prepareKitchenStep({
+          step,
+          storeReference,
+          correlationReference: serviceOperationReference(),
+          lines: mergeTargets(part),
+        });
+        const id = queue.tap(step, part);
+        bodies.current.set(id, body);
+      }
+    },
+    /** Within the hold: nothing was sent, so nothing is recorded and nobody is told anything. */
+    undo(ids: readonly number[]) {
+      for (const id of ids) {
+        if (queueRef.current?.undo(id) === true) bodies.current.delete(id);
+      }
+    },
+    retry(ids: readonly number[]) {
+      for (const id of ids) queueRef.current?.retry(id);
+    },
+    dismiss(ids: readonly number[]) {
+      for (const id of ids) {
+        queueRef.current?.dismiss(id);
+        bodies.current.delete(id);
+      }
+    },
+    readyBusy,
+    /** Expo Enabled only: an order item marked ready, one after another, with its versions. */
+    markReady(items: readonly KitchenBoardItem[]) {
+      const storeReference = input.storeReference;
+      const csrf = input.csrf;
+      if (!authority || readyBusy || !storeReference || !csrf) return;
+      setReadyBusy(true);
       void (async () => {
         const versions = new Map<string, string>();
-        for (const original of items) {
-          const confirmedVersion = versions.get(original.ticketReference);
-          const execution = original.execution;
-          const item =
-            execution &&
-            confirmedVersion !== undefined &&
-            BigInt(confirmedVersion) > BigInt(execution.ticketVersion)
-              ? Object.freeze({
-                  ...original,
-                  execution: Object.freeze({ ...execution, ticketVersion: confirmedVersion }),
-                })
-              : original;
-          const operation = createKitchenWorkClient().prepare({
-            action,
-            item,
-            storeReference,
-            idempotencyKey: serviceOperationReference(),
-            correlationReference: serviceOperationReference(),
-          });
-          const result = await execute({ item, operation, revision });
-          if (result === null) return;
-          versions.set(item.ticketReference, result.ticketVersion);
+        try {
+          for (const original of items) {
+            const execution = original.execution;
+            const confirmedVersion = versions.get(original.ticketReference);
+            const item =
+              execution &&
+              confirmedVersion !== undefined &&
+              BigInt(confirmedVersion) > BigInt(execution.ticketVersion)
+                ? Object.freeze({
+                    ...original,
+                    execution: Object.freeze({ ...execution, ticketVersion: confirmedVersion }),
+                  })
+                : original;
+            const result = await createKitchenWorkClient()
+              .prepare({
+                action: "MarkKitchenOrderItemReady",
+                item,
+                storeReference,
+                idempotencyKey: serviceOperationReference(),
+                correlationReference: serviceOperationReference(),
+              })
+              .execute(csrf);
+            versions.set(item.ticketReference, result.ticketVersion);
+            setConfirmed((steps) => [
+              ...steps.filter((step) => step.workItemReference !== item.workItemReference),
+              {
+                workItemReference: item.workItemReference,
+                ticketReference: item.ticketReference,
+                result: {
+                  workItemReference: item.workItemReference,
+                  orderItemReference: item.execution?.orderItemReference ?? "",
+                  ticketReference: item.ticketReference,
+                  outcome: "AlreadyFinished",
+                  refusedReason: null,
+                  ticketVersion: result.ticketVersion,
+                  workItemVersion: result.workItemVersion,
+                  workItemStatus: result.workItemStatus,
+                  completedQuantity: result.completedQuantity,
+                  requiredQuantity: item.requiredQuantity,
+                  acceptedAt: item.execution?.acceptedAt ?? null,
+                  readyAt: result.occurredAt,
+                  dishesDone: null,
+                },
+              },
+            ]);
+            setConfirmedCount((count) => count + 1);
+            sayRef.current(
+              "Done",
+              t("{orderLabel} · {displayName} ready.", {
+                orderLabel: kitchenOrderLabelText(item),
+                displayName: item.displayName,
+              }),
+            );
+          }
+        } catch (error) {
+          const busy =
+            error instanceof KitchenWorkClientError &&
+            (error.code === "Busy" || error.code === "Conflict" || error.code === "OutcomeUnknown");
+          sayRef.current(
+            "Problem",
+            busy
+              ? t("The kitchen system was busy for a moment and nothing was changed. Try again.")
+              : t("The action was not accepted. Refresh and review the current work item."),
+          );
+        } finally {
+          setReadyBusy(false);
         }
       })();
     },
-    retry() {
-      if (state.kind === "Unknown" && authority) void execute(state.attempt);
-    },
-    canRetry: authority && state.kind === "Unknown",
   };
 }
 
-/**
- * What the board says about the last kitchen step that is not (yet) confirmed: the panel heading,
- * its sentence and the retry button's label. A busy server (WP-2423 v15 2026-10-16) is "try
- * again", never a permission problem; only a refusal says permission.
- */
-export function kitchenActionNotice(
-  state: Exclude<KitchenActionState, { kind: "Idle" } | { kind: "Confirmed" }>,
-  rejectedRefreshed: boolean,
-): { heading: string; text: string; retry: string | null } {
-  if (state.kind === "Submitting")
-    return {
-      heading: t("Submitting Kitchen action"),
-      text: t("Please wait before taking another action."),
-      retry: null,
-    };
-  if (state.kind === "Unknown")
-    return state.busy
-      ? {
-          heading: t("Kitchen busy, try again"),
-          text: t("The kitchen system was busy for a moment and nothing was changed. Try again."),
-          retry: t("Try again"),
-        }
-      : {
-          heading: t("Action result unknown"),
-          text: t(
-            "The response was lost. Retry this same operation to recover its result; do not create another operation.",
-          ),
-          retry: t("Retry same operation"),
-        };
-  return {
-    heading: t("Kitchen action not completed"),
-    text: rejectedRefreshed
-      ? t("The queue has been refreshed. Review the current item before choosing an action.")
-      : state.code === "PermissionDenied"
-        ? t(
-            "Your current permission or Store scope no longer allows this action. Refresh before continuing.",
-          )
-        : state.code === "Conflict"
-          ? t(
-              "The work item changed. Refresh and review its current state before choosing an action.",
-            )
-          : t("The action was not accepted. Refresh and review the current work item."),
-    retry: null,
-  };
+function kitchenOrderLabelText(item: KitchenBoardItem): string {
+  const label = item.orderLabel;
+  return label ? t("Order {orderNumber}", { orderNumber: label.orderNumber }) : "";
+}
+
+/** Dish lines of one combo become one line of the body, naming each chosen dish. */
+function mergeTargets(targets: readonly KitchenStepTarget[]) {
+  const lines = new Map<
+    string,
+    {
+      idempotencyKey: string;
+      ticketReference: string;
+      workItemReference: string;
+      orderItemReference: string;
+      optionReferences: string[] | null;
+    }
+  >();
+  for (const target of targets) {
+    const { item } = target;
+    const existing = lines.get(item.workItemReference);
+    if (existing) {
+      existing.optionReferences =
+        existing.optionReferences === null || target.optionReferences === null
+          ? null
+          : [...existing.optionReferences, ...target.optionReferences];
+      continue;
+    }
+    lines.set(item.workItemReference, {
+      idempotencyKey: serviceOperationReference(),
+      ticketReference: item.ticketReference,
+      workItemReference: item.workItemReference,
+      orderItemReference: item.execution?.orderItemReference ?? "",
+      optionReferences: target.optionReferences === null ? null : [...target.optionReferences],
+    });
+  }
+  return [...lines.values()];
 }

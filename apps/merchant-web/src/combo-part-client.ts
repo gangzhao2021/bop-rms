@@ -1,5 +1,3 @@
-import { createContext } from "react";
-import type { ComboPartView } from "./combo-parts.js";
 import { newOperationReference } from "./operation-reference.js";
 
 /** WP-2423 item 8 ⑥ part 4: a combo's dish done in the kitchen, or served at its table. */
@@ -39,21 +37,6 @@ async function post(csrf: string, path: string, body: unknown, fetcher: typeof f
   return payload ?? {};
 }
 
-/** The kitchen: this dish of the combo is done. True when every dish of it is done now. */
-export async function markComboPartDone(
-  csrf: string,
-  input: { readonly workItemReference: string; readonly optionReference: string },
-  fetcher: typeof fetch = fetch,
-): Promise<boolean> {
-  const result = await post(
-    csrf,
-    "/merchant/kitchen/combo-part-done",
-    { operationReference: newOperationReference(), ...input },
-    fetcher,
-  );
-  return result.allDone === true;
-}
-
 /** A server: this dish of the combo is served. True when every dish of it is served now. */
 export async function markComboPartServed(
   csrf: string,
@@ -72,8 +55,3 @@ export async function markComboPartServed(
   );
   return result.allServed === true;
 }
-
-/** The kitchen board's "this dish is done" for a combo's dish (absent: read only). */
-export const ComboPartDoneContext = createContext<
-  ((workItemReference: string, part: ComboPartView) => void) | null
->(null);

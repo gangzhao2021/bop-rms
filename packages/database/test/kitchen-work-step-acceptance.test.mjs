@@ -485,3 +485,104 @@ it("a 20-dish finish lets another Store command through", async () => {
     assert.ok(waits.length > chunks.length);
   });
 });
+
+/**
+ * Finished work must never fail a read. The feed used to fail at the 101st ticket of any rolling day
+ * and the browser at the 201st dish, leaving every tablet stale and read-only at peak.
+ */
+it("a Store with 150 finished and 10 open tickets and 400 dishes in 24 hours reads Fresh and a tap works", async () => {
+  await withFixture("wp2423_ks_capacity", async (f) => {
+    const {
+      kitchenBoardFinishedDishes,
+      kitchenBoardFinishedTickets,
+      kitchenBoardOpenTicketLimit,
+      countUnfinishedKitchenTickets,
+    } = await import("../../rms/kitchen/src/index.ts");
+    const cook = f.id(0x700);
+    const finished = [];
+    for (let n = 0; n < 150; n += 1) {
+      // 250 dishes in 100 tickets of 2 and 50 tickets of 3 ... 400 dishes with the 10 open below.
+      const round = await f.createTicket({
+        lines: n % 3 === 0 ? 3 : 2,
+        createdAgoMs: 3_600_000 + (150 - n) * 60_000,
+      });
+      finished.push(round);
+      await f.tap({ step: "Finish", actor: cook, lines: linesOf(round) });
+    }
+    const open = [];
+    for (let n = 0; n < 10; n += 1)
+      open.push(await f.createTicket({ lines: 3, createdAgoMs: 60_000 * (10 - n) }));
+    const dishes = (await f.rows("SELECT count(*)::int AS n FROM rms_kitchen.kitchen_work_item"))[0]
+      .n;
+    assert.ok(dishes >= 380, String(dishes));
+
+    // Today's bounds: the whole board read fails at the 101st ticket of the day.
+    await assert.rejects(f.board().refresh(), { code: "KITCHEN_QUEUE_DEPENDENCY_UNAVAILABLE" });
+
+    const board = f.board({
+      maxTickets: kitchenBoardOpenTicketLimit,
+      keepFinished: { tickets: kitchenBoardFinishedTickets, dishes: kitchenBoardFinishedDishes },
+    });
+    assert.equal(await board.refresh(), 1);
+    const read = async () => {
+      const items = [];
+      let cursor = null;
+      for (let page = 0; page < 6; page += 1) {
+        const result = await board.list({
+          ...f.scope,
+          actorReference: f.id(0x600),
+          observedAt: new Date().toISOString(),
+          filters: {
+            orderReference: null,
+            ticketReference: null,
+            workItemReference: null,
+            stationReference: null,
+            status: null,
+          },
+          cursor,
+          limit: 50,
+        });
+        items.push(...result.items);
+        assert.equal(result.freshnessStatus, "Fresh");
+        cursor = result.nextCursor;
+        if (cursor === null) return items;
+      }
+      assert.fail("more than the browser reads in one go");
+    };
+    const items = await read();
+    assert.ok(items.length <= 300);
+    assert.deepEqual(
+      new Set(items.filter((item) => item.status === "Queued").map((item) => item.ticketReference)),
+      new Set(open.map((round) => round.ticket)),
+    );
+    // The newest finished work stays for Recently finished and Remake; the oldest has left.
+    const shownFinished = new Set(
+      items.filter((item) => item.status === "Completed").map((item) => item.ticketReference),
+    );
+    assert.ok(shownFinished.has(finished.at(-1).ticket));
+    assert.ok(!shownFinished.has(finished[0].ticket));
+    assert.ok(items.filter((item) => item.status === "Completed").length <= 100);
+
+    // A tap works, and the board keeps reading.
+    const reply = await f.tap({ step: "Finish", actor: cook, lines: linesOf(open[0]) });
+    assert.deepEqual([...new Set(reply.lines.map((line) => line.outcome))], ["Finished"]);
+    assert.equal(await board.refresh(), 1);
+    assert.equal((await read()).filter((item) => item.status === "Queued").length, 9 * 3);
+
+    // More open tickets than the board carries: the oldest show, and the count says so.
+    const small = f.board({
+      maxTickets: 5,
+      keepFinished: { tickets: kitchenBoardFinishedTickets, dishes: kitchenBoardFinishedDishes },
+    });
+    assert.equal(await small.refresh(), 1);
+    const carried = new Set(
+      (
+        await f.rows(
+          "SELECT DISTINCT p.kitchen_ticket_id::text AS id FROM rms_kitchen.kitchen_work_queue_projection p JOIN rms_kitchen.kitchen_work_queue_projection_generation g ON g.projection_generation_id=p.projection_generation_id WHERE g.generation_status='Active' AND p.status='Queued'",
+        )
+      ).map((row) => row.id),
+    );
+    assert.deepEqual(carried, new Set(open.slice(1, 6).map((round) => round.ticket)));
+    assert.equal(await f.as((tx) => countUnfinishedKitchenTickets(tx, f.scope)), 9);
+  });
+});

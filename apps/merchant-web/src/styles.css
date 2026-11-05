@@ -1507,7 +1507,7 @@
   background: var(--bop-color-brand-primary);
   color: var(--bop-color-on-primary);
 }
-/* WP-2423 Q33: new work is announced across the board until a cook says they saw it. */
+/* DEC-PAID-ORDER-AUTO-ACCEPT: a paid order that needs someone is announced across the board. */
 .kitchen-arrivals {
   display: flex;
   flex-wrap: wrap;
@@ -1582,13 +1582,6 @@
   font: inherit;
   color: var(--bop-color-accent);
   cursor: pointer;
-}
-.kitchen-sound-reminder {
-  margin: var(--bop-space-2) 0 0;
-  padding: var(--bop-space-2) var(--bop-space-3);
-  border: 1px solid var(--bop-color-warning);
-  border-radius: var(--bop-radius-control);
-  font-size: 15px;
 }
 .kitchen-board-lock .bop-state-card,
 .kitchen-work-item-screen > .bop-state-card,

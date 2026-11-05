@@ -448,9 +448,44 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "某个规格的配方没有使用要替换或移除的配料。",
   "About {value} before tax and tip. The final total comes when you send the order.":
     "约 {value}，未含税和小费。发送后显示最终合计。",
-  "Accept order": "接单",
-  "Accept all": "全部接单",
   "Start cooking": "开始做",
+  "All finished": "全部做好了",
+  "Round finished": "这一轮做好了",
+  "To make": "待做",
+  "New order: {list}": "新订单：{list}",
+  "{count} new orders: {list}": "有 {count} 个新订单：{list}",
+  "Marked done": "已做好",
+  "Marked started": "已开始",
+  "Not recorded yet": "还没记上",
+  "Never mind": "不用了",
+  "The network dropped. That step was not recorded.": "网络断了，没记上",
+  "{orderLabel} · {displayName} started.": "{orderLabel} · {displayName} 开始做了",
+  "{orderLabel} · {displayName} done.": "{orderLabel} · {displayName} 做好了",
+  "{orderLabel} · {displayName} ready.": "{orderLabel} · {displayName} 可以上了",
+  "{displayName} was cancelled, so nothing was recorded for it.":
+    "{displayName} 已取消，没有记录这一步。",
+  "{displayName}: its ticket was closed, so nothing was recorded.":
+    "{displayName}：这张单已关闭，没有记录这一步。",
+  "{displayName} is on hold, so nothing was recorded for it.":
+    "{displayName} 暂缓中，没有记录这一步。",
+  "{displayName} needs its allergens checked before cooking. Nothing was recorded.":
+    "{displayName} 要先核对过敏原再做，没有记录这一步。",
+  "{displayName}: the order changed, so nothing was recorded. Check with the server.":
+    "{displayName}：订单变了，没有记录这一步。请和服务员核对。",
+  "{displayName} is no longer on this ticket. Nothing was recorded.":
+    "{displayName} 已不在这张单上，没有记录这一步。",
+  "{displayName} was not recorded. Tap it again.": "{displayName} 没记上，请再点一次。",
+  "Cancelled · don't make it": "已取消 · 别做了",
+  "Combo: {comboName} · last dish of it": "套餐：{comboName} · 这道做好就齐了",
+  "Combo: {comboName} · also {dishes}": "套餐：{comboName} · 还差 {dishes}",
+  "Combo: {comboName} · {count} more dishes": "套餐：{comboName} · 还差 {count} 道",
+  "Added · {minutes} min ago": "加菜 · {minutes} 分钟前",
+  "{count} more": "还有 {count} 条",
+  "Taken by the kitchen": "后厨已接手",
+  "More orders are waiting. They show as you finish these.": "还有订单在等，做完这些就会显示。",
+  "{count} more orders are waiting. They show as you finish these.":
+    "还有 {count} 张单在等，做完这些就会显示。",
+  "Remakes below: {count}": "下方有 {count} 道重做",
   "Start all": "全部开始做",
   Finished: "做好了",
   "Mark {displayName} finished": "{displayName}做好了",
@@ -3814,9 +3849,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sound turns back on at your next tap on this screen.": "声音会在你下次点这块屏幕时重新打开。",
   "Sound is off. New orders will not ring on this screen.":
     "声音已关闭，新订单在这块屏幕上不会响铃。",
-  "New order to accept": "有新订单待接单",
-  "{count} new orders to accept": "有 {count} 个新订单待接单",
-  Seen: "看到了",
   "Unsaved changes on this device": "本机有未保存的改动",
   "Changes made earlier on this device were not brought back, because the menu has been saved since. Check the menu below and make them again if they are still needed.":
     "本机之前的改动没有恢复，因为菜单之后已被保存过。请检查下面的菜单，如仍需要请重新修改。",
@@ -5833,7 +5865,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '"使用当前门店的设置"也会用当前门店的营业时间替换此设置中的营业时间。',
   // Figma v1 (2026-10-25): Home's "Needs attention now".
   "To accept": "待接单",
-  "Kitchen to accept": "待后厨接单",
   "{refunded} refunded": "已退 {refunded}",
   "Earlier orders not finished": "较早营业日未完成的订单",
   "From an earlier day · not finished": "较早营业日 · 未完成",

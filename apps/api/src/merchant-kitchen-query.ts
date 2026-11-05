@@ -2,10 +2,12 @@ import { readClosedRecord } from "@bop/identity";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   buildKdsContinuityState,
+  countUnfinishedKitchenTickets,
   createKitchenQueueProjectionService,
   createPostgresKitchenQueueQueries,
   lockPostgresKitchenQueueRead,
   KitchenQueueProjectionError,
+  kitchenBoardOpenTicketLimit,
   kitchenStaleTicketClosePermission,
   listClosedKitchenTickets,
   listKitchenWorkChases,
@@ -165,6 +167,25 @@ const noPreparation: KitchenPreparation = Object.freeze({
   customerNote: null,
   kitchenSection: null,
 });
+/**
+ * A combo's dishes keep their five keys (a tablet still on the previous page reads them strictly);
+ * each dish's section goes in a sibling field it ignores.
+ */
+export function kitchenComboPartFields(parts: readonly ComboPart[] | undefined) {
+  if (parts === undefined) return {};
+  return {
+    comboParts: parts.map((part) => ({
+      optionReference: part.optionReference,
+      nameZh: part.nameZh,
+      name: part.name,
+      done: part.done,
+      served: part.served,
+    })),
+    comboPartSections: Object.fromEntries(
+      parts.map((part) => [part.optionReference, part.kitchenSection ?? null]),
+    ),
+  };
+}
 const itemView = (
   item: KitchenQueueItemView,
   preparation: KitchenPreparation,
@@ -177,9 +198,7 @@ const itemView = (
     ? { chase: chases.get(String(item.workItemReference)) }
     : {}),
   // WP-2423 item 8 ⑥ part 4: a combo's chosen dishes, each made and marked done on its own.
-  ...(parts.has(String(item.orderItemReference))
-    ? { comboParts: parts.get(String(item.orderItemReference)) }
-    : {}),
+  ...kitchenComboPartFields(parts.get(String(item.orderItemReference))),
   ticketAggregateVersion: item.ticketAggregateVersion.toString(10),
   workItemVersion: item.workItemVersion.toString(10),
   allergens: preparation.allergens,
@@ -620,6 +639,7 @@ export function createMerchantKitchenQuery(options: {
                     orderItemReference: String(item.orderItemReference),
                     optionReferences: item.selectedOptions.map((o) => String(o.optionReference)),
                   })),
+                  { withSections: true },
                 ),
               new Map<string, readonly ComboPart[]>(),
             );
@@ -754,9 +774,24 @@ export function createMerchantKitchenQuery(options: {
                     null,
                   )
                 : null;
+            // DEC-KITCHEN-ONE-TAP: more open tickets than the board carries: it says so.
+            const moreWaitingTickets =
+              query.cursor === null
+                ? await withOptionalRead(
+                    tx,
+                    async () =>
+                      Math.max(
+                        0,
+                        (await countUnfinishedKitchenTickets(tx as never, authority)) -
+                          kitchenBoardOpenTicketLimit,
+                      ),
+                    0,
+                  )
+                : 0;
             return {
               ...result,
               operatorStatus: operatorStatus(result),
+              ...(moreWaitingTickets > 0 ? { moreWaitingTickets } : {}),
               ...(kitchenSections === null ? {} : { kitchenSections }),
               storeReference: authority.storeReference,
               canCloseEarlierDayTickets,

@@ -206,7 +206,7 @@ test("@production WP-2423 Q26: the kitchen remakes a dropped dish and puts a dis
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await send.click();
-  await expect(page.getByRole("heading", { name: "Remake sent to the kitchen" })).toBeVisible();
+  await expect(page.locator(".kitchen-status-row__line")).toHaveText("Remake sent to the kitchen");
   expect(commands[0]).toMatchObject({
     action: "CreateKitchenRework",
     originalWorkItemReference: id(1),
@@ -233,11 +233,13 @@ test("@production WP-2423 Q26: the kitchen remakes a dropped dish and puts a dis
   ]);
 
   // Marked done by mistake: back in progress, nothing wasted.
+  await page.getByRole("button", { name: "Details", exact: true }).click();
   await page.getByRole("button", { name: "Dismiss" }).click();
   await page.getByRole("button", { name: "Remake Beef noodle soup, Table T4 · Order 21" }).click();
   await dialog.getByLabel("Not ready yet — marked done by mistake").check();
   await expect(dialog.getByText("Nothing is recorded as waste", { exact: false })).toBeVisible();
   await dialog.getByRole("button", { name: "Put back in progress" }).click();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
   await expect(
     page.getByText("The dish is back in progress. Nothing was recorded as waste."),
   ).toBeVisible();
@@ -272,7 +274,8 @@ test("@production WP-2423 Q26: past two minutes a dish can no longer be put back
   const dialog = page.getByRole("dialog", { name: "Remake Beef noodle soup" });
   await dialog.getByLabel("Not ready yet — marked done by mistake").check();
   await dialog.getByRole("button", { name: "Put back in progress" }).click();
-  await expect(page.getByRole("heading", { name: "Remake not recorded" })).toBeVisible();
+  await expect(page.locator(".kitchen-status-row__line")).toHaveText("Remake not recorded");
+  await page.getByRole("button", { name: "Details", exact: true }).click();
   await expect(page.getByText("More than two minutes have passed", { exact: false })).toBeVisible();
 });
 
@@ -286,7 +289,8 @@ test("@production WP-2423 (2026-10-18): a remake opened by mistake or no longer 
   const create = page.getByRole("dialog", { name: "Remake Beef noodle soup" });
   await create.getByLabel("Made wrong").check();
   await create.getByRole("button", { name: "Send remake" }).click();
-  await expect(page.getByRole("heading", { name: "Remake sent to the kitchen" })).toBeVisible();
+  await expect(page.locator(".kitchen-status-row__line")).toHaveText("Remake sent to the kitchen");
+  await page.getByRole("button", { name: "Details", exact: true }).click();
   await page.getByRole("button", { name: "Dismiss" }).click();
 
   const lane = page.getByRole("region", { name: "Remakes" });
@@ -323,7 +327,8 @@ test("@production WP-2423 (2026-10-18): a remake opened by mistake or no longer 
       .map((v) => v.id),
   ).toEqual([]);
   await confirm.click();
-  await expect(page.getByRole("heading", { name: "Remake cancelled" })).toBeVisible();
+  await expect(page.locator(".kitchen-status-row__line")).toHaveText("Remake cancelled");
+  await page.getByRole("button", { name: "Details", exact: true }).click();
   await expect(
     page.getByText("Anything recorded as waste for it is put back in stock.", { exact: false }),
   ).toBeVisible();
@@ -347,6 +352,7 @@ test("@production WP-2423 (2026-10-18): a cancellation whose answer was lost is 
   await page.getByRole("button", { name: "Remake Beef noodle soup, Table T4 · Order 21" }).click();
   await page.getByRole("dialog", { name: "Remake Beef noodle soup" }).getByLabel("Dropped").check();
   await page.getByRole("button", { name: "Send remake" }).click();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
   await page.getByRole("button", { name: "Dismiss" }).click();
   let lost = true;
   await page.route("**/merchant/kitchen/rework/command", async (route) => {
@@ -365,9 +371,10 @@ test("@production WP-2423 (2026-10-18): a cancellation whose answer was lost is 
   const dialog = page.getByRole("dialog", { name: "Cancel remake of Beef noodle soup" });
   await dialog.getByLabel("Guest doesn't want it any more").check();
   await dialog.getByRole("button", { name: "Cancel remake" }).click();
-  await expect(page.getByRole("heading", { name: "Remake result unknown" })).toBeVisible();
+  await expect(page.locator(".kitchen-status-row__line")).toHaveText("Remake result unknown");
+  await page.getByRole("button", { name: "Details", exact: true }).click();
   await page.getByRole("button", { name: "Retry same cancellation" }).click();
-  await expect(page.getByRole("heading", { name: "Remake cancelled" })).toBeVisible();
+  await expect(page.locator(".kitchen-status-row__line")).toHaveText("Remake cancelled");
   await expect(page.getByText("The first dish stays recorded as waste.")).toBeVisible();
   const cancels = commands.filter((command) => command.action === "CancelKitchenRework");
   expect(cancels).toHaveLength(2);

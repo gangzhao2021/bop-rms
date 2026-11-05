@@ -154,11 +154,6 @@
   color: var(--bop-color-danger);
   font-weight: 600;
 }
-.kitchen-sound-reminder {
-  margin: 0;
-  color: var(--bop-color-danger);
-  font-size: 16px;
-}
 /* On the kitchen display, search and filters open from the bar ("Find an order") instead of a
    queue row; a phone keeps its own Filters button under the bar. A counter or office sign-in
    reading the Kitchen in the workspace keeps its search row. */
@@ -204,49 +199,6 @@
   border: 0;
   background: none;
   color: var(--bop-color-accent);
-  font-size: 16px;
-  font-weight: 600;
-}
-
-/* ------------------------------------------------------------ New orders */
-.kitchen-arrivals {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  min-height: 64px;
-  padding: 0 0 0 20px;
-  border: 0;
-  border-left: 6px solid var(--bop-color-accent);
-  border-radius: 0;
-  background: none;
-  color: var(--bop-color-text-default);
-}
-.kitchen-arrivals > div {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 16px;
-  margin-inline-end: auto;
-}
-.kitchen-arrivals h3 {
-  margin: 0;
-  color: var(--bop-color-accent);
-  font-size: 20px;
-  font-weight: 600;
-}
-.kitchen-arrivals p {
-  margin: 0;
-  color: var(--bop-color-text-muted);
-  font-size: 16px;
-}
-.kitchen-arrivals button {
-  min-height: var(--bop-kitchen-target);
-  padding: 0 16px;
-  border: 0;
-  border-radius: var(--bop-radius-control);
-  background: var(--bop-color-accent);
-  color: var(--bop-color-on-accent-fill);
   font-size: 16px;
   font-weight: 600;
 }
@@ -297,8 +249,9 @@
   border-radius: 0;
   background: none;
 }
-.kitchen-ticket[data-fresh="true"] {
-  border-top: 4px solid var(--bop-color-accent);
+/* A new ticket's number takes the accent for its first minute; nothing moves. */
+.kitchen-ticket[data-fresh="true"] .kitchen-ticket__number {
+  color: var(--bop-color-accent);
 }
 .kitchen-order-group.kitchen-ticket > .kitchen-ticket__header {
   flex-wrap: wrap;
@@ -371,7 +324,7 @@
   border-radius: 50%;
   background: var(--bop-color-accent);
 }
-.kitchen-ticket__state[data-state="ToAccept"]::before {
+.kitchen-ticket__state[data-state="ToMake"]::before {
   background: var(--bop-color-danger-mark);
 }
 .kitchen-ticket__state[data-state="Done"]::before {
@@ -524,31 +477,6 @@
 .kitchen-board-freshness:has([data-operator="Named"]) .kitchen-board-autorefresh {
   display: none;
 }
-.kitchen-sound-reminder {
-  color: var(--bop-color-text-muted);
-  font-size: 14px;
-}
-.kitchen-arrivals {
-  outline: 0;
-  box-shadow: none;
-  border-top: 0;
-  border-right: 0;
-  border-bottom: 0;
-}
-/* New orders still draw the eye when the sound is off: the accent bar pulses, nothing else. */
-@media (prefers-reduced-motion: no-preference) {
-  .kitchen-arrivals {
-    animation: kitchen-v3-arrivals-pulse 1.2s ease-in-out infinite alternate;
-  }
-}
-@keyframes kitchen-v3-arrivals-pulse {
-  from {
-    border-left-color: var(--bop-color-accent);
-  }
-  to {
-    border-left-color: transparent;
-  }
-}
 .kitchen-work-item[data-in-ticket] .kitchen-work-item__actions:has(.kitchen-work-item__no-actions) {
   grid-column: 1 / -1;
   grid-row: auto;
@@ -636,7 +564,6 @@
 /* Said once by the view-only line or the sound toggle; still read out. */
 .kitchen-board-workspace .kitchen-board-freshness [data-operator="Unverified"],
 .kitchen-board-workspace .kitchen-board-autorefresh,
-.kitchen-sound-reminder:not([data-resumes]),
 .kitchen-queue-heading {
   position: absolute;
   width: 1px;
@@ -1099,5 +1026,152 @@
 .kitchen-work-item .kitchen-work-item__paper {
   margin: 4px 0 0;
   font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---- DEC-KITCHEN-ONE-TAP: nothing above the tickets changes height during service. The row keeps
+   its height whatever it says; what does not fit on one line opens over the board. */
+.kitchen-status-row {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  height: var(--bop-kitchen-target);
+  min-width: 0;
+}
+.kitchen-status-row__line {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--bop-color-text-muted);
+  font-size: 16px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kitchen-status-row[data-tone="New"] .kitchen-status-row__line {
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.kitchen-status-row[data-tone="Problem"] .kitchen-status-row__line {
+  color: var(--bop-color-danger-text);
+  font-weight: 600;
+}
+.kitchen-status-row__more {
+  flex: 0 0 auto;
+  min-height: var(--bop-kitchen-target);
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+.kitchen-status-row__detail {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  z-index: 30;
+  display: grid;
+  gap: 12px;
+  max-height: 60vh;
+  padding: 16px;
+  overflow: auto;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-surface-default);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+.kitchen-status-row__detail ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 16px;
+}
+.kitchen-status-row__detail li[data-tone="Problem"] {
+  color: var(--bop-color-danger-text);
+}
+/* One line, reserved at a phone's width too, however many sections wait. */
+.kitchen-section-others {
+  display: -webkit-box;
+  height: 2.8em;
+  overflow: hidden;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+@media (min-width: 768px) {
+  .kitchen-section-others {
+    height: 1.4em;
+    -webkit-line-clamp: 1;
+  }
+}
+
+/* The ticket's top row: its quiet Start, or what a tap is doing. Never near the Done buttons. */
+.kitchen-order-group.kitchen-ticket > .kitchen-ticket__header {
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: center;
+  min-height: var(--bop-kitchen-target);
+}
+.kitchen-order-group.kitchen-ticket .kitchen-ticket__header .kitchen-order-group__label {
+  min-width: 0;
+}
+.kitchen-ticket__top {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  margin-inline-start: auto;
+}
+.kitchen-ticket__top button {
+  min-height: var(--bop-kitchen-target);
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font-size: 16px;
+  font-weight: 400;
+}
+.kitchen-ticket__top button:disabled {
+  color: var(--bop-color-text-muted);
+}
+.kitchen-ticket__top-text {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-ticket__top-text[data-tone="problem"] {
+  color: var(--bop-color-danger-text);
+  font-weight: 600;
+}
+/* A tapped line keeps its exact slot and dims; a slot closes only when its hold ends. */
+.kitchen-work-item[data-pending]:not([data-pending="Failed"]),
+.kitchen-work-item__combo li[data-pending]:not([data-pending="Failed"]) {
+  opacity: 0.45;
+}
+/* A later round of the table, read apart: its dishes wait for the round above in the foot button. */
+.kitchen-ticket__round {
+  margin: 4px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--bop-color-row-divider);
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-work-item__combo-note {
+  margin: 2px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.kitchen-work-item[data-cancelled-notice] .kitchen-work-item__summary h3 {
+  text-decoration: line-through;
+}
+.kitchen-work-item__cancelled {
+  margin: 2px 0 0;
+  color: var(--bop-color-danger-text);
+  font-size: 16px;
   font-weight: 600;
 }

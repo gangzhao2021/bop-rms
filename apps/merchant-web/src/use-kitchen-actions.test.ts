@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { parseKitchenBoardView, parseKitchenWorkItemView } from "./kitchen-board.js";
 import { kitchenBoardFixture, kitchenItemFixture } from "./kitchen-board.fixtures.js";
+import type { KitchenStepLineResult } from "./kitchen-step-client.js";
 import {
   applyConfirmedKitchenSteps,
-  kitchenActionNotice,
+  kitchenRefusalText,
   kitchenStepText,
   type KitchenConfirmedStep,
 } from "./use-kitchen-actions.js";
@@ -31,118 +32,96 @@ const board = (latte: Record<string, unknown>, sibling: Record<string, unknown> 
       },
     ],
   });
-const accepted: KitchenConfirmedStep = {
+const line = (change: Partial<KitchenStepLineResult>): KitchenStepLineResult => ({
   workItemReference: kitchenItemFixture().workItemReference,
+  orderItemReference: id(4),
   ticketReference: kitchenItemFixture().ticketReference,
-  result: Object.freeze({
-    outcome: "Accepted",
-    ticketVersion: "8",
-    workItemVersion: "2",
-    workItemStatus: "Queued",
-    completedQuantity: 0,
-    occurredAt: "2026-08-12T15:13:00.000Z",
-    projectionPending: true,
-  }),
-};
+  outcome: "Finished",
+  refusedReason: null,
+  ticketVersion: "10",
+  workItemVersion: "4",
+  workItemStatus: "Completed",
+  completedQuantity: 2,
+  requiredQuantity: 2,
+  acceptedAt: "2026-08-12T15:13:00.000Z",
+  readyAt: "2026-08-12T15:13:00.000Z",
+  dishesDone: null,
+  ...change,
+});
+const step = (result: KitchenStepLineResult): KitchenConfirmedStep => ({
+  workItemReference: result.workItemReference,
+  ticketReference: result.ticketReference,
+  result,
+});
 
 describe("WP-2423 a confirmed kitchen step shows at once", () => {
   it("shows the server-confirmed step while the queue projection has not caught up", () => {
-    const view = applyConfirmedKitchenSteps(board({}), [accepted]);
+    const view = applyConfirmedKitchenSteps(board({}), [step(line({}))]);
     const [latte, croissant] = view.items;
-    // Accepted: the next step (Start) is offered, with the versions the server confirmed.
-    expect(latte?.status).toBe("Queued");
+    expect(latte).toMatchObject({ status: "Completed", completedQuantity: 2 });
     expect(latte?.execution).toMatchObject({
-      ticketVersion: "8",
-      workItemVersion: "2",
+      ticketVersion: "10",
+      workItemVersion: "4",
       acceptedAt: "2026-08-12T15:13:00.000Z",
+      readyAt: "2026-08-12T15:13:00.000Z",
     });
-    // Other work on the same ticket takes the confirmed ticket version, nothing else.
-    expect(croissant?.execution).toMatchObject({
-      ticketVersion: "8",
-      workItemVersion: "1",
-      acceptedAt: null,
-    });
-    // The changed items still read as valid work items (they are sent with the next step).
+    // Other work on the same ticket is left alone: the browser sends no versions any more.
+    expect(croissant?.execution).toMatchObject({ ticketVersion: "7", workItemVersion: "1" });
     expect(() => parseKitchenWorkItemView(latte)).not.toThrow();
-    expect(() => parseKitchenWorkItemView(croissant)).not.toThrow();
   });
   it("leaves the projection as the source once it reaches the confirmed versions", () => {
-    const caughtUp = board(
-      { status: "In Progress", execution: execution("9", "3", "2026-08-12T15:13:00.000Z") },
-      { execution: { ...execution("9", "1", null), orderItemReference: id(10) } },
-    );
-    expect(applyConfirmedKitchenSteps(caughtUp, [accepted])).toBe(caughtUp);
-    // Nothing confirmed: nothing changes.
+    const caughtUp = board({
+      status: "Completed",
+      completedQuantity: 2,
+      execution: execution("10", "4", "2026-08-12T15:13:00.000Z"),
+    });
+    expect(applyConfirmedKitchenSteps(caughtUp, [step(line({}))])).toBe(caughtUp);
     const plain = board({});
     expect(applyConfirmedKitchenSteps(plain, [])).toBe(plain);
   });
-  it("applies completion and ready exactly as confirmed", () => {
+  it("shows a combo's dish done at once, though the work item's versions did not move", () => {
+    const parts = [
+      { optionReference: id(20), nameZh: "奶茶", name: "Milk tea", done: false, served: false },
+      { optionReference: id(21), nameZh: "薯条", name: "Fries", done: false, served: false },
+    ];
     const started = board({
       status: "In Progress",
-      execution: execution("8", "2", "2026-08-12T15:13:00.000Z"),
+      comboParts: parts,
+      execution: execution("8", "3", "2026-08-12T15:13:00.000Z"),
     });
-    const [done] = applyConfirmedKitchenSteps(started, [
-      {
-        ...accepted,
-        result: {
-          ...accepted.result,
-          outcome: "CompletedAndOrderItemReady",
-          ticketVersion: "9",
+    const [combo] = applyConfirmedKitchenSteps(started, [
+      step(
+        line({
+          outcome: "DishDone",
+          ticketVersion: "8",
           workItemVersion: "3",
-          workItemStatus: "Completed",
-          completedQuantity: 2,
-          occurredAt: "2026-08-12T15:20:00.000Z",
-        },
-      },
+          workItemStatus: "In Progress",
+          completedQuantity: 0,
+          readyAt: null,
+          dishesDone: [id(20)],
+        }),
+      ),
     ]).items;
-    expect(done).toMatchObject({ status: "Completed", completedQuantity: 2 });
-    expect(done?.execution).toMatchObject({
-      acceptedAt: "2026-08-12T15:13:00.000Z",
-      readyAt: "2026-08-12T15:20:00.000Z",
-    });
+    expect(combo?.comboParts?.map((part) => part.done)).toEqual([true, false]);
+    expect(combo?.status).toBe("In Progress");
   });
-  it("says what the cook just did in plain words", () => {
-    const item = { displayName: "Latte", requiredQuantity: 2 };
-    expect(kitchenStepText("Pickup · Order 6", item, accepted.result)).toBe(
-      "Pickup · Order 6 · Latte accepted.",
+  it("says what the cook just did in plain words, and nothing when nothing changed", () => {
+    expect(kitchenStepText("Order 6", "Latte", { outcome: "Finished" })).toBe(
+      "Order 6 · Latte done.",
     );
-    expect(
-      kitchenStepText("Pickup · Order 6", item, {
-        outcome: "ProgressRecorded",
-        completedQuantity: 1,
-      }),
-    ).toBe("Pickup · Order 6 · Latte 1 of 2 done.");
-    expect(
-      kitchenStepText("Pickup · Order 6", item, {
-        outcome: "OrderItemReady",
-        completedQuantity: 2,
-      }),
-    ).toBe("Pickup · Order 6 · Latte ready.");
-  });
-});
-
-describe("WP-2423 (v15 2026-10-16) what the board says about a step that did not complete", () => {
-  const attempt = { item: kitchenItemFixture(), operation: {}, revision: 1 } as never;
-  it("a busy server is 'try again', never a permission problem", () => {
-    const busy = kitchenActionNotice({ kind: "Unknown", attempt, busy: true }, false);
-    expect(busy).toEqual({
-      heading: "Kitchen busy, try again",
-      text: "The kitchen system was busy for a moment and nothing was changed. Try again.",
-      retry: "Try again",
-    });
-    expect(JSON.stringify(busy)).not.toMatch(/permission/iu);
-  });
-  it("a lost answer offers the same operation again", () => {
-    expect(kitchenActionNotice({ kind: "Unknown", attempt, busy: false }, false).retry).toBe(
-      "Retry same operation",
+    expect(kitchenStepText("Order 6", "Latte", { outcome: "Started" })).toBe(
+      "Order 6 · Latte started.",
     );
+    expect(kitchenStepText("Order 6", "Latte", { outcome: "AlreadyFinished" })).toBeNull();
+    expect(kitchenStepText("Order 6", "Latte", { outcome: "AlreadyStarted" })).toBeNull();
   });
-  it("only a refusal speaks of permission", () => {
-    expect(
-      kitchenActionNotice({ kind: "Rejected", attempt, code: "PermissionDenied" }, false).text,
-    ).toMatch(/permission/u);
-    expect(kitchenActionNotice({ kind: "Rejected", attempt, code: "Conflict" }, false).text).toBe(
-      "The work item changed. Refresh and review its current state before choosing an action.",
+  it("says why a line of a tap was left out, in staff words", () => {
+    expect(kitchenRefusalText("Latte", "Cancelled")).toBe(
+      "Latte was cancelled, so nothing was recorded for it.",
     );
+    for (const reason of ["Closed", "Held", "Blocked", "OrderChanged", "NotFound"] as const)
+      expect(kitchenRefusalText("Latte", reason)).not.toMatch(
+        /KITCHEN|\bunavailable\b|operation/iu,
+      );
   });
 });

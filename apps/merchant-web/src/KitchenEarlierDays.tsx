@@ -144,6 +144,18 @@ export function useKitchenStaleClose(input: {
   };
 }
 
+/** A ticket close's last step in one line, for the board's status row. */
+export function kitchenStaleCloseHeading(close: ReturnType<typeof useKitchenStaleClose>): string {
+  const { state } = close;
+  return state.kind === "Submitting"
+    ? t("Closing ticket")
+    : state.kind === "Unknown"
+      ? t("Close result unknown")
+      : state.kind === "Confirmed"
+        ? t("Ticket closed")
+        : t("Ticket not closed");
+}
+
 export function KitchenStaleCloseStatus({
   close,
 }: {
@@ -151,14 +163,7 @@ export function KitchenStaleCloseStatus({
 }) {
   const { state } = close;
   if (state.kind === "Idle") return null;
-  const heading =
-    state.kind === "Submitting"
-      ? t("Closing ticket")
-      : state.kind === "Unknown"
-        ? t("Close result unknown")
-        : state.kind === "Confirmed"
-          ? t("Ticket closed")
-          : t("Ticket not closed");
+  const heading = kitchenStaleCloseHeading(close);
   const text =
     state.kind === "Submitting"
       ? t("Please wait.")

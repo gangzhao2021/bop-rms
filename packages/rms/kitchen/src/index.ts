@@ -398,6 +398,9 @@ export {
 export { createPostgresKitchenWorkLifecycleStore } from "./infrastructure/persistence/kitchen-work-lifecycle-store.js";
 export {
   chunkKitchenWorkStepLines,
+  kitchenBoardFinishedDishes,
+  kitchenBoardFinishedTickets,
+  kitchenBoardOpenTicketLimit,
   kitchenWorkStepChunkLines,
   kitchenWorkStepKinds,
   kitchenWorkStepMaxLines,
@@ -434,7 +437,10 @@ export { createPostgresKitchenQueueProjectionStore } from "./infrastructure/pers
 
 export { createKitchenQueueLifecycleProofBundle } from "./application/kitchen-queue-lifecycle-proof.js";
 
-export { createPostgresKitchenQueueSourceReader } from "./infrastructure/persistence/kitchen-queue-source-reader.js";
+export {
+  countUnfinishedKitchenTickets,
+  createPostgresKitchenQueueSourceReader,
+} from "./infrastructure/persistence/kitchen-queue-source-reader.js";
 
 export { createKitchenQueueRebuildSource } from "./application/kitchen-queue-rebuild-source.js";
 
