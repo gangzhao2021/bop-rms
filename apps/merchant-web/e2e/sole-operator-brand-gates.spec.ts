@@ -308,9 +308,10 @@ test("@production the allergen list is recorded by one person and approved by an
         permissions: { mayRead: true, mayDeclare: true, mayManageRegistry: true },
         locale: "en-CA",
         registryProposal: proposal,
+        // As the server says it with the setting off: who else holds the approval is named.
         soleOperator:
           proposal !== null && recordedByYou
-            ? { status: "NotSet", otherApprovers: [], verifiedUntil: null }
+            ? { status: "NotSet", otherApprovers: [{ displayName: "Mia" }], verifiedUntil: null }
             : null,
         registry: null,
         registryTemplate: {
