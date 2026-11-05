@@ -1556,6 +1556,22 @@
     outline: 6px solid var(--bop-color-warning);
   }
 }
+/* WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: plain lines above the list, no box. */
+.paid-order-switch-line,
+.pause-ordering {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--bop-color-text-muted);
+}
+.paid-order-switch-line button,
+.pause-ordering button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--bop-color-accent);
+  cursor: pointer;
+}
 .kitchen-sound-reminder {
   margin: var(--bop-space-2) 0 0;
   padding: var(--bop-space-2) var(--bop-space-3);

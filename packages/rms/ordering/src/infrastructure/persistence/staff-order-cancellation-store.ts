@@ -413,6 +413,16 @@ export function createPostgresStaffOrderCancellationStore(options: {
          * proved (from Payment, under this fence) fully refunded already. Default Refund.
          */
         refundDisposition?: StaffOrderCancellationRefundDisposition;
+        /**
+         * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the permission actually used. "Can't make it" is
+         * ordering.order.accept, only for an automatically accepted batch (the database checks).
+         */
+        permissionCode?: "ordering.order.cancel" | "ordering.order.accept";
+        /**
+         * The System closed it, not a person: `actorReference` is the reserved System actor (the
+         * actor columns require one) and the audit says System, from the worker.
+         */
+        bySystem?: boolean;
       },
     ): Promise<{ readonly status: "Created"; readonly record: StaffOrderCancellationRecord }> {
       const plan = parseStaffOrderCancellationPlan(input.plan);
@@ -426,6 +436,17 @@ export function createPostgresStaffOrderCancellationStore(options: {
       const refundDisposition = input.refundDisposition ?? "Refund";
       if (refundDisposition !== "Refund" && refundDisposition !== "AlreadyRefunded")
         return unavailable();
+      const permissionCode = input.permissionCode ?? staffOrderCancellationPolicy.permissionCode;
+      if (
+        permissionCode !== staffOrderCancellationPolicy.permissionCode &&
+        permissionCode !== "ordering.order.accept"
+      )
+        return unavailable();
+      const auditActor =
+        input.bySystem === true
+          ? ({ type: "System" } as const)
+          : ({ type: "User", reference: parseOrderingReference(input.actorReference) } as const);
+      const auditChannel = input.bySystem === true ? "EVENT_CONSUMER" : "MERCHANT_WEB";
       // WP-2423 (v15 2026-10-18): a dine-in reason is never recorded on a pickup order.
       if (!staffOrderCancellationReasonAllowed(plan.orderType, reasonCode)) return invalidReason();
       const identity = {
@@ -495,7 +516,7 @@ export function createPostgresStaffOrderCancellationStore(options: {
         auditId: auditReference,
         brandId: brand,
         storeId: store,
-        actor: { type: "User", reference: actorReference },
+        actor: auditActor,
         actionCode: "ORDER_CANCELLED_BY_STAFF",
         targetType: record.orderType === "Pickup" ? "Order" : "OrderBatch",
         targetId:
@@ -503,7 +524,7 @@ export function createPostgresStaffOrderCancellationStore(options: {
         correlationId: operationReference,
         reasonCode,
         occurredAt: cancelledAt,
-        sourceChannel: "MERCHANT_WEB",
+        sourceChannel: auditChannel,
         afterSummary: {
           // Handoff 24.8: a pickup the Store never accepted ends as Rejected, not Cancelled.
           phase:
@@ -533,10 +554,10 @@ export function createPostgresStaffOrderCancellationStore(options: {
             expectedSourceCheckpoint: record.expectedSourceCheckpoint,
             previousPhase: plan.previousPhase ?? "Accepted",
             phase: plan.previousPhase === "Submitted" ? "Rejected" : "Cancelled",
-            actorType: "User",
-            actorReference,
+            actorType: input.bySystem === true ? "System" : "User",
+            actorReference: input.bySystem === true ? null : actorReference,
             purposeCode: staffOrderCancellationPolicy.purposeCode,
-            permissionCode: staffOrderCancellationPolicy.permissionCode,
+            permissionCode,
             reasonCode,
             workflowVersionReference: staffOrderCancellationPolicy.workflowVersionReference,
             transitionReference: staffOrderCancellationPolicy.transitionReference,
@@ -556,14 +577,14 @@ export function createPostgresStaffOrderCancellationStore(options: {
               auditId: terminationAuditReference,
               brandId: brand,
               storeId: store,
-              actor: { type: "User", reference: actorReference },
+              actor: auditActor,
               actionCode: "ORDER_TERMINATED",
               targetType: "Order",
               targetId: candidate.orderReference,
               correlationId: candidate.operationReference,
               reasonCode: candidate.reasonCode,
               occurredAt: candidate.terminatedAt,
-              sourceChannel: "MERCHANT_WEB",
+              sourceChannel: auditChannel,
               afterSummary: { phase: candidate.phase },
               dataClassification: "Restricted",
               retentionPolicyCode: "FINANCIAL_COMPLIANCE",
@@ -595,7 +616,7 @@ export function createPostgresStaffOrderCancellationStore(options: {
             ",permission_code) VALUES (" +
             keys.map((_, i) => "$" + (i + 1)).join(",") +
             ",'" +
-            staffOrderCancellationPolicy.permissionCode +
+            permissionCode +
             "')",
           keys.map((key) =>
             key === "orderItemReferences" ? [...record.orderItemReferences] : record[key],

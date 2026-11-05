@@ -1,5 +1,6 @@
 import { parseComboParts, type ComboPartView } from "./combo-parts.js";
 import { t, saidTable } from "./i18n/i18n.js";
+import { parsePaidOrderWatch, type PaidOrderWatch } from "./paid-order-watch.js";
 export type KitchenStatus = "Queued" | "Held" | "In Progress" | "Completed" | "Cancelled";
 
 export interface KitchenSelectedOption {
@@ -102,11 +103,15 @@ export interface KitchenBoardView {
   readonly awaitingAcceptance?: readonly KitchenAwaitingLabel[] | null;
   /** WP-2423 item 8 ⑧: the Store's kitchen sections, in its order (omitted: not read). */
   readonly kitchenSections?: readonly string[];
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that sends paid orders straight here. */
+  readonly paidOrderWatch?: PaidOrderWatch | null;
 }
 /** A paid order not accepted yet; a pickup carries when it is refunded unless someone accepts it. */
 export interface KitchenAwaitingLabel extends KitchenOrderLabel {
   /** Warn before timeouts (WP-2423 2026-10-17); null or absent when no refund deadline runs. */
   readonly acceptBy?: string | null;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: why it was not sent automatically (absent: it does not apply). */
+  readonly notSent?: { readonly reason: string; readonly itemCount: number | null };
 }
 
 export interface KitchenWorkItemDetailView {
@@ -245,15 +250,35 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
 function parseKitchenAwaitingLabel(value: unknown): KitchenAwaitingLabel {
   const hasDeadline =
     value !== null && typeof value === "object" && Object.hasOwn(value, "acceptBy");
-  const { acceptBy, ...rest } = (
+  const { acceptBy, notSent, ...rest } = (
     hasDeadline ? value : { ...(value as object), acceptBy: null }
   ) as {
     acceptBy: unknown;
+    notSent?: unknown;
   };
   const label = parseKitchenOrderLabel(rest);
   if (label === null || (acceptBy !== null && label.orderType !== "Pickup"))
     throw new Error("KITCHEN_BOARD_INVALID");
-  return Object.freeze({ ...label, acceptBy: acceptBy === null ? null : instant(acceptBy) });
+  const why = notSent === undefined ? null : closed(notSent, ["reason", "itemCount"]);
+  if (
+    why !== null &&
+    (typeof why.reason !== "string" ||
+      !/^[A-Za-z]{1,40}$/u.test(why.reason) ||
+      (why.itemCount !== null && !Number.isSafeInteger(why.itemCount)))
+  )
+    throw new Error("KITCHEN_BOARD_INVALID");
+  return Object.freeze({
+    ...label,
+    acceptBy: acceptBy === null ? null : instant(acceptBy),
+    ...(why === null
+      ? {}
+      : {
+          notSent: Object.freeze({
+            reason: why.reason as string,
+            itemCount: why.itemCount as number | null,
+          }),
+        }),
+  });
 }
 /** WP-2423 Q2: the Customer's note, as written (bounded, no control characters). */
 export function parseKitchenCustomerNote(value: unknown): string | null {
@@ -443,6 +468,8 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     value !== null && typeof value === "object" && Object.hasOwn(value, "awaitingAcceptance");
   const hasSections =
     value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenSections");
+  const hasWatch =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "paidOrderWatch");
   const input = closed(value, [
     "screenId",
     "projectionName",
@@ -455,6 +482,7 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     ...(hasCanClose ? ["canCloseEarlierDayTickets"] : []),
     ...(hasAwaiting ? ["awaitingAcceptance"] : []),
     ...(hasSections ? ["kitchenSections"] : []),
+    ...(hasWatch ? ["paidOrderWatch"] : []),
   ]);
   if (
     hasSections &&
@@ -511,6 +539,7 @@ export function parseKitchenBoardView(value: unknown): KitchenBoardView {
     ...(hasSections
       ? { kitchenSections: Object.freeze([...(input.kitchenSections as string[])]) }
       : {}),
+    ...(hasWatch ? { paidOrderWatch: parsePaidOrderWatch(input.paidOrderWatch) } : {}),
   });
 }
 

@@ -11,6 +11,10 @@ import {
 import { parseOrderingReference } from "../../packages/rms/ordering/src/index.ts";
 import { isPilotRuntime, pilotProviderEnvironment } from "./pilot-environment.mjs";
 import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolution.mjs";
+import {
+  createOrderAutoAcceptedPickupExpiry,
+  createOrderAutoAcceptedPickupSweep,
+} from "../../apps/api/dist/order-auto-accepted-pickup-expiry.js";
 const unavailable = () => {
   throw new Error("INTERNAL_PICKUP_PAYMENT_EXPIRY_UNAVAILABLE");
 };
@@ -46,6 +50,41 @@ export function createInternalPickupPaymentExpiry(
     newReference: resources.credentials.reference,
     authorize: async () => active(),
     authorizeDiscovery: async (_tx, at) => active() && at <= resources.now(),
+  });
+}
+/**
+ * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: an automatically accepted pickup the kitchen has not touched 30
+ * minutes after it was sent closes and refunds. Same System actor; it finds nothing at a Store that
+ * never turned automatic sending on.
+ */
+export function createInternalAutoAcceptedPickupSweep(
+  resources,
+  { systemActorReference, providerAccountReference },
+) {
+  if (!isPilotRuntime()) return unavailable();
+  const binding = resources.publicProfile.binding;
+  const active = () => isPilotRuntime() && resources.now() < binding.validUntil;
+  return createOrderAutoAcceptedPickupSweep({
+    expiry: createOrderAutoAcceptedPickupExpiry({
+      scope: {
+        tenantReference: String(parseOrderingReference(binding.tenantReference)),
+        brandReference: String(parseOrderingReference(resources.scope.brandReference)),
+        storeReference: String(parseOrderingReference(resources.scope.storeReference)),
+      },
+      systemActorReference: String(parseOrderingReference(systemActorReference)),
+      transactions: resources.transactions,
+      now: resources.now,
+      newReference: resources.credentials.reference,
+      authorize: async () => active(),
+      resolveRefundConfiguration: async () => ({
+        providerAccountReference: String(parseOrderingReference(providerAccountReference)),
+        environment: pilotProviderEnvironment(),
+      }),
+    }),
+    now: resources.now,
+    pageSize: 10,
+    onFailure: (code) =>
+      console.error(JSON.stringify({ event: "INTERNAL_AUTO_ACCEPTED_PICKUP_FAILED", code })),
   });
 }
 /**
@@ -91,6 +130,7 @@ export function createInternalPickupPaymentExpiryWorkload(
   {
     createService = createInternalPickupPaymentExpiry,
     createPaymentSweep = createInternalPickupClosedPaymentSweep,
+    createAutoAcceptedSweep = createInternalAutoAcceptedPickupSweep,
   } = {},
 ) {
   const closure = createService(resources, options);
@@ -98,6 +138,7 @@ export function createInternalPickupPaymentExpiryWorkload(
   const dispatcher = createPickupPaymentWindowDispatcher({
     closure,
     ...(closedPayments === null ? {} : { closedPayments }),
+    autoAcceptedPickups: createAutoAcceptedSweep(resources, options),
     now: resources.now,
     pageSize: 10,
     onOutcome: (outcome) => {

@@ -131,10 +131,16 @@ export function createMerchantServiceControl(options: {
         {
           transaction: tx,
           resolve: async () => {
-            const scope = await resolveScope(tx, sessionCookie, "store.service.read");
-            if ((await scope.allowed()) !== true)
+            // DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause sees whether the Store is paused, from
+            // Orders and the kitchen board; the Store's page stays with those who may read it.
+            const scope = await resolveScope(tx, sessionCookie, "store.service.read").catch(
+              () => null,
+            );
+            if (scope !== null && (await scope.allowed()) === true) return scope;
+            const pausing = await resolveScope(tx, sessionCookie, "store.service.pause");
+            if ((await pausing.allowed()) !== true)
               throw new Error("STORE_SERVICE_PERMISSION_DENIED");
-            return scope;
+            return pausing;
           },
           recheck: async (scope) => (await scope.allowed()) === true,
           denied: () => {

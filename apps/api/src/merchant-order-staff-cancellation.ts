@@ -6,6 +6,7 @@ import {
 } from "@rms/kitchen";
 import {
   createPostgresStaffOrderCancellationStore,
+  listStoreOrderAutoAcceptanceFacts,
   parseOrderingInstant,
   parseOrderingReference,
   readStaffBatchLineSources,
@@ -177,7 +178,10 @@ export async function readStaffCancellationRefundStatus(
  */
 async function readStaffCancellationRemaining(
   tx: ConsumerTransaction,
-  options: Pick<StaffOrderCancellationOptions, "resolveRefundConfiguration" | "persistence">,
+  options: {
+    resolveRefundConfiguration?: StaffOrderCancellationOptions["resolveRefundConfiguration"];
+    now(): string;
+  },
   selected: { tenantReference: string; brandReference: string; storeReference: string },
   plan: StaffOrderCancellationPlan,
   allowed: () => Promise<boolean>,
@@ -221,7 +225,7 @@ async function readStaffCancellationRemaining(
       paymentTransactionReference: String(plan.payment.paymentTransactionReference),
       paymentIntentReference: String(plan.payment.paymentIntentReference),
       paymentAttemptReference: String(plan.payment.paymentAttemptReference),
-      observedAt: parseOrderingInstant(options.persistence.now()),
+      observedAt: parseOrderingInstant(options.now()),
       authorize: async (t, query) => t === tx && query.orderReference === orderReference,
     });
     result = {
@@ -237,6 +241,166 @@ async function readStaffCancellationRemaining(
 function databaseCode(error: unknown) {
   const code = (error as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : null;
+}
+
+/**
+ * One cancellation, under the caller's authorization: Ordering fence and eligibility, what is left to
+ * refund, every Kitchen item still unstarted, the append-only record, and the reserved stock
+ * released, all or nothing. The Payment compensation workload refunds from the record.
+ */
+export async function cancelPaidBatch(
+  tx: ConsumerTransaction,
+  input: {
+    options: {
+      resolveRefundConfiguration?: StaffOrderCancellationOptions["resolveRefundConfiguration"];
+      now(): string;
+      nextReference(): string;
+    };
+    selected: { tenantReference: string; brandReference: string; storeReference: string };
+    ordering: ReturnType<typeof createPostgresStaffOrderCancellationStore>;
+    owned(
+      t: ConsumerTransaction,
+      identity: { orderReference: string; orderBatchReference: string; actorReference: string },
+    ): Promise<boolean>;
+    allowed(): Promise<boolean>;
+    orderReference: string;
+    orderBatchReference: string;
+    expectedOrderVersion: number;
+    operationReference: string;
+    actorReference: string;
+    reasonCode: StaffOrderCancellationReasonCode;
+    /** DEC-PAID-ORDER-AUTO-ACCEPT: "Can't make it" records the permission it used. */
+    permissionCode?: "ordering.order.accept";
+    /** Only a batch the System accepted, refunded in full ("Can't make it", the System close). */
+    autoAcceptedOnly?: boolean;
+    /** The System closed it: the actor is the reserved System actor and the audit says System. */
+    bySystem?: boolean;
+  },
+): Promise<StaffOrderCancellationRecord> {
+  const {
+    options,
+    selected,
+    ordering,
+    owned,
+    allowed,
+    orderReference,
+    orderBatchReference,
+    expectedOrderVersion,
+    operationReference,
+    actorReference,
+    reasonCode,
+  } = input;
+  const prepared = await ordering.prepare(tx, {
+    orderReference,
+    orderBatchReference,
+    expectedOrderVersion,
+    actorReference,
+  });
+  if (prepared.status === "NotEligible")
+    return fail(
+      prepared.reason === "NotFound"
+        ? "ORDER_CANCELLATION_NOT_FOUND"
+        : prepared.reason === "VersionConflict"
+          ? "ORDER_CANCELLATION_VERSION_CONFLICT"
+          : "ORDER_CANCELLATION_NOT_CANCELLABLE",
+    );
+  const plan = prepared.plan;
+  // WP-2423 (v15 2026-10-18): "Guests left" is a table's reason. A pickup customer who
+  // never came is closed as not collected after the pickup hold, not cancelled.
+  if (!staffOrderCancellationReasonAllowed(plan.orderType, reasonCode))
+    return fail("ORDER_CANCELLATION_INPUT_INVALID");
+  // DEC-TABLE-CLOSE-GUESTS-LEFT: a round whose payment ordinary refunds already returned in full
+  // (never accepted, or accepted and refunded item by item) owes nothing more; otherwise
+  // Payment refunds what is left (all of it, tip included).
+  const position = await readStaffCancellationRemaining(tx, options, selected, plan, allowed);
+  if (position === null && plan.previousPhase === "Submitted")
+    return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+  const refundDisposition: "Refund" | "AlreadyRefunded" =
+    position?.remainingMinor === 0n ? "AlreadyRefunded" : "Refund";
+  if (input.autoAcceptedOnly === true) {
+    const fact = (await listStoreOrderAutoAcceptanceFacts(tx, selected, [orderReference])).get(
+      orderBatchReference,
+    );
+    if (
+      fact?.kind !== "Accepted" ||
+      plan.previousPhase === "Submitted" ||
+      refundDisposition !== "Refund"
+    )
+      return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
+  }
+  const cancellationReference = String(parseOrderingReference(options.nextReference()));
+  const cancelledAt = parseOrderingInstant(options.now());
+  // Kitchen after the Ordering fence (foreign owner fences first): every item still unstarted.
+  const kitchen = await createPostgresKitchenBatchCancellation({
+    ...selected,
+    authorize: owned,
+  }).cancel(tx, {
+    orderReference,
+    orderBatchReference,
+    operationReference,
+    orderCancellationReference: cancellationReference,
+    actorReference,
+    cancelledAt,
+    auditReference: options.nextReference(),
+    eventReference: options.nextReference(),
+    nextReference: options.nextReference,
+    ...(input.bySystem === true ? { bySystem: true } : {}),
+  });
+  if (kitchen.status === "AlreadyCancelled")
+    return fail("ORDER_CANCELLATION_UNAVAILABLE");
+  const created = await ordering.commit(tx, {
+    plan,
+    cancellationReference,
+    operationReference,
+    actorReference,
+    reasonCode,
+    kitchenEvidenceDigest: kitchen.evidenceDigest,
+    auditReference: options.nextReference(),
+    terminationAuditReference: options.nextReference(),
+    cancelledAt,
+    refundDisposition,
+    ...(input.permissionCode === undefined ? {} : { permissionCode: input.permissionCode }),
+    ...(input.bySystem === true ? { bySystem: true } : {}),
+  });
+  const record = created.record;
+  // Stock reserved at submission returns in the same transaction, or nothing is cancelled.
+  // The ledger movement names the cancelling staff member; the release audit is System-owned.
+  const releaser = createSubmissionInventoryRelease({
+    scope: selected,
+    systemActorReference: actorReference,
+    reasonCode: "STAFF_CANCELLED_BEFORE_PREPARATION",
+    now: options.now,
+  });
+  const request = {
+    source: {
+      kind: "StaffOrderCancellationInventory/v1",
+      reference: String(record.cancellationReference),
+      submissionReference: String(record.submissionReference),
+      orderReference: String(record.orderReference),
+      occurredAt: String(record.cancelledAt),
+    },
+    releasedAt: String(record.cancelledAt),
+    authorize: allowed,
+  };
+  // WP-2423 Q6 step 2a: once lines of this Batch were cancelled (and their stock released),
+  // the remaining lines are released line by line.
+  const lines = await readStaffBatchLineSources(
+    tx,
+    selected,
+    orderReference,
+    orderBatchReference,
+  );
+  const inventory = lines.some((line) => line.itemCancelled)
+    ? await releaser.releaseLines(tx, {
+        ...request,
+        cartLineReferences: lines
+          .filter((line) => !line.itemCancelled)
+          .map((line) => String(line.sourceCartLineReference)),
+      })
+    : await releaser.release(tx, request);
+  if (inventory.status === "NotReleasable")
+    return fail("ORDER_CANCELLATION_STOCK_NOT_RELEASABLE");
+  return record;
 }
 
 /**
@@ -259,6 +423,13 @@ export function createMerchantOrderStaffCancellation(options: {
     scope: { tenantReference: string; brandReference: string; storeReference: string },
   ): Promise<void>;
   nextReference(): string;
+  /**
+   * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: "Can't make it · refund". Whoever can accept may give back an
+   * automatically accepted batch the kitchen has not started, in full, to the card that paid; the
+   * general cancellation stays with managers. Not behind the PIN step-up: the money only goes back
+   * to the card it came from, and it is attributed and listed for the manager.
+   */
+  autoAcceptedOnly?: boolean;
   /**
    * DEC-TABLE-CLOSE-GUESTS-LEFT: the Store's Provider account, to read what is left to refund of a
    * round paid online. Without it a never-accepted round is not cancellable here, and an accepted
@@ -317,7 +488,9 @@ export function createMerchantOrderStaffCancellation(options: {
               const current = await resolveScope(
                 transaction,
                 input.sessionCookie,
-                staffOrderCancellationPermission,
+                options.autoAcceptedOnly === true
+                  ? "order.accept"
+                  : staffOrderCancellationPermission,
                 session.sessionReference,
               ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
               if ((await current.allowed()) !== true)
@@ -390,108 +563,22 @@ export function createMerchantOrderStaffCancellation(options: {
                 return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
               return replied("AlreadyCancelled", prior);
             }
-            const prepared = await ordering.prepare(tx, {
+            const record = await cancelPaidBatch(tx, {
+              options: { ...options, now: options.persistence.now },
+              selected,
+              ordering,
+              owned,
+              allowed,
               orderReference,
               orderBatchReference,
               expectedOrderVersion,
-              actorReference,
-            });
-            if (prepared.status === "NotEligible")
-              return fail(
-                prepared.reason === "NotFound"
-                  ? "ORDER_CANCELLATION_NOT_FOUND"
-                  : prepared.reason === "VersionConflict"
-                    ? "ORDER_CANCELLATION_VERSION_CONFLICT"
-                    : "ORDER_CANCELLATION_NOT_CANCELLABLE",
-              );
-            const plan = prepared.plan;
-            // WP-2423 (v15 2026-10-18): "Guests left" is a table's reason. A pickup customer who
-            // never came is closed as not collected after the pickup hold, not cancelled.
-            if (!staffOrderCancellationReasonAllowed(plan.orderType, reasonCode))
-              return fail("ORDER_CANCELLATION_INPUT_INVALID");
-            // DEC-TABLE-CLOSE-GUESTS-LEFT: a round whose payment ordinary refunds already returned in full
-            // (never accepted, or accepted and refunded item by item) owes nothing more; otherwise
-            // Payment refunds what is left (all of it, tip included).
-            const position = await readStaffCancellationRemaining(
-              tx,
-              options,
-              selected,
-              plan,
-              allowed,
-            );
-            if (position === null && plan.previousPhase === "Submitted")
-              return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
-            const refundDisposition: "Refund" | "AlreadyRefunded" =
-              position?.remainingMinor === 0n ? "AlreadyRefunded" : "Refund";
-            const cancellationReference = String(parseOrderingReference(options.nextReference()));
-            const cancelledAt = parseOrderingInstant(options.persistence.now());
-            // Kitchen after the Ordering fence (foreign owner fences first): every item still unstarted.
-            const kitchen = await createPostgresKitchenBatchCancellation({
-              ...selected,
-              authorize: owned,
-            }).cancel(tx, {
-              orderReference,
-              orderBatchReference,
-              operationReference,
-              orderCancellationReference: cancellationReference,
-              actorReference,
-              cancelledAt,
-              auditReference: options.nextReference(),
-              eventReference: options.nextReference(),
-              nextReference: options.nextReference,
-            });
-            if (kitchen.status === "AlreadyCancelled")
-              return fail("ORDER_CANCELLATION_UNAVAILABLE");
-            const created = await ordering.commit(tx, {
-              plan,
-              cancellationReference,
               operationReference,
               actorReference,
               reasonCode,
-              kitchenEvidenceDigest: kitchen.evidenceDigest,
-              auditReference: options.nextReference(),
-              terminationAuditReference: options.nextReference(),
-              cancelledAt,
-              refundDisposition,
+              ...(options.autoAcceptedOnly === true
+                ? { permissionCode: "ordering.order.accept" as const, autoAcceptedOnly: true }
+                : {}),
             });
-            const record = created.record;
-            // Stock reserved at submission returns in the same transaction, or nothing is cancelled.
-            // The ledger movement names the cancelling staff member; the release audit is System-owned.
-            const releaser = createSubmissionInventoryRelease({
-              scope: selected,
-              systemActorReference: actorReference,
-              reasonCode: "STAFF_CANCELLED_BEFORE_PREPARATION",
-              now: options.persistence.now,
-            });
-            const request = {
-              source: {
-                kind: "StaffOrderCancellationInventory/v1",
-                reference: String(record.cancellationReference),
-                submissionReference: String(record.submissionReference),
-                orderReference: String(record.orderReference),
-                occurredAt: String(record.cancelledAt),
-              },
-              releasedAt: String(record.cancelledAt),
-              authorize: allowed,
-            };
-            // WP-2423 Q6 step 2a: once lines of this Batch were cancelled (and their stock released),
-            // the remaining lines are released line by line.
-            const lines = await readStaffBatchLineSources(
-              tx,
-              selected,
-              orderReference,
-              orderBatchReference,
-            );
-            const inventory = lines.some((line) => line.itemCancelled)
-              ? await releaser.releaseLines(tx, {
-                  ...request,
-                  cartLineReferences: lines
-                    .filter((line) => !line.itemCancelled)
-                    .map((line) => String(line.sourceCartLineReference)),
-                })
-              : await releaser.release(tx, request);
-            if (inventory.status === "NotReleasable")
-              return fail("ORDER_CANCELLATION_STOCK_NOT_RELEASABLE");
             return replied("Cancelled", record);
           },
         ),
@@ -618,7 +705,7 @@ export function createMerchantOrderStaffCancellationPreview(
               );
             const position = await readStaffCancellationRemaining(
               tx,
-              options,
+              { ...options, now: options.persistence.now },
               selected,
               prepared.plan,
               allowed,

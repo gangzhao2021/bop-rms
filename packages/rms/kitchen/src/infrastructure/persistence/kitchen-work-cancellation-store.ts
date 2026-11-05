@@ -163,6 +163,12 @@ interface CancelInput {
   readonly cancelledAt: string;
   readonly auditReference: string;
   readonly eventReference: string;
+  /**
+   * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the System closed it, not a person. `actorReference` is then
+   * the reserved System actor (the actor columns require one, as the stock ledger's do); the audit
+   * says System.
+   */
+  readonly bySystem?: boolean;
   nextReference(): string;
 }
 
@@ -613,7 +619,10 @@ export function createPostgresKitchenBatchCancellation(options: {
         auditId: input.auditReference,
         brandId: brand,
         storeId: store,
-        actor: { type: "User", reference: input.actorReference },
+        actor:
+          raw.bySystem === true
+            ? { type: "System" }
+            : { type: "User", reference: input.actorReference },
         actionCode: kitchenWorkCancellationActionCode,
         targetType: "KitchenTicket",
         targetId: ticketReference,

@@ -144,3 +144,22 @@ describe("WP-2423 item 8 ⑦ Store features client", () => {
     });
   });
 });
+
+describe("DEC-PAID-ORDER-AUTO-ACCEPT", () => {
+  const base = () => JSON.parse(JSON.stringify(view)) as Record<string, unknown>;
+  it("an older server without it reads as off", () => {
+    const value = parseStoreFeatures(base());
+    expect(value.autoAccept).toEqual({ version: 0, pickup: false, dineIn: false, changedAt: null });
+  });
+  it("reads the two order types and refuses a wrong answer", () => {
+    expect(
+      parseStoreFeatures({
+        ...base(),
+        autoAccept: { version: 3, pickup: true, dineIn: false, changedAt: null },
+      }).autoAccept,
+    ).toEqual({ version: 3, pickup: true, dineIn: false, changedAt: null });
+    expect(() =>
+      parseStoreFeatures({ ...base(), autoAccept: { version: 3, pickup: "yes", dineIn: false } }),
+    ).toThrow();
+  });
+});

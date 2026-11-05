@@ -23,6 +23,7 @@ import {
 import { createCustomerAdditionalDiningSubmissionStore } from "../../../apps/api/src/customer-additional-dining-submission-store.ts";
 import { createPostgresCapturedBatchPaymentSource } from "../../rms/payment/src/index.ts";
 import { createCustomerSubmissionInventoryFinalizer } from "../../../apps/api/src/customer-submission-inventory-finalizer.ts";
+import { appendEventInTransaction } from "../../bop/eventing/src/index.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createInternalPaidOutcome } from "../../../tooling/environment/pilot-paid-outcome.mjs";
 import { createInternalMerchantAcceptance } from "../../../tooling/environment/pilot-merchant-acceptance.mjs";
@@ -111,6 +112,17 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
         runSnapshot(unit) {
           return this.run(unit, true);
         },
+      });
+      /** The worker's transaction: the Store's context set, as the pilot's resources set it. */
+      const worker = () => ({
+        run: (unit) =>
+          transactions().run(async (tx) => {
+            await tx.query(
+              "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+              [tenant, scope.brandReference, scope.storeReference],
+            );
+            return unit(tx);
+          }),
       });
       const ownerRunner = () => ({
         async run(unit) {
@@ -245,7 +257,7 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
               ? {}
               : {
                   referencePrefix: prefix,
-                  sessionReferencePrefix: prefix.slice(0, 7) + "f",
+                  sessionReferencePrefix: "01a9" + prefix.slice(4),
                 }),
           })),
         };
@@ -263,8 +275,8 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
             quoteVersion: 1,
           },
         );
-      const capturedEvent = async (orderReference, orderBatchReference) =>
-        (
+      const capturedEvent = async (orderReference, orderBatchReference) => {
+        const event = (
           await transactions().run((tx) =>
             createPostgresCapturedBatchPaymentSource({
               scope: paymentScope,
@@ -272,6 +284,16 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
             }).load(tx, { orderReference, orderBatchReference, observedAt: now() }),
           )
         ).paymentEvent;
+        // The event the Payment owner published: the wait workload resumes from the outbox.
+        await ownerRunner().run(async (tx) => {
+          await tx.query(
+            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+            [scope.brandReference, scope.storeReference],
+          );
+          await appendEventInTransaction(tx, event);
+        });
+        return event;
+      };
       const payRefs = (n, allocation) => {
         const ref = (m) =>
           "01a7" +
@@ -381,11 +403,13 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
         const pay = payRefs(n, allocation);
         const requestedAt = new Date(Date.now() - paidAgo - 30_000).toISOString();
         const occurredAt = new Date(Date.now() - paidAgo).toISOString();
+        // Capacity is written as of now, as checkout writes it; an older payment moves it back below.
+        const capacityAt = new Date(Date.now() - 500).toISOString();
         const reader = createPostgresCurrentPickupCapacityStore(ownerRunner(), scope);
         const repository = createPostgresAsapCapacityStore(ownerRunner(), scope, {
-          now: () => requestedAt,
+          now: () => capacityAt,
         });
-        const slotNow = (await reader.resolve(requestedAt)).slot;
+        const slotNow = (await reader.resolve(capacityAt)).slot;
         const prepared = parseAsapCapacityCommitment({
           slot: slotNow,
           allocationReference: allocation,
@@ -404,8 +428,8 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
           intentDigest: hashText("intent" + n),
           state: "Prepared",
           version: 1,
-          preparedAt: requestedAt,
-          preparationValidUntil: new Date(Date.parse(requestedAt) + minutes(10)).toISOString(),
+          preparedAt: capacityAt,
+          preparationValidUntil: new Date(Date.parse(capacityAt) + minutes(10)).toISOString(),
           orderingLinkedAt: null,
           paymentRequestedAt: null,
           capacityExpiresAt: null,
@@ -429,7 +453,7 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
         });
         await createAsapCapacityService({
           scope,
-          now: () => requestedAt,
+          now: () => capacityAt,
           authorization: {
             authorize: async (request) => ({
               guestSessionReference: prepared.guestSessionReference,
@@ -460,12 +484,22 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
             storeReference: scope.storeReference,
             cartVersion: prepared.cartVersion,
             intentDigest: prepared.intentDigest,
-            acknowledgedAt: requestedAt,
+            acknowledgedAt: capacityAt,
           },
-          requestedAt,
-          requestedAt,
+          capacityAt,
+          capacityAt,
         );
         await repository.append({ record: sealed, audit: capacityAudit(sealed) });
+        // The commitment as checkout wrote it when the guest paid (test only: history moved back).
+        await admin.query("SET session_replication_role = replica");
+        try {
+          await admin.query(
+            "UPDATE rms_fulfillment.capacity_asap_commitment SET prepared_at=LEAST(prepared_at,$2::timestamptz),preparation_valid_until=$2::timestamptz+interval '10 minutes',ordering_linked_at=CASE WHEN ordering_linked_at IS NULL THEN NULL ELSE $2::timestamptz END,payment_requested_at=CASE WHEN payment_requested_at IS NULL THEN NULL ELSE $2::timestamptz END,capacity_expires_at=CASE WHEN capacity_expires_at IS NULL THEN NULL ELSE $2::timestamptz+interval '30 minutes' END WHERE allocation_id=$1",
+            [allocation, requestedAt],
+          );
+        } finally {
+          await admin.query("SET session_replication_role = origin");
+        }
         await finalizeInventory(round, items);
         await seedJourneyPayment(admin, {
           scope,
@@ -486,6 +520,7 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
           orderBatchReference,
           submissionReference: round.batch.submissionReference,
           pay,
+          requestedAt,
           event: await capturedEvent(orderReference, orderBatchReference),
         };
       };
@@ -746,10 +781,100 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
         },
       };
       const query = async (sql, values = []) => (await admin.query(sql, values)).rows;
+      /**
+       * Owner seed of the Kitchen rows of a batch, for what reads them (test only): these reads are
+       * about status and steps, so the rows' other columns and checks don't matter here.
+       */
+      const seedKitchenTicket = async (order, { status = "Queued", step = null } = {}) => {
+        const relax = async (table) => {
+          const checks = await query(
+            "SELECT conname FROM pg_constraint WHERE conrelid=$1::regclass AND contype='c'",
+            [table],
+          );
+          for (const { conname } of checks)
+            await admin.query("ALTER TABLE " + table + ' DROP CONSTRAINT "' + conname + '"');
+        };
+        const insert = async (table, values) => {
+          const columns = await query(
+            "SELECT column_name,data_type,domain_name,udt_name FROM information_schema.columns WHERE table_schema||'.'||table_name=$1 AND is_nullable='NO' AND column_default IS NULL",
+            [table],
+          );
+          const row = { ...values };
+          for (const column of columns) {
+            if (Object.hasOwn(row, column.column_name)) continue;
+            row[column.column_name] =
+              column.domain_name === "uuid_v7"
+                ? fresh()
+                : column.data_type.includes("timestamp")
+                  ? now()
+                  : column.data_type === "integer" || column.data_type === "bigint"
+                    ? 1
+                    : column.data_type === "boolean"
+                      ? false
+                      : column.data_type === "jsonb"
+                        ? "{}"
+                        : column.data_type === "ARRAY"
+                          ? []
+                          : "x";
+          }
+          const names = Object.keys(row);
+          await admin.query(
+            "INSERT INTO " +
+              table +
+              " (" +
+              names.join(",") +
+              ") VALUES (" +
+              names.map((_, index) => "$" + (index + 1)).join(",") +
+              ")",
+            names.map((name) => row[name]),
+          );
+        };
+        await admin.query("SET session_replication_role = replica");
+        try {
+          for (const table of [
+            "rms_kitchen.kitchen_ticket",
+            "rms_kitchen.kitchen_work_item",
+            "rms_kitchen.kitchen_work_lifecycle_operation",
+          ])
+            await relax(table);
+          const common = {
+            brand_id: scope.brandReference,
+            store_id: scope.storeReference,
+            order_id: order.orderReference,
+            order_batch_id: order.orderBatchReference,
+          };
+          const ticket = fresh(),
+            item = fresh();
+          await insert("rms_kitchen.kitchen_ticket", {
+            ...common,
+            kitchen_ticket_id: ticket,
+            status: "Open",
+          });
+          await insert("rms_kitchen.kitchen_work_item", {
+            ...common,
+            kitchen_ticket_id: ticket,
+            kitchen_work_item_id: item,
+            status,
+          });
+          if (step !== null)
+            await insert("rms_kitchen.kitchen_work_lifecycle_operation", {
+              brand_id: scope.brandReference,
+              store_id: scope.storeReference,
+              kitchen_ticket_id: ticket,
+              kitchen_work_item_id: item,
+              action_code: step,
+              occurred_at: now(),
+            });
+          return { ticket, item };
+        } finally {
+          await admin.query("SET session_replication_role = origin");
+        }
+      };
       await work({
         admin,
         api,
         assert,
+        clientConfig: context.clientConfig,
         clock,
         fresh,
         inventoryOptions,
@@ -765,6 +890,7 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
         provider,
         query,
         scope,
+        seedKitchenTicket,
         seedPaidLaterRound,
         seedPaidPickup,
         seedPaidTableRound,
@@ -775,6 +901,7 @@ export async function withAutoAcceptWorld({ caseId, orderType }, work) {
         tenant,
         time,
         transactions,
+        worker,
       });
     } finally {
       vi.unstubAllEnvs();

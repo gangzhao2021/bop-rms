@@ -7515,4 +7515,65 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A size's code can't be changed once it is saved. Its name can.":
     "规格保存后代码不能修改，名称可以随时改。",
   "Not on a menu": "不在菜单上",
+  "Has alcohol · check ID, then Accept": "有酒水 · 先查证件，再接单",
+  "Large order · check it, then Accept": "大单 · 看一下再接单",
+  "Large order · {count} items · check it, then Accept": "大单 · {count} 份 · 看一下再接单",
+  "Stock changed · check the items": "库存有变 · 看一下这些菜",
+  "Store was paused or closed · check, then Accept": "门店当时暂停或已打烊 · 看一下再接单",
+  "Kitchen screen was off · turn it on, then Accept": "后厨屏幕当时没开 · 打开后再接单",
+  "Paid before automatic sending was turned on": "打开自动送后厨之前付的款",
+  "Paid over 30 minutes ago · check with the guest": "付款已超过 30 分钟 · 先问一下客人",
+  "Not sent automatically · check the order": "没有自动送后厨 · 看一下这张单",
+  "The kitchen hasn't touched anything for {minutes} min and {count} paid orders are waiting · check the kitchen screen":
+    "后厨已经 {minutes} 分钟没动过，有 {count} 张已付款的单在等 · 看一下后厨屏幕",
+  "{count} paid orders did not reach the kitchen · make them from the order details, or tap Can't make it for a full refund":
+    "{count} 张已付款的单没到后厨 · 按订单详情来做，或点“做不了”全额退款",
+  "Saved. Paid orders now go straight to the kitchen.": "已保存。已付款的订单现在直接进后厨。",
+  "Saved. Paid orders wait for Accept on Orders again.": "已保存。已付款的订单又要在订单页接单了。",
+  "Paid orders": "已付款的订单",
+  "Send paid orders straight to the kitchen": "已付款的订单直接进后厨",
+  "Nobody needs to watch Orders: a paid order goes to the kitchen screen at once, unless the store is paused or closed, or the order has alcohol or is very large.":
+    "不用盯着订单页：已付款的订单马上到后厨屏幕；门店暂停或打烊、单里有酒水或单子很大时除外。",
+  "Keep the kitchen screen on with sound. If you can't make one, tap Can't make it on Orders for a full refund.":
+    "后厨屏幕要开着，并打开声音。做不了的单，在订单页点“做不了”全额退款。",
+  "Save paid orders": "保存已付款订单设置",
+  "Paid orders now wait for Accept on Orders.": "已付款的订单现在要在订单页接单。",
+  "Paid orders go straight to the kitchen": "已付款的订单直接进后厨",
+  "Yes, turn off": "确定关闭",
+  "Keep it on": "继续开着",
+  "Someone else changed this just now. Check it again.": "刚才有人改过了，请再看一下。",
+  "Refunded in full. The guest is told, and the items go back to stock.":
+    "已全额退款。客人会收到通知，菜品库存已退回。",
+  "The kitchen has started it, so it can't be undone here. Ask a manager.":
+    "后厨已经开始做了，这里不能退。请找经理。",
+  "This order just changed. Check it again.": "这张单刚有变化，请再看一下。",
+  "Not done. Check the connection and try again.": "没有办成。检查网络后再试。",
+  "You can't do this. Ask a manager.": "你没有这个权限，请找经理。",
+  "It isn't known whether this went through. Try again: it is only done once.":
+    "不确定是否办成。请再试一次：只会办一次。",
+  "Can't make it · refund": "做不了 · 退款",
+  "Can't make order {orderNumber}": "{orderNumber} 号单做不了",
+  "The guest gets a full refund, tip included, to the card they paid with, and is told why. Your name is recorded.":
+    "客人会全额退款（含小费）到付款的卡上，并收到原因。会记下你的名字。",
+  "Refunding…": "退款中…",
+  "Refund in full": "全额退款",
+  "Keep the order": "保留这张单",
+  "Ordering paused until {time}": "点单已暂停，到 {time}",
+  Resume: "恢复",
+  "Guests can't order while paused. Orders already paid still come in.":
+    "暂停时客人不能点单。已付款的单仍会进来。",
+  "Pause ordering": "暂停点单",
+  "Paid orders now come straight here. Sound is off, so nobody will hear them.":
+    "已付款的订单现在直接到这里。声音关着，没人听得到。",
+  "Tap to turn it on": "点这里打开",
+  "Paid, needs a person": "已付款，需要人来处理",
+  "Accept on Orders": "去订单页接单",
+  "Ask someone at the counter to accept it on Orders.": "请前台的同事在订单页接单。",
+  "Accepted automatically · sent {minutes} min ago": "已自动接单 · {minutes} 分钟前送后厨",
+  "Accepted automatically": "已自动接单",
+  "Paid orders the kitchen never started: {count}": "后厨没开始做的已付款单：{count}",
+  "Refunded with Can't make it in the last 24 hours: {count}":
+    "过去 24 小时点“做不了”退款：{count}",
+  "Order {orderNumber} will be refunded automatically {when} unless the kitchen starts it.":
+    "{orderNumber} 号单将在{when}自动退款，除非后厨开始做。",
 });

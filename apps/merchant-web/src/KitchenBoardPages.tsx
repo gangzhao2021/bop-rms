@@ -136,6 +136,8 @@ export function kitchenTicketState(
 
 import { playKitchenChime } from "./alert-chime.js";
 export { playKitchenChime };
+import { KitchenPaidOrderNotices } from "./KitchenPaidOrderNotices.js";
+import { PauseOrderingControl } from "./PauseOrderingControl.js";
 
 /** WP-2423 Q2: "Table T4 · Order 14", "Pickup · Order 5"; never a Customer's name. */
 export function kitchenOrderLabel(item: KitchenBoardItem): string {
@@ -1375,6 +1377,7 @@ export function KitchenBoardScreen({
   actionsBlocked = true,
   navigation,
   soundOn,
+  onRing,
   soundResumes = false,
   onSoundToggle,
   arrivals = [],
@@ -1427,6 +1430,8 @@ export function KitchenBoardScreen({
   readonly navigation?: ReactNode;
   /** New-ticket chime; off until the operator turns it on (browsers need that gesture). */
   readonly soundOn?: boolean | undefined;
+  /** One chime on this screen, when sound is on. */
+  readonly onRing?: (() => void) | undefined;
   readonly onSoundToggle?: (() => void) | undefined;
   /** WP-2423 Q33: sound was on before this page loaded; it returns at the next tap. */
   readonly soundResumes?: boolean | undefined;
@@ -2089,6 +2094,14 @@ export function KitchenBoardScreen({
           </p>
         ) : null}
         <KitchenArrivals view={view} arrivals={arrivals} onSeen={onArrivalsSeen} />
+        {/* DEC-PAID-ORDER-AUTO-ACCEPT: says nothing at a Store that doesn't use it. */}
+        <KitchenPaidOrderNotices
+          view={view}
+          soundOn={soundOn === true}
+          soundResumes={soundResumes === true}
+          onSoundOn={onSoundToggle}
+          onRing={() => onRing?.()}
+        />
         {notices}
         {workspaceFrame ? null : filterToggle}
         {stale ? (
@@ -2964,6 +2977,10 @@ function KitchenBoardContent(
       ) : null}
       <KitchenReworkStatus rework={rework} />
       <KitchenStaleCloseStatus close={staleClose} />
+      {/* DEC-PAID-ORDER-AUTO-ACCEPT: the Store's Pause, for whoever may pause. */}
+      {props.csrf !== undefined && props.storeReference !== undefined && props.csrf !== "" ? (
+        <PauseOrderingControl csrf={props.csrf} storeReference={props.storeReference} />
+      ) : null}
     </>
   );
   return (
@@ -2981,6 +2998,9 @@ function KitchenBoardContent(
           headerStatus={headerStatus}
           workspaceFrame={workspaceFrame}
           soundOn={soundOn}
+          onRing={() => {
+            if (audio.current) playKitchenChime(audio.current);
+          }}
           soundResumes={soundResumes}
           onSoundToggle={toggleSound}
           arrivals={arrivals}

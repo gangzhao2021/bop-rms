@@ -99,14 +99,21 @@ it("WP-2423 L1: resolves the caller once at the start and once before the reply,
   expect(d.ownerAuthorizations.every((value) => value)).toBe(true);
 });
 
-it("WP-2423 L1: refuses before any owner read without the read permission", async () => {
+it("WP-2423 L1: refuses before any owner read without the read or pause permission", async () => {
   const f = setup();
-  f.allowed.mockResolvedValueOnce(false);
+  f.allowed.mockResolvedValue(false);
   await expect(f.control.read("synthetic-cookie")).rejects.toThrow(
     "STORE_SERVICE_PERMISSION_DENIED",
   );
   expect(d.stateRead).not.toHaveBeenCalled();
   expect(d.ownerAuthorizations).toHaveLength(0);
+});
+
+it("DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause reads whether the Store is paused", async () => {
+  const f = setup();
+  f.allowed.mockResolvedValueOnce(false);
+  await expect(f.control.read("synthetic-cookie")).resolves.toBeDefined();
+  expect(d.stateRead).toHaveBeenCalled();
 });
 
 it("WP-2423 L1: refuses the reply when the permission or Session ends during the read", async () => {

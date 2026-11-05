@@ -8,6 +8,7 @@ import {
   type KitchenBoardClient,
   type KitchenQueueSearch,
 } from "./kitchen-board.js";
+import type { PaidOrderWatch } from "./paid-order-watch.js";
 const fail = (): never => {
   throw new KitchenBoardClientError("Unavailable");
 };
@@ -151,6 +152,11 @@ export function createKitchenBoardClient(options: {
 }): KitchenBoardClient & {
   /** Today's paid orders still waiting for acceptance (null when the Store could not say). */
   loadAwaitingAcceptance(): Promise<readonly KitchenAwaitingLabel[] | null>;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: the same small read, for the screen-wide warnings. */
+  loadWatch(): Promise<{
+    readonly awaiting: readonly KitchenAwaitingLabel[] | null;
+    readonly paidOrderWatch: PaidOrderWatch | null;
+  }>;
 } {
   const fetcher = options.fetcher ?? fetch;
   async function query(body: unknown) {
@@ -263,6 +269,8 @@ export function createKitchenBoardClient(options: {
             : {}),
           // WP-2423 item 8 ⑧: the Store's kitchen sections, read with the first page.
           ...("kitchenSections" in first ? { kitchenSections: first.kitchenSections } : {}),
+          // DEC-PAID-ORDER-AUTO-ACCEPT: read with the first page, at a Store that uses it.
+          ...("paidOrderWatch" in first ? { paidOrderWatch: first.paidOrderWatch } : {}),
         });
       const next = record(cursor);
       // A page may be empty when every ticket on it was just closed (DEC-KITCHEN-STALE-TICKETS);
@@ -273,37 +281,44 @@ export function createKitchenBoardClient(options: {
     }
     return fail();
   }
+  // Warn before timeouts (WP-2423 2026-10-17): the first page alone carries them; one ticket keeps
+  // the read small for the store-wide refund warning.
+  async function readWatch() {
+    const first = await query({
+      kind: "List",
+      filters: {
+        orderReference: null,
+        ticketReference: null,
+        workItemReference: null,
+        stationReference: null,
+        status: null,
+      },
+      cursor: null,
+      limit: 1,
+    });
+    if (!("awaitingAcceptance" in first)) return { awaiting: null, paidOrderWatch: null };
+    const view = parseKitchenBoardView({
+      screenId: "KIT-KITCHEN-QUEUE",
+      projectionName: "kitchen_work_queue_v1",
+      projectionVersion: 1,
+      storeLabel: options.storeLabel,
+      projectedAt: first.projectedAt,
+      freshnessStatus: first.stale ? "Stale" : first.freshnessStatus,
+      operatorStatus: first.operatorStatus,
+      items: [],
+      awaitingAcceptance: first.awaitingAcceptance,
+      ...("paidOrderWatch" in first ? { paidOrderWatch: first.paidOrderWatch } : {}),
+    });
+    return {
+      awaiting: view.awaitingAcceptance ?? null,
+      paidOrderWatch: view.paidOrderWatch ?? null,
+    };
+  }
   return {
-    // Warn before timeouts (WP-2423 2026-10-17): the first page alone carries them; one ticket keeps
-    // the read small for the store-wide refund warning.
     async loadAwaitingAcceptance() {
-      const first = await query({
-        kind: "List",
-        filters: {
-          orderReference: null,
-          ticketReference: null,
-          workItemReference: null,
-          stationReference: null,
-          status: null,
-        },
-        cursor: null,
-        limit: 1,
-      });
-      if (!("awaitingAcceptance" in first)) return null;
-      return (
-        parseKitchenBoardView({
-          screenId: "KIT-KITCHEN-QUEUE",
-          projectionName: "kitchen_work_queue_v1",
-          projectionVersion: 1,
-          storeLabel: options.storeLabel,
-          projectedAt: first.projectedAt,
-          freshnessStatus: first.stale ? "Stale" : first.freshnessStatus,
-          operatorStatus: first.operatorStatus,
-          items: [],
-          awaitingAcceptance: first.awaitingAcceptance,
-        }).awaitingAcceptance ?? null
-      );
+      return (await readWatch()).awaiting;
     },
+    loadWatch: readWatch,
     async loadQueue(search?: KitchenQueueSearch) {
       const reference = search ? parseKitchenRouteReference(search.reference) : null;
       if (search && search.kind !== "Order" && search.kind !== "Ticket") return fail();

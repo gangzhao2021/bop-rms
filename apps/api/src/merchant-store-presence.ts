@@ -1,4 +1,5 @@
 import console from "node:console";
+import { kitchenScreenPresenceWriteIntervalMs, recordKitchenScreenPresence } from "@rms/kitchen";
 import { recordStorePresence, storePresenceWriteIntervalMilliseconds } from "@rms/store";
 
 interface Transactions {
@@ -59,6 +60,51 @@ export function createMerchantStorePresence(options: {
       return async (...input: Input): Promise<Output> => {
         const output = await read(...input);
         await observe(scope);
+        return output;
+      };
+    },
+  });
+}
+
+/**
+ * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: that a kitchen board is open at this Store. Only the board's
+ * own read counts: an Orders page at the till, or on an owner's phone at home, must not send paid
+ * orders to a screen nobody has open. At most one write a minute per Store from this process; a
+ * failure is logged as a code only and never fails the board.
+ */
+export function createMerchantKitchenScreenPresence(options: {
+  transactions: Transactions;
+  now(): string;
+}) {
+  const lastWritten = new Map<string, number>();
+  return Object.freeze({
+    wrap<Input extends unknown[], Output>(
+      scope: { brandReference: string; storeReference: string },
+      read: (...input: Input) => Promise<Output>,
+    ) {
+      return async (...input: Input): Promise<Output> => {
+        const output = await read(...input);
+        const key = scope.brandReference + ":" + scope.storeReference;
+        const observedAt = options.now();
+        const at = Date.parse(observedAt);
+        const previous = lastWritten.get(key);
+        if (previous !== undefined && at - previous < kitchenScreenPresenceWriteIntervalMs)
+          return output;
+        lastWritten.set(key, at);
+        try {
+          await options.transactions.run((transaction) =>
+            recordKitchenScreenPresence(transaction as never, scope, observedAt),
+          );
+        } catch (error) {
+          lastWritten.delete(key);
+          const code = (error as { code?: unknown } | null)?.code;
+          console.error(
+            JSON.stringify({
+              event: "KITCHEN_SCREEN_PRESENCE_UNAVAILABLE",
+              code: typeof code === "string" && /^[A-Z0-9_]{1,80}$/u.test(code) ? code : undefined,
+            }),
+          );
+        }
         return output;
       };
     },

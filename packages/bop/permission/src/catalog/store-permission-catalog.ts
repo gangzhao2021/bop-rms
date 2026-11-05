@@ -80,8 +80,11 @@
  * guests left without paying, so the table can close on a night the Owner is away. Owner, Store
  * Manager and Area Manager hold it (the managers through the `ordering.order.` prefix); Front of
  * House does not. It no longer rides on payment.refund.approve, which stays with the Owner.
+ * v26 (2026-11-05, WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT, Owner's recommended default): Front of House
+ * also holds operations.ordering.pause, the brake on a busy night once paid orders go straight to
+ * the kitchen (it moves no money). Turning automatic sending on stays the Owner's.
  */
-export const storePermissionCatalogVersion = 25 as const;
+export const storePermissionCatalogVersion = 26 as const;
 export type PermissionRisk = "Low" | "Medium" | "High";
 export interface StorePermissionDefinition {
   readonly code: string;
@@ -598,6 +601,8 @@ export const storeRoleTemplates: Readonly<Record<StoreRoleTemplateCode, readonly
       "inventory.waste.record",
       // v10 (WP-2423 Q17): sold out for today and back in stock.
       "catalog.sku.sold_out.mark",
+      // v26 (DEC-PAID-ORDER-AUTO-ACCEPT): pause and resume ordering at a busy moment; moves no money.
+      "operations.ordering.pause",
       "task.read",
       "task.claim",
       "task.complete",

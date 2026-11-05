@@ -243,8 +243,15 @@ describe("DEC-PERM-CATALOG Store permission catalog", () => {
         risk: "High",
       });
   });
+  it("v26 DEC-PAID-ORDER-AUTO-ACCEPT: front of house can pause on a busy night; the kitchen can't", () => {
+    expect(storeRoleTemplateActions("front-of-house")).toEqual(
+      expect.arrayContaining(["operations.ordering.pause", "store.service.pause"]),
+    );
+    expect(storeRoleTemplateActions("front-of-house")).not.toContain("organization.manage");
+    expect(storeRoleTemplateActions("kitchen")).not.toContain("operations.ordering.pause");
+  });
   it("v24 WP-2423 取舍 18: the Owner changes the points rules; managers read members; others neither", () => {
-    expect(storePermissionCatalogVersion).toBe(25);
+    expect(storePermissionCatalogVersion).toBe(26);
     expect(storeRoleTemplateActions("owner")).toEqual(
       expect.arrayContaining(["loyalty.program.manage", "loyalty.member.read"]),
     );

@@ -137,7 +137,11 @@ import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-b
 import { createMerchantOrderItemStaffCancellation } from "../../apps/api/dist/merchant-order-item-staff-cancellation.js";
 import { createMerchantOrdinaryRefundBusinessDate } from "../../apps/api/dist/merchant-ordinary-refund-business-date.js";
 import { createPersistentMerchantOrderQueue } from "../../apps/api/dist/persistent-merchant-order-queue.js";
-import { createMerchantStorePresence } from "../../apps/api/dist/merchant-store-presence.js";
+import {
+  createMerchantKitchenScreenPresence,
+  createMerchantStorePresence,
+} from "../../apps/api/dist/merchant-store-presence.js";
+import { createMerchantPaidOrderAutoAcceptOff } from "../../apps/api/dist/merchant-paid-order-watch.js";
 import { createMerchantOrderAcceptanceHoldRefund } from "../../apps/api/dist/merchant-order-acceptance-hold-refund.js";
 import { createInternalStoreConfiguration } from "./pilot-store-configuration.mjs";
 import { createInternalStoreSetupBff } from "./pilot-store-setup.mjs";
@@ -405,6 +409,17 @@ export async function createInternalMerchant(
   const orderStaffCancellation = createMerchantOrderStaffCancellation(
     orderStaffCancellationOptions,
   );
+  // DEC-PAID-ORDER-AUTO-ACCEPT: "Can't make it · refund", for whoever can accept.
+  const orderCantMake = createMerchantOrderStaffCancellation({
+    ...orderStaffCancellationOptions,
+    autoAcceptedOnly: true,
+  });
+  // DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause turns automatic sending off.
+  const paidOrderAutoAcceptOff = createMerchantPaidOrderAutoAcceptOff({
+    persistence,
+    authentication: service,
+    now: resources.now,
+  });
   // WP-2423 (v15 2026-10-18): the cancel dialog reads what the cancellation would refund.
   const orderStaffCancellationPreview = createMerchantOrderStaffCancellationPreview(
     orderStaffCancellationOptions,
@@ -1122,13 +1137,21 @@ export async function createInternalMerchant(
   });
   const diningItemService = createInternalMerchantDining(resources, persistence, service);
   const kitchenCommand = createInternalKitchenCommand(resources, persistence, service);
+  // DEC-PAID-ORDER-AUTO-ACCEPT: only the board's own read says a kitchen screen is open.
+  const kitchenScreenPresence = createMerchantKitchenScreenPresence({
+    transactions: persistence.transactions,
+    now: resources.now,
+  });
   const kitchenQuery = storePresence.wrap(
     presenceScope,
-    createMerchantKitchenQuery({
-      persistence,
-      authentication: service,
-      sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
-    }),
+    kitchenScreenPresence.wrap(
+      presenceScope,
+      createMerchantKitchenQuery({
+        persistence,
+        authentication: service,
+        sha256: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+      }),
+    ),
   );
   // WP-2423 Q26 (Handoff Section 26.6): remake a finished dish from the Kitchen board.
   const kitchenRework = createMerchantKitchenRework({
@@ -1466,6 +1489,8 @@ export async function createInternalMerchant(
       compensationQuery,
       ...(unmatchedCaptureRefund === undefined ? {} : { unmatchedCaptureRefund }),
       orderStaffCancellation,
+      orderCantMake,
+      paidOrderAutoAcceptOff,
       orderStaffCancellationPreview,
       ...(unpaidRoundCancellation === undefined ? {} : { unpaidRoundCancellation }),
       endedOrderStockRelease,

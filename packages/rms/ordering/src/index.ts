@@ -478,8 +478,10 @@ export {
 } from "./infrastructure/persistence/order-acceptance-hold-store.js";
 export {
   changeOrderAutoAcceptanceSetting,
+  countStoreCantMakeRefundsSince,
   listStoreOpenAutoAcceptedBatches,
   listStoreOrderAutoAcceptanceFacts,
+  listStoreOrderAutoAcceptanceSkipsByOrder,
   loadOrderAutoAcceptanceSetting,
   loadOrderAutoAcceptanceSkip,
   OrderAutoAcceptanceSettingConflictError,

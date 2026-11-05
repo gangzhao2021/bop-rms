@@ -263,12 +263,63 @@ export async function listStoreOrderAutoAcceptanceFacts(
   );
 }
 
+/** For a screen that names waiting orders, not rounds: each Order's latest reason (order → reason). */
+export async function listStoreOrderAutoAcceptanceSkipsByOrder(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  orderReferences: readonly string[],
+): Promise<
+  ReadonlyMap<
+    string,
+    { readonly reason: OrderAutoAcceptanceSkipReason; readonly itemCount: number | null }
+  >
+> {
+  if (orderReferences.length === 0) return new Map();
+  const { brand, store } = await scoped(tx, scope);
+  const rows = (
+    await tx.query(
+      "SELECT DISTINCT ON (d.order_id) d.order_id::text AS order_id,d.reason_code,d.item_count::int AS item_count " +
+        "FROM rms_ordering.order_auto_acceptance_decision d WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=ANY($3::uuid[]) AND d.outcome='Skipped' " +
+        "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=d.brand_id AND a.store_id=d.store_id AND a.order_batch_id=d.order_batch_id) " +
+        "ORDER BY d.order_id,d.decided_at DESC,d.decision_id DESC",
+      [brand, store, orderReferences.map((value) => String(parseOrderingReference(value)))],
+    )
+  ).rows as readonly {
+    order_id: string;
+    reason_code: OrderAutoAcceptanceSkipReason;
+    item_count: number | null;
+  }[];
+  return new Map(
+    rows.map((row) => [
+      row.order_id,
+      Object.freeze({ reason: row.reason_code, itemCount: row.item_count }),
+    ]),
+  );
+}
+
+/** "Can't make it" refunds since then: the manager's closing list names them, as a count. */
+export async function countStoreCantMakeRefundsSince(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  since: string,
+): Promise<number> {
+  const { brand, store } = await scoped(tx, scope);
+  const row = (
+    await tx.query(
+      "SELECT count(*)::int AS n FROM rms_ordering.order_staff_cancellation WHERE brand_id=$1 AND store_id=$2 AND permission_code='ordering.order.accept' AND cancelled_at>=$3::timestamptz",
+      [brand, store, instant(since)],
+    )
+  ).rows[0] as { n: number } | undefined;
+  return row?.n ?? 0;
+}
+
 export interface OpenAutoAcceptedBatch {
   readonly orderReference: string;
   readonly orderBatchReference: string;
   readonly orderNumber: string;
   readonly orderType: "Pickup" | "DineIn";
   readonly acceptedAt: string;
+  readonly acceptedOrderVersion: number;
 }
 
 /**
@@ -283,7 +334,7 @@ export async function listStoreOpenAutoAcceptedBatches(
   const { brand, store } = await scoped(tx, scope);
   const rows = (
     await tx.query(
-      "SELECT a.order_id::text AS order_id,a.order_batch_id::text AS batch,h.order_number,h.order_type," +
+      "SELECT a.order_id::text AS order_id,a.order_batch_id::text AS batch,h.order_number,h.order_type,a.accepted_order_version::int AS accepted_order_version," +
         asInstant("a.accepted_at") +
         " AS accepted_at FROM rms_ordering.order_acceptance_record a JOIN rms_ordering.order_header h ON h.brand_id=a.brand_id AND h.store_id=a.store_id AND h.order_id=a.order_id " +
         "WHERE a.brand_id=$1 AND a.store_id=$2 AND a.reason_code='STORE_AUTO_ACCEPT_PAID' AND a.accepted_at>=$3::timestamptz " +
@@ -300,6 +351,7 @@ export async function listStoreOpenAutoAcceptedBatches(
     batch: string;
     order_number: string;
     order_type: "Pickup" | "DineIn";
+    accepted_order_version: number;
     accepted_at: unknown;
   }[];
   return Object.freeze(
@@ -310,6 +362,7 @@ export async function listStoreOpenAutoAcceptedBatches(
         orderNumber: String(row.order_number),
         orderType: row.order_type,
         acceptedAt: instant(row.accepted_at),
+        acceptedOrderVersion: row.accepted_order_version,
       }),
     ),
   );

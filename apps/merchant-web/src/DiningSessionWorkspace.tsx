@@ -1,3 +1,4 @@
+import { PaidOrderSwitchLine } from "./PaidOrderSwitchLine.js";
 import { t, saidTable } from "./i18n/i18n.js";
 import { createTableCheckoutClient } from "./table-checkout-client.js";
 import {
@@ -1080,6 +1081,7 @@ export function DiningSessionWorkspace({
       status={
         tables.length > 0 ? (
           <span className="dining-floor-summary">
+            <PaidOrderSwitchLine csrf={csrf} />
             <span>{t("{seatedCount} seated", { seatedCount: String(seatedCount) })}</span>
             {needCount > 0 ? (
               <span data-attention="true">

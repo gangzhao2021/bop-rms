@@ -19,6 +19,7 @@ import { CardMachinePaymentCommandError } from "./merchant-card-machine-payment.
 import { CardMachineRefundCommandError } from "./merchant-card-machine-refund.js";
 import { AcceptanceHoldRefundError } from "./merchant-order-acceptance-hold-refund.js";
 import { StaffOrderCancellationError } from "./merchant-order-staff-cancellation.js";
+import { PaidOrderAutoAcceptOffError } from "./merchant-paid-order-watch.js";
 import { UnpaidRoundCancellationError } from "./merchant-unpaid-round-cancellation.js";
 import { EndedOrderStockReleaseError } from "./merchant-stock-holding-orders.js";
 import { StaffItemCancellationError } from "./merchant-order-item-staff-cancellation.js";
@@ -131,6 +132,17 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       // WP-2423 (v15 2026-10-16): when this paid dine-in round, still waiting for staff, was
       // paid; Orders, Home and Tables warn at 5 and 10 minutes (it is never refunded on its own).
       awaitingAcceptanceSince: batch.awaitingAcceptanceSince,
+      // DEC-PAID-ORDER-AUTO-ACCEPT: only where they apply, so a tablet at a Store without it keeps
+      // reading the list it knows.
+      ...(batch.acceptedAutomaticallyAt === undefined
+        ? {}
+        : {
+            acceptedAutomaticallyAt: batch.acceptedAutomaticallyAt,
+            canCantMake: batch.canCantMake === true,
+          }),
+      ...(batch.notSentAutomatically === undefined
+        ? {}
+        : { notSentAutomatically: batch.notSentAutomatically }),
       // Orders v3 (Owner 2026-10-26): when the round was sent, shown with its items.
       submittedAt: batch.submittedAt,
       // DEC-DINE-IN-PAY-LATER (rule 19): dishes that can come off this unpaid round's bill,
@@ -235,6 +247,7 @@ export function installMerchantOrderRoutes(
           earlierDayItems: view.items.filter((item) => item.earlierDay === true).map(row),
           items: view.items.filter((item) => item.earlierDay !== true).map(row),
           nextAfterOrderReference: view.nextAfterOrderReference,
+          ...(view.paidOrderWatch === undefined ? {} : { paidOrderWatch: view.paidOrderWatch }),
         });
       })
       .catch((error: unknown) => refundReadFailure(response, error));
@@ -892,6 +905,81 @@ export function installMerchantOrderRoutes(
       .catch((error: unknown) => staffCancellationError(response, error));
   });
   // WP-2423 (v15 2026-10-18): what cancelling the order or round would refund, read-only.
+  // DEC-PAID-ORDER-AUTO-ACCEPT: "Can't make it · refund" on an automatically accepted batch.
+  router.post("/orders/cant-make", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.orderCantMake) {
+      response.status(503).json({ error: "order_cancellation_unavailable" });
+      return;
+    }
+    void options
+      .orderCantMake({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        const code = error instanceof StaffOrderCancellationError ? error.code : null;
+        if (code === null) {
+          denied(response);
+          return;
+        }
+        const status =
+          code === "ORDER_CANCELLATION_INPUT_INVALID"
+            ? 400
+            : code === "ORDER_CANCELLATION_PERMISSION_DENIED"
+              ? 403
+              : code === "ORDER_CANCELLATION_UNAVAILABLE"
+                ? 503
+                : 409;
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: code.toLowerCase() });
+      });
+  });
+  // DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause turns automatic sending off from Orders or Tables.
+  router.post("/orders/auto-accept/off", sameOriginMutation(options), (request, response) => {
+    const sessionCookie = cookie(request, "__Host-bop-merchant");
+    const csrf = exactHeader(request, "x-bop-csrf");
+    if (
+      sessionCookie === null ||
+      csrf === null ||
+      csrf.length === 0 ||
+      Object.keys(request.query).length !== 0
+    ) {
+      denied(response);
+      return;
+    }
+    if (!options.paidOrderAutoAcceptOff) {
+      response.status(503).json({ error: "paid_order_auto_accept_unavailable" });
+      return;
+    }
+    void options
+      .paidOrderAutoAcceptOff({ sessionCookie, csrf, command: request.body })
+      .then((result) => response.set("Cache-Control", NO_STORE).json(result))
+      .catch((error: unknown) => {
+        const code = error instanceof PaidOrderAutoAcceptOffError ? error.code : null;
+        if (code === null || code === "PAID_ORDER_AUTO_ACCEPT_DENIED") {
+          denied(response);
+          return;
+        }
+        response
+          .status(
+            code === "PAID_ORDER_AUTO_ACCEPT_INPUT_INVALID"
+              ? 400
+              : code === "PAID_ORDER_AUTO_ACCEPT_CHANGED"
+                ? 409
+                : 503,
+          )
+          .set("Cache-Control", NO_STORE)
+          .json({ error: code.toLowerCase() });
+      });
+  });
   router.post("/orders/cancel/preview", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     const csrf = exactHeader(request, "x-bop-csrf");

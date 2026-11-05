@@ -16,6 +16,10 @@ import {
   DiningRoundsProvider,
 } from "./DiningRounds.js";
 import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
+import { CantMakeRefundAction } from "./CantMakeRefundAction.js";
+import { notSentReasonText } from "./paid-order-watch.js";
+import { PaidOrderSwitchLine } from "./PaidOrderSwitchLine.js";
+import { PauseOrderingControl } from "./PauseOrderingControl.js";
 import {
   StaffOrderCancelAction,
   staffCancellationReasonLabel,
@@ -1737,6 +1741,26 @@ function OrderDetailBody({
           {t("Acceptance: {value}", { value: t("Not accepted") })}
         </p>
       )}
+      {/* DEC-PAID-ORDER-AUTO-ACCEPT: quiet facts, no alarm per order. */}
+      {batch.acceptedAutomaticallyAt !== null ? (
+        <p role="note" className="order-round__acceptance">
+          {batch.canCantMake && now !== undefined
+            ? t("Accepted automatically · sent {minutes} min ago", {
+                minutes: Math.max(
+                  0,
+                  Math.floor((now - Date.parse(batch.acceptedAutomaticallyAt)) / 60_000),
+                ),
+              })
+            : t("Accepted automatically")}
+        </p>
+      ) : batch.notSentAutomatically !== null ? (
+        <p role="note" className="order-round__acceptance">
+          {notSentReasonText(
+            batch.notSentAutomatically.reason,
+            batch.notSentAutomatically.itemCount,
+          )}
+        </p>
+      ) : null}
       {/* A pickup's one step is the panel's next step (below); a table's stays per round. */}
       {order.orderType === "Pickup" ? null : action?.(order, batch)}
     </>
@@ -2448,9 +2472,12 @@ export function CurrentOrderQueuePage({
   timeZone,
   orderReference,
   fetcher,
+  pauseStoreReference,
 }: {
   readonly storeLabel: string;
   readonly csrf: string;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: the Store's Pause, for whoever may pause (absent: not offered). */
+  readonly pauseStoreReference?: string | undefined;
   /** WP-2423 OPS-ORDER-DETAIL (/operations/orders/:id): only this Order, with its items. */
   readonly orderReference?: string | undefined;
   /** WP-2423: the Store's IANA time zone; order times are shown in it. */
@@ -2911,6 +2938,18 @@ export function CurrentOrderQueuePage({
                     onOpen={openOrder}
                     onShowHeld={() => setPhaseFilter("OutageHeld")}
                   />
+                )}
+                {single ? null : (
+                  <>
+                    <PaidOrderSwitchLine csrf={csrf} {...(fetcher ? { fetcher } : {})} />
+                    {pauseStoreReference === undefined ? null : (
+                      <PauseOrderingControl
+                        csrf={csrf}
+                        storeReference={pauseStoreReference}
+                        fetcher={fetcher}
+                      />
+                    )}
+                  </>
                 )}
                 {single ? null : (
                   <div className="order-toolbar">
@@ -3387,9 +3426,19 @@ export function CurrentOrderQueuePage({
                         </Link>
                       )}
                     </fieldset>
-                  ) : !batch.canRequestAcceptance && (batch.canCancel || batch.canCancelItems) ? (
+                  ) : !batch.canRequestAcceptance &&
+                    (batch.canCancel || batch.canCancelItems || batch.canCantMake) ? (
                     <fieldset disabled={servingBusy} className="order-cancel-actions">
-                      {batch.canCancel ? (
+                      {batch.canCantMake ? (
+                        <CantMakeRefundAction
+                          key={"cant-make-" + batch.orderBatchReference}
+                          order={order}
+                          batch={batch}
+                          csrf={csrf}
+                          fetcher={fetcher}
+                          onSettled={() => reload(after)}
+                        />
+                      ) : batch.canCancel ? (
                         <StaffOrderCancelAction
                           key={batch.orderBatchReference}
                           order={order}

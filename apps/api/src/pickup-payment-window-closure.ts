@@ -341,6 +341,8 @@ export function createPickupPaymentWindowDispatcher(options: {
   onFailure?(code: string): void;
   /** Settles the card payments of Orders already closed (see `createPickupClosedPaymentSweep`). */
   closedPayments?: Pick<ReturnType<typeof createPickupClosedPaymentSweep>, "runOnce">;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: automatically accepted pickups the kitchen never touched. */
+  autoAcceptedPickups?: { runOnce(): Promise<number> };
 }) {
   if (!Number.isInteger(options.pageSize) || options.pageSize < 1 || options.pageSize > 100)
     throw new TypeError("PICKUP_PAYMENT_WINDOW_DISPATCHER_CONFIG_INVALID");
@@ -383,6 +385,12 @@ export function createPickupPaymentWindowDispatcher(options: {
         processed += await options.closedPayments.runOnce();
       } catch (error) {
         // Never blocks the closures; reported like a failing Order, without identifiers.
+        options.onFailure?.(failureCode(error));
+      }
+    if (!stopping && options.autoAcceptedPickups !== undefined)
+      try {
+        processed += await options.autoAcceptedPickups.runOnce();
+      } catch (error) {
         options.onFailure?.(failureCode(error));
       }
     if (!stopping) {

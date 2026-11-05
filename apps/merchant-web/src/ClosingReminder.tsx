@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { PaidOrderWatchContext } from "./PaidOrderAlarm.js";
+import { useEffect, useMemo, useState, useContext } from "react";
 import { Link } from "react-router";
 import { countOf, t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
@@ -67,6 +68,7 @@ export function ClosingReminder({
 }) {
   const day = useStoreBusinessDay();
   const live = useStaffSessionLive();
+  const watch = useContext(PaidOrderWatchContext);
   const client = useMemo(() => createStoreReportsClient(fetcher), [fetcher]);
   const [now, setNow] = useState(() => Date.now());
   const [summary, setSummary] = useState<TonightSummary | null>(null);
@@ -102,6 +104,8 @@ export function ClosingReminder({
     };
   }, [show, live, client]);
   if (!show) return null;
+  const neverStarted = watch?.waiting.length ?? 0;
+  const cantMake = watch?.cantMakeRefunds ?? 0;
   const open = summary?.openTables.filter((table) => table.owedMinor !== "0") ?? [];
   if (phase === "UnpaidTablesOnly" && open.length === 0) return null;
   const before = phase === "BeforeClosing";
@@ -147,6 +151,17 @@ export function ClosingReminder({
               : t("Today's net taken {amount} · look over today's summary", { amount: net })}
           </p>
         )}
+        {/* DEC-PAID-ORDER-AUTO-ACCEPT: what the shift should know before it goes home. */}
+        {neverStarted > 0 ? (
+          <p className="closing-reminder__detail">
+            {t("Paid orders the kitchen never started: {count}", { count: neverStarted })}
+          </p>
+        ) : null}
+        {cantMake > 0 ? (
+          <p className="closing-reminder__detail">
+            {t("Refunded with Can't make it in the last 24 hours: {count}", { count: cantMake })}
+          </p>
+        ) : null}
       </div>
       <Link className="closing-reminder__open" to="/app/reports/operations">
         {t("See today's summary")}

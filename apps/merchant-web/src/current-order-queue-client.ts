@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { parsePaidOrderWatch } from "./paid-order-watch.js";
 export class CurrentOrderQueueError extends Error {
   constructor(readonly code: "PermissionDenied" | "NotFound" | "Unavailable") {
     super(t("Current orders could not be loaded"));
@@ -456,11 +457,16 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   // today, Orders still holding stock) come apart from the page (absent from an older server).
   const withEarlier =
     value !== null && typeof value === "object" && Object.hasOwn(value, "earlierDayItems");
+  // DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that has it on or has orders from it.
+  const withWatch =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "paidOrderWatch");
   const raw = exact(value, [
     ...(withEarlier ? ["earlierDayItems"] : []),
+    ...(withWatch ? ["paidOrderWatch"] : []),
     "items",
     "nextAfterOrderReference",
   ]);
+  const paidOrderWatch = parsePaidOrderWatch(raw.paidOrderWatch);
   // The page holds up to 50 Orders; earlier-day Orders (first page only) up to 50 more. An older
   // server mixed both in `items`.
   if (
@@ -696,9 +702,18 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       // WP-2423 item 8 ① segment 2: absent from an older server (no comps then).
       const withComps =
         value !== null && typeof value === "object" && Object.hasOwn(value, "compableItems");
+      // DEC-PAID-ORDER-AUTO-ACCEPT: only on a batch it applies to.
+      const withAutomatic =
+        value !== null &&
+        typeof value === "object" &&
+        Object.hasOwn(value, "acceptedAutomaticallyAt");
+      const withNotSent =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "notSentAutomatically");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
+        ...(withAutomatic ? ["acceptedAutomaticallyAt", "canCantMake"] : []),
+        ...(withNotSent ? ["notSentAutomatically"] : []),
         ...(withSubmittedAt ? ["submittedAt"] : []),
         "acceptanceStatus",
         "canRequestAcceptance",
@@ -842,9 +857,31 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       previousSequence = batch.sequence;
       seenBatches.add(orderBatchReference);
       const batchSubmittedAt = withSubmittedAt ? instant(batch.submittedAt) : null;
+      const notSent = withNotSent
+        ? exact(batch.notSentAutomatically, ["reason", "itemCount"])
+        : null;
+      if (
+        (withAutomatic && typeof batch.canCantMake !== "boolean") ||
+        (notSent !== null &&
+          (typeof notSent.reason !== "string" ||
+            (notSent.itemCount !== null && !Number.isSafeInteger(notSent.itemCount))))
+      )
+        return fail();
       return Object.freeze({
         orderBatchReference,
         sequence: batch.sequence,
+        /** DEC-PAID-ORDER-AUTO-ACCEPT: the System accepted it; null otherwise. */
+        acceptedAutomaticallyAt: withAutomatic ? instant(batch.acceptedAutomaticallyAt) : null,
+        /** Whoever can accept may give it back while the kitchen has not started it. */
+        canCantMake: withAutomatic && batch.canCantMake === true,
+        /** Why a paid batch at a Store with the switch on is still here; null otherwise. */
+        notSentAutomatically:
+          notSent === null
+            ? null
+            : Object.freeze({
+                reason: notSent.reason as string,
+                itemCount: notSent.itemCount as number | null,
+              }),
         /** Orders v3: when this round was sent; null from an older server. */
         submittedAt: batchSubmittedAt,
         acceptanceStatus: batch.acceptanceStatus as "Accepted" | "NotAccepted" | "Cancelled",
@@ -1038,6 +1075,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
   return Object.freeze({
     items: Object.freeze([...earlier, ...page]),
     nextAfterOrderReference: next,
+    /** DEC-PAID-ORDER-AUTO-ACCEPT: absent at a Store that does not use it. */
+    ...(paidOrderWatch === null ? {} : { paidOrderWatch }),
     unreadable: Object.freeze(unreadable),
   });
 }

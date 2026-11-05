@@ -195,6 +195,7 @@ import type { createMerchantDiningTableQr } from "./merchant-dining-table-qr.js"
 import type { createMerchantDiningOrderProgress } from "./merchant-dining-order-progress.js";
 import type { createMerchantDiningTableClosePlan } from "./merchant-dining-table-close-plan.js";
 import type { createMerchantDiningItemService } from "./merchant-dining-item-service.js";
+import type { createMerchantPaidOrderAutoAcceptOff } from "./merchant-paid-order-watch.js";
 import type { createMerchantServiceControl } from "./merchant-service-control.js";
 import type { createMerchantStoreConfiguration } from "./merchant-store-configuration.js";
 import type {
@@ -484,6 +485,10 @@ export interface MerchantBffRouterOptions {
   readonly pickupIdentityCheck?: ReturnType<typeof createMerchantPickupIdentityCheck>;
   /** WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it. */
   readonly orderStaffCancellation?: ReturnType<typeof createMerchantOrderStaffCancellation>;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: "Can't make it · refund" for whoever can accept. */
+  readonly orderCantMake?: ReturnType<typeof createMerchantOrderStaffCancellation>;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause turns automatic sending off. */
+  readonly paidOrderAutoAcceptOff?: ReturnType<typeof createMerchantPaidOrderAutoAcceptOff>;
   /** WP-2423 (v15 2026-10-18): what that cancellation would refund, for the cancel dialog. */
   readonly orderStaffCancellationPreview?: ReturnType<
     typeof createMerchantOrderStaffCancellationPreview

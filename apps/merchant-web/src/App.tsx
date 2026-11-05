@@ -35,6 +35,8 @@ import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { parseKitchenBoardView, type KitchenBoardView } from "./kitchen-board.js";
 import { createCurrentOrderQueueClient } from "./current-order-queue-client.js";
+import { PaidOrderAlarmBanner, PaidOrderWatchContext } from "./PaidOrderAlarm.js";
+import { paidOrderRefundDeadlines, type PaidOrderWatch } from "./paid-order-watch.js";
 import {
   RefundDeadlineWatch,
   refundDeadlinesFromOrders,
@@ -546,12 +548,21 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   const watchKitchen =
     state.kind === "Ready" &&
     state.workspace.navigation.some((item) => item.screenId === "KIT-KITCHEN-QUEUE");
+  // WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: read with the refund warning, kept for the pages that show it.
+  const [paidOrderWatch, setPaidOrderWatch] = useState<PaidOrderWatch | null>(null);
   const refundRead = useMemo(():
     ((signal: AbortSignal) => Promise<readonly RefundDeadline[] | null>) | null => {
     if (watchCsrf === null || watchStoreReference === null) return null;
     if (watchOrdersHref !== null) {
       const orders = createCurrentOrderQueueClient();
-      return async (signal) => refundDeadlinesFromOrders(await orders.load(null, signal));
+      return async (signal) => {
+        const view = await orders.load(null, signal);
+        setPaidOrderWatch(view.paidOrderWatch ?? null);
+        return [
+          ...refundDeadlinesFromOrders(view),
+          ...paidOrderRefundDeadlines(view.paidOrderWatch ?? null),
+        ];
+      };
     }
     if (!watchKitchen) return null;
     const kitchen = createKitchenBoardClient({
@@ -560,12 +571,16 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       storeLabel: watchStoreLabel,
     });
     return async () => {
-      const awaiting = await kitchen.loadAwaitingAcceptance();
+      const { awaiting, paidOrderWatch } = await kitchen.loadWatch();
+      setPaidOrderWatch(paidOrderWatch);
       return awaiting === null
         ? null
-        : awaiting.flatMap((label) =>
-            label.acceptBy ? [{ orderNumber: label.orderNumber, acceptBy: label.acceptBy }] : [],
-          );
+        : [
+            ...awaiting.flatMap((label) =>
+              label.acceptBy ? [{ orderNumber: label.orderNumber, acceptBy: label.acceptBy }] : [],
+            ),
+            ...paidOrderRefundDeadlines(paidOrderWatch),
+          ];
     };
   }, [watchCsrf, watchStoreReference, watchStoreLabel, watchOrdersHref, watchKitchen]);
 
@@ -1405,6 +1420,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     storeLabel={state.workspace.selectedScope.storeLabel}
                     csrf={state.csrf}
                     timeZone={state.workspace.selectedScope.timeZone}
+                    pauseStoreReference={state.workspace.selectedScope.storeReference}
                   />
                 ) : (
                   <StatePanel heading={t("Order Queue unavailable")} status>
@@ -2241,13 +2257,18 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             remember
           />
         ) : null}
-        {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
-          workspaceFrame(routes)
-        ) : state.kind === "SignedOut" && demo === null && staffPage ? (
-          <StaffSignedOutPage />
-        ) : (
-          routes
-        )}
+        {refundRead !== null && !sessionless ? (
+          <PaidOrderAlarmBanner watch={paidOrderWatch} />
+        ) : null}
+        <PaidOrderWatchContext.Provider value={paidOrderWatch}>
+          {state.kind === "Ready" && usesWorkspaceLayout(pathname) && !soldOutFromKitchen ? (
+            workspaceFrame(routes)
+          ) : state.kind === "SignedOut" && demo === null && staffPage ? (
+            <StaffSignedOutPage />
+          ) : (
+            routes
+          )}
+        </PaidOrderWatchContext.Provider>
         {/* WP-2423 Q18: keep the Session alive while staff work; warn before it ends. */}
         {state.kind === "Ready" && demo === null && !sessionless ? (
           <StaffSessionGuard

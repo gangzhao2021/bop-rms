@@ -30,6 +30,12 @@ import {
   type StoreFeatureSetting,
   readPublishedStoreTipOff,
 } from "@rms/store";
+import {
+  changeOrderAutoAcceptanceSetting,
+  loadOrderAutoAcceptanceSetting,
+  OrderAutoAcceptanceSettingConflictError,
+  type OrderAutoAcceptanceSetting,
+} from "@rms/ordering";
 import type { CurrencyMetadataSnapshot } from "@rms/pricing";
 import { createCustomerMenuStoreFacts } from "./customer-menu-store-facts.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -154,6 +160,16 @@ export interface StoreFeaturesView {
     /** The Store's published configuration (Store setup) has Tip Off: no tips, whatever this says. */
     readonly offInStoreSetup: boolean;
   };
+  /**
+   * DEC-PAID-ORDER-AUTO-ACCEPT: paid orders go straight to the kitchen (Ordering's own setting).
+   * One switch on the page; the two order types stay apart in the record.
+   */
+  readonly autoAccept: {
+    readonly version: number;
+    readonly pickup: boolean;
+    readonly dineIn: boolean;
+    readonly changedAt: string | null;
+  };
   readonly canChange: boolean;
 }
 
@@ -195,6 +211,12 @@ export function createMerchantStoreFeatures(options: {
       expectedVersion: number;
       tipsEnabled: boolean;
       tierPercents: readonly number[];
+    } = null;
+    let autoAcceptChange: null | {
+      operationReference: string;
+      expectedVersion: number;
+      pickup: boolean;
+      dineIn: boolean;
     } = null;
     let change: null | {
       operationReference: string;
@@ -277,6 +299,27 @@ export function createMerchantStoreFeatures(options: {
           expectedVersion: Number(raw.expectedVersion),
           tipsEnabled: raw.enabled,
           tierPercents: tiers.map(Number),
+        };
+      } else if (action === "ChangeAutoAccept") {
+        const raw = readClosedRecord(input.command, [
+          "action",
+          "operationReference",
+          "expectedVersion",
+          "pickup",
+          "dineIn",
+        ]);
+        if (
+          typeof raw.pickup !== "boolean" ||
+          typeof raw.dineIn !== "boolean" ||
+          !Number.isSafeInteger(raw.expectedVersion) ||
+          Number(raw.expectedVersion) < 0
+        )
+          return fail("STORE_FEATURES_INPUT_INVALID");
+        autoAcceptChange = {
+          operationReference: String(parseStoreAdministrationReference(raw.operationReference)),
+          expectedVersion: Number(raw.expectedVersion),
+          pickup: raw.pickup,
+          dineIn: raw.dineIn,
         };
       } else if (action === "ApplyTemplate") {
         const raw = readClosedRecord(input.command, [
@@ -420,6 +463,17 @@ export function createMerchantStoreFeatures(options: {
                 observedAt: new Date(Date.parse(options.now())).toISOString(),
               });
             const offInStoreSetup = await readPublishedStoreTipOff(tx as never, scope);
+            const orderingRunner = tx as unknown as Parameters<
+              typeof loadOrderAutoAcceptanceSetting
+            >[0];
+            const autoAccept =
+              autoAcceptChange === null
+                ? await loadOrderAutoAcceptanceSetting(orderingRunner, scope)
+                : await changeOrderAutoAcceptanceSetting(orderingRunner, scope, {
+                    ...autoAcceptChange,
+                    actorReference: String(current.actorReference),
+                    observedAt: new Date(Date.parse(options.now())).toISOString(),
+                  });
             return storeFeaturesView(
               setting,
               services,
@@ -427,6 +481,7 @@ export function createMerchantStoreFeatures(options: {
               offInStoreSetup,
               teaCharge,
               teaChoices,
+              autoAccept,
               true,
             );
           },
@@ -437,6 +492,7 @@ export function createMerchantStoreFeatures(options: {
       if (
         error instanceof StoreFeatureSettingConflictError ||
         error instanceof StoreTipSettingConflictError ||
+        error instanceof OrderAutoAcceptanceSettingConflictError ||
         (error instanceof DiningSessionError &&
           error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT")
       )
@@ -453,6 +509,7 @@ function storeFeaturesView(
   offInStoreSetup: boolean,
   teaCharge: DiningTeaChargeSetting,
   teaChoices: StoreFeaturesView["teaChoices"],
+  autoAccept: OrderAutoAcceptanceSetting,
   canChange: boolean,
 ): StoreFeaturesView {
   return Object.freeze({
@@ -485,6 +542,12 @@ function storeFeaturesView(
       tierPercents: Object.freeze([...tips.tierPercents]),
       changedAt: tips.changedAt,
       offInStoreSetup,
+    }),
+    autoAccept: Object.freeze({
+      version: autoAccept.version,
+      pickup: autoAccept.pickup.on,
+      dineIn: autoAccept.dineIn.on,
+      changedAt: autoAccept.changedAt,
     }),
     canChange,
   });

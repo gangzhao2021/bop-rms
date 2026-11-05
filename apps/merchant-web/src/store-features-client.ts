@@ -50,6 +50,16 @@ export interface StoreFeatures {
     /** The Store's published configuration has Tip Off: no one is asked, whatever is set here. */
     readonly offInStoreSetup: boolean;
   };
+  /**
+   * DEC-PAID-ORDER-AUTO-ACCEPT: paid orders go straight to the kitchen (off until the owner turns it
+   * on). Absent from an older server: off.
+   */
+  readonly autoAccept: {
+    readonly version: number;
+    readonly pickup: boolean;
+    readonly dineIn: boolean;
+    readonly changedAt: string | null;
+  };
 }
 /** Three whole percentages, each 1–50, from lowest to highest. */
 export const validTipTiers = (tiers: readonly number[]): boolean =>
@@ -188,6 +198,31 @@ export function parseStoreFeatures(value: unknown): StoreFeatures {
       changedAt: tips.changedAt as string | null,
       offInStoreSetup: tips.offInStoreSetup,
     }),
+    autoAccept: parseAutoAccept(raw.autoAccept),
+  });
+}
+
+function parseAutoAccept(value: unknown): StoreFeatures["autoAccept"] {
+  if (value === undefined)
+    return Object.freeze({ version: 0, pickup: false, dineIn: false, changedAt: null });
+  const auto = value as Record<string, unknown> | null;
+  if (
+    auto === null ||
+    typeof auto !== "object" ||
+    Object.keys(auto).sort().join(",") !== "changedAt,dineIn,pickup,version" ||
+    !Number.isSafeInteger(auto.version) ||
+    Number(auto.version) < 0 ||
+    typeof auto.pickup !== "boolean" ||
+    typeof auto.dineIn !== "boolean" ||
+    (auto.changedAt !== null &&
+      (typeof auto.changedAt !== "string" || !instant.test(auto.changedAt)))
+  )
+    return fail();
+  return Object.freeze({
+    version: Number(auto.version),
+    pickup: auto.pickup,
+    dineIn: auto.dineIn,
+    changedAt: auto.changedAt as string | null,
   });
 }
 
@@ -239,6 +274,12 @@ export function createStoreFeaturesClient(csrf: string, fetcher: typeof fetch = 
       enabled: boolean;
       tierPercents: readonly number[];
     }) => send({ action: "ChangeTips", ...input }),
+    changeAutoAccept: (input: {
+      operationReference: string;
+      expectedVersion: number;
+      pickup: boolean;
+      dineIn: boolean;
+    }) => send({ action: "ChangeAutoAccept", ...input }),
     applyFullService: (input: { operationReference: string; expectedVersion: number }) =>
       send({ action: "ApplyTemplate", template: "FullService", ...input }),
     change: (input: {

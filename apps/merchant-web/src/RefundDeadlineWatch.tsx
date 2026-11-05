@@ -268,7 +268,7 @@ export function RefundDeadlineWatch({
               : `Ask someone at the counter to accept ${them} on Orders.`}
           {checked}
         </p>
-      ) : ordersHref === null ? (
+      ) : warnings.every((warning) => warning.kitchenStart) ? null : ordersHref === null ? (
         <p>Ask someone at the counter to accept {them} on Orders.</p>
       ) : onOrdersPage ? null : (
         <Link className="shell-action" to={ordersHref}>

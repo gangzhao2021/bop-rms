@@ -11,6 +11,11 @@ import { t } from "./i18n/i18n.js";
 export interface RefundDeadline {
   readonly orderNumber: string;
   readonly acceptBy: string;
+  /**
+   * DEC-PAID-ORDER-AUTO-ACCEPT: sent straight to the kitchen; refunded unless the kitchen starts it
+   * (absent: unless someone accepts it).
+   */
+  readonly kitchenStart?: boolean;
 }
 
 export type RefundWarningTier = "warning" | "urgent" | "final";
@@ -21,6 +26,7 @@ export interface RefundWarning {
   readonly leftMs: number;
   readonly tier: RefundWarningTier;
   readonly text: string;
+  readonly kitchenStart: boolean;
 }
 
 /** Warnings start this long before the refund (the Orders page's urgent tier starts here too). */
@@ -35,11 +41,23 @@ export function refundWarningTier(leftMs: number): RefundWarningTier | null {
 }
 
 /** Plain staff wording, e.g. "Order 9 will be refunded automatically in 2 min unless someone accepts it." */
-export function refundWarningText(orderNumber: string, leftMs: number): string {
+export function refundWarningText(
+  orderNumber: string,
+  leftMs: number,
+  kitchenStart = false,
+): string {
   const when =
     leftMs <= 60_000
       ? t("in less than a minute")
       : t("in {value} min", { value: Math.ceil(leftMs / 60_000) });
+  if (kitchenStart)
+    return t(
+      "Order {orderNumber} will be refunded automatically {when} unless the kitchen starts it.",
+      {
+        orderNumber: orderNumber,
+        when: when,
+      },
+    );
   return t("Order {orderNumber} will be refunded automatically {when} unless someone accepts it.", {
     orderNumber: orderNumber,
     when: when,
@@ -91,7 +109,8 @@ export function refundWarnings(
               acceptBy: deadline.acceptBy,
               leftMs,
               tier,
-              text: refundWarningText(deadline.orderNumber, leftMs),
+              kitchenStart: deadline.kitchenStart === true,
+              text: refundWarningText(deadline.orderNumber, leftMs, deadline.kitchenStart === true),
             },
           ];
     })
@@ -165,6 +184,7 @@ export function saveLastKnownRefundDeadlines(value: LastKnownRefundDeadlines): v
         deadlines: value.deadlines.map((deadline) => ({
           orderNumber: deadline.orderNumber,
           acceptBy: deadline.acceptBy,
+          ...(deadline.kitchenStart === true ? { kitchenStart: true } : {}),
         })),
         checkedAt: value.checkedAt,
         canAccept: value.canAccept,
@@ -196,13 +216,13 @@ export function loadLastKnownRefundDeadlines(now: number): LastKnownRefundDeadli
     return null;
   const deadlines = body.deadlines.flatMap((item: unknown) => {
     if (item === null || typeof item !== "object") return [];
-    const { orderNumber, acceptBy } = item as Record<string, unknown>;
+    const { orderNumber, acceptBy, kitchenStart } = item as Record<string, unknown>;
     return typeof orderNumber === "string" &&
       ORDER_NUMBER.test(orderNumber) &&
       typeof acceptBy === "string" &&
       INSTANT.test(acceptBy) &&
       Date.parse(acceptBy) > now
-      ? [{ orderNumber, acceptBy }]
+      ? [{ orderNumber, acceptBy, ...(kitchenStart === true ? { kitchenStart: true } : {}) }]
       : [];
   });
   if (deadlines.length === 0) return null;

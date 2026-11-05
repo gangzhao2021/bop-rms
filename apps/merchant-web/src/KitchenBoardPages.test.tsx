@@ -461,6 +461,74 @@ describe("WP-2423 M3 kitchen display", () => {
     for (const state of ["Queued", "Held", "In Progress", "Completed", "Cancelled"])
       expect(html).toContain(`<option value="${state}">`);
   });
+  it("DEC-PAID-ORDER-AUTO-ACCEPT: at a Store sending paid orders here, sound off is a full alert", () => {
+    const watch = {
+      on: true,
+      settingVersion: 1,
+      lastKitchenStepAt: null,
+      canTurnOff: false,
+      canAcceptOrders: false,
+      cantMakeRefunds: 0,
+      waiting: [],
+    };
+    const render = (input: Partial<KitchenBoardView>, soundOn = false) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <KitchenBoardScreen
+            view={{ ...parseKitchenBoardView(kitchenBoardFixture()), ...input }}
+            soundOn={soundOn}
+            onSoundToggle={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+    const alert = "Paid orders now come straight here. Sound is off, so nobody will hear them.";
+    expect(render({ paidOrderWatch: watch })).toContain(alert);
+    expect(render({ paidOrderWatch: watch }, true)).not.toContain(alert);
+    // A Store without it sees nothing new.
+    expect(render({})).not.toContain(alert);
+    expect(render({ paidOrderWatch: { ...watch, on: false } })).not.toContain(alert);
+  });
+
+  it("DEC-PAID-ORDER-AUTO-ACCEPT: a paid order left for a person says so, and who can accept it", () => {
+    const watch = {
+      on: true,
+      settingVersion: 1,
+      lastKitchenStepAt: null,
+      canTurnOff: false,
+      canAcceptOrders: false,
+      cantMakeRefunds: 0,
+      waiting: [],
+    };
+    const waiting = {
+      orderNumber: "12",
+      orderType: "DineIn" as const,
+      tableLabel: "4",
+      notSent: { reason: "HasAlcohol", itemCount: 2 },
+    };
+    const render = (input: Partial<KitchenBoardView>) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <KitchenBoardScreen
+            view={{ ...parseKitchenBoardView(kitchenBoardFixture()), ...input }}
+            soundOn
+            onSoundToggle={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+    const kitchenRole = render({ paidOrderWatch: watch, awaitingAcceptance: [waiting] });
+    expect(kitchenRole).toContain("Paid, needs a person");
+    expect(kitchenRole).toContain("Has alcohol · check ID, then Accept");
+    expect(kitchenRole).toContain("Ask someone at the counter to accept it on Orders.");
+    const counter = render({
+      paidOrderWatch: { ...watch, canAcceptOrders: true },
+      awaitingAcceptance: [waiting],
+    });
+    expect(counter).toContain("Accept on Orders");
+    expect(counter).not.toContain("Ask someone at the counter");
+    // Switch off: the list is only for the order search, as before.
+    expect(render({ awaitingAcceptance: [waiting] })).not.toContain("Paid, needs a person");
+  });
+
   it("Owner 2026-11-03: sound off is an alarm only on a screen working the tickets", () => {
     const render = (operatorStatus: "Named" | "Unverified") =>
       renderToStaticMarkup(

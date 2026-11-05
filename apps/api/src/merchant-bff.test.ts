@@ -2073,6 +2073,7 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
       changedAt: null,
       offInStoreSetup: false,
     },
+    autoAccept: { version: 0, pickup: false, dineIn: false, changedAt: null },
     canChange: true,
   };
   const command = vi.fn<Command>().mockResolvedValue(view);

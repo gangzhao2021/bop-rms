@@ -12,6 +12,7 @@ import {
   listStoreDiningBatchPaymentDeadlines,
   listStorePaidOrderBatches,
   listStoreOrderAcceptanceHolds,
+  listStoreOrderAutoAcceptanceFacts,
   listStoreUnfulfillablePaidOrders,
   computeBillTaxRounding,
   listOrderItemPrices,
@@ -22,6 +23,7 @@ import {
   loadOrderPickupContact,
   type MerchantOrderListSummary,
   type OrderAcceptanceHold,
+  type OrderAutoAcceptanceBatchFact,
   type StaffOrderCancellationRecord,
   listOrderPriceReductions,
   orderPriceReductionPermission,
@@ -61,6 +63,8 @@ import {
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import { readDiningTableBill, tableRefundedMinor } from "./merchant-dining-table-checkout.js";
+import { withOptionalRead } from "./merchant-round-business-date.js";
+import { readPaidOrderWatch } from "./merchant-paid-order-watch.js";
 import { readItemCancellationRefund } from "./merchant-order-item-staff-cancellation.js";
 import { readCustomerReceiptFinancial } from "./customer-receipt-financial.js";
 import {
@@ -138,6 +142,8 @@ export function createPersistentMerchantOrderQueue(options: {
               "payment.refund.approve",
               // WP-2423 item 8 ① segment 2: comps and discounts are offered to managers only.
               orderPriceReductionPermission,
+              // DEC-PAID-ORDER-AUTO-ACCEPT: who may turn automatic sending off from this page.
+              "store.service.pause",
             ]);
             if (decisions.get("ordering.operate")?.effect !== "Allow") return unavailable();
             return Object.freeze({
@@ -149,6 +155,7 @@ export function createPersistentMerchantOrderQueue(options: {
               // WP-2423 Q6: staff cancellation is offered only to holders of ordering.order.cancel.
               cancelAllowed: decisions.get(staffOrderCancellationPermission)?.effect === "Allow",
               compAllowed: decisions.get(orderPriceReductionPermission)?.effect === "Allow",
+              pauseAllowed: decisions.get("store.service.pause")?.effect === "Allow",
               // The card-machine payment record (counter orders and staff-entered table rounds).
               cardMachinePaymentAllowed: decisions.get(counterOrderPermission)?.effect === "Allow",
               // Payments and refunds are read by refund requesters (Manager) and approvers
@@ -168,6 +175,7 @@ export function createPersistentMerchantOrderQueue(options: {
             acceptanceAllowed,
             cancelAllowed,
             compAllowed,
+            pauseAllowed,
             cardMachinePaymentAllowed,
             paymentsAllowed,
           } = authority.scope;
@@ -369,6 +377,32 @@ export function createPersistentMerchantOrderQueue(options: {
                   ownerScope,
                   waiting.map((item) => item.orderReference),
                 );
+          // DEC-PAID-ORDER-AUTO-ACCEPT: what the System did or why it did not, per batch (most have
+          // nothing), and what every screen warns about. An unreadable answer never blanks Orders.
+          const autoAcceptance =
+            ownerScope === null || result.items.length === 0
+              ? new Map<string, OrderAutoAcceptanceBatchFact>()
+              : await withOptionalRead(
+                  businessTransaction,
+                  () =>
+                    listStoreOrderAutoAcceptanceFacts(
+                      businessTransaction,
+                      ownerScope,
+                      result.items.map((item) => item.orderReference),
+                    ),
+                  new Map<string, OrderAutoAcceptanceBatchFact>(),
+                );
+          const paidOrderWatch =
+            ownerScope === null || input.orderReference !== undefined
+              ? null
+              : await withOptionalRead(
+                  businessTransaction,
+                  () => readPaidOrderWatch(businessTransaction, ownerScope, String(source.now())),
+                  null,
+                );
+          const automaticBatches = [...autoAcceptance]
+            .filter(([, fact]) => fact.kind === "Accepted")
+            .map(([batch]) => batch);
           // WP-2423 Q6: staff cancellations (with refund status) and which paid, accepted batches the
           // kitchen has not started, so the cancel action is offered only where the command accepts it.
           const orderReferences = result.items.map((item) => item.orderReference);
@@ -690,6 +724,24 @@ export function createPersistentMerchantOrderQueue(options: {
                 orderReferences,
               );
               const open = [...confirmed].filter((batch) => !cancellations.has(batch));
+              for (let index = 0; index < open.length; index += 100)
+                for (const batch of await listStoreStartedKitchenBatches(
+                  businessTransaction,
+                  scoped,
+                  open.slice(index, index + 100),
+                ))
+                  started.add(batch);
+            }
+            // "Can't make it" is offered to whoever can accept, on batches the System accepted.
+            if (!cancelAllowed && acceptanceAllowed && automaticBatches.length > 0) {
+              confirmed = await listStoreConfirmedOrderBatches(
+                businessTransaction,
+                scoped,
+                orderReferences,
+              );
+              const open = automaticBatches.filter(
+                (batch) => confirmed.has(batch) && !cancellations.has(batch),
+              );
               for (let index = 0; index < open.length; index += 100)
                 for (const batch of await listStoreStartedKitchenBatches(
                   businessTransaction,
@@ -1182,6 +1234,10 @@ export function createPersistentMerchantOrderQueue(options: {
             lines: detailLines,
             pickupContact,
             paymentPosition,
+            // DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that has it on or has orders from it.
+            ...(paidOrderWatch === null
+              ? {}
+              : { paidOrderWatch: Object.freeze({ ...paidOrderWatch, canTurnOff: pauseAllowed }) }),
             items: Object.freeze(
               result.items.map((item) => {
                 const closed = unfulfillable.get(item.orderReference) ?? null;
@@ -1263,8 +1319,40 @@ export function createPersistentMerchantOrderQueue(options: {
                         (batch.sequence > 1 ||
                           item.orderType === "DineIn" ||
                           item.currentVersion === 1);
+                      // DEC-PAID-ORDER-AUTO-ACCEPT: keys only where they apply, so a tablet at a
+                      // Store without it keeps reading the list it knows.
+                      const automatic = autoAcceptance.get(batch.orderBatchReference);
+                      const automaticKeys: {
+                        acceptedAutomaticallyAt?: string;
+                        canCantMake?: boolean;
+                        notSentAutomatically?: Readonly<{
+                          reason: string;
+                          itemCount: number | null;
+                        }>;
+                      } =
+                        automatic?.kind === "Accepted"
+                          ? {
+                              acceptedAutomaticallyAt: automatic.acceptedAt,
+                              canCantMake:
+                                acceptanceAllowed &&
+                                closed === null &&
+                                item.currentVersion !== null &&
+                                !uncollected.has(item.orderReference) &&
+                                !cancellations.has(batch.orderBatchReference) &&
+                                confirmed.has(batch.orderBatchReference) &&
+                                !started.has(batch.orderBatchReference),
+                            }
+                          : automatic?.kind === "Skipped" && batch.acceptanceStatus === "NotAccepted"
+                            ? {
+                                notSentAutomatically: Object.freeze({
+                                  reason: automatic.reason,
+                                  itemCount: automatic.itemCount,
+                                }),
+                              }
+                            : {};
                       return Object.freeze({
                         ...batch,
+                        ...automaticKeys,
                         canRequestAcceptance,
                         // WP-2423: when a paid dine-in round staff can accept was paid. It is never
                         // refunded automatically, so staff are warned while it waits (pickups

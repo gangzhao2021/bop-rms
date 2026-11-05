@@ -24,6 +24,7 @@ import {
   createPostgresStaffDiningRoundEntryStore,
   listStoreKitchenOrderLabels,
   listStoreOrderBusinessDates,
+  listStoreOrderAutoAcceptanceSkipsByOrder,
   listStoreOrdersAwaitingAcceptance,
 } from "@rms/ordering";
 import {
@@ -39,6 +40,7 @@ import {
 } from "./merchant-round-business-date.js";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
 import { comboPartsByOrderItem, type ComboPart } from "./merchant-combo-parts.js";
+import { readPaidOrderWatch } from "./merchant-paid-order-watch.js";
 import { readPickupRefundDeadlines } from "./pickup-acceptance-deadline.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -335,6 +337,8 @@ export interface KitchenAwaitingAcceptanceLabel extends Omit<KitchenOrderLabel, 
    * refunded for waiting), while an order is held for an outage, or when the deadline is unknown.
    */
   readonly acceptBy: string | null;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: why it was not sent automatically (only when it applies). */
+  readonly notSent?: { readonly reason: string; readonly itemCount: number | null };
 }
 /**
  * WP-2423 (v15 2026-10-16): how the kitchen names today's orders waiting for acceptance — number,
@@ -350,6 +354,7 @@ export async function kitchenAwaitingAcceptance(
     readonly diningSessionReference: string | null;
   }[],
   refundDeadlines: ReadonlyMap<string, string> = new Map(),
+  notSent: ReadonlyMap<string, NonNullable<KitchenAwaitingAcceptanceLabel["notSent"]>> = new Map(),
 ): Promise<readonly KitchenAwaitingAcceptanceLabel[]> {
   const sessions = [
     ...new Set(
@@ -383,6 +388,9 @@ export async function kitchenAwaitingAcceptance(
         mergedFromTableLabel: null,
         acceptBy:
           order.orderType === "Pickup" ? (refundDeadlines.get(order.orderReference) ?? null) : null,
+        ...((reason) => (reason === undefined ? {} : { notSent: reason }))(
+          notSent.get(order.orderReference),
+        ),
       }),
     ),
   );
@@ -635,6 +643,19 @@ export function createMerchantKitchenQuery(options: {
             const chases = await chasesOf(items);
             const canCloseEarlierDayTickets =
               (await scope.authorizeAction(kitchenStaleTicketClosePermission))?.effect === "Allow";
+            // DEC-PAID-ORDER-AUTO-ACCEPT: at a Store sending paid orders straight here, what waits
+            // for a person and why, and whether what was sent is going anywhere. Left out elsewhere.
+            const paidOrderWatch =
+              query.cursor === null
+                ? await withOptionalRead(
+                    tx,
+                    () => readPaidOrderWatch(tx, authority, authority.observedAt),
+                    null,
+                  )
+                : null;
+            const canAcceptOrders =
+              paidOrderWatch !== null &&
+              (await scope.authorizeAction("order.accept"))?.effect === "Allow";
             // WP-2423 (v15 2026-10-16): today's paid orders still waiting for acceptance have no
             // kitchen work yet; the board's order search names them instead of matching an
             // earlier day's order with the same number. Read with the first page only; null when
@@ -669,7 +690,34 @@ export function createMerchantKitchenQuery(options: {
                         () => readPickupRefundDeadlines(tx, authority, pickups),
                         new Map<string, string>(),
                       );
-                      return kitchenAwaitingAcceptance(tx, authority, waiting, refundDeadlines);
+                      const notSent: ReadonlyMap<
+                        string,
+                        { readonly reason: string; readonly itemCount: number | null }
+                      > =
+                        paidOrderWatch === null
+                          ? new Map()
+                          : await withOptionalRead<
+                              ReadonlyMap<
+                                string,
+                                { readonly reason: string; readonly itemCount: number | null }
+                              >
+                            >(
+                              tx,
+                              () =>
+                                listStoreOrderAutoAcceptanceSkipsByOrder(
+                                  tx,
+                                  authority,
+                                  waiting.map((order) => order.orderReference),
+                                ),
+                              new Map(),
+                            );
+                      return kitchenAwaitingAcceptance(
+                        tx,
+                        authority,
+                        waiting,
+                        refundDeadlines,
+                        notSent,
+                      );
                     },
                     null,
                   )
@@ -694,6 +742,9 @@ export function createMerchantKitchenQuery(options: {
               storeReference: authority.storeReference,
               canCloseEarlierDayTickets,
               ...(awaitingAcceptance === undefined ? {} : { awaitingAcceptance }),
+              ...(paidOrderWatch === null
+                ? {}
+                : { paidOrderWatch: { ...paidOrderWatch, canTurnOff: false, canAcceptOrders } }),
               items: items.map((item) =>
                 itemView(
                   item,
