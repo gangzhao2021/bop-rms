@@ -435,6 +435,7 @@ export function DiningSessionWorkspace({
   const [guestStarts, setGuestStarts] = useState<{
     readonly version: number;
     readonly canTurnOff: boolean;
+    readonly startsBusy: boolean;
   } | null>(null);
   const [canOperateTables, setCanOperateTables] = useState(false),
     [blockReasonCode, setBlockReasonCode] = useState(""),
@@ -1091,6 +1092,13 @@ export function DiningSessionWorkspace({
             {needCount > 0 ? (
               <span data-attention="true">
                 {t("{count} need you", { count: String(needCount) })}
+              </span>
+            ) : null}
+            {guestStarts?.startsBusy === true ? (
+              <span data-attention="true">
+                {t(
+                  "Many tables started by scanning · new guests are sent to staff for a few minutes",
+                )}
               </span>
             ) : null}
             {guestStarts !== null ? (

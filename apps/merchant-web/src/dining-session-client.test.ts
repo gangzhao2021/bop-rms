@@ -301,7 +301,7 @@ it("DEC-DINING-GUEST-TABLE-START: reads a table a guest started, and a table wit
     ],
     nextAfterTableReference: null,
   });
-  expect(started.guestTableStart).toEqual({ version: 4, canTurnOff: true });
+  expect(started.guestTableStart).toEqual({ version: 4, canTurnOff: true, startsBusy: false });
   expect(started.items[0]?.guestStart).toEqual({ closesByItselfAt: at });
   expect(started.items[1]?.blockedSince).toBe(at);
 });

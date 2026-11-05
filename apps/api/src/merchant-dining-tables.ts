@@ -409,6 +409,7 @@ export function createMerchantDiningTables(options: {
             tx as never,
             ownerScope,
             activeReferences,
+            new Date(joinedAt).toISOString(),
           );
           const guestStarted = guestPage.started;
           const guestActivity = await loadDiningGuestTableActivity(tx as never, ownerScope, [
@@ -496,6 +497,8 @@ export function createMerchantDiningTables(options: {
                   guestTableStart: Object.freeze({
                     version: guestPage.version,
                     canTurnOff: canStopGuestStarts,
+                    // Guests at free tables are being told to ask staff; staff should know why.
+                    ...(guestPage.storeBudgetSpent ? { startsBusy: true } : {}),
                   }),
                 }
               : {}),

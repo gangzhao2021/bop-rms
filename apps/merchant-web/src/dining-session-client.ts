@@ -487,6 +487,7 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
             : Object.freeze({
                 version: num(obj(data.guestTableStart).version),
                 canTurnOff: obj(data.guestTableStart).canTurnOff === true,
+                startsBusy: obj(data.guestTableStart).startsBusy === true,
               }),
       };
     },

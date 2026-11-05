@@ -47,6 +47,7 @@ const timing = vi.hoisted(() => ({
 }));
 const guestStart = vi.hoisted(() => ({
   on: false,
+  budgetSpent: false,
   started: new Map<string, { startedAt: string }>(),
   activity: new Map<
     string,
@@ -70,6 +71,7 @@ vi.mock("@rms/dining", async (original) => ({
     guestTableStart: guestStart.on,
     version: guestStart.on ? 2 : 0,
     started: guestStart.started,
+    storeBudgetSpent: guestStart.budgetSpent,
   }),
   loadDiningGuestTableActivity: async () => guestStart.activity,
   createPostgresDiningStaffCallStore: vi.fn(() => ({ listOpen: mock.staffCalls })),
@@ -857,7 +859,7 @@ it("DEC-DINING-GUEST-TABLE-START: says which table a guest started and when it f
   );
   try {
     const view = (await f.read(f.input)) as unknown as {
-      guestTableStart?: { version: number; canTurnOff: boolean };
+      guestTableStart?: { version: number; canTurnOff: boolean; startsBusy?: boolean };
       items: readonly {
         guestStart?: { closesByItselfAt: string | null };
         blockedSince?: string;
@@ -871,7 +873,14 @@ it("DEC-DINING-GUEST-TABLE-START: says which table a guest started and when it f
     expect(view.items[0]?.newPhones).toEqual([]);
     expect(view.items[1]?.guestStart).toBeUndefined();
     expect(view.items[1]?.blockedSince).toBe(startedAt);
+    // The Store's budget is spent: staff are told why guests at free tables are coming to them.
+    guestStart.budgetSpent = true;
+    const busy = (await f.read(f.input)) as unknown as {
+      guestTableStart?: { version: number; canTurnOff: boolean; startsBusy?: boolean };
+    };
+    expect(busy.guestTableStart).toEqual({ version: 2, canTurnOff: true, startsBusy: true });
   } finally {
+    guestStart.budgetSpent = false;
     guestStart.on = false;
     guestStart.started = new Map();
     guestStart.activity = new Map();

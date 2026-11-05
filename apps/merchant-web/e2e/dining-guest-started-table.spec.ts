@@ -72,7 +72,7 @@ for (const [width, height] of [
         json: {
           canOperateTables: true,
           canCloseSessions: true,
-          ...(on ? { guestTableStart: { version: 4, canTurnOff: true } } : {}),
+          ...(on ? { guestTableStart: { version: 4, canTurnOff: true, startsBusy: true } } : {}),
           items: [
             {
               ...base(1),
@@ -113,6 +113,8 @@ for (const [width, height] of [
     // The warning waits for its last minutes: a countdown nobody can act on is just noise.
     await expect(main.getByText("frees itself in 18 min")).toHaveCount(0);
     await expect(main).toContainText("guests can start it now");
+    // Scanned starts ran out for now: staff are told why guests are coming to them.
+    await expect(main).toContainText("new guests are sent to staff for a few minutes");
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -126,5 +128,6 @@ for (const [width, height] of [
     await expect(main).toContainText("New tables need staff to open them now.");
     expect(off).toEqual([expect.objectContaining({ expectedVersion: 4 })]);
     await expect(main.getByRole("button", { name: "Turn off", exact: true })).toHaveCount(0);
+    await expect(main.getByText("new guests are sent to staff")).toHaveCount(0);
   });
 }

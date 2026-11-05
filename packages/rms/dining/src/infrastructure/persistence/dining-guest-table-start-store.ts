@@ -165,10 +165,13 @@ export async function loadDiningGuestTableStartPage(
   tx: DiningTableTransaction,
   scope: Pick<DiningTableStoreScope, "brandReference" | "storeReference">,
   sessionReferences: readonly string[],
+  observedAt: string,
 ): Promise<{
   readonly guestTableStart: boolean;
   readonly version: number;
   readonly started: ReadonlyMap<string, { readonly startedAt: string }>;
+  /** The Store's budget is spent: a guest at a free table is being asked to see staff right now. */
+  readonly storeBudgetSpent: boolean;
 }> {
   const { brand, store } = scoped(scope);
   const sessions = sessionReferences.map((value) => String(parseDiningReference(value)));
@@ -176,8 +179,9 @@ export async function loadDiningGuestTableStartPage(
   const page = rows(
     await tx.query(
       `SELECT (SELECT jsonb_build_object('version',v.version,'on',v.guest_table_start) FROM rms_dining.dining_service_setting v WHERE v.brand_id=$1 AND v.store_id=$2 ORDER BY v.version DESC LIMIT 1) AS setting,
- (SELECT coalesce(jsonb_agg(jsonb_build_object('session',g.session_id,'at',${instantSql("g.started_at")})),'[]'::jsonb) FROM rms_dining.dining_session_guest_start g WHERE g.brand_id=$1 AND g.store_id=$2 AND g.session_id=ANY($3::uuid[])) AS started`,
-      [brand, store, sessions],
+ (SELECT coalesce(jsonb_agg(jsonb_build_object('session',g.session_id,'at',${instantSql("g.started_at")})),'[]'::jsonb) FROM rms_dining.dining_session_guest_start g WHERE g.brand_id=$1 AND g.store_id=$2 AND g.session_id=ANY($3::uuid[])) AS started,
+ (SELECT count(*)::int FROM rms_dining.dining_session_guest_start g WHERE g.brand_id=$1 AND g.store_id=$2 AND g.started_at>$4::timestamptz - make_interval(mins => ${guestTableStartBudget.windowMinutes})) AS store_starts`,
+      [brand, store, sessions, String(parseDiningInstant(observedAt))],
     ),
   )[0];
   const setting = page?.setting as { version?: unknown; on?: unknown } | null | undefined;
@@ -193,6 +197,7 @@ export async function loadDiningGuestTableStartPage(
     guestTableStart: setting?.on === true,
     version: setting === null || setting === undefined ? 0 : Number(setting.version),
     started,
+    storeBudgetSpent: Number(page?.store_starts ?? 0) >= guestTableStartBudget.perStore,
   });
 }
 
