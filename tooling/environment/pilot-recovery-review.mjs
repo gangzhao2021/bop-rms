@@ -31,6 +31,7 @@ const services = [
   "reconciliation-worker",
   "daily-settlement-worker",
   "dining-exception-worker",
+  "store-workers",
 ];
 async function privateRead(file, limit = 1048576) {
   if ((await fs.realpath(file)) !== file) fail();

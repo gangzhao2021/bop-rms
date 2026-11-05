@@ -4,7 +4,12 @@ import process from "node:process";
 import console from "node:console";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import { createPilotRecoverySweep, storeWorkerServices } from "./pilot-recovery-sweep.mjs";
+import {
+  allServices,
+  createPilotRecoverySweep,
+  storeWorkerServices,
+} from "./pilot-recovery-sweep.mjs";
+import { readHostedStoreHealth } from "./pilot-workload-health.mjs";
 import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 import { admitConfiguredStores } from "./pilot-admitted-stores.mjs";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
@@ -48,6 +53,7 @@ export async function acquirePilotSupervisorLease(runtimeDirectory) {
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
     ]) {
       try {
         await fs.lstat(path.join(directory, `${service}.restart-lock`));
@@ -155,57 +161,52 @@ export function createPilotSupervisorHealthWriter(
 export function createPilotInstallationSweep({
   runtimeDirectory,
   createSweep = createPilotRecoverySweep,
+  root = () => process.cwd(),
+  readHealth = readHostedStoreHealth,
   listStores = async () =>
     loadServedStoreDirectories(path.join(await fs.realpath(process.cwd()), runtimeDirectory)),
   // WP-2423 (2026-11-02): which of them fit the database role's connections (a refused Store is
   // reported each sweep, so the operations monitor alerts on it, and its workers aren't started).
   admit = async (relatives) => admitConfiguredStores(runtimeDirectory, relatives),
-  exists = async (file) =>
-    fs.lstat(file).then(
-      () => true,
-      () => false,
-    ),
 }) {
-  const own = createSweep({
-    runtimeDirectory,
-    workloadHealth: createPilotWorkloadHealthOptions(runtimeDirectory),
-  });
-  let stores = null,
-    refusedStores = [];
-  const storeSweeps = async () => {
-    if (stores !== null) return stores;
-    stores = [];
+  // DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the Stores after the first run in one process; each is
+  // still reported on its own, from its own health files. The Store list is read once per run.
+  let prepared = null;
+  const prepare = async () => {
+    if (prepared !== null) return prepared;
     const { admitted, refused } = await admit(await listStores());
-    refusedStores = refused;
-    for (const relative of admitted) {
-      const directory = runtimeDirectory + "/" + relative;
-      const settles = await exists(path.join(directory, "daily-settlement-coverage.json"));
-      stores.push({
-        relative,
-        sweep: createSweep({
-          runtimeDirectory: directory,
-          services: storeWorkerServices.filter(
-            (service) => settles || service !== "daily-settlement-worker",
-          ),
-          workloadHealth: createPilotWorkloadHealthOptions(directory),
-        }),
-      });
-    }
-    return stores;
+    prepared = {
+      refused,
+      own: createSweep({
+        runtimeDirectory,
+        ...(admitted.length === 0
+          ? {}
+          : { services: Object.freeze([...allServices, "store-workers"]) }),
+        workloadHealth: createPilotWorkloadHealthOptions(runtimeDirectory),
+      }),
+      stores: admitted,
+    };
+    return prepared;
   };
   return Object.freeze({
     async sweep(options) {
+      const { own, stores, refused } = await prepare();
       const services = [...(await own.sweep(options))];
-      for (const store of await storeSweeps()) {
+      const host = services.find((entry) => entry.service === "store-workers");
+      for (const relative of stores) {
         if (options?.signal?.aborted) break;
-        try {
-          for (const entry of await store.sweep.sweep(options))
-            services.push({ ...entry, service: store.relative + ":" + entry.service });
-        } catch {
-          services.push({ service: store.relative, state: "attention_required" });
+        if (host?.state !== "running") {
+          services.push({ service: relative, state: host?.state ?? "unavailable" });
+          continue;
+        }
+        for (const service of storeWorkerServices) {
+          const directory = path.join(root(), runtimeDirectory, relative);
+          const health = await readHealth(directory, service, host.pid);
+          if (health !== null)
+            services.push({ service: relative + ":" + service, state: "running", ...health });
         }
       }
-      for (const relative of refusedStores)
+      for (const relative of refused)
         services.push({ service: relative, state: "attention_required" });
       return services;
     },

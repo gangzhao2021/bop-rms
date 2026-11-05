@@ -91,6 +91,27 @@ export async function startPilotDiningExceptionWorker({
   }
 }
 
+export async function startConfiguredDiningExceptionWorker({ directory, startRuntime }) {
+  const installation = await loadPilotInstallation(directory);
+  const config = await installation.loadDiningExceptionWorker();
+  return startPilotDiningExceptionWorker({
+    directory,
+    ...(startRuntime === undefined ? {} : { startRuntime }),
+    providerAccountReference: config.providerAccountReference,
+    createResources: async () => {
+      const resources = await createBackgroundPilotResources(directory);
+      if (
+        Object.entries(config.scope).some(
+          ([key, value]) => resources.publicProfile.binding[key] !== value,
+        )
+      ) {
+        await resources.close();
+        throw Error("DINING_EXCEPTION_WORKER_SCOPE_CHANGED");
+      }
+      return resources;
+    },
+  });
+}
 export function parseDiningExceptionWorkerArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
     throw Error("DINING_EXCEPTION_WORKER_ARGUMENT_INVALID");
@@ -103,24 +124,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       fileURLToPath(new URL("../../", import.meta.url)),
       runtimeDirectory,
     );
-    const installation = await loadPilotInstallation(directory);
-    const config = await installation.loadDiningExceptionWorker();
-    await startPilotDiningExceptionWorker({
-      directory,
-      providerAccountReference: config.providerAccountReference,
-      createResources: async () => {
-        const resources = await createBackgroundPilotResources(directory);
-        if (
-          Object.entries(config.scope).some(
-            ([key, value]) => resources.publicProfile.binding[key] !== value,
-          )
-        ) {
-          await resources.close();
-          throw Error("DINING_EXCEPTION_WORKER_SCOPE_CHANGED");
-        }
-        return resources;
-      },
-    });
+    await startConfiguredDiningExceptionWorker({ directory });
   } catch (error) {
     reportUnexpected("DINING_EXCEPTION_WORKER_START_UNAVAILABLE", error);
     console.error("DINING_EXCEPTION_WORKER_START_UNAVAILABLE");

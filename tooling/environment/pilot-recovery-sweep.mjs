@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 import { runPilotService, parsePilotRuntimeDirectory } from "./pilot-service.mjs";
-const allServices = Object.freeze([
+export const allServices = Object.freeze([
   "api",
   "business-worker",
   "kitchen-queue-worker",
@@ -39,7 +39,10 @@ function attentionComponents(health) {
 /** Process recovery only. Start performs authoritative identity/terminal checks.
  * Health failures never authorize terminating or replacing a live process; with `workloadHealth`
  * (the supervisor), a running worker's alert-worthy workloads are reported as `attention`. */
-/** The workers another Store of the installation runs from its own directory. */
+/**
+ * The workers each other Store of the installation has, all in one `store-workers` process of the
+ * installation's own (DEC-MULTI-MERCHANT-ONE-INSTALLATION A5), each writing health in its own directory.
+ */
 export const storeWorkerServices = Object.freeze([
   "business-worker",
   "kitchen-queue-worker",
@@ -48,23 +51,24 @@ export const storeWorkerServices = Object.freeze([
   "dining-exception-worker",
 ]);
 /**
- * Every listed Store's workers as (service, runtime directory) — what an installation-wide stop or
- * recovery stops in the same window (v15 2026-10-31). None for a single-Store installation.
+ * The process running every listed Store's workers as (service, runtime directory): what an
+ * installation-wide stop or recovery stops in the same window (v15 2026-10-31). None for a
+ * single-Store installation.
  */
 export async function servedStoreWorkerTargets(
   runtimeDirectory,
   listStores = async () =>
     loadServedStoreDirectories(path.join(await fs.realpath(process.cwd()), runtimeDirectory)),
 ) {
-  return (await listStores()).flatMap((relative) =>
-    storeWorkerServices.map((name) =>
-      Object.freeze({
-        name,
-        directory: runtimeDirectory + "/" + relative,
-        label: relative + ":" + name,
-      }),
-    ),
-  );
+  return (await listStores()).length === 0
+    ? []
+    : [
+        Object.freeze({
+          name: "store-workers",
+          directory: runtimeDirectory,
+          label: "store-workers",
+        }),
+      ];
 }
 export function createPilotRecoverySweep({
   runtimeDirectory,

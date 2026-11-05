@@ -22,6 +22,7 @@ const services = [
   "reconciliation-worker",
   "daily-settlement-worker",
   "dining-exception-worker",
+  "store-workers",
 ];
 export async function clearStoppedPilotMaintenance(
   runtimeDirectory,

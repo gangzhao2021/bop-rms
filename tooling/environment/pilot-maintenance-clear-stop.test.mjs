@@ -27,7 +27,7 @@ it("releases an actual exited Stop owner only after all services are confirmed s
     const confirmStopped = vi.fn(async () => true);
     expect(await clearStoppedPilotMaintenance(directory, { confirmStopped })).toEqual({
       state: "StoppedMaintenanceReleased",
-      servicesConfirmedStopped: 7,
+      servicesConfirmedStopped: 8,
       servicesStarted: false,
     });
     expect(confirmStopped.mock.calls.map(([v]) => v.service)).toEqual([
@@ -38,6 +38,7 @@ it("releases an actual exited Stop owner only after all services are confirmed s
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
     ]);
     await assertPilotMaintenanceAccess(directory);
     await expect(fs.lstat(directory + "/maintenance-clear-stop.lock")).rejects.toMatchObject({
@@ -118,7 +119,7 @@ it("finishes a partial Stop in order with stop-only access and releases after in
       return { service, state: "stopped" };
     });
     const confirmStopped = vi.fn(async () => {
-      expect(calls).toBe(7);
+      expect(calls).toBe(8);
       return true;
     });
     await clearStoppedPilotMaintenance(directory, {
@@ -134,8 +135,9 @@ it("finishes a partial Stop in order with stop-only access and releases after in
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
     ]);
-    expect(confirmStopped).toHaveBeenCalledTimes(7);
+    expect(confirmStopped).toHaveBeenCalledTimes(8);
     await assertPilotMaintenanceAccess(directory, "start");
   });
 });

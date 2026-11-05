@@ -168,12 +168,12 @@ it.each([
       expect(await result).toEqual({
         state: "SourceComparisonMatchedReviewRequired",
         sourceUnchanged: true,
-        servicesConfirmedStopped: 7,
+        servicesConfirmedStopped: 8,
         maintenanceRetained: true,
         servicesStarted: false,
         targetRestorationVerified: false,
       });
-      expect(state.stopped).toBe(14);
+      expect(state.stopped).toBe(16);
     }
     expect(await fs.readFile(runtimeDirectory + "/maintenance.lock")).toEqual(before);
     expect(

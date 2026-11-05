@@ -15,48 +15,64 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: another Store's directory is a runti
     expect(() => parsePilotRuntimeDirectory(bad)).toThrow();
 });
 
-it("supervises each other Store's workers from its own directory, settlement once its first day is recorded", async () => {
+it("DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the other Stores run in one process, each reported on its own", async () => {
   const created = [];
   const createSweep = (options) => {
     created.push(options);
     return {
-      sweep: async () =>
-        (options.services ?? ["api", "customer", "business-worker"]).map((service) => ({
-          service,
-          state:
-            options.runtimeDirectory.endsWith("demo-3") && service === "business-worker"
-              ? "attention_required"
-              : "running",
-        })),
+      sweep: async () => [
+        { service: "api", state: "running", pid: 1 },
+        { service: "store-workers", state: "running", pid: 42 },
+      ],
     };
   };
+  const read = [];
   const sweep = createPilotInstallationSweep({
     runtimeDirectory: ".local/pilot-v15",
     createSweep,
+    root: () => "/app",
     listStores: async () => ["stores/demo-2", "stores/demo-3"],
-    exists: async (file) => file.includes("demo-2"),
+    admit: async (relatives) => ({ admitted: relatives, refused: [] }),
+    readHealth: async (directory, service, pid) => {
+      read.push(pid);
+      if (service === "daily-settlement-worker") return null;
+      return directory.endsWith("demo-3") && service === "business-worker"
+        ? { attention: ["events"] }
+        : {};
+    },
   });
   const services = await sweep.sweep({});
-  expect(created.map((options) => options.runtimeDirectory)).toEqual([
-    ".local/pilot-v15",
-    ".local/pilot-v15/stores/demo-2",
-    ".local/pilot-v15/stores/demo-3",
-  ]);
-  // A listed Store runs workers only; its settlement worker only once its coverage exists.
-  expect(created[1].services).toContain("daily-settlement-worker");
-  expect(created[2].services).not.toContain("daily-settlement-worker");
-  expect(created[1].services).not.toContain("api");
-  // Each Store reported on its own; one Store needing a person never hides another.
-  expect(services.map((entry) => entry.service)).toContain("stores/demo-2:business-worker");
-  expect(services.find((entry) => entry.service === "stores/demo-3:business-worker")?.state).toBe(
-    "attention_required",
-  );
-  expect(services.find((entry) => entry.service === "stores/demo-2:business-worker")?.state).toBe(
-    "running",
+  expect(created).toHaveLength(1);
+  expect(created[0].runtimeDirectory).toBe(".local/pilot-v15");
+  expect(created[0].services).toContain("store-workers");
+  expect(created[0].services).toContain("api");
+  expect(new Set(read)).toEqual(new Set([42]));
+  // Each Store on its own; one Store needing a person never hides another. Settlement is listed
+  // once it has run.
+  expect(services).toContainEqual({ service: "stores/demo-2:business-worker", state: "running" });
+  expect(services).toContainEqual({
+    service: "stores/demo-3:business-worker",
+    state: "running",
+    attention: ["events"],
+  });
+  expect(services.map((entry) => entry.service)).not.toContain(
+    "stores/demo-2:daily-settlement-worker",
   );
   // The Store list is read once per supervisor run.
   await sweep.sweep({});
-  expect(created).toHaveLength(3);
+  expect(created).toHaveLength(1);
+});
+
+it("while the shared process isn't running, its Stores say so", async () => {
+  const sweep = createPilotInstallationSweep({
+    runtimeDirectory: ".local/pilot-v15",
+    createSweep: () => ({
+      sweep: async () => [{ service: "store-workers", state: "backoff" }],
+    }),
+    listStores: async () => ["stores/demo-2"],
+    admit: async (relatives) => ({ admitted: relatives, refused: [] }),
+  });
+  expect(await sweep.sweep({})).toContainEqual({ service: "stores/demo-2", state: "backoff" });
 });
 
 it("a single-Store installation supervises exactly its own services", async () => {
@@ -68,6 +84,7 @@ it("a single-Store installation supervises exactly its own services", async () =
       return { sweep: async () => [{ service: "api", state: "running" }] };
     },
     listStores: async () => [],
+    admit: async (relatives) => ({ admitted: relatives, refused: [] }),
   });
   expect(await sweep.sweep({})).toEqual([{ service: "api", state: "running" }]);
   expect(created).toHaveLength(1);
@@ -96,10 +113,11 @@ it("v15 2026-10-31: the sweep starts a Store's worker with no window open and no
         createSweep: (options) =>
           createPilotRecoverySweep({ ...options, service, workloadHealth: null }),
         listStores: async () => ["stores/demo-2"],
-        exists: async () => false,
+        admit: async (relatives) => ({ admitted: relatives, refused: [] }),
+        readHealth: async () => null,
       }).sweep();
     await sweep();
-    expect(started).toContain(directory + "/stores/demo-2:kitchen-queue-worker");
+    expect(started).toContain(directory + ":store-workers");
     // The installation's planned update window is open: no start, its own or the Store's workers.
     await fs.writeFile(directory + "/maintenance.lock", "{}", { mode: 0o600 });
     started.length = 0;
@@ -116,14 +134,14 @@ it("WP-2423: a Store over the connection budget is reported, and its workers are
     runtimeDirectory: ".local/pilot-v15",
     createSweep: (options) => {
       created.push(options.runtimeDirectory);
-      return { sweep: async () => [{ service: "api", state: "running" }] };
+      return { sweep: async () => [{ service: "store-workers", state: "running", pid: 42 }] };
     },
     listStores: async () => ["stores/demo-2", "stores/demo-3"],
     admit: async () => ({ admitted: ["stores/demo-2"], refused: ["stores/demo-3"] }),
-    exists: async () => true,
+    readHealth: async () => ({}),
   });
   const services = await sweep.sweep();
-  expect(created).toEqual([".local/pilot-v15", ".local/pilot-v15/stores/demo-2"]);
-  expect(services).toContainEqual({ service: "stores/demo-2:api", state: "running" });
+  expect(created).toEqual([".local/pilot-v15"]);
+  expect(services).toContainEqual({ service: "stores/demo-2:business-worker", state: "running" });
   expect(services).toContainEqual({ service: "stores/demo-3", state: "attention_required" });
 });

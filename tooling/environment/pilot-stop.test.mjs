@@ -40,18 +40,11 @@ it("v15 2026-10-31: an installation-wide stop also stops each served Store's wor
   expect(result.state).toBe("stopped");
   // One window, the installation's; the Store's workers stop inside it, after the installation's.
   expect(windows).toEqual([".local/other"]);
-  expect(service.mock.calls.slice(7).map(([action, name, dir]) => [action, name, dir])).toEqual(
-    [
-      "business-worker",
-      "kitchen-queue-worker",
-      "reconciliation-worker",
-      "daily-settlement-worker",
-      "dining-exception-worker",
-    ].map((name) => ["stop", name, ".local/other/stores/demo-2"]),
-  );
-  expect(result.services.slice(7).map((entry) => entry.service)).toContain(
-    "stores/demo-2:kitchen-queue-worker",
-  );
+  // DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: they all run in the installation's one shared process.
+  expect(service.mock.calls.slice(7).map(([action, name, dir]) => [action, name, dir])).toEqual([
+    ["stop", "store-workers", ".local/other"],
+  ]);
+  expect(result.services.slice(7).map((entry) => entry.service)).toEqual(["store-workers"]);
 });
 it.each(["throw", "running", "wrong-service"])(
   "returns exact partial state without continuing or restarting on %s",

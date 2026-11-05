@@ -19,6 +19,7 @@ const SERVICE_NAMES = Object.freeze({
   "reconciliation-worker": "Payment checks",
   "daily-settlement-worker": "Day-end settlement",
   "dining-exception-worker": "Table service follow-ups",
+  "store-workers": "Background work of the other Stores",
 });
 const COMPONENT_NAMES = Object.freeze({
   events: "order updates",

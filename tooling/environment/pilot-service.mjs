@@ -39,6 +39,7 @@ export function pilotProcessArguments(root, service, runtimeDirectory = pilotRun
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
     ].includes(service)
   )
     return fail();
@@ -50,6 +51,7 @@ export function pilotProcessArguments(root, service, runtimeDirectory = pilotRun
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
       "kitchen-queue-worker",
       "business-worker",
     ].includes(service)
@@ -168,6 +170,7 @@ export function pilotLaunchEnvironment(service, environment) {
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
     ].includes(service)
   )
     return fail();
@@ -216,6 +219,7 @@ export function isPilotWorkerCandidate(
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
     ].includes(service) ||
     cwd !== root
   )
@@ -227,6 +231,7 @@ export function isPilotWorkerCandidate(
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
       "kitchen-queue-worker",
       "business-worker",
     ].includes(service) &&

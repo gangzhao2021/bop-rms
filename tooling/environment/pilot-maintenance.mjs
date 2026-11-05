@@ -88,6 +88,7 @@ export async function withPilotMaintenance(runtimeDirectory, work, operation = "
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "store-workers",
     ].map((v) => v + ".restart-lock");
     const busy = [
       ...[

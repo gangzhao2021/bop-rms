@@ -138,7 +138,13 @@ export function parsePilotWorkloadHealth(value, identity, now = Date.now()) {
 }
 /** One line per failed cycle in the service log: category, safe code and SQLSTATE only. Returns
  * the failure instant now reported. */
-function logPilotCycleFailure(component, snapshot, reported, time = new Date().toISOString()) {
+function logPilotCycleFailure(
+  component,
+  snapshot,
+  reported,
+  time = new Date().toISOString(),
+  store = null,
+) {
   const failure = snapshot?.lastCycleFailure;
   if (!failure || failure.occurredAt === reported) return reported;
   try {
@@ -149,6 +155,8 @@ function logPilotCycleFailure(component, snapshot, reported, time = new Date().t
         module: "pilot-workload-health",
         event: "workload_cycle_failed",
         component,
+        // Which Store's workload, in the process shared by the Stores after the first.
+        ...(store === null ? {} : { store }),
         state: snapshot.state,
         consecutiveFailures: Number.isSafeInteger(snapshot.consecutiveFailures)
           ? snapshot.consecutiveFailures
@@ -204,12 +212,19 @@ export function createPilotWorkloadHealthObserver(directory, component) {
     return fail();
   const fields = fs.readFileSync("/proc/self/stat", "utf8").split(") ").at(-1).trim().split(/\s+/u);
   const identity = { pid: process.pid, started: fields[19] };
+  const store = /(?:^|\/)(stores\/[^/]+)$/u.exec(directory)?.[1] ?? null;
   const target = path.join(directory, component + ".health.json");
   let sequence = 0,
     reportedFailure = null;
   return (snapshot) => {
     const value = { ...identity, observedAt: new Date().toISOString(), snapshot };
-    reportedFailure = logPilotCycleFailure(component, snapshot, reportedFailure, value.observedAt);
+    reportedFailure = logPilotCycleFailure(
+      component,
+      snapshot,
+      reportedFailure,
+      value.observedAt,
+      store,
+    );
     const temporary = target + "." + process.pid + "." + ++sequence + ".tmp";
     let created = false;
     try {
@@ -261,3 +276,40 @@ export function pilotHealthComponents(
     });
   return fail();
 }
+
+/**
+ * DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: one Store's workers in the shared `store-workers` process,
+ * from that Store's own health files. Null when this service has written none yet (a Store's first
+ * settlement, say). Starting up or unreadable is reported, never used to stop or replace the process.
+ */
+export async function readHostedStoreHealth(directory, service, pid, read = readFileText) {
+  const files = Object.entries(
+    pilotHealthComponents(service, { requireBatchCancellation: true, requireCompensation: true }),
+  );
+  const attention = [];
+  let found = false;
+  try {
+    const stat = await read(`/proc/${pid}/stat`);
+    const started = stat
+      .slice(stat.lastIndexOf(")") + 2)
+      .trim()
+      .split(/\s+/u)[19];
+    for (const [component, file] of files) {
+      let text;
+      try {
+        text = await read(path.join(directory, file));
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+      found = true;
+      if (parsePilotWorkloadHealth(JSON.parse(text), { pid, started }).attention === true)
+        attention.push(component);
+    }
+  } catch {
+    return { health: "unavailable" };
+  }
+  if (!found) return null;
+  return attention.length === 0 ? {} : { attention: attention.sort() };
+}
+const readFileText = (file) => fs.promises.readFile(file, "utf8");
