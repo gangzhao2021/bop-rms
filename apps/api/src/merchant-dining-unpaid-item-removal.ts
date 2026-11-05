@@ -7,6 +7,7 @@ import {
 } from "@rms/kitchen";
 import {
   createPostgresPayLaterItemCancellationStore,
+  listOrderPriceReductions,
   parseOrderingInstant,
   parseOrderingReference,
   parseStaffItemCancellationSelection,
@@ -27,7 +28,9 @@ import { staffOrderCancellationPermission } from "./merchant-order-staff-cancell
  * cancellation without the refund: Ordering's fence and eligibility → the kitchen cancels the work
  * of exactly those lines (still unstarted) → Ordering's append-only cancellation on the
  * 'PayLater' basis (revision, audit) → fulfillment leaves them out → their reserved stock returns.
- * Refused once the table has paid (a paid table's dishes are refunded instead).
+ * Refused once the table has paid (a paid table's dishes are refunded instead), and for a dish a
+ * manager comped or discounted (DEC-KITCHEN-ONE-TAP: Start is optional, so a comped dish may still
+ * read not started; its comp must never be left on a dish the table no longer has).
  */
 export type UnpaidItemRemovalErrorCode =
   | "UNPAID_ITEM_REMOVAL_INPUT_INVALID"
@@ -38,6 +41,7 @@ export type UnpaidItemRemovalErrorCode =
   | "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT"
   | "UNPAID_ITEM_REMOVAL_NOT_REMOVABLE"
   | "UNPAID_ITEM_REMOVAL_PREPARATION_STARTED"
+  | "UNPAID_ITEM_REMOVAL_COMPED"
   | "UNPAID_ITEM_REMOVAL_UNAVAILABLE";
 export class UnpaidItemRemovalError extends Error {
   constructor(readonly code: UnpaidItemRemovalErrorCode) {
@@ -189,6 +193,24 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
                       : "UNPAID_ITEM_REMOVAL_NOT_REMOVABLE",
               );
             const plan = prepared.plan;
+            // A comped or discounted dish stays on the bill (the fence is held, so a comp either
+            // committed before this read or waits): its reduction would otherwise stay on a dish the
+            // table no longer has and the bill could not be taken. The table is refunded after it
+            // pays instead, which is recorded.
+            const removing = new Set(plan.lines.map((line) => line.orderItemReference));
+            if (
+              (
+                await listOrderPriceReductions(
+                  tx,
+                  {
+                    brandReference: selected.brandReference,
+                    storeReference: selected.storeReference,
+                  },
+                  [intent.orderReference],
+                )
+              ).some((reduction) => removing.has(String(reduction.orderItemReference)))
+            )
+              return fail("UNPAID_ITEM_REMOVAL_COMPED");
             const cancellationReference = String(parseOrderingReference(options.nextReference()));
             const cancelledAt = String(parseOrderingInstant(options.persistence.now()));
             const owned = async (

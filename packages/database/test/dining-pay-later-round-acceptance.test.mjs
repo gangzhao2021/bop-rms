@@ -200,9 +200,11 @@ it("a guest pays the whole table on their phone, once, split by round", () =>
 it("a manager comps and discounts served dishes before the table pays; it stays on record", () =>
   journey("Comped"));
 
-// v15 2026-10-27 follow-up: a table whose every dish was comped owes nothing and closes as usual.
+// DEC-KITCHEN-ONE-TAP: Start is optional, so a dish with no Start fact may be comped; its kitchen
+// work stays open, and the comped dish can no longer be taken off the bill.
 it("a manager comps a dish with no Start fact and its kitchen work stays open", () =>
   journey("CompBeforeStart"));
+// v15 2026-10-27 follow-up: a table whose every dish was comped owes nothing and closes as usual.
 it("a table comped in full owes nothing and closes without a payment", () =>
   journey("CompedWhole"));
 
@@ -3548,6 +3550,38 @@ async function journey(journeyEnding) {
           await assert.rejects(comp(manager, { orderItemReferences: [mocha] }), {
             code: "ITEM_COMP_ALREADY_COMPED",
           });
+          // A comped dish stays on the bill. With Start optional it still reads not started, but
+          // taking it off now would leave its comp on a dish the table no longer has, and the bill
+          // could no longer be taken. Refused; nothing is cancelled and the bill is unchanged.
+          const billBeforeRemoval = await bill(manager);
+          assert.equal(billBeforeRemoval.consistent, true);
+          await assert.rejects(
+            removal(server, {
+              expectedOrderVersion: await versionNow(),
+              operationReference: fresh(),
+              orderItemReferences: [mocha],
+            }),
+            { code: "UNPAID_ITEM_REMOVAL_COMPED" },
+          );
+          const billAfterRemoval = await bill(manager);
+          assert.equal(billAfterRemoval.consistent, true);
+          assert.deepEqual(billAfterRemoval.owed, billBeforeRemoval.owed);
+          assert.deepEqual(
+            await rows(
+              "SELECT count(*)::int AS n FROM rms_ordering.order_item_staff_cancellation WHERE $1::uuid=ANY(order_item_ids)",
+              [mocha],
+            ),
+            [{ n: 0 }],
+          );
+          assert.deepEqual(
+            (
+              await admin.query(
+                "SELECT status FROM rms_kitchen.kitchen_work_item WHERE order_item_id=$1",
+                [mocha],
+              )
+            ).rows,
+            [{ status: "Queued" }],
+          );
         }
         async function compedEnding() {
           const mocha = String(items2[0].orderItemReference);

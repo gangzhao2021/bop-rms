@@ -1076,7 +1076,13 @@ export function createPersistentMerchantOrderQueue(options: {
                   scoped,
                   [batch],
                 )) {
-                  if (cancelAllowed && state === "NotStarted" && !removed.has(line))
+                  // A comped or discounted dish stays on the bill (see the removal command).
+                  if (
+                    cancelAllowed &&
+                    state === "NotStarted" &&
+                    !removed.has(line) &&
+                    !reduced.has(line)
+                  )
                     unpaidRemovable.set(batch, [...(unpaidRemovable.get(batch) ?? []), line]);
                   // DEC-KITCHEN-ONE-TAP: any dish that reached the kitchen (see the comp command).
                   if (

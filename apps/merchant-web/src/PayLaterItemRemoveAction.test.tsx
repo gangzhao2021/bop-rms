@@ -130,7 +130,7 @@ it("DEC-DINE-IN-PAY-LATER: the bill shows what came off and what is left", () =>
 
 it("Coordinator 2026-10-30: a refusal names what to do instead, with the way there when allowed", () => {
   const notice = (
-    failure: "NotRemovable" | "AlreadyPaid",
+    failure: "NotRemovable" | "AlreadyPaid" | "Comped",
     compable: string[],
     compInstead = true,
   ) => {
@@ -162,4 +162,10 @@ it("Coordinator 2026-10-30: a refusal names what to do instead, with the way the
   // Paid: money back from the table's payment, on the order's page.
   expect(notice("AlreadyPaid", [])).toContain('href="/operations/orders/' + id(1) + '"');
   expect(notice("AlreadyPaid", [])).toContain("Give money back from the payment");
+  // DEC-KITCHEN-ONE-TAP: a comped dish stays on the bill; nothing more to comp, nobody to ask.
+  const comped = notice("Comped", []);
+  expect(comped).toContain("stays on the bill at that price");
+  expect(comped).not.toContain("Ask a manager to comp them.");
+  expect(comped).not.toContain("Comp these dishes");
+  expect(payLaterRemoveFailureText("Comped")).toContain("tell the kitchen");
 });

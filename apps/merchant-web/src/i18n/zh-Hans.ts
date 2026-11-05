@@ -6189,6 +6189,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这张订单在显示后有变动。请刷新后再试。",
   "These dishes were already made or served, so they stay on the bill. To not charge the table for them, comp them with a reason instead; the comp is recorded.":
     "这些菜已经做好或上桌，所以留在账单上。如果不想向这桌收这些菜的钱，请改为填写原因免单，免单会被记录。",
+  "A manager comped or discounted this dish, so it stays on the bill at that price. If the guests don't want it, tell the kitchen. Once the table pays, a manager can give the money back from the payment; it is recorded.":
+    "店长已为这道菜免单或打折，它按那个价格留在账单上。客人不要了，请告诉后厨。这桌付款后，店长可以从付款里退钱给客人，退款会被记录。",
   "This table has paid, so dishes can't come off its bill. A manager gives the guest money back from the table's payment instead; it is recorded.":
     "这桌已经付款，菜不能再从账单删除。请店长改为从这桌的付款里退钱给客人，退款会被记录。",
   "Comp these dishes": "为这些菜免单",

@@ -25,6 +25,7 @@ type Failure =
   | "Started"
   | "Changed"
   | "NotRemovable"
+  | "Comped"
   | "Unknown";
 
 export function payLaterRemoveFailureText(failure: Failure) {
@@ -47,6 +48,10 @@ export function payLaterRemoveFailureText(failure: Failure) {
       return t(
         "These dishes were already made or served, so they stay on the bill. To not charge the table for them, comp them with a reason instead; the comp is recorded.",
       );
+    case "Comped":
+      return t(
+        "A manager comped or discounted this dish, so it stays on the bill at that price. If the guests don't want it, tell the kitchen. Once the table pays, a manager can give the money back from the payment; it is recorded.",
+      );
     case "Unknown":
       return t(
         "We couldn't confirm the result. Check the connection and press the button again: it is never recorded twice.",
@@ -65,13 +70,15 @@ const failureOf = (status: number, payload: unknown): Failure => {
         ? "Started"
         : error === "version_conflict"
           ? "Changed"
-          : "NotRemovable";
+          : error === "comped"
+            ? "Comped"
+            : "NotRemovable";
   if (status === 400) return "NotRemovable";
   return "Unknown";
 };
 
 export interface PayLaterRemoveRefusal {
-  readonly failure: "NotRemovable" | "Started" | "AlreadyPaid";
+  readonly failure: "NotRemovable" | "Started" | "AlreadyPaid" | "Comped";
   readonly orderItemReferences: readonly string[];
 }
 
@@ -105,7 +112,7 @@ export function PayLaterRemoveRefusalNotice({
   return (
     <div role="alert" className="pay-later-remove__instead">
       <p>{payLaterRemoveFailureText(refusal.failure)}</p>
-      {refusal.failure === "AlreadyPaid" ? (
+      {refusal.failure === "Comped" ? null : refusal.failure === "AlreadyPaid" ? (
         refundHref !== undefined ? (
           <Link className="table-checkout__primary" to={refundHref}>
             {t("Give money back from the payment")}
@@ -219,14 +226,20 @@ export function PayLaterItemRemoveAction({
       setFailure(next);
       // Made, served or paid: the page keeps the answer with what to do instead, even after the
       // refreshed order no longer offers these dishes here (never a silent failure).
-      if (next === "NotRemovable" || next === "Started" || next === "AlreadyPaid")
+      if (
+        next === "NotRemovable" ||
+        next === "Started" ||
+        next === "AlreadyPaid" ||
+        next === "Comped"
+      )
         onRefused({ failure: next, orderItemReferences: items });
       // Read the order again: what changed (made, served, paid) decides what to offer instead.
       if (
         next === "AlreadyPaid" ||
         next === "Started" ||
         next === "Changed" ||
-        next === "NotRemovable"
+        next === "NotRemovable" ||
+        next === "Comped"
       )
         onSettled();
     } catch {
@@ -310,7 +323,8 @@ export function PayLaterItemRemoveAction({
       ) : failure !== null &&
         failure !== "NotRemovable" &&
         failure !== "Started" &&
-        failure !== "AlreadyPaid" ? (
+        failure !== "AlreadyPaid" &&
+        failure !== "Comped" ? (
         <p role="alert">{payLaterRemoveFailureText(failure)}</p>
       ) : null}
     </div>
