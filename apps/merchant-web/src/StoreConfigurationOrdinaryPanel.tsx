@@ -244,6 +244,40 @@ export async function executeStoreConfigurationOriginal(input: {
   check();
   return { receipt, workspace };
 }
+/** The command for one step of a configuration: a new one is made from the saved setup. */
+export async function buildStoreConfigurationCommand(input: {
+  readonly scope: StoreSetupScope;
+  readonly action: StoreConfigurationOrdinaryAction;
+  readonly operationReference: string;
+  readonly expectedHead: StoreConfigurationOrdinaryWorkspace["expectedHead"];
+  readonly saved: StoreSetupSnapshot | null;
+}): Promise<StoreConfigurationOrdinaryCommand> {
+  const { scope, action, saved } = input;
+  const base = {
+    profile: "StoreConfigurationOrdinaryCommandV1" as const,
+    ...scope,
+    operationReference: input.operationReference,
+    expectedHead: input.expectedHead,
+  };
+  if (action !== "Materialize") return { ...base, action };
+  if (
+    !saved ||
+    saved.tenantReference !== scope.tenantReference ||
+    saved.brandReference !== scope.brandReference ||
+    saved.storeReference !== scope.storeReference
+  )
+    throw new StoreSetupClientError("Invalid");
+  return {
+    ...base,
+    action,
+    setupSelector: {
+      setupDraftReference: saved.setupDraftReference,
+      sourceRevision: saved.revision,
+      sourceSnapshotDigest: await publicationValueDigest(saved),
+    },
+    reasonCode: "STORE_SETUP_MATERIALIZATION",
+  };
+}
 const messages: Record<StoreSetupClientError["code"], string> = {
   Invalid: t("This configuration request is invalid."),
   Stale: t("The current configuration observation expired. Refresh before a new request."),
@@ -475,32 +509,13 @@ export function StoreConfigurationOrdinaryPanel(props: StoreConfigurationOrdinar
       if (canonical(latest.expectedHead) !== canonical(baseline.expectedHead))
         throw new StoreSetupClientError("Conflict");
       if (freshDisabled.current) throw new StoreSetupClientError("Conflict");
-      const base = {
-        profile: "StoreConfigurationOrdinaryCommandV1" as const,
-        ...props.scope,
+      const command = await buildStoreConfigurationCommand({
+        scope: props.scope,
+        action,
         operationReference: serviceOperationReference(),
         expectedHead: baseline.expectedHead,
-      };
-      let command: StoreConfigurationOrdinaryCommand;
-      if (action === "Materialize") {
-        if (
-          !saved ||
-          saved.tenantReference !== props.scope.tenantReference ||
-          saved.brandReference !== props.scope.brandReference ||
-          saved.storeReference !== props.scope.storeReference
-        )
-          throw new StoreSetupClientError("Invalid");
-        command = {
-          ...base,
-          action,
-          setupSelector: {
-            setupDraftReference: saved.setupDraftReference,
-            sourceRevision: saved.revision,
-            sourceSnapshotDigest: await publicationValueDigest(saved),
-          },
-          reasonCode: "STORE_SETUP_MATERIALIZATION",
-        };
-      } else command = { ...base, action };
+        saved,
+      });
       check();
       const prepared = await client.prepare(command, { signal: c.signal });
       check();

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { serveStoreSetupPanels } from "./store-setup-panels";
+import { establishedOpeningList, serveStoreSetupPanels } from "./store-setup-panels";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 import {
@@ -62,6 +62,7 @@ async function install(page: Page) {
   await page.route("**/merchant/**", async (route) => {
     const request = route.request(),
       path = new URL(request.url()).pathname;
+    if (path === "/merchant/store/opening-list") return respond(route, establishedOpeningList);
     if (path === "/merchant/session") {
       const selected = {
         storeReference: id(3),

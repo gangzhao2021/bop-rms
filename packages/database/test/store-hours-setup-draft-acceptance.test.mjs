@@ -1306,6 +1306,8 @@ it("WP-2423 Q4: a Store Manager changes hours on a configuration from Store setu
       ).rows[0];
       assert.equal(final.current.setupBasis.sourceRevision, Number(head.revision));
       assert.equal(final.current.setupBasis.sourceSnapshotDigest, head.snapshot_digest);
+      // WP-2423 item 14: an hours change never makes an established Store a first Store again.
+      assert.equal(await transactions.run((tx) => hasOwnerPublishedStoreSetup(tx, scope)), true);
 
       // --- WP-2423 v15: the Owner's own hours change on the configuration from Store setup (an
       // hours-only Store setup revision): the Store Manager cannot check or send it; the Owner

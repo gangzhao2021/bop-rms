@@ -361,6 +361,87 @@ test("@production the allergen list is recorded by one person and approved by an
   expect(JSON.parse(commands[1] ?? "{}")).not.toHaveProperty("approvalMode");
 });
 
+test("@production alone, the allergen list takes one press; a failed approval keeps the list recorded", async ({
+  page,
+}) => {
+  await session(page, [
+    {
+      screenId: "CMP-ALLERGEN-REVIEW",
+      label: "Allergens",
+      href: "/app/compliance/allergens",
+      permission: "catalog.allergen.read",
+    },
+  ]);
+  let proposal: unknown = null;
+  let refuseApproval = true;
+  const commands: Record<string, unknown>[] = [];
+  await page.route("**/merchant/compliance/allergens/query", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "CMP-ALLERGEN-REVIEW",
+        sourceAsOf: new Date().toISOString(),
+        viewer: owner,
+        permissions: { mayRead: true, mayDeclare: true, mayManageRegistry: true },
+        locale: "en-CA",
+        registryProposal: proposal,
+        soleOperator: { status: "Effective", otherApprovers: [], verifiedUntil: null },
+        registry: null,
+        registryTemplate: {
+          template: "CA_PRIORITY_TEST",
+          jurisdictionCode: "CA",
+          policyDocument: "TEST-ONLY synthetic list.",
+          allergens: [{ code: "MILK", name: "Milk" }],
+        },
+        sources: ["SupplierSpecification"],
+        items: [],
+      },
+    }),
+  );
+  await page.route("**/merchant/compliance/allergens/command", (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    commands.push(body);
+    if (body.action === "RecordRegistry") {
+      proposal = {
+        proposalReference: id(30),
+        recordedAt: new Date().toISOString(),
+        recordedByYou: true,
+      };
+      return route.fulfill({ headers, json: { status: "Applied", proposalReference: id(30) } });
+    }
+    if (refuseApproval) {
+      refuseApproval = false;
+      return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
+    }
+    return route.fulfill({
+      headers,
+      json: { status: "Applied", registryVersionReference: id(31) },
+    });
+  });
+  await page.goto("/app/compliance/allergens");
+  await expect(
+    page.getByRole("button", { name: "Record this allergen list for approval" }),
+  ).toHaveCount(0);
+  const approve = page.getByRole("button", { name: "Approve this list on my own" });
+  await expect(approve).toBeDisabled();
+  await verify(page, "Verify to approve on your own");
+  await page.getByLabel("I checked this allergen list and approve on my own").check();
+  await approve.click();
+  // The approval failed: the list is recorded, and the press that follows is the same approval.
+  const retry = page.getByRole("button", { name: "Retry" });
+  await expect(retry).toBeEnabled();
+  await expect(page.getByText("recorded by you")).toBeVisible();
+  await retry.click();
+  await expect(page.getByText("Allergen list approved.")).toBeVisible();
+  expect(commands.map((body) => body.action)).toEqual([
+    "RecordRegistry",
+    "ApproveRegistry",
+    "ApproveRegistry",
+  ]);
+  expect(commands[1]).toMatchObject({ proposalReference: id(30), approvalMode: "SoleOperator" });
+  expect(commands[2]?.operationReference).toBe(commands[1]?.operationReference);
+});
+
 // WP-2423 v15 staff text: catalog pages show Store time, names and plain words — never ISO/UTC
 // times, codes (EACH, KG, DineIn, SYNTHETIC_TAX, OBS_ITEM_30001), step indexes or "Staff 0100".
 test("@production v15 catalog pages show staff words: recipe, option recipes, option set, product and tax review", async ({

@@ -112,17 +112,23 @@ function useCommand(client: AllergenClient, onDone: () => void) {
   const [pending, setPending] = useState<AllergenCommand | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
-  const send = async (fresh: AllergenCommand, done: string) => {
+  const send = async (
+    fresh: AllergenCommand,
+    done: string,
+    then?: (outcome: unknown) => AllergenCommand,
+  ): Promise<void> => {
     if (!client.command) return;
     const command = pending !== null && pending.action === fresh.action ? pending : fresh;
     setBusy(true);
     setMessage(null);
     setPending(command);
     try {
-      await client.command(command);
+      const outcome = await client.command(command);
       setPending(null);
-      setMessage({ tone: "neutral", text: done });
+      // Read again first: should what follows fail, the page already shows what was saved.
       onDone();
+      if (then) await send(then(outcome), done);
+      else setMessage({ tone: "neutral", text: done });
     } catch (error) {
       const code = error instanceof AllergenPageError ? error.code : "Unavailable";
       if (code !== "Offline" && code !== "Unavailable") setPending(null);
@@ -200,6 +206,49 @@ export function AllergenListPage({
             {/* WP-2423 Q19: one person records the list, another approves it. */}
             {!view.permissions.mayManageRegistry ? (
               <p>{t("Someone holding allergen list approval must record and approve it.")}</p>
+            ) : view.registryProposal === null && view.soleOperator?.status === "Effective" ? (
+              /* WP-2423 item 14: alone, recording then approving is one press. Should the approval
+                 fail, the list stays recorded and the case below approves it. */
+              <SoleOperatorSelfApproval
+                gate={view.soleOperator}
+                csrf={csrf}
+                what={t("this allergen list")}
+                permissionName={t("allergen list approval")}
+                yourPart={t("You are recording this list")}
+                busy={busy}
+                actionLabel={pending ? t("Retry") : t("Approve this list on my own")}
+                summary={
+                  <p>
+                    {t("{jurisdictionCode} list of {length} allergens.", {
+                      jurisdictionCode: view.registryTemplate.jurisdictionCode,
+                      length: view.registryTemplate.allergens.length,
+                    })}
+                  </p>
+                }
+                onApprove={() =>
+                  void send(
+                    {
+                      action: "RecordRegistry",
+                      operationReference: newOperationReference(),
+                      template: "CA_PRIORITY_TEST",
+                    },
+                    t("Allergen list approved."),
+                    (outcome) => {
+                      const { proposalReference } = (outcome ?? {}) as {
+                        readonly proposalReference?: unknown;
+                      };
+                      if (typeof proposalReference !== "string")
+                        throw new AllergenPageError("Unavailable");
+                      return {
+                        action: "ApproveRegistry",
+                        operationReference: newOperationReference(),
+                        proposalReference,
+                        approvalMode: "SoleOperator",
+                      };
+                    },
+                  )
+                }
+              />
             ) : view.registryProposal === null ? (
               <button
                 type="button"

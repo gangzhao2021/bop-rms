@@ -31,8 +31,10 @@ import {
   type StoreSetupReferencePendingJournal,
 } from "./store-setup-reference-pending-journal.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation, useParams } from "react-router";
+import { lazyPage } from "./route-chunks.js";
+import { loadOpeningListRead, StoreProfilePublishedContext } from "./store-opening-list-client.js";
 import {
   createStoreSetupClient,
   createUnconfiguredStoreSetupContent,
@@ -54,6 +56,10 @@ import {
 import { serviceOperationReference, type ServiceMode } from "./service-control-client.js";
 import { languageName } from "./staff-text.js";
 import { timeZoneChoices, timeZoneLabel } from "./time-zone-names.js";
+const StoreFirstOpeningPanel = lazyPage(
+  () => import("./StoreFirstOpeningPanel.js"),
+  "StoreFirstOpeningPanel",
+);
 const steps = [
   t("Identity"),
   t("Address and timezone"),
@@ -331,11 +337,14 @@ export function StoreSetupHeader({
   displayName,
   refreshDisabled,
   onRefresh,
+  firstStore = false,
 }: {
   readonly ownerOnly: boolean;
   readonly displayName: string | null;
   readonly refreshDisabled: boolean;
   readonly onRefresh: () => void;
+  /** WP-2423 item 14: on a first Store's one page there is no draft to talk about here. */
+  readonly firstStore?: boolean;
 }) {
   return (
     <header className="screen-heading">
@@ -348,16 +357,59 @@ export function StoreSetupHeader({
               "Only the Owner can change Store setup. You can see the details customers and receipts use below.",
             )}
           </p>
-        ) : (
+        ) : firstStore ? null : (
           <p>{t("Saving a draft does not change the live Store.")}</p>
         )}
       </div>
-      {ownerOnly ? null : (
+      {ownerOnly || firstStore ? null : (
         <button type="button" disabled={refreshDisabled} onClick={onRefresh}>
           {t("Refresh saved setup")}
         </button>
       )}
     </header>
+  );
+}
+/**
+ * WP-2423 item 14: on a first Store everything Store setup offers an established one stays usable,
+ * folded under the one page. Nothing in it is read until it is opened; a link to one of its sections
+ * opens it.
+ */
+function FirstStoreFold({
+  active,
+  panel,
+  sections,
+  forcedOpen,
+  children,
+}: {
+  readonly active: boolean;
+  readonly panel: ReactNode;
+  readonly sections: ReactNode;
+  readonly forcedOpen: boolean;
+  readonly children: ReactNode;
+}) {
+  const { hash } = useLocation();
+  const [opened, setOpened] = useState(false);
+  if (!active) return <>{children}</>;
+  const open = opened || forcedOpen || (hash !== "" && hash !== "#store-opening");
+  return (
+    <>
+      {panel}
+      <details
+        className="store-opening__all"
+        open={open}
+        onToggle={(event) => {
+          if (event.currentTarget.open) setOpened(true);
+        }}
+      >
+        <summary>{t("All settings, step by step")}</summary>
+        {open ? (
+          <>
+            {sections}
+            {children}
+          </>
+        ) : null}
+      </details>
+    </>
   );
 }
 export function StoreSetupDraftPage({
@@ -367,6 +419,7 @@ export function StoreSetupDraftPage({
   journalFactory = createStoreSetupPendingJournal,
   children,
   taxClassificationsHref,
+  fetcher,
 }: {
   readonly storeReference: string;
   readonly csrf: string;
@@ -376,6 +429,8 @@ export function StoreSetupDraftPage({
   readonly children?: ReactNode;
   /** Where the Brand Owner manages tax classifications (only for people who can). */
   readonly taxClassificationsHref?: string;
+  /** Test seam: the opening read's transport. */
+  readonly fetcher?: typeof fetch;
 }) {
   const { id } = useParams(),
     client = useMemo(() => injected ?? createStoreSetupClient(), [injected]),
@@ -394,6 +449,7 @@ export function StoreSetupDraftPage({
     [notice, setNotice] = useState(""),
     [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine),
     [ready, setReady] = useState(false),
+    [setupAnswered, setSetupAnswered] = useState(false),
     [live, setLive] = useState<StoreSetupLiveConfiguration | null>(null);
   const running = useRef(false),
     epoch = useRef(0),
@@ -435,14 +491,17 @@ export function StoreSetupDraftPage({
     const reconnect = () => setOnline(true);
     window.addEventListener("offline", offline);
     window.addEventListener("online", reconnect);
+    setSetupAnswered(false);
     if (id !== storeReference) {
       setError("ScopeChanged");
       setBusy(false);
       running.current = false;
+      setSetupAnswered(true);
     } else if (!navigator.onLine) {
       setBusy(false);
       running.current = false;
       setError("Unavailable");
+      setSetupAnswered(true);
     } else
       void client
         .load({ storeReference, signal: request.signal })
@@ -471,6 +530,7 @@ export function StoreSetupDraftPage({
           if (token === epoch.current) {
             setBusy(false);
             running.current = false;
+            setSetupAnswered(true);
           }
         });
     return () => {
@@ -671,6 +731,34 @@ export function StoreSetupDraftPage({
     return () => c.abort();
   }, [liveScope, step, live === null]);
   const ownerOnly = storeSetupOwnerOnly(error, workspace, id === storeReference);
+  // WP-2423 item 14 (DEC-STORE-FIRST-OPENING): a Store whose setup has not been published gets one
+  // page and one action. Only a successful read saying it has shows the page as it always was; a
+  // read that fails keeps the steps folded, so a moment's failure never swaps the page under the
+  // Owner. Someone who can't read the setup is not asked anything.
+  const [opening, setOpening] = useState<"Loading" | "First" | "Established" | "Failed">("Loading"),
+    [openingRead, setOpeningRead] = useState(0),
+    [publishedNote, setPublishedNote] = useState<string | null>(null),
+    [noFirstConfiguration, setNoFirstConfiguration] = useState(false);
+  useEffect(() => {
+    const request = new AbortController();
+    setOpening("Loading");
+    loadOpeningListRead(fetcher, request.signal).then(
+      (view) => {
+        if (!request.signal.aborted) setOpening(view.setupPublished ? "Established" : "First");
+      },
+      () => {
+        if (!request.signal.aborted) setOpening("Failed");
+      },
+    );
+    return () => request.abort();
+  }, [fetcher, storeReference, openingRead]);
+  const profileSync = useRef<(() => void) | null>(null);
+  const registerProfileSync = useCallback((sync: (() => void) | null) => {
+    profileSync.current = sync;
+  }, []);
+  const profilePublished = useCallback(() => profileSync.current?.(), []);
+  const onNoFirstConfiguration = useCallback(() => setNoFirstConfiguration(true), []);
+  const firstStore = workspace !== null && id === storeReference && opening !== "Established";
   return (
     <AppFrame
       className="store-setup-draft-page"
@@ -684,13 +772,23 @@ export function StoreSetupDraftPage({
         displayName={workspace?.store.displayName ?? null}
         refreshDisabled={busy || !online || id !== storeReference}
         onRefresh={() => void refresh()}
+        firstStore={firstStore}
       />
+      {publishedNote === null ? null : (
+        <p role="status" className="store-opening__published">
+          {publishedNote} <Link to="/app/commerce/menus">{t("Add your menu")}</Link>
+        </p>
+      )}
       {id !== storeReference && (
         <StatePanel heading={t("Select this Store")} tone="error" status>
           <p>{t("Choose this Store in the workspace before opening its setup.")}</p>
         </StatePanel>
       )}
-      {id === storeReference ? children : null}
+      {/* Until a read has said which page this is, a first Store's sections stay off it: put there
+          and then folded, each would load twice. */}
+      {id === storeReference && !firstStore && (opening === "Established" || setupAnswered)
+        ? children
+        : null}
       {!online && (
         <p role="status">
           {t("Offline. Your local edits are retained. Reconnect and refresh before saving.")}
@@ -712,7 +810,53 @@ export function StoreSetupDraftPage({
         </section>
       )}
       {workspace && (
-        <>
+        <FirstStoreFold
+          active={firstStore}
+          forcedOpen={noFirstConfiguration}
+          sections={
+            <StoreProfilePublishedContext.Provider value={profilePublished}>
+              {children}
+            </StoreProfilePublishedContext.Provider>
+          }
+          panel={
+            opening === "Loading" ? (
+              <p role="status">{t("Loading your store…")}</p>
+            ) : opening === "Failed" ? (
+              <section className="store-opening">
+                <p role="alert">{t("This didn't load. Try again.")}</p>
+                <button
+                  type="button"
+                  className="store-opening__primary"
+                  onClick={() => setOpeningRead((value) => value + 1)}
+                >
+                  {t("Try again")}
+                </button>
+              </section>
+            ) : (
+              <Suspense fallback={<p role="status">{t("Loading your store…")}</p>}>
+                <StoreFirstOpeningPanel
+                  scope={workspace.scope}
+                  locale={workspace.store.locale}
+                  csrf={csrf}
+                  onChanged={() => void refresh()}
+                  onPublished={(result) => {
+                    setPublishedNote(
+                      result.waits.length > 0
+                        ? t(
+                            "Your store setup is published. The allergen list still needs approval.",
+                          )
+                        : t("Your store setup is published."),
+                    );
+                    setOpening("Established");
+                    void refresh(true);
+                  }}
+                  onNoFirstConfiguration={onNoFirstConfiguration}
+                  registerProfileSync={registerProfileSync}
+                />
+              </Suspense>
+            )
+          }
+        >
           <nav className="store-setup-steps" aria-label={t("Setup steps")}>
             <ol>
               {steps.map((name, i) => (
@@ -1305,7 +1449,7 @@ export function StoreSetupDraftPage({
               {t("Discard local edits")}
             </button>
           </footer>
-        </>
+        </FirstStoreFold>
       )}
     </AppFrame>
   );
@@ -2514,6 +2658,47 @@ export function liveStoreSettingsChange(
         ? content.exceptions
         : { state: "Configured", value: current.exceptions },
     effectiveFrom: { state: "Configured", value: live.observedAt },
+    effectiveUntil: { state: "Configured", value: null },
+  };
+}
+/** WP-2423 item 14 (DEC-STORE-FIRST-OPENING): what a first opening takes from the live Store: tax and
+ * Brand settings, holidays and a start as soon as it is published. Unlike the button above it never
+ * replaces hours the Owner answered, and it carries neither the hours, the service modes nor the
+ * receipt template of the configuration a Store starts with: a TEST Store's reads 24 hours with pickup
+ * on and names a template that was never published. The time zone and business day start are the
+ * Store's own, the only values the publication checks accept. */
+const firstOpeningCarried = liveOperatingFields.filter(
+  (field) =>
+    field !== "weeklySchedule" && field !== "enabledServiceModes" && field !== "receiptReference",
+);
+export function firstOpeningFill(
+  content: StoreSetupContent,
+  live: StoreSetupLiveConfiguration & { readonly current: StoreConfigurationSnapshot },
+): Partial<StoreSetupContent> {
+  const current = live.current;
+  const carried = Object.fromEntries(
+    firstOpeningCarried
+      .filter((field) => content[field].state !== "Configured")
+      .map((field) => [field, { state: "Configured", value: current[field] }]),
+  ) as Partial<StoreSetupContent>;
+  return {
+    ...carried,
+    timeZone: { state: "Configured", value: current.timeZone },
+    businessDayStartLocalTime: { state: "Configured", value: current.businessDayStartLocalTime },
+    taxConfigurationReference: { state: "Configured", value: liveStoreTaxReference(live) },
+    brandBaseVersionReference: { state: "Configured", value: current.brandBaseVersionReference },
+    exceptions:
+      content.exceptions.state === "Configured"
+        ? content.exceptions
+        : { state: "Configured", value: current.exceptions },
+    // A start already saved still means "as soon as it is published": pressing again after a stop
+    // writes no new revision for it.
+    effectiveFrom:
+      content.effectiveFrom.state === "Configured" &&
+      content.effectiveFrom.value >= current.effectiveFrom &&
+      content.effectiveFrom.value <= live.observedAt
+        ? content.effectiveFrom
+        : { state: "Configured", value: live.observedAt },
     effectiveUntil: { state: "Configured", value: null },
   };
 }

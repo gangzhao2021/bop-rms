@@ -5221,6 +5221,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "You don't have permission to print table QR codes.": "你没有打印桌台二维码的权限。",
   "You made or sent this change, so someone else with Owner access must approve it, or approve it on your own as sole operator.":
     "此更改由你提出或提交，因此需由另一位有店主权限的人批准，或由你作为独立经营者自行批准。",
+  "You are recording this list": "这份清单由你记录",
   "You made this change": "此更改由你提出",
   "You made this change, so another person with Owner access must approve it. You cannot approve a change you made.":
     "此更改由你提出，因此需由另一位有店主权限的人批准。你不能批准自己提出的更改。",
@@ -5589,6 +5590,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item}: the option {value} has no published recipe change. Set, review and publish it under Option recipes, then submit again.":
     '{item}：选项{value}没有已发布的配方更改。请在"选项配方"中设置、审核并发布，然后重新提交。',
   "{jurisdictionCode} list approved": "{jurisdictionCode} 清单已批准",
+  "{jurisdictionCode} list of {length} allergens.":
+    "{jurisdictionCode} 清单，共 {length} 种过敏原。",
   "{jurisdictionCode} list of {length} allergens, recorded by you":
     "由你记录的 {jurisdictionCode} 清单，共 {length} 种过敏原",
   "{kind} configuration": "{kind}配置",
@@ -7151,6 +7154,158 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Do this next": "下一步做这个",
   "Set this up": "去设置",
   "Open {store}": "打开 {store}",
+  "Store details and settings": "门店信息和设置",
+  "Waiting for BOP support to set your tax rates": "在等 BOP 支持设置税率",
+  "Waiting for BOP support to set your tax rates.": "在等 BOP 支持设置您的税率。",
+  "Waiting for BOP support to approve this store to open.": "在等 BOP 支持批准这家店开业。",
+  "your store's details": "门店信息",
+  "your receipt details": "收据信息",
+  "the kitchen line": "后厨线",
+  tips: "小费",
+  "your hours and order types": "营业时间和点餐方式",
+  "approving on your own": "自行批准",
+  "the ways to pay": "付款方式",
+  "the receipt": "收据",
+  "the allergen list": "过敏原清单",
+  "the store setup": "门店设置",
+  "{items} and {last}": "{items}和{last}",
+  "Choose dine-in, pickup or both.": "请选择堂食、自取或两者都选。",
+  "Choose at least one day you open.": "请至少选一天营业。",
+  "Enter when you open and close.": "请填写开门和打烊时间。",
+  "Opening and closing can't be the same time.": "开门和打烊不能是同一时间。",
+  "The two opening periods overlap.": "两段营业时间有重叠。",
+  "Enter last orders as whole minutes, from 0 to 1,440.": "最后点单请填整数分钟，0 到 1,440。",
+  "Enter preparation time as whole minutes, from 0 to 1,440.": "备餐时间请填整数分钟，0 到 1,440。",
+  "Every day: {hours}": "每天：{hours}",
+  "{from} to {to}": "{from}至{to}",
+  "{days}: {hours}": "{days}：{hours}",
+  "card on the guest's phone": "客人手机刷卡",
+  "card on your card machine": "刷卡机刷卡",
+  "Interac on your card machine": "刷卡机 Interac",
+  "Service charge and delivery fee: off.": "服务费和外送费：关。",
+  "Service charge and delivery fee: on, as you set them in the step-by-step settings.":
+    "服务费和外送费：开，按您在分步设置里的选择。",
+  "Service charge: on, as you set it in the step-by-step settings. Delivery fee: off.":
+    "服务费：开，按您在分步设置里的选择。外送费：关。",
+  "Delivery fee: on, as you set it in the step-by-step settings. Service charge: off.":
+    "外送费：开，按您在分步设置里的选择。服务费：关。",
+  "Order types": "点餐方式",
+  "Opening hours": "营业时间",
+  "Last orders {cutoff} minutes before closing. Preparation {lead} minutes.":
+    "打烊前 {cutoff} 分钟最后点单。备餐 {lead} 分钟。",
+  Time: "时间",
+  "Times are in {timeZone}. The business day starts at {start}.":
+    "时间按{timeZone}。营业日从 {start} 开始。",
+  Holidays: "节假日",
+  "None yet. You add them later in Hours & ordering.": "暂无。以后在“营业时间与点单”里添加。",
+  "{count} special dates, as saved.": "{count} 个特殊日期，按已保存的。",
+  "Offered at {low}%, {mid}% and {high}% or another amount. Nothing is chosen for the guest, and No tip is always there.":
+    "提供 {low}%、{mid}%、{high}% 或其他金额。不替客人预选，始终可以选“不加小费”。",
+  "Not offered.": "不提供。",
+  Charges: "收费",
+  "Tax rates": "税率",
+  "Set by BOP support for your province.": "由 BOP 支持按您所在省份设置。",
+  Receipts: "收据",
+  "The standard receipt, in {language}. A tax or legal professional has not checked it.":
+    "标准收据，{language}。尚未经税务或法律专业人士审核。",
+  "Ways to pay": "付款方式",
+  "{ways}. Card payments also need your payment account.": "{ways}。刷卡收款还需要您的支付账户。",
+  "Pickup orders": "自取订单",
+  "Up to 20 orders an hour. Ask BOP support to change it.":
+    "每小时最多 20 单。如需更改，请联系 BOP 支持。",
+  "Your brand owner approves this list.": "这份清单由品牌负责人批准。",
+  "Already approved.": "已批准。",
+  "Takes effect": "生效",
+  "As soon as it is published, with no end date.": "发布后立即生效，没有结束日期。",
+  Opens: "开门",
+  "Opens again": "再次开门",
+  Closes: "打烊",
+  "Closes again": "再次打烊",
+  "Closes the next day": "次日打烊",
+  "second opening period": "第二段营业时间",
+  "Add a second opening period": "加第二段营业时间",
+  "The same hours every day I open": "每个营业日时间相同",
+  "Different hours by day": "每天时间不同",
+  "Days you open": "营业日",
+  "What was done stays. Press Continue, here or on another device; nothing is done twice.":
+    "已完成的部分会保留。请按“继续”，在这里或其他设备上都可以，不会重复执行。",
+  "Your sign-in does not allow {step}. Ask the Owner to open this page.":
+    "您的登录不能处理{step}。请让店主打开这个页面。",
+  "Your check is more than 15 minutes old. Press Continue and enter a new code.":
+    "您的验证已超过 15 分钟。请按“继续”并输入新的验证码。",
+  "Enter the store's phone number, then press the button again.": "请填写门店电话，再按一次按钮。",
+  "Answer the opening hours and order types, then press the button again.":
+    "请先回答营业时间和点餐方式，再按一次按钮。",
+  "Someone else started publishing this and has not sent it yet. They open this page and press the button to carry on.":
+    "另一个人已开始发布但还没有送审。请对方打开这个页面并按按钮继续。",
+  "Someone else's change to this store is still waiting. It has to be approved or declined first; see All settings, step by step.":
+    "另一个人对门店的修改还在等待。需要先批准或驳回，请看“所有设置（分步）”。",
+  "BOP support has to set up the allergen list for your country first.":
+    "需要 BOP 支持先设置您所在国家的过敏原清单。",
+  "Only the brand owner can approve these alone. Ask them to open this page.":
+    "只有品牌负责人才能自行批准这些。请让对方打开这个页面。",
+  "{step} can't be published yet: {checks}. {carryOn}": "{step}还不能发布：{checks}。{carryOn}",
+  "your tax rates are not in force": "税率还没有生效",
+  "BOP support has not approved this store to open": "BOP 支持还没有批准这家店开业",
+  "the opening hours need another look": "营业时间需要再检查",
+  "a setting differs from the live store": "有一项设置和在营门店不同",
+  "We couldn't confirm {step}. {carryOn}": "无法确认{step}的结果。{carryOn}",
+  "This stopped at {step}. {carryOn}": "停在了{step}。{carryOn}",
+  "Enter the store's phone number.": "请填写门店电话。",
+  "Loading your store…": "正在读取门店信息…",
+  "This didn't load. Try again.": "没有读取成功。请重试。",
+  "BOP support has not installed this store's first settings yet, so the short way is not available. The step-by-step settings below still work.":
+    "BOP 支持还没有安装这家店的初始设置，所以暂时不能用快捷方式。下面的分步设置仍可使用。",
+  "Waiting for {people} to approve {what}. They open Store setup and press Approve.":
+    "在等{people}批准{what}。请对方打开门店设置并按“批准”。",
+  "Working on {step}…": "正在处理{step}…",
+  "Something changed since you checked this list. Read it again and tick the box.":
+    "您核对之后有内容变了。请再看一遍并重新勾选。",
+  "Open your store": "开店",
+  "Waiting for you: {what}.": "等您处理：{what}。",
+  "The other Owner answered these. Check them; pressing Approve records it as approved by you.":
+    "这些是另一位店主填写的。请核对；按“批准”后记录为由您批准。",
+  "What you are approving": "您要批准的内容",
+  "Approve and continue": "批准并继续",
+  "What was sent": "已送审的内容",
+  "your store's name, address, phone and business name": "门店名称、地址、电话和商家名称",
+  "dine-in, pickup or both": "堂食、自取或两者",
+  "your opening hours": "营业时间",
+  "the box above": "上面的勾选框",
+  "Answer these once and press the button at the end. Guests can order after that, once your menu is listed and your tables have codes.":
+    "这些只需回答一次，最后按一个按钮。之后菜单上架、桌子有了二维码，客人就能点餐。",
+  "Your store": "您的门店",
+  "Store phone number": "门店电话",
+  "Guests call this number about their order, and it goes on your receipts.":
+    "客人会打这个电话询问订单，收据上也会显示。",
+  "The legal or operating name of the business, as registered.": "商家登记的法定名称或经营名称。",
+  "For example 123456789RT0001. Leave empty if the business is not registered.":
+    "例如 123456789RT0001。商家未登记就留空。",
+  "Offer tips": "提供小费",
+  "Guests choose {low}%, {mid}%, {high}%, another amount or No tip; nothing is chosen for them. You can switch this at any time in Store features, and it works at once.":
+    "客人可选 {low}%、{mid}%、{high}%、其他金额或不加小费，不替客人预选。随时可以在“门店功能”里更改，立即生效。",
+  "What you are waiting for": "正在等待",
+  "Come back here once they have: nothing else is needed from you now.":
+    "对方处理好后再回到这里：现在不需要您做别的。",
+  "Save your details first: they need your province.":
+    "请先保存您的信息：对方需要知道您所在的省份。",
+  "{people} also approves here, so they check what you send before it is published.":
+    "{people}也有批准权，所以您送审的内容要由对方核对后才发布。",
+  "I run this business on my own and approve the above. I will approve my own prices, menus, recipes, allergen lists, Store setup and larger refunds; each needs my code and is recorded as approved by me alone. If I add a second owner, they approve instead.":
+    "这家店由我一人经营，我批准以上内容。以后我自己批准价格、菜单、配方、过敏原清单、门店设置和较大金额的退款；每次都要验证码，并记录为由我一人批准。如果我增加第二位店主，就改由对方批准。",
+  "I checked the above and approve it on my own. Each is recorded as approved by me alone.":
+    "我已核对以上内容并自行批准。每一项都记录为由我一人批准。",
+  "Save my details": "保存我的信息",
+  "Publish my store setup": "发布我的门店设置",
+  "Send for approval": "送审",
+  "Still to do: {items}.": "还差：{items}。",
+  "All settings, step by step": "所有设置（分步）",
+  "Add your menu": "添加菜单",
+  "Your store setup is published. The allergen list still needs approval.":
+    "门店设置已发布。过敏原清单还需要批准。",
+  "Your store setup is published.": "门店设置已发布。",
+  "Only I can approve {what} here. I checked it and approve it on my own; it needs my code and is recorded as approved by me alone.":
+    "这里只有我能批准{what}。我已核对并自行批准；需要验证码，并记录为由我一人批准。",
   "Approve your allergen list first: open Allergens, approve the list, then list the menu.":
     "请先批准过敏原清单：打开“过敏原”，批准清单，再上架菜单。",
   "{item} has too many choice combinations to list. Remove a choice or split it into two dishes. Nothing was changed.":

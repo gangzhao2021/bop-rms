@@ -18,3 +18,13 @@ export async function serveStoreSetupPanels(page: Page) {
     route.fulfill({ headers, json: { version: 1, mode: "Off", allowedUntil: null, log: [] } }),
   );
 }
+/**
+ * WP-2423 item 14: what Store setup reads first. These specs drive the page of a Store whose setup
+ * has been published; store-first-opening.spec.ts drives a first Store's.
+ */
+export const establishedOpeningList = Object.freeze({
+  setupPublished: true,
+  allergenList: true,
+  menuListed: true,
+  taxRatesSet: true,
+});

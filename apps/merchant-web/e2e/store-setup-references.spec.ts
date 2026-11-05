@@ -1,3 +1,4 @@
+import { establishedOpeningList } from "./store-setup-panels";
 import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import {
@@ -88,6 +89,7 @@ async function install(page: Page) {
       url = new URL(request.url()),
       path = url.pathname,
       at = new Date().toISOString();
+    if (path === "/merchant/store/opening-list") return respond(route, establishedOpeningList);
     if (path === "/merchant/session") {
       const selected = {
         storeReference: id(3),

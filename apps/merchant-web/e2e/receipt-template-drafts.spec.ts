@@ -1,5 +1,5 @@
 import { parseDigitalReceiptTemplatePublishedCurrent } from "../../../packages/rms/printing-device/src/contracts/digital-receipt-template-published-current.js";
-import { serveStoreSetupPanels } from "./store-setup-panels";
+import { establishedOpeningList, serveStoreSetupPanels } from "./store-setup-panels";
 import {
   createStoreSetupDraft,
   replaceStoreSetupDraftContent,
@@ -172,6 +172,7 @@ async function install(page: Page) {
       path = url.pathname,
       at = new Date().toISOString(),
       until = new Date(Date.parse(at) + 5000).toISOString();
+    if (path === "/merchant/store/opening-list") return respond(route, establishedOpeningList);
     if (path === "/merchant/session") {
       const selected = {
         storeReference: id(3),

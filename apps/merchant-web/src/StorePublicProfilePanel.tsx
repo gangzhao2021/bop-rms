@@ -1,7 +1,8 @@
 import { displayLocale, t } from "./i18n/i18n.js";
 import { StatePanel } from "@bop-rms/ui";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { serviceOperationReference } from "./service-control-client.js";
+import { StoreProfilePublishedContext } from "./store-opening-list-client.js";
 import {
   createStorePublicProfileClient,
   StorePublicProfileClientError,
@@ -130,6 +131,7 @@ export function StorePublicProfilePanel({
   const [busy, setBusy] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const [message, setMessage] = useState<{ tone: "status" | "alert"; text: string } | null>(null);
+  const onPublished = useContext(StoreProfilePublishedContext);
   // One operation per intended publication: a lost answer is retried as the same publication.
   const operation = useRef<{ reference: string; key: string } | null>(null);
   const load = useCallback(async () => {
@@ -216,6 +218,7 @@ export function StorePublicProfilePanel({
         ),
       });
       await load();
+      onPublished?.();
     } catch (error) {
       const code = error instanceof StorePublicProfileClientError ? error.code : "OutcomeUnknown";
       if (code !== "OutcomeUnknown") operation.current = null;

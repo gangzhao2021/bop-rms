@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { serveStoreSetupPanels } from "./store-setup-panels";
+import { establishedOpeningList, serveStoreSetupPanels } from "./store-setup-panels";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
@@ -316,6 +316,7 @@ async function install(
         body: JSON.stringify({ status: "Applied", kind }),
       });
     }
+    if (path === "/merchant/store/opening-list") return respond(route, establishedOpeningList);
     if (path === "/merchant/session") {
       const selected = {
         storeReference: id(3),

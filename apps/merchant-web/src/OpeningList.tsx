@@ -4,6 +4,7 @@ import { t } from "./i18n/i18n.js";
 import { createStoreKitchenSetupClient } from "./store-kitchen-setup-client.js";
 import { createStorePublicProfileClient } from "./store-public-profile-client.js";
 import { createStoreReceiptProfileClient } from "./store-receipt-profile-client.js";
+import { loadOpeningListRead } from "./store-opening-list-client.js";
 import { createTableQrClient } from "./table-qr-client.js";
 
 /**
@@ -11,6 +12,9 @@ import { createTableQrClient } from "./table-qr-client.js";
  * to do before guests can order, in order, each step linking to where it is done. A step that can't
  * be read isn't shown as done or as to do. Once everything is done the list goes away for good on
  * this device (a Store already open never sees it).
+ *
+ * WP-2423 item 14: the Store's details, kitchen, receipts and published setup are one row: one page
+ * and one action do them all. While BOP support still has the tax rates to set, the row says so.
  */
 export interface OpeningFacts {
   readonly details: boolean | null;
@@ -20,29 +24,37 @@ export interface OpeningFacts {
   readonly allergenList: boolean | null;
   readonly menuListed: boolean | null;
   readonly tableCode: boolean | null;
+  /** False: BOP support has yet to set this Store's tax rates. Null or absent: not known. */
+  readonly taxRatesSet?: boolean | null;
 }
 export interface OpeningStep {
-  readonly key: keyof OpeningFacts;
+  readonly key: "store" | "allergenList" | "menuListed" | "tableCode";
   readonly label: string;
   readonly href: string;
   readonly done: boolean;
+  /** Not the Owner's to do now: said instead of a link. */
+  readonly waiting?: string;
 }
+/** Several facts as one row: not done if any is not; unknown if none is not but one can't be read. */
+const allOf = (...facts: readonly (boolean | null)[]): boolean | null =>
+  facts.some((fact) => fact === false) ? false : facts.some((fact) => fact === null) ? null : true;
 export function openingSteps(facts: OpeningFacts, storeReference: string): readonly OpeningStep[] {
-  const setup = `/app/organization/stores/${storeReference}/setup`;
+  const setup = `/app/organization/stores/${storeReference}/setup#store-opening`;
+  const store = allOf(facts.details, facts.kitchen, facts.receipts, facts.setupPublished);
   const all: readonly (Omit<OpeningStep, "done"> & { readonly done: boolean | null })[] = [
     {
-      key: "details",
-      label: t("Store name and address guests see"),
+      key: "store",
+      label: t("Store details and settings"),
       href: setup,
-      done: facts.details,
-    },
-    { key: "kitchen", label: t("Kitchen line"), href: setup, done: facts.kitchen },
-    { key: "receipts", label: t("Business name on receipts"), href: setup, done: facts.receipts },
-    {
-      key: "setupPublished",
-      label: t("Store setup published: hours, tax and payment"),
-      href: setup,
-      done: facts.setupPublished,
+      done: store,
+      // The Owner has done their part; the tax rates are set by BOP support for their province.
+      ...(store === false &&
+      facts.details === true &&
+      facts.kitchen === true &&
+      facts.receipts === true &&
+      facts.taxRatesSet === false
+        ? { waiting: t("Waiting for BOP support to set your tax rates") }
+        : {}),
     },
     {
       key: "allergenList",
@@ -84,19 +96,8 @@ const known = async <T,>(read: Promise<T>, fact: (value: T) => boolean) => {
 };
 async function loadOpeningFacts(csrf: string, fetcher: typeof fetch): Promise<OpeningFacts> {
   const clients = { csrf, fetcher };
-  const server = fetcher("/merchant/store/opening-list", {
-    credentials: "same-origin",
-    cache: "no-store",
-    redirect: "error",
-  }).then(async (response) => {
-    if (!response.ok) throw new Error("OPENING_LIST_UNAVAILABLE");
-    return (await response.json()) as {
-      readonly setupPublished: boolean;
-      readonly allergenList: boolean;
-      readonly menuListed: boolean;
-    };
-  });
-  const [details, kitchen, receipts, setupPublished, allergenList, menuListed, tableCode] =
+  const server = loadOpeningListRead(fetcher);
+  const [details, kitchen, receipts, setupPublished, allergenList, menuListed, tableCode, tax] =
     await Promise.all([
       known(createStorePublicProfileClient(clients).load(), (view) => view.current !== null),
       known(createStoreKitchenSetupClient(clients).load(), (view) => view.version > 0),
@@ -107,13 +108,23 @@ async function loadOpeningFacts(csrf: string, fetcher: typeof fetch): Promise<Op
       known(createTableQrClient(csrf, fetcher).overview(), (view) =>
         view.rows.some((row) => row.codeState === "Active"),
       ),
+      known(server, (view) => view.taxRatesSet !== false),
     ]);
-  return { details, kitchen, receipts, setupPublished, allergenList, menuListed, tableCode };
+  return {
+    details,
+    kitchen,
+    receipts,
+    setupPublished,
+    allergenList,
+    menuListed,
+    tableCode,
+    taxRatesSet: tax,
+  };
 }
 
 export function OpeningListView({ steps }: { readonly steps: readonly OpeningStep[] }) {
   if (steps.length === 0 || steps.every((step) => step.done)) return null;
-  const next = steps.find((step) => !step.done);
+  const next = steps.find((step) => !step.done && step.waiting === undefined);
   return (
     <section className="opening-list" aria-labelledby="opening-list-heading">
       <h2 id="opening-list-heading">{t("Getting ready to open")}</h2>
@@ -124,6 +135,8 @@ export function OpeningListView({ steps }: { readonly steps: readonly OpeningSte
             <span>{step.label}</span>
             {step.done ? (
               <span>{t("Done")}</span>
+            ) : step.waiting !== undefined ? (
+              <span>{step.waiting}</span>
             ) : (
               <Link to={step.href} data-next={step === next ? "true" : undefined}>
                 {step === next ? t("Do this next") : t("Set this up")}
@@ -153,7 +166,8 @@ export function OpeningList({
       if (!active) return;
       const next = openingSteps(facts, storeReference);
       setSteps(next);
-      if (next.length === 7 && next.every((step) => step.done))
+      // Every fact known and done; a row that could not be read never finishes the list.
+      if (next.length === 4 && next.every((step) => step.done))
         try {
           window.localStorage.setItem(finishedKey(storeReference), "1");
         } catch {
