@@ -400,3 +400,20 @@ it("DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: a person of another merchant signs i
   seam.members = new Set();
   await expect(session.issue("author")).rejects.toThrow();
 });
+
+it("v15 2026-11-04: platform support works at no Store and still signs in", async () => {
+  const f = setup();
+  f.change({
+    ...f.value,
+    actors: [
+      ...f.value.actors,
+      { selector: "support-1", actorReference: id(6), validUntil: until },
+    ],
+  });
+  const session = await f.create();
+  seam.members = new Set();
+  await session.issue("support-1");
+  expect(seam.selections.at(-1).scope).toEqual(scope);
+  // The same page, for someone who isn't support and works nowhere here: no session.
+  await expect(session.issue("author")).rejects.toThrow();
+});

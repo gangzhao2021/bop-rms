@@ -191,6 +191,7 @@ export async function createInternalMerchantSession(
       recentMfaAt: null,
     });
   };
+  const isSupportEntry = (entry) => entry.selector.startsWith("support-");
   const validateAssociation = async (tx, session, selected, at = clock()) => {
     try {
       const entries = await roster(),
@@ -203,12 +204,14 @@ export async function createInternalMerchantSession(
         // DEC-MULTI-MERCHANT-ONE-INSTALLATION: where they work, so a person of another merchant
         // signs in to their own merchant's Store. The merchant BFF checks the rest.
         servedStoreFor(resources, selected) !== null &&
-        (await isActiveStoreMember(tx, {
-          brandReference: selected.brandReference,
-          storeReference: selected.storeReference,
-          actorReference: session.actor.actorReference,
-          at: instant(at),
-        }))
+        // Platform support works at no Store: their own page checks them, and no Store role reaches them.
+        (isSupportEntry(entry) ||
+          (await isActiveStoreMember(tx, {
+            brandReference: selected.brandReference,
+            storeReference: selected.storeReference,
+            actorReference: session.actor.actorReference,
+            at: instant(at),
+          })))
       );
     } catch {
       return false;
@@ -271,7 +274,12 @@ export async function createInternalMerchantSession(
         return denied();
       // DEC-MULTI-MERCHANT-ONE-INSTALLATION A6: the first Store they work at, their own merchant's.
       let sessionScope = chosen ?? scope;
-      if (chosen === undefined && !(await worksAt(scope))) {
+      const entries = await roster();
+      const entry = entries.find(
+        (value) => value.actorReference === record.session.actor.actorReference,
+      );
+      const support = entry !== undefined && isSupportEntry(entry);
+      if (chosen === undefined && !support && !(await worksAt(scope))) {
         sessionScope = null;
         for (const served of servedStoresOf(resources))
           if (await worksAt(served)) {
