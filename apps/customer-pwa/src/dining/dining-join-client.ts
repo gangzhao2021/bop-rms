@@ -1,3 +1,4 @@
+import { isNewPartyJoin } from "../session/customer-transaction-context.js";
 export type DiningJoinClientErrorCode =
   "request-invalid" | "offline" | "unavailable" | "outcome-unknown" | DiningJoinRefusalCode;
 /** Definitive server refusals: nothing was joined, and the same code cannot succeed later. */
@@ -9,7 +10,10 @@ export type DiningJoinRefusalCode =
   | "table-not-open"
   | "table-checking-out"
   | "qr-paused"
-  | "table-busy";
+  | "table-busy"
+  // WP-2423 DEC-DINING-GUEST-TABLE-START.
+  | "table-being-cleaned"
+  | "table-in-use";
 export function isDiningJoinRefusal(code: unknown): code is DiningJoinRefusalCode {
   return Object.values(refusals).some((refusal) => refusal.code === code);
 }
@@ -50,6 +54,16 @@ const refusals: Readonly<
     status: 429,
     messageKey: "customer.dining.join_table_busy",
     code: "table-busy",
+  },
+  dining_join_table_being_cleaned: {
+    status: 409,
+    messageKey: "customer.dining.join_table_being_cleaned",
+    code: "table-being-cleaned",
+  },
+  dining_join_table_in_use: {
+    status: 409,
+    messageKey: "customer.dining.join_table_in_use",
+    code: "table-in-use",
   },
 };
 export class DiningJoinClientError extends Error {
@@ -254,7 +268,12 @@ export function createBrowserDiningJoinClient(
       return send(
         parsed.operationReference,
         parsed.csrfToken,
-        parsed.joinCredential === null ? {} : { joinCredential: parsed.joinCredential },
+        parsed.joinCredential === null
+          ? // DEC-DINING-GUEST-TABLE-START: this phone said it isn't with the people at this table.
+            isNewPartyJoin()
+            ? { newParty: true }
+            : {}
+          : { joinCredential: parsed.joinCredential },
         (value) => {
           const raw = exact(value, ["status", "operationReference", "admissionReference"]);
           const admissionReference = reference(raw.admissionReference);

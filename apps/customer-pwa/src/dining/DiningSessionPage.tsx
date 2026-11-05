@@ -289,8 +289,11 @@ function RoundCard({
   onOrderAgain,
   againStatus,
   menu = null,
+  collectOrderNumber = null,
 }: {
   readonly round: DiningRound;
+  /** A guest started this table, so nobody brings a finished dish over: it is called by number. */
+  readonly collectOrderNumber?: string | null;
   /** WP-2423 item 8 ⑥ part 4: the published menu, for a combo's chosen dishes and allergens. */
   readonly menu?: MenuView | null;
   /** Absent when the table can't add dishes now (checking out, paid or closed). */
@@ -311,7 +314,11 @@ function RoundCard({
         </div>
         <div>
           <dt>{t("Status")}</dt>
-          <dd>{statusText[round.status]}</dd>
+          <dd>
+            {round.status === "Ready" && collectOrderNumber !== null
+              ? t("Ready · Order {number}", { number: collectOrderNumber })
+              : statusText[round.status]}
+          </dd>
         </div>
         <div>
           <dt>{t("Payment")}</dt>
@@ -932,6 +939,7 @@ export function DiningSessionScreen({
                 key={round.roundNumber}
                 round={round}
                 menu={menu}
+                collectOrderNumber={view.startedByGuest === true ? view.orderNumber : null}
                 againStatus={
                   again === null
                     ? undefined

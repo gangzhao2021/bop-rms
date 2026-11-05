@@ -22,6 +22,19 @@
   margin-right: var(--bop-space-2);
   color: var(--bop-color-text-muted);
 }
+.workspace-page.dining-floor .dining-floor-guest-starts button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+.workspace-page.dining-floor .dining-floor-guest-starts button:focus-visible {
+  outline: 2px solid var(--bop-color-accent);
+  outline-offset: 2px;
+}
 .dining-floor .dining-floor-summary > [data-attention="true"] {
   color: var(--bop-color-warning);
   font-weight: 600;

@@ -6632,6 +6632,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Saved. No one is asked for a tip from now on.": "已保存。从现在起不再询问小费。",
   "Save tips": "保存小费设置",
   "Ask how many guests when opening a table": "开台时问人数",
+  "Guests starting tables": "客人自己开桌",
+  "Save this setting": "保存这一项",
+  "Guests can start a free table": "客人扫码就能开始用空桌",
+  "A guest who scans a free table orders right away and pays each round on their phone. A finished table frees itself with no cleaning step: 20 minutes after the last activity if nobody ordered, 90 minutes if they did. Someone with a photo of the code could start a table from elsewhere, but gets no food without paying.":
+    "客人扫空桌的码就能点餐，每一轮在手机上付款。吃完的桌子会自动空出，不用清理这一步：没点单的 20 分钟后，点过单的最后一次动作 90 分钟后。有人拿着桌码照片也能在别处开始这张桌，但不付款拿不到东西。",
+  "Only for stores where guests pay each round first.": "只适用于客人每轮先付款的门店。",
+  "Each paid round still waits for Accept on Orders.": "每一轮付款后还要在订单页接单。",
+  "Each paid round still waits for Accept on Orders. Turn on “Send paid table rounds straight to the kitchen” if nobody watches Orders.":
+    "每一轮付款后还要在订单页接单。如果没人看订单页，请打开“已付款的桌边订单直接进后厨”。",
+  "Saved. Guests can start free tables now.": "已保存。客人现在可以自己开始用空桌。",
+  "Saved. New tables need staff to open them; tables already started finish as usual.":
+    "已保存。新开桌需要店员操作；已经开始的桌子照常结束。",
+  "Started by a guest": "客人扫码开的桌",
+  "started by a guest": "客人扫码开的桌",
+  "no order yet": "还没点单",
+  "frees itself in {minutes} min": "{minutes} 分钟后自动空出",
+  "guests can start it now": "客人现在可以直接开始",
+  "Guests can start free tables.": "客人可以自己开始用空桌。",
+  "New tables need staff to open them now.": "现在新开桌需要店员操作。",
+  "Turn off guests starting tables first.": "请先关掉“客人自己开桌”。",
   "Saved. No tea charge is added from now on.": "已保存。从现在起不再加茶位。",
   "Saved. Tea is added for each guest from the next party size recorded.":
     "已保存。从下一次记人数起，按人数加茶位。",

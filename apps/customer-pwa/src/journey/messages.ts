@@ -1,3 +1,4 @@
+import { getGuestTableStarter } from "../session/customer-transaction-context.js";
 import { t } from "../i18n/i18n.js";
 import type { CartState } from "../cart/cart-state.js";
 
@@ -226,7 +227,9 @@ export const cartText = Object.freeze({
       return t("Your table is checking out.");
     },
     get "not-seated"() {
-      return t("You can order once staff seat you.");
+      return getGuestTableStarter() !== null
+        ? t("Add a dish from the menu to start.")
+        : t("You can order once staff seat you.");
     },
     get expired() {
       return t("Your cart expired. See the message on this page.");
@@ -284,10 +287,16 @@ export const cartText = Object.freeze({
       ] as const;
     },
     get notSeated() {
-      return [
-        t("You can order once staff seat you"),
-        t("You can order once staff seat you. Ask a staff member, then scan again."),
-      ] as const;
+      // WP-2423 DEC-DINING-GUEST-TABLE-START: this table starts with the guest's first dish.
+      return getGuestTableStarter() !== null
+        ? ([
+            t("Nothing in your cart yet"),
+            t("Add a dish from the menu and this table starts for you."),
+          ] as const)
+        : ([
+            t("You can order once staff seat you"),
+            t("You can order once staff seat you. Ask a staff member, then scan again."),
+          ] as const);
     },
     get tableCheckingOut() {
       return [

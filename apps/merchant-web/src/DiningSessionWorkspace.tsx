@@ -431,6 +431,11 @@ export function DiningSessionWorkspace({
   const [canTransferHost, setCanTransferHost] = useState(false);
   const [canCancelUnpaidRounds, setCanCancelUnpaidRounds] = useState(false);
   const [canWriteOff, setCanWriteOff] = useState(false);
+  // DEC-DINING-GUEST-TABLE-START: guests can start free tables here, and whether this person stops it.
+  const [guestStarts, setGuestStarts] = useState<{
+    readonly version: number;
+    readonly canTurnOff: boolean;
+  } | null>(null);
   const [canOperateTables, setCanOperateTables] = useState(false),
     [blockReasonCode, setBlockReasonCode] = useState(""),
     [checkoutRevision, setCheckoutRevision] = useState(0),
@@ -554,6 +559,7 @@ export function DiningSessionWorkspace({
         setCanTransferHost(loaded.canTransferHost);
         setCanCancelUnpaidRounds(loaded.canCancelUnpaidRounds);
         setCanWriteOff(loaded.canWriteOff);
+        setGuestStarts(loaded.guestTableStart);
         if (loaded.items.length === 0 && !more)
           setMessage(t("No tables are available in this Store."));
         void loadFacts(items, controller.signal);
@@ -1087,6 +1093,37 @@ export function DiningSessionWorkspace({
                 {t("{count} need you", { count: String(needCount) })}
               </span>
             ) : null}
+            {guestStarts !== null ? (
+              <span className="dining-floor-guest-starts">
+                {t("Guests can start free tables.")}{" "}
+                {guestStarts.canTurnOff ? (
+                  <button
+                    type="button"
+                    disabled={locked}
+                    onClick={() => {
+                      const operationReference = serviceOperationReference();
+                      void createDiningSessionClient()
+                        .turnOffGuestTableStart(csrf, {
+                          operationReference,
+                          expectedVersion: guestStarts.version,
+                        })
+                        .then(
+                          () =>
+                            load().then(() =>
+                              setMessage(t("New tables need staff to open them now.")),
+                            ),
+                          () =>
+                            load().then(() =>
+                              setMessage(t("Not saved. Check your connection and save again.")),
+                            ),
+                        );
+                    }}
+                  >
+                    {t("Turn off")}
+                  </button>
+                ) : null}
+              </span>
+            ) : null}
           </span>
         ) : null
       }
@@ -1371,6 +1408,7 @@ function TablePanel({
                 ? t("pays at the end")
                 : t("pays each round")
               : tableFloorStatus(table).label,
+            table.guestStart != null ? t("started by a guest") : null,
           ]
             .filter((part) => part !== null)
             .join(" · ")}

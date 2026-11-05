@@ -121,6 +121,8 @@ export interface DiningSessionView {
    * at the end; PayFirst — each round is paid as it is sent (also from an older server).
    */
   readonly paymentTiming: "PayFirst" | "PayLater";
+  /** DEC-DINING-GUEST-TABLE-START: a guest started this table; nobody brings the dishes over. */
+  readonly startedByGuest?: true;
   readonly rounds: readonly DiningRound[];
   readonly summary: null | {
     readonly paid: DiningMoney;
@@ -259,9 +261,15 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     "orderNumber",
     "checkedAt",
     ...(timed ? ["paymentTiming"] : []),
+    ...(root.session !== null &&
+    typeof root.session === "object" &&
+    Object.hasOwn(root.session, "startedByGuest")
+      ? ["startedByGuest"]
+      : []),
     "rounds",
     "summary",
   ]);
+  if (session.startedByGuest !== undefined && session.startedByGuest !== true) return invalid();
   if (!Array.isArray(session.rounds) || session.rounds.length > 100) return invalid();
   const rounds = session.rounds.map((value: unknown, index): DiningRound => {
     const priced = value !== null && typeof value === "object" && Object.hasOwn(value, "subtotal");
@@ -480,6 +488,7 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     paymentTiming: timed
       ? oneOf(session.paymentTiming, ["PayFirst", "PayLater"] as const)
       : "PayFirst",
+    ...(session.startedByGuest === true ? { startedByGuest: true as const } : {}),
     rounds: Object.freeze(rounds),
     summary,
   });

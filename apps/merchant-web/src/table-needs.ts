@@ -46,6 +46,21 @@ export function heldRoundReasonText(reason: "FirstOrder" | "PhoneRapid" | "Table
       : t("many rounds from this table just now");
 }
 
+/** DEC-DINING-GUEST-TABLE-START: how long staff have to clean before the next guest may start. */
+const cleaningGraceMinutes = 5;
+/** The warning before a guest-started table frees itself: a timer they can't act on otherwise. */
+const freesItselfWarningMinutes = 10;
+
+/** "frees itself in N min", only in the last minutes before the System closes the table. */
+function freesItself(table: StaffDiningTable, now: number): string | null {
+  const at = table.guestStart?.closesByItselfAt;
+  if (at === null || at === undefined) return null;
+  const left = Math.ceil((Date.parse(at) - now) / 60_000);
+  return left > freesItselfWarningMinutes
+    ? null
+    : t("frees itself in {minutes} min", { minutes: String(Math.max(left, 0)) });
+}
+
 const cad = (minor: string) => orderMoney({ amountMinor: minor, currencyCode: "CAD" });
 const minutesAgo = (since: string, now: number) =>
   Math.max(0, Math.floor((now - Date.parse(since)) / 60_000));
@@ -58,7 +73,18 @@ export function tableNeed(
   const seated = table.currentDiningSessionReference !== null;
   if (!seated) {
     if (table.operationalState === "TemporarilyBlocked" && table.blockReasonCode === "CLEANING")
-      return { tone: "action", rank: 6, words: t("Needs cleaning"), detail: null, step: "Cleaned" };
+      return {
+        tone: "action",
+        rank: 6,
+        words: t("Needs cleaning"),
+        // Where guests start tables: past this time the next guest may start it anyway.
+        detail:
+          table.blockedSince != null &&
+          now - Date.parse(table.blockedSince) >= cleaningGraceMinutes * 60_000
+            ? t("guests can start it now")
+            : null,
+        step: "Cleaned",
+      };
     if (table.operationalState === "TemporarilyBlocked")
       return {
         tone: "idle",
@@ -129,10 +155,12 @@ export function tableNeed(
       isPaymentUnconfirmed(round.payBy, now),
     );
     const left = Math.ceil((Date.parse(payBy) - now) / 60_000);
+    // A guest's own table: an unpaid round cancels itself, and nobody can pay it for them.
+    const selfServed = table.guestStart != null && !unconfirmed;
     return {
-      tone: "action",
-      rank: 1,
-      urgent: unconfirmed || left <= 10,
+      tone: selfServed ? "progress" : "action",
+      rank: selfServed ? 52 : 1,
+      urgent: !selfServed && (unconfirmed || left <= 10),
       since: payBy,
       words: unconfirmed ? t("Payment not confirmed") : t("Round not paid yet"),
       detail: unconfirmed
@@ -145,8 +173,9 @@ export function tableNeed(
   }
   if (order !== null && order.readyToServe > 0)
     return {
-      tone: "action",
-      rank: 2,
+      // A guest's own table: the kitchen finishing it is the last step anyone has to take.
+      tone: table.guestStart != null ? "progress" : "action",
+      rank: table.guestStart != null ? 51 : 2,
       words:
         order.readyToServe === 1
           ? t("1 dish ready to serve")
@@ -224,7 +253,24 @@ export function tableNeed(
       step: null,
     };
   if (order?.allServed)
-    return { tone: "done", rank: 60, words: t("Everything served"), detail: null, step: null };
+    return {
+      tone: "done",
+      rank: 60,
+      words: t("Everything served"),
+      detail: freesItself(table, now),
+      step: null,
+    };
+  if (table.guestStart != null)
+    return {
+      tone: "progress",
+      rank: 55,
+      words: t("Started by a guest"),
+      detail:
+        table.session?.orderReference === null
+          ? [t("no order yet"), freesItself(table, now)].filter(Boolean).join(" · ")
+          : freesItself(table, now),
+      step: null,
+    };
   return { tone: "progress", rank: 55, words: t("Seated"), detail: null, step: null };
 }
 

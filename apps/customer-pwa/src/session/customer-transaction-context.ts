@@ -96,6 +96,33 @@ export function isUnseatedTableScan(): boolean {
   return unseatedTableScan;
 }
 
+/**
+ * WP-2423 DEC-DINING-GUEST-TABLE-START: this scan offered to start a free table. A guest's tap on Add
+ * on the menu runs this, which starts and joins the table, so the dish they configured is kept.
+ * Refused: why, in the guest's terms. Memory only; a link preview never reaches it.
+ */
+export type GuestTableStartAnswer = "Started" | "Refused";
+let guestTableStarter: (() => Promise<GuestTableStartAnswer>) | null = null;
+
+export function setGuestTableStarter(value: (() => Promise<GuestTableStartAnswer>) | null): void {
+  guestTableStarter = value;
+}
+
+export function getGuestTableStarter(): (() => Promise<GuestTableStartAnswer>) | null {
+  return guestTableStarter;
+}
+
+/** This phone said it isn't with the people at the table; the next QR join says so. Memory only. */
+let newPartyJoin = false;
+
+export function setNewPartyJoin(value: boolean): void {
+  newPartyJoin = value;
+}
+
+export function isNewPartyJoin(): boolean {
+  return newPartyJoin;
+}
+
 export function setCustomerCsrfCredential(value: string | null): void {
   csrfContext = Symbol();
   csrfCredential = value;
@@ -105,6 +132,7 @@ export function setCustomerCsrfCredential(value: string | null): void {
     movedTableLabel = null;
     settledTable = null;
     unseatedTableScan = false;
+    guestTableStarter = null;
   }
   paymentOperationReference = null;
   checkoutSessionReference = null;

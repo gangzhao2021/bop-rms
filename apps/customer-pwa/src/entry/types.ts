@@ -16,6 +16,17 @@ export interface CustomerEntryEstablishedContext {
   readonly tableOpen?: boolean;
 }
 
+/** What the menu needs when no visit has started: the Store, never a table or a Session. */
+export type CustomerEntryPublicContext = Readonly<{
+  publicStoreReference: string;
+  channel: "DineIn";
+  locale: string;
+  brandDisplayName: string;
+  storeDisplayName: string;
+}>;
+
+export type CustomerEntryIntent = "Start" | "Join" | "NewParty";
+
 export type CustomerEntryScreenState =
   | Readonly<{ kind: "Loading" }>
   | Readonly<{ kind: "Missing" }>
@@ -44,14 +55,15 @@ export type CustomerEntryScreenState =
    */
   | Readonly<{
       kind: "TableNotOpen";
-      context: Readonly<{
-        publicStoreReference: string;
-        channel: "DineIn";
-        locale: string;
-        brandDisplayName: string;
-        storeDisplayName: string;
-      }>;
+      context: CustomerEntryPublicContext;
     }>
+  /**
+   * WP-2423 DEC-DINING-GUEST-TABLE-START: no visit was started; this free table can be started, it
+   * is waiting for cleaning, or this phone is asked whether it is with the guests already there.
+   */
+  | Readonly<{ kind: "TableMayStart"; context: CustomerEntryPublicContext }>
+  | Readonly<{ kind: "TableBeingCleaned"; context: CustomerEntryPublicContext }>
+  | Readonly<{ kind: "TableAskNewParty"; context: CustomerEntryPublicContext }>
   | Readonly<{ kind: "ServiceUnavailable" }>
   | Readonly<{ kind: "RateLimited"; retryAfterSeconds: number }>
   | Readonly<{ kind: "Offline" }>
@@ -62,4 +74,6 @@ export interface CustomerEntryClient {
   readonly hasEntry: boolean;
   start(): Promise<CustomerEntryScreenState>;
   retry(): Promise<CustomerEntryScreenState>;
+  /** The guest answered a table's choice: a second entry, which may start a visit. */
+  enter?(intent: CustomerEntryIntent): Promise<CustomerEntryScreenState>;
 }

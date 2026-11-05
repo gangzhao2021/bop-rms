@@ -21,6 +21,7 @@ import {
   parseQrTableContextEvidence,
 } from "../../rms/dining/src/index.ts";
 import { createOrderNumberAllocation } from "../../rms/ordering/src/index.ts";
+import { readPaymentRemainingRefundable } from "../../rms/payment/src/index.ts";
 import {
   createKitchenWorkLifecycleService,
   createPostgresKitchenWorkLifecycleStore,
@@ -1220,6 +1221,38 @@ it("the System closes a paid table the kitchen finished, nobody having tapped Se
           },
         ],
       );
+      // The money record is the same one a staff close writes: settled for exactly what was paid.
+      const finality = (
+        await admin.query(
+          "SELECT classification,captured_minor::text AS captured,priced_order_total_minor::text AS priced FROM rms_payment.order_settled_finality WHERE order_id=$1",
+          [orderReference],
+        )
+      ).rows;
+      assert.deepEqual(finality, [
+        {
+          classification: "Settled",
+          captured: String(seeded.roundTotal),
+          priced: String(seeded.roundTotal),
+        },
+      ]);
+      // An ordinary refund has no closure gate: after the System's close the whole round can still
+      // be refunded (the refund commands read this same owner fact).
+      const refundable = await transactions().run((tx) =>
+        readPaymentRemainingRefundable(tx, {
+          scope: {
+            ...ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+          },
+          orderReference,
+          paymentTransactionReference: seeded.refs.transaction,
+          paymentIntentReference: seeded.refs.paymentIntent,
+          paymentAttemptReference: seeded.refs.attempt,
+          observedAt: new Date().toISOString(),
+          authorize: async () => true,
+        }),
+      );
+      assert.equal(refundable.remainingMinor, seeded.roundTotal);
       // Closed once: another cycle finds nothing to do.
       assert.deepEqual(await system.closeQuiet(sessionReference), {
         status: "Held",

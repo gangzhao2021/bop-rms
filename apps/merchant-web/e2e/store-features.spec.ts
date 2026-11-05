@@ -533,3 +533,111 @@ test("@production the owner sends paid orders straight to the kitchen, and back"
   await expect(page.getByText("Saved. Paid orders wait for Accept on Orders again.")).toBeVisible();
   expect(commands.at(-1)).toMatchObject({ pickup: false, dineIn: false, expectedVersion: 1 });
 });
+
+/** DEC-DINING-GUEST-TABLE-START: the switch, only where guests pay each round first. */
+const guestStartFeatures = (changes: {
+  guestTableStart?: boolean;
+  guestTableStartAllowed: boolean;
+  version?: number;
+}) => ({
+  version: 1,
+  templateCode: null,
+  modules: { counterOrder: true, pickup: true, inventory: true, loyalty: false, alcohol: false },
+  changedAt: null,
+  services: {
+    version: changes.version ?? 0,
+    staffCall: false,
+    chaseDish: false,
+    askPartySize: false,
+    ...(changes.guestTableStart === true ? { guestTableStart: true } : {}),
+    changedAt: null,
+  },
+  guestTableStartAllowed: changes.guestTableStartAllowed,
+  teaCharge: { version: 0, teaSellableReference: null, changedAt: null },
+  teaChoices: [],
+  tips: {
+    version: 0,
+    enabled: true,
+    tierPercents: [10, 15, 18],
+    changedAt: null,
+    offInStoreSetup: false,
+  },
+  canChange: true,
+});
+
+test("@production the owner turns on guests starting tables; it is off where guests pay at the end; a change made meanwhile is shown", async ({
+  page,
+}) => {
+  await session(page);
+  const sent: { action: string; guestTableStart?: boolean; expectedVersion?: number }[] = [];
+  let answer: "Save" | "Conflict" | "NeedsPayFirst" = "Save";
+  let current = guestStartFeatures({ guestTableStartAllowed: true });
+  await page.route("**/merchant/store/features", async (route) => {
+    const body = route.request().postDataJSON() as (typeof sent)[number];
+    if (body.action === "ChangeServices") {
+      sent.push(body);
+      if (answer !== "Save") {
+        await route.fulfill({
+          status: 409,
+          headers,
+          json: {
+            error:
+              answer === "Conflict"
+                ? "store_features_changed"
+                : "store_features_guest_start_needs_pay_first",
+          },
+        });
+        return;
+      }
+      current = guestStartFeatures({
+        guestTableStart: body.guestTableStart === true,
+        guestTableStartAllowed: true,
+        version: (body.expectedVersion ?? 0) + 1,
+      });
+    }
+    await route.fulfill({ headers, json: current });
+  });
+  await page.goto("/app/organization/stores/" + store + "/capabilities");
+  const box = page.getByRole("checkbox", { name: /Guests can start a free table/u });
+  await expect(box).not.toBeChecked();
+  await expect(box).toBeEnabled();
+  await expect(
+    page.getByText("20 minutes after the last activity if nobody ordered"),
+  ).toBeVisible();
+  const section = page.getByRole("group", { name: "Guests starting tables" });
+
+  // Off by default; a change someone else made first is said, and nothing is claimed.
+  await box.check();
+  // Each paid round waits on Orders until a Store can send them straight to the kitchen.
+  await expect(section.getByRole("note")).toContainText(
+    "Each paid round still waits for Accept on Orders.",
+  );
+  answer = "Conflict";
+  await section.getByRole("button", { name: "Save this setting" }).click();
+  await expect(section.getByRole("alert")).toContainText("Someone else changed these settings");
+  answer = "NeedsPayFirst";
+  await section.getByRole("button", { name: "Save this setting" }).click();
+  await expect(section.getByRole("alert")).toContainText(
+    "Only for stores where guests pay each round first.",
+  );
+  answer = "Save";
+  await section.getByRole("button", { name: "Save this setting" }).click();
+  await expect(section.getByRole("status")).toContainText("Guests can start free tables now.");
+  expect(sent.at(-1)?.guestTableStart).toBe(true);
+  await expectNoInternalText(page);
+  await page.screenshot({ path: "test-results/store-features-guest-start.png", fullPage: true });
+});
+
+test("@production where guests pay at the end the switch can't be turned on, and says why", async ({
+  page,
+}) => {
+  await session(page);
+  await page.route("**/merchant/store/features", (route) =>
+    route.fulfill({ headers, json: guestStartFeatures({ guestTableStartAllowed: false }) }),
+  );
+  await page.goto("/app/organization/stores/" + store + "/capabilities");
+  await expect(
+    page.getByRole("checkbox", { name: /Guests can start a free table/u }),
+  ).toBeDisabled();
+  await expect(page.getByText("Only for stores where guests pay each round first.")).toBeVisible();
+});

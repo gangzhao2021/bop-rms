@@ -5,7 +5,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { CustomerCurrentOrder } from "../session/session-bootstrap.js";
 import { SettledTableReceiptPanel } from "../dining/SettledTableReceipt.js";
-import { getSettledTableLabel } from "../session/customer-transaction-context.js";
+import {
+  getSettledTableLabel,
+  setGuestTableStarter,
+  setNewPartyJoin,
+  type GuestTableStartAnswer,
+} from "../session/customer-transaction-context.js";
 import {
   createStoreProfileClient,
   type StoreProfileLoader,
@@ -16,6 +21,7 @@ import { endSentence } from "../journey/format.js";
 import type {
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
+  CustomerEntryIntent,
   CustomerEntryScreenState,
 } from "./types.js";
 
@@ -80,6 +86,12 @@ export function EntryContextPage({
   const navigate = useNavigate();
   const established = useRef(onEstablished);
   const runCurrent = useRef<((action: "start" | "retry") => Promise<void>) | null>(null);
+  // WP-2423 DEC-DINING-GUEST-TABLE-START: what the guest answered, so joining needs no second tap.
+  const [answered, setAnswered] = useState<CustomerEntryIntent | null>(null);
+  const clientRef = useRef(client);
+  clientRef.current = client;
+  const admissionRef = useRef(diningAdmission);
+  admissionRef.current = diningAdmission;
 
   useLayoutEffect(() => {
     established.current = onEstablished;
@@ -98,7 +110,13 @@ export function EntryContextPage({
         const next = await client[action]();
         if (!active) return;
         setResult({ client, state: next });
-        if (next.kind === "Established" || next.kind === "TableNotOpen")
+        if (
+          next.kind === "Established" ||
+          next.kind === "TableNotOpen" ||
+          next.kind === "TableMayStart" ||
+          next.kind === "TableBeingCleaned" ||
+          next.kind === "TableAskNewParty"
+        )
           established.current?.(next.context);
       } catch {
         if (active) setResult({ client, state: Object.freeze({ kind: "ServiceUnavailable" }) });
@@ -118,8 +136,41 @@ export function EntryContextPage({
     if (state.kind !== "Loading") heading.current?.focus();
   }, [state.kind]);
 
+  // The guest looks at the menu first: their tap on Add starts and joins this table, and the dish
+  // they configured goes in. A scan or a link preview never gets here.
+  useEffect(() => {
+    if (state.kind !== "TableMayStart") return;
+    const enter = clientRef.current.enter;
+    const admission = admissionRef.current;
+    if (enter === undefined || admission === undefined) return;
+    setGuestTableStarter(async (): Promise<GuestTableStartAnswer> => {
+      const next = await enter("Start");
+      if (next.kind !== "Established") return "Refused";
+      established.current?.(next.context);
+      await admission.journey.start({
+        operationReference: admission.generateOperationReference(),
+        joinCredential: null,
+      });
+      return "Started";
+    });
+  }, [state.kind]);
+
   const retry = (): void => {
     void runCurrent.current?.("retry");
+  };
+  const answer = (intent: CustomerEntryIntent): void => {
+    const enter = client.enter;
+    if (enter === undefined) return;
+    setAnswered(intent);
+    setResult({ client, state: Object.freeze({ kind: "Loading" }) });
+    void enter(intent)
+      .catch(() => Object.freeze({ kind: "ServiceUnavailable" }) as CustomerEntryScreenState)
+      .then((next) => {
+        // The next QR join says this phone isn't with the people at the table.
+        setNewPartyJoin(intent === "NewParty" && next.kind === "Established");
+        setResult({ client, state: next });
+        if (next.kind === "Established") established.current?.(next.context);
+      });
   };
 
   if (holding && currentOrder)
@@ -136,6 +187,8 @@ export function EntryContextPage({
       headingRef={heading}
       onContinue={() => navigate("/menu")}
       onRetry={retry}
+      onAnswer={client.enter === undefined ? undefined : answer}
+      autoJoin={answered !== null}
       state={state}
       storeProfile={storeProfile === undefined ? browserStoreProfile : storeProfile}
     />
@@ -209,6 +262,10 @@ export interface EntryContextViewProps {
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly onContinue?: (() => void) | undefined;
   readonly onRetry?: (() => void) | undefined;
+  /** WP-2423 DEC-DINING-GUEST-TABLE-START: the guest's answer to a table's choice. */
+  readonly onAnswer?: ((intent: CustomerEntryIntent) => void) | undefined;
+  /** The guest already answered; the join follows with no second tap. */
+  readonly autoJoin?: boolean | undefined;
   readonly state: CustomerEntryScreenState;
   /** Shown under a started visit: the Store's hours, address and phone. */
   readonly storeProfile?: StoreProfileLoader | null | undefined;
@@ -219,6 +276,8 @@ export function EntryContextView({
   headingRef,
   onContinue,
   onRetry,
+  onAnswer,
+  autoJoin,
   state,
   storeProfile = null,
 }: EntryContextViewProps) {
@@ -244,6 +303,8 @@ export function EntryContextView({
           headingRef={headingRef}
           onContinue={onContinue}
           onRetry={onRetry}
+          onAnswer={onAnswer}
+          autoJoin={autoJoin}
           state={state}
         />
       </section>
@@ -273,11 +334,13 @@ function EntryNextSteps({
   context,
   diningAdmission,
   onContinue,
+  autoJoin,
 }: {
   readonly joining: boolean;
   readonly context: object;
   readonly diningAdmission: DiningAdmissionUi | undefined;
   readonly onContinue: () => void;
+  readonly autoJoin?: boolean | undefined;
 }) {
   const [joined, setJoined] = useState(false);
   // Joining is the next step only where it can happen here.
@@ -289,8 +352,11 @@ function EntryNextSteps({
         <DiningAdmissionPanel
           contextEpoch={context}
           service={diningAdmission}
+          autoJoin={autoJoin === true}
           onStateChange={(state) => {
             setJoined(state === "Bound" || state === "Unavailable");
+            // Answered once: a refusal goes back to asking, and doesn't repeat the new party.
+            if (state !== "Joining" && state !== "Ready") setNewPartyJoin(false);
             // Owner 2026-11-03 walkthrough: the guest came to order; joined, the menu opens.
             if (state === "Bound" && !opened.current) {
               opened.current = true;
@@ -373,6 +439,8 @@ function EntryState({
   headingRef,
   onContinue,
   onRetry,
+  onAnswer,
+  autoJoin,
   state,
 }: Readonly<EntryContextViewProps>) {
   if (state.kind === "Loading")
@@ -492,6 +560,75 @@ function EntryState({
     );
   }
 
+  // WP-2423 DEC-DINING-GUEST-TABLE-START: a scan starts nothing; the guest's tap does. A guest whose
+  // visit just ended here sees their receipt first, and is told starting again ends it on this phone.
+  if (state.kind === "TableMayStart") {
+    const settled = getSettledTableLabel();
+    return (
+      <div>
+        {settled === null ? null : (
+          <>
+            <StateHeading headingRef={headingRef}>
+              {t("This table is settled. Thank you for dining with us.")}
+            </StateHeading>
+            <p className="entry-context">
+              {t("Table {table} has paid and closed.", { table: saidTable(settled) })}
+            </p>
+            <SettledTableReceiptPanel />
+          </>
+        )}
+        {settled === null ? (
+          <StateHeading headingRef={headingRef}>{t("Order at this table")}</StateHeading>
+        ) : (
+          <h3>{t("Order at this table")}</h3>
+        )}
+        <p className="entry-context">
+          {t("You pay on your phone each time you order. No account needed.")}
+        </p>
+        {settled === null ? null : (
+          <p>{t("Starting a new visit ends your receipt on this phone.")}</p>
+        )}
+        <button className="entry-action" type="button" onClick={() => onAnswer?.("Start")}>
+          {t("Start ordering")}
+        </button>
+        {onContinue ? (
+          <button className="entry-secondary-action" type="button" onClick={onContinue}>
+            {t("Look at the menu first")}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (state.kind === "TableBeingCleaned")
+    return (
+      <div>
+        <StateHeading headingRef={headingRef}>
+          {t("This table is being cleaned. Pick another table or ask staff.")}
+        </StateHeading>
+        {onContinue ? (
+          <button className="entry-action" type="button" onClick={onContinue}>
+            {t("Look at the menu first")}
+          </button>
+        ) : null}
+      </div>
+    );
+
+  if (state.kind === "TableAskNewParty")
+    return (
+      <div>
+        <StateHeading headingRef={headingRef}>
+          {t("Are you with the people already at this table?")}
+        </StateHeading>
+        <button className="entry-action" type="button" onClick={() => onAnswer?.("Join")}>
+          {t("Yes, join them")}
+        </button>
+        <button className="entry-action" type="button" onClick={() => onAnswer?.("NewParty")}>
+          {t("No, we just sat down")}
+        </button>
+      </div>
+    );
+
   if (state.kind === "PickupNotOffered")
     return (
       <div className="entry-state entry-state--warning" role="alert">
@@ -578,6 +715,7 @@ function EntryState({
             context={context}
             diningAdmission={diningAdmission}
             onContinue={onContinue}
+            autoJoin={autoJoin}
           />
         ) : (
           <p role="status">

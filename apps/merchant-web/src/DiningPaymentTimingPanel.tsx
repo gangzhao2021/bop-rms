@@ -91,7 +91,12 @@ export function createDiningPaymentTimingClient(fetcher: typeof fetch = fetch) {
       if (raw === null || typeof raw !== "object")
         throw new DiningPaymentTimingError("Unavailable");
       const { status, timing } = raw as { status?: unknown; timing?: unknown };
-      if (status !== "Changed" && status !== "AlreadyChanged" && status !== "Conflict")
+      if (
+        status !== "Changed" &&
+        status !== "AlreadyChanged" &&
+        status !== "Conflict" &&
+        status !== "GuestTableStartOn"
+      )
         throw new DiningPaymentTimingError("Unavailable");
       return Object.freeze({ status, timing: parseDiningPaymentTimingView(timing) });
     },
@@ -155,7 +160,9 @@ export function DiningPaymentTimingPanel({
       setMessage(
         result.status === "Conflict"
           ? t("Someone changed it meanwhile. This is the current choice; choose again if needed.")
-          : t("Saved. Tables opened from now on use it; tables already open keep theirs."),
+          : result.status === "GuestTableStartOn"
+            ? t("Turn off guests starting tables first.")
+            : t("Saved. Tables opened from now on use it; tables already open keep theirs."),
       );
     } catch {
       setMessage(t("Not saved. Check your connection and save again."));

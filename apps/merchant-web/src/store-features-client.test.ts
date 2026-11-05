@@ -163,3 +163,21 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT", () => {
     ).toThrow();
   });
 });
+
+describe("DEC-DINING-GUEST-TABLE-START: the switch on a page that may be open across a deploy", () => {
+  it("reads both shapes: never set (no key), and on", () => {
+    const base = view as unknown as { services: Record<string, unknown> };
+    expect(parseStoreFeatures(base).services.guestTableStart).toBe(false);
+    expect(parseStoreFeatures(base).guestTableStartAllowed).toBe(false);
+    const on = {
+      ...base,
+      services: { ...base.services, guestTableStart: true },
+      guestTableStartAllowed: true,
+    };
+    expect(parseStoreFeatures(on).services.guestTableStart).toBe(true);
+    expect(parseStoreFeatures(on).guestTableStartAllowed).toBe(true);
+    expect(() =>
+      parseStoreFeatures({ ...base, services: { ...base.services, guestTableStart: "yes" } }),
+    ).toThrow();
+  });
+});

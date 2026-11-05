@@ -252,6 +252,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This table is settled. Thank you for dining with us.": "这桌已结账，谢谢光临",
   "Table {table} has paid and closed.": "桌号 {table}，已付清。",
   "From table {table}": "来自 {table} 桌",
+  "Order at this table": "在这张桌点餐",
+  "You pay on your phone each time you order. No account needed.":
+    "每次点餐在手机上付款，不用注册。",
+  "Start ordering": "开始点餐",
+  "Starting a new visit ends your receipt on this phone.":
+    "开始新的点餐后，这部手机上就看不到刚才的收据了。",
+  "This table is being cleaned. Pick another table or ask staff.":
+    "这张桌正在清理，请换一张桌或找店员。",
+  "Are you with the people already at this table?": "你们和这桌的人是一起的吗？",
+  "Yes, join them": "是，加入",
+  "No, we just sat down": "不是，我们刚坐下",
+  "Someone at this table just ordered. You can join them, or ask staff.":
+    "这桌刚刚有人点单。可以加入他们，或找店员。",
+  "This table can’t be started just now. Pick another table or ask staff. Your choices are kept here.":
+    "这张桌暂时不能开始。请换一张桌或找店员。您选的内容还在这里。",
+  "Nothing in your cart yet": "购物车还是空的",
+  "Add a dish from the menu and this table starts for you.":
+    "从菜单加一道菜，就会开始用这张桌。",
+  "Add a dish from the menu to start.": "从菜单加一道菜就可以开始。",
+  "Ready · Order {number}": "做好了 · {number} 号",
   "This table isn’t open yet": "这桌还没开台",
   "Ask staff to seat you, then scan again.": "请让店员带位，开台后再扫一次码。",
   "New party? Ask staff to seat you, then scan again.":

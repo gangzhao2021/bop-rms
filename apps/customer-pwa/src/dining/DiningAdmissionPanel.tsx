@@ -21,7 +21,8 @@ export type DiningAdmissionUiState =
 export type DiningAdmissionRefusedState =
   "CodeUsed" | "CodeNotAccepted" | "TooManyAttempts" | DiningQrJoinRefusedState;
 /** WP-2423 item 8 ⑤: the scanned table can't be joined by QR right now. */
-export type DiningQrJoinRefusedState = "QrPaused" | "NotOpen" | "CheckingOut" | "TableBusy";
+export type DiningQrJoinRefusedState =
+  "QrPaused" | "NotOpen" | "CheckingOut" | "TableBusy" | "BeingCleaned" | "TableInUse";
 const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
   get CodeUsed() {
     return t(
@@ -50,6 +51,12 @@ const refusalText: Readonly<Record<DiningAdmissionRefusedState, string>> = {
   get TableBusy() {
     return t("Many phones joined this table just now. Please ask staff for help.");
   },
+  get BeingCleaned() {
+    return t("This table is being cleaned. Pick another table or ask staff.");
+  },
+  get TableInUse() {
+    return t("Someone at this table just ordered. You can join them, or ask staff.");
+  },
 };
 /** These refusals need a code; the others are about the table itself. */
 const needsCode = (state: DiningAdmissionUiState) =>
@@ -68,6 +75,8 @@ export function admissionStateForFailure(error: unknown): "Unknown" | DiningAdmi
   if (error.code === "table-not-open") return "NotOpen";
   if (error.code === "table-checking-out") return "CheckingOut";
   if (error.code === "table-busy") return "TableBusy";
+  if (error.code === "table-being-cleaned") return "BeingCleaned";
+  if (error.code === "table-in-use") return "TableInUse";
   return "Unknown";
 }
 function refused(state: DiningAdmissionUiState): state is DiningAdmissionRefusedState {
@@ -80,9 +89,12 @@ export function DiningAdmissionPanel({
   service,
   contextEpoch,
   onStateChange,
+  autoJoin = false,
 }: {
   readonly service?: DiningAdmissionUi | undefined;
   readonly contextEpoch?: object | undefined;
+  /** The guest already tapped Start, or said who they are with: join with no second tap. */
+  readonly autoJoin?: boolean;
   /** WP-2423 item 8 ⑤: the page keeps one primary action (joining, then the menu). */
   readonly onStateChange?: ((state: DiningAdmissionUiState) => void) | undefined;
 }) {
@@ -195,6 +207,16 @@ export function DiningAdmissionPanel({
         if (generation.current === current) busy.current = false;
       });
   };
+  const joined = useRef<object | null>(null);
+  const runCurrent = useRef(run);
+  runCurrent.current = run;
+  useEffect(() => {
+    if (!autoJoin || service === undefined) return;
+    const epoch = contextEpoch ?? service;
+    if (joined.current === epoch) return;
+    joined.current = epoch;
+    runCurrent.current(false, true);
+  }, [autoJoin, service, contextEpoch]);
   return (
     <DiningAdmissionView
       state={state}

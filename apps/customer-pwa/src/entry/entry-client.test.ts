@@ -166,6 +166,71 @@ describe("customer entry browser boundary", () => {
     await expect(start()).resolves.toEqual({ kind: "CommandFailed" });
   });
 
+  it.each([
+    ["entry_table_may_start", "customer.entry.table_may_start", "TableMayStart"],
+    ["entry_table_being_cleaned", "customer.entry.table_being_cleaned", "TableBeingCleaned"],
+    ["entry_table_ask_new_party", "customer.entry.table_ask_new_party", "TableAskNewParty"],
+  ])(
+    "DEC-DINING-GUEST-TABLE-START: %s is the table's choice, with the menu's public context and no visit",
+    async (code, messageKey, kind) => {
+      const body = {
+        schemaVersion: 1,
+        code,
+        messageKey,
+        recovery: { action: "StartTable", storeSelection: "Hidden" },
+        store: {
+          brandDisplayName: "TEST Brand",
+          storeDisplayName: "TEST Noodle House",
+          publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+          locale: "en-CA",
+        },
+      };
+      setUnseatedTableScan(false);
+      const state = await createCustomerEntryClient({
+        fetch: vi.fn().mockResolvedValueOnce(response(409, body)),
+        hash: "#qr=aaa.bbb.ccc",
+        pathname: "/",
+        search: "",
+        replaceState: vi.fn(),
+        online: () => true,
+      }).start();
+      expect(state.kind).toBe(kind);
+      expect(isUnseatedTableScan()).toBe(true);
+      setUnseatedTableScan(false);
+    },
+  );
+
+  it("DEC-DINING-GUEST-TABLE-START: a guest's answer is a second entry carrying what they tapped", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      response(409, {
+        schemaVersion: 1,
+        code: "entry_table_being_cleaned",
+        messageKey: "customer.entry.table_being_cleaned",
+        recovery: { action: "AskStaff", storeSelection: "Hidden" },
+        store: {
+          brandDisplayName: "TEST Brand",
+          storeDisplayName: "TEST Noodle House",
+          publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+          locale: "en-CA",
+        },
+      }),
+    );
+    const client = createCustomerEntryClient({
+      fetch,
+      hash: "#qr=aaa.bbb.ccc",
+      pathname: "/",
+      search: "",
+      replaceState: vi.fn(),
+      online: () => true,
+    });
+    await client.enter?.("Start");
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
+      qrToken: "aaa.bbb.ccc",
+      intent: "Start",
+    });
+    setUnseatedTableScan(false);
+  });
+
   it("reads a table no party is seated at: the menu's public context, and ordering waits", async () => {
     const body = {
       schemaVersion: 1,

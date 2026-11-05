@@ -465,6 +465,39 @@ order of the file; then publish the menu. Guests see each name in their phone's 
 kitchen shows the Chinese name first with the English one under it. Check one dish of each
 section on a phone in both languages and on the kitchen screen before testing with staff.
 
+## Guests starting free tables (WP-2423 item 5)
+
+[DEC-DINING-GUEST-TABLE-START](../spec/design/dining-guest-table-start.md). Off by default; only for a
+Store where guests pay each round first.
+
+- **Who can do what.** Turning it on: the Owner, on `Store features` (`Guests starting tables`).
+  Turning it off: the Owner, or anyone who may pause ordering (Store Manager, Area Manager), from the
+  line at the top of `Tables` (`Guests can start free tables. Turn off`). Front of house and kitchen
+  can't turn it off today; they ask a manager, or pause scanning on one table from its panel.
+- **Queue at the door.** Turn it off: new tables then need staff, and tables already started finish
+  as usual. Turning it off never strands a table.
+- **Tables that free themselves.** With nothing owed and nothing unfinished: 20 minutes after the last
+  activity if nobody ordered, 90 minutes if they did. `Tables` says so in the last 10 minutes. A
+  finished dish nobody marked served counts as handed over; there is no cleaning step. The System
+  never closes a table with an unpaid round, an unfinished dish, a refund in progress, an open call or
+  a merge: those stay on `Tables` for staff, as any other table.
+- **Next party at a quiet table.** After 5 quiet minutes with nothing owed, a new phone is asked
+  whether it is with the people there. "No, we just sat down" closes the table and starts a new one;
+  the earlier party's phones go to their receipt. A party still at the table that wants more scans
+  again.
+- **A table closed by hand** needs no `Cleaned` tap at such a Store. Any other table waiting for
+  cleaning stops refusing guests after 5 minutes, and `Tables` says `guests can start it now`.
+- **Network or device down.** Store network down: guests on mobile data can still start tables and
+  pay; staff can't see it; pause ordering from any connection to stop new scans. Host down: scanning
+  fails; use the paper order sheet in the outage procedure below. Provider down: rounds can't be paid
+  and the guest is told; take the order at the counter or on a staff round. A guest with no phone or a
+  dead battery: staff `Open table` or `Take order`, as always.
+- **Monitoring.** The `business-guest-table-close` workload (`freeing tables guests started`) runs every
+  minute. If it stops, tables stay open and the next party joins the last one: restart the worker, and
+  close tables by hand meanwhile. The log line `GUEST_TABLE_START_BUDGET_SPENT` (code only) means guests
+  at free tables were told to ask staff because more than 40 tables started in 10 minutes; if that was
+  nobody real, replace the table codes or turn the switch off.
+
 ## Store outage procedure (WP-2423 Q9)
 
 What staff do when the store network, the pilot host, the payment Provider, the card machine or a

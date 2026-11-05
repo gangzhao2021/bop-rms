@@ -2,6 +2,7 @@ import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartItemDraft, type CartView } from "../cart/types.js";
 import {
   getCustomerCsrfCredential,
+  getGuestTableStarter,
   isUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 
@@ -25,6 +26,7 @@ export type ConfigureState =
         | "checkout-in-progress"
         | "table-checking-out"
         | "not-seated"
+        | "table-start-refused"
         | "expired"
         | "abandoned"
         | "unavailable"
@@ -139,8 +141,24 @@ export function createConfigureController({
     // Coordinator 2026-10-30: a scan of a table no party is seated at started no visit; nothing
     // is sent until staff seat the party and the code is scanned again.
     if (getCustomerCsrfCredential() === null && isUnseatedTableScan()) {
-      fail(new CartClientError("cart_dining_not_seated"), false);
-      return;
+      // WP-2423 DEC-DINING-GUEST-TABLE-START: where the guest may start this table, their tap on Add
+      // starts and joins it, then the dish they configured goes in. Only a tap reaches here.
+      const starter = getGuestTableStarter();
+      if (starter === null) {
+        fail(new CartClientError("cart_dining_not_seated"), false);
+        return;
+      }
+      publish({ status: "pending", stage: "locate" });
+      const answer = await starter().catch(() => "Refused" as const);
+      if (answer !== "Started" || getCustomerCsrfCredential() === null) {
+        publish({
+          status: "table-start-refused",
+          issueCodes: [],
+          retryAfterSeconds: null,
+          canRetry: false,
+        });
+        return;
+      }
     }
     pending = plan;
     try {

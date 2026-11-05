@@ -87,6 +87,13 @@ export interface StaffDiningTable {
    */
   roundsAwaitingAcceptance: readonly { readonly roundNumber: number; readonly paidAt: string }[];
   /**
+   * WP-2423 DEC-DINING-GUEST-TABLE-START: a guest started this table, and when it frees itself if
+   * nothing else happens (null: something holds it). Absent on every other table.
+   */
+  guestStart?: { readonly closesByItselfAt: string | null } | null;
+  /** Where guests start tables: since when this table has been waiting for cleaning. */
+  blockedSince?: string | null;
+  /**
    * WP-2423 item 8 ⑤ decisions 5–7: guest rounds waiting for staff before the kitchen ("needs
    * action"; never sent or cancelled automatically). Empty from an older server.
    */
@@ -441,6 +448,19 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
           roundsAwaitingAcceptance: Object.freeze(acceptanceAwaiting),
           session,
           staffCall,
+          ...(r.guestStart === undefined || r.guestStart === null
+            ? {}
+            : {
+                guestStart: Object.freeze({
+                  closesByItselfAt:
+                    obj(r.guestStart).closesByItselfAt === null
+                      ? null
+                      : instant(obj(r.guestStart).closesByItselfAt),
+                }),
+              }),
+          ...(r.blockedSince === undefined || r.blockedSince === null
+            ? {}
+            : { blockedSince: instant(r.blockedSince) }),
         } as StaffDiningTable;
       });
       const next = data.nextAfterTableReference === null ? null : ref(data.nextAfterTableReference);
@@ -460,6 +480,14 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         canCancelUnpaidRounds: data.canCancelUnpaidRounds === true,
         /** WP-2423 item 8 ①: a manager may record that the guests left without paying. */
         canWriteOff: data.canWriteOff === true,
+        /** DEC-DINING-GUEST-TABLE-START: present while guests can start free tables here. */
+        guestTableStart:
+          data.guestTableStart === undefined || data.guestTableStart === null
+            ? null
+            : Object.freeze({
+                version: num(obj(data.guestTableStart).version),
+                canTurnOff: obj(data.guestTableStart).canTurnOff === true,
+              }),
       };
     },
     prepareAvailability(
@@ -530,6 +558,23 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         generation: num(r.generation),
         joinKind: kind(r.joinKind),
       };
+    },
+    /** Whoever may pause ordering stops guests starting tables; only ever off. */
+    async turnOffGuestTableStart(
+      csrf: string,
+      command: { readonly operationReference: string; readonly expectedVersion: number },
+    ) {
+      const answer = await send(
+        "/merchant/dining/guest-table-start/off",
+        JSON.stringify({
+          operationReference: ref(command.operationReference),
+          expectedVersion: num(command.expectedVersion),
+        }),
+        csrf,
+        undefined,
+        true,
+      );
+      return answer.guestTableStart === false ? ("Off" as const) : fail();
     },
     prepareStart(table: StaffDiningTable, operation: string) {
       const command = {

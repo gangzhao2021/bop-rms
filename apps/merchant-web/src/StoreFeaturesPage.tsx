@@ -1,3 +1,4 @@
+import { StoreGuestTableStart } from "./StoreGuestTableStart.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "./i18n/i18n.js";
@@ -473,6 +474,13 @@ export function StoreFeaturesPage({
         </div>
         {/* WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: Ordering's own setting, saved on its own. */}
         <StorePaidOrderAutoAccept
+          view={view}
+          client={client}
+          locked={busy}
+          onSaved={(next) => setView(next)}
+        />
+        {/* WP-2423 DEC-DINING-GUEST-TABLE-START: guests start a free table (Dining's own switch). */}
+        <StoreGuestTableStart
           view={view}
           client={client}
           locked={busy}

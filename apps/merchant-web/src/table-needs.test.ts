@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { StaffDiningTable } from "./dining-session-client.js";
 import { compareTables, tableInTab, tableNeed } from "./table-needs.js";
 import type { TableOrderFacts } from "./table-order-facts.js";
@@ -189,4 +189,76 @@ it("WP-2423 item 8 ⑤: a round waiting for staff needs action (never times out)
   );
   expect([joined.tone, joined.words]).toEqual(["action", "Phone 3 just joined"]);
   expect(tableInTab(table(8), joined, "Needs")).toBe(true);
+});
+
+describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
+  const closes = (minutes: number) => ({
+    closesByItselfAt: new Date(now + minutes * 60_000).toISOString(),
+  });
+  it("with no order yet says so, and warns only in the last 10 minutes", () => {
+    const empty = { orderReference: null, phase: "Active" as const, version: 2 };
+    const early = tableNeed(table(1, { session: empty, guestStart: closes(18) }), null, now);
+    expect([early.tone, early.words, early.detail]).toEqual([
+      "progress",
+      "Started by a guest",
+      "no order yet",
+    ]);
+    expect(tableNeed(table(1, { session: empty, guestStart: closes(9) }), null, now).detail).toBe(
+      "no order yet · frees itself in 9 min",
+    );
+  });
+  it("all served warns only in the last 10 minutes", () => {
+    const served = facts({ allServed: true });
+    expect(tableNeed(table(1, { guestStart: closes(80) }), served, now).detail).toBeNull();
+    expect(tableNeed(table(1, { guestStart: closes(5) }), served, now).detail).toBe(
+      "frees itself in 5 min",
+    );
+  });
+  it("a guest's unpaid round cancels itself: not a job for staff, unlike a payment not confirmed", () => {
+    const round = (minutes: number) => ({
+      orderReference: id(1),
+      orderBatchReference: id(2),
+      roundNumber: 1,
+      payBy: new Date(now + minutes * 60_000).toISOString(),
+    });
+    const unpaid = tableNeed(
+      table(1, { guestStart: closes(80), guestRoundsAwaitingPayment: [round(12)] }),
+      null,
+      now,
+    );
+    expect([unpaid.tone, unpaid.words, unpaid.detail]).toEqual([
+      "progress",
+      "Round not paid yet",
+      "12 min left",
+    ]);
+    expect(
+      tableNeed(
+        table(1, { guestStart: closes(80), guestRoundsAwaitingPayment: [round(-30)] }),
+        null,
+        now,
+      ).tone,
+    ).toBe("action");
+    // A staff-opened table is exactly as it was.
+    expect(tableNeed(table(1, { guestRoundsAwaitingPayment: [round(12)] }), null, now).tone).toBe(
+      "action",
+    );
+  });
+  it("dishes ready aren't a job for staff either, but stay one tap away", () => {
+    const need = tableNeed(table(1, { guestStart: closes(80) }), facts({ readyToServe: 2 }), now);
+    expect([need.tone, need.step]).toEqual(["progress", "ServeAll"]);
+    expect(tableNeed(table(1), facts({ readyToServe: 2 }), now).tone).toBe("action");
+  });
+  it("a table waiting for cleaning says when guests can start it anyway", () => {
+    const blocked = (minutes: number) =>
+      table(1, {
+        currentDiningSessionReference: null,
+        elapsedMinutes: null,
+        session: null,
+        operationalState: "TemporarilyBlocked",
+        blockReasonCode: "CLEANING",
+        blockedSince: new Date(now - minutes * 60_000).toISOString(),
+      });
+    expect(tableNeed(blocked(4), null, now).detail).toBeNull();
+    expect(tableNeed(blocked(5), null, now).detail).toBe("guests can start it now");
+  });
 });

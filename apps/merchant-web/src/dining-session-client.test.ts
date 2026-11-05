@@ -250,3 +250,58 @@ it("WP-2423 item 8 ⑤: reads rounds waiting for staff and phones that just join
     }),
   ).rejects.toThrow();
 });
+
+it("DEC-DINING-GUEST-TABLE-START: reads a table a guest started, and a table with no such key", async () => {
+  const row = (changes: object) => ({
+    tableReference: "01909968-0000-7000-8000-000000000001",
+    stableLabel: "T1",
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    aggregateVersion: 2,
+    currentDiningSessionReference: null,
+    elapsedMinutes: null,
+    qrCodeValidUntil: null,
+    ...changes,
+  });
+  const read = (body: object) =>
+    createDiningSessionClient(
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "content-type": "application/json", "cache-control": "no-store" },
+          }),
+      ),
+    ).tables("a".repeat(43));
+  const plain = await read({
+    canOperateTables: true,
+    items: [row({})],
+    nextAfterTableReference: null,
+  });
+  expect(plain.guestTableStart).toBeNull();
+  expect(plain.items[0]?.guestStart).toBeUndefined();
+  const at = "2026-11-05T12:00:00.000Z";
+  const started = await read({
+    canOperateTables: true,
+    guestTableStart: { version: 4, canTurnOff: true },
+    items: [
+      row({
+        currentDiningSessionReference: "01909968-0000-7000-8000-000000000002",
+        elapsedMinutes: 3,
+        guestStart: { closesByItselfAt: at },
+      }),
+      row({
+        tableReference: "01909968-0000-7000-8000-000000000003",
+        operationalState: "TemporarilyBlocked",
+        blockReasonCode: "CLEANING",
+        blockedSince: at,
+      }),
+    ],
+    nextAfterTableReference: null,
+  });
+  expect(started.guestTableStart).toEqual({ version: 4, canTurnOff: true });
+  expect(started.items[0]?.guestStart).toEqual({ closesByItselfAt: at });
+  expect(started.items[1]?.blockedSince).toBe(at);
+});

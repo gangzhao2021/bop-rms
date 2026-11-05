@@ -2,6 +2,7 @@ import { guestReadRetryWaitsMs } from "../network/read-retry.js";
 import type {
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
+  CustomerEntryIntent,
   CustomerEntryScreenState,
   CustomerEntryServiceMode,
 } from "./types.js";
@@ -234,6 +235,27 @@ function parseNotAccepting(value: unknown): CustomerEntryScreenState {
   }
 }
 
+const tableAnswers: Readonly<
+  Record<
+    string,
+    {
+      readonly kind: "TableNotOpen" | "TableMayStart" | "TableBeingCleaned" | "TableAskNewParty";
+      readonly messageKey: string;
+    }
+  >
+> = Object.freeze({
+  entry_table_not_open: { kind: "TableNotOpen", messageKey: "customer.entry.table_not_open" },
+  entry_table_may_start: { kind: "TableMayStart", messageKey: "customer.entry.table_may_start" },
+  entry_table_being_cleaned: {
+    kind: "TableBeingCleaned",
+    messageKey: "customer.entry.table_being_cleaned",
+  },
+  entry_table_ask_new_party: {
+    kind: "TableAskNewParty",
+    messageKey: "customer.entry.table_ask_new_party",
+  },
+});
+
 function parseError(
   status: number,
   value: unknown,
@@ -247,12 +269,12 @@ function parseError(
   )
     return parseNotAccepting(value);
   // Coordinator 2026-10-30: no party is seated at this table; no visit was started.
-  if (
-    status === 409 &&
-    value !== null &&
-    typeof value === "object" &&
-    (value as { code?: unknown }).code === "entry_table_not_open"
-  ) {
+  // WP-2423 DEC-DINING-GUEST-TABLE-START: nor at a table the guest may start, or is asked about.
+  const tableAnswer =
+    status === 409 && value !== null && typeof value === "object"
+      ? tableAnswers[String((value as { code?: unknown }).code)]
+      : undefined;
+  if (tableAnswer !== undefined) {
     const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery", "store"]);
     const store = exact(raw.store, [
       "brandDisplayName",
@@ -262,14 +284,14 @@ function parseError(
     ]);
     if (
       raw.schemaVersion !== 1 ||
-      raw.messageKey !== "customer.entry.table_not_open" ||
+      raw.messageKey !== tableAnswer.messageKey ||
       typeof store.locale !== "string" ||
       !localePattern.test(store.locale)
     )
       return Object.freeze({ kind: "ServiceUnavailable" });
     setUnseatedTableScan(true);
     return Object.freeze({
-      kind: "TableNotOpen",
+      kind: tableAnswer.kind,
       context: Object.freeze({
         publicStoreReference: reference(store.publicStoreReference),
         channel: "DineIn" as const,
@@ -400,7 +422,7 @@ export function createCustomerEntryClient(
     }
   };
 
-  async function receive(current: () => boolean) {
+  async function receive(current: () => boolean, intent: CustomerEntryIntent | null) {
     const controller = new AbortController();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -425,7 +447,7 @@ export function createCustomerEntryClient(
         referrerPolicy: "no-referrer",
         signal: controller.signal,
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ qrToken: token }),
+        body: JSON.stringify(intent === null ? { qrToken: token } : { qrToken: token, intent }),
       });
       try {
         guard();
@@ -477,21 +499,23 @@ export function createCustomerEntryClient(
       }
     }
   }
-  const execute = async (): Promise<CustomerEntryScreenState> => {
+  const execute = async (
+    intent: CustomerEntryIntent | null = null,
+  ): Promise<CustomerEntryScreenState> => {
     setCustomerCsrfCredential(null);
     setPaymentOperationReference(null);
     const current = captureCustomerCsrfContext();
     if (token === null) return Object.freeze({ kind: "Missing" });
     if (!online()) return Object.freeze({ kind: "Offline" });
     try {
-      let answer = await receive(current);
+      let answer = await receive(current, intent);
       // WP-2423: a 503 issued nothing, so a scan in a burst is tried again before the guest sees it.
       // Owner 2026-11-04: nor is a Store busy for half a minute (a menu being listed) an error yet.
       for (const ms of scanRetryWaitsMs) {
         if (answer.status !== 503) break;
         await new Promise((resolve) => setTimeout(resolve, ms));
         if (!online() || !current()) throw new Error("entry unavailable");
-        answer = await receive(current);
+        answer = await receive(current, intent);
       }
       const { status, body, retryAfter } = answer;
       if (!online() || !current()) throw new Error("entry unavailable");
@@ -509,11 +533,11 @@ export function createCustomerEntryClient(
       return Object.freeze({ kind: online() ? "CommandFailed" : "Offline" });
     }
   };
-  function launch() {
+  function launch(intent: CustomerEntryIntent | null = null) {
     if (flight) return flight;
     if (retryUntil !== null && performance.now() < retryUntil) return Promise.resolve(cooldown());
     retryUntil = null;
-    const pending = execute();
+    const pending = execute(intent);
     flight = pending;
     settled = pending;
     void pending.then(() => {
@@ -528,6 +552,9 @@ export function createCustomerEntryClient(
     },
     retry() {
       return flight ?? launch();
+    },
+    enter(intent: CustomerEntryIntent) {
+      return flight ?? launch(intent);
     },
   });
 }

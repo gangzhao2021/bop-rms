@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import console from "node:console";
 import { createInternalDiningBinding } from "./pilot-dining-binding.mjs";
 import { createInternalDiningJoinRequestContext } from "./pilot-dining-join.mjs";
 import { createCustomerDiningSessionBinding } from "../../apps/api/dist/customer-dining-binding-composition.js";
@@ -129,8 +130,8 @@ export async function createInternalCustomerEntry(
               }),
             }).issue({ ...input, operationReference: resources.credentials.reference() }),
           // A free table a guest may start; it commits before the issue above runs again.
-          startIfFree: (input) =>
-            createPostgresDiningGuestTableStartStore(resources.transactions, {
+          startIfFree: async (input) => {
+            const started = await createPostgresDiningGuestTableStartStore(resources.transactions, {
               scope: owner.scope,
               credentials: owner.credentials,
               pepperVersion: 1,
@@ -153,7 +154,12 @@ export async function createInternalCustomerEntry(
                   current.availableServiceModes.includes("DineIn")
                 );
               },
-            }).startIfFree(input),
+            }).startIfFree(input);
+            // Guests at free tables are being told to ask staff: worth a line in the log. Code only.
+            if (started.status === "Busy")
+              console.warn(JSON.stringify({ event: "GUEST_TABLE_START_BUDGET_SPENT" }));
+            return started;
+          },
           closeForNewParty: (input) => guestTables().closeForNewParty(input.tableReference),
         },
       },
