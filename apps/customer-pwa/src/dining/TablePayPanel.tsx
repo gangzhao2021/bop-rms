@@ -5,8 +5,9 @@ import { v7 as uuidv7 } from "uuid";
 import { t } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
 import { formatMoney } from "../journey/format.js";
+import { SlowWaitNote } from "../journey/SlowWaitNote.js";
 import { paymentConfiguration } from "../payment/payment-configuration.js";
-import { StripeCardForm } from "../payment/StripeCardForm.js";
+import { cardFormNotLoadedText, StripeCardForm } from "../payment/StripeCardForm.js";
 import {
   createTablePaymentClient,
   TablePaymentClientError,
@@ -18,6 +19,8 @@ const money = (amountMinor: string) => formatMoney(amountMinor, "CAD");
 /** "0": no tip; "other": an amount the guest types; otherwise one of the Store's percentages. */
 type TipChoice = string;
 const OTHER = "other";
+/** WP-2423 item 2: a payment still confirming after this long gets advice, not a longer wait. */
+const confirmingTooLongMs = 60_000;
 const tipOf = (choice: TipChoice, typedMinor: string | null): TableTip =>
   choice === "0"
     ? { kind: "None" }
@@ -26,6 +29,20 @@ const tipOf = (choice: TipChoice, typedMinor: string | null): TableTip =>
       : { kind: "Percent", percent: Number(choice) };
 const tipMinor = (choice: TipChoice, subtotalMinor: string) =>
   ((BigInt(subtotalMinor) * BigInt(choice) + 50n) / 100n).toString();
+
+/**
+ * WP-2423 item 2: the guest's own tap on Pay failed. No card was offered for this start, so it can say
+ * this payment wasn't charged (never "you": they may have paid for something else). What a failed read
+ * says stays about the connection only.
+ */
+function startProblemText(error: unknown) {
+  const code = error instanceof TablePaymentClientError ? error.code : "unavailable";
+  return code === "unavailable"
+    ? t(
+        "We couldn’t start the payment just now. This payment hasn’t been charged. Try again, or ask a staff member to take payment.",
+      )
+    : problemText(error);
+}
 
 function problemText(error: unknown) {
   const code = error instanceof TablePaymentClientError ? error.code : "unavailable";
@@ -123,6 +140,9 @@ export function TablePayPanel({
   // WP-2423 item 8 ④: the part of a split bill this guest pays (null: the next one to pay).
   const [part, setPart] = useState<number | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  // WP-2423 item 2: the card form's one-time value couldn't be read; the guest asks again.
+  const [handoffFailed, setHandoffFailed] = useState(false);
+  const [handoffAttempt, setHandoffAttempt] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const configuration = paymentConfiguration();
@@ -172,11 +192,20 @@ export function TablePayPanel({
   useEffect(() => {
     if (view?.state !== "Paying" || configuration?.mode !== "stripe" || clientSecret !== null)
       return;
+    let stopped = false;
+    setHandoffFailed(false);
     client
       .handoff()
-      .then(setClientSecret)
-      .catch((error: unknown) => setProblem(problemText(error)));
-  }, [view?.state, configuration?.mode, clientSecret, client]);
+      .then((secret) => {
+        if (!stopped) setClientSecret(secret);
+      })
+      .catch(() => {
+        if (!stopped) setHandoffFailed(true);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [view?.state, configuration?.mode, clientSecret, client, handoffAttempt]);
 
   if (view === null) return problem ? <p role="alert">{problem}</p> : null;
   if (!view.checkingOut && view.state !== "Paid") return null;
@@ -229,7 +258,7 @@ export function TablePayPanel({
         ),
       );
     } catch (error) {
-      setProblem(problemText(error));
+      setProblem(startProblemText(error));
       if (error instanceof TablePaymentClientError && error.code !== "unavailable") void read();
     } finally {
       setBusy(false);
@@ -357,7 +386,14 @@ export function TablePayPanel({
             </div>
           ) : configuration?.mode === "stripe" && clientSecret !== null ? (
             submitted ? (
-              <p role="status">{t("Confirming your payment…")}</p>
+              <>
+                <p role="status">{t("Confirming your payment…")}</p>
+                <SlowWaitNote active afterMs={confirmingTooLongMs}>
+                  {t(
+                    "This is taking longer than usual. Don’t pay again: ask a staff member to check this payment.",
+                  )}
+                </SlowWaitNote>
+              </>
             ) : (
               <StripeCardForm
                 publishableKey={configuration.publishableKey}
@@ -373,6 +409,21 @@ export function TablePayPanel({
                 "Card payment isn’t available on this phone. Ask a staff member to take the payment.",
               )}
             </p>
+          ) : handoffFailed ? (
+            // A reload loses "submitted": a card may be confirming, so nothing is said about money.
+            <div role="alert">
+              <p>{cardFormNotLoadedText()}</p>
+              <button
+                type="button"
+                disabled={!online}
+                onClick={() => {
+                  setHandoffFailed(false);
+                  setHandoffAttempt((count) => count + 1);
+                }}
+              >
+                {t("Try again")}
+              </button>
+            </div>
           ) : (
             <p role="status">{t("Preparing the secure card form…")}</p>
           )}

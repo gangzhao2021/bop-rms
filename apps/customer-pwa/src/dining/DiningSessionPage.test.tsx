@@ -351,6 +351,35 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
     });
   });
 
+  describe("WP-2423 item 6: the page a guest lands on after placing a round", () => {
+    const ready = { status: "ready", view: view(), refreshing: false } as const;
+    const placing = (placed: "Sent" | "Held" | null) =>
+      renderToStaticMarkup(
+        <MemoryRouter initialEntries={["/dine-in/session"]}>
+          <DiningSessionScreen
+            state={ready}
+            store={store}
+            onRefresh={() => undefined}
+            placed={placed}
+          />
+        </MemoryRouter>,
+      );
+
+    it("says the order was placed, and never that it went to the kitchen", () => {
+      const sent = placing("Sent");
+      expect(sent).toContain('<p class="dining-session__placed" role="status">Order placed.</p>');
+      const held = placing("Held");
+      expect(held).toContain("Order placed. Staff confirm it first.");
+      expect(placing(null)).not.toContain("Order placed");
+    });
+
+    it("lists the newest round first, with numbers unchanged", () => {
+      const html = placing(null);
+      expect(html.indexOf("Round 2 ·")).toBeGreaterThan(-1);
+      expect(html.indexOf("Round 2 ·")).toBeLessThan(html.indexOf("Round 1 ·"));
+    });
+  });
+
   it("WP-2423 Q26: says which dish the kitchen is making again and that it will come to the table", () => {
     const ramen = round().items[0];
     if (ramen === undefined) throw new Error("fixture");

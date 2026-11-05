@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
@@ -23,6 +24,10 @@ const technicalAttributes = new Set([
   "htmlFor",
   "key",
   "to",
+  "path",
+  "cartPath",
+  "resultPath",
+  "sizes",
   "href",
   "type",
   "role",
@@ -67,6 +72,9 @@ function attributeName(node: ts.Node): string | null {
 const machineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
   // One-time order link page states (compared, never shown).
   "../resume/ResumeScreen.tsx": new Set(["Opening", "Expired", "Open", "TryAgain", "TooManyTries"]),
+  // What the page tells the table page it did (router state, never shown).
+  "../cart/CartPage.tsx": new Set(["Held", "Sent"]),
+  "../checkout/CheckoutPage.tsx": new Set(["Held", "Sent"]),
   // Contact-method and receipt-choice values of the checkout details contract.
   "../checkout/CheckoutDetailsForm.tsx": new Set([
     "Phone",
@@ -98,6 +106,12 @@ function isMachineUse(node: ts.Node): boolean {
   if (ts.isLiteralTypeNode(parent) || ts.isCaseClause(parent)) return true;
   if (ts.isElementAccessExpression(parent) && parent.argumentExpression === node) return true;
   if (ts.isPropertyAssignment(parent) && parent.name === node) return true;
+  // A state's tag, or a browser setting: never read by a guest.
+  if (
+    ts.isPropertyAssignment(parent) &&
+    /^(?:kind|status|state|step|channel|choice|action|rootMargin)$/u.test(parent.name.getText())
+  )
+    return true;
   if (
     ts.isBinaryExpression(parent) &&
     [
@@ -111,7 +125,7 @@ function isMachineUse(node: ts.Node): boolean {
     const callee = parent.expression.getText();
     if (/(?:^|\.)(?:includes|startsWith|endsWith|getElementById|querySelector)$/u.test(callee))
       return true;
-    if (/^(?:Error|TypeError)$/u.test(callee)) return true;
+    if (/^(?:Error|TypeError|super|navigate)$/u.test(callee)) return true;
   }
   return false;
 }
@@ -123,8 +137,25 @@ function literalText(node: ts.Node): string | null {
   return null;
 }
 
-/** Inline guest-visible text in one component source: JSX text and sentence-like literals. */
-export function findInlineGuestText(fileName: string, source: string): string[] {
+/** Whether a literal is what's being translated: the English text passed to `t()`, not a value. */
+function isTranslatedText(node: ts.Node): boolean {
+  const parent = node.parent;
+  return (
+    ts.isCallExpression(parent) &&
+    parent.expression.getText() === "t" &&
+    parent.arguments[0] === node
+  );
+}
+
+/**
+ * Inline guest-visible text in one component source: JSX text and sentence-like literals.
+ * `translated`: text passed to `t()` is fine (the dictionary test checks it has its Chinese).
+ */
+export function findInlineGuestText(
+  fileName: string,
+  source: string,
+  { translated = false }: { readonly translated?: boolean } = {},
+): string[] {
   const file = ts.createSourceFile(
     fileName,
     source,
@@ -141,6 +172,7 @@ export function findInlineGuestText(fileName: string, source: string): string[] 
     }
     const text = literalText(node);
     if (text !== null) {
+      if (translated && isTranslatedText(node)) return;
       const attribute = attributeName(node);
       const technical =
         attribute !== null && (technicalAttributes.has(attribute) || attribute.startsWith("data-"));
@@ -160,6 +192,109 @@ export function findInlineGuestText(fileName: string, source: string): string[] 
   visit(file);
   return found;
 }
+
+const sourceRoot = new URL("..", import.meta.url).pathname;
+/** Local previews and the entry points read no guest text; the dictionary is checked by itself. */
+const unguarded = /^(?:customer-demo|customer-entry-lifecycle-demo|main\.|i18n\/)/u;
+function pageSources(directory: string): string[] {
+  return readdirSync(directory).flatMap((name) => {
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) return pageSources(path);
+    const file = relative(sourceRoot, path);
+    return file.endsWith(".tsx") && !file.endsWith(".test.tsx") && !unguarded.test(file)
+      ? [file]
+      : [];
+  });
+}
+
+/**
+ * Reviewed codes every page compares or passes around under other names (never rendered), by file.
+ * A literal rendered to a guest doesn't belong here: it goes through `t()`.
+ */
+const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
+  // What the page tells the table page it did (router state, never shown).
+  "cart/CartPage.tsx": new Set(["Held", "Sent"]),
+  "checkout/CheckoutPage.tsx": new Set(["Held", "Sent"]),
+  "checkout/CheckoutDetailsForm.tsx": new Set([
+    "Phone",
+    "Email",
+    "InSession",
+    "TransactionalEmail",
+  ]),
+  "delivery-status/DeliveryStatusPage.tsx": new Set(["Unavailable"]),
+  "dining/DiningAdmissionPanel.tsx": new Set([
+    "Unknown",
+    "Ready",
+    "Unavailable",
+    "Invalid",
+    "Joining",
+    "Bound",
+  ]),
+  // The round statuses that mean nothing more will happen.
+  "dining/DiningSessionPage.tsx": new Set(["Served"]),
+  "dining/DiningStaffCallPanel.tsx": new Set(["Question", "Withdrawn"]),
+  // What the error says in a log; a guest never sees it.
+  "dining/SettledTableReceipt.tsx": new Set(["settled table receipt "]),
+  // The name of the kind of tip sent to the server.
+  "dining/TablePayPanel.tsx": new Set(["None", "Amount", "Percent"]),
+  "entry/EntryContextPage.tsx": new Set(["Missing", "Loading", "/menu"]),
+  "member/MemberPage.tsx": new Set(["Loading", "Ready", "Failed", "Left"]),
+  "menu/MenuPage.tsx": new Set([
+    "Loading",
+    "88px",
+    "(min-width: 960px) 45vw, (min-width: 736px) 640px, calc(100vw - 64px)",
+    "configure-price- - ",
+    "configure-allergens- - ",
+  ]),
+  "order-status/OrderStatusPage.tsx": new Set([
+    "Refunded",
+    "Pending",
+    "All",
+    "Some",
+    "None",
+    "Unknown",
+    "Served",
+    "Queued",
+    "Ready",
+    "Preparing",
+    "Submitted",
+    "Accepted",
+  ]),
+  "payment/SessionPaymentResultPage.tsx": new Set(["Checking"]),
+  // The instruction the server sends, compared to show it in the guest's language.
+  "pickup-code/PickupCodePanel.tsx": new Set([
+    "Show this pickup confirmation to staff at the pickup counter.",
+  ]),
+  "resume/ResumeScreen.tsx": new Set(["Expired", "Opening"]),
+  // How a formatter joins its parts, never its words.
+  "store/StoreIdentity.tsx": new Set(["Line"]),
+};
+
+describe("WP-2423 item 2: no bare English on any guest page", () => {
+  for (const file of pageSources(sourceRoot))
+    it(`${file} shows nothing outside the dictionary`, () => {
+      const source = readFileSync(join(sourceRoot, file), "utf8");
+      const found = findInlineGuestText(file, source, { translated: true }).filter(
+        (text) => !(pageMachineCodes[file]?.has(text) ?? false),
+      );
+      expect(found).toEqual([]);
+    });
+
+  it("catches bare words beside translated ones, and inside a translated sentence's values", () => {
+    const sample = `export const A = ({ busy, n }: { busy: boolean; n: number }) => (
+      <>
+        <button>{busy ? "Refreshing…" : t("Refresh code")}</button>
+        <dd>{busy ? t("Total") : "Calculating…"}</dd>
+        <p>{t("{value1} is required.", { value1: \`Choice group \${n}\` })}</p>
+      </>
+    );`;
+    expect(findInlineGuestText("sample.tsx", sample, { translated: true })).toEqual([
+      "Refreshing…",
+      "Calculating…",
+      "Choice group  ",
+    ]);
+  });
+});
 
 describe("WP-2423 C5: guest text in the order flows comes from the messages catalog", () => {
   for (const path of guardedComponents)

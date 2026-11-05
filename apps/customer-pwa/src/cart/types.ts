@@ -1,4 +1,5 @@
 import { t } from "../i18n/i18n.js";
+import { getTablePaymentTiming } from "../session/customer-transaction-context.js";
 export interface CartMoney {
   readonly amountMinor: string;
   readonly currency: string;
@@ -141,6 +142,9 @@ export function orderProcessingMessage(retryAfterSeconds: number | null): string
  * the same table is checking out this cart. Nothing was changed; they can try again after the wait.
  */
 export function checkoutInProgressMessage(retryAfterSeconds: number | null): string {
+  // WP-2423 item 6: at a table that pays at the end nobody is paying; someone is placing an order.
+  if (getTablePaymentTiming() === "PayLater")
+    return t("Someone at your table is placing an order. Try again in a moment.");
   const base = t("Another guest at your table is paying for this order.");
   if (retryAfterSeconds === null) return t("{base} Try again shortly.", { base });
   if (retryAfterSeconds <= 60) return t("{base} Try again in a moment.", { base });

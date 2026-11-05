@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoInternalText } from "./internal-text-guard";
 import { routeStorefrontReads } from "./storefront-reads";
 
@@ -1256,5 +1256,160 @@ test.describe("@production DEC-DINE-IN-PAY-LATER S4 the guest pays the whole tab
       },
     ]);
     await expectNoInternalText(page);
+  });
+
+  // WP-2423 item 2: every wait on the bill ends with something the guest can do.
+  const tableBill = async (
+    page: Page,
+    answers: {
+      readonly start?: (route: Route, call: number) => Promise<void> | void;
+      readonly handoff?: (route: Route, call: number) => Promise<void> | void;
+      readonly initial?: "NotPaid" | "Paying";
+    },
+  ) => {
+    await page.route("**/bff/customer/payment-configuration", (route) =>
+      route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          schemaVersion: 1,
+          mode: "stripe",
+          publishableKey: "pk_test_SyntheticBrowserOnly",
+          returnUrl: "https://synthetic-return.invalid/return",
+          wallets: false,
+          internalTestEntry: false,
+        },
+      }),
+    );
+    await page.route("https://js.stripe.com/**", (route) =>
+      route.fulfill({ contentType: "application/javascript", body: syntheticStripe }),
+    );
+    let state: "NotPaid" | "Paying" = answers.initial ?? "NotPaid";
+    let starts = 0;
+    let handoffs = 0;
+    const bill = () => ({
+      schemaVersion: 1,
+      payment: {
+        tableLabel: "12",
+        checkingOut: true,
+        rounds: [
+          {
+            roundNumber: 1,
+            items: [{ displayName: "Synthetic tonkotsu ramen", subtotalMinor: "1800" }],
+            totalMinor: "2034",
+          },
+        ],
+        owed: { subtotalMinor: "1800", taxMinor: "234", totalMinor: "2034" },
+        consistent: true,
+        tips: { enabled: false, tierPercents: [10, 15, 18] },
+        state,
+        attempt: state === "Paying" ? { totalMinor: "2034", tipMinor: "0" } : null,
+        receipt: null,
+      },
+    });
+    await page.route("**/api/v1/dine-in/table-payment", async (route) => {
+      const body = route.request().postDataJSON() as { action: string };
+      if (body.action === "Start") {
+        starts += 1;
+        if (answers.start) {
+          await answers.start(route, starts);
+          if (route.request().postDataJSON() && starts === 1) return;
+        }
+        state = "Paying";
+      }
+      await route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: bill(),
+      });
+    });
+    await page.route("**/api/v1/dine-in/table-payment/handoff", async (route) => {
+      handoffs += 1;
+      if (answers.handoff) return answers.handoff(route, handoffs);
+      return route.fulfill({
+        status: 200,
+        headers: { "cache-control": "no-store" },
+        json: { schemaVersion: 1, clientSecret: "pi_SYNTHETIC_secret_SYNTHETIC" },
+      });
+    });
+    await enterTable(page, () => ({
+      status: 200,
+      json: {
+        schemaVersion: 1,
+        session: {
+          ...session.session,
+          paymentTiming: "PayLater",
+          rounds: [{ ...session.session.rounds[0], payment: "OnTableBill" }],
+        },
+      },
+    }));
+    return page.getByRole("region", { name: "Pay the bill" });
+  };
+  const noHandoff = (route: Route) =>
+    route.fulfill({
+      status: 503,
+      headers: { "cache-control": "no-store" },
+      json: { schemaVersion: 1, error: { code: "unavailable" } },
+    });
+
+  test("a failed Pay says this payment wasn't charged and offers it again", async ({ page }) => {
+    const pay = await tableBill(page, {
+      start: (route, call) =>
+        call === 1
+          ? route.fulfill({
+              status: 503,
+              headers: { "cache-control": "no-store" },
+              json: { schemaVersion: 1, error: { code: "unavailable" } },
+            })
+          : undefined,
+    });
+    await pay.getByRole("button", { name: "Pay $20.34" }).click();
+    await expect(pay.getByRole("alert")).toHaveText(
+      "We couldn’t start the payment just now. This payment hasn’t been charged. Try again, or ask a staff member to take payment.",
+    );
+    await expect(pay).not.toContainText("You haven’t been charged");
+    await expect(pay.getByRole("button", { name: "Pay $20.34" })).toBeEnabled();
+    await expectNoInternalText(page);
+  });
+
+  test("a card form that can’t be prepared offers a retry", async ({ page }) => {
+    const pay = await tableBill(page, {
+      handoff: (route, call) =>
+        call === 1
+          ? noHandoff(route)
+          : route.fulfill({
+              status: 200,
+              headers: { "cache-control": "no-store" },
+              json: { schemaVersion: 1, clientSecret: "pi_SYNTHETIC_secret_SYNTHETIC" },
+            }),
+    });
+    await pay.getByRole("button", { name: "Pay $20.34" }).click();
+    await expect(pay.getByRole("alert")).toContainText("The secure card form didn’t load.");
+    await expect(pay).not.toContainText("Preparing the secure card form");
+    await pay.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(pay.getByRole("button", { name: "Pay securely" })).toBeEnabled();
+    await expect(pay.getByRole("alert")).toHaveCount(0);
+  });
+
+  // A reload forgets the card was submitted: it may be confirming, so nothing is said about money.
+  test("a table payment reopened after a reload never says it wasn’t charged", async ({ page }) => {
+    const pay = await tableBill(page, { initial: "Paying", handoff: noHandoff });
+    await expect(pay.getByRole("alert")).toContainText(
+      "If you already entered your card, ask a staff member to check before paying again.",
+    );
+    await expect(pay).not.toContainText("hasn’t been charged");
+    await expect(pay.getByRole("button", { name: "Try again", exact: true })).toBeEnabled();
+  });
+
+  test("a payment still confirming after a minute says don’t pay again", async ({ page }) => {
+    await page.clock.install();
+    const pay = await tableBill(page, {});
+    await pay.getByRole("button", { name: "Pay $20.34" }).click();
+    await pay.getByRole("button", { name: "Pay securely" }).click();
+    await expect(pay.getByText("Confirming your payment…")).toBeVisible();
+    await expect(pay).not.toContainText("Don’t pay again");
+    await page.clock.runFor(60_000);
+    await expect(pay.getByRole("status").filter({ hasText: "Don’t pay again" })).toHaveText(
+      "This is taking longer than usual. Don’t pay again: ask a staff member to check this payment.",
+    );
   });
 });

@@ -3,8 +3,8 @@ import {
   getGuestTableStarter,
   isGuestTableQuestion,
 } from "../session/customer-transaction-context.js";
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { Link } from "react-router";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Link, useNavigate } from "react-router";
 import { createBrowserCustomerCartClient } from "./cart-client.js";
 import {
   createCartStateController,
@@ -18,13 +18,26 @@ import {
   type CartView,
 } from "./types.js";
 import { formatCartMoney } from "./format-money.js";
-import { cartItemShortMessage } from "../checkout/item-refusal-message.js";
+import {
+  cartItemShortMessage,
+  checkoutItemRefusalMessage,
+} from "../checkout/item-refusal-message.js";
+import {
+  sharedSendRoundController,
+  type SeenSubtotal,
+  type SendRoundController,
+  type SendRoundState,
+} from "../checkout/send-round.js";
+import { DiningStaffCallPanel } from "../dining/DiningStaffCallPanel.js";
+import type { DiningSessionClient } from "../dining/dining-session-client.js";
+import { useTablePaymentTiming, type TableTimingAnswer } from "../dining/table-timing.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatMinutesUntil, formatMoney } from "../journey/format.js";
+import { SlowWaitNote } from "../journey/SlowWaitNote.js";
 import {
   quoteConsistentLinePrices,
   cartLinesSubtotal,
-  usePublishedMenu,
+  usePublishedMenuRead,
   type CartLinePrice,
 } from "../menu/menu-line-prices.js";
 import type { CustomerMenuClient, MenuJourneyContext, MenuView } from "../menu/types.js";
@@ -33,6 +46,7 @@ import {
   cartIssueMessage,
   cartItemWarningMessage,
   cartText,
+  checkoutText,
   commonText,
   lineEstimateLabel,
   quoteIssueMessage,
@@ -74,8 +88,11 @@ function CartItem({
   controller,
   price,
   allergens,
+  payLater,
 }: {
   readonly item: CartItemView;
+  /** WP-2423 item 6: a table that pays at the end has no checkout to promise a price at. */
+  readonly payLater: boolean;
   /** WP-2423 item 8 ⑥ part 4: a combo's chosen dishes' allergens (null for other lines). */
   readonly allergens: string | null;
   /** The line's price before tax when it can be stated (the Store's, or the published one). */
@@ -115,9 +132,11 @@ function CartItem({
         <p className="cart-item__estimate">
           {price !== null
             ? formatMoney(price.amountMinor, price.currency)
-            : item.lineEstimate.status === "Unavailable"
-              ? lineEstimateLabel(item.lineEstimate.reasonCode)
-              : formatCartMoney(item.lineEstimate.total)}
+            : item.lineEstimate.status !== "Unavailable"
+              ? formatCartMoney(item.lineEstimate.total)
+              : payLater
+                ? null
+                : lineEstimateLabel(item.lineEstimate.reasonCode)}
         </p>
       </div>
       {foreign ? (
@@ -173,11 +192,14 @@ function CartSummary({
   cart,
   now,
   subtotal,
+  payLater,
 }: {
   readonly cart: CartView;
   readonly now: () => number;
   /** Every line's price before tax added up, when each one can be stated; null otherwise. */
   readonly subtotal: CartLinePrice | null;
+  /** WP-2423 item 6: the table pays at the end: no checkout to point at, no prices to lock. */
+  readonly payLater: boolean;
 }) {
   if (cart.cart.lifecycle.status !== "Active")
     return (
@@ -200,7 +222,13 @@ function CartSummary({
           </dl>
         )}
         <p>
-          {subtotal === null ? cartText.summary.totalAtCheckout : cartText.summary.taxAtCheckout}
+          {payLater
+            ? subtotal === null
+              ? cartText.summary.totalOnTableBill
+              : cartText.summary.taxOnTableBill
+            : subtotal === null
+              ? cartText.summary.totalAtCheckout
+              : cartText.summary.taxAtCheckout}
         </p>
       </section>
     );
@@ -234,11 +262,13 @@ function CartSummary({
           <dd>{formatCartMoney(quote.total)}</dd>
         </div>
       </dl>
-      <p className="cart-summary__validity">
-        {remaining === null
-          ? cartText.summary.pricesExpired
-          : commonText.pricesConfirmedFor(remaining)}
-      </p>
+      {payLater ? null : (
+        <p className="cart-summary__validity">
+          {remaining === null
+            ? cartText.summary.pricesExpired
+            : commonText.pricesConfirmedFor(remaining)}
+        </p>
+      )}
       {[
         ...quote.blockingReasons.map((code) => quoteIssueMessage(code, true)),
         ...quote.warnings.map((code) => quoteIssueMessage(code, false)),
@@ -331,16 +361,117 @@ function ErrorState({
   );
 }
 
+/**
+ * WP-2423 item 6: what a stopped send says, under the button. Nothing here repeats an unknown answer:
+ * that one has its own panel, above everything, because the cart it was about may be gone.
+ */
+function SendRoundMessage({
+  round,
+  cart,
+  onRetry,
+}: {
+  readonly round: SendRoundState;
+  readonly cart: CartView;
+  readonly onRetry: () => void;
+}) {
+  switch (round.status) {
+    case "confirm-total": {
+      const total = formatCartMoney(round.total);
+      return (
+        <p role="alert">
+          {round.reason === "changed"
+            ? cartText.priceChangedTotal(total)
+            : round.reason === "fees"
+              ? cartText.orderComesToWithFees(total)
+              : cartText.orderComesTo(total)}
+        </p>
+      );
+    }
+    case "blocked":
+      return (
+        <div role="alert">
+          {round.messages.map((message) => (
+            <p key={message}>{message}</p>
+          ))}
+        </div>
+      );
+    case "refused":
+      return (
+        <p role="alert">{checkoutItemRefusalMessage(round.refusal, round.line, cart.cart.items)}</p>
+      );
+    case "store-closed":
+      return (
+        <div role="alert">
+          <p>{checkoutText.storeClosed}</p>
+          <Link to="/dine-in/session">{checkoutText.backToYourTable}</Link>
+        </div>
+      );
+    case "busy":
+      return (
+        <div role="alert">
+          <p>
+            {round.wait === "order-processing"
+              ? orderProcessingMessage(round.retryAfterSeconds)
+              : checkoutInProgressMessage(round.retryAfterSeconds)}
+          </p>
+          <button type="button" onClick={onRetry}>
+            {commonText.tryAgain}
+          </button>
+        </div>
+      );
+    case "table-checking-out":
+      return <p role="alert">{cartText.failure.tableCheckingOut[1]}</p>;
+    case "session-ended":
+      return <p role="alert">{checkoutText.sessionEnded}</p>;
+    case "cart-changed":
+      return <p role="alert">{cartText.failure.conflict[1]}</p>;
+    default:
+      return null;
+  }
+}
+
+/** The answer to a send got lost: it may or may not have been placed, and asking again is safe. */
+function UnconfirmedOrder({
+  online,
+  onRetry,
+}: {
+  readonly online: boolean;
+  readonly onRetry: () => void;
+}) {
+  return (
+    <>
+      <section className="checkout-attention" role="alert">
+        <p>{cartText.orderUnconfirmed}</p>
+        <button type="button" disabled={!online} onClick={onRetry}>
+          {commonText.tryAgain}
+        </button>
+        <Link to="/dine-in/session">{cartText.checkYourTable}</Link>
+      </section>
+      <DiningStaffCallPanel />
+    </>
+  );
+}
+
 function CartContent({
   state,
   controller,
   now,
   menu,
+  timing,
+  round,
+  menuSettled,
+  onPlace,
 }: {
   readonly state: CartState;
   readonly controller: CartStateController;
   readonly now: () => number;
   readonly menu: MenuView | null;
+  /** WP-2423 item 6: how this table pays, and where its one-tap order stands. */
+  readonly timing: TableTimingAnswer;
+  readonly round: SendRoundState;
+  /** Prices have been read, or that read took too long to wait for. */
+  readonly menuSettled: boolean;
+  readonly onPlace: (cart: CartView, seen: SeenSubtotal | null) => void;
 }) {
   if (state.status === "loading")
     return (
@@ -355,7 +486,17 @@ function CartContent({
       state.cart.cart.items.length === 0 &&
       state.cart.cart.warnings.length === 0)
   )
-    return (
+    return round.status === "cart-changed" ? (
+      // A second phone tapped after the first sent: without this she'd add it all again.
+      <StateMessage heading={cartText.someonePlacedIt}>
+        <div className="cart-state__actions">
+          <Link className="cart-primary-link" to="/dine-in/session">
+            {cartText.seeYourTable}
+          </Link>
+          <Link to="/menu">{commonText.browseMenu}</Link>
+        </div>
+      </StateMessage>
+    ) : (
       <StateMessage heading={commonText.emptyCartHeading}>
         <p>{cartText.emptyBody}</p>
         <Link className="cart-primary-link" to="/menu">
@@ -388,6 +529,14 @@ function CartContent({
   const pending = state.status === "command-pending";
   const terminal = cart.cart.lifecycle.status !== "Active";
   const count = cart.cart.items.reduce((total, item) => total + item.quantity, 0);
+  const payLater = timing === "PayLater";
+  // WP-2423 item 6: while a round is on its way the cart holds still: a change now would refuse the
+  // round, and leaving would hide what it answers. An unknown answer holds it too.
+  const sending = round.status === "sending";
+  const held = sending || round.status === "unconfirmed";
+  const othersItems = cart.cart.items
+    .filter((item) => item.warnings.includes("OTHER_PARTICIPANT_ITEM"))
+    .reduce((total, item) => total + item.quantity, 0);
   const currentQuote =
     cart.cart.quote !== null && cart.cart.quote.cartVersion === cart.cart.version
       ? cart.cart.quote.subtotal
@@ -447,7 +596,7 @@ function CartContent({
           {cartText.stale}
         </div>
       ) : null}
-      {cart.cart.warnings.includes("QUOTE_EXPIRED") ? (
+      {cart.cart.warnings.includes("QUOTE_EXPIRED") && !payLater ? (
         <div className="cart-stale" role="status">
           {cartText.quoteExpired}
         </div>
@@ -468,9 +617,11 @@ function CartContent({
                 item.configuration.map((option) => option.optionReference),
               )}
               price={prices.get(item.cartItemReference) ?? null}
+              payLater={payLater}
               pending={pending}
               readOnly={
                 readOnly ||
+                held ||
                 state.status === "command-failed" ||
                 terminal ||
                 cart.cart.warnings.includes("PROJECTION_STALE")
@@ -479,19 +630,69 @@ function CartContent({
             />
           ))}
         </section>
-        <CartSummary cart={cart} now={now} subtotal={cartLinesSubtotal(prices)} />
+        <CartSummary
+          cart={cart}
+          now={now}
+          subtotal={cartLinesSubtotal(prices)}
+          payLater={payLater}
+        />
       </div>
       <section className="cart-next-actions" aria-label={cartText.actionsLabel}>
-        <Link to="/menu">{terminal ? commonText.browseMenu : cartText.continueShopping}</Link>
-        {!terminal && !readOnly ? (
+        {sending ? (
+          <Link
+            to="/menu"
+            aria-disabled="true"
+            tabIndex={-1}
+            onClick={(event) => event.preventDefault()}
+          >
+            {cartText.continueShopping}
+          </Link>
+        ) : (
+          <Link to="/menu">{terminal ? commonText.browseMenu : cartText.continueShopping}</Link>
+        )}
+        {terminal || readOnly ? null : timing === "Loading" ? (
+          <button className="cart-checkout-link" type="button" disabled>
+            {cartText.continueWaiting}
+          </button>
+        ) : payLater ? (
+          <>
+            {othersItems === 0 ? null : (
+              <p className="cart-next-actions__note">{cartText.alsoPlacesOthers(othersItems)}</p>
+            )}
+            <p className="cart-next-actions__note">{cartText.allergiesBeforeOrdering}</p>
+            <button
+              className="cart-checkout-link"
+              type="button"
+              disabled={
+                held ||
+                state.status !== "ready" ||
+                !menuSettled ||
+                cart.cart.warnings.includes("PROJECTION_STALE")
+              }
+              onClick={() => onPlace(cart, cartLinesSubtotal(prices))}
+            >
+              {sending
+                ? cartText.placingOrder
+                : round.status === "confirm-total"
+                  ? cartText.placeOrderWithTotal(formatCartMoney(round.total))
+                  : cartText.placeOrder}
+            </button>
+            <SlowWaitNote active={sending}>{cartText.placedSlowly}</SlowWaitNote>
+            <SendRoundMessage round={round} cart={cart} onRetry={() => onPlace(cart, null)} />
+            <p className="cart-next-actions__note">{checkoutText.sendToKitchenNote}</p>
+          </>
+        ) : (
           <Link className="cart-checkout-link" to="/checkout">
             {cartText.checkout}
           </Link>
-        ) : null}
+        )}
       </section>
     </>
   );
 }
+
+/** Cart prices come from a full menu read; an ordinary guest gets one tap once it's in. */
+const menuPriceWaitMs = 2_000;
 
 export function CartPage({
   controller: provided,
@@ -499,6 +700,8 @@ export function CartPage({
   now = Date.now,
   menuContext,
   menuClient,
+  sendRound,
+  diningClient,
 }: {
   readonly controller?: CartStateController;
   readonly store?: CustomerStoreContext | undefined;
@@ -506,10 +709,29 @@ export function CartPage({
   /** The published menu prices lines the Store hasn't priced yet (as shown on the item page). */
   readonly menuContext?: MenuJourneyContext | undefined;
   readonly menuClient?: CustomerMenuClient | undefined;
+  /** WP-2423 item 6: the one-tap order at a table that pays at the end (tests inject). */
+  readonly sendRound?: SendRoundController | undefined;
+  /** How the table pays, when it isn't known yet (tests inject). */
+  readonly diningClient?: DiningSessionClient | undefined;
 }) {
   const [controller] = useState(
     () => provided ?? createCartStateController({ client: createBrowserCustomerCartClient() }),
   );
+  const [round] = useState(() => sendRound ?? sharedSendRoundController());
+  const navigate = useNavigate();
+  const roundState = useSyncExternalStore(round.subscribe, round.getState, round.getState);
+  const [online, setOnline] = useState(
+    () => typeof navigator === "undefined" || navigator.onLine !== false,
+  );
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine !== false);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
   const state = useSyncExternalStore(
     controller.subscribe,
     controller.getState,
@@ -529,7 +751,7 @@ export function CartPage({
     };
   }, [controller]);
   const cart = "cart" in state && state.cart !== null ? state.cart.cart : null;
-  const menu = usePublishedMenu(
+  const { menu, settled } = usePublishedMenuRead(
     menuContext,
     menuClient,
     // Also for a line with choices: a combo's chosen dishes show their allergens.
@@ -537,6 +759,42 @@ export function CartPage({
       (item) => item.lineEstimate.status !== "Available" || item.configuration.length > 0,
     ) ?? false,
   );
+  const [menuWaitOver, setMenuWaitOver] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMenuWaitOver(true), menuPriceWaitMs);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const timing = useTablePaymentTiming(cart?.orderType === "DineIn", diningClient);
+  // Leaving forgets a stop; an answer still unknown stays, to be finished when the guest is back.
+  useEffect(
+    () => () => {
+      const left = round.getState().status;
+      if (left !== "sending" && left !== "unconfirmed") round.reset();
+    },
+    [round],
+  );
+  // What the send's answer means for this page, once.
+  const acted = useRef<SendRoundState | null>(null);
+  useEffect(() => {
+    if (acted.current === roundState) return;
+    acted.current = roundState;
+    if (roundState.status === "sent") {
+      round.reset();
+      void navigate("/dine-in/session", {
+        replace: true,
+        state: { placed: roundState.held ? "Held" : "Sent" },
+      });
+    } else if (roundState.status === "needs-page" || roundState.status === "pay-first") {
+      round.reset();
+      void navigate("/checkout");
+    } else if (
+      roundState.status === "confirm-total" ||
+      roundState.status === "cart-changed" ||
+      roundState.status === "refused"
+    )
+      // The summary shows the quote's total; a changed cart shows what it holds now.
+      void controller.load();
+  }, [controller, navigate, round, roundState]);
   const resolvedStore: CustomerStoreContext | undefined =
     store ??
     (cart
@@ -550,10 +808,29 @@ export function CartPage({
     <CustomerPage step="cart" store={resolvedStore} className="cart-page">
       <PageHeading title={cartText.pageHeading} />
       <div id="cart-content">
-        <CartContent state={state} controller={controller} now={now} menu={menu} />
+        {roundState.status === "unconfirmed" ? (
+          <UnconfirmedOrder
+            online={online}
+            onRetry={() => void round.send("cart" in state ? state.cart : null, null)}
+          />
+        ) : null}
+        <CartContent
+          state={state}
+          controller={controller}
+          now={now}
+          menu={menu}
+          timing={timing}
+          round={roundState}
+          menuSettled={settled || menuWaitOver}
+          onPlace={(placed, seen) => void round.send(placed, seen)}
+        />
       </div>
       <div className="sr-only" role="status" aria-live="polite">
-        {cartText.stateAnnouncement[state.status]}
+        {roundState.status === "cart-changed" && cart !== null && cart.items.length === 0
+          ? cartText.someonePlacedIt
+          : roundState.status === "cart-changed" && state.status === "empty"
+            ? cartText.someonePlacedIt
+            : cartText.stateAnnouncement[state.status]}
       </div>
     </CustomerPage>
   );

@@ -1,4 +1,5 @@
 import { nameLocale } from "../i18n/i18n.js";
+import { boundedJsonFetch } from "../network/bounded-fetch.js";
 import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
@@ -281,9 +282,9 @@ export function createTablePaymentClient(request: typeof fetch = globalThis.fetc
     const csrf = getCustomerCsrfCredential();
     const current = captureCustomerCsrfContext();
     if (csrf === null || !/^[A-Za-z0-9_-]{43}$/u.test(csrf)) return fail("not-found");
-    let response: Response;
+    let answer: Awaited<ReturnType<typeof boundedJsonFetch>>;
     try {
-      response = await request("/api/v1/dine-in/table-payment" + path, {
+      answer = await boundedJsonFetch(request, "/api/v1/dine-in/table-payment" + path, {
         method: "POST",
         credentials: "include",
         cache: "no-store",
@@ -299,7 +300,8 @@ export function createTablePaymentClient(request: typeof fetch = globalThis.fetc
     } catch {
       return fail();
     }
-    const payload = (await response.json().catch(() => null)) as {
+    const { response } = answer;
+    const payload = answer.payload as {
       error?: { code?: unknown };
       clientSecret?: unknown;
     } | null;

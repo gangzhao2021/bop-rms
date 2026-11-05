@@ -1,3 +1,4 @@
+import { boundedJsonFetch } from "../network/bounded-fetch.js";
 import {
   getCustomerCsrfCredential,
   getSettledTableReceiptCsrf,
@@ -89,9 +90,9 @@ export interface MemberRedemptionOptions {
 async function post<T>(body: Record<string, unknown>): Promise<T> {
   const csrf = getCustomerCsrfCredential() ?? getSettledTableReceiptCsrf();
   if (csrf === null) throw new MemberClientError("member_not_found");
-  let response: Response;
+  let received: Awaited<ReturnType<typeof boundedJsonFetch>>;
   try {
-    response = await globalThis.fetch("/bff/customer/member", {
+    received = await boundedJsonFetch(globalThis.fetch, "/bff/customer/member", {
       method: "POST",
       mode: "cors",
       credentials: "same-origin",
@@ -104,7 +105,8 @@ async function post<T>(body: Record<string, unknown>): Promise<T> {
   } catch {
     throw new MemberClientError("member_unavailable");
   }
-  const answer = (await response.json().catch(() => null)) as {
+  const { response } = received;
+  const answer = received.payload as {
     error?: { code?: MemberErrorCode; retryAfterSeconds?: number };
   } | null;
   if (!response.ok)

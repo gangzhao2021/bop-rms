@@ -2,6 +2,7 @@ import { t } from "../i18n/i18n.js";
 import { useRef, useState } from "react";
 import { formatCartMoney } from "../cart/format-money.js";
 import { formatClockTime } from "../journey/format.js";
+import { markCheckoutCardOffered } from "../session/customer-transaction-context.js";
 import {
   createSessionPaymentClient,
   SessionPaymentClientError,
@@ -82,8 +83,10 @@ export function ResumePaymentPanel({
         onSettled();
         return;
       }
-      if (configuration.mode === "simulation") setState({ step: "simulated" });
-      else setState({ step: "card", secret: await client.handoff(checkoutSessionReference) });
+      if (configuration.mode === "simulation") {
+        markCheckoutCardOffered();
+        setState({ step: "simulated" });
+      } else setState({ step: "card", secret: await client.handoff(checkoutSessionReference) });
     } catch (error) {
       stop(error);
     } finally {

@@ -3,6 +3,7 @@ import { checkoutText } from "../journey/messages.js";
 import { createCheckoutSessionController } from "./session-controller.js";
 import { CheckoutSessionClientError } from "./session-client.js";
 import { checkoutSessionAlert } from "./session-message.js";
+import { markCheckoutCardOffered } from "../session/customer-transaction-context.js";
 
 it("never turns a lost connection into a checkout refusal", async () => {
   const create = vi.fn();
@@ -45,4 +46,14 @@ it("maps a server conflict through the controller to the refusal text", async ()
     quoteVersion: 1,
   });
   expect(checkoutSessionAlert(c.getState(), false)).toBe(checkoutText.checkoutRefused);
+});
+
+it("WP-2423 item 2: an unconfirmed checkout says this order wasn't charged only before any card", () => {
+  const unconfirmed = checkoutSessionAlert({ status: "unknown", canRetry: true }, false);
+  expect(unconfirmed).toBe(checkoutText.checkoutUnconfirmed);
+  expect(unconfirmed).toContain("This order hasn’t been charged.");
+  markCheckoutCardOffered();
+  const after = checkoutSessionAlert({ status: "unknown", canRetry: true }, false);
+  expect(after).toBe(checkoutText.checkoutUnconfirmedAfterCard);
+  expect(after).not.toContain("charged");
 });

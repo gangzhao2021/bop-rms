@@ -1,4 +1,7 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { LanguageRoot } from "../i18n/i18n.js";
 import {
   endSentence,
   formatClockTime,
@@ -66,6 +69,16 @@ describe("customer time presentation", () => {
     expect(formatMinutesUntil("2026-09-02T17:00:30.000Z", now)).toBe("less than a minute");
     expect(formatMinutesUntil("2026-09-02T18:30:00.000Z", now)).toBe("about 1 hour");
     expect(formatMinutesUntil("2026-09-02T16:59:00.000Z", now)).toBeNull();
+  });
+  it("says short times in Chinese", () => {
+    const now = Date.parse("2026-09-02T17:00:00.000Z");
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    try {
+      expect(formatMinutesUntil("2026-09-02T17:00:30.000Z", now)).toBe("不到 1 分钟");
+      expect(formatMinutesUntil("2026-09-02T18:30:00.000Z", now)).toBe("约 1 小时");
+    } finally {
+      renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+    }
   });
 });
 

@@ -6,6 +6,7 @@ import {
   getMovedTableLabel,
   getMovedTableMerged,
   getSettledTableLabel,
+  setTablePaymentTiming,
 } from "../session/customer-transaction-context.js";
 
 /** WP-2423 Q8 (CUST-DINE-IN-SESSION): the table's shared, read-only view for a joined guest. */
@@ -573,7 +574,10 @@ export function createHttpDiningSessionClient(
       throw new DiningSessionClientError("unavailable");
     }
     if (!current()) throw new DiningSessionClientError("not-joined");
-    return parseDiningSessionView(payload);
+    const view = parseDiningSessionView(payload);
+    // WP-2423 item 6: a table's timing is fixed when it opens, so the menu has learned it for the cart.
+    setTablePaymentTiming(view.paymentTiming);
+    return view;
   };
   return Object.freeze({
     async load(signal?: AbortSignal) {

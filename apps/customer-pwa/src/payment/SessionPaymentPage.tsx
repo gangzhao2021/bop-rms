@@ -1,22 +1,29 @@
 import { t } from "../i18n/i18n.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
+import { manualRetryBusyTotalMs } from "../checkout/checkout-client.js";
 import {
   CheckoutSessionClientError,
   createCheckoutSessionClient,
 } from "../checkout/session-client.js";
+import { DiningStaffCallPanel } from "../dining/DiningStaffCallPanel.js";
 import {
   captureCustomerCsrfContext,
   getCheckoutSessionReference,
   getCheckoutTipSelection,
+  markCheckoutCardOffered,
+  setTablePaymentTiming,
+  wasCheckoutCardOffered,
 } from "../session/customer-transaction-context.js";
 import { formatCartMoney } from "../cart/format-money.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
+import { SlowWaitNote } from "../journey/SlowWaitNote.js";
 import {
   createSessionPaymentClient,
   SessionPaymentClientError,
   type SessionPaymentView,
 } from "./session-payment-client.js";
+import { useCheckoutReturn, type CheckoutReturn } from "./checkout-return.js";
 import { SessionPaymentResultPage } from "./SessionPaymentResultPage.js";
 import { StripeCardForm } from "./StripeCardForm.js";
 import { paymentConfiguration } from "./payment-configuration.js";
@@ -30,6 +37,80 @@ export function checkoutLoadFailureState(error: unknown): "denied" | "retry" {
     (error.code === "denied" || error.code === "invalid" || error.code === "conflict")
     ? "denied"
     : "retry";
+}
+
+export type PaymentStartFailureState =
+  | "closed"
+  | "items_short"
+  | "tips_off"
+  | "denied"
+  | "expired"
+  | "start_failed"
+  | "unknown"
+  /** WP-2423: the restaurant updated its menu after this checkout began; nothing was charged. */
+  | "requote_required"
+  /** The table pays at the end, so nothing here takes payment: back to its cart. */
+  | "table_pays_later";
+
+/**
+ * WP-2423 item 2: which panel a failed start shows. No money moves before a guest submits the secure
+ * card form, so until a card was offered in this tab a failure can say this order wasn't charged.
+ * After that it can't, whatever the failure says: "last orders" can be answered while a captured card
+ * is still confirming. So once a card was offered, every answer that would claim it leads to the panel
+ * that says to check the result first.
+ */
+export function paymentStartFailureState(
+  error: unknown,
+  cardOffered: boolean,
+): PaymentStartFailureState {
+  const code = error instanceof SessionPaymentClientError ? error.code : "unknown";
+  if (code === "pay_later_table") return "table_pays_later";
+  if (code === "denied" || code === "conflict") return "denied";
+  if (cardOffered) return "unknown";
+  switch (code) {
+    case "store_closed":
+      return "closed";
+    case "items_short":
+      return "items_short";
+    case "tips_off":
+      return "tips_off";
+    case "not_ready":
+      return "expired";
+    case "requote_required":
+      return "requote_required";
+    case "invalid":
+    case "unknown":
+      return "start_failed";
+    // Already paid, the window ended, another attempt pending: the result page knows which.
+    default:
+      return "unknown";
+  }
+}
+
+/** Back to where this guest's dishes are now (never a screen saying the cart is empty). */
+function CheckoutReturnLink({
+  to,
+  cartPath,
+  cartText,
+}: {
+  readonly to: CheckoutReturn;
+  readonly cartPath: string;
+  readonly cartText: string;
+}) {
+  return to === "cart" ? (
+    <Link to={cartPath}>{cartText}</Link>
+  ) : (
+    <Link to="/dine-in/session">
+      {to === "table-saved" ? t("See your table") : t("Back to your table")}
+    </Link>
+  );
+}
+
+/** The dishes of a round that was placed before the payment failed are safe, and say where. */
+function SavedOnTable({ to }: { readonly to: CheckoutReturn }): ReactNode {
+  return to === "table-saved" ? (
+    <p>{t("Your dishes are saved on your table page and go to the kitchen once paid.")}</p>
+  ) : null;
 }
 export function SessionPaymentPage({
   store,
@@ -60,6 +141,8 @@ function PreparedSessionPaymentPage({
     | "ready"
     | "creating"
     | "card"
+    /** The simulated card was submitted: what it does can't be taken back. */
+    | "confirming"
     | "processing"
     | "unknown"
     | "denied"
@@ -71,6 +154,10 @@ function PreparedSessionPaymentPage({
     | "tips_off"
     /** WP-2423: the restaurant updated its menu after this checkout began; nothing was charged. */
     | "requote_required"
+    /** WP-2423 item 2: the payment couldn't start; no card was offered, so nothing was charged. */
+    | "start_failed"
+    /** WP-2423 item 2: the checkout's prices no longer hold; no card was offered. */
+    | "expired"
     | "unavailable"
   >("loading");
   // WP-2423 Q10: a failed check of the checkout is retried in place, never a dead end.
@@ -78,13 +165,14 @@ function PreparedSessionPaymentPage({
   const [selectedTip] = useState(getCheckoutTipSelection);
   const [payment, setPayment] = useState<SessionPaymentView | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
+  const [firstOffer, setFirstOffer] = useState(false);
   const [online, setOnline] = useState(
     () => typeof navigator === "undefined" || navigator.onLine !== false,
   );
   const flight = useRef(false),
     alive = useRef(true);
-  const valid = () =>
-    alive.current && current() && getCheckoutSessionReference() === sessionReference;
+  /** This guest's checkout is still the one on this page. */
+  const inContext = () => current() && getCheckoutSessionReference() === sessionReference;
   useEffect(() => {
     alive.current = true;
     let stopped = false;
@@ -100,11 +188,11 @@ function PreparedSessionPaymentPage({
       void createCheckoutSessionClient()
         .read(sessionReference)
         .then(() => {
-          if (!stopped && current()) setStatus("ready");
+          if (!stopped) setStatus(current() ? "ready" : "denied");
         })
         .catch((error: unknown) => {
           if (stopped) return;
-          setStatus(checkoutLoadFailureState(error));
+          setStatus(current() ? checkoutLoadFailureState(error) : "denied");
         });
     return () => {
       stopped = true;
@@ -125,52 +213,74 @@ function PreparedSessionPaymentPage({
       window.removeEventListener("online", connected);
     };
   }, []);
-  const prepare = async () => {
-    if (!config || !sessionReference || !valid() || !online || flight.current) return;
+  // In both modes: what comes after this can't claim nothing was charged.
+  useEffect(() => {
+    if (status === "card") markCheckoutCardOffered();
+  }, [status]);
+  /** `manual`: the guest asked again, having already outlasted a menu listing. */
+  const prepare = async (manual = false) => {
+    if (!config || !sessionReference || !alive.current || !online || flight.current) return;
     if (!selectedTip || selectedTip.checkoutSessionReference !== sessionReference) return;
+    // The credential was replaced under this page: an ended page says so, it never waits.
+    if (!inContext()) {
+      setStatus("denied");
+      return;
+    }
     flight.current = true;
     setSecret(null);
     setStatus("creating");
+    const options = {
+      isWanted: () => alive.current,
+      ...(manual ? { busyTotalMs: manualRetryBusyTotalMs } : {}),
+    };
     try {
       const result = await client.create(
         sessionReference,
         selectedTip.selectionReference,
         selectedTip.amountMinor,
+        options,
       );
-      if (!valid()) return;
+      if (!alive.current) return;
+      if (!inContext()) {
+        setStatus("denied");
+        return;
+      }
       setPayment(result);
       if (result.creationStatus === "Processing") {
-        setStatus("processing");
+        setStatus(wasCheckoutCardOffered() ? "unknown" : "processing");
         return;
       }
       if (config.mode === "simulation") {
+        setFirstOffer(!wasCheckoutCardOffered());
         setStatus("card");
         return;
       }
       const credential = await client.handoff(sessionReference);
-      if (!valid()) return;
+      if (!alive.current) return;
+      if (!inContext()) {
+        setStatus("denied");
+        return;
+      }
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         setStatus("unknown");
         return;
       }
+      setFirstOffer(!wasCheckoutCardOffered());
       setSecret(credential);
       setStatus("card");
     } catch (error) {
-      if (valid())
-        setStatus(
-          error instanceof SessionPaymentClientError && error.code === "store_closed"
-            ? "closed"
-            : error instanceof SessionPaymentClientError && error.code === "items_short"
-              ? "items_short"
-              : error instanceof SessionPaymentClientError && error.code === "tips_off"
-                ? "tips_off"
-                : error instanceof SessionPaymentClientError && error.code === "requote_required"
-                  ? "requote_required"
-                  : error instanceof SessionPaymentClientError &&
-                      (error.code === "denied" || error.code === "conflict")
-                    ? "denied"
-                    : "unknown",
-        );
+      if (!alive.current) return;
+      if (!inContext()) {
+        setStatus("denied");
+        return;
+      }
+      const failure = paymentStartFailureState(error, wasCheckoutCardOffered());
+      if (failure === "table_pays_later") {
+        setTablePaymentTiming("PayLater");
+        void navigate("/cart", { replace: true });
+        return;
+      }
+      setStatus(failure);
     } finally {
       flight.current = false;
     }
@@ -188,31 +298,42 @@ function PreparedSessionPaymentPage({
       config?.mode !== "simulation" ||
       !sessionReference ||
       !selectedTip ||
-      !valid() ||
+      !alive.current ||
+      !inContext() ||
       !online ||
       flight.current
     )
       return;
     flight.current = true;
-    setStatus("creating");
+    setStatus("confirming");
     try {
       await (outcome === "approve" ? client.simulate : client.simulateDecline)(
         sessionReference,
         selectedTip.selectionReference,
         selectedTip.amountMinor,
       );
-      if (valid()) void navigate("/checkout/result", { replace: true });
+      if (alive.current && inContext()) void navigate("/checkout/result", { replace: true });
     } catch {
-      if (valid()) setStatus("unknown");
+      if (alive.current) setStatus(inContext() ? "unknown" : "denied");
     } finally {
       flight.current = false;
     }
   };
   const submitted = () => {
     setSecret(null);
-    if (valid()) void navigate("/checkout/result", { replace: true });
+    if (alive.current && inContext()) void navigate("/checkout/result", { replace: true });
   };
   const demo = config?.mode === "simulation";
+  const cardOffered = wasCheckoutCardOffered();
+  const failedStart =
+    status === "start_failed" ||
+    status === "expired" ||
+    (status === "denied" && !cardOffered) ||
+    status === "retry";
+  const back = useCheckoutReturn(failedStart, store?.serviceMode === "DineIn");
+  // While a payment may be under way (or just failed), a second checkout is the last thing to offer.
+  const inFlow =
+    status === "loading" || status === "ready" || status === "creating" || status === "card";
   return (
     <CustomerPage step="payment" store={store} className="payment-page">
       <PageHeading title={demo ? t("DEMO payment") : t("Secure payment")}>
@@ -230,7 +351,13 @@ function PreparedSessionPaymentPage({
           <p>{t("Card payment isn’t set up at this location yet. Ask staff how to pay.")}</p>
         </section>
       ) : null}
-      {status === "denied" ? (
+      {status === "denied" && cardOffered ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("We can’t show this payment on this phone")}</h2>
+          <p>{t("Ask a staff member to check it before you pay again.")}</p>
+        </section>
+      ) : null}
+      {status === "denied" && !cardOffered ? (
         <section className="checkout-attention" role="alert">
           <h2>{t("This checkout has ended")}</h2>
           <p>
@@ -238,13 +365,17 @@ function PreparedSessionPaymentPage({
               "You haven’t been charged for it. Go back to your cart to check out again, or ask a staff member for help.",
             )}
           </p>
-          <Link to="/cart">{t("Back to your cart")}</Link>
+          <CheckoutReturnLink to={back} cartPath="/cart" cartText={t("Back to your cart")} />
         </section>
       ) : null}
       {status === "retry" ? (
         <section className="checkout-attention" role="alert">
           <h2>{t("We couldn’t load your payment")}</h2>
-          <p>{t("You haven’t been charged. Check your connection and try again.")}</p>
+          <p>
+            {cardOffered
+              ? t("Check your connection and try again.")
+              : t("You haven’t been charged. Check your connection and try again.")}
+          </p>
           <button
             type="button"
             disabled={!online}
@@ -294,16 +425,66 @@ function PreparedSessionPaymentPage({
               "The restaurant updated its menu while you were checking out, so you haven’t been charged. Go back to checkout to see your total and pay.",
             )}
           </p>
+          <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
         </section>
       ) : null}
-      {status !== "denied" &&
-      status !== "retry" &&
-      status !== "closed" &&
-      status !== "items_short" &&
-      status !== "tips_off" &&
-      status !== "requote_required" &&
-      status !== "unavailable" &&
-      status !== "loading" ? (
+      {status === "start_failed" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("We couldn’t start your payment")}</h2>
+          <p>{t("This order hasn’t been charged, and it hasn’t gone to the kitchen.")}</p>
+          <SavedOnTable to={back} />
+          <p>
+            {t(
+              "Try again in a moment. If it still doesn’t work, ask a staff member: they can take your order and payment.",
+            )}
+          </p>
+          <button type="button" disabled={!online} onClick={() => void prepare(true)}>
+            {t("Try again")}
+          </button>
+          <CheckoutReturnLink to={back} cartPath="/cart" cartText={t("Back to your cart")} />
+        </section>
+      ) : null}
+      {status === "processing" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("Your payment is still being set up")}</h2>
+          <p>{t("This order hasn’t been charged.")}</p>
+          <button type="button" disabled={!online} onClick={() => void prepare(true)}>
+            {t("Try again")}
+          </button>
+        </section>
+      ) : null}
+      {status === "expired" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("Your order needs checking again")}</h2>
+          <p>{t("This order hasn’t been charged. Go back to check out again.")}</p>
+          <SavedOnTable to={back} />
+          <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
+        </section>
+      ) : null}
+      {status === "unknown" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("We can’t confirm where your payment stands")}</h2>
+          <p>
+            {t(
+              "If you already entered your card, check the result first and don’t pay again. If you haven’t, you can continue.",
+            )}
+          </p>
+          <Link to="/checkout/result">{t("Check payment result")}</Link>
+          <button type="button" disabled={!online} onClick={() => void prepare(true)}>
+            {t("Continue to payment")}
+          </button>
+        </section>
+      ) : null}
+      {store?.serviceMode === "DineIn" &&
+      (status === "start_failed" || status === "processing" || status === "unknown") ? (
+        // Asking for help is one tap for a seated guest; the panel hides itself if none is offered.
+        <DiningStaffCallPanel />
+      ) : null}
+      {payment !== null &&
+      (status === "card" ||
+        status === "confirming" ||
+        status === "processing" ||
+        status === "unknown") ? (
         <section className="payment-page__amount" aria-label={t("Amount")}>
           <dl>
             {selectedTip && selectedTip.amountMinor !== "0" ? (
@@ -316,21 +497,19 @@ function PreparedSessionPaymentPage({
             ) : null}
             <div className="payment-page__total">
               <dt>{t("Total to pay")}</dt>
-              <dd>{payment ? formatCartMoney(payment.total) : "Calculating…"}</dd>
+              <dd>{formatCartMoney(payment.total)}</dd>
             </div>
           </dl>
         </section>
       ) : null}
       {status === "creating" ? <p role="status">{t("Preparing your payment…")}</p> : null}
-      {status === "processing" || status === "unknown" ? (
-        <section role="status" className="checkout-attention">
-          <p>{t("We couldn’t confirm your payment is ready. Check the same payment again.")}</p>
-          <Link to="/checkout/result">{t("Check payment result")}</Link>
-          <button type="button" disabled={!online} onClick={() => void prepare()}>
-            {t("Check payment readiness")}
-          </button>
-        </section>
-      ) : null}
+      <SlowWaitNote active={status === "creating"}>
+        {cardOffered
+          ? t("Still working on it.")
+          : t("Still working on it. This order hasn’t been charged.")}
+      </SlowWaitNote>
+      {status === "confirming" ? <p role="status">{t("Confirming your payment…")}</p> : null}
+      <SlowWaitNote active={status === "confirming"}>{t("Still working on it.")}</SlowWaitNote>
       {status === "card" && demo ? (
         <>
           <button
@@ -348,14 +527,22 @@ function PreparedSessionPaymentPage({
         </>
       ) : null}
       {status === "card" && secret && config?.mode === "stripe" ? (
-        <StripeCardForm {...config} clientSecret={secret} onSubmitted={submitted} />
+        <StripeCardForm
+          {...config}
+          clientSecret={secret}
+          onSubmitted={submitted}
+          firstOffer={firstOffer}
+          resultPath="/checkout/result"
+        />
       ) : null}
       {!online ? (
         <p role="alert">{t("Reconnect to continue. Payment will not restart automatically.")}</p>
       ) : null}
-      <Link className="payment-page__back" to="/checkout">
-        {t("Back to checkout")}
-      </Link>
+      {inFlow ? (
+        <Link className="payment-page__back" to="/checkout">
+          {t("Back to checkout")}
+        </Link>
+      ) : null}
     </CustomerPage>
   );
 }

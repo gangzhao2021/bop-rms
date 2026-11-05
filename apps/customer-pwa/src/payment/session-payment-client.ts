@@ -2,7 +2,10 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
-import { requestCheckoutMutation } from "../checkout/checkout-client.js";
+import {
+  requestCheckoutMutation,
+  type CheckoutMutationOptions,
+} from "../checkout/checkout-client.js";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export interface SessionPaymentView {
   readonly checkoutSessionReference: string;
@@ -10,6 +13,10 @@ export interface SessionPaymentView {
   readonly orderReference: string;
   readonly creationStatus: "Created" | "AlreadyCreated" | "Processing";
   readonly total: Readonly<{ amountMinor: string; currency: "CAD" }>;
+}
+/** WP-2423 item 2: how long a busy Store is waited for, and until when the guest still wants it. */
+export interface SessionPaymentRequestOptions extends CheckoutMutationOptions {
+  readonly isWanted?: () => boolean;
 }
 export class SessionPaymentClientError extends Error {
   constructor(
@@ -80,7 +87,13 @@ export function createSessionPaymentClient() {
     payment_tips_turned_off: "tips_off",
     payment_requote_required: "requote_required",
   } as const;
-  async function post(session: string, suffix: string, body: object, key?: string) {
+  async function post(
+    session: string,
+    suffix: string,
+    body: object,
+    key?: string,
+    { isWanted = () => true, ...options }: SessionPaymentRequestOptions = {},
+  ) {
     if (!uuid.test(session)) throw new SessionPaymentClientError("invalid");
     const current = captureCustomerCsrfContext(),
       csrf = getCustomerCsrfCredential();
@@ -103,7 +116,8 @@ export function createSessionPaymentClient() {
           },
           body: JSON.stringify(body),
         },
-        current,
+        () => current() && isWanted(),
+        options,
       );
       if (!current()) throw new SessionPaymentClientError("unknown");
       const named = errorCode(result.payload);
@@ -134,6 +148,7 @@ export function createSessionPaymentClient() {
     selectionReference: string,
     tipAmountMinor: string,
     suffix = "payment-intents",
+    options?: SessionPaymentRequestOptions,
   ): Promise<SessionPaymentView> {
     if (!uuid.test(selectionReference)) throw new SessionPaymentClientError("invalid");
     const tip = amount(tipAmountMinor);
@@ -144,6 +159,7 @@ export function createSessionPaymentClient() {
         suffix,
         { tip: { amountMinor: tip, currency: "CAD" } },
         selectionReference,
+        options,
       ),
     );
   }
@@ -193,7 +209,12 @@ export function createSessionPaymentClient() {
     }
   }
   return Object.freeze({
-    create: (session: string, selection: string, tip: string) => create(session, selection, tip),
+    create: (
+      session: string,
+      selection: string,
+      tip: string,
+      options?: SessionPaymentRequestOptions,
+    ) => create(session, selection, tip, "payment-intents", options),
     /**
      * DEC-DINE-IN-PAY-LATER: at a table that pays at the end, send this checkout's round to the
      * kitchen (no payment, no tip). Sending again with the same key returns the same round.
@@ -201,6 +222,7 @@ export function createSessionPaymentClient() {
     async sendToKitchen(
       session: string,
       selection: string,
+      options?: SessionPaymentRequestOptions,
     ): Promise<{
       /** Held (WP-2423 item 8 ⑤): it waits for staff before the kitchen; the table page says why. */
       readonly status: "Sent" | "AlreadySent" | "Held";
@@ -212,6 +234,7 @@ export function createSessionPaymentClient() {
         "payment-intents",
         { sendToKitchen: true },
         selection,
+        options,
       );
       try {
         const root = exact(payload, ["schemaVersion", "round"]);

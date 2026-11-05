@@ -95,10 +95,10 @@ export function formatMinutesUntil(instant: string, nowMs: number): string | nul
   const remaining = Date.parse(instant) - nowMs;
   if (!Number.isFinite(remaining) || remaining <= 0) return null;
   const minutes = Math.ceil(remaining / 60_000);
-  if (minutes <= 1) return "less than a minute";
+  if (minutes <= 1) return t("less than a minute");
   if (minutes < 60) return t("about {minutes} minutes", { minutes });
   const hours = Math.floor(minutes / 60);
-  return hours === 1 ? "about 1 hour" : t("about {hours} hours", { hours });
+  return hours === 1 ? t("about 1 hour") : t("about {hours} hours", { hours });
 }
 
 /** A whole-number percentage of an amount in minor units, rounded half up, as minor-unit text. */

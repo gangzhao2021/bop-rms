@@ -2,7 +2,11 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
-import { requestCheckoutMutation, retryAfterSeconds } from "./checkout-client.js";
+import {
+  requestCheckoutMutation,
+  retryAfterSeconds,
+  type CheckoutMutationOptions,
+} from "./checkout-client.js";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export interface CheckoutSessionSelection {
   readonly cartReference: string;
@@ -116,7 +120,11 @@ function errorCode(payload: unknown): string | null {
   return typeof error?.code === "string" ? error.code : null;
 }
 export function createCheckoutSessionClient() {
-  async function request(path: string, init: RequestInit): Promise<CheckoutSessionView> {
+  async function request(
+    path: string,
+    init: RequestInit,
+    options?: CheckoutMutationOptions,
+  ): Promise<CheckoutSessionView> {
     const current = captureCustomerCsrfContext(),
       csrf = getCustomerCsrfCredential();
     if (csrf === null) throw new CheckoutSessionClientError("denied");
@@ -129,6 +137,7 @@ export function createCheckoutSessionClient() {
           headers: { ...init.headers, "x-csrf-token": csrf },
         },
         current,
+        options,
       );
       if (!current()) throw new CheckoutSessionClientError("unknown");
       // WP-2423: another guest at the table is checking out this cart; nothing was created.
@@ -160,7 +169,11 @@ export function createCheckoutSessionClient() {
     }
   }
   return Object.freeze({
-    async create(selection: CheckoutSessionSelection, createOperationReference: string) {
+    async create(
+      selection: CheckoutSessionSelection,
+      createOperationReference: string,
+      options?: CheckoutMutationOptions,
+    ) {
       if (
         !uuid.test(selection.cartReference) ||
         !uuid.test(selection.quoteReference) ||
@@ -185,6 +198,7 @@ export function createCheckoutSessionClient() {
             quoteReference: selection.quoteReference,
           }),
         },
+        options,
       );
       if (
         result.cartReference !== expected.cartReference ||

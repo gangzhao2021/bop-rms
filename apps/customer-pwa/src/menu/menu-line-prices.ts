@@ -121,6 +121,15 @@ export function usePublishedMenu(
   client: CustomerMenuClient | undefined,
   needed: boolean,
 ): MenuView | null {
+  return usePublishedMenuRead(context, client, needed).menu;
+}
+
+/** The same read, and whether it has finished (WP-2423 item 6: the cart waits a moment for prices). */
+export function usePublishedMenuRead(
+  context: MenuJourneyContext | undefined,
+  client: CustomerMenuClient | undefined,
+  needed: boolean,
+): { readonly menu: MenuView | null; readonly settled: boolean } {
   const resolved = useMemo(() => {
     if (client !== undefined) return client;
     if (context === undefined) return null;
@@ -130,9 +139,11 @@ export function usePublishedMenu(
     });
   }, [client, context]);
   const [menu, setMenu] = useState<MenuView | null>(null);
+  const [finished, setFinished] = useState(false);
   useEffect(() => {
     if (!needed || resolved === null) return;
     let active = true;
+    setFinished(false);
     void resolved
       .load({})
       .then((result) => {
@@ -140,10 +151,13 @@ export function usePublishedMenu(
       })
       .catch(() => {
         if (active) setMenu(null);
+      })
+      .finally(() => {
+        if (active) setFinished(true);
       });
     return () => {
       active = false;
     };
   }, [needed, resolved]);
-  return needed ? menu : null;
+  return { menu: needed ? menu : null, settled: !needed || resolved === null || finished };
 }

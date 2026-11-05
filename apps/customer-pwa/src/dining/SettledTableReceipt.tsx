@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { t, saidTable, nameLocale } from "../i18n/i18n.js";
 import { formatMoney } from "../journey/format.js";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
+import { boundedJsonFetch } from "../network/bounded-fetch.js";
 import { getSettledTableReceiptCsrf } from "../session/customer-transaction-context.js";
 
 /**
@@ -140,9 +141,9 @@ export function createSettledTableReceiptClient(
     async read() {
       const csrf = getSettledTableReceiptCsrf();
       if (csrf === null) return fail("none");
-      let response: Response;
+      let answer: Awaited<ReturnType<typeof boundedJsonFetch>>;
       try {
-        response = await request("/api/v1/dine-in/table-payment", {
+        answer = await boundedJsonFetch(request, "/api/v1/dine-in/table-payment", {
           method: "POST",
           credentials: "include",
           cache: "no-store",
@@ -161,9 +162,9 @@ export function createSettledTableReceiptClient(
         return fail();
       }
       // Not found: a bill written off, or nothing to show for this phone.
-      if (response.status === 404) return fail("none");
-      if (response.status !== 200) return fail();
-      return parseSettledTableReceipt(await response.json().catch(() => fail()));
+      if (answer.response.status === 404) return fail("none");
+      if (answer.response.status !== 200 || answer.payload === null) return fail();
+      return parseSettledTableReceipt(answer.payload);
     },
   });
 }

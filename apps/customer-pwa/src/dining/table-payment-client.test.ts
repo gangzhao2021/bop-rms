@@ -1,5 +1,15 @@
-import { expect, it } from "vitest";
-import { parseTablePaymentView } from "./table-payment-client.js";
+import { afterEach, expect, it, vi } from "vitest";
+import { setCustomerCsrfCredential } from "../session/customer-transaction-context.js";
+import {
+  createTablePaymentClient,
+  parseTablePaymentView,
+  TablePaymentClientError,
+} from "./table-payment-client.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+  setCustomerCsrfCredential(null);
+});
 
 const body = (payment: Record<string, unknown>) => ({
   schemaVersion: 1,
@@ -119,4 +129,51 @@ it("WP-2423 item 8 ⑦: reads the Store's tip percentages or tips off (older ser
     [10, 15],
   ])
     expect(() => parseTablePaymentView(body({ tips: { enabled: true, tierPercents } }))).toThrow();
+});
+
+it("gives up on a payment request that never answers", async () => {
+  vi.useFakeTimers();
+  setCustomerCsrfCredential("c".repeat(43));
+  const hung = vi.fn<typeof globalThis.fetch>(
+    (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      }),
+  );
+  let settled: unknown = "waiting";
+  void createTablePaymentClient(hung)
+    .start("0190fa21-0000-7000-8000-000000000011", { kind: "None" })
+    .then(
+      () => (settled = "answered"),
+      (error: unknown) => (settled = error),
+    );
+  await vi.advanceTimersByTimeAsync(14_999);
+  expect(settled).toBe("waiting");
+  await vi.advanceTimersByTimeAsync(2);
+  expect(settled).toBeInstanceOf(TablePaymentClientError);
+  expect((settled as TablePaymentClientError).code).toBe("unavailable");
+});
+
+it("gives up on a payment answer whose body stalls", async () => {
+  vi.useFakeTimers();
+  setCustomerCsrfCredential("c".repeat(43));
+  const stalled = vi.fn<typeof globalThis.fetch>(
+    async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"schemaVersion":'));
+          },
+        }),
+      ),
+  );
+  let settled: unknown = "waiting";
+  void createTablePaymentClient(stalled)
+    .read()
+    .then(
+      () => (settled = "answered"),
+      (error: unknown) => (settled = error),
+    );
+  await vi.advanceTimersByTimeAsync(15_001);
+  expect(settled).toBeInstanceOf(TablePaymentClientError);
 });

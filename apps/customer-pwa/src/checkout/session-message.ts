@@ -1,5 +1,6 @@
 import { checkoutInProgressMessage } from "../cart/types.js";
 import { checkoutText } from "../journey/messages.js";
+import { wasCheckoutCardOffered } from "../session/customer-transaction-context.js";
 import type { CheckoutSessionState } from "./session-controller.js";
 
 /**
@@ -27,7 +28,13 @@ export function checkoutSessionAlert(
     case "checkout_in_progress":
       return checkoutInProgressMessage(state.retryAfterSeconds);
     case "unknown":
-      return state.canRetry ? checkoutText.checkoutUnconfirmed : checkoutText.checkoutRefused;
+      // WP-2423 item 2: after a card was offered in this tab an earlier checkout may be confirming,
+      // so a failure here says nothing about money.
+      return !state.canRetry
+        ? checkoutText.checkoutRefused
+        : wasCheckoutCardOffered()
+          ? checkoutText.checkoutUnconfirmedAfterCard
+          : checkoutText.checkoutUnconfirmed;
     case "denied":
     case "conflict":
     case "invalid":

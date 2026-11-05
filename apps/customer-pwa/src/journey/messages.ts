@@ -4,6 +4,7 @@ import {
 } from "../session/customer-transaction-context.js";
 import { t } from "../i18n/i18n.js";
 import type { CartState } from "../cart/cart-state.js";
+import { getTablePaymentTiming } from "../session/customer-transaction-context.js";
 
 /** Customer sentences for server codes. Raw codes never reach the page; unknown codes get one safe sentence. */
 
@@ -154,7 +155,9 @@ export const commonText = Object.freeze({
     return t("Order still processing");
   },
   get checkoutInProgressHeading() {
-    return t("Another guest is checking out");
+    return getTablePaymentTiming() === "PayLater"
+      ? t("Someone at your table is placing an order")
+      : t("Another guest is checking out");
   },
   pricesConfirmedFor: (remaining: string) => t("Prices confirmed for {remaining}.", { remaining }),
 });
@@ -184,6 +187,45 @@ export const cartText = Object.freeze({
   },
   get checkout() {
     return t("Checkout");
+  },
+  /** WP-2423 item 6: at a table that pays at the end; nobody is paying now. */
+  get placeOrder() {
+    return t("Place order");
+  },
+  placeOrderWithTotal: (total: string) => t("Place order · {total}", { total }),
+  get placingOrder() {
+    return t("Placing your order…");
+  },
+  /** While the cart doesn't know yet how this table pays. */
+  get continueWaiting() {
+    return t("Continue");
+  },
+  get allergiesBeforeOrdering() {
+    return t("Allergies? Ask a staff member before you order.");
+  },
+  alsoPlacesOthers: (count: number) =>
+    t("This also places {count} items other guests added.", { count }),
+  get placedSlowly() {
+    return t("Still working on it.");
+  },
+  get checkYourTable() {
+    return t("Check your table");
+  },
+  get orderUnconfirmed() {
+    return t(
+      "We couldn’t confirm your order was placed. Try again — it is never placed twice. You can also tell a staff member what you’d like.",
+    );
+  },
+  priceChangedTotal: (total: string) =>
+    t("The price changed since you added this. It now comes to {total} with tax.", { total }),
+  orderComesTo: (total: string) => t("This order comes to {total} with tax.", { total }),
+  orderComesToWithFees: (total: string) =>
+    t("This order comes to {total} with tax and fees.", { total }),
+  get someonePlacedIt() {
+    return t("Someone at your table just placed this order.");
+  },
+  get seeYourTable() {
+    return t("See your table");
   },
   /** What a screen reader hears when the cart changes state; never the state's internal name. */
   stateAnnouncement: Object.freeze({
@@ -224,7 +266,9 @@ export const cartText = Object.freeze({
       return t("Your order is still processing.");
     },
     get "checkout-in-progress"() {
-      return t("Another guest is checking out.");
+      return getTablePaymentTiming() === "PayLater"
+        ? t("Someone at your table is placing an order.")
+        : t("Another guest is checking out.");
     },
     get "table-checking-out"() {
       return t("Your table is checking out.");
@@ -276,6 +320,13 @@ export const cartText = Object.freeze({
     },
     get taxAtCheckout() {
       return t("Tax is added at checkout.");
+    },
+    /** WP-2423 item 6: a table that pays at the end. */
+    get taxOnTableBill() {
+      return t("Tax is added to your table’s bill.");
+    },
+    get totalOnTableBill() {
+      return t("Prices and tax are on your table’s bill.");
     },
     get pricesExpired() {
       return t("These prices have expired. Checkout will price your order again.");
@@ -563,6 +614,9 @@ export const checkoutText = Object.freeze({
     );
   },
   get checkoutUnconfirmed() {
+    return t("We couldn’t start your checkout. This order hasn’t been charged. Try again.");
+  },
+  get checkoutUnconfirmedAfterCard() {
     return t("We couldn’t confirm checkout. Retry to recover the same checkout.");
   },
   get checkoutRefused() {
@@ -588,25 +642,20 @@ export const checkoutText = Object.freeze({
   },
   continueToPaymentWithTotal: (total: string) => t("Continue to payment · {total}", { total }),
   /** DEC-DINE-IN-PAY-LATER: a table that pays once at the end. */
-  sendToKitchenWithTotal: (total: string) => t("Send to the kitchen · {total}", { total }),
-  get sendToKitchen() {
-    return t("Send to the kitchen");
+  get placeOrder() {
+    return t("Place order");
   },
+  placeOrderWithTotal: (total: string) => t("Place order · {total}", { total }),
   get sendToKitchenNote() {
     return t(
       "Nothing is charged now. Your table pays once at the end, and you choose any tip then.",
     );
   },
-  get progressSend() {
-    return t("Send");
+  get placingOrder() {
+    return t("Placing your order…");
   },
-  get sendingToKitchen() {
-    return t("Sending your order to the kitchen…");
-  },
-  get sendToKitchenFailed() {
-    return t(
-      "We couldn’t confirm your order reached the kitchen. Send it again — it is never sent twice.",
-    );
+  get orderUnconfirmed() {
+    return t("We couldn’t confirm your order was placed. Try again — it is never placed twice.");
   },
   get tablePaysAsItOrders() {
     return t("This table pays for each round as it orders. Continue to payment instead.");

@@ -50,7 +50,8 @@ for (const status of ["Failed", "Succeeded", "Pending", "Unknown", "Unprepared"]
         Succeeded: "Payment confirmed",
         Pending: "Your payment is still being confirmed. Don’t start another payment.",
         Unknown: "Neither success nor failure is confirmed.",
-        Unprepared: "Payment has not been prepared for this checkout.",
+        Unprepared:
+          "This order hasn’t been charged. Go back to check out again, or ask a staff member.",
       }[status];
       await expect(page.getByText(message, { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Confirm simulated payment" })).toHaveCount(0);

@@ -5,6 +5,7 @@ import { parseTipAmount } from "./tip-amount.js";
 import {
   setCheckoutSessionReference,
   setCheckoutTipSelection,
+  setTablePaymentTiming,
 } from "../session/customer-transaction-context.js";
 import { captureCustomerCsrfContext } from "../session/customer-transaction-context.js";
 import {
@@ -21,6 +22,7 @@ import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types
 import { describeConfiguration } from "../cart/CartPage.js";
 import { checkoutItemRefusalMessage } from "./item-refusal-message.js";
 import { checkoutSessionAlert } from "./session-message.js";
+import { sendFailureState } from "./send-round.js";
 import { paymentConfiguration } from "../payment/payment-configuration.js";
 import { quoteConsistentLinePrices, usePublishedMenu } from "../menu/menu-line-prices.js";
 import type { CustomerMenuClient, MenuJourneyContext } from "../menu/types.js";
@@ -32,6 +34,7 @@ import {
   percentOfMinor,
 } from "../journey/format.js";
 import {
+  cartText,
   checkoutText,
   commonText,
   lineEstimateLabel,
@@ -42,10 +45,8 @@ import {
   createCheckoutController,
   type CheckoutController,
 } from "./checkout-client.js";
-import {
-  createHttpDiningSessionClient,
-  type DiningSessionClient,
-} from "../dining/dining-session-client.js";
+import type { DiningSessionClient } from "../dining/dining-session-client.js";
+import { useTablePaymentTiming } from "../dining/table-timing.js";
 import {
   createSessionPaymentClient,
   SessionPaymentClientError,
@@ -117,11 +118,10 @@ export function CheckoutPage({
     readonly contact: PickupContactDraft;
   } | null>(null);
   const [continueRequested, setContinueRequested] = useState(false);
-  // DEC-DINE-IN-PAY-LATER: at a table that pays once at the end the round goes to the kitchen
-  // when sent: no tip and no payment here.
-  const [payLater, setPayLater] = useState(false);
   const [sendClientValue] = useState(() => sendClient ?? createSessionPaymentClient());
-  const [sendState, setSendState] = useState<"idle" | "sending" | "failed" | "pay_first">("idle");
+  const [sendState, setSendState] = useState<
+    "idle" | "sending" | "failed" | "pay_first" | "store_closed" | "items_short"
+  >("idle");
   // WP-2423: the restaurant updated its menu while this guest was checking out; nothing was placed
   // or charged. The page prices the cart again once and says why, and the guest checks the total
   // and presses again. What was chosen for the old price goes with it.
@@ -136,20 +136,30 @@ export function CheckoutPage({
   const sendRound = async (checkoutSessionReference: string, selectionReference: string) => {
     setSendState("sending");
     try {
-      await sendClientValue.sendToKitchen(checkoutSessionReference, selectionReference);
-      void navigate("/dine-in/session", { replace: true });
+      const sent = await sendClientValue.sendToKitchen(
+        checkoutSessionReference,
+        selectionReference,
+      );
+      void navigate("/dine-in/session", {
+        replace: true,
+        state: { placed: sent.status === "Held" ? "Held" : "Sent" },
+      });
     } catch (error) {
       if (error instanceof SessionPaymentClientError && error.code === "requote_required") {
         priceAgainAfterMenuUpdate();
         return;
       }
-      setSendState(
-        error instanceof SessionPaymentClientError && error.code === "pay_first_table"
-          ? "pay_first"
-          : "failed",
-      );
+      setSendState(sendFailureState(error));
     }
   };
+  // DEC-DINE-IN-PAY-LATER: at a table that pays once at the end the round goes to the kitchen
+  // when sent: no tip and no payment here. WP-2423 item 6: such a table is here only for the Store's
+  // documents; the cart places its rounds in one tap.
+  const payLater =
+    useTablePaymentTiming(
+      "cart" in state && state.cart?.cart.orderType === "DineIn",
+      diningClient,
+    ) === "PayLater";
   useEffect(() => {
     if (sessionState.status === "ready" && selectedTip.current && payLater) {
       if (sendState === "idle")
@@ -206,18 +216,6 @@ export function CheckoutPage({
   }, [controller]);
   const cart = "cart" in state ? state.cart : null;
   const dineIn = cart?.cart.orderType === "DineIn";
-  useEffect(() => {
-    if (!dineIn) return;
-    const controller = new AbortController();
-    (diningClient ?? createHttpDiningSessionClient())
-      .load(controller.signal)
-      .then((view) => {
-        if (!controller.signal.aborted) setPayLater(view.paymentTiming === "PayLater");
-      })
-      // Unknown: the guest pays as before, and the server says if the table pays at the end.
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [dineIn, diningClient]);
   const quote = state.status === "ready" ? state.quote : null;
   const menu = usePublishedMenu(
     menuContext,
@@ -355,7 +353,7 @@ export function CheckoutPage({
       void sendRound(session, selection);
       return;
     }
-    setPayLater(false);
+    setTablePaymentTiming("PayFirst");
     setCheckoutSessionReference(session);
     setCheckoutTipSelection({
       checkoutSessionReference: session,
@@ -376,12 +374,14 @@ export function CheckoutPage({
   const remaining = quote === null ? null : formatMinutesUntil(quote.expiresAt, now());
   return (
     <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
-      <PageHeading title={checkoutText.pageTitle} />
-      <ol className="checkout-progress" aria-label={checkoutText.progressLabel}>
-        <li aria-current="step">{checkoutText.progressReview}</li>
-        <li>{payLater ? checkoutText.progressSend : checkoutText.progressPay}</li>
-        <li>{checkoutText.progressDone}</li>
-      </ol>
+      <PageHeading title={payLater ? checkoutText.placeOrder : checkoutText.pageTitle} />
+      {payLater ? null : (
+        <ol className="checkout-progress" aria-label={checkoutText.progressLabel}>
+          <li aria-current="step">{checkoutText.progressReview}</li>
+          <li>{checkoutText.progressPay}</li>
+          <li>{checkoutText.progressDone}</li>
+        </ol>
+      )}
       {state.status === "loading" ? (
         <section role="status">
           <h2>{checkoutText.loadingHeading}</h2>
@@ -494,7 +494,7 @@ export function CheckoutPage({
                     {checkoutText.refreshPrices}
                   </button>
                 </div>
-              ) : (
+              ) : payLater ? null : (
                 <p className="checkout-totals__validity">
                   {remaining === null ? "" : commonText.pricesConfirmedFor(remaining)}
                 </p>
@@ -572,7 +572,9 @@ export function CheckoutPage({
               </button>
             </section>
           ) : null}
-          {["offline", "session-expired", "outcome-unknown"].includes(state.status) ? (
+          {["offline", "session-expired", "outcome-unknown", "table-checking-out"].includes(
+            state.status,
+          ) ? (
             <section role="alert" className="checkout-attention">
               <h2>{checkoutText.attentionHeading}</h2>
               <p>
@@ -580,7 +582,9 @@ export function CheckoutPage({
                   ? checkoutText.offline
                   : state.status === "outcome-unknown"
                     ? checkoutText.pricingOutcomeUnknown
-                    : checkoutText.sessionEnded}
+                    : state.status === "table-checking-out"
+                      ? cartText.failure.tableCheckingOut[1]
+                      : checkoutText.sessionEnded}
               </p>
               {"canRetry" in state && state.canRetry ? (
                 <button
@@ -605,6 +609,7 @@ export function CheckoutPage({
               ref={detailsForm}
               now={now}
               selection={detailsSelection}
+              payLater={payLater}
               unsavedContact={
                 unsavedContact?.cartReference === detailsSelection.cartReference
                   ? unsavedContact.contact
@@ -695,16 +700,24 @@ export function CheckoutPage({
           {continueRequested ? <p role="status">{checkoutText.savingYourDetails}</p> : null}
           {sessionState.status === "pending" ? (
             <p role="status">
-              {payLater ? checkoutText.sendingToKitchen : checkoutText.preparingPayment}
+              {payLater ? checkoutText.placingOrder : checkoutText.preparingPayment}
             </p>
           ) : null}
-          {sendState === "sending" ? <p role="status">{checkoutText.sendingToKitchen}</p> : null}
+          {sendState === "sending" ? <p role="status">{checkoutText.placingOrder}</p> : null}
           {menuUpdated && sessionState.status === "idle" && sendState === "idle" ? (
             <p role="status">{checkoutText.menuUpdatedPricedAgain}</p>
           ) : null}
-          {sendState === "failed" ? <p role="alert">{checkoutText.sendToKitchenFailed}</p> : null}
+          {sendState === "failed" ? <p role="alert">{checkoutText.orderUnconfirmed}</p> : null}
           {sendState === "pay_first" ? (
             <p role="alert">{checkoutText.tablePaysAsItOrders}</p>
+          ) : null}
+          {/* Sending again can't help with these: say why and offer what can. */}
+          {sendState === "store_closed" ? <p role="alert">{checkoutText.storeClosed}</p> : null}
+          {sendState === "items_short" ? (
+            <p role="alert">
+              {checkoutItemRefusalMessage("item_short", null, cart?.cart.items ?? [])}{" "}
+              <Link to="/cart">{checkoutText.changeYourCart}</Link>
+            </p>
           ) : null}
           {sessionState.status === "item_short" || sessionState.status === "item_unavailable" ? (
             <p role="alert">
@@ -726,11 +739,9 @@ export function CheckoutPage({
               className="checkout-continue__button"
               onClick={() => retrySend(sessionState.session.checkoutSessionReference)}
             >
-              {sendState === "pay_first"
-                ? checkoutText.continueToPayment
-                : checkoutText.sendToKitchen}
+              {sendState === "pay_first" ? checkoutText.continueToPayment : checkoutText.placeOrder}
             </button>
-          ) : sessionState.status === "store_closed" ? (
+          ) : sessionState.status === "store_closed" || sendState === "store_closed" ? (
             // WP-2423 item 8 ⑦ s1: closed or past last orders: retrying does not help now.
             <Link className="checkout-continue__button" to={dineIn ? "/dine-in/session" : "/menu"}>
               {dineIn ? checkoutText.backToYourTable : checkoutText.backToTheMenu}
@@ -747,15 +758,20 @@ export function CheckoutPage({
             <button
               type="button"
               className="checkout-continue__button"
-              disabled={!canContinue || continueRequested || sendState === "sending"}
+              disabled={
+                !canContinue ||
+                continueRequested ||
+                sendState === "sending" ||
+                sendState === "items_short"
+              }
               onClick={() => void requestContinue()}
             >
               {payLater
                 ? quote
-                  ? checkoutText.sendToKitchenWithTotal(
+                  ? checkoutText.placeOrderWithTotal(
                       formatMoney(quote.total.amountMinor, quote.total.currency),
                     )
-                  : checkoutText.sendToKitchen
+                  : checkoutText.placeOrder
                 : asksTip && tipChoice === null
                   ? checkoutText.chooseTipToContinue
                   : quote && tipAmount !== null

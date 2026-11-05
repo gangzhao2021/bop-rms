@@ -3,7 +3,7 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
-import { requestCheckoutMutation } from "./checkout-client.js";
+import { requestCheckoutMutation, type CheckoutMutationOptions } from "./checkout-client.js";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export interface CheckoutDetailsDraft {
@@ -175,11 +175,16 @@ export interface CheckoutDetailsClient {
   save(
     draft: CheckoutDetailsDraft,
     operationReference: string,
+    options?: CheckoutMutationOptions,
   ): Promise<CheckoutDetailsAcknowledgement>;
 }
 export function createCheckoutDetailsClient(): CheckoutDetailsClient {
   return Object.freeze({
-    async save(value: CheckoutDetailsDraft, operationValue: string) {
+    async save(
+      value: CheckoutDetailsDraft,
+      operationValue: string,
+      options?: CheckoutMutationOptions,
+    ) {
       const draft = parseCheckoutDetailsDraft(value),
         operationReference = reference(operationValue);
       const current = captureCustomerCsrfContext(),
@@ -202,6 +207,7 @@ export function createCheckoutDetailsClient(): CheckoutDetailsClient {
             body: JSON.stringify(body),
           },
           current,
+          options,
         );
         if (!current()) throw new CheckoutDetailsClientError("unknown");
         if (response.status === 200 || response.status === 201) {

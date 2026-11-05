@@ -1420,6 +1420,21 @@
   width: 100%;
   font-size: 1.0625rem !important;
 }
+/* WP-2423 item 6: what the one tap also does, read before and after the button. */
+.cart-next-actions__note,
+.slow-wait-note {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 0.875rem;
+}
+.cart-next-actions [aria-disabled="true"] {
+  color: var(--bop-color-text-muted);
+  pointer-events: none;
+}
+.dining-session__placed {
+  margin: 0;
+  font-weight: 600;
+}
 
 /* ---------- Checkout ---------- */
 .checkout-progress {

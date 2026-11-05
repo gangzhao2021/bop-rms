@@ -9,6 +9,7 @@ import {
   createCheckoutClient,
   createCheckoutController,
   type CheckoutClient,
+  manualRetryBusyTotalMs,
   requestCheckoutMutation,
 } from "./checkout-client.js";
 import type { CheckoutQuote } from "./types.js";
@@ -975,6 +976,51 @@ describe("durable original Quote expiry receipt", () => {
   });
 });
 
+describe("WP-2423 item 6: a table checking out when it is priced", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setCustomerCsrfCredential(null);
+  });
+  it("is told so, with nothing to wait for", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              schemaVersion: 1,
+              error: {
+                code: "cart_table_checking_out",
+                messageKey: "customer.cart.table_checking_out",
+              },
+            }),
+            { status: 409 },
+          ),
+      ),
+    );
+    const cart = {
+      schemaVersion: 1,
+      cart: { cartReference: "018f7800-0000-7000-8000-000000000001", version: 3, items: [{}] },
+    } as unknown as CartView;
+    const client = createCheckoutClient({} as CustomerCartClient);
+    const failure = await client
+      .quote(cart, "018f7800-0000-7000-8000-000000000002")
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(CartClientError);
+    expect((failure as CartClientError).code).toBe("cart_table_checking_out");
+    const controller = createCheckoutController({
+      loadCart: async () => cart,
+      quote: async () => {
+        throw failure;
+      },
+    });
+    await controller.load();
+    await controller.quote();
+    expect(controller.getState().status).toBe("table-checking-out");
+  });
+});
+
 describe("a busy store while a guest sends an order", () => {
   const busy = () =>
     new Response('{"error":"busy"}', { status: 503, headers: { "retry-after": "5" } });
@@ -1030,5 +1076,34 @@ describe("a busy store while a guest sends an order", () => {
       return busy();
     });
     await expect(send(keyed, fetcher, () => here)).resolves.toBe("failed");
+  });
+
+  it("stops asking after 45 seconds even when each answer is slow", async () => {
+    const slow = vi.fn<typeof globalThis.fetch>(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 14_000));
+      return busy();
+    });
+    await expect(send(keyed, slow)).resolves.toBe(503);
+    // 0 s, 17 s, 34 s: a fourth attempt would start past the limit.
+    expect(slow).toHaveBeenCalledTimes(3);
+  });
+
+  it("a guest's own retry ends plainly after the shorter budget", async () => {
+    vi.useFakeTimers();
+    const always = vi.fn<typeof globalThis.fetch>(async () => busy());
+    vi.stubGlobal("fetch", always);
+    try {
+      let status: unknown = "waiting";
+      void requestCheckoutMutation("/x", keyed, () => true, {
+        busyTotalMs: manualRetryBusyTotalMs,
+      }).then((result) => (status = result.response.status));
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(status).toBe(503);
+      // 0 s, 3 s, 6 s, 9 s; never the half minute of the first wait.
+      expect(always).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });

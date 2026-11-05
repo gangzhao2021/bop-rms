@@ -104,7 +104,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Change your cart": "修改购物车",
   "Change {name} to {left}": "把 {name} 改为 {left} 份",
   "Check again": "再检查一次",
-  "Check payment readiness": "检查付款是否就绪",
   "Check payment result": "查看付款结果",
   "Check payment status": "查看付款状态",
   "Check the same payment; do not submit another.": "请查看同一笔付款，不要再次提交。",
@@ -478,11 +477,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Payment failed": "付款失败",
   "Payment for this round didn’t go through. ": "这一轮付款没有成功。",
   "Payment for your order didn’t go through. ": "你的订单付款没有成功。",
-  "Payment has not been prepared for this checkout.": "这次结账还没有准备好付款。",
   "Payment is not available": "暂时无法付款",
   "Payment not confirmed yet": "付款尚未确认",
   "Payment not finished": "付款未完成",
-  "Payment not prepared": "付款未准备好",
   "Payment pending": "付款处理中",
   "Payment received {amount}": "已收款 {amount}",
   "Payment received {amount} ({online} online, {machine} on the store’s card machine)":
@@ -890,14 +887,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "View your receipt": "查看你的收据",
   "View {name}": "查看 {name}",
   "Waiting for payment": "等待付款",
-  "Send to the kitchen · {total}": "送厨房 · {total}",
-  "Send to the kitchen": "送厨房",
   "Nothing is charged now. Your table pays once at the end, and you choose any tip then.":
     "现在不收款。这桌最后一起结账，小费也在那时选。",
   Send: "送出",
-  "Sending your order to the kitchen…": "正在把你的菜送到厨房…",
-  "We couldn’t confirm your order reached the kitchen. Send it again — it is never sent twice.":
-    "没能确认已送到厨房。请再送一次，不会重复下单。",
   "This table pays for each round as it orders. Continue to payment instead.":
     "这桌每一轮点完就付款。请继续付款。",
   "On the table's bill": "记入本桌账单",
@@ -915,8 +907,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "无法确认结果。开始新的尝试前请先恢复这一次；如果仍无法确认，请向店员求助。",
   "We couldn’t confirm your details were saved. Retry saving before changing them.":
     "无法确认你的信息已保存，修改前请重新保存。",
-  "We couldn’t confirm your payment is ready. Check the same payment again.":
-    "无法确认付款已就绪，请再次查看同一笔付款。",
   "We couldn’t confirm your prices. Retry to continue without creating a second order.":
     "无法确认价格。请重试，不会生成第二笔订单。",
   "We couldn’t continue this checkout. Review your cart and scan the QR code again if needed.":
@@ -1320,6 +1310,69 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Choose {part}": "请选择{part}",
   "Ask staff about allergens": "过敏原请询问店员",
   "No allergens listed": "未标注过敏原",
+  // WP-2423 item 6: at a table that pays at the end, a round is placed from the cart in one tap.
+  "Place order": "下单",
+  "Place order · {total}": "下单 · {total}",
+  "Placing your order…": "正在下单…",
+  Continue: "继续",
+  "This also places {count} items other guests added.": "会一起下单同桌其他人加的 {count} 样。",
+  "Check your table": "查看本桌",
+  "We couldn’t confirm your order was placed. Try again — it is never placed twice. You can also tell a staff member what you’d like.":
+    "没能确认下单成功。请重试，不会重复下单；也可以直接告诉店员。",
+  "We couldn’t confirm your order was placed. Try again — it is never placed twice.":
+    "没能确认下单成功。请重试，不会重复下单。",
+  "The price changed since you added this. It now comes to {total} with tax.":
+    "价格有变动，现在是 {total}（含税）。",
+  "This order comes to {total} with tax.": "这一单共 {total}（含税）。",
+  "This order comes to {total} with tax and fees.": "这一单共 {total}（含税和费用）。",
+  "Someone at your table just placed this order.": "同桌刚刚下单了这些菜。",
+  "Tax is added to your table’s bill.": "税会加在这桌的账单上。",
+  "Prices and tax are on your table’s bill.": "价格和税会显示在这桌的账单上。",
+  "Someone at your table is placing an order. Try again in a moment.":
+    "同桌有人正在下单，请稍等再试。",
+  "Someone at your table is placing an order": "同桌有人正在下单",
+  "Someone at your table is placing an order.": "同桌有人正在下单。",
+  "Order placed.": "已下单。",
+  "Order placed. Staff confirm it first.": "已下单，店员确认后开始做。",
+  // WP-2423 item 2: every wait ends in a state with a next action, and says what was charged only
+  // when it knows.
+  "We couldn’t start your payment": "暂时无法开始付款",
+  "This order hasn’t been charged, and it hasn’t gone to the kitchen.":
+    "这一单没有扣款，也还没有送到厨房。",
+  "Try again in a moment. If it still doesn’t work, ask a staff member: they can take your order and payment.":
+    "请稍后再试。如果还是不行，请找店员，他们可以帮你下单和收款。",
+  "Your dishes are saved on your table page and go to the kitchen once paid.":
+    "你的菜已保存在这桌页面，付款后才送厨房。",
+  "Still working on it. This order hasn’t been charged.": "还在处理，请稍等。这一单没有扣款。",
+  "Still working on it.": "还在处理，请稍等。",
+  "Your payment is still being set up": "付款还在准备中",
+  "This order hasn’t been charged.": "这一单没有扣款。",
+  "We can’t confirm where your payment stands": "暂时无法确认付款状态",
+  "If you already entered your card, check the result first and don’t pay again. If you haven’t, you can continue.":
+    "如果你已经输入过银行卡，请先查看结果，不要重复付款；如果还没有，可以继续付款。",
+  "Your order needs checking again": "这一单需要重新确认",
+  "This order hasn’t been charged. Go back to check out again.": "这一单没有扣款。请返回重新结账。",
+  "We can’t show this payment on this phone": "这台手机无法显示这笔付款",
+  "Ask a staff member to check it before you pay again.": "再次付款前，请先请店员核对。",
+  "Check your connection and try again.": "请检查网络后重试。",
+  "The secure card form didn’t load": "安全付款表单没有加载出来",
+  "This payment hasn’t been charged. Try again, or ask a staff member to take your payment.":
+    "这笔没有扣款。请重试，或请店员帮你收款。",
+  "The secure card form didn’t load. If you already entered your card, ask a staff member to check before paying again. Otherwise try again.":
+    "安全付款表单没有加载出来。如果你已经输入过银行卡，请先请店员核对，不要重复付款；否则请重试。",
+  "Don’t pay again: ask a staff member to check this payment.":
+    "请不要重复付款，可以请店员帮你核对。",
+  "We couldn’t start the payment just now. This payment hasn’t been charged. Try again, or ask a staff member to take payment.":
+    "暂时无法开始付款，这笔没有扣款。请重试，或请店员帮你收款。",
+  "This is taking longer than usual. Don’t pay again: ask a staff member to check this payment.":
+    "比平时慢一些。请不要重复付款，可以请店员帮你核对。",
+  "Your payment hasn’t started": "付款还没有开始",
+  "This order hasn’t been charged. Go back to check out again, or ask a staff member.":
+    "这一单没有扣款。请返回重新结账，或请店员帮忙。",
+  "We couldn’t start your checkout. This order hasn’t been charged. Try again.":
+    "暂时无法开始结账，这一单没有扣款。请重试。",
+  "less than a minute": "不到 1 分钟",
+  "about 1 hour": "约 1 小时",
   "Ask staff about allergens in your choices.": "所选菜品的过敏原请询问店员。",
   "Your choices: no listed allergens declared.": "所选菜品：未申报所列过敏原。",
   "Your choices: {allergens}.": "所选菜品：{allergens}。",

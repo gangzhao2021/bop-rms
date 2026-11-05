@@ -1,10 +1,17 @@
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { CartPage } from "./CartPage.js";
 import type { CartState, CartStateController } from "./cart-state.js";
 import { checkoutInProgressMessage, type CartView } from "./types.js";
+import type { SendRoundController, SendRoundState } from "../checkout/send-round.js";
+import { LanguageRoot } from "../i18n/i18n.js";
 import { cartText } from "../journey/messages.js";
+import {
+  setCustomerCsrfCredential,
+  setTablePaymentTiming,
+} from "../session/customer-transaction-context.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -463,4 +470,271 @@ it("WP-2423: words the checkout-in-progress wait like the order-processing one",
   expect(checkoutInProgressMessage(61)).toBe(`${base} Try again in about 2 minutes.`);
   expect(checkoutInProgressMessage(3600)).toBe(`${base} Try again in about 60 minutes.`);
   expect(checkoutInProgressMessage(120)).toBe(`${base} Try again in about 2 minutes.`);
+});
+
+describe("WP-2423 item 6: a table that pays at the end", () => {
+  afterEach(() => {
+    setCustomerCsrfCredential(null);
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+  });
+  const tableCart = (overrides: Partial<CartView["cart"]> = {}): CartView => {
+    const base = cart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    return {
+      ...base,
+      cart: {
+        ...base.cart,
+        orderType: "DineIn",
+        serviceMode: "DineIn",
+        quote: null,
+        items: [{ ...item, warnings: [] }],
+        ...overrides,
+      },
+    };
+  };
+  const round = (state: SendRoundState): SendRoundController => ({
+    getState: () => state,
+    subscribe: () => () => undefined,
+    send: async () => undefined,
+    reset: () => undefined,
+  });
+  const page = (state: CartState, send: SendRoundState = { status: "idle" }) => {
+    setCustomerCsrfCredential("c".repeat(43));
+    setTablePaymentTiming("PayLater");
+    return renderToStaticMarkup(
+      <MemoryRouter>
+        <CartPage controller={controller(state)} sendRound={round(send)} />
+      </MemoryRouter>,
+    );
+  };
+
+  it("at a table that pays at the end the main action is Place order, never Checkout", () => {
+    const html = page({ status: "ready", cart: tableCart() });
+    expect(html).toContain('<button class="cart-checkout-link" type="button"');
+    expect(html).toContain(">Place order</button>");
+    expect(html).not.toContain(">Checkout<");
+    expect(html).not.toContain('href="/checkout"');
+    expect(html).toContain("Nothing is charged now.");
+    expect(html).toContain("Allergies? Ask a staff member before you order.");
+  });
+
+  it("in Chinese it says 下单, with nothing about paying or checking out on the button", () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    setTablePaymentTiming("PayLater");
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <CartPage
+          controller={controller({ status: "ready", cart: tableCart() })}
+          sendRound={round({ status: "idle" })}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain(">下单</button>");
+    expect(html).not.toContain(">结账<");
+    expect(html).toContain("有过敏？点单前请先问店员。");
+  });
+
+  it("says nothing about a price lock or checkout in the summary", () => {
+    const priced = page({ status: "ready", cart: tableCart() });
+    expect(priced).toContain("Subtotal before tax");
+    expect(priced).toContain("Tax is added to your table’s bill.");
+    expect(priced).not.toContain("at checkout");
+    const item = tableCart().cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const noPrices = page({
+      status: "ready",
+      cart: tableCart({
+        items: [{ ...item, lineEstimate: { status: "Unavailable", reasonCode: "QUOTE_REQUIRED" } }],
+      }),
+    });
+    expect(noPrices).toContain("Prices and tax are on your table’s bill.");
+    expect(noPrices).not.toContain("at checkout");
+    const quoted = page({
+      status: "ready",
+      cart: tableCart({
+        quote: cart().cart.quote,
+        warnings: ["QUOTE_EXPIRED"],
+      }),
+    });
+    expect(quoted).not.toContain("Prices confirmed for");
+    expect(quoted).not.toContain("Prices have expired");
+    expect(quoted).toContain("$11.30");
+  });
+
+  it("a table not yet known waits on a disabled Continue; pay-first keeps Checkout", () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    const unknown = renderToStaticMarkup(
+      <MemoryRouter>
+        <CartPage
+          controller={controller({ status: "ready", cart: tableCart() })}
+          sendRound={round({ status: "idle" })}
+        />
+      </MemoryRouter>,
+    );
+    expect(unknown).toContain('type="button" disabled="">Continue</button>');
+    expect(unknown).not.toContain(">Checkout<");
+    setTablePaymentTiming("PayFirst");
+    const payFirst = renderToStaticMarkup(
+      <MemoryRouter>
+        <CartPage
+          controller={controller({ status: "ready", cart: tableCart() })}
+          sendRound={round({ status: "idle" })}
+        />
+      </MemoryRouter>,
+    );
+    expect(payFirst).toContain('href="/checkout"');
+    expect(payFirst).toContain(">Checkout<");
+    expect(payFirst).not.toContain("Place order");
+  });
+
+  it("holds the cart still while a round is on its way", () => {
+    const html = page({ status: "ready", cart: tableCart() }, { status: "sending" });
+    expect(html).toContain(">Placing your order…</button>");
+    expect(html).toContain('disabled="">Placing your order…');
+    // − (already at the end of its range is not the point: all three controls are held).
+    expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
+    expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+    expect(html).toMatch(/disabled="">Remove/u);
+    expect(html).toContain('aria-disabled="true"');
+    const idle = page({ status: "ready", cart: tableCart() });
+    expect(idle).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+    expect(idle).not.toContain('aria-disabled="true"');
+  });
+
+  it("says when the tap also places what other guests added", () => {
+    const base = tableCart();
+    const item = base.cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const shared = tableCart({
+      items: [{ ...item, warnings: ["OTHER_PARTICIPANT_ITEM"] }],
+    });
+    expect(page({ status: "ready", cart: shared })).toContain(
+      "This also places 2 items other guests added.",
+    );
+    expect(page({ status: "ready", cart: base })).not.toContain("other guests added");
+  });
+
+  it("asks once about a total that went up, with the total on the button", () => {
+    const html = page(
+      { status: "ready", cart: tableCart() },
+      {
+        status: "confirm-total",
+        total: { amountMinor: "2260", currency: "CAD" },
+        reason: "changed",
+      },
+    );
+    expect(html).toContain(
+      '<p role="alert">The price changed since you added this. It now comes to $22.60 with tax.</p>',
+    );
+    expect(html).toContain(">Place order · $22.60</button>");
+    expect(
+      page(
+        { status: "ready", cart: tableCart() },
+        {
+          status: "confirm-total",
+          total: { amountMinor: "2260", currency: "CAD" },
+          reason: "shown",
+        },
+      ),
+    ).toContain("This order comes to $22.60 with tax.");
+    expect(
+      page(
+        { status: "ready", cart: tableCart() },
+        {
+          status: "confirm-total",
+          total: { amountMinor: "2260", currency: "CAD" },
+          reason: "fees",
+        },
+      ),
+    ).toContain("This order comes to $22.60 with tax and fees.");
+  });
+
+  it("an answer that got lost is said above an emptied cart, with the way to finish it", () => {
+    const html = page({ status: "empty" }, { status: "unconfirmed" });
+    expect(html).toContain("We couldn’t confirm your order was placed. Try again");
+    expect(html).toContain(">Try again</button>");
+    expect(html).toContain('href="/dine-in/session"');
+    expect(html).toContain("Check your table");
+    expect(html.indexOf("We couldn’t confirm your order")).toBeLessThan(
+      html.indexOf("Your cart is empty"),
+    );
+    // Also while the cart is offline or still loading.
+    for (const state of [
+      { status: "offline-readonly", cart: null },
+      { status: "loading" },
+    ] as const)
+      expect(page(state, { status: "unconfirmed" })).toContain(">Try again</button>");
+    // The cart it may have emptied can't be changed meanwhile.
+    expect(page({ status: "ready", cart: tableCart() }, { status: "unconfirmed" })).toContain(
+      'disabled="" aria-label="Increase Synthetic tea quantity"',
+    );
+  });
+
+  it("when someone else just placed it, an empty cart says so and points at the table", () => {
+    const html = page({ status: "empty" }, { status: "cart-changed" });
+    expect(html).toContain("Someone at your table just placed this order.");
+    expect(html).toContain('class="cart-primary-link" href="/dine-in/session"');
+    expect(html).toContain("See your table");
+    expect(html).toContain("Browse menu");
+    expect(html).not.toContain("Your cart is empty");
+    // Without a send that ended that way, an empty cart is just empty.
+    expect(page({ status: "empty" })).toContain("Your cart is empty");
+  });
+
+  it("names a dish that ran out, and each other stop in plain words", () => {
+    const item = tableCart().cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const ready = { status: "ready", cart: tableCart() } as const;
+    expect(
+      page(ready, {
+        status: "refused",
+        refusal: "item_short",
+        line: { cartItemReference: item.cartItemReference, available: 0, sharedStock: false },
+      }),
+    ).toContain("Synthetic tea (Synthetic size) just sold out.");
+    const closed = page(ready, { status: "store-closed" });
+    expect(closed).toContain("The store isn’t taking new orders right now");
+    expect(closed).toContain("Back to your table");
+    expect(page(ready, { status: "table-checking-out" })).toContain(
+      "New dishes can’t be sent while the bill is being settled.",
+    );
+    expect(page(ready, { status: "session-ended" })).toContain("Your session ended.");
+    expect(page(ready, { status: "cart-changed" })).toContain("The latest cart was loaded.");
+    expect(
+      page(ready, { status: "blocked", messages: ["This order can’t be paid yet."] }),
+    ).toContain("This order can’t be paid yet.");
+  });
+
+  it("another guest placing an order never reads as paying, in either language", () => {
+    const busy: SendRoundState = {
+      status: "busy",
+      wait: "checkout-in-progress",
+      retryAfterSeconds: 30,
+    };
+    const english = page({ status: "ready", cart: tableCart() }, busy);
+    expect(english).toContain("Someone at your table is placing an order. Try again in a moment.");
+    expect(english).not.toContain("paying");
+    setCustomerCsrfCredential("c".repeat(43));
+    setTablePaymentTiming("PayLater");
+    renderToStaticMarkup(createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }));
+    const blocked = renderToStaticMarkup(
+      <MemoryRouter>
+        <CartPage
+          controller={controller({
+            status: "checkout-in-progress",
+            cart: tableCart(),
+            issueCodes: [],
+            retryAfterSeconds: 30,
+            canRetrySameOperation: false,
+          })}
+          sendRound={round({ status: "idle" })}
+        />
+      </MemoryRouter>,
+    );
+    expect(blocked).toContain("同桌有人正在下单");
+    const error = blocked.slice(blocked.indexOf("cart-state"), blocked.indexOf("cart-layout"));
+    expect(error).not.toMatch(/付款|结账/u);
+  });
 });

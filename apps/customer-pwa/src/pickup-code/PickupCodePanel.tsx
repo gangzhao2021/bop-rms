@@ -247,7 +247,7 @@ export function PickupCodePanel({
               disabled={state.refreshing}
               onClick={() => void controller.refresh()}
             >
-              {state.refreshing ? "Refreshing…" : t("Refresh code")}
+              {state.refreshing ? t("Refreshing…") : t("Refresh code")}
             </button>
             {autoReveal ? null : (
               <button type="button" onClick={() => controller.close()}>

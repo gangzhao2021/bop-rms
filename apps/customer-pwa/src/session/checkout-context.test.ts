@@ -7,8 +7,33 @@ import {
   getCheckoutSessionReference,
   setCheckoutTipSelection,
   getCheckoutTipSelection,
+  getTablePaymentTiming,
+  markCheckoutCardOffered,
+  setTablePaymentTiming,
+  wasCheckoutCardOffered,
 } from "./customer-transaction-context.js";
 afterEach(() => setCustomerCsrfCredential(null));
+
+it("the card-offered marker survives a credential replacement", () => {
+  // Replacing the credential is what ends a payment page; the guest may have entered a card.
+  expect(wasCheckoutCardOffered()).toBe(false);
+  setCustomerCsrfCredential("c".repeat(43));
+  expect(wasCheckoutCardOffered()).toBe(false);
+  markCheckoutCardOffered();
+  setCustomerCsrfCredential("d".repeat(43));
+  expect(wasCheckoutCardOffered()).toBe(true);
+  setCustomerCsrfCredential(null);
+  expect(wasCheckoutCardOffered()).toBe(true);
+});
+
+it("a table's payment timing is known for the current credential only", () => {
+  setCustomerCsrfCredential("c".repeat(43));
+  expect(getTablePaymentTiming()).toBeNull();
+  setTablePaymentTiming("PayLater");
+  expect(getTablePaymentTiming()).toBe("PayLater");
+  setCustomerCsrfCredential("d".repeat(43));
+  expect(getTablePaymentTiming()).toBeNull();
+});
 it("keeps only a validated checkout reference in the current credential context", () => {
   const id = "01909999-0000-7000-8000-000000000001";
   setCustomerCsrfCredential("c".repeat(43));

@@ -141,9 +141,42 @@ export function isNewPartyJoin(): boolean {
   return newPartyJoin;
 }
 
+/**
+ * WP-2423 item 2: a card form (or the simulated one) was offered in this tab since it loaded. No money
+ * moves before a guest submits that form, so until then a page may say a failed start charged nothing;
+ * afterwards it may not, because the card could still be confirming. It stays set when the credential
+ * is replaced, which is exactly when a page ends a payment and says what it knows, and it dies with the
+ * page's memory on a reload (which lands on the result page). Never sent anywhere.
+ */
+let checkoutCardOffered = false;
+
+export function markCheckoutCardOffered(): void {
+  checkoutCardOffered = true;
+}
+
+export function wasCheckoutCardOffered(): boolean {
+  return checkoutCardOffered;
+}
+
+/**
+ * WP-2423 item 6 (DEC-DINE-IN-PAY-LATER): how this table pays, as last read. A table's timing is fixed
+ * when it opens, so it stays good for the visit; memory only, cleared with the credential.
+ */
+export type TablePaymentTiming = "PayFirst" | "PayLater";
+let tablePaymentTiming: TablePaymentTiming | null = null;
+
+export function setTablePaymentTiming(value: TablePaymentTiming | null): void {
+  tablePaymentTiming = value;
+}
+
+export function getTablePaymentTiming(): TablePaymentTiming | null {
+  return tablePaymentTiming;
+}
+
 export function setCustomerCsrfCredential(value: string | null): void {
   csrfContext = Symbol();
   csrfCredential = value;
+  tablePaymentTiming = null;
   // A new visit replaces the ended one on this device (its cookie replaces the old Session).
   if (value !== null) {
     endedVisitReceipt = null;

@@ -195,3 +195,20 @@ test("@production a guest who comes back keeps the payment form through the auto
     ["payment-handoff", "{}"],
   ]);
 });
+
+// WP-2423 item 2: this page says the guest may have entered a card already, so a form that doesn't
+// load proves nothing was charged.
+test("@production coming back to a payment whose form won't load never says it wasn't charged", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route("https://js.stripe.com/**", (route) => route.abort("failed"));
+  await page.goto("/checkout/payment");
+  await page.getByRole("button", { name: "Finish paying", exact: true }).click();
+  const form = page.getByRole("region", { name: "Secure card payment" });
+  await expect(form.getByRole("alert")).toContainText(
+    "If you already entered your card, ask a staff member to check before paying again.",
+  );
+  await expect(form).not.toContainText("hasn’t been charged");
+  await expect(form.getByRole("button", { name: "Try again", exact: true })).toBeEnabled();
+});

@@ -1,5 +1,11 @@
 import * as pickupClient from "../cart/pickup-cart-client.js";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { LanguageRoot } from "../i18n/i18n.js";
+import {
+  setCustomerCsrfCredential,
+  setTablePaymentTiming,
+} from "../session/customer-transaction-context.js";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { MenuScreen, SellableConfigurator } from "./MenuPage.js";
@@ -482,9 +488,7 @@ describe("WP-1701 Customer Menu screens", () => {
     );
     const inputs = html.match(/<input[^>]*type="radio"[^>]*>/gu) ?? [];
     expect(inputs[0]).toContain('aria-describedby="configure-allergens-0-0"');
-    expect(inputs[1]).toContain(
-      'aria-describedby="configure-price-0-1 configure-allergens-0-1"',
-    );
+    expect(inputs[1]).toContain('aria-describedby="configure-price-0-1 configure-allergens-0-1"');
     expect(html).toContain(
       '<span id="configure-allergens-0-1" class="configure-option__allergens">Ask staff about allergens</span>',
     );
@@ -684,6 +688,38 @@ describe("WP-2423: a table cart that timed out", () => {
       "Another guest at your table is paying for this order. Try again in a moment.",
     );
     expect(html).not.toContain("We couldn’t add this right now.");
+  });
+  it("WP-2423 item 6: at a table that pays at the end someone is ordering, not paying", () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    setTablePaymentTiming("PayLater");
+    try {
+      const english = render({
+        status: "checkout-in-progress",
+        issueCodes: [],
+        retryAfterSeconds: 30,
+        canRetry: false,
+      });
+      expect(english).toContain(
+        "Someone at your table is placing an order. Try again in a moment.",
+      );
+      expect(english).not.toContain("paying");
+      renderToStaticMarkup(
+        createElement(LanguageRoot, { initial: "zh-Hans", children: () => null }),
+      );
+      const chinese = render({
+        status: "checkout-in-progress",
+        issueCodes: [],
+        retryAfterSeconds: 30,
+        canRetry: false,
+      });
+      expect(chinese).toContain("同桌有人正在下单，请稍等再试。");
+      const said = /<div class="configure-status[^>]*>.*?<\/div>/su.exec(chinese)?.[0] ?? "";
+      expect(said).toContain("同桌有人正在下单");
+      expect(said).not.toMatch(/付款|结账/u);
+    } finally {
+      renderToStaticMarkup(createElement(LanguageRoot, { initial: "en", children: () => null }));
+      setCustomerCsrfCredential(null);
+    }
   });
   it("no longer sends the guest to staff when the cart could not be restarted", () => {
     const html = render({

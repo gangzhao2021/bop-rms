@@ -514,13 +514,16 @@ for (const screen of [
             await expect(page).toHaveURL(/\/checkout\/payment$/u);
             expect(sessionCalls).toHaveLength(2);
             expect(sessionCalls[1]).toEqual(sessionCalls[0]);
-            await expect(page.getByText("$1.25", { exact: true })).toBeVisible();
             await expect(page.getByLabel("Tip ($)", { exact: true })).toHaveCount(0);
-            // U1: the page prepares the payment itself; the lost response leaves one retry.
-            const retryPayment = page.getByRole("button", {
-              name: "Check payment readiness",
-              exact: true,
-            });
+            // U1: the page prepares the payment itself; the lost response leaves one retry. No card
+            // was offered yet, so it can say this order wasn't charged.
+            await expect(
+              page.getByRole("heading", { name: "We couldn’t start your payment" }),
+            ).toBeVisible();
+            await expect(
+              page.getByText("This order hasn’t been charged", { exact: false }),
+            ).toBeVisible();
+            const retryPayment = page.getByRole("button", { name: "Try again", exact: true });
             await expect(retryPayment).toBeEnabled();
             await context.setOffline(true);
             await expect(retryPayment).toBeDisabled();
@@ -528,7 +531,9 @@ for (const screen of [
             await expect(retryPayment).toBeEnabled();
             expect(paymentCalls).toHaveLength(1);
             await retryPayment.click();
+            // The amount only the server knows, with the tip inside it, once it has answered.
             await expect(page.getByText("$2.38", { exact: true })).toBeVisible();
+            await expect(page.getByText("$1.25", { exact: true })).toBeVisible();
             expect(paymentCalls).toHaveLength(2);
             expect(paymentCalls[1]).toEqual(paymentCalls[0]);
             expect(paymentCalls[0]?.body).toEqual({ tip: { amountMinor: "125", currency: "CAD" } });
@@ -557,7 +562,16 @@ for (const screen of [
             await context.setOffline(true);
             await expect(pay).toHaveCount(0);
             await context.setOffline(false);
-            await expect(retryPayment).toBeEnabled();
+            // A card was offered: nothing here may say it wasn't charged, and the same payment goes on.
+            await expect(
+              page.getByRole("heading", { name: "We can’t confirm where your payment stands" }),
+            ).toBeVisible();
+            await expect(page.getByRole("main")).not.toContainText("hasn’t been charged");
+            const continuePayment = page.getByRole("button", {
+              name: "Continue to payment",
+              exact: true,
+            });
+            await expect(continuePayment).toBeEnabled();
             expect(paymentCalls).toHaveLength(3);
             await page.evaluate(async () => {
               Reflect.set(window, "syntheticHoldSubmit", false);
@@ -572,7 +586,7 @@ for (const screen of [
               destroys: 1,
               confirms: 0,
             });
-            await retryPayment.click();
+            await continuePayment.click();
             await expect(pay).toBeEnabled();
             expect(paymentCalls[3]).toEqual(paymentCalls[0]);
             expect(handoffCalls).toBe(2);

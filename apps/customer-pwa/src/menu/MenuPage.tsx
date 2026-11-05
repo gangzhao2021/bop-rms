@@ -1271,14 +1271,14 @@ function configurationIssues(
     if (count < rule.minimumSelections && rule.comboPart !== true)
       issues.push(
         t("{value1} requires at least {minimumSelections}.", {
-          value1: rule.name ?? `Choice group ${index + 1}`,
+          value1: rule.name ?? t("Choice group {value1}", { value1: index + 1 }),
           minimumSelections: rule.minimumSelections,
         }),
       );
     if (count > rule.maximumSelections)
       issues.push(
         t("{value1} allows at most {maximumSelections}.", {
-          value1: rule.name ?? `Choice group ${index + 1}`,
+          value1: rule.name ?? t("Choice group {value1}", { value1: index + 1 }),
           maximumSelections: rule.maximumSelections,
         }),
       );

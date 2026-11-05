@@ -163,32 +163,53 @@ function parseTips(value: unknown) {
   });
 }
 
+/** How a keyed write waits through a busy Store. */
+export interface CheckoutMutationOptions {
+  /** No further attempt after this long (the default rides out a menu listing). */
+  readonly busyTotalMs?: number;
+}
+
 export interface CheckoutClient {
   loadCart(): Promise<CartView | null>;
-  quote(cart: CartView, operationReference: string): Promise<CheckoutQuote>;
+  quote(
+    cart: CartView,
+    operationReference: string,
+    options?: CheckoutMutationOptions,
+  ): Promise<CheckoutQuote>;
 }
 
 const BUSY_WAIT_MS = 3_000;
 const BUSY_ATTEMPTS = 11;
+const BUSY_TOTAL_MS = 45_000;
+/**
+ * WP-2423 item 2: a guest who taps Try again has already outlasted a menu listing; a fault that is
+ * still there ends plainly instead of costing another long wait. Their next step is a person.
+ */
+export const manualRetryBusyTotalMs = 10_000;
 
 /**
  * Owner 2026-11-04: while a menu is being listed the Store answers 503 and "try again later" for
  * about half a minute. A write carrying its idempotency key is asked again with the same key, so it
- * can't happen twice, and the guest keeps waiting instead of being told it failed.
+ * can't happen twice, and the guest keeps waiting instead of being told it failed. WP-2423 item 2:
+ * the wait is bounded by time as well as attempts, because each slow answer can take 15 s.
  */
 export async function requestCheckoutMutation(
   url: string,
   init: RequestInit,
   contextCurrent: () => boolean,
+  options: CheckoutMutationOptions = {},
 ) {
   const keyed = new Headers(init.headers).has("idempotency-key");
+  const budget = options.busyTotalMs ?? BUSY_TOTAL_MS;
+  const started = Date.now();
   for (let attempt = 1; ; attempt += 1) {
     const result = await requestCheckoutMutationOnce(url, init, contextCurrent);
     if (
       !keyed ||
       attempt >= BUSY_ATTEMPTS ||
       result.response.status !== 503 ||
-      !result.response.headers.has("retry-after")
+      !result.response.headers.has("retry-after") ||
+      Date.now() - started + BUSY_WAIT_MS > budget
     )
       return result;
     await new Promise((resolve) => setTimeout(resolve, BUSY_WAIT_MS));
@@ -277,7 +298,7 @@ async function requestCheckoutMutationOnce(
 export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutClient {
   return Object.freeze({
     loadCart: () => cartClient.loadCurrent(),
-    async quote(cart: CartView, operationReference: string) {
+    async quote(cart: CartView, operationReference: string, options?: CheckoutMutationOptions) {
       const contextCurrent = captureCustomerCsrfContext();
       const csrf = getCustomerCsrfCredential();
       if (csrf === null) throw new CartClientError("cart_session_expired");
@@ -303,6 +324,7 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
           body: JSON.stringify({ cartVersion }),
         },
         contextCurrent,
+        options,
       );
       try {
         if (!contextCurrent()) throw new CartClientError("network_unknown");
@@ -338,6 +360,7 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
           quote_request_invalid: [400, "cart_request_invalid"],
           cart_order_processing: [409, "cart_order_processing"],
           cart_checkout_in_progress: [409, "cart_checkout_in_progress"],
+          cart_table_checking_out: [409, "cart_table_checking_out"],
         } as const;
         const contract = Object.hasOwn(known, String(error.code))
           ? known[error.code as keyof typeof known]
@@ -451,7 +474,9 @@ export function createCheckoutController(
             ? "conflict"
             : parsed === "cart_selection_invalid" || parsed === "cart_request_invalid"
               ? "validation"
-              : "unavailable",
+              : parsed === "cart_table_checking_out"
+                ? "table-checking-out"
+                : "unavailable",
       cart: parsed === "cart_session_expired" ? null : current,
       canRetry: false,
     });

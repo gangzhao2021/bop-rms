@@ -240,3 +240,29 @@ for (const wallets of [true, false, undefined] as const) {
     await noOverflowOrBlockingAxe(page);
   });
 }
+
+// WP-2423 item 2: this form isn't the first offer: a card may already be in, so it says nothing
+// about money, and the guest can always ask again.
+test("@production the secure form failing to load offers try again", async ({ page }) => {
+  await fixture(page);
+  let aborted = false;
+  await page.route("https://js.stripe.com/**", (route) => {
+    if (!aborted) {
+      aborted = true;
+      return route.abort("failed");
+    }
+    return route.fulfill({ contentType: "application/javascript", body: syntheticStripe });
+  });
+  await page.goto("/checkout/result");
+  await page.getByRole("button", { name: "Try another card", exact: true }).click();
+  const form = page.getByRole("region", { name: "Secure card payment" });
+  await expect(form.getByRole("alert")).toContainText(
+    "The secure card form didn’t load. If you already entered your card, ask a staff member to check before paying again. Otherwise try again.",
+  );
+  await expect(form).not.toContainText("hasn’t been charged");
+  await expect(form.getByRole("button", { name: "Pay securely" })).toHaveCount(0);
+  await form.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.getByText("Synthetic secure card component")).toBeVisible();
+  await expect(form.getByRole("button", { name: "Pay securely" })).toBeEnabled();
+  await expect(form.getByRole("alert")).toHaveCount(0);
+});

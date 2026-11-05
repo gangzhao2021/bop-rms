@@ -38,7 +38,9 @@ export type CheckoutState =
         | "validation"
         | "unavailable"
         | "quote-expired"
-        | "outcome-unknown";
+        | "outcome-unknown"
+        /** WP-2423 item 6: staff started the table's checkout; no more rounds from a phone. */
+        | "table-checking-out";
       cart: CartView | null;
       canRetry: boolean;
     }>

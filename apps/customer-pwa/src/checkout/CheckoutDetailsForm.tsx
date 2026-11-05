@@ -84,8 +84,14 @@ export function CheckoutDetailsForm({
   onBusyChange,
   onReadyChange,
   onSubmittableChange,
+  payLater = false,
   ref,
 }: {
+  /**
+   * WP-2423 item 6: a table that pays at the end comes here only for the Store's documents, so that
+   * is all the form asks: no receipt choice, no save or reload of its own (the one button does it).
+   */
+  readonly payLater?: boolean;
   readonly selection: CheckoutFormSelection;
   readonly now?: () => number;
   /** Contact typed but not yet saved, held by the page so a re-price does not clear it. */
@@ -131,7 +137,7 @@ export function CheckoutDetailsForm({
         policies.read(selection),
       ]);
       // Only once this checkout's details are readable: which order messages can be sent now.
-      const channels = await messageOptions.read();
+      const channels = payLater ? noOrderMessages : await messageOptions.read();
       if (run !== generation.current || !current()) return;
       const prior = saved.details;
       setDraft({
@@ -164,7 +170,7 @@ export function CheckoutDetailsForm({
     } finally {
       if (run === generation.current) setLoading(false);
     }
-  }, [policies, reader, selection]);
+  }, [payLater, policies, reader, selection]);
   useEffect(() => {
     void load();
     return () => {
@@ -289,6 +295,53 @@ export function CheckoutDetailsForm({
       </section>
     );
   const contact = draft.pickupContact;
+  if (payLater)
+    return policy.documents.length === 0 ? null : (
+      <section aria-label={checkoutText.detailsLabel}>
+        <form
+          className="checkout-details-form"
+          autoComplete="off"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <fieldset disabled={busy || !online || expired}>
+            {policy.documents.map((document) => (
+              <details key={document.documentReference}>
+                <summary>{document.title}</summary>
+                <p style={{ whiteSpace: "pre-wrap" }}>{document.bodyText}</p>
+              </details>
+            ))}
+            <label>
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={(event) => {
+                  setConfirmed(event.target.checked);
+                  setDirty(true);
+                }}
+              />
+              {checkoutText.agreePolicies}
+            </label>
+          </fieldset>
+          {expired ? <p role="alert">{checkoutText.detailsExpired}</p> : null}
+          {["conflict", "policy", "requote", "denied", "invalid"].includes(save.status) ? (
+            <p role="alert">{checkoutText.detailsCheckoutChanged}</p>
+          ) : null}
+          {showsUnconfirmedSave(uncertain, online) ? (
+            <>
+              <p role="alert">{checkoutText.detailsSaveUnconfirmed}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  void saver.retry().then(savedRevision);
+                }}
+              >
+                {checkoutText.retrySavingDetails}
+              </button>
+            </>
+          ) : null}
+        </form>
+      </section>
+    );
   return (
     <section aria-labelledby="checkout-details-heading">
       <h2 id="checkout-details-heading">

@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { CheckoutPage } from "./CheckoutPage.js";
+import {
+  setCustomerCsrfCredential,
+  setTablePaymentTiming,
+} from "../session/customer-transaction-context.js";
 import type { CheckoutController } from "./checkout-client.js";
 import type { CheckoutQuote, CheckoutState } from "./types.js";
 import type { CartView } from "../cart/types.js";
@@ -190,4 +194,46 @@ it.each([
   expect(html).toContain("Try again</button>");
   expect(html).not.toContain("We couldn’t price your order just now");
   expect(html).not.toContain("cart_");
+});
+
+describe("WP-2423 item 6: a table that pays at the end reaches this page only for documents", () => {
+  afterEach(() => setCustomerCsrfCredential(null));
+  const tableCart: CartView = {
+    ...cart,
+    cart: { ...cart.cart, orderType: "DineIn", serviceMode: "DineIn" },
+  };
+  const paging = (state: CheckoutState, timing: "PayLater" | "PayFirst") => {
+    setCustomerCsrfCredential("c".repeat(43));
+    setTablePaymentTiming(timing);
+    return renderToStaticMarkup(
+      <MemoryRouter>
+        <CheckoutPage
+          controller={controller(state)}
+          now={() => Date.parse("2026-08-12T00:01:00.000Z")}
+        />
+      </MemoryRouter>,
+    );
+  };
+  it("is called Place order, with no steps, price lock or tip", () => {
+    const html = paging(
+      { status: "ready", cart: tableCart, quote: { ...quote, warnings: [], priceChange: null } },
+      "PayLater",
+    );
+    expect(html).toContain('<h2 id="page-heading">Place order</h2>');
+    expect(html).toContain("Place order · $1.13");
+    expect(html).not.toContain("checkout-progress");
+    expect(html).not.toContain("Prices confirmed for");
+    expect(html).not.toContain("checkout-tip");
+    expect(html).not.toContain(">Checkout<");
+    expect(html).toContain("Nothing is charged now.");
+  });
+  it("a pay-first table keeps the review page with its steps", () => {
+    const html = paging(
+      { status: "ready", cart: tableCart, quote: { ...quote, warnings: [], priceChange: null } },
+      "PayFirst",
+    );
+    expect(html).toContain("checkout-progress");
+    expect(html).toContain("Prices confirmed for");
+    expect(html).not.toContain("Place order");
+  });
 });

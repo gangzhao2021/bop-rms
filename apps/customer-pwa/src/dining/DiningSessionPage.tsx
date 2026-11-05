@@ -8,7 +8,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { endSentence, formatClockTime, formatMoney } from "../journey/format.js";
 import { staffCancellationReasonText } from "../order-status/OrderStatusPage.js";
@@ -634,6 +634,15 @@ export function DiningSessionPage({
 }) {
   const [client] = useState(() => provided ?? createHttpDiningSessionClient());
   const [state, setState] = useState<DiningSessionState>({ status: "loading" });
+  // WP-2423 item 6: the cart placed a round in one tap and sent the guest here. It says so once: the
+  // address keeps no record of it, so coming back to this page later doesn't claim it again.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [placed] = useState<RoundPlaced | null>(() => placedRound(location.state));
+  useEffect(() => {
+    if (placedRound(location.state) !== null)
+      void navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
   // The menu is read once the table has ordered something (a combo's dishes and allergens).
   const menu = usePublishedMenu(
     menuContext,
@@ -766,6 +775,7 @@ export function DiningSessionPage({
       store={store}
       cartClient={cartClient}
       menu={menu}
+      placed={placed}
       onRefresh={() => void load()}
       billReadKey={billReadKey}
       invitation={
@@ -810,6 +820,13 @@ function SettledTable({
   );
 }
 
+/** What the cart says it just did (router state; no private data). */
+export type RoundPlaced = "Sent" | "Held";
+const placedRound = (state: unknown): RoundPlaced | null => {
+  const placed = (state as { placed?: unknown } | null)?.placed;
+  return placed === "Sent" || placed === "Held" ? placed : null;
+};
+
 export function DiningSessionScreen({
   state,
   store,
@@ -821,7 +838,11 @@ export function DiningSessionScreen({
   settledReceipt,
   billReadKey,
   tablePaymentClient,
+  placed = null,
 }: {
+  /** WP-2423 item 6: a round was just placed from the cart (never "sent to the kitchen": a held
+   * round waits for staff, and an item not prepared never reaches it). */
+  readonly placed?: RoundPlaced | null;
   /** A new value reads the table's payment state again. */
   readonly billReadKey?: number | undefined;
   /** Asked before "Order again" adds a dish (tests inject). */
@@ -880,6 +901,11 @@ export function DiningSessionScreen({
           <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
         )}
       </PageHeading>
+      {placed === null ? null : (
+        <p className="dining-session__placed" role="status">
+          {placed === "Held" ? t("Order placed. Staff confirm it first.") : t("Order placed.")}
+        </p>
+      )}
       {state.status === "loading" ? (
         <section role="status">
           <h2>{t("Loading your table")}</h2>
@@ -999,7 +1025,10 @@ export function DiningSessionScreen({
                 })}
               </p>
             ))(view.rounds.filter(chargeTakenOff).length)}
-          {view.rounds
+          {/* WP-2423 item 6: newest first, numbers unchanged: the round just placed is the first
+              card a guest sees, and a charge from when the table opened sinks to the bottom. */}
+          {[...view.rounds]
+            .reverse()
             .filter((round) => !chargeTakenOff(round))
             .map((round) => (
               <RoundCard

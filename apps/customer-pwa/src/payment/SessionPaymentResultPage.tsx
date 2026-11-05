@@ -5,6 +5,7 @@ import { formatCartMoney } from "../cart/format-money.js";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { createSessionPaymentResultClient } from "./session-payment-result-client.js";
 import { createSessionPaymentResultController } from "./session-payment-result-controller.js";
+import { useCheckoutReturn } from "./checkout-return.js";
 import { RetryCardPanel } from "./RetryCardPanel.js";
 import { ResumePaymentPanel } from "./ResumePaymentPanel.js";
 import { paymentConfiguration } from "./payment-configuration.js";
@@ -98,6 +99,8 @@ export function SessionPaymentResultPage({
   }, [controller, polls, refresh]);
   const unknown = state.status === "unknown" || result?.status === "Unknown";
   const unprepared = result?.status === "Pending" && result.paymentIntentReference === null;
+  // WP-2423 item 2: this checkout's dishes may already be an unpaid round on the table page.
+  const back = useCheckoutReturn(unprepared, store?.serviceMode === "DineIn");
   // WP-2423 abandoned payment: a payment never finished (cancelled when its time ran out).
   const notCompleted = result?.status === "Failed" && result.failure === "NotCompleted";
   // The guest who started this payment can finish it here while its time is open.
@@ -116,7 +119,7 @@ export function SessionPaymentResultPage({
           : unknown
             ? t("Payment result unknown")
             : unprepared
-              ? t("Payment not prepared")
+              ? t("Your payment hasn’t started")
               : result?.status === "Pending"
                 ? t("Payment not confirmed yet")
                 : result?.status === "Succeeded"
@@ -128,7 +131,7 @@ export function SessionPaymentResultPage({
                       : t("Payment result not found");
   const badge = unknown
     ? t("Status not confirmed")
-    : notCompleted
+    : notCompleted || unprepared
       ? t("Not charged")
       : result?.status === "Failed"
         ? t("Declined")
@@ -213,7 +216,20 @@ export function SessionPaymentResultPage({
               <p>{t("Check the same payment; do not submit another.")}</p>
             </>
           ) : null}
-          {unprepared ? <p>{t("Payment has not been prepared for this checkout.")}</p> : null}
+          {unprepared ? (
+            <>
+              <p>
+                {t(
+                  "This order hasn’t been charged. Go back to check out again, or ask a staff member.",
+                )}
+              </p>
+              {back === "table-saved" ? (
+                <p>
+                  {t("Your dishes are saved on your table page and go to the kitchen once paid.")}
+                </p>
+              ) : null}
+            </>
+          ) : null}
           {result?.status === "Pending" && !unprepared ? (
             <p>
               {resumable
@@ -285,9 +301,18 @@ export function SessionPaymentResultPage({
           </>
         ) : null}
       </section>
-      <Link className="payment-result-page__back" to="/checkout">
-        {t("Back to checkout")}
-      </Link>
+      {unprepared && back !== "cart" ? (
+        <Link className="payment-result-page__back cart-primary-link" to="/dine-in/session">
+          {back === "table-saved" ? t("See your table") : t("Back to your table")}
+        </Link>
+      ) : (
+        <Link
+          className={"payment-result-page__back" + (unprepared ? " cart-primary-link" : "")}
+          to="/checkout"
+        >
+          {t("Back to checkout")}
+        </Link>
+      )}
     </CustomerPage>
   );
 }
