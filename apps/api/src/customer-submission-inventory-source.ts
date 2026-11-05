@@ -16,8 +16,8 @@ import {
 
 export class CustomerInventorySourceError extends Error {
   readonly code = "CUSTOMER_INVENTORY_SOURCE_UNAVAILABLE";
-  constructor() {
-    super("Inventory submission source is unavailable");
+  constructor(options?: { readonly cause?: unknown }) {
+    super("Inventory submission source is unavailable", options);
     this.name = "CustomerInventorySourceError";
   }
 }

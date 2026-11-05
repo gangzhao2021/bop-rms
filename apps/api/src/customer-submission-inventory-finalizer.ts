@@ -430,7 +430,7 @@ function createBatchInventoryFinalizer<V extends 1 | 2>(
           error.code === "STOCK_RESERVATION_INSUFFICIENT"
         )
           throw new OrderCreationError("ORDER_CREATE_STOCK_SHORT");
-        return fail();
+        throw new CustomerInventorySourceError({ cause: error });
       }
     },
   });
