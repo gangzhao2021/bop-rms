@@ -421,7 +421,7 @@ export function OpeningCountPage({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<OpeningCountErrorCode | null>(null);
   if (state.kind === "Unavailable" || state.kind === "Offline")
-    return <PageDidNotLoad code={state.kind} onRetry={reload} />;
+    return <PageDidNotLoad code={state.kind} title={t("Opening count")} onRetry={reload} />;
   if (state.kind !== "Found")
     return (
       <StatePanel

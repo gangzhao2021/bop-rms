@@ -111,7 +111,7 @@ describe("the words", () => {
   it("are in Chinese too", () => {
     for (const text of words) expect(zhHans[text]).toBeDefined();
     setLanguageForTest("zh-Hans");
-    expect(t("Our system has a problem")).toBe("我们的系统出了问题");
+    expect(t("This screen isn't working")).toBe("这个页面暂时用不了");
     setLanguageForTest("en");
   });
 });

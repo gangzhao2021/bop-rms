@@ -1,5 +1,6 @@
 import { StatePanel } from "@bop-rms/ui";
 import { t } from "./i18n/i18n.js";
+import { WorkspacePage } from "./WorkspacePage.js";
 
 /**
  * WP-2423 item 10: a back office page whose read did not work. A page that didn't open has no saved
@@ -8,12 +9,15 @@ import { t } from "./i18n/i18n.js";
  */
 export function PageDidNotLoad({
   code,
+  title,
   onRetry,
 }: {
   readonly code: "Unavailable" | "Offline";
+  /** The page's own name and frame; left out where the page draws its frame itself. */
+  readonly title?: string | undefined;
   readonly onRetry: () => void;
 }) {
-  return (
+  const panel = (
     <StatePanel
       heading={t("This page didn't load")}
       tone={code === "Offline" ? "offline" : "error"}
@@ -31,6 +35,7 @@ export function PageDidNotLoad({
       </button>
     </StatePanel>
   );
+  return title === undefined ? panel : <WorkspacePage title={title}>{panel}</WorkspacePage>;
 }
 
 /**

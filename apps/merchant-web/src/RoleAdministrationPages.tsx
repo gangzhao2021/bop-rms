@@ -67,7 +67,7 @@ function Status({
   readonly onRetry: () => void;
 }) {
   if (state === "Unavailable" || state === "Offline")
-    return <PageDidNotLoad code={state} onRetry={onRetry} />;
+    return <PageDidNotLoad code={state} title={t("Roles")} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={

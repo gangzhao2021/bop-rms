@@ -15,7 +15,7 @@ export const serverProblemText = t(
  * A screen in use on the floor: what to do now, on the screen they are working in. Pairs with the
  * outage guide on Tables (AGENTS.md operating continuity).
  */
-export const floorServerProblemHeading = t("Our system has a problem");
+export const floorServerProblemHeading = t("This screen isn't working");
 export const floorServerProblemText = t(
   "Our system has a problem; your wifi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.",
 );

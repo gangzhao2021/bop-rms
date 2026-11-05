@@ -7798,7 +7798,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "我们这边出了问题。已保存的内容不受影响。",
   "Something went wrong on our side. If you just saved, open it to see whether it is there, then try again.":
     "我们这边出了问题。如果刚才在保存，请打开看看是否已经存上，然后再试一次。",
-  "Our system has a problem": "我们的系统出了问题",
+  "This screen isn't working": "这个页面暂时用不了",
   "Our system has a problem; your wifi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.":
     "我们的系统出了问题，您的网络没有问题。请继续营业：新点的菜写纸单，付款用刷卡机。这个页面会一直重试。",
   "We couldn't confirm the result. Press again: it is never recorded twice.":

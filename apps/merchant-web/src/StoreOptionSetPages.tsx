@@ -71,7 +71,7 @@ function Failure({
   readonly onRetry?: () => void;
 }) {
   if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
-    return <PageDidNotLoad code={code} onRetry={onRetry} />;
+    return <PageDidNotLoad code={code} title={t("Options")} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Options")}

@@ -92,7 +92,7 @@ export function StoreOptionPricesPage({
     };
   }, [client, generation]);
   if (state.kind === "Unavailable" || state.kind === "Offline")
-    return <PageDidNotLoad code={state.kind} onRetry={reload} />;
+    return <PageDidNotLoad code={state.kind} title={t("Option prices")} onRetry={reload} />;
   if (state.kind !== "Found")
     return (
       <StatePanel

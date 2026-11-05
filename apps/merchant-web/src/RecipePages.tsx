@@ -100,7 +100,7 @@ function useRecipeView<V>(
 }
 function Failure({ code, onRetry }: { code: RecipeErrorCode | "Loading"; onRetry?: () => void }) {
   if (onRetry !== undefined && (code === "Unavailable" || code === "Offline"))
-    return <PageDidNotLoad code={code} onRetry={onRetry} />;
+    return <PageDidNotLoad code={code} title={t("Recipes")} onRetry={onRetry} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Recipes")}

@@ -210,7 +210,13 @@ export function StoreTaxReviewPage({
     };
   }, [client, generation]);
   if (state.kind === "Unavailable" || state.kind === "Offline")
-    return <PageDidNotLoad code={state.kind} onRetry={() => setGeneration((value) => value + 1)} />;
+    return (
+      <PageDidNotLoad
+        code={state.kind}
+        title={t("Tax review")}
+        onRetry={() => setGeneration((value) => value + 1)}
+      />
+    );
   if (state.kind !== "Found")
     return (
       <StatePanel

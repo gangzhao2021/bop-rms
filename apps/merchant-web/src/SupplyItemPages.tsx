@@ -70,7 +70,7 @@ function routeReference(value: unknown): string | null {
 }
 function Failure({ code, onRefresh }: { code: SupplyItemErrorCode; onRefresh?: () => void }) {
   if (onRefresh !== undefined && (code === "Unavailable" || code === "Offline"))
-    return <PageDidNotLoad code={code} onRetry={onRefresh} />;
+    return <PageDidNotLoad code={code} title={t("Inventory items")} onRetry={onRefresh} />;
   return (
     <StatePanel
       heading={code === "PermissionDenied" ? noAccessHeading : t("Inventory items")}

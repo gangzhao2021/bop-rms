@@ -205,7 +205,11 @@ export function StoreAvailabilityPage({
   if (state.kind !== "Found") {
     const panel =
       state.kind === "Unavailable" || state.kind === "Offline" ? (
-        <PageDidNotLoad code={state.kind} onRetry={reload} />
+        <PageDidNotLoad
+          code={state.kind}
+          title={navigation ? undefined : t("Item availability")}
+          onRetry={reload}
+        />
       ) : (
         <StatePanel
           heading={state.kind === "PermissionDenied" ? noAccessHeading : t("Item availability")}
