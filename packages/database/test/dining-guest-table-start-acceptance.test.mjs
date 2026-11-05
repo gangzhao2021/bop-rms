@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
-import { createHash, createHmac, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { URL } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
+import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
 import {
+  createGuestDiningBindingCredentialProvider,
   createGuestSessionCredentialProvider,
   createGuestSessionRecord,
+  createPostgresGuestDiningBindingStore,
+  createPostgresGuestSessionEntryStore,
 } from "../../bop/identity/src/index.ts";
 import {
   changeDiningServiceSetting,
@@ -15,144 +16,41 @@ import {
   createPostgresDiningGuestTableStartStore,
   createPostgresDiningPaymentTimingStore,
   createPostgresDiningPublicTableReader,
+  createDiningCartParticipationQuery,
+  createDiningGuestBindingQuery,
+  createDiningParticipantSubmissionQuery,
+  createPostgresDiningAdmissionConsumptionStore,
+  createPostgresDiningGuestBindingStore,
+  createPostgresDiningParticipationStore,
   createPostgresDiningQrJoinStore,
   createPostgresDiningSessionJoinStore,
   createPostgresDiningSessionStartStore,
   buildDiningSessionStartRecord,
   loadDiningGuestTableStart,
+  loadDiningGuestTableStartPage,
   parseQrTableContextEvidence,
 } from "../../rms/dining/src/index.ts";
-import { createOrderNumberAllocation } from "../../rms/ordering/src/index.ts";
 import { readPaymentRemainingRefundable } from "../../rms/payment/src/index.ts";
-import {
-  createKitchenWorkLifecycleService,
-  createPostgresKitchenWorkLifecycleStore,
-} from "../../rms/kitchen/src/index.ts";
+import { createCustomerDiningBindingComposition } from "../../../apps/api/src/customer-dining-binding-composition.ts";
 import { createCustomerDiningJoinComposition } from "../../../apps/api/src/customer-dining-join-composition.ts";
-import { createDiningGuestTableClose } from "../../../apps/api/src/dining-guest-table-close.ts";
-import { seedAcceptanceOrderHistory } from "../test-support/acceptance-order-history.mjs";
 import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
+import { journeyRound } from "../test-support/dine-in-journey-seed.mjs";
 import {
-  journeyRound,
-  seedJourneyAcceptance,
-  seedJourneyDining,
-  seedJourneyPayment,
-  seedJourneyQuote,
-} from "../test-support/dine-in-journey-seed.mjs";
-import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+  closer,
+  digest,
+  finishKitchen,
+  fresh,
+  id,
+  minutes,
+  owner,
+  provider,
+  scope,
+  seedPaidGuestTable,
+  setup,
+} from "../test-support/dining-guest-table-fixture.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
-import { snapshotBegin, snapshotQuery } from "../test-support/snapshot-read-runner.mjs";
 
 const { Client } = pg;
-const id = (n) => "01a0ff10-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-const scope = { tenantReference: id(1), brandReference: id(2), storeReference: id(3) };
-const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
-const digest = (value) => createHash("sha256").update(value).digest("hex");
-let references = 0x9000;
-/** Fresh UUIDv7 whose timestamp prefix is the current instant. */
-const fresh = () =>
-  Date.now()
-    .toString(16)
-    .padStart(12, "0")
-    .replace(/^(.{8})(.{4})$/u, "$1-$2") +
-  "-7000-8000-" +
-  (references++).toString(16).padStart(12, "0");
-
-async function setup(context) {
-  const admin = new Client(context.clientConfig);
-  await admin.connect();
-  const api = "wp2423_gs_" + context.runId,
-    worker = "wp2423_gs_w_" + context.runId;
-  for (const name of [api, worker])
-    await admin.query(
-      "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
-    );
-  const root = new URL("../../../docs/spec/", import.meta.url);
-  const matrices = await Promise.all(
-    ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
-      JSON.parse(await readFile(new URL(file, root), "utf8")),
-    ),
-  );
-  await admin.query(renderPilotAclSql(matrices, { api, worker }));
-  await admin.query(
-    "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
-    [scope.brandReference, scope.storeReference],
-  );
-  const opened = { connections: 0 };
-  /** One restricted-role transaction on its own connection, under the pilot's lock timeout. */
-  const transactions = (role = api) => ({
-    async run(work) {
-      const client = new Client(context.clientConfig);
-      await client.connect();
-      opened.connections += 1;
-      try {
-        await client.query("BEGIN");
-        await client.query("SET LOCAL ROLE " + role);
-        await client.query("SET LOCAL lock_timeout='2s'");
-        await client.query("SET LOCAL statement_timeout='10s'");
-        const result = await work({
-          query: (sql, values) => client.query(sql, [...(values ?? [])]),
-        });
-        await client.query("COMMIT");
-        return result;
-      } catch (error) {
-        await client.query("ROLLBACK").catch(() => undefined);
-        throw error;
-      } finally {
-        await client.end();
-      }
-    },
-  });
-  /** The pilot runner's snapshot read: same BEGIN and statement rules, no locks. */
-  transactions.snapshot = (role = api) => ({
-    async run(work) {
-      const client = new Client(context.clientConfig);
-      await client.connect();
-      try {
-        await client.query(snapshotBegin);
-        await client.query("SET LOCAL ROLE " + role);
-        const result = await work({
-          query: snapshotQuery((sql, values) => client.query(sql, [...(values ?? [])])),
-        });
-        await client.query("COMMIT");
-        return result;
-      } catch (error) {
-        await client.query("ROLLBACK").catch(() => undefined);
-        throw error;
-      } finally {
-        await client.end();
-      }
-    },
-  });
-  const pepper = randomBytes(32);
-  const credentials = {
-    generateReference: fresh,
-    generateJoinCredential: () => String(100000 + Math.floor(Math.random() * 899999)),
-    hashJoinCredential: (kind, value) =>
-      createHmac("sha256", pepper).update(`DiningJoin:${kind}:${value}`).digest("hex"),
-    hashOperationIntent: digest,
-    equals: (a, b) => a === b,
-  };
-  /** Owner client transactions for test-only setup through real owner stores. */
-  const ownerRunner = () => ({
-    async run(work) {
-      const client = new Client(context.clientConfig);
-      await client.connect();
-      try {
-        await client.query("BEGIN");
-        const result = await work({ query: (sql, values) => client.query(sql, values) });
-        await client.query("COMMIT");
-        return result;
-      } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
-      } finally {
-        await client.end();
-      }
-    },
-  });
-  return { admin, api, worker, transactions, credentials, opened, ownerRunner };
-}
 
 /** A published table with an active code, owner-seeded (table configuration is not under test). */
 async function seedTable(admin, n, { blocked = null, at = new Date(Date.now() - 3_600_000) } = {}) {
@@ -245,6 +143,41 @@ function guests() {
   };
 }
 
+/**
+ * The real table read, on a connection of its own, as the pilot's QR context does: this is what
+ * would block on a table row a start still held in the same transaction.
+ */
+const tableContexts = (run) => ({
+  resolve: async (input) => {
+    const table = String(input.session.publicTableReference).replace(/[0-9a-f]{12}$/u, (hex) =>
+      (parseInt(hex, 16) - 0x100).toString(16).padStart(12, "0"),
+    );
+    const read = await run.run((tx) =>
+      createPostgresDiningPublicTableReader({
+        transaction: tx,
+        scope,
+        authorize: async () => true,
+      }).read({ tableReference: table, purpose: "DiningJoin", observedAt: input.observedAt }),
+    );
+    if (read === null) return null;
+    return parseQrTableContextEvidence({
+      publicStoreReference: id(4),
+      publicTableReference: input.session.publicTableReference,
+      ...owner,
+      tableReference: table,
+      brandLifecycle: "Active",
+      storeLifecycle: "Active",
+      tableLifecycle: "Active",
+      assignmentState: "Active",
+      channel: "DineIn",
+      qrState: "Enabled",
+      revocationVersion: 1,
+      contextEvidenceReference: id(6),
+      validUntil: new Date(Date.parse(input.observedAt) + 600_000).toISOString(),
+    });
+  },
+});
+
 /** The pilot's composition (tooling/environment/pilot-customer-entry.mjs), over real Dining owners. */
 function composeJoin({
   transactions,
@@ -284,38 +217,7 @@ function composeJoin({
       credentials,
       pepperVersion: 1,
     },
-    // The real table read, on a connection of its own, as the pilot's QR context does: this is what
-    // would block on a table row a start still held in the same transaction.
-    contexts: {
-      resolve: async (input) => {
-        const table = String(input.session.publicTableReference).replace(/[0-9a-f]{12}$/u, (hex) =>
-          (parseInt(hex, 16) - 0x100).toString(16).padStart(12, "0"),
-        );
-        const read = await run.run((tx) =>
-          createPostgresDiningPublicTableReader({
-            transaction: tx,
-            scope,
-            authorize: async () => true,
-          }).read({ tableReference: table, purpose: "DiningJoin", observedAt: input.observedAt }),
-        );
-        if (read === null) return null;
-        return parseQrTableContextEvidence({
-          publicStoreReference: id(4),
-          publicTableReference: input.session.publicTableReference,
-          ...owner,
-          tableReference: table,
-          brandLifecycle: "Active",
-          storeLifecycle: "Active",
-          tableLifecycle: "Active",
-          assignmentState: "Active",
-          channel: "DineIn",
-          qrState: "Enabled",
-          revocationVersion: 1,
-          contextEvidenceReference: id(6),
-          validUntil: new Date(Date.parse(input.observedAt) + 600_000).toISOString(),
-        });
-      },
-    },
+    contexts: tableContexts(run),
     qr: {
       issue: (input, authorize) =>
         createPostgresDiningQrJoinStore(run, {
@@ -528,6 +430,187 @@ it("a guest starts a free table by scanning: one Session, the phone is its first
     }
   });
 }, 180_000);
+
+it("a phone with a real Guest Session starts the table, joins and binds: it is seated and can order", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_gs_bind" }, async (context) => {
+    const { admin, transactions, credentials } = await setup(context);
+    try {
+      await seedTable(admin, 20);
+      await setSwitch(transactions, true);
+      // Real Identity from the scan on, under the rendered pilot grants.
+      const store = createPostgresGuestSessionEntryStore(transactions(), owner);
+      const guestCredentials = createGuestSessionCredentialProvider(new Uint8Array(32).fill(9));
+      const sessionCredential = guestCredentials.generateCredential("Session"),
+        csrfCredential = guestCredentials.generateCredential("Csrf"),
+        base = Date.now() - 60_000,
+        at = new Date(base).toISOString();
+      await store.create({
+        record: createGuestSessionRecord({
+          session: {
+            sessionReference: id(80),
+            status: "Active",
+            version: 1,
+            ...owner,
+            publicStoreReference: id(4),
+            publicTableReference: id(20 + 0x100),
+            channel: "DineIn",
+            locale: "en-CA",
+            qrReference: id(5),
+            qrRevocationVersion: 1,
+            diningState: "ContextOnly",
+            diningSessionReference: null,
+            diningParticipantReference: null,
+            createdAt: at,
+            lastSeenAt: at,
+            idleExpiresAt: new Date(base + 14_400_000).toISOString(),
+            absoluteExpiresAt: new Date(base + 86_400_000).toISOString(),
+            orderClosedAt: null,
+            closureExpiresAt: null,
+            rotatedFromGuestSessionReference: null,
+            revocationReason: null,
+            revokedAt: null,
+          },
+          sessionSelectorHash: guestCredentials.hashCredential("Session", sessionCredential),
+          csrfSelectorHash: guestCredentials.hashCredential("Csrf", csrfCredential),
+          operationReference: fresh(),
+          operationIntentHash: guestCredentials.hashOperationIntent("synthetic entry"),
+        }),
+      });
+      const joined = await tap(
+        composeJoin({
+          transactions,
+          credentials,
+          identity: { provider: guestCredentials, store },
+        }),
+        { sessionCredential, csrfCredential },
+      );
+      assert.equal(joined.status, "Joined");
+      const session = (
+        await admin.query(
+          "SELECT session_id::text AS id,version,session_snapshot FROM rms_dining.dining_session WHERE table_id=$1",
+          [id(20)],
+        )
+      ).rows[0];
+      const auditOf = (actionCode, targetType, targetId, occurredAt, reasonCode) => ({
+        auditId: fresh(),
+        brandId: scope.brandReference,
+        storeId: scope.storeReference,
+        actor: { type: "System" },
+        actionCode,
+        targetType,
+        targetId,
+        reasonCode,
+        correlationId: fresh(),
+        occurredAt,
+        sourceChannel: "CUSTOMER_PWA",
+        dataClassification: "Restricted",
+        retentionPolicyCode: "AUDIT_DEFAULT",
+        retentionPolicyVersion: 1,
+      });
+      const binding = createCustomerDiningBindingComposition({
+        scope: owner,
+        session: {
+          store,
+          credentials: guestCredentials,
+          binding: { validate: async () => "Current" },
+        },
+        bindings: createPostgresGuestDiningBindingStore(
+          transactions(),
+          owner,
+          {
+            append: (tx, descriptor) =>
+              appendAuditRecordInTransaction(
+                tx,
+                auditOf(
+                  "IDENTITY_GUEST_DINING_BINDING_" + descriptor.action.toUpperCase(),
+                  "GuestDiningBindingPreparation",
+                  descriptor.operationReference,
+                  descriptor.occurredAt,
+                  "AUTHORIZED_OPERATION",
+                ),
+              ),
+          },
+          guestCredentials.equals,
+        ),
+        dining: {
+          credentials,
+          store: createPostgresDiningAdmissionConsumptionStore(
+            transactions(),
+            scope,
+            credentials,
+            (descriptor) =>
+              auditOf(
+                "DINING_IDENTITY_ADMISSION_CONSUME",
+                "DiningIdentityAdmission",
+                descriptor.admissionReference,
+                descriptor.occurredAt,
+                "AUTHORIZED_DINING_ADMISSION_CONSUMPTION",
+              ),
+          ),
+          binding: createPostgresDiningGuestBindingStore(transactions(), scope),
+        },
+        contexts: tableContexts(transactions()),
+        recovery: createGuestDiningBindingCredentialProvider(new Uint8Array(32).fill(11)),
+        preparationLifetimeSeconds: 300,
+        now: () => new Date().toISOString(),
+      });
+      const operationReference = fresh();
+      const prepared = await binding.prepare({
+        sessionCredential,
+        csrfCredential,
+        operationReference,
+        admissionReference: joined.admissionReference,
+      });
+      await binding.activate({
+        sessionCredential,
+        csrfCredential,
+        operationReference,
+        candidateSessionCredential: prepared.sessionCredential,
+        candidateCsrfCredential: prepared.csrfCredential,
+        recoveryProof: prepared.recoveryProof,
+      });
+      const completed = await binding.complete({
+        operationReference,
+        sessionCredential: prepared.sessionCredential,
+        csrfCredential: prepared.csrfCredential,
+      });
+      assert.equal(completed.status, "Activated");
+      // The phone's visit now names the table a guest started, and the gates every round goes through
+      // answer as at a table staff opened.
+      const bound = (
+        await store.resolve(guestCredentials.hashCredential("Session", prepared.sessionCredential))
+      ).session;
+      assert.equal(bound.diningSessionReference, session.id);
+      const hostReference = session.session_snapshot.hostParticipantReference;
+      assert.equal(bound.diningParticipantReference, hostReference);
+      const seat = { diningSessionReference: session.id, participantReference: hostReference };
+      const clock = () => new Date().toISOString();
+      assert.ok(
+        await createDiningGuestBindingQuery({
+          scope: owner,
+          now: clock,
+          repository: createPostgresDiningGuestBindingStore(transactions(), scope),
+        }).resolve({ purpose: "GuestSessionBinding", ...seat, tableReference: id(20) }),
+      );
+      assert.ok(
+        await createDiningParticipantSubmissionQuery({
+          scope: owner,
+          now: clock,
+          repository: createPostgresDiningGuestBindingStore(transactions(), scope),
+        }).resolve({ purpose: "DiningParticipantSubmission", ...seat, tableReference: id(20) }),
+      );
+      assert.ok(
+        await createDiningCartParticipationQuery({
+          scope: owner,
+          now: clock,
+          repository: createPostgresDiningParticipationStore(transactions(), scope),
+        }).resolve({ purpose: "Cart", ...seat }),
+      );
+    } finally {
+      await admin.end();
+    }
+  });
+}, 300_000);
 
 it("with the switch off or never set the scan and the join refuse as today, and an ordinary join adds nothing", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_gs_off" }, async (context) => {
@@ -885,6 +968,14 @@ it("budgets: the 4th start at a table and the 41st at a Store in 10 minutes are 
         status: "Refused",
         reason: "TooManyJoins",
       });
+      // Tables tells staff why guests at free tables are coming to them; a window later it clears.
+      const page = (at) =>
+        transactions().run((tx) => loadDiningGuestTableStartPage(tx, owner, [], at));
+      assert.equal((await page(new Date().toISOString())).storeBudgetSpent, true);
+      assert.equal(
+        (await page(new Date(Date.now() + minutes(11)).toISOString())).storeBudgetSpent,
+        false,
+      );
       // The database refuses the same whatever the store checked.
       await assert.rejects(past(30, 1, 0x600), /too many guest starts at this store/u);
       // After the window a start works again.
@@ -894,296 +985,6 @@ it("budgets: the 4th start at a table and the 41st at a Store in 10 minutes are 
     }
   });
 }, 300_000);
-
-const minutes = (n) => n * 60_000;
-const provider = id(0x801);
-
-/**
- * A guest-started table whose paid round the kitchen has: the Session, its guest-start row and one
- * paid, accepted round, owner-seeded (payment and acceptance are covered by their own suites). The
- * tenant scope of these rows is the journey fixture's.
- */
-async function seedPaidGuestTable(admin, transactions, input) {
-  const base = input.base;
-  const time = (offset) => new Date(base + offset).toISOString();
-  const R1 = journeyRound({ at: time(-minutes(130)), prefix: input.prefix });
-  const journeyScope = R1.f.scope;
-  const tenant = journeyScope.brandReference.slice(0, 24) + "000000000900";
-  const ownerScope = { tenantReference: tenant, ...journeyScope };
-  await admin.query(
-    "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
-    [journeyScope.brandReference, journeyScope.storeReference],
-  );
-  const version = await transactions().run(async (tx) => {
-    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
-      journeyScope.brandReference,
-      journeyScope.storeReference,
-    ]);
-    const current = (
-      await tx.query(
-        "SELECT coalesce(max(version),0)::int AS version FROM rms_dining.dining_service_setting WHERE brand_id=$1 AND store_id=$2",
-        [journeyScope.brandReference, journeyScope.storeReference],
-      )
-    ).rows[0].version;
-    return (
-      await changeDiningServiceSetting(tx, ownerScope, {
-        operationReference: fresh(),
-        expectedVersion: current,
-        staffCall: false,
-        chaseDish: false,
-        guestTableStart: true,
-        actorReference: id(8),
-        observedAt: time(-minutes(151)),
-      })
-    ).version;
-  });
-  const dining = await seedJourneyDining({
-    client: admin,
-    scope: ownerScope,
-    round: R1,
-    startedAt: time(-minutes(150)),
-    guestParticipant: id(0x901),
-    tableVersion: 2,
-  });
-  const session = dining.session;
-  await admin.query(
-    "INSERT INTO rms_dining.dining_session_guest_start (tenant_id,brand_id,store_id,session_id,table_id,guest_session_id,operation_id,service_setting_version,started_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-    [
-      tenant,
-      journeyScope.brandReference,
-      journeyScope.storeReference,
-      session.diningSessionReference,
-      session.tableReference,
-      R1.f.request.record.guestSessionReference,
-      fresh(),
-      version,
-      session.startedAt,
-    ],
-  );
-  const r1 = R1.f.request.record,
-    items1 = R1.items();
-  await seedAcceptanceOrderHistory(admin, {
-    ...r1,
-    items: items1,
-    orderNumberAllocation: createOrderNumberAllocation({
-      orderReference: r1.order.orderReference,
-      allocatedAt: r1.createdAt,
-      sequence: 1n,
-      businessDateResolution: R1.f.request.businessDateResolution,
-    }),
-  });
-  await seedJourneyQuote({
-    runner: input.ownerRunner,
-    scope: ownerScope,
-    snapshot: { items: items1, batch: R1.batch },
-    prefix: "01a1" + input.prefix.slice(4),
-  });
-  const roundTotal = items1.reduce((sum, item) => sum + item.pricing.total.amountMinor, 0n);
-  const n = input.refsAt;
-  const refs = {
-    paymentIntent: id(n + 1),
-    attempt: id(n + 2),
-    observation: id(n + 3),
-    webhook: id(n + 4),
-    transaction: id(n + 5),
-    paymentEvent: id(n + 6),
-    projection: id(n + 7),
-    preparation: id(n + 8),
-    commitment: id(n + 9),
-    paymentOperation: id(n + 10),
-    providerIntent: "pi_SYNTHETICGUEST" + n.toString(16),
-    providerEvent: "evt_SYNTHETICGUEST" + n.toString(16),
-    acceptance: id(n + 11),
-    acceptanceOperation: id(n + 12),
-    acceptanceWorkflow: id(n + 13),
-    acceptanceTransition: id(n + 14),
-    disposition: id(n + 15),
-    correlation: id(n + 16),
-    confirmation: id(n + 17),
-    confirmedEvent: id(n + 18),
-    ticket: id(n + 19),
-    sourceEvidence: id(n + 20),
-    workPlan: id(n + 21),
-    station: id(n + 22),
-    routing: id(n + 23),
-    preparationStep: id(n + 24),
-    workItems: [id(n + 30), id(n + 31)],
-  };
-  // "Unpaid": ordered, never paid. "Paying": the guest opened the payment and has no result yet.
-  if (input.stage !== "Unpaid")
-    await seedJourneyPayment(admin, {
-      scope: journeyScope,
-      providerAccountReference: provider,
-      round: R1,
-      refs,
-      outcome: input.stage === "Paying" ? "Open" : "Succeeded",
-      requestedAt: time(-minutes(129)),
-      occurredAt: time(-minutes(128)),
-      totalMinor: roundTotal,
-    });
-  if (input.stage === undefined)
-    await seedJourneyAcceptance(admin, {
-      scope: journeyScope,
-      round: R1,
-      items: items1,
-      refs,
-      staff: id(8),
-      version: 1,
-      previousRevision: r1.submissionReference,
-      acceptedAt: time(-minutes(127)),
-      kitchenAt: time(-minutes(126)),
-    });
-  return {
-    ownerScope,
-    session,
-    refs,
-    orderReference: r1.order.orderReference,
-    roundTotal,
-    host: dining.host,
-  };
-}
-
-const closer = (transactions, ownerScope, now) =>
-  createDiningGuestTableClose({
-    scope: ownerScope,
-    providerAccountReference: provider,
-    environment: "Test",
-    transactions: transactions(),
-    // As the pilot composes it: decided from one snapshot of every owner, under the same statement
-    // rules as a polled merchant read.
-    readTransactions: transactions.snapshot(),
-    authorize: async () => true,
-    now,
-    newReference: fresh,
-    retentionPolicyCode: "AUDIT_DEFAULT",
-    retentionPolicyVersion: 1,
-    orderAudit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
-  });
-/** The kitchen finishes the round, through the real Kitchen commands under the API role. */
-async function finishKitchen({ admin, transactions, ownerScope, orderReference, at }) {
-  const sha256 = (value) => "sha256:" + digest(value);
-  const correlation = fresh();
-  const cook = id(0x720);
-  const references = {
-    next: fresh,
-    derive(purpose, identity) {
-      const hex = digest(purpose + identity);
-      return `0190abcf-${hex.slice(0, 4)}-7${hex.slice(4, 7)}-8${hex.slice(7, 10)}-${hex.slice(10, 22)}`;
-    },
-  };
-  const kitchen = createKitchenWorkLifecycleService({
-    trustedContext: {
-      resolveAuthority: async () => ({
-        actorReference: cook,
-        brandReference: ownerScope.brandReference,
-        storeReference: ownerScope.storeReference,
-        observedAt: at,
-      }),
-    },
-    correlationContext: { resolve: async () => ({ correlationReference: correlation }) },
-    authorization: { authorize: async () => true },
-    transactions: {
-      withTransaction: (work) =>
-        transactions().run(async (tx) => {
-          await tx.query(
-            "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
-            [ownerScope.tenantReference, ownerScope.brandReference, ownerScope.storeReference],
-          );
-          return work(tx);
-        }),
-    },
-    tenantContext: { install: async () => undefined },
-    idempotency: {
-      acquireFence: async ({ transaction, idempotencyKey }) => {
-        await transaction.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-          ownerScope.storeReference + ":" + idempotencyKey,
-        ]);
-      },
-    },
-    repository: createPostgresKitchenWorkLifecycleStore({
-      brandReference: ownerScope.brandReference,
-      storeReference: ownerScope.storeReference,
-      references,
-      digests: { sha256 },
-      authorize: async () => true,
-      validateCurrentSource: async () => true,
-    }),
-    references,
-    digests: { sha256 },
-    clock: { now: () => at },
-    admission: {
-      resolve: async ({ command, acceptedOperationReference }) => ({
-        decisionReference: fresh(),
-        decisionVersion: 1,
-        decisionDigest: sha256("synthetic admission"),
-        producerContractVersion: 1,
-        actorReference: command.actorReference,
-        brandReference: ownerScope.brandReference,
-        storeReference: ownerScope.storeReference,
-        ticketReference: command.ticketReference,
-        workItemReference: command.workItemReference,
-        acceptedOperationReference,
-        ticketVersion: BigInt(command.expectedTicketVersion),
-        workItemVersion: BigInt(command.expectedWorkItemVersion),
-        action: "StartKitchenWorkItem",
-        purpose: "KitchenWorkExecution",
-        outcome: "Allowed",
-        evaluatedAt: at,
-        validUntil: new Date(Date.parse(at) + minutes(60)).toISOString(),
-      }),
-    },
-    expo: {
-      resolve: async () => ({
-        decisionReference: fresh(),
-        decisionVersion: 1,
-        decisionDigest: sha256("synthetic Expo"),
-        producerContractVersion: 1,
-        brandReference: ownerScope.brandReference,
-        storeReference: ownerScope.storeReference,
-        purpose: "KitchenReadiness",
-        mode: "Disabled",
-        evaluatedAt: at,
-        validUntil: new Date(Date.parse(at) + minutes(60)).toISOString(),
-      }),
-    },
-  });
-  const work = (
-    await admin.query(
-      "SELECT w.kitchen_work_item_id::text AS id,w.order_item_id::text AS item,w.required_quantity AS quantity,w.kitchen_ticket_id::text AS ticket FROM rms_kitchen.kitchen_work_item w WHERE w.order_id=$1 ORDER BY w.source_item_ordinal",
-      [orderReference],
-    )
-  ).rows;
-  for (const row of work) {
-    const step = async (action, extra = {}) => {
-      const versions = (
-        await admin.query(
-          "SELECT t.aggregate_version::text AS ticket,w.version::text AS item FROM rms_kitchen.kitchen_ticket t JOIN rms_kitchen.kitchen_work_item w ON w.kitchen_ticket_id=t.kitchen_ticket_id WHERE w.kitchen_work_item_id=$1",
-          [row.id],
-        )
-      ).rows[0];
-      return kitchen.execute({
-        action,
-        idempotencyKey: "guest-table-" + row.id + "-" + action,
-        actorReference: cook,
-        brandReference: ownerScope.brandReference,
-        storeReference: ownerScope.storeReference,
-        ticketReference: row.ticket,
-        workItemReference: row.id,
-        orderItemReference: row.item,
-        expectedTicketVersion: versions.ticket,
-        expectedWorkItemVersion: versions.item,
-        correlationReference: correlation,
-        ...extra,
-      });
-    };
-    assert.equal((await step("AcceptKitchenWorkItem")).outcome, "Accepted");
-    assert.equal((await step("StartKitchenWorkItem")).outcome, "Started");
-    assert.match(
-      (await step("CompleteKitchenWorkItem", { quantityDelta: row.quantity })).outcome,
-      /^Completed/u,
-    );
-  }
-}
 
 it("the System closes a paid table the kitchen finished, nobody having tapped Served, recording who and why; nothing unfinished closes", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_gs_close" }, async (context) => {
@@ -1631,6 +1432,53 @@ it("the question and the close are refused while a round is unfinished; a party 
         status: "Held",
         hold: "CartInUse",
       });
+      // Another table was merged into this one: its people and its rounds are staff's to sort out.
+      assert.deepEqual(
+        await heldBy(async (client) => {
+          const [source, sourceTable, operation] = [fresh(), fresh(), fresh()];
+          // Test-only: the merged-away Session is synthetic, so its keys and checks are off here.
+          await client.query("SET LOCAL session_replication_role = replica");
+          await client.query(
+            "INSERT INTO rms_dining.dining_session_merge_operation (operation_id,tenant_id,brand_id,store_id,source_session_id,target_session_id,source_table_id,target_table_id,expected_source_session_version,expected_target_session_version,expected_source_table_version,expected_target_table_version,source_party_size,target_party_size,merged_party_size,intent_digest,actor_id,occurred_at,record_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,1,1,1,1,1,2,$9,$10,$11,$12::jsonb)",
+            [
+              operation,
+              ownerScope.tenantReference,
+              ownerScope.brandReference,
+              ownerScope.storeReference,
+              source,
+              sessionReference,
+              sourceTable,
+              session.tableReference,
+              "sha256:" + digest("merge"),
+              id(8),
+              longAgo,
+              JSON.stringify({
+                sourceSession: { diningSessionReference: source, phase: "Closed", version: 2 },
+                targetSession: {
+                  diningSessionReference: sessionReference,
+                  phase: "Active",
+                  tableReference: session.tableReference,
+                  version: 2,
+                },
+                sourceTable: {
+                  tableReference: sourceTable,
+                  stableLabel: "T2",
+                  activeDiningSessionReference: null,
+                  aggregateVersion: 2,
+                },
+                audit: {
+                  actionCode: "DINING_SESSION_MERGE_TABLE",
+                  targetId: source,
+                  correlationId: operation,
+                  actor: { type: "User", reference: id(8) },
+                },
+              }),
+            ],
+          );
+          await client.query("SET LOCAL session_replication_role = origin");
+        }),
+        { status: "Held", hold: "Merged" },
+      );
 
       // Lock order: a paid event holds the Order fence, then wants the table. The close waits on
       // the fence holding nothing, so the paid event goes first and neither fails.
@@ -1664,6 +1512,59 @@ it("the question and the close are refused while a round is unfinished; a party 
       await paid.query("COMMIT");
       await paid.end();
       assert.equal((await closing).status, "Closed");
+    } finally {
+      await admin.end();
+    }
+  });
+}, 300_000);
+
+it("a phone scanning or tapping while the System closes that table isn't failed: it gets the free table", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_gs_during" }, async (context) => {
+    const { admin, transactions, credentials, opened } = await setup(context);
+    try {
+      await setSwitch(transactions, true);
+      await seedTable(admin, 20);
+      const previous = await startedAgo({ transactions, credentials }, 20, 25);
+      const system = closer(transactions, scope, () => new Date().toISOString());
+      const identity = guests();
+      const join = composeJoin({ transactions, credentials, identity });
+      const scan = () =>
+        transactions().run((tx) =>
+          loadDiningGuestTableStart(tx, owner, id(20), new Date().toISOString()),
+        );
+      // The close stops right after its fence took the table, until the phones are on their way.
+      let holding, release;
+      const held = new Promise((resolve) => (holding = resolve));
+      const released = new Promise((resolve) => (release = resolve));
+      let armed = true;
+      opened.after = async (sql) => {
+        if (armed && /FROM rms_dining\.dining_session\b[^;]*FOR UPDATE/su.test(sql)) {
+          armed = false;
+          holding();
+          await released;
+        }
+      };
+      const closing = system.closeQuiet(previous);
+      await held;
+      // The scan reads what is committed and waits for nothing.
+      assert.equal((await scan()).kind, "No");
+      const tapping = tap(join, identity.scan(85, 20));
+      await delay(300);
+      release();
+      assert.equal((await closing).status, "Closed");
+      assert.equal((await tapping).status, "Joined");
+      opened.after = null;
+      const sessions = (
+        await admin.query(
+          "SELECT session_id::text AS id,phase FROM rms_dining.dining_session WHERE table_id=$1 ORDER BY started_at",
+          [id(20)],
+        )
+      ).rows;
+      assert.deepEqual(
+        sessions.map((row) => row.phase),
+        ["Closed", "Active"],
+      );
+      assert.equal(sessions[0].id, previous);
     } finally {
       await admin.end();
     }

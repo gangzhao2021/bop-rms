@@ -13,7 +13,10 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ["packages/database/test/dining-guest-table-start-acceptance.test.mjs"],
+    include: [
+      "packages/database/test/dining-guest-table-start-acceptance.test.mjs",
+      "packages/database/test/dining-guest-table-money-acceptance.test.mjs",
+    ],
     testTimeout: 300_000,
     hookTimeout: 120_000,
     maxWorkers: 1,
