@@ -903,14 +903,14 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
   const raise = raiserFor(conditions);
   evaluateProbes(observations.probes, raise);
   const supervisor = observations.supervisor;
-  if (
+  const noReport =
     supervisor === undefined ||
     supervisor === null ||
     supervisor === "unreadable" ||
-    supervisor.reportAgeMs > thresholds.supervisorSilentMs
-  )
-    unreadable.push("supervisor");
-  else {
+    supervisor.reportAgeMs > thresholds.supervisorSilentMs;
+  // The supervisor stops with the rest during a planned update; that is no failed check.
+  if (noReport && observations.plannedUpdate !== true) unreadable.push("supervisor");
+  if (!noReport) {
     const attention = storeAttention(supervisor.attention, observations.store);
     if (attention !== null) raise("service.attention", attention);
   }
@@ -929,7 +929,7 @@ export function evaluateStoreConditions(observations, thresholds = DEFAULT_THRES
     thresholds,
   });
   const previous = observations.previous?.alerts ?? {};
-  for (const source of unreadable)
+  for (const source of noReport ? [...unreadable, "supervisor"] : unreadable)
     for (const key of HELD_WHILE_UNREADABLE[source] ?? []) {
       const entry = previous[key];
       if (entry?.raisedAt && !conditions.has(key)) raise(key, entry.params, entry.severity);

@@ -42,7 +42,11 @@ const emptyStoreState = () => ({ schemaVersion: 1, alert: emptyAlertState(), uns
 
 async function readStoreState(file, log, store) {
   try {
-    return (await readPrivateJson(file)) ?? emptyStoreState();
+    const state = await readPrivateJson(file);
+    if (state === null) return emptyStoreState();
+    if (state.schemaVersion !== 1 || typeof state.alert?.alerts !== "object")
+      throw Error("PILOT_OPS_FILE_INVALID");
+    return state;
   } catch {
     // As at the root: a damaged state starts again; the worst outcome is a repeated message.
     await log({ event: "store_state_unreadable", store });
@@ -58,6 +62,7 @@ export function createStoreMonitors({
   observeValidity = observeInstallationValidity,
   readLimitMs = STORE_READ_LIMIT_MS,
   report = reportUnexpected,
+  clock = Date.now,
 }) {
   const monitors = new Map();
   const monitorOf = (relative, now) => {
@@ -116,6 +121,7 @@ export function createStoreMonitors({
       business: await observeWithinLimit(monitor, now),
       installation: await observeValidity(monitor.directory),
       previous: previous.alert,
+      plannedUpdate: maintenance !== null,
     };
     const advanced = advanceAlertState(
       previous.alert,
@@ -179,6 +185,7 @@ export function createStoreMonitors({
   return Object.freeze({
     /** One pass over the Stores; `cycle` is what the root cycle observed for the installation. */
     async run(cycle) {
+      const startedAt = clock();
       let relatives;
       try {
         relatives = await listStores();
@@ -196,8 +203,10 @@ export function createStoreMonitors({
         }
       for (const relative of relatives) {
         const name = nameOf(relative);
+        // Each board says when it was really written, however long the Stores before it took.
+        const now = cycle.now + (clock() - startedAt);
         try {
-          await runStore(name, monitorOf(relative, cycle.now), cycle);
+          await runStore(name, monitorOf(relative, now), { ...cycle, now });
         } catch (error) {
           await log({
             event: "store_monitor_failed",

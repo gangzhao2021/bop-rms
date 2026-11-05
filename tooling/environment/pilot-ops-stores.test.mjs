@@ -120,6 +120,7 @@ async function monitorsFor(facts, options = {}) {
     load: businessOf(facts, closes),
     log: async (entry) => logs.push(entry),
     report,
+    clock: () => 0,
     ...(options.readLimitMs ? { readLimitMs: options.readLimitMs } : {}),
   });
   const cycle = (minute, change = {}) =>
@@ -156,6 +157,43 @@ describe("one alert board per served Store", () => {
     expect(hotpot.active).toEqual([]);
     expect(hotpot.outboundChannels).toEqual({ email: false, webhooks: 0, heartbeat: false });
     expect(hotpot.lastSuccessfulBackupAt).toBe(null);
+  });
+  it("each board says when it was really written, however long the Stores before it took", async () => {
+    const facts = { tea: fact(), hotpot: fact() };
+    const { directory } = await runtime(facts);
+    let elapsed = 0;
+    const monitors = createStoreMonitors({
+      runtimeDirectory: directory,
+      load: businessOf(facts),
+      log: async () => undefined,
+      report: () => undefined,
+      clock: () => elapsed,
+      observeValidity: async () => {
+        elapsed += 2 * MIN;
+        return { validUntil: "2026-12-30T00:00:00.000Z" };
+      },
+    });
+    await monitors.run({
+      now: T0,
+      probes: healthyProbes,
+      supervisor: healthySupervisor,
+      maintenance: null,
+      config,
+    });
+    expect((await boardOf(directory, "tea")).observedAt).toBe(new Date(T0).toISOString());
+    expect((await boardOf(directory, "hotpot")).observedAt).toBe(
+      new Date(T0 + 2 * MIN).toISOString(),
+    );
+  });
+  it("a damaged state file starts that Store's alerts again, and is logged", async () => {
+    const { directory, cycle, logs } = await monitorsFor({ tea: fact({ dead: 1 }) });
+    await cycle(0);
+    await fs.writeFile(path.join(directory, "stores", "tea", "ops", "alert-state.json"), "{}", {
+      mode: 0o600,
+    });
+    await cycle(1);
+    expect(keysOf(await boardOf(directory, "tea"))).toEqual(["payment.updates"]);
+    expect(logs).toContainEqual({ event: "store_state_unreadable", store: "tea" });
   });
   it("keeps its files private", async () => {
     const { directory, cycle } = await monitorsFor({ tea: fact() });
@@ -319,6 +357,7 @@ function restartedMonitor(directory, facts) {
     load: businessOf(facts),
     log: async () => undefined,
     report: () => undefined,
+    clock: () => 0,
   });
   return (minute) =>
     monitors.run({
@@ -418,6 +457,21 @@ describe("what the installation shares with every Store", () => {
       "monitor.source",
       "service.attention",
     ]);
+  });
+  it("a planned update stopping the supervisor is no failed check, and clears nothing", async () => {
+    const { directory, cycle } = await monitorsFor({ hotpot: fact() });
+    const attention = {
+      ...healthySupervisor,
+      attention: ["stores/hotpot:business-worker:events"],
+    };
+    await cycle(0, { supervisor: attention });
+    const window = {
+      startedAt: new Date(T0).toISOString(),
+      expiresAt: new Date(T0 + 15 * MIN).toISOString(),
+    };
+    for (const minute of [1, 3, 5, 7, 9, 11])
+      await cycle(minute, { supervisor: null, maintenance: window });
+    expect(keysOf(await boardOf(directory, "hotpot"))).toEqual(["service.attention"]);
   });
   it("carries the support contact the operator configured", async () => {
     const support = { phone: "+14165550100", testOnly: true };
@@ -540,6 +594,7 @@ describe("BOP hears one clear message", () => {
       load: businessOf(facts),
       log: async () => undefined,
       report: () => undefined,
+      clock: () => 0,
     });
     expect(after.pending()).toEqual([]);
     const run = (minute) =>
