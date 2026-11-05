@@ -209,6 +209,39 @@ test("@production a double tap on the main button finishes one order only", asyn
   await expect(second.locator(".kitchen-work-item")).not.toHaveAttribute("data-pending", /./u);
 });
 
+test("@production a table's card reads clearly while a tap is held, at every width", async ({
+  page,
+}) => {
+  const table = { orderNumber: "7", orderType: "DineIn", tableLabel: "T5" };
+  await mockBoard(page, [
+    dish(1, "担担面", { orderLabel: table }),
+    dish(2, "水煮鱼", { orderLabel: table }),
+    dish(3, "炒青菜", {
+      orderLabel: table,
+      ticketReference: id(70),
+      workItemCreatedAt: "2026-10-26T22:13:30.000Z",
+    }),
+    dish(4, "奶茶", {
+      ticketReference: id(60),
+      orderReference: id(61),
+      orderLabel: { orderNumber: "8", orderType: "Pickup", tableLabel: null },
+      workItemCreatedAt: "2026-10-26T22:13:00.000Z",
+    }),
+  ]);
+  await page.goto("/operations/kitchen");
+  const card = page.locator(".kitchen-ticket").filter({ hasText: "担担面" });
+  await card.getByRole("button", { name: "Mark 担担面 finished" }).click();
+  await expect(card.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  for (const [width, height] of [
+    [1440, 900],
+    [1024, 768],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await page.screenshot({ path: `test-results/kitchen-held-${width}.png`, fullPage: true });
+  }
+});
+
 test("@production the next ticket does not move during the hold", async ({ page }) => {
   const other = dish(2, "TEST mocha", {
     ticketReference: id(60),
@@ -387,6 +420,7 @@ for (const [width, height] of [
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
+    await page.screenshot({ path: `test-results/kitchen-one-tap-${width}.png`, fullPage: true });
   });
 
 test("@production the kitchen's own targets are large enough for wet fingers", async ({ page }) => {
@@ -399,6 +433,6 @@ test("@production the kitchen's own targets are large enough for wet fingers", a
     ticket.getByRole("button", { name: "Mark TEST latte finished" }),
   ]) {
     const box = await target.boundingBox();
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(48);
   }
 });

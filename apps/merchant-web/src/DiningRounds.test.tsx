@@ -264,6 +264,14 @@ describe("WP-2423 item 8 ⑦: chasing a dish with the kitchen", () => {
     expect(on).toContain('aria-label="Chase TEST beef noodles with the kitchen"');
     expect(on).not.toContain('aria-label="Chase TEST green tea with the kitchen"');
     expect(on).not.toContain('aria-label="Chase TEST dumplings with the kitchen"');
+    // Not accepted yet: no kitchen work exists, so there is nothing to hurry.
+    const waiting = render(
+      progress([progressItem(4, 1, "TEST soup", "Submitted")], { chaseDish: true }),
+    );
+    expect(waiting).not.toContain('aria-label="Chase TEST soup with the kitchen"');
+    expect(
+      render(progress([progressItem(4, 1, "TEST soup", "Accepted")], { chaseDish: true })),
+    ).toContain('aria-label="Chase TEST soup with the kitchen"');
     expect(text(on)).toContain("Chased 2 times");
     const off = render(progress(items()));
     expect(off).not.toContain("with the kitchen");

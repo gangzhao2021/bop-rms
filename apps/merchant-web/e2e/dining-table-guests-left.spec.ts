@@ -115,6 +115,7 @@ const planRound = (
   cancellableItemReferences: [],
   refund,
   cancelsAt: null,
+  kitchenReceivedAt: null,
 });
 
 test("@production a manager closes out a table whose guests left: rounds cancelled with refunds shown first, then the table closes", async ({
@@ -235,10 +236,10 @@ test("@production a manager closes out a table whose guests left: rounds cancell
     "Round 4: paid $11.30 online but never sent to the kitchen. It will be cancelled and the guest refunded.",
   );
   await expect(guests).toContainText(
-    "Round 9: 1 item not started in the kitchen. It will be cancelled; then refund $5.93 on the card machine",
+    "Round 9: 1 item not marked started in the kitchen. It will be cancelled; then refund $5.93 on the card machine",
   );
   await expect(guests).toContainText(
-    "Round 10: 1 item not started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
+    "Round 10: 1 item not marked started in the kitchen, already refunded in full. It will be cancelled; nothing is left to refund.",
   );
   await expect(guests).not.toContainText("$0.00");
   await expect(guests).toContainText(

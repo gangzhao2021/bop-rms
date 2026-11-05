@@ -1,10 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * WP-2423 item 8 ⑥ part 4 (coordinator 2026-10-28 decision 3): a combo on the kitchen card lists
- * each chosen dish under it, Chinese name first, each marked done on its own; the combo's own
- * "Finished" appears only once every dish is done, and the last dish finishes it. TEST-only data.
+ * each chosen dish under it, Chinese name first, each marked done on its own, and the last dish
+ * finishes it in the same step. The ticket's main button finishes them all. TEST-only data.
  */
 const id = (n: number) => "01a0f0c0-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const scope = {
@@ -17,9 +17,7 @@ const headers = { "cache-control": "no-store" };
 const at = "2026-10-29T00:14:00.000Z";
 const [wonton, rice] = [id(61), id(62)];
 
-test("@production a combo's dishes are made and marked done one by one on the kitchen card", async ({
-  page,
-}, testInfo) => {
+async function mockCombo(page: Page) {
   await page.clock.setFixedTime(new Date(at));
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
@@ -131,6 +129,13 @@ test("@production a combo's dishes are made and marked done one by one on the ki
     });
   });
 
+  return { steps };
+}
+
+test("@production a combo's dishes are made and marked done one by one on the kitchen card", async ({
+  page,
+}, testInfo) => {
+  const { steps } = await mockCombo(page);
   await page.goto("/operations/kitchen");
   const card = page.locator(".kitchen-work-item").filter({ hasText: "二人套餐" }).first();
   const dishes = card.getByRole("list", { name: "Dishes in this combo" });
@@ -141,7 +146,7 @@ test("@production a combo's dishes are made and marked done one by one on the ki
   // one-screen shop.
   const ticket = page.locator(".kitchen-ticket").filter({ hasText: "二人套餐" });
   await expect(ticket.locator(".kitchen-ticket__next")).toHaveText("Finished");
-  await expect(dishes.getByRole("button", { name: "Mark 馄饨汤 done" })).toHaveCSS(
+  await expect(dishes.getByRole("button", { name: "Mark 馄饨汤 finished" })).toHaveCSS(
     "min-height",
     "48px",
   );
@@ -162,17 +167,32 @@ test("@production a combo's dishes are made and marked done one by one on the ki
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await dishes.getByRole("button", { name: "Mark 馄饨汤 done" }).click();
+  await dishes.getByRole("button", { name: "Mark 馄饨汤 finished" }).click();
   // Held first, then recorded: that dish only, and the combo stays until its last dish.
   await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
   await expect.poll(() => steps.length, { timeout: 8_000 }).toBe(1);
   expect(steps[0]?.step).toBe("Finish");
   expect(steps[0]?.lines[0]?.optionReferences).toEqual([wonton]);
-  await expect(dishes.getByRole("button", { name: "Mark 馄饨汤 done" })).toHaveCount(0);
+  await expect(dishes.getByRole("button", { name: "Mark 馄饨汤 finished" })).toHaveCount(0);
   await expect(dishes.locator("li").first()).toContainText("Done");
   await expect(ticket).toBeVisible();
   // The last dish done finishes the combo in the same step, whichever cook taps it.
-  await dishes.getByRole("button", { name: "Mark 炒饭 done" }).click();
+  await dishes.getByRole("button", { name: "Mark 炒饭 finished" }).click();
   await expect.poll(() => steps.length, { timeout: 8_000 }).toBe(2);
   expect(steps[1]?.lines[0]?.optionReferences).toEqual([rice]);
+});
+
+test("@production on a screen with every section, the main button finishes the whole combo in one tap", async ({
+  page,
+}) => {
+  const { steps } = await mockCombo(page);
+  await page.goto("/operations/kitchen");
+  const ticket = page.locator(".kitchen-ticket").filter({ hasText: "二人套餐" });
+  await ticket.locator(".kitchen-ticket__next").click();
+  await expect(ticket.locator(".kitchen-ticket__top")).toContainText("Marked done");
+  await expect.poll(() => steps.length, { timeout: 8_000 }).toBe(1);
+  expect(steps[0]?.step).toBe("Finish");
+  // No dish named: every dish still to make, and the combo with them.
+  expect(steps[0]?.lines[0]?.optionReferences).toBeNull();
+  await expect(ticket).toHaveCount(0);
 });

@@ -1590,9 +1590,8 @@ function WorkCard({
                     {t("Start cooking")}
                   </button>
                 ) : null}
-                {kitchenLineFinishable(item) &&
-                combosDishesDone(item) &&
-                !kitchenLineNeedsStartFirst(item) ? (
+                {/* A combo on an earlier day's card finishes as a whole; no dish lines here. */}
+                {kitchenLineFinishable(item) && !kitchenLineNeedsStartFirst(item) ? (
                   <button
                     disabled={readOnly || !onStep || pending !== undefined}
                     onClick={() => onStep?.(item, "Finish")}
@@ -3113,7 +3112,7 @@ function KitchenComboParts({
                 type="button"
                 className="kitchen-work-item__combo-step"
                 disabled={readOnly || pending !== undefined}
-                aria-label={t("Mark {displayName} done", { displayName: label })}
+                aria-label={t("Mark {displayName} finished", { displayName: label })}
                 onClick={() => onDishDone(item, part)}
               >
                 {t("Finished")}

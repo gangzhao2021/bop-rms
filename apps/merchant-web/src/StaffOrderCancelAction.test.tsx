@@ -101,7 +101,7 @@ it("WP-2423 Q6: labels the action by order type and explains the refund", () => 
     </MemoryRouter>,
   );
   expect(html).toContain("Cancel order");
-  expect(html).toContain("Only before the kitchen starts.");
+  expect(html).toContain("Only before the kitchen marks it started.");
   // The refund line is read from the server when the dialog opens.
   expect(html).toContain("Checking what will be refunded…");
   expect(html).not.toContain("refunded in full, including tip");

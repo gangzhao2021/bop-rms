@@ -262,7 +262,10 @@ export function useKitchenActions(input: {
       },
       onNotSent: (unsent) => {
         for (const tap of unsent) bodies.current.delete(tap.id);
-        sayRef.current("Problem", t("The network dropped. That step was not recorded."));
+        sayRef.current(
+          "Problem",
+          t("The board lost touch. That step was not recorded. Tap it again."),
+        );
       },
     });
     queueRef.current = queue;

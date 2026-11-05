@@ -469,6 +469,11 @@
     gap: 0 16px;
     margin-inline-start: 0;
   }
+  /* Each action stays one line: past the width they drop to a new row, never split a word. */
+  .kitchen-board-heading__actions > button {
+    flex: 1 0 auto;
+    white-space: nowrap;
+  }
 }
 
 /* The bar keeps to one line on a 1024 tablet: the display's own name is already in the frame
@@ -1040,7 +1045,9 @@
   height: var(--bop-kitchen-target);
   min-width: 0;
 }
+/* Two lines fit in the row's fixed height, so a phone reads a whole sentence and nothing moves. */
 .kitchen-status-row__line {
+  display: -webkit-box;
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
@@ -1048,8 +1055,9 @@
   color: var(--bop-color-text-muted);
   font-size: 16px;
   font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .kitchen-status-row[data-tone="New"] .kitchen-status-row__line {
   color: var(--bop-color-accent);
