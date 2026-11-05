@@ -189,10 +189,14 @@ function choiceText(rule: MenuOptionRule): string {
   if (min === 0) return max === 1 ? t("Optional") : t("Optional · up to {max}", { max });
   return t("Choose {min} to {max}", { min, max });
 }
-/** "+ $0.75", "Included", or a note that the quote will price it. */
-function optionPriceText(price: MenuOptionRule["options"][number]["price"]): string {
+/**
+ * "+ $0.75", or a note that the quote will price it. A choice that costs nothing has no text at all
+ * (null): a guest choosing sugar level reads a clean list and "+ $0.75" stands out, and silence
+ * always means free, because a price not set yet still says so.
+ */
+function optionPriceText(price: MenuOptionRule["options"][number]["price"]): string | null {
   if (price === null) return t("Priced at checkout");
-  if (/^0+(\.0+)?$/u.test(price.amount)) return t("Included");
+  if (/^0+(\.0+)?$/u.test(price.amount)) return null;
   const amount = formatDecimalMoney(price.amount, price.currency);
   return amount === null ? t("Priced at checkout") : `+ ${amount}`;
 }
@@ -1558,55 +1562,70 @@ export function SellableConfigurator({
             </span>
             <span className="configure-group__rule">{choiceText(rule)}</span>
           </legend>
-          {rule.options.map((option) => (
-            <div className="configure-option configure-option--row" key={option.optionReference}>
-              <label className="configure-option__choice">
-                <input
-                  type={singleChoice(rule) ? "radio" : "checkbox"}
-                  name={`configure-group-${groupIndex}`}
-                  checked={current.has(option.optionReference)}
-                  disabled={locked}
-                  onChange={() => {
-                    const next = new Map(current);
-                    if (singleChoice(rule)) {
-                      // Choosing one replaces the group's other choice.
-                      for (const other of rule.options) next.delete(other.optionReference);
-                      next.set(option.optionReference, 1);
-                    } else if (next.has(option.optionReference))
-                      next.delete(option.optionReference);
-                    else next.set(option.optionReference, 1);
-                    setSelected(next);
-                  }}
-                />
-                <span className="configure-option__name">{option.name}</span>
-              </label>
-              <span className="configure-option__price">{optionPriceText(option.price)}</span>
-              {/* WP-2423 item 8 ⑥ part 4: each dish of a combo part with its allergens. */}
-              {rule.comboPart === true ? (
-                <span className="configure-option__allergens">
-                  {dishAllergenText(comboDishAllergens(sellable, option.optionReference))}
-                </span>
-              ) : null}
-              {current.has(option.optionReference) && option.maximumQuantity > 1 ? (
-                <label className="configure-option__quantity">
-                  {t("How many")} {option.name}
+          {rule.options.map((option, optionIndex) => {
+            const price = optionPriceText(option.price);
+            // Indexes, never the option's reference: references stay out of the markup.
+            const priceId = price === null ? null : `configure-price-${groupIndex}-${optionIndex}`;
+            const allergensId =
+              rule.comboPart === true ? `configure-allergens-${groupIndex}-${optionIndex}` : null;
+            // A screen reader gets what a sighted guest reads beside the choice: its price, and for
+            // a combo dish what it contains.
+            const described = [priceId, allergensId].filter((id) => id !== null).join(" ");
+            return (
+              <div className="configure-option configure-option--row" key={option.optionReference}>
+                <label className="configure-option__choice">
                   <input
-                    type="number"
-                    min={1}
-                    max={Math.min(option.maximumQuantity, 100)}
-                    inputMode="numeric"
-                    value={current.get(option.optionReference)}
+                    type={singleChoice(rule) ? "radio" : "checkbox"}
+                    name={`configure-group-${groupIndex}`}
+                    checked={current.has(option.optionReference)}
                     disabled={locked}
-                    onChange={(event) => {
+                    {...(described === "" ? {} : { "aria-describedby": described })}
+                    onChange={() => {
                       const next = new Map(current);
-                      next.set(option.optionReference, event.currentTarget.valueAsNumber);
+                      if (singleChoice(rule)) {
+                        // Choosing one replaces the group's other choice.
+                        for (const other of rule.options) next.delete(other.optionReference);
+                        next.set(option.optionReference, 1);
+                      } else if (next.has(option.optionReference))
+                        next.delete(option.optionReference);
+                      else next.set(option.optionReference, 1);
                       setSelected(next);
                     }}
                   />
+                  <span className="configure-option__name">{option.name}</span>
                 </label>
-              ) : null}
-            </div>
-          ))}
+                {priceId === null ? null : (
+                  <span id={priceId} className="configure-option__price">
+                    {price}
+                  </span>
+                )}
+                {/* WP-2423 item 8 ⑥ part 4: each dish of a combo part with its allergens. */}
+                {allergensId === null ? null : (
+                  <span id={allergensId} className="configure-option__allergens">
+                    {dishAllergenText(comboDishAllergens(sellable, option.optionReference))}
+                  </span>
+                )}
+                {current.has(option.optionReference) && option.maximumQuantity > 1 ? (
+                  <label className="configure-option__quantity">
+                    {t("How many")} {option.name}
+                    <input
+                      type="number"
+                      min={1}
+                      max={Math.min(option.maximumQuantity, 100)}
+                      inputMode="numeric"
+                      value={current.get(option.optionReference)}
+                      disabled={locked}
+                      onChange={(event) => {
+                        const next = new Map(current);
+                        next.set(option.optionReference, event.currentTarget.valueAsNumber);
+                        setSelected(next);
+                      }}
+                    />
+                  </label>
+                ) : null}
+              </div>
+            );
+          })}
         </fieldset>
       ))}
       <div className="configure-note">

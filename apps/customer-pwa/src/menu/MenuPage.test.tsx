@@ -398,6 +398,97 @@ describe("WP-1701 Customer Menu screens", () => {
     expect(html).not.toContain("Staff");
     expect(html).not.toContain(configurable.optionRules[0]?.options[0]?.optionReference);
   });
+
+  it("a free choice shows no price; a paid one is tied to its control", () => {
+    const option = (n: string, name: string, price: { amount: string; currency: string } | null) =>
+      Object.freeze({
+        optionReference: `018f7500-0000-7000-8000-${n.padStart(12, "0")}`,
+        name,
+        maximumQuantity: 1,
+        conflictOptionReferences: Object.freeze([]),
+        selectedByDefault: false,
+        price,
+      });
+    const options = [
+      option("a1", "Whole milk", { amount: "0.00", currency: "CAD" }),
+      option("a2", "Oat beverage", { amount: "0.75", currency: "CAD" }),
+      option("a3", "Soy beverage", null),
+    ];
+    const free: MenuSellable = {
+      ...sellable,
+      optionRules: [{ name: "Milk", minimumSelections: 1, maximumSelections: 1, options }],
+    };
+    const controller: ConfigureController = {
+      getState: () => ({ status: "idle" }),
+      retry: vi.fn(),
+      setOnline: vi.fn(),
+      submit: vi.fn(),
+      subscribe: () => () => undefined,
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <SellableConfigurator sellable={free} controller={controller} />
+      </MemoryRouter>,
+    );
+    // Silence means free: nothing to read beside a choice that costs nothing, on screen or aloud.
+    expect(html).not.toContain("Included");
+    expect(html).not.toContain("$0.00");
+    expect(html).toContain("+ $0.75");
+    expect(html).toContain("Priced at checkout");
+    const inputs = html.match(/<input[^>]*type="radio"[^>]*>/gu) ?? [];
+    expect(inputs).toHaveLength(3);
+    expect(inputs[0]).not.toContain("aria-describedby");
+    expect(inputs[1]).toContain('aria-describedby="configure-price-0-1"');
+    expect(inputs[2]).toContain('aria-describedby="configure-price-0-2"');
+    expect(html).toContain('<span id="configure-price-0-1" class="configure-option__price">');
+    for (const entry of options) expect(html).not.toContain(entry.optionReference);
+  });
+
+  it("a combo dish's allergens are read with its control, with the price when it has one", () => {
+    const dish = (n: string, name: string, price: { amount: string; currency: string } | null) =>
+      Object.freeze({
+        optionReference: `018f7500-0000-7000-8000-${n.padStart(12, "0")}`,
+        name,
+        maximumQuantity: 1,
+        conflictOptionReferences: Object.freeze([]),
+        selectedByDefault: false,
+        price,
+      });
+    const free = dish("b1", "Red bean soup", { amount: "0.00", currency: "CAD" });
+    const paid = dish("b2", "Sesame soup", { amount: "1.50", currency: "CAD" });
+    const combo: MenuSellable = {
+      ...sellable,
+      optionRules: [
+        {
+          name: "Soup",
+          comboPart: true,
+          minimumSelections: 1,
+          maximumSelections: 1,
+          options: [free, paid],
+        },
+      ],
+    };
+    const controller: ConfigureController = {
+      getState: () => ({ status: "idle" }),
+      retry: vi.fn(),
+      setOnline: vi.fn(),
+      submit: vi.fn(),
+      subscribe: () => () => undefined,
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <SellableConfigurator sellable={combo} controller={controller} />
+      </MemoryRouter>,
+    );
+    const inputs = html.match(/<input[^>]*type="radio"[^>]*>/gu) ?? [];
+    expect(inputs[0]).toContain('aria-describedby="configure-allergens-0-0"');
+    expect(inputs[1]).toContain(
+      'aria-describedby="configure-price-0-1 configure-allergens-0-1"',
+    );
+    expect(html).toContain(
+      '<span id="configure-allergens-0-1" class="configure-option__allergens">Ask staff about allergens</span>',
+    );
+  });
 });
 
 it("WP-2423 item 8 ③ decision 13: says how many of a dish the table already ordered", () => {

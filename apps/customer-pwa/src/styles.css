@@ -1128,6 +1128,13 @@
   text-align: end;
   white-space: nowrap;
 }
+/* A combo dish's allergens: on their own row under the name, whether or not it has a price. */
+.configure-option__allergens {
+  grid-column: 1 / -1;
+  padding-bottom: var(--bop-space-2);
+  color: var(--bop-color-text-muted);
+  font-size: 0.8125rem;
+}
 .configure-option__quantity {
   display: flex;
   grid-column: 1 / -1;
