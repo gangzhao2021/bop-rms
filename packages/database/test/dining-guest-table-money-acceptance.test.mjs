@@ -30,6 +30,7 @@ import { createMerchantDiningOrderCloseCommand } from "../../../apps/api/src/mer
 import { createMerchantGuestTableStartOff } from "../../../apps/api/src/merchant-dining-guest-table-start.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
 import { createMerchantDiningServeCommand } from "../../../apps/api/src/merchant-dining-serve-command.ts";
+import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
 import { kdsOperatorProfileAllows } from "../../../apps/api/src/merchant-kds-operator-profile.ts";
 import { createMerchantMfaStepUp } from "../../../apps/api/src/merchant-mfa-step-up.ts";
@@ -39,6 +40,7 @@ import { createMerchantOrdinaryRefundSendCommand } from "../../../apps/api/src/m
 import { createMerchantStoreFeatures } from "../../../apps/api/src/merchant-store-features.ts";
 import { createMerchantWorkforcePermissionSource } from "../../../apps/api/src/merchant-workforce-authority-source.ts";
 import { createOriginalReceiptIssuance } from "../../../apps/api/src/original-receipt-issuance.ts";
+import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { createPersistentMerchantSettlement } from "../../../apps/api/src/persistent-merchant-settlement.ts";
 import { createPersistentMerchantStoreReports } from "../../../apps/api/src/persistent-merchant-store-reports.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
@@ -942,6 +944,40 @@ it("staff closing a guest-started table leave it free for the next guest, with n
         at: new Date(base - minutes(120)).toISOString(),
       });
       const persistence = { ...manager.persistence, transactions: transactions(), now };
+      // Tables, as staff read it (the pilot's snapshot read): the table a guest started, and when
+      // the System frees it. The kitchen's last step is the latest activity, so it is 90 minutes
+      // after that, nobody having tapped Served; long past, the page says a person should look.
+      const polled = {
+        ...persistence,
+        transactions: {
+          ...transactions(),
+          runSnapshot: (work) => transactions.snapshot().run(work),
+        },
+      };
+      const tables = await createMerchantDiningTables({
+        persistence: polled,
+        authentication: manager.authentication,
+        tableAvailabilityCommandEnabled: true,
+      })({
+        sessionCookie: manager.sessionCookie,
+        csrf: manager.csrf,
+        query: { afterTableReference: null, limit: 100 },
+      });
+      const guestTable = tables.items.find(
+        (table) => table.tableReference === session.tableReference,
+      );
+      assert.deepEqual(guestTable?.guestStart, {
+        closesByItselfAt: new Date(base - minutes(30)).toISOString(),
+      });
+      assert.equal(tables.guestTableStart?.canTurnOff, false);
+      // Orders and Home: its finished dishes aren't raised as something someone must carry over.
+      const queued = await createPersistentMerchantOrderQueue({
+        persistence: polled,
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+      })({ sessionCookie: manager.sessionCookie, afterOrderReference: null, orderReference });
+      assert.equal(queued.items[0]?.orderReference, orderReference);
+      assert.equal(queued.items[0]?.startedByGuest, true);
       await staffClose({ manager, persistence, ownerScope, seeded })();
       assert.deepEqual(await tableState(admin, seeded), {
         phase: "Closed",

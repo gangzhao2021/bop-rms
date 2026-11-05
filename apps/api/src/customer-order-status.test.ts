@@ -183,6 +183,19 @@ it("WP-2423: serializes only the not-collected time of a pickup source", async (
   const without = (await (await f.send()).json()) as typeof body;
   expect(without.status.sources).not.toHaveProperty("pickup");
 });
+it("DEC-DINING-GUEST-TABLE-START: says a guest started the table only when one did", async () => {
+  const f = await setup();
+  const sources = { checkedAt: "2026-09-12T12:00:00.000Z", kitchen: null, payments: null };
+  f.read.mockResolvedValue({ ...f.result, sources: { ...sources, startedByGuest: true } });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.startedByGuest).toBe(true);
+  // Every other order's answer keeps its shape, so a phone that loaded the page earlier reads it.
+  f.read.mockResolvedValue({ ...f.result, sources });
+  const other = (await (await f.send()).json()) as typeof body;
+  expect(other.status.sources).not.toHaveProperty("startedByGuest");
+});
 it("WP-2423 Q12: serializes only the time a pickup was cancelled for an unpaid payment window", async () => {
   const f = await setup();
   f.read.mockResolvedValue({

@@ -26,10 +26,12 @@ import {
   createPostgresDiningSessionJoinStore,
   createPostgresDiningSessionStartStore,
   buildDiningSessionStartRecord,
+  loadDiningGuestTableOffer,
   loadDiningGuestTableStart,
   loadDiningGuestTableStartPage,
   parseQrTableContextEvidence,
 } from "../../rms/dining/src/index.ts";
+import { listStoreKitchenOrderProgress } from "../../rms/kitchen/src/index.ts";
 import { readPaymentRemainingRefundable } from "../../rms/payment/src/index.ts";
 import { createCustomerDiningBindingComposition } from "../../../apps/api/src/customer-dining-binding-composition.ts";
 import { createCustomerDiningJoinComposition } from "../../../apps/api/src/customer-dining-join-composition.ts";
@@ -944,6 +946,15 @@ it("budgets: the 4th start at a table and the 41st at a Store in 10 minutes are 
         );
       };
       for (const n of [1, 2, 3]) await past(20, n, 0x400 + n);
+      // A scan offers no start it couldn't give: the guest is told what a guest at any table
+      // nobody opened is told, rather than tapping Start and being refused.
+      const offer = (table, at = new Date().toISOString()) =>
+        transactions().run((tx) => loadDiningGuestTableOffer(tx, owner, id(table), at));
+      assert.deepEqual(await offer(20), { kind: "Spent" });
+      assert.deepEqual(await offer(20, new Date(Date.now() + minutes(11)).toISOString()), {
+        kind: "MayStart",
+        clearsCleaning: false,
+      });
       const before = await count(admin, "SELECT count(*)::int AS n FROM rms_dining.dining_session");
       assert.deepEqual(await tap(join, identity.scan(80, 20)), {
         status: "Refused",
@@ -955,6 +966,7 @@ it("budgets: the 4th start at a table and the 41st at a Store in 10 minutes are 
       );
       // A table's budget doesn't touch another; a Store's budget of 40 does.
       await seedTable(admin, 30);
+      assert.deepEqual(await offer(30), { kind: "MayStart", clearsCleaning: false });
       for (let n = 0; n < 37; n += 1) {
         await seedTable(admin, 100 + n);
         await past(100 + n, 5, 0x500 + n);
@@ -968,6 +980,7 @@ it("budgets: the 4th start at a table and the 41st at a Store in 10 minutes are 
         status: "Refused",
         reason: "TooManyJoins",
       });
+      assert.deepEqual(await offer(30), { kind: "Spent" });
       // Tables tells staff why guests at free tables are coming to them; a window later it clears.
       const page = (at) =>
         transactions().run((tx) => loadDiningGuestTableStartPage(tx, owner, [], at));
@@ -1019,10 +1032,19 @@ it("the System closes a paid table the kitchen finished, nobody having tapped Se
         hold: "Unfinished",
       });
       assert.equal((await state()).phase, "Active");
+      // Tables reads the same kitchen fact for a whole page, as the pilot's role.
+      const progress = () =>
+        transactions().run(async (tx) =>
+          (await listStoreKitchenOrderProgress(tx, ownerScope, [orderReference])).get(
+            orderReference,
+          ),
+        );
+      assert.equal((await progress())?.stillMaking, true);
 
       // The kitchen finishes; nobody taps Served. Only quiet time held it, and it has passed.
       const cookedAt = new Date(base - minutes(120)).toISOString();
       await finishKitchen({ admin, transactions, ownerScope, orderReference, at: cookedAt });
+      assert.deepEqual(await progress(), { lastChangedAt: cookedAt, stillMaking: false });
       // Under 90 minutes since the kitchen last touched it: a party still sitting isn't ended.
       const soon = closer(transactions, ownerScope, () =>
         new Date(Date.parse(cookedAt) + minutes(60)).toISOString(),
@@ -1329,6 +1351,108 @@ it("the next party after a 5-minute gap gets its own Session, once it says it is
           [previous],
         ),
         0,
+      );
+      // The new start names the visit it ended, and Tables says so on that table only.
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT ended_session_id::text AS ended FROM rms_dining.dining_session_guest_start WHERE session_id=$1",
+            [sessions[1].id],
+          )
+        ).rows,
+        [{ ended: previous }],
+      );
+      const sittingDown = await startedAtSession(admin, 21);
+      const page = await transactions().run((tx) =>
+        loadDiningGuestTableStartPage(tx, owner, [sessions[1].id, sittingDown], now()),
+      );
+      assert.equal(page.started.get(sessions[1].id)?.endedLastParty, true);
+      assert.equal(page.started.get(sittingDown)?.endedLastParty, false);
+      // The database takes that name only for a visit that closed at the same table.
+      await seedTable(admin, 22);
+      const startNaming = (endedSessionReference) =>
+        createPostgresDiningGuestTableStartStore(transactions(), {
+          scope,
+          credentials,
+          pepperVersion: 1,
+          now,
+          newReference: fresh,
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+          takingDineIn: async () => true,
+        }).startIfFree({
+          tableReference: id(22),
+          guestSessionReference: fresh(),
+          endedSessionReference,
+        });
+      await assert.rejects(startNaming(sittingDown), { code: "23514" });
+      await assert.rejects(startNaming(previous), { code: "23514" });
+      assert.equal(
+        await count(
+          admin,
+          "SELECT count(*)::int AS n FROM rms_dining.dining_session WHERE table_id=$1",
+          [id(22)],
+        ),
+        0,
+      );
+
+      // Staff paused scanning at a quiet table: nobody new is asked, and "we just sat down" from a
+      // phone that was asked before the pause ends nothing.
+      await seedTable(admin, 23);
+      const quietTable = await startedAgo({ transactions, credentials }, 23, 6);
+      assert.equal(await asks(23), true);
+      const asked = identity.scan(85, 23);
+      const paused = await createPostgresDiningQrJoinStore(transactions(), {
+        scope,
+        credentials,
+        pepperVersion: 1,
+        now,
+        authorize: async () => true,
+        audit: (record) => ({
+          auditId: fresh(),
+          brandId: scope.brandReference,
+          storeId: scope.storeReference,
+          actor: { type: "User", reference: id(8) },
+          actionCode: "DINING_QR_JOIN_PAUSE",
+          targetType: "DiningTable",
+          targetId: record.tableReference,
+          reasonCode: "STAFF_TABLE_CONTROL",
+          correlationId: record.operationReference,
+          occurredAt: record.observedAt,
+          sourceChannel: "API",
+          dataClassification: "Internal",
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+        }),
+      }).setPaused({
+        operationReference: fresh(),
+        diningSessionReference: quietTable,
+        paused: true,
+        actorReference: id(8),
+        observedAt: now(),
+      });
+      assert.equal(paused.status, "Applied");
+      assert.equal(await asks(23), false);
+      assert.deepEqual(
+        await join.join(
+          {
+            sessionCredential: asked.sessionCredential,
+            csrfCredential: asked.csrfCredential,
+            operationReference: fresh(),
+            newParty: true,
+          },
+          joinRequest,
+        ),
+        { status: "Refused", reason: "Paused" },
+      );
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT phase FROM rms_dining.dining_session WHERE table_id=$1 ORDER BY started_at",
+            [id(23)],
+          )
+        ).rows,
+        [{ phase: "Active" }],
       );
     } finally {
       await admin.end();
