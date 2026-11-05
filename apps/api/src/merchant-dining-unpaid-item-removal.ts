@@ -21,6 +21,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { createSubmissionInventoryRelease } from "./submission-inventory-release.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER (rule 2): staff take dishes — or a whole round — off the bill of a
@@ -118,7 +119,7 @@ export function createMerchantDiningUnpaidItemRemoval(options: {
                 input.sessionCookie,
                 staffOrderCancellationPermission,
                 session.sessionReference,
-              ).catch(() => fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("UNPAID_ITEM_REMOVAL_PERMISSION_DENIED");
               return current;

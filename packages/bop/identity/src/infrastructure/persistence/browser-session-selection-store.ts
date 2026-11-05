@@ -3,6 +3,7 @@ import {
   createAuthenticationSession,
   type AuthenticationSession,
 } from "../../contracts/authentication-session.js";
+import { isBrowserSessionReadFailure } from "../../contracts/browser-session.js";
 import { parseCanonicalInstant, parseOpaqueUuidV7 } from "../../contracts/identity-actor.js";
 import type { OidcAuthorizationTransaction } from "./oidc-authorization-store.js";
 export interface BrowserSessionSelection {
@@ -116,7 +117,9 @@ export function createPostgresBrowserSessionSelectionStore(options: {
           if (!(await options.validate(tx, s, scope, observedAt))) return denied();
           return scope;
         });
-      } catch {
+      } catch (error) {
+        // WP-2423 item 10: what could not be read is not a refusal of the selection.
+        if (isBrowserSessionReadFailure(error)) throw error;
         return denied();
       }
     },
@@ -170,7 +173,9 @@ export function createPostgresBrowserSessionSelectionStore(options: {
           if (!(await options.validate(tx, s, scope, observedAt))) return denied();
           return scope;
         });
-      } catch {
+      } catch (error) {
+        // WP-2423 item 10: what could not be read is not a refusal of the selection.
+        if (isBrowserSessionReadFailure(error)) throw error;
         return denied();
       }
     },

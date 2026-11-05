@@ -27,6 +27,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 interface Scope {
   tenantReference: string;
@@ -143,7 +144,7 @@ export function createMerchantCardMachineOrdinaryRefund(options: {
                 input.sessionCookie,
                 "merchant.access",
                 session.sessionReference,
-              ).catch(denied);
+              ).catch(onlyRefusal(denied));
               if ((await current.allowed()) !== true) return denied();
               const tx = businessTransaction(transaction);
               const scope = {

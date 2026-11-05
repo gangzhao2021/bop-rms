@@ -73,7 +73,7 @@ export function createMerchantDiningTables(options: {
       raw.limit < 1 ||
       raw.limit > 100
     )
-      throw new Error("DINING_TABLES_UNAVAILABLE");
+      throw new Error("DINING_TABLES_INPUT_INVALID");
     const limit = raw.limit;
     const denied = (): never => {
       throw new Error("DINING_TABLES_PERMISSION_DENIED");

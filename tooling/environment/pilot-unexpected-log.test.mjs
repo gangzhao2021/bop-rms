@@ -1,6 +1,7 @@
 import console from "node:console";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { logUnexpected, reportUnexpected } from "./pilot-merchant-pickup.mjs";
+import { createMerchantRequestReporter, storeOfDirectory } from "./pilot-unexpected.mjs";
 
 /**
  * v15 2026-10-31: opening a Store answered 503 and the pilot logged nothing; the database had
@@ -140,4 +141,118 @@ it("names the Workflow rule from anywhere in the wrapped chain, never other text
     { causes: undefined, rule: undefined },
   ]);
   expect(JSON.stringify(lines())).not.toContain("Sam");
+});
+
+describe("a merchant request that failed for a reason that is not a refusal (WP-2423 item 10)", () => {
+  const missingGrant = () =>
+    Object.assign(new Error("permission denied for table membership: guest Sam"), {
+      code: "TENANT_DATABASE_TRANSACTION_FAILED",
+      diagnostic: { sqlState: "42501", table: "membership", constraint: null, closed: false },
+    });
+
+  it("names its route, Store, SQLSTATE and table, never message text", () => {
+    const lines = logged();
+    createMerchantRequestReporter({ store: "stores/tea" })("/dining/tables", missingGrant());
+    expect(lines()).toEqual([
+      expect.objectContaining({
+        event: "MERCHANT_REQUEST_UNEXPECTED",
+        code: "TENANT_DATABASE_TRANSACTION_FAILED",
+        route: "/dining/tables",
+        store: "stores/tea",
+        sqlState: "42501",
+        table: "membership",
+      }),
+    ]);
+    expect(JSON.stringify(lines())).not.toContain("Sam");
+    expect(JSON.stringify(lines())).not.toContain("permission denied");
+  });
+
+  it("reads the identifiers of what a rewrite wraps, and of a failure riding on another error", () => {
+    const lines = logged();
+    const reporter = createMerchantRequestReporter();
+    reporter("/a", Object.assign(new Error("X_UNAVAILABLE"), { cause: missingGrant() }));
+    reporter(
+      "/b",
+      Object.defineProperty(new Error("Y_UNAVAILABLE"), Symbol.for("bop.database.failure"), {
+        value: { sqlState: "23514", table: "product", constraint: "guard_check" },
+        enumerable: false,
+      }),
+    );
+    expect(
+      lines().map(({ route, code, causes, sqlState, table, constraint }) => ({
+        route,
+        code,
+        causes,
+        sqlState,
+        table,
+        constraint,
+      })),
+    ).toEqual([
+      {
+        route: "/a",
+        code: "X_UNAVAILABLE",
+        causes: ["TENANT_DATABASE_TRANSACTION_FAILED"],
+        sqlState: "42501",
+        table: "membership",
+        constraint: undefined,
+      },
+      {
+        route: "/b",
+        code: "Y_UNAVAILABLE",
+        causes: undefined,
+        sqlState: "23514",
+        table: "product",
+        constraint: "guard_check",
+      },
+    ]);
+  });
+
+  it("drops anything that is not identifier-shaped", () => {
+    const lines = logged();
+    createMerchantRequestReporter()(
+      "/orders/01909a3c-0000 ; drop",
+      Object.assign(new Error("safe"), {
+        code: "X",
+        diagnostic: { sqlState: "not a state", table: "Sam's table", constraint: "x y" },
+      }),
+    );
+    const [line] = lines();
+    expect(line.route).toBeUndefined();
+    expect(line.sqlState).toBeUndefined();
+    expect(line.table).toBeUndefined();
+    expect(line.constraint).toBeUndefined();
+  });
+
+  it("does not say twice what a wrapper around the service already logged", async () => {
+    const lines = logged();
+    const failure = missingGrant();
+    const wrapped = logUnexpected("INTERNAL_STORE_REPORTS_UNAVAILABLE", async () => {
+      throw failure;
+    });
+    await expect(wrapped({})).rejects.toBe(failure);
+    createMerchantRequestReporter()("/reports", failure);
+    expect(lines().map(({ event }) => event)).toEqual(["INTERNAL_STORE_REPORTS_UNAVAILABLE"]);
+  });
+
+  it("writes a bounded number of lines however often it fails, and says how many", () => {
+    const lines = logged();
+    let at = 1_000_000;
+    const reporter = createMerchantRequestReporter({ now: () => at });
+    for (let n = 0; n < 100; n += 1) reporter("/orders", missingGrant());
+    expect(lines()).toHaveLength(1);
+    // Another route or another failure is its own line.
+    reporter("/tables", missingGrant());
+    reporter("/orders", new TypeError("a bug"));
+    expect(lines()).toHaveLength(3);
+    at += 60_000;
+    reporter("/orders", missingGrant());
+    expect(lines()).toHaveLength(4);
+    expect(lines()[3]).toMatchObject({ route: "/orders", suppressed: 99 });
+  });
+
+  it("names the Store only from a served Store's directory", () => {
+    expect(storeOfDirectory("/app/.local/pilot-v15/stores/tea")).toBe("stores/tea");
+    expect(storeOfDirectory("/app/.local/pilot-v15/stores/tea/")).toBe("stores/tea");
+    expect(storeOfDirectory("/app/.local/pilot-v15")).toBeUndefined();
+  });
 });

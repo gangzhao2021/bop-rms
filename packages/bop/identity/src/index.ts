@@ -120,6 +120,7 @@ export {
   authorizationCookie,
   browserSessionErrorCodes,
   BrowserSessionError,
+  isBrowserSessionReadFailure,
   createAuthorizationTransaction,
   createBrowserSessionRecord,
   merchantSessionCookie,

@@ -1,6 +1,14 @@
 /** Merchant BFF routes: dining sessions, tables, table QR, order progress, serving and closing. Registered by createMerchantBffRouter (merchant-bff.ts). */
 import { GuestTableStartOffError } from "./merchant-dining-guest-table-start.js";
-import { cookie, denied, exactHeader, NO_STORE, sameOriginMutation } from "./merchant-bff-http.js";
+import {
+  cookie,
+  denied,
+  exactHeader,
+  failed,
+  NO_STORE,
+  noteFailure,
+  sameOriginMutation,
+} from "./merchant-bff-http.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
 import { DiningClosingError } from "@rms/dining";
@@ -80,8 +88,9 @@ export function orderProgressResponse(
 }
 
 function heldRoundFailure(response: Response, error: unknown) {
+  noteFailure(response, error);
   if (!(error instanceof MerchantDiningHeldRoundError)) {
-    denied(response);
+    failed(response, error);
     return;
   }
   const status =
@@ -128,7 +137,7 @@ export function installMerchantDiningRoutes(
           joinKind: r.joinKind,
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
   // WP-2423 item 8 ⑤ decisions 5–7: a guest round waiting for staff — send it or cancel it.
   router.post("/dining/held-round", sameOriginMutation(options), (request, response) => {
@@ -174,8 +183,9 @@ export function installMerchantDiningRoutes(
       .diningChase({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof MerchantDiningChaseError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         response.set("Cache-Control", NO_STORE);
@@ -221,11 +231,12 @@ export function installMerchantDiningRoutes(
       .diningTableMove({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (
           !(error instanceof MerchantDiningTableMoveError) ||
           error.code === "DINING_TABLE_MOVE_PERMISSION_DENIED"
         ) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -261,11 +272,12 @@ export function installMerchantDiningRoutes(
       .diningTableMerge({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (
           !(error instanceof MerchantDiningTableMergeError) ||
           error.code === "DINING_TABLE_MERGE_PERMISSION_DENIED"
         ) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -300,11 +312,12 @@ export function installMerchantDiningRoutes(
       .diningPartySize({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (
           !(error instanceof MerchantDiningPartySizeError) ||
           error.code === "DINING_PARTY_SIZE_PERMISSION_DENIED"
         ) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -340,11 +353,12 @@ export function installMerchantDiningRoutes(
       .diningTeaCharge({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (
           !(error instanceof MerchantDiningTeaChargeError) ||
           error.code === "DINING_TEA_CHARGE_PERMISSION_DENIED"
         ) {
-          denied(response);
+          failed(response, error);
           return;
         }
         response
@@ -400,7 +414,7 @@ export function installMerchantDiningRoutes(
     void options
       .diningQrJoin({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
   router.post("/dining/sessions/regenerate", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
@@ -435,7 +449,7 @@ export function installMerchantDiningRoutes(
                 r.joinCredential,
               )))
         ) {
-          denied(response);
+          failed(response, new Error("MERCHANT_BFF_RESULT_INVALID"));
           return;
         }
         response.json({
@@ -446,7 +460,7 @@ export function installMerchantDiningRoutes(
           ...(r.status === "Issued" ? { joinCredential: r.joinCredential } : {}),
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post(
@@ -489,7 +503,7 @@ export function installMerchantDiningRoutes(
             !Number.isFinite(Date.parse(result.transferredAt)) ||
             new Date(result.transferredAt).toISOString() !== result.transferredAt
           ) {
-            denied(response);
+            failed(response, new Error("MERCHANT_BFF_RESULT_INVALID"));
             return;
           }
           response.json({
@@ -502,7 +516,7 @@ export function installMerchantDiningRoutes(
             transferredAt: result.transferredAt,
           });
         })
-        .catch(() => denied(response));
+        .catch((error: unknown) => failed(response, error));
     },
   );
 
@@ -547,7 +561,7 @@ export function installMerchantDiningRoutes(
             !Array.isArray(result.participants) ||
             result.participants.length > 100
           ) {
-            denied(response);
+            failed(response, new Error("MERCHANT_BFF_RESULT_INVALID"));
             return;
           }
           const seen = new Set<string>();
@@ -560,7 +574,7 @@ export function installMerchantDiningRoutes(
               p.isHost !== (p.participantReference === result.hostParticipantReference) ||
               seen.has(p.participantReference)
             ) {
-              denied(response);
+              failed(response, new Error("MERCHANT_BFF_RESULT_INVALID"));
               return;
             }
             seen.add(p.participantReference);
@@ -578,7 +592,7 @@ export function installMerchantDiningRoutes(
             })),
           });
         })
-        .catch(() => denied(response));
+        .catch((error: unknown) => failed(response, error));
     },
   );
 
@@ -618,7 +632,7 @@ export function installMerchantDiningRoutes(
                 result.joinCredential,
               )))
         ) {
-          denied(response);
+          failed(response, new Error("MERCHANT_BFF_RESULT_INVALID"));
           return;
         }
         response.json({
@@ -631,7 +645,7 @@ export function installMerchantDiningRoutes(
           ...(result.status === "Issued" ? { joinCredential: result.joinCredential } : {}),
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post("/dining/tables", sameOriginMutation(options), (request, response) => {
@@ -653,7 +667,7 @@ export function installMerchantDiningRoutes(
     void options
       .diningTables({ sessionCookie, csrf, query: request.body })
       .then((result) => response.json(result))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   // WP-2423 Q28 DEC-DINING-STAFF-CALL: how many guests wait for staff, and answering one call.
@@ -676,7 +690,7 @@ export function installMerchantDiningRoutes(
     void options
       .diningStaffCallCount({ sessionCookie, csrf })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
   router.post("/dining/staff-calls/answer", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
@@ -697,7 +711,7 @@ export function installMerchantDiningRoutes(
     void options
       .diningStaffCallAnswer({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   // WP-2423 DEC-DINE-IN-PAY-LATER: the Store's dine-in payment timing (Owner, Store Manager).
@@ -720,7 +734,7 @@ export function installMerchantDiningRoutes(
     void options
       .diningPaymentTimingRead({ sessionCookie, csrf })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
   router.post("/dining/payment-timing/change", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant"),
@@ -741,7 +755,7 @@ export function installMerchantDiningRoutes(
     void options
       .diningPaymentTimingChange({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   // WP-2423 DEC-DINING-GUEST-TABLE-START: whoever may pause ordering stops guests starting tables.
@@ -765,9 +779,14 @@ export function installMerchantDiningRoutes(
       .guestTableStartOff({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
-        const code = error instanceof GuestTableStartOffError ? error.code : "Denied";
-        if (code === "Changed") response.status(409).json({ error: "guest_table_start_changed" });
-        else if (code === "Unavailable")
+        if (!(error instanceof GuestTableStartOffError)) {
+          failed(response, error);
+          return;
+        }
+        noteFailure(response, error);
+        if (error.code === "Changed")
+          response.status(409).json({ error: "guest_table_start_changed" });
+        else if (error.code === "Unavailable")
           response.status(503).json({ error: "guest_table_start_unavailable" });
         else denied(response);
       });
@@ -777,9 +796,10 @@ export function installMerchantDiningRoutes(
   // cash) recorded at checkout. Refusals keep their meaning for the page (409 changed/owed, 422 cash
   // short); a missing permission reads as denied.
   const checkoutFailure = (response: Response, error: unknown) => {
+    noteFailure(response, error);
     const code = error instanceof DiningTableCheckoutError ? error.code : null;
     if (code === null || code === "TABLE_CHECKOUT_PERMISSION_DENIED") {
-      denied(response);
+      failed(response, error);
       return;
     }
     const status =
@@ -916,7 +936,7 @@ export function installMerchantDiningRoutes(
           !Number.isSafeInteger(result.aggregateVersion) ||
           result.aggregateVersion < 1
         ) {
-          denied(response);
+          failed(response, new Error("MERCHANT_BFF_RESULT_INVALID"));
           return;
         }
         response.json({
@@ -926,7 +946,7 @@ export function installMerchantDiningRoutes(
           aggregateVersion: result.aggregateVersion,
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   // WP-2423 Q11: table QR codes. Unknown failures stay denied; a changed table answers 409 so the
@@ -967,7 +987,7 @@ export function installMerchantDiningRoutes(
             response.status(409).json({ error: "dining_table_seated" });
           else if (error instanceof Error && error.message === "TABLE_QR_INVALID")
             response.status(400).json({ error: "dining_table_invalid" });
-          else denied(response);
+          else failed(response, error);
         });
     });
   tableQrRoute("/dining/table-qr", (port, input) =>
@@ -1011,7 +1031,7 @@ export function installMerchantDiningRoutes(
         }
         response.json(orderProgressResponse(current));
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   // DEC-TABLE-CLOSE-GUESTS-LEFT: what closing a table whose guests left resolves and refunds.
@@ -1059,6 +1079,7 @@ export function installMerchantDiningRoutes(
         });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof Error && error.message === "DINING_TABLE_CLOSE_PLAN_PERMISSION_DENIED")
           denied(response);
         else response.status(503).json({ error: "dining_table_close_plan_unavailable" });
@@ -1089,7 +1110,7 @@ export function installMerchantDiningRoutes(
           itemServiceVersion: result.itemServiceVersion,
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   // WP-2423: "Serve all ready items" for a round or a table. 200 reports every line (served,
@@ -1127,11 +1148,13 @@ export function installMerchantDiningRoutes(
         }),
       )
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof DiningServeReadyError && error.code === "Invalid")
           response.status(400).json({ error: "dining_serve_ready_invalid" });
         else if (error instanceof DiningServeReadyError && error.code === "NotFound")
           response.status(404).json({ error: "dining_serve_ready_not_found" });
-        else if (error instanceof DiningServeReadyError) denied(response);
+        else if (error instanceof DiningServeReadyError && error.code === "PermissionDenied")
+          denied(response);
         else response.status(503).json({ error: "dining_serve_ready_unavailable" });
       });
   });
@@ -1160,7 +1183,7 @@ export function installMerchantDiningRoutes(
           itemServiceVersion: result.record.itemServiceVersion,
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post("/dining/closing", sameOriginMutation(options), (request, response) => {
@@ -1189,7 +1212,7 @@ export function installMerchantDiningRoutes(
           !Number.isSafeInteger(result.sessionVersion) ||
           result.sessionVersion < 1
         ) {
-          denied(response);
+          failed(response, new Error("MERCHANT_BFF_RESULT_INVALID"));
           return;
         }
         response.json({
@@ -1199,6 +1222,7 @@ export function installMerchantDiningRoutes(
         });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         // WP-2423 (B759): a table that cannot close yet is a 409, never a permission message.
         const code =
           error instanceof DiningClosingError || error instanceof DiningCheckoutAlreadyPaidError

@@ -1,5 +1,13 @@
 /** Merchant BFF routes: settlement and store reports. Registered by createMerchantBffRouter (merchant-bff.ts). */
-import { cookie, denied, NO_STORE, rawHeaderValues, safeRead } from "./merchant-bff-http.js";
+import {
+  cookie,
+  denied,
+  failed,
+  NO_STORE,
+  noteFailure,
+  rawHeaderValues,
+  safeRead,
+} from "./merchant-bff-http.js";
 import express, { type Router } from "express";
 import {
   type StoreSalesReportExportKind,
@@ -35,6 +43,7 @@ export function installMerchantReportRoutes(
       .settlement({ sessionCookie, businessDate: businessDate === undefined ? null : businessDate })
       .then((view) => response.json(view))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         // WP-2423 Q7 (v15): records busy with live work is a retry-later, not a refusal.
         if ((error as { code?: unknown } | null)?.code === "MERCHANT_SETTLEMENT_BUSY") {
           response
@@ -57,7 +66,7 @@ export function installMerchantReportRoutes(
           });
           return;
         }
-        denied(response);
+        failed(response, error);
       });
   });
 
@@ -82,6 +91,7 @@ export function installMerchantReportRoutes(
     };
   };
   const reportFailure = (response: express.Response) => (error: unknown) => {
+    noteFailure(response, error);
     if ((error as { code?: unknown } | null)?.code === "MERCHANT_STORE_REPORTS_BUSY") {
       response
         .status(503)
@@ -90,7 +100,7 @@ export function installMerchantReportRoutes(
         .json({ error: "reports_busy" });
       return;
     }
-    denied(response);
+    failed(response, error);
   };
   router.get("/reports", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

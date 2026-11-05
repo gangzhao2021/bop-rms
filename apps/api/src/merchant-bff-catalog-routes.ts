@@ -9,10 +9,13 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
+  noteFailure,
   rawHeaderValues,
   safeRead,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
+import { withCause } from "./merchant-failure.js";
 import {
   MerchantProductCategoryLookupError,
   parseMerchantProductCategoryLookupResult,
@@ -84,6 +87,7 @@ export function installMerchantCatalogRoutes(
         response.json(safe);
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         const code =
           error instanceof MerchantProductDraftBaselineError ? error.code : "Unavailable";
         const status =
@@ -152,6 +156,7 @@ export function installMerchantCatalogRoutes(
         response.json(safe);
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         const code =
           error instanceof MerchantProductCategoryLookupError ? error.code : "Unavailable";
         const status =
@@ -218,6 +223,7 @@ export function installMerchantCatalogRoutes(
         response.json(parseMerchantCategoryTreeResult(view));
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         const code = error instanceof MerchantCategoryTreeError ? error.code : "Unavailable";
         const status =
           code === "Invalid"
@@ -282,11 +288,12 @@ export function installMerchantCatalogRoutes(
       .then((view) => {
         try {
           response.json(parseCatalogProductListView(view));
-        } catch {
-          throw new CatalogProductListError("Unavailable");
+        } catch (cause) {
+          throw withCause(new CatalogProductListError("Unavailable"), cause);
         }
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         const code = error instanceof CatalogProductListError ? error.code : "Unavailable";
         const status =
           code === "Invalid"
@@ -333,8 +340,9 @@ export function installMerchantCatalogRoutes(
       .menuPublication({ sessionCookie, csrf, command: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof CatalogError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -383,8 +391,9 @@ export function installMerchantCatalogRoutes(
       .menuDraft({ sessionCookie, csrf, command: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof CatalogError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -442,12 +451,13 @@ export function installMerchantCatalogRoutes(
       .productCreation({ sessionCookie, csrf, command: request.body, expectedScope })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantProductWriteFeatureDisabled) {
           response.status(409).json({ error: "product_creation_feature_disabled" });
           return;
         }
         if (!(error instanceof CatalogError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -505,12 +515,13 @@ export function installMerchantCatalogRoutes(
       .productDraft({ sessionCookie, csrf, command: request.body, expectedScope })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantProductWriteFeatureDisabled) {
           response.status(409).json({ error: "product_draft_feature_disabled" });
           return;
         }
         if (!(error instanceof CatalogError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -568,12 +579,13 @@ export function installMerchantCatalogRoutes(
       .productLifecycle({ sessionCookie, csrf, command: request.body, expectedScope })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantProductWriteFeatureDisabled) {
           response.status(409).json({ error: "product_lifecycle_feature_disabled" });
           return;
         }
         if (!(error instanceof CatalogError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -639,8 +651,8 @@ export function installMerchantCatalogRoutes(
         let view;
         try {
           view = parseCatalogProductEditorSnapshot(value);
-        } catch {
-          throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+        } catch (cause) {
+          throw withCause(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"), cause);
         }
         if (
           view.productReference !== query.productReference ||
@@ -651,6 +663,7 @@ export function installMerchantCatalogRoutes(
         response.json(view);
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         const status =
           error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID"
             ? 400
@@ -700,6 +713,7 @@ export function installMerchantCatalogRoutes(
         .productOptionPicker({ sessionCookie, csrf, command: request.body, expectedScope })
         .then((view) => response.json(view))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const feature = error instanceof MerchantProductWriteFeatureDisabled;
           const code =
             error instanceof CatalogError ? error.code : "CATALOG_DEPENDENCY_UNAVAILABLE";
@@ -763,6 +777,7 @@ export function installMerchantCatalogRoutes(
         })
           .then((result) => response.json(result))
           .catch((error: unknown) => {
+            noteFailure(response, error);
             const status =
               error instanceof MerchantProductWriteFeatureDisabled
                 ? 409
@@ -824,6 +839,7 @@ export function installMerchantCatalogRoutes(
         .productAuthoringContext({ sessionCookie, csrf, command: request.body, expectedScope })
         .then((result) => response.json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const status =
             error instanceof MerchantProductWriteFeatureDisabled
               ? 409

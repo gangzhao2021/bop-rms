@@ -52,7 +52,7 @@ it.each(["Draft", "Suspended", "Archived"])(
   async (lifecycle) => {
     const f = fixture();
     f.row.lifecycle = lifecycle;
-    await expect(f.read()).rejects.toThrow("MERCHANT_ORGANIZATION_UNAVAILABLE");
+    await expect(f.read()).rejects.toThrow("MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED");
   },
 );
 it.each([

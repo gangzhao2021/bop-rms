@@ -72,7 +72,7 @@ it("WP-2423: refuses a caller without the cancellation permission before the hol
   await expect(f.operation(f.input)).rejects.toMatchObject({
     code: "ACCEPTANCE_HOLD_REFUND_PERMISSION_DENIED",
   });
-  doubles.scope.mockRejectedValue(new Error("expired"));
+  doubles.scope.mockRejectedValue(new Error("STORE_SERVICE_PERMISSION_DENIED"));
   await expect(f.operation(f.input)).rejects.toMatchObject({
     code: "ACCEPTANCE_HOLD_REFUND_PERMISSION_DENIED",
   });

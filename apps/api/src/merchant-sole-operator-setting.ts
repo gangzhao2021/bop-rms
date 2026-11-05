@@ -31,6 +31,7 @@ import {
 } from "./merchant-sole-operator.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export class MerchantSoleOperatorError extends Error {
   constructor(
@@ -96,7 +97,7 @@ export function createMerchantSoleOperator(options: {
       transaction,
       sessionCookie,
       String(current.sessionReference),
-    ).catch(denied);
+    ).catch(onlyRefusal(denied));
     // WP-2423: current staff of the Store who are not the Brand Owner are told so (NotOwner)
     // rather than refused, so the Approvals page shows them nothing without a refused request.
     if ((await brand.authorizeAction("organization.brand.manage"))?.effect !== "Allow")

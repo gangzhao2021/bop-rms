@@ -28,6 +28,7 @@ import { merchantStockCatalog } from "./merchant-stock-catalog.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 / DEC-INV-STOCK-COUNT: INV-COUNT-LIST / INV-COUNT-WORKBENCH for the selected Store over the
@@ -330,7 +331,7 @@ export function createMerchantStockCounts(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   const countActions = [
     "inventory.count.read",
     "inventory.count.manage",

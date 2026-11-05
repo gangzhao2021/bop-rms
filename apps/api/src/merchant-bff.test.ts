@@ -707,8 +707,8 @@ it("protects service-control transport and exposes only bounded results", async 
   expect((await submit()).status).toBe(409);
   control.mockRejectedValueOnce(new Error("synthetic private failure detail"));
   const failed = await submit();
-  expect(failed.status).toBe(403);
-  expect(await failed.json()).toEqual({ error: "request_denied" });
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toEqual({ error: "retry_later" });
 });
 
 it("protects store-configuration transport and exposes only bounded results", async () => {
@@ -800,8 +800,8 @@ it("protects store-configuration transport and exposes only bounded results", as
   }
   control.mockRejectedValueOnce(new Error("synthetic private failure detail"));
   const failed = await submit();
-  expect(failed.status).toBe(403);
-  expect(await failed.json()).toEqual({ error: "request_denied" });
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toEqual({ error: "retry_later" });
 });
 
 it("restricts service-control state reads to safe scoped requests", async () => {
@@ -844,8 +844,8 @@ it("restricts service-control state reads to safe scoped requests", async () => 
   expect(read).toHaveBeenCalledTimes(1);
   read.mockRejectedValueOnce(new Error("synthetic internal detail"));
   const denied = await request(root, "/merchant/service-control", { headers });
-  expect(denied.status).toBe(403);
-  expect(await denied.json()).toEqual({ error: "request_denied" });
+  expect(denied.status).toBe(503);
+  expect(await denied.json()).toEqual({ error: "retry_later" });
 });
 
 it("protects Dining serving transport and excludes private record fields", async () => {
@@ -892,8 +892,8 @@ it("protects Dining serving transport and excludes private record fields", async
   });
   serving.mockRejectedValueOnce(new Error("synthetic private failure"));
   const failure = await submit();
-  expect(failure.status).toBe(403);
-  expect(await failure.json()).toEqual({ error: "request_denied" });
+  expect(failure.status).toBe(503);
+  expect(await failure.json()).toEqual({ error: "retry_later" });
   const unavailable = await serve(fakeService());
   expect(
     (
@@ -951,8 +951,8 @@ it("protects order acceptance transport and returns only public status/version",
   });
   accept.mockRejectedValueOnce(new Error("synthetic-private-source"));
   const failure = await submit();
-  expect(failure.status).toBe(403);
-  expect(await failure.json()).toEqual({ error: "request_denied" });
+  expect(failure.status).toBe(503);
+  expect(await failure.json()).toEqual({ error: "retry_later" });
   // WP-2423 D1: an authorized acceptance that did not happen is a conflict, never a refusal.
   for (const [code, error] of [
     ["ORDER_ACCEPTANCE_VERSION_CONFLICT", "order_changed"],
@@ -1041,8 +1041,8 @@ it("protects current order queue reads and bounds cursor authority", async () =>
   expect(split.items.map((item) => item.orderReference)).toEqual(["paged"]);
   queue.mockRejectedValueOnce(new Error("synthetic-private-source"));
   const failed = await request(root, "/merchant/orders", { headers });
-  expect(failed.status).toBe(403);
-  expect(await failed.json()).toEqual({ error: "request_denied" });
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect((await request(unconfigured, "/merchant/orders", { headers })).status).toBe(503);
 });
@@ -1219,7 +1219,7 @@ it("protects price management transport and sanitizes command failures", async (
     expect(JSON.stringify(await failed.json())).not.toContain(code);
   }
   write.mockRejectedValueOnce(new Error("synthetic-private-error"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -1334,7 +1334,7 @@ it("protects Product lifecycle transport and sanitizes command failures", async 
   expect(disabled.status).toBe(409);
   expect(await disabled.json()).toEqual({ error: "product_lifecycle_feature_disabled" });
   write.mockRejectedValueOnce(new Error("synthetic-private-error"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -1442,7 +1442,7 @@ it.each(["creation", "draft"] as const)(
           : "product_draft_feature_disabled",
     });
     write.mockRejectedValueOnce(new Error("synthetic-private-error"));
-    expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+    expect(await (await submit()).json()).toEqual({ error: "retry_later" });
     const unconfigured = await serve(fakeService());
     expect(
       (
@@ -1488,7 +1488,7 @@ it("protects complete Menu Draft reads behind the same session and CSRF boundary
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   read.mockRejectedValueOnce(new Error("synthetic-private-menu"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   read.mockRejectedValueOnce(new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE"));
   expect((await submit()).status).toBe(503);
   const unconfigured = await serve(fakeService());
@@ -1558,7 +1558,7 @@ it("protects Menu publication commands and returns safe status errors", async ()
     expect(JSON.stringify(await failed.json())).not.toContain(code);
   }
   write.mockRejectedValueOnce(new Error("synthetic-private-menu"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -1630,7 +1630,7 @@ it("protects ordinary refund preparation and does not claim Provider success or 
     replayed: true,
   });
   prepare.mockRejectedValueOnce(new Error("synthetic-private-provider-detail"));
-  expect(await (await post()).json()).toEqual({ error: "request_denied" });
+  expect(await (await post()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -1697,13 +1697,21 @@ it("protects Kitchen commands and preserves typed recovery outcomes", async () =
     [database("TENANT_DATABASE_TRANSACTION_CONFLICT", "40P01"), 503, { error: "retry_later" }],
     [database("TENANT_DATABASE_ACQUIRE_FAILED"), 503, { error: "retry_later" }],
     [database("TENANT_DATABASE_TRANSACTION_FAILED", "57014"), 503, { error: "retry_later" }],
-    [database("TENANT_DATABASE_TRANSACTION_FAILED", "42501"), 403, { error: "request_denied" }],
-    [new Error("synthetic-private-source"), 403, { error: "request_denied" }],
+    // WP-2423 item 10: a missing grant or an unknown failure is not a refusal, and it will not pass
+    // by itself: try again after longer, and it is logged.
+    [database("TENANT_DATABASE_TRANSACTION_FAILED", "42501"), 503, { error: "retry_later" }],
+    [new Error("synthetic-private-source"), 503, { error: "retry_later" }],
   ] as const) {
     execute.mockRejectedValueOnce(error);
     const result = await submit();
     expect([result.status, await result.json()]).toEqual([status, body]);
-    if (status === 503) expect(result.headers.get("retry-after")).toBe("1");
+    if (status === 503)
+      expect(result.headers.get("retry-after")).toBe(
+        (error as { diagnostic?: { sqlState?: string } }).diagnostic?.sqlState === "42501" ||
+          error.message === "synthetic-private-source"
+          ? "5"
+          : "1",
+      );
   }
   const result = parseKitchenWorkLifecycleResult({
     operationReference: "018f7f9a-ad3e-7a11-8d01-000000000011",
@@ -1740,7 +1748,7 @@ it("protects Kitchen commands and preserves typed recovery outcomes", async () =
     ).status,
   ).toBe(503);
   execute.mockRejectedValueOnce(new Error("private adapter details"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
 });
 
 it("protects Kitchen queries and exposes only typed public failures", async () => {
@@ -1789,7 +1797,7 @@ it("protects Kitchen queries and exposes only typed public failures", async () =
     expect(await response.json()).toEqual({ error: code });
   }
   query.mockRejectedValueOnce(new Error("private SQL"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -1850,7 +1858,7 @@ it("protects Pickup handoff and exposes only typed public failures", async () =>
     expect(await response.json()).toEqual({ error: code });
   }
   query.mockRejectedValueOnce(new Error("private SQL"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -1909,7 +1917,7 @@ it("WP-2423: protects the in-person pickup check details and never caches them",
     expect(await response.json()).toEqual({ error: code });
   }
   read.mockRejectedValueOnce(new Error("private SQL"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -1969,7 +1977,7 @@ it("protects Pickup proof and exposes only typed public failures", async () => {
     expect(await response.json()).toEqual({ error: code });
   }
   query.mockRejectedValueOnce(new Error("private SQL"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -2031,7 +2039,7 @@ it("protects Pickup queue and exposes only typed public failures", async () => {
     expect(await response.json()).toEqual({ error: code });
   }
   query.mockRejectedValueOnce(new Error("private SQL"));
-  expect(await (await submit()).json()).toEqual({ error: "request_denied" });
+  expect(await (await submit()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serve(fakeService());
   expect(
     (
@@ -2127,8 +2135,8 @@ it("WP-2423 item 8 ⑦: reads and changes the Store's modules, and says when ano
   }
   command.mockRejectedValueOnce(new Error("private failure"));
   const denied = await submit({ action: "Read" });
-  expect(denied.status).toBe(403);
-  expect(await denied.json()).toEqual({ error: "request_denied" });
+  expect(denied.status).toBe(503);
+  expect(await denied.json()).toEqual({ error: "retry_later" });
 });
 
 it("WP-2423 item 8 ⑦: chases a dish, and says when a round was chased too soon", async () => {
@@ -2334,8 +2342,8 @@ it("protects Dining progress transport and returns only operational fields", asy
   expect((await submit()).status).toBe(404);
   read.mockRejectedValueOnce(new Error("private failure"));
   const denied = await submit();
-  expect(denied.status).toBe(403);
-  expect(await denied.json()).toEqual({ error: "request_denied" });
+  expect(denied.status).toBe(503);
+  expect(await denied.json()).toEqual({ error: "retry_later" });
   const unavailable = await serve(fakeService());
   expect(
     (
@@ -2396,8 +2404,8 @@ it("protects the minimal Dining serve command and keeps private facts out of res
   });
   command.mockRejectedValueOnce(new Error("private details"));
   const failure = await submit();
-  expect(failure.status).toBe(403);
-  expect(await failure.json()).toEqual({ error: "request_denied" });
+  expect(failure.status).toBe(503);
+  expect(await failure.json()).toEqual({ error: "retry_later" });
   const absent = await serve(fakeService());
   expect(
     (await request(absent, "/merchant/dining/serve", { method: "POST", headers, body: "{}" }))
@@ -2575,12 +2583,16 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     const absent = await serveSettlement();
     expect((await request(absent, "/merchant/settlement", { headers })).status).toBe(503);
   });
-  it("answers a reader failure as denied without leaking the reason", async () => {
+  it("answers a reader failure as try again, a refusal as denied, and never the reason", async () => {
+    const refused = await serveSettlement(async () => {
+      throw new Error("MERCHANT_PERMISSION_DENIED");
+    });
+    expect((await request(refused, "/merchant/settlement", { headers })).status).toBe(403);
     const root = await serveSettlement(async () => {
       throw new Error("MERCHANT_SETTLEMENT_UNAVAILABLE");
     });
     const result = await request(root, "/merchant/settlement", { headers });
-    expect(result.status).toBe(403);
+    expect(result.status).toBe(503);
     expect(await result.text()).not.toContain("SETTLEMENT");
   });
   it("answers records busy with live work as retry-later, never as denied (WP-2423 Q7 v15)", async () => {
@@ -2615,7 +2627,7 @@ describe("WP-2423 P1 merchant settlement read route", () => {
         firstBusinessDate: "soon",
       });
     });
-    expect((await request(malformed, "/merchant/settlement", { headers })).status).toBe(403);
+    expect((await request(malformed, "/merchant/settlement", { headers })).status).toBe(503);
   });
 });
 describe("WP-2423 Q14 store reports routes", () => {
@@ -2733,10 +2745,14 @@ describe("WP-2423 Q14 store reports routes", () => {
   });
   it("answers a refusal as denied and busy records as retry-later", async () => {
     const denied = fake();
-    denied.read.mockRejectedValue(new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE"));
+    denied.read.mockRejectedValue(new Error("MERCHANT_PERMISSION_DENIED"));
     const refused = await request(await serveReports(denied), "/merchant/reports", { headers });
     expect(refused.status).toBe(403);
-    expect(await refused.text()).not.toContain("REPORTS");
+    const down = fake();
+    down.read.mockRejectedValue(new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE"));
+    const failing = await request(await serveReports(down), "/merchant/reports", { headers });
+    expect(failing.status).toBe(503);
+    expect(await failing.text()).not.toContain("REPORTS");
     const busy = fake();
     busy.export.mockRejectedValue(
       Object.assign(new Error("MERCHANT_STORE_REPORTS_BUSY"), {
@@ -2817,7 +2833,7 @@ describe("WP-2423 Q21 merchant business-day read route", () => {
       throw new Error("STORE_BUSINESS_DATE_UNAVAILABLE");
     });
     const denied = await request(failing, "/merchant/business-day", { headers });
-    expect(denied.status).toBe(403);
+    expect(denied.status).toBe(503);
     expect(await denied.text()).not.toContain("BUSINESS_DATE");
   });
 });
@@ -2906,7 +2922,7 @@ it("protects order closure transport, exact retry and bounded response", async (
   expect(conflict.status).toBe(409);
   expect(await conflict.json()).toEqual({ error: "order_version_conflict" });
   close.mockResolvedValueOnce({ status: "Committed", closedOrderVersion: 0, closureVersion: 1 });
-  expect((await submit()).status).toBe(403);
+  expect((await submit()).status).toBe(503);
   const unconfigured = await serveOrderClose(),
     unavailable = await request(unconfigured, "/merchant/orders/close", {
       method: "POST",
@@ -2991,7 +3007,7 @@ it("WP-2423 Q6: protects staff cancellation transport and maps owner refusals to
   }
   cancel.mockRejectedValueOnce(new Error("synthetic-private"));
   const denied = await submit();
-  expect(denied.status).toBe(403);
+  expect(denied.status).toBe(503);
   expect(await denied.text()).not.toContain("synthetic");
   const unconfigured = await serveStaffCancellation();
   expect(
@@ -3161,7 +3177,7 @@ it("WP-2423 Q9-G1: protects the outage refund decision transport and maps refusa
   }
   refund.mockRejectedValueOnce(new Error("synthetic-private"));
   const denied = await submit();
-  expect(denied.status).toBe(403);
+  expect(denied.status).toBe(503);
   expect(await denied.text()).not.toContain("synthetic");
 });
 
@@ -3374,7 +3390,7 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
   }
   cardMachineRefund.mockRejectedValueOnce(new Error("synthetic-private"));
   const denied = await submit("/orders/card-machine-refund");
-  expect(denied.status).toBe(403);
+  expect(denied.status).toBe(503);
   expect(await denied.text()).not.toContain("synthetic");
 
   const readHeaders = {
@@ -3484,7 +3500,7 @@ it("WP-2423 item 4: records an item refund made on the card machine and maps ref
   }
   cardMachineOrdinaryRefund.mockRejectedValueOnce(new Error("synthetic-private"));
   const denied = await submit();
-  expect(denied.status).toBe(403);
+  expect(denied.status).toBe(503);
   expect(await denied.text()).not.toContain("synthetic");
   const unconfigured = await serveCounter();
   expect(
@@ -3602,7 +3618,7 @@ it("WP-2423 Q7 slice 2: protects the staff table round transport and maps refusa
   });
   staffDiningRound.mockRejectedValueOnce(new Error("synthetic-private"));
   const denied = await submit();
-  expect(denied.status).toBe(403);
+  expect(denied.status).toBe(503);
   expect(await denied.text()).not.toContain("synthetic");
   const unconfigured = await serveCounter();
   expect(
@@ -3696,7 +3712,7 @@ it("protects dining closing transport, exact retry and bounded response", async 
   close.mockRejectedValueOnce(new DiningClosingError("DINING_CLOSING_TASK_REQUIRED"));
   expect((await submit()).status).toBe(409);
   close.mockResolvedValueOnce({ status: "Applied", phase: "Closing", sessionVersion: 0 });
-  expect((await submit()).status).toBe(403);
+  expect((await submit()).status).toBe(503);
   const unconfigured = await serveDiningClosing(),
     unavailable = await request(unconfigured, "/merchant/dining/closing", {
       method: "POST",
@@ -3934,7 +3950,7 @@ it("protects session start and returns one-time credentials only for Issued", as
   expect(retry).not.toHaveProperty("joinCredential");
   expect(retry).not.toHaveProperty("privateEvidence");
   start.mockResolvedValueOnce({ ...result, joinCredential: "invalid" as never });
-  expect((await submit()).status).toBe(403);
+  expect((await submit()).status).toBe(503);
   const unavailable = await serveDiningSessionStart();
   expect(
     (
@@ -4094,7 +4110,7 @@ it("protects refund request transport and returns only request evidence", async 
   command.mockResolvedValueOnce({ ...data, status: "AlreadyCommitted" });
   expect(await (await send()).json()).toMatchObject({ status: "RequestRecorded", replayed: true });
   command.mockRejectedValueOnce(new Error("private"));
-  expect(await (await send()).json()).toEqual({ error: "request_denied" });
+  expect(await (await send()).json()).toEqual({ error: "retry_later" });
   const unconfigured = await serveRefundRequest();
   expect(
     (
@@ -4215,7 +4231,7 @@ it("protects refund items transport and strips private nested data", async () =>
     items: [item],
   });
   query.mockRejectedValueOnce(new Error("private"));
-  expect(await (await send()).json()).toEqual({ error: "request_denied" });
+  expect(await (await send()).json()).toEqual({ error: "retry_later" });
   // v15 2026-10-18 (dd750045): history that changed while the list loaded, or a dependency that
   // could not be read, is never answered as a permission refusal; a refusal still is.
   for (const [message, status, body] of [
@@ -4565,9 +4581,9 @@ it("protects Host transfer and whitelists original operation receipt", async () 
     ...result,
     hostParticipantReference: result.previousHostParticipantReference,
   });
-  expect((await submit()).status).toBe(403);
+  expect((await submit()).status).toBe(503);
   command.mockRejectedValueOnce(new Error("private"));
-  expect((await submit()).status).toBe(403);
+  expect((await submit()).status).toBe(503);
   const unavailable = await serveDiningHostTransfer();
   expect(
     (
@@ -4646,7 +4662,7 @@ it("protects Host selection and excludes private participant fields", async () =
     ...result,
     participants: [...result.participants, ...result.participants],
   });
-  expect((await send()).status).toBe(403);
+  expect((await send()).status).toBe(503);
   const unavailable = await serveDiningHostSelection();
   expect(
     (
@@ -6560,7 +6576,7 @@ it("WP-2423 取舍 15: the merchant session names platform support, and asks onl
   if (!address || typeof address === "string") throw new Error("listener unavailable");
   const root = `http://127.0.0.1:${address.port}`;
   const withCookie = { ...safeHeaders, Cookie: `__Host-bop-merchant=${sessionCookie}` };
-  vi.mocked(service.bootstrap).mockRejectedValue(new Error("no Store workspace"));
+  vi.mocked(service.bootstrap).mockRejectedValue(new Error("MERCHANT_WORKSPACE_DENIED"));
 
   const support = await request(root, "/merchant/session", { headers: withCookie });
   expect(support.status).toBe(403);
@@ -6691,7 +6707,7 @@ it("WP-2423 Q6 step 2a: protects item cancellation transport and maps owner refu
   }
   cancel.mockRejectedValueOnce(new Error("synthetic-private"));
   const denied = await submit("");
-  expect(denied.status).toBe(403);
+  expect(denied.status).toBe(503);
   expect(await denied.text()).not.toContain("synthetic");
 });
 
@@ -6770,7 +6786,7 @@ it("WP-2423 Q5: verifies a step-up code for the session only and never echoes th
   expect((await send()).status).toBe(503);
   command.mockRejectedValueOnce(new Error("private detail"));
   const failed = await send();
-  expect(failed.status).toBe(403);
+  expect(failed.status).toBe(503);
   expect(await failed.text()).not.toContain("private");
   // The same server-computed recency is readable by the signed-in member (no code involved).
   const read = (extra: Record<string, string> = {}) =>
@@ -6846,7 +6862,7 @@ it("WP-2423 Q5: approves through the session and names who must re-verify", asyn
   command.mockRejectedValueOnce(new MerchantRefundApprovalError("Changed"));
   expect((await send()).status).toBe(409);
   command.mockRejectedValueOnce(new Error("private"));
-  expect((await send()).status).toBe(403);
+  expect((await send()).status).toBe(503);
 });
 
 it("WP-2423 Q5: lists refunds awaiting approval as a same-origin read", async () => {
@@ -7002,7 +7018,7 @@ it("WP-2423 Q19: the Brand Owner reads and changes the sole-operator setting", a
     [new MerchantSoleOperatorError("VersionConflict"), 409, { error: "setting_changed" }],
     [new MerchantSoleOperatorError("NoChange"), 409, { error: "no_change" }],
     [new MerchantSoleOperatorError("Invalid"), 422, { error: "invalid_request" }],
-    [new Error("private"), 403, { error: "request_denied" }],
+    [new Error("private"), 503, { error: "retry_later" }],
   ] as const) {
     change.mockRejectedValueOnce(error);
     const failed = await post();
@@ -7055,7 +7071,7 @@ it("WP-2423 Q5: declines through the session and names why a decline was refused
       409,
       { error: "needs_reverification", party: "Approver" },
     ],
-    [new Error("private"), 403, { error: "request_denied" }],
+    [new Error("private"), 503, { error: "retry_later" }],
   ] as const) {
     command.mockRejectedValueOnce(error);
     const failed = await send();
@@ -7128,7 +7144,7 @@ it("WP-2423 Q5: reads one request's progress through the session without private
     observedAt: "2026-10-13T04:38:00.000Z",
   });
   read.mockRejectedValueOnce(new Error("private"));
-  expect((await send()).status).toBe(403);
+  expect((await send()).status).toBe(503);
 });
 
 it("WP-2423 Q19: a refund read retries a transaction conflict and never calls it a refusal", async () => {
@@ -7319,8 +7335,8 @@ describe("WP-2423 Q18 staff session continuity routes", () => {
     expect(page.headers.get("location")).toBe("/operations/sign-in?signIn=unavailable");
     expect(page.headers.get("cache-control")).toBe("no-store");
     expect(page.headers.get("set-cookie")).toBeNull();
-    // Not a page navigation, or another refusal: the ordinary denial.
-    expect((await request(root, "/merchant/login", { headers: safeHeaders })).status).toBe(403);
+    // Not a page navigation: an outage answered as one; another refusal: the ordinary denial.
+    expect((await request(root, "/merchant/login", { headers: safeHeaders })).status).toBe(503);
     vi.mocked(service.start).mockRejectedValue(new BrowserSessionError("BROWSER_SESSION_DENIED"));
     expect(
       (
@@ -7447,7 +7463,7 @@ describe("WP-2423 Q26 Kitchen remake routes", () => {
     }
     command.mockRejectedValueOnce(new Error("private details"));
     expect(await (await post("/merchant/kitchen/rework/command")).json()).toEqual({
-      error: "request_denied",
+      error: "retry_later",
     });
     query.mockResolvedValueOnce({ items: [] });
     expect(await (await post("/merchant/kitchen/rework/query")).json()).toEqual({ items: [] });
@@ -7520,7 +7536,7 @@ describe("DEC-KITCHEN-STALE-TICKETS close route", () => {
       expect(await result.json()).toEqual({ error: code });
     }
     close.mockRejectedValueOnce(new Error("private details"));
-    expect(await (await post()).json()).toEqual({ error: "request_denied" });
+    expect(await (await post()).json()).toEqual({ error: "retry_later" });
     const unwired = await serve();
     expect(
       (
@@ -7598,7 +7614,7 @@ it("WP-2423: the Orders list and pickup queue rerun a deadlocked read and never 
     body: "{}",
     headers: { ...headers, "X-BOP-CSRF": csrf, "Content-Type": "application/json" },
   });
-  expect(refused.status).toBe(403);
+  expect(refused.status).toBe(503);
 }, 15000);
 describe("WP-2423 Q13 operations alerts read route", () => {
   type Read = NonNullable<MerchantBffRouterOptions["operationsAlerts"]>;
@@ -7665,12 +7681,16 @@ describe("WP-2423 Q13 operations alerts read route", () => {
     expect(result.headers.get("cache-control")).toBe("no-store");
     expect(await result.json()).toEqual({ permitted: false });
   });
-  it("answers a refusal or unreadable board as denied without the reason", async () => {
+  it("answers an unreadable board as try again and a refusal as denied, never the reason", async () => {
+    const refused = await serve(async () => {
+      throw new Error("MERCHANT_PERMISSION_DENIED");
+    });
+    expect((await request(refused, "/merchant/operations-alerts", { headers })).status).toBe(403);
     const root = await serve(async () => {
       throw new Error("MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE");
     });
     const result = await request(root, "/merchant/operations-alerts", { headers });
-    expect(result.status).toBe(403);
+    expect(result.status).toBe(503);
     expect(await result.text()).not.toContain("OPERATIONS");
   });
 });
@@ -7721,7 +7741,7 @@ it("WP-2423 Q4: protects the hours draft transport and answers its refusals plai
     ["STORE_CONFIGURATION_LIFECYCLE_CONFLICT", 409, "store_configuration_conflict"],
     ["STORE_CONFIGURATION_COMMAND_INVALID", 422, "store_configuration_rejected"],
     ["STORE_CONFIGURATION_PERMISSION_DENIED", 403, "request_denied"],
-    ["CATALOG_DEPENDENCY_UNAVAILABLE", 403, "request_denied"],
+    ["CATALOG_DEPENDENCY_UNAVAILABLE", 503, "retry_later"],
   ] as const) {
     hours.mockRejectedValueOnce(Object.assign(new Error("safe"), { code }));
     const refused = await submit();

@@ -25,6 +25,7 @@ import { localBoundary } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 9 (coordinator 2026-10-31 rule 1, a
@@ -393,10 +394,10 @@ export function createMerchantStorePrices(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(() =>
-      fail("PermissionDenied"),
+    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(
+      onlyRefusal(() => fail("PermissionDenied")),
     );
     const allowed = async (action: string) =>
       (await scope.authorizeStoreAction(action))?.effect === "Allow" ||

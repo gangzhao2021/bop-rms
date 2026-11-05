@@ -19,6 +19,7 @@ import {
   type TenantContext,
   type TenantOrganizationPort,
 } from "@bop/tenant";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 export interface StoreContextSessionPort {
   authorize(input: {
@@ -170,8 +171,9 @@ export class MerchantStoreSwitchService {
         cookie,
         tenantContext,
       });
-    } catch {
-      throw new Error("STORE_SWITCH_DENIED");
+    } catch (error) {
+      if (!isMerchantRefusal(error)) throw error;
+      throw new Error("STORE_SWITCH_DENIED", { cause: error });
     }
   }
 }

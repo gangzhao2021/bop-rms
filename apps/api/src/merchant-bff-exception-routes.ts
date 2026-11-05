@@ -3,6 +3,8 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
+  noteFailure,
   rawHeaderValues,
   safeRead,
   sameOriginMutation,
@@ -73,7 +75,7 @@ export function installMerchantExceptionRoutes(
           })),
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post(
@@ -109,9 +111,10 @@ export function installMerchantExceptionRoutes(
             acknowledgmentRecorded: result.acknowledgmentRecorded,
           }),
         )
-        .catch(() =>
-          response.status(503).json({ error: "compensation_reconciliation_unavailable" }),
-        );
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          response.status(503).json({ error: "compensation_reconciliation_unavailable" });
+        });
     },
   );
 
@@ -164,10 +167,12 @@ export function installMerchantExceptionRoutes(
           response.status(200).json({ items, nextAfterActorReference });
         })
         .catch((error) => {
+          noteFailure(response, error);
           if (
             (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_DENIED") ||
             (error instanceof ReconciliationFollowUpError &&
-              error.code === "RECONCILIATION_FOLLOW_UP_PERMISSION_DENIED")
+              error.code === "RECONCILIATION_FOLLOW_UP_PERMISSION_DENIED") ||
+            (error instanceof Error && error.message === "RECONCILIATION_ASSIGNEES_DENIED")
           ) {
             denied(response);
             return;
@@ -227,6 +232,7 @@ export function installMerchantExceptionRoutes(
           });
         })
         .catch((error) => {
+          noteFailure(response, error);
           if (
             (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_DENIED") ||
             (error instanceof PaymentReconciliationError &&
@@ -284,7 +290,10 @@ export function installMerchantExceptionRoutes(
             updatedAt: String(parseCanonicalInstant(result.updatedAt)),
           });
         })
-        .catch(() => response.status(503).json({ error: "reconciliation_follow_up_unavailable" }));
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          response.status(503).json({ error: "reconciliation_follow_up_unavailable" });
+        });
     },
   );
 
@@ -326,6 +335,7 @@ export function installMerchantExceptionRoutes(
           });
         })
         .catch((error) => {
+          noteFailure(response, error);
           if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_DENIED") {
             denied(response);
             return;
@@ -379,7 +389,10 @@ export function installMerchantExceptionRoutes(
             reconciledAt: String(parseCanonicalInstant(result.reconciledAt)),
           });
         })
-        .catch(() => response.status(503).json({ error: "compensation_reconciliation_unknown" }));
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          response.status(503).json({ error: "compensation_reconciliation_unknown" });
+        });
     },
   );
 }

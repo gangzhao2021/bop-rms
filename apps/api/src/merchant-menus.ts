@@ -58,6 +58,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
 import { storePrices } from "./merchant-store-prices.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 / DEC-MENU-REVISION: CAT-MENU-LIST / CAT-MENU-BUILDER for the selected Store's Brand. The current
@@ -554,10 +555,10 @@ export function createMerchantMenus(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(() =>
-      fail("PermissionDenied"),
+    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(
+      onlyRefusal(() => fail("PermissionDenied")),
     );
     const decision = (action: string) => scope.authorizeAction(action);
     const may = async (action: string) => (await decision(action))?.effect === "Allow";

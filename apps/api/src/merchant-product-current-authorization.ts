@@ -15,6 +15,7 @@ import {
   rememberBrandTransactionValue,
   restoreBrandTransactionRowSecurity,
 } from "./merchant-brand-transaction-authorization.js";
+import { keepingCause } from "./merchant-failure.js";
 
 let instances = 0;
 
@@ -164,15 +165,17 @@ export function createMerchantProductCurrentAuthorization(options: {
     } catch (error) {
       failed = true;
       if (error instanceof CatalogError) throw error;
-      return fail(
-        error instanceof BrowserSessionError ||
-          (error instanceof Error &&
-            ["STORE_SERVICE_PERMISSION_DENIED", "BRAND_SERVICE_PERMISSION_DENIED"].includes(
-              error.message,
-            ))
-          ? "CATALOG_PERMISSION_DENIED"
-          : "CATALOG_DEPENDENCY_UNAVAILABLE",
-      );
+      return keepingCause(() =>
+        fail(
+          error instanceof BrowserSessionError ||
+            (error instanceof Error &&
+              ["STORE_SERVICE_PERMISSION_DENIED", "BRAND_SERVICE_PERMISSION_DENIED"].includes(
+                error.message,
+              ))
+            ? "CATALOG_PERMISSION_DENIED"
+            : "CATALOG_DEPENDENCY_UNAVAILABLE",
+        ),
+      )(error);
     }
   };
   function fullDecision(value: unknown, action: string): PermissionDecision {

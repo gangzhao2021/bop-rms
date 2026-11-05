@@ -140,7 +140,7 @@ it("requires current dining.operate before reading the table", async () => {
 it("WP-2423: a permission withdrawn or Session ended during the command refuses it before commit", async () => {
   const f = fixture();
   f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  await expect(f.execute(f.input())).rejects.toThrow("DINING_TABLE_COMMAND_UNAVAILABLE");
+  await expect(f.execute(f.input())).rejects.toThrow("DINING_TABLE_COMMAND_DENIED");
   // Resolved in full at the start and in the re-check; the refusal is thrown inside the
   // transaction callback, so the table write it made does not commit.
   expect(f.allowed).toHaveBeenCalledTimes(2);

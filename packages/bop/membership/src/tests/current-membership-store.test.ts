@@ -402,12 +402,21 @@ it("poisons caught reentry and does not return a successful outer Brand read", a
   await expect(f.read()).rejects.toThrow("membership input is invalid");
   expect(f.calls).toHaveLength(1);
 });
-it("maps SQL failures to the finite owner error without raw details", async () => {
+it("WP-2423 item 10: a read that failed is not an invalid membership, and carries on as itself", async () => {
   const f = brandFixture();
+  const failure = Object.assign(new Error("safe"), {
+    code: "TENANT_DATABASE_TRANSACTION_FAILED",
+    diagnostic: { sqlState: "42501" },
+  });
   f.state.beforeReturn = async () => {
-    throw new Error("synthetic database detail");
+    throw failure;
   };
-  await expect(f.read()).rejects.toThrow("membership input is invalid");
+  await expect(f.read()).rejects.toBe(failure);
+  const g = brandFixture();
+  g.state.beforeReturn = async () => {
+    throw new TypeError("a bug");
+  };
+  await expect(g.read()).rejects.toThrow("a bug");
 });
 
 it.each(["Draft", "Active", "Suspended", "Archived"] as const)(

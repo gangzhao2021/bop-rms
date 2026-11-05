@@ -3,7 +3,6 @@ import { pilotMerchantAppPaths } from "./pilot-merchant-app-paths.mjs";
 import { registerInternalDiningEntry } from "./pilot-dining-launcher.mjs";
 import { installInternalStaffLogin } from "./pilot-staff-login.mjs";
 import { Buffer } from "node:buffer";
-import console from "node:console";
 import process from "node:process";
 import { URL } from "node:url";
 import { CustomerPaymentResultHandler } from "../../apps/api/dist/customer-payment-result.js";
@@ -418,7 +417,8 @@ export async function startInternalCustomerServer({
         ...(merchant.bff.staffPin === undefined
           ? {}
           : { resolveDevice: merchant.bff.staffPin.storeOfDevice }),
-        onUnexpected: () => console.error("PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE"),
+        onUnexpected: (error) =>
+          reportUnexpected("PILOT_MERCHANT_STORE_ROUTING_UNAVAILABLE", error),
       });
     }
     // WP-2423 DEC-COGNITO-STORE-STAFF: the TEST-ONLY staff sign-in page is not served when staff

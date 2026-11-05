@@ -211,8 +211,11 @@ it("B759: an already closed Order, a session failure and an internal failure are
   mocks.position.mockResolvedValue({ status: "Open", orderVersion: 3, closureVersion: 0 });
   mocks.prepared.mockRejectedValue(new Error("SETTLED_ORDER_CLOSE_UNAVAILABLE"));
   await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_UNAVAILABLE" });
-  f.authentication.authorize.mockRejectedValue(new Error("denied"));
+  // WP-2423 item 10: a session the owner refused is a refusal; one it could not read is not.
+  f.authentication.authorize.mockRejectedValue(new Error("BROWSER_SESSION_DENIED"));
   await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_PERMISSION_DENIED" });
+  f.authentication.authorize.mockRejectedValue(new Error("lock timeout"));
+  await expect(f.run()).rejects.toMatchObject({ code: "ORDER_CLOSE_UNAVAILABLE" });
 });
 
 it("WP-2423: resolves the caller in full once at the start and once before the reply", async () => {

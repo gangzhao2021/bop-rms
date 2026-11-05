@@ -147,7 +147,7 @@ export function createMerchantOrdinaryRefundDecline(options: {
       if (
         error instanceof Error &&
         (error.message === "ORDINARY_REFUND_AUTHORITY_DENIED" ||
-          error.message === "WORKFORCE_AUTHORITY_UNAVAILABLE")
+          error.message === "WORKFORCE_AUTHORITY_DENIED")
       )
         throw new MerchantRefundApprovalError("Denied");
       throw error;

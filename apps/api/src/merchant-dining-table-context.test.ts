@@ -60,7 +60,7 @@ it.each([
   { phase: "Closing" },
 ])("rejects session movement or lifecycle change %j", async (change) => {
   mock.session.mockResolvedValueOnce(session).mockResolvedValueOnce({ ...session, ...change });
-  await expect(setup().read()).rejects.toThrow("UNAVAILABLE");
+  await expect(setup().read()).rejects.toThrow("DINING_TABLE_CONTEXT_CHANGED");
 });
 it("rejects table reassignment between reads", async () => {
   mock.table

@@ -249,7 +249,7 @@ export function createMerchantOrdinaryRefundApproval(options: {
       const roleRefused = (error: unknown) =>
         error instanceof Error &&
         (error.message === "ORDINARY_REFUND_AUTHORITY_DENIED" ||
-          error.message === "WORKFORCE_AUTHORITY_UNAVAILABLE");
+          error.message === "WORKFORCE_AUTHORITY_DENIED");
       // The requester may have lost the Manager role since asking; say so, not "sign in again".
       const requester = await party(subject.requesterReference, "payment.refund.request").catch(
         (error: unknown) => {

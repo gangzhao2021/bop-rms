@@ -12,6 +12,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export type MerchantKitchenSectionsErrorCode =
   | "KITCHEN_SECTIONS_INPUT_INVALID"
@@ -156,7 +157,7 @@ export function createMerchantKitchenSections(options: {
                 input.sessionCookie,
                 permission,
                 authenticated.sessionReference,
-              ).catch(() => fail("KITCHEN_SECTIONS_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("KITCHEN_SECTIONS_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("KITCHEN_SECTIONS_PERMISSION_DENIED");
               return current;

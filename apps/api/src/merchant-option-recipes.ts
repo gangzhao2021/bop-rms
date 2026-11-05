@@ -40,6 +40,7 @@ import { createStaffLabels } from "./merchant-staff-labels.js";
 import { derivedReference } from "./merchant-products.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { staffContentName } from "./staff-content-locale.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 slice 4.4: RECIPE-OPTION-LIST — what choosing each option of a product does to its recipes
@@ -218,10 +219,10 @@ export function createMerchantOptionRecipes(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(() =>
-      fail("PermissionDenied"),
+    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(
+      onlyRefusal(() => fail("PermissionDenied")),
     );
     const may = async (action: string) => (await scope.authorizeAction(action))?.effect === "Allow";
     const permissions = {

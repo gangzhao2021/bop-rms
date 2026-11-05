@@ -28,6 +28,9 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 const unavailable = (): never => {
   throw new Error("MERCHANT_SETTLEMENT_UNAVAILABLE");
 };
+const denied = (): never => {
+  throw new Error("MERCHANT_SETTLEMENT_DENIED");
+};
 /** A retryable database conflict outlasted the read's own retries; the caller should retry later. */
 export const merchantSettlementBusy = "MERCHANT_SETTLEMENT_BUSY" as const;
 const conflicted = (error: unknown) =>
@@ -135,7 +138,7 @@ export function createPersistentMerchantSettlement(options: {
                   input.sessionCookie,
                   merchantSettlementReadPermission,
                 );
-                if (!(await value.allowed())) return unavailable();
+                if (!(await value.allowed())) return denied();
                 return Object.freeze({
                   settlement: settlementScope(value),
                   store: Object.freeze({
@@ -154,7 +157,7 @@ export function createPersistentMerchantSettlement(options: {
                   matches(settlementScope(again), settlement) && (await again.allowed()) === true
                 );
               },
-              denied: unavailable,
+              denied,
             },
             async (run) => {
               runs.set(tx, run);
@@ -180,7 +183,11 @@ export function createPersistentMerchantSettlement(options: {
       try {
         return await work();
       } catch (error) {
-        if (error instanceof Error && error.message === "MERCHANT_SETTLEMENT_UNAVAILABLE")
+        if (
+          error instanceof Error &&
+          (error.message === "MERCHANT_SETTLEMENT_UNAVAILABLE" ||
+            error.message === "MERCHANT_SETTLEMENT_DENIED")
+        )
           throw error;
         return null;
       }

@@ -398,6 +398,12 @@ export interface MerchantStoreConfigurationOrdinaryPort {
 }
 
 export interface MerchantBffRouterOptions {
+  /**
+   * WP-2423 item 10: a request failed for a reason that is not a refusal: the Express route's
+   * template (never an id; "" for no route) and what failed. For the log; it never changes the
+   * answer. This app stays a transport: the composition decides where it goes.
+   */
+  readonly onUnexpectedFailure?: (route: string, error: unknown) => void;
   readonly storeConfigurationOrdinary?: MerchantStoreConfigurationOrdinaryPort;
   /** v15 2026-11-01: a Store configuration command answered 503: its failing step, for the log. */
   readonly onStoreConfigurationUnavailable?: (step: string, error: unknown) => void;

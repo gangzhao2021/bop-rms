@@ -476,8 +476,10 @@ it("keeps explicit original and natural administrative deadlines, refusing exact
 it("uses the actual administrative Permission owner by default and refuses absent policy", async () => {
   const f = administrationFixture();
   const resolve = createMerchantCurrentBrandAdministrationScope(f.options);
+  // WP-2423 item 10: a Brand with no policy to read is a fault someone must fix, not this person's
+  // refusal; access stays closed either way.
   await expect(resolve(f.tx, "x".repeat(43), id(2))).rejects.toThrow(
-    "BRAND_SERVICE_PERMISSION_DENIED",
+    "permission policy materialization",
   );
   expect(f.calls.some((sql) => sql.includes("bop_permission.policy_state"))).toBe(true);
   expect(f.assess).not.toHaveBeenCalled();

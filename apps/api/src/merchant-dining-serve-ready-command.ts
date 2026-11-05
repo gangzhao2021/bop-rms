@@ -4,6 +4,7 @@ import { parseOrderingReference } from "@rms/ordering";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import type { createMerchantDiningServeCommand } from "./merchant-dining-serve-command.js";
 import type { createMerchantDiningOrderProgress } from "./merchant-dining-order-progress.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 /** At most this many lines in one "Serve all ready items" request. */
 export const DINING_SERVE_READY_MAX_LINES = 100;
@@ -152,15 +153,9 @@ export function createMerchantDiningServeReadyCommand(options: {
     try {
       before = await retry(read);
     } catch (error) {
-      // A read that kept meeting a database conflict is "try again" (the route answers 503),
-      // never a refusal; anything else refuses the whole request.
-      if (
-        error !== null &&
-        typeof error === "object" &&
-        Object.getOwnPropertyDescriptor(error, "code")?.value ===
-          "TENANT_DATABASE_TRANSACTION_CONFLICT"
-      )
-        throw error;
+      // A read that could not run is "try again" (the route answers 503), never a refusal; only a
+      // real refusal refuses the whole request.
+      if (!isMerchantRefusal(error)) throw error;
       throw new DiningServeReadyError("PermissionDenied");
     }
     if (!before) throw new DiningServeReadyError("NotFound");

@@ -30,6 +30,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
 import { staffContentName } from "./staff-content-locale.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 / DEC-CAT-PRODUCT-ADMIN: CAT-PRODUCT-LIST / CAT-PRODUCT-DETAIL for the selected Store's Brand.
@@ -465,17 +466,17 @@ export function createMerchantProducts(options: {
     const images = options.images;
     return images
       .load(mediaTx(tx), { brandReference: brand, imageReferences: [String(photo.imageReference)] })
-      .catch(() => fail("PhotoStorageUnavailable"));
+      .catch(keepingCause(() => fail("PhotoStorageUnavailable")));
   };
   const view = async (tx: Tx, brand: string, product: ProductAggregate) =>
     productView(product, options.locale, await imagesOf(tx, brand, product));
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(() =>
-      fail("PermissionDenied"),
+    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(
+      onlyRefusal(() => fail("PermissionDenied")),
     );
     const decision = (action: string) => scope.authorizeAction(action);
     const may = async (action: string) => (await decision(action))?.effect === "Allow";
@@ -791,7 +792,7 @@ export function createMerchantProducts(options: {
                     brandReference: brand,
                     imageReferences: [input.photo.imageReference],
                   })
-                  .catch(() => fail("PhotoStorageUnavailable"))
+                  .catch(keepingCause(() => fail("PhotoStorageUnavailable")))
               ).get(input.photo.imageReference);
               if (image === undefined || image.productReference !== product.productReference)
                 fail("Invalid");

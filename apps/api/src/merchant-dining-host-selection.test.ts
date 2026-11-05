@@ -103,7 +103,7 @@ it("WP-2423: a permission withdrawn during the read refuses it inside the transa
     } as unknown as Options["authentication"],
   });
   f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  await expect(read(f.input)).rejects.toThrow("DINING_HOST_SELECTION_UNAVAILABLE");
+  await expect(read(f.input)).rejects.toThrow("DINING_HOST_SELECTION_DENIED");
   expect(m.read).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledTimes(2);
   expect(thrownInside).toBe(true);

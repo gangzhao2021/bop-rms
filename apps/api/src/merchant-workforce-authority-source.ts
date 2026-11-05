@@ -22,7 +22,7 @@ interface Query {
   permissionCode: string;
 }
 const denied = (): never => {
-  throw new Error("WORKFORCE_AUTHORITY_UNAVAILABLE");
+  throw new Error("WORKFORCE_AUTHORITY_DENIED");
 };
 /** Composition only. Identity/Tenant resolver must authorize this lookup purpose
  * and retain current actor/association fences in the borrowed transaction.

@@ -29,20 +29,27 @@ const businessDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
 const unavailable = (): never => {
   throw new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE");
 };
+const denied = (): never => {
+  throw new Error("MERCHANT_STORE_REPORTS_DENIED");
+};
+/** A range that can't be asked for: the same answer again and again, so nothing to wait for. */
+const invalidRange = (): never => {
+  throw new Error("MERCHANT_STORE_REPORTS_INPUT_INVALID");
+};
 const conflicted = (error: unknown) =>
   (error as { code?: unknown } | null)?.code === "TENANT_DATABASE_TRANSACTION_CONFLICT";
 
 /** Calendar dates from `from` to `to` inclusive ("2026-10-01".."2026-10-03"), at most `limit`. */
 export function businessDatesBetween(from: string, to: string, limit: number): readonly string[] {
   if (!businessDatePattern.test(from) || !businessDatePattern.test(to) || from > to)
-    return unavailable();
+    return invalidRange();
   const dates: string[] = [];
   for (let at = Date.parse(from + "T00:00:00.000Z"); ; at += 86_400_000) {
     const date = new Date(at).toISOString().slice(0, 10);
-    if (Number.isNaN(at) || dates.length >= limit) return unavailable();
+    if (Number.isNaN(at) || dates.length >= limit) return invalidRange();
     dates.push(date);
     if (date === to) return dates;
-    if (date > to) return unavailable();
+    if (date > to) return invalidRange();
   }
 }
 
@@ -73,7 +80,7 @@ export function createPersistentMerchantStoreReports(options: {
     permission: string,
   ) => {
     const found = await authority(tx, sessionCookie, storeReference, permission);
-    if (found === null) return unavailable();
+    if (found === null) return denied();
     const decide = async (action: string) =>
       (await authority(tx, sessionCookie, storeReference, action)) === null
         ? null
@@ -137,7 +144,7 @@ export function createPersistentMerchantStoreReports(options: {
                     input.targetStoreReference,
                     input.permission,
                   );
-            if (!(await value.allowed())) return unavailable();
+            if (!(await value.allowed())) return denied();
             return value;
           },
           recheck: async (value) => {
@@ -158,7 +165,7 @@ export function createPersistentMerchantStoreReports(options: {
               (await again.allowed())
             );
           },
-          denied: unavailable,
+          denied,
         },
         async (authority) => {
           const value = authority.scope;
@@ -182,7 +189,7 @@ export function createPersistentMerchantStoreReports(options: {
           const today = current.businessDate;
           const to = input.to ?? today,
             from = input.from ?? to;
-          if (to > today) return unavailable();
+          if (to > today) return invalidRange();
           const days = await windows.range(
             tx,
             businessDatesBetween(from, to, storeReportsMaximumDays),
@@ -339,7 +346,7 @@ export async function loadStoreSalesReportSources(
     scope: { ...input.scope, ...input.configuration },
     authorize: input.authorize,
   })(tx, { ...input.window, observedAt: input.observedAt });
-  if ((await input.authorize(tx)) !== true) throw new Error("MERCHANT_STORE_REPORTS_UNAVAILABLE");
+  if ((await input.authorize(tx)) !== true) return denied();
   const priceReductions = (
     await listStorePriceReductionsDecided(tx, input.scope, input.window)
   ).map((record) =>

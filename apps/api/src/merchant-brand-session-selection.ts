@@ -21,6 +21,7 @@ import {
   type MerchantCurrentBrandOptions,
   type MerchantCurrentBrandAdministrationOptions,
 } from "./merchant-current-brand-scope.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 type Hook = NonNullable<
   Parameters<typeof createPostgresBrowserSessionStore>[0]["onSessionCreated"]
@@ -234,8 +235,9 @@ function createBrandSessionSelection(
         expectedBrandVersion = result.context.brand.version;
         check();
         return current;
-      } catch {
+      } catch (error) {
         failed = true;
+        if (!isMerchantRefusal(error)) throw error;
         return denied();
       } finally {
         active = false;
@@ -250,8 +252,9 @@ function createBrandSessionSelection(
           const selected = await selection.read(tx, fresh, check());
           if (selected?.brandReference !== brandReference) return denied();
           check();
-        } catch {
+        } catch (error) {
           failed = true;
+          if (!isMerchantRefusal(error)) throw error;
           return denied();
         }
       };
@@ -260,8 +263,9 @@ function createBrandSessionSelection(
         check();
       });
       check();
-    } catch {
+    } catch (error) {
       failed = true;
+      if (!isMerchantRefusal(error)) throw error;
       return denied();
     }
   };

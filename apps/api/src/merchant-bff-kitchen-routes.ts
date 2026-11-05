@@ -1,6 +1,13 @@
 /** Merchant BFF routes: kitchen board, work, rework, stale tickets and release. Registered by createMerchantBffRouter (merchant-bff.ts). */
 import express, { type Router } from "express";
-import { cookie, denied, exactHeader, NO_STORE, sameOriginMutation } from "./merchant-bff-http.js";
+import {
+  cookie,
+  denied,
+  exactHeader,
+  failed,
+  noteFailure,
+  sameOriginMutation,
+} from "./merchant-bff-http.js";
 import {
   KitchenQueueProjectionError,
   KitchenReworkError,
@@ -8,44 +15,6 @@ import {
   KitchenWorkLifecycleError,
 } from "@rms/kitchen";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
-
-/**
- * WP-2423 (v15 2026-10-16): a kitchen step that kept meeting a database conflict (a lock wait or
- * deadlock with the queue rebuild or another step, after its own reruns), a busy connection pool or
- * a statement timeout is "busy, try again" (503 with Retry-After), never a permission refusal. Returns false otherwise.
- */
-function kitchenDatabaseRetryLater(response: express.Response, error: unknown): boolean {
-  const code =
-    error !== null && typeof error === "object"
-      ? Object.getOwnPropertyDescriptor(error, "code")?.value
-      : undefined;
-  const sqlState =
-    error !== null && typeof error === "object"
-      ? (
-          Object.getOwnPropertyDescriptor(error, "diagnostic")?.value as {
-            sqlState?: unknown;
-          } | null
-        )?.sqlState
-      : undefined;
-  // A statement cancelled by its timeout or a lost connection under load is transient too; a
-  // failure such as a refused row (missing grant) stays a refusal.
-  if (
-    code !== "TENANT_DATABASE_TRANSACTION_CONFLICT" &&
-    code !== "TENANT_DATABASE_ACQUIRE_FAILED" &&
-    !(
-      code === "TENANT_DATABASE_TRANSACTION_FAILED" &&
-      typeof sqlState === "string" &&
-      (sqlState === "57014" || sqlState.startsWith("08"))
-    )
-  )
-    return false;
-  response
-    .status(503)
-    .set("Cache-Control", NO_STORE)
-    .set("Retry-After", "1")
-    .json({ error: "retry_later" });
-  return true;
-}
 
 export function installMerchantKitchenRoutes(
   router: Router,
@@ -71,8 +40,9 @@ export function installMerchantKitchenRoutes(
       .kitchenQuery({ sessionCookie, csrf, query: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof KitchenQueueProjectionError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status = {
@@ -106,8 +76,9 @@ export function installMerchantKitchenRoutes(
       .kitchenCommand({ sessionCookie, csrf, command: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof KitchenWorkLifecycleError)) {
-          if (!kitchenDatabaseRetryLater(response, error)) denied(response);
+          failed(response, error);
           return;
         }
         const status = {
@@ -161,8 +132,9 @@ export function installMerchantKitchenRoutes(
 
   // WP-2423 Q26 (Handoff Section 26.6): Kitchen remakes. Errors carry a code only.
   const kitchenReworkFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof KitchenReworkError)) {
-      if (!kitchenDatabaseRetryLater(response, error)) denied(response);
+      failed(response, error);
       return;
     }
     const status = {
@@ -243,8 +215,9 @@ export function installMerchantKitchenRoutes(
       .kitchenStaleClose({ sessionCookie, csrf, command: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof KitchenStaleTicketError)) {
-          if (!kitchenDatabaseRetryLater(response, error)) denied(response);
+          failed(response, error);
           return;
         }
         const status = {
@@ -279,6 +252,6 @@ export function installMerchantKitchenRoutes(
     void options
       .kitchenRelease({ sessionCookie, csrf })
       .then(() => response.status(204).end())
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 }

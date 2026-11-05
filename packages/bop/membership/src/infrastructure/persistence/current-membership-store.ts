@@ -1,4 +1,9 @@
-import { createIdentityActor, parseOpaqueUuidV7, type IdentityActor } from "@bop/identity";
+import {
+  createIdentityActor,
+  isBrowserSessionReadFailure,
+  parseOpaqueUuidV7,
+  type IdentityActor,
+} from "@bop/identity";
 import {
   createTenantContext,
   parseBrandAdministrationContext,
@@ -242,8 +247,10 @@ function brandMembershipSource(
         });
         check();
         return Object.freeze(memberships);
-      } catch {
+      } catch (error) {
         poisoned = true;
+        // WP-2423 item 10: what could not be read is not an invalid membership.
+        if (isBrowserSessionReadFailure(error)) throw error;
         return unavailable();
       } finally {
         active = false;
@@ -287,7 +294,9 @@ export function createPostgresCurrentMembershipSource(
             ),
           ).map((row) => membership(row, context, instant)),
         );
-      } catch {
+      } catch (error) {
+        // WP-2423 item 10: what could not be read is not an invalid membership.
+        if (isBrowserSessionReadFailure(error)) throw error;
         return unavailable();
       }
     },
@@ -334,7 +343,9 @@ export function createPostgresCurrentMembershipSource(
             return result;
           }),
         );
-      } catch {
+      } catch (error) {
+        // WP-2423 item 10: what could not be read is not an invalid membership.
+        if (isBrowserSessionReadFailure(error)) throw error;
         return unavailable();
       }
     },

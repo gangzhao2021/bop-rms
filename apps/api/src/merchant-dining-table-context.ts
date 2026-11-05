@@ -31,10 +31,14 @@ export function createMerchantDiningTableContext(options: {
       observedAt: string,
     ): Promise<DiningTableContext> {
       const reference = parseDiningReference(diningSessionReference);
+      // WP-2423 item 10: the table moved on since it was shown; a screen reads it again.
       const fail = (): never => {
-        throw new Error("DINING_TABLE_CONTEXT_UNAVAILABLE");
+        throw new Error("DINING_TABLE_CONTEXT_CHANGED");
       };
-      if ((await options.authorize()) !== true) return fail();
+      const denied = (): never => {
+        throw new Error("DINING_TABLE_CONTEXT_DENIED");
+      };
+      if ((await options.authorize()) !== true) return denied();
       // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): a party merged into another table's is served
       // and closed at that table — its rounds' context is the party it joined.
       const merged = (
@@ -82,10 +86,10 @@ export function createMerchantDiningTableContext(options: {
         again.tableAssignmentVersion !== session.tableAssignmentVersion ||
         again.phase !== session.phase ||
         tableAgain.aggregateVersion !== table.aggregateVersion ||
-        tableAgain.activeDiningSessionReference !== table.activeDiningSessionReference ||
-        (await options.authorize()) !== true
+        tableAgain.activeDiningSessionReference !== table.activeDiningSessionReference
       )
         return fail();
+      if ((await options.authorize()) !== true) return denied();
       return Object.freeze({
         diningSessionReference: reference,
         sessionPhase: session.phase,

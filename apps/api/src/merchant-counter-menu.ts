@@ -5,6 +5,7 @@ import { publicFound, type CustomerMenuPort } from "./customer-menu.js";
 import { counterOrderPermission } from "./merchant-counter-order.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readStoreTipChoices, type StoreTipChoices } from "./merchant-store-features.js";
+import { isMerchantRefusal, keepingCause, withCause } from "./merchant-failure.js";
 
 export class CounterMenuError extends Error {
   readonly code: "COUNTER_MENU_PERMISSION_DENIED" | "COUNTER_MENU_UNAVAILABLE";
@@ -62,13 +63,15 @@ export function createMerchantCounterMenu(options: {
           brandReference: String(resolved.context.brand.brandReference),
           storeReference: String(resolved.store.storeReference),
         };
-        const tips = await readStoreTipChoices(transaction, scope).catch(() => {
-          throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
-        });
+        const tips = await readStoreTipChoices(transaction, scope).catch(
+          keepingCause(() => {
+            throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
+          }),
+        );
         return { ...scope, tips };
       })
       .catch((error: unknown) => {
-        if (error instanceof CounterMenuError) throw error;
+        if (error instanceof CounterMenuError || !isMerchantRefusal(error)) throw error;
         throw new CounterMenuError("COUNTER_MENU_PERMISSION_DENIED");
       });
     const read = (locale: string) =>
@@ -87,8 +90,8 @@ export function createMerchantCounterMenu(options: {
     let result;
     try {
       result = await read(locale);
-    } catch {
-      throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
+    } catch (cause) {
+      throw withCause(new CounterMenuError("COUNTER_MENU_UNAVAILABLE"), cause);
     }
     if (result.status !== "Found") throw new CounterMenuError("COUNTER_MENU_UNAVAILABLE");
     // Only helps search: without it staff still find a dish by the name they see.

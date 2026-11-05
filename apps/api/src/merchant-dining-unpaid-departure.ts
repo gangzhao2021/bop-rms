@@ -18,6 +18,7 @@ import { createDiningSettledCloseEvidence } from "./dining-settled-close-evidenc
 import type { createMerchantDiningOrderCloseCommand } from "./merchant-dining-order-close-command.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { isMerchantRefusal, keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a table left without paying what it still owed. A manager
@@ -69,7 +70,8 @@ export function createMerchantDiningUnpaidDeparture(options: {
     let authenticated: Awaited<ReturnType<MerchantBffService["authorize"]>>;
     try {
       authenticated = await options.authentication.authorize(input);
-    } catch {
+    } catch (error) {
+      if (!isMerchantRefusal(error)) throw error;
       return refuse("UNPAID_DEPARTURE_PERMISSION_DENIED");
     }
     let command: {
@@ -110,7 +112,7 @@ export function createMerchantDiningUnpaidDeparture(options: {
                 input.sessionCookie,
                 "order.close",
                 authenticated.sessionReference,
-              ).catch(() => refuse("UNPAID_DEPARTURE_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => refuse("UNPAID_DEPARTURE_PERMISSION_DENIED")));
               const decisions = await current.authorizeActions([
                 "order.close",
                 unpaidDepartureApprovalPermission,
@@ -311,7 +313,7 @@ export function createMerchantDiningUnpaidDeparture(options: {
         error.code === "DINING_TABLE_WRITE_OFF_ALREADY_RECORDED"
       )
         return refuse("UNPAID_DEPARTURE_ALREADY_CLOSED");
-      return refuse("UNPAID_DEPARTURE_UNAVAILABLE");
+      return keepingCause(() => refuse("UNPAID_DEPARTURE_UNAVAILABLE"))(error);
     }
   };
 }

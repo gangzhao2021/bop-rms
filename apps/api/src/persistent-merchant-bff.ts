@@ -49,6 +49,7 @@ import {
   type MerchantBffService,
   type MerchantWorkspaceSnapshot,
 } from "./merchant-bff.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 type Persistence = Parameters<typeof createPostgresBrowserSessionStore>[0];
 type Transaction = Parameters<NonNullable<Persistence["onSessionCreated"]>>[0];
@@ -649,6 +650,7 @@ export function createPersistentMerchantBffService(
         } catch {
           // Reporting never changes the answer.
         }
+        if (!isMerchantRefusal(error)) throw error;
         throw new Error("STORE_SWITCH_DENIED", { cause: error });
       }
     },

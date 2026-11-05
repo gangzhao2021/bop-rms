@@ -16,6 +16,7 @@ import {
   parseBrandReference,
   parseStoreReference,
 } from "@bop/tenant";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 type SessionCreated = NonNullable<
   Parameters<typeof createPostgresBrowserSessionStore>[0]["onSessionCreated"]
@@ -87,8 +88,9 @@ export function createMerchantSessionSelection(options: {
   return async (tx, record) => {
     try {
       await selections.write(tx, record.session, scope, parseCanonicalInstant(options.now()));
-    } catch {
-      throw new Error("MERCHANT_SESSION_SELECTION_DENIED");
+    } catch (error) {
+      if (!isMerchantRefusal(error)) throw error;
+      throw new Error("MERCHANT_SESSION_SELECTION_DENIED", { cause: error });
     }
   };
 }

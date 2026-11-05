@@ -6,6 +6,7 @@ import {
   denied,
   exactHeader,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   safeRead,
   sameOriginMutation,
@@ -26,6 +27,7 @@ export function installMerchantReceiptTemplateRoutes(
   options: MerchantBffRouterOptions,
 ): void {
   const receiptTemplateDraftFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     const invalid = code === "RECEIPT_TEMPLATE_INPUT_INVALID";
@@ -198,6 +200,7 @@ export function installMerchantReceiptTemplateRoutes(
   );
 
   const receiptTemplateReviewFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     response
@@ -364,6 +367,7 @@ export function installMerchantReceiptTemplateRoutes(
   );
 
   const receiptTemplatePublishedFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     response
@@ -497,6 +501,7 @@ export function installMerchantReceiptTemplateRoutes(
   });
 
   const receiptTemplateSubmitFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     const invalid = code === "RECEIPT_TEMPLATE_INPUT_INVALID";
     const forbidden = code === "RECEIPT_TEMPLATE_PERMISSION_DENIED";
@@ -584,6 +589,7 @@ export function installMerchantReceiptTemplateRoutes(
   );
 
   const receiptTemplateLifecycleFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     // WP-2423 DEC-SOLE-OPERATOR-APPROVAL: why the Owner's own approval was not accepted.
     if (error instanceof MerchantSoleOperatorGateError) {
       response

@@ -11,9 +11,11 @@ import {
   cookie,
   denied,
   exactHeader,
+  noteFailure,
   rawHeaderValues,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
+import { withCause } from "./merchant-failure.js";
 import { readClosedRecord } from "@bop/identity";
 import {
   parsePublishingOptionSetPublicationOperation,
@@ -57,11 +59,12 @@ export function installMerchantOptionSetRoutes(
       .then((view) => {
         try {
           response.json(parseOptionSetListView(view));
-        } catch {
-          throw new CatalogOptionSetListError("DependencyUnavailable");
+        } catch (cause) {
+          throw withCause(new CatalogOptionSetListError("DependencyUnavailable"), cause);
         }
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         const code =
           error instanceof CatalogOptionSetListError ? error.code : "DependencyUnavailable";
         response
@@ -244,6 +247,7 @@ export function installMerchantOptionSetRoutes(
             });
           })
           .catch((error: unknown) => {
+            noteFailure(response, error);
             const status =
               error instanceof MerchantProductWriteFeatureDisabled
                 ? 409

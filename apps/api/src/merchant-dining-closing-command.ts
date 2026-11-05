@@ -20,6 +20,7 @@ import {
 } from "./dining-session-closing-run.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 const fail = (): never => {
   throw new Error("DINING_CLOSING_COMMAND_UNAVAILABLE");
 };
@@ -54,7 +55,7 @@ export function createMerchantDiningClosingCommand(options: {
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
-    const authenticated = await options.authentication.authorize(input).catch(denied);
+    const authenticated = await options.authentication.authorize(input).catch(onlyRefusal(denied));
     const raw = readClosedRecord(input.command, [
       "action",
       "diningSessionReference",
@@ -84,7 +85,7 @@ export function createMerchantDiningClosingCommand(options: {
               input.sessionCookie,
               "dining.session.close",
               authenticated.sessionReference,
-            ).catch(denied);
+            ).catch(onlyRefusal(denied));
             const decisions = await current.authorizeActions([
               "dining.session.close",
               ...taskActions,
@@ -221,7 +222,7 @@ export function createMerchantDiningClosingCommand(options: {
                 authorizeTask: async (request: { action: unknown }) => {
                   const action = String(request.action);
                   const decision = tasks.get(action);
-                  if (!decision || !(await guard())) return fail();
+                  if (!decision || !(await guard())) return denied();
                   usedTasks.add(action);
                   return decision;
                 },

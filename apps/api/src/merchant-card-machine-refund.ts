@@ -20,6 +20,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export const cardMachineRefundCommandErrorCodes = [
   "CARD_MACHINE_REFUND_INPUT_INVALID",
@@ -209,7 +210,7 @@ function createRecord(
                 input.sessionCookie,
                 staffOrderCancellationPermission,
                 session.sessionReference,
-              ).catch(() => fail("CARD_MACHINE_REFUND_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("CARD_MACHINE_REFUND_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("CARD_MACHINE_REFUND_PERMISSION_DENIED");
               return current;

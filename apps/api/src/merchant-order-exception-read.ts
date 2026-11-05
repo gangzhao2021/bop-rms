@@ -5,6 +5,7 @@ import {
   type createPostgresOrderExceptionSourceStore,
   type OrderExceptionSource,
 } from "@bop/projection";
+import { keepingCause } from "./merchant-failure.js";
 
 export interface MerchantExceptionScope {
   readonly tenantReference: string;
@@ -236,7 +237,9 @@ export function createMerchantOrderExceptionRead(options: {
           ),
         });
       })
-      .catch(() => {
-        throw Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
-      });
+      .catch(
+        keepingCause(() => {
+          throw Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
+        }),
+      );
 }

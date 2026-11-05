@@ -17,6 +17,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { staffContentName } from "./staff-content-locale.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 Store setup in product: CAT-TAX-CLASSIFICATION-LIST — the Brand Owner adds, renames and
@@ -258,13 +259,15 @@ export function createMerchantTaxClassifications(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   const denied = (): never => fail("PermissionDenied");
 
   /** The Brand decisions for this page, decided in full (one permission packet). */
   async function decide(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const brand = await resolveBrand(tx, sessionCookie, sessionReference).catch(denied);
-    const result = await brand.authorizeActionsWithValidity(actions).catch(denied);
+    const brand = await resolveBrand(tx, sessionCookie, sessionReference).catch(
+      onlyRefusal(denied),
+    );
+    const result = await brand.authorizeActionsWithValidity(actions).catch(onlyRefusal(denied));
     if (result === null || result.decisions.length !== actions.length) return denied();
     const allowed = new Set<string>();
     result.decisions.forEach((decision, i) => {

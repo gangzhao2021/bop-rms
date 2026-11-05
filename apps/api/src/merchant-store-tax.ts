@@ -10,6 +10,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { staffContentName } from "./staff-content-locale.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 8.7: TAX-STORE-REVIEW — the selected Store's current tax configuration (what governs, how
@@ -49,11 +50,11 @@ export function createMerchantStoreTax(options: {
   const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
     return retryTransactionConflict(() =>
       options.persistence.transactions.run(async (tx) => {
         const scope = await resolveScope(tx, input.sessionCookie, current.sessionReference).catch(
-          () => fail("PermissionDenied"),
+          onlyRefusal(() => fail("PermissionDenied")),
         );
         // The Store's tax configuration: a Store grant or a Brand grant may read it.
         if (!(await scope.allowedAtSelectedStore("pricing.tax_config.read")))

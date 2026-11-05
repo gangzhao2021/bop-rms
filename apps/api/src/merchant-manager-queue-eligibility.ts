@@ -114,7 +114,7 @@ export async function prepareMerchantManagerQueueEligibility(
       claim.decision.scopeKind !== "Store" ||
       !claim.activeRoleCodes.includes(policy.managerRoleCode)
     )
-      return fail();
+      throw new Error("MERCHANT_QUEUE_ELIGIBILITY_DENIED");
     const expiry = [
       policy.effectiveUntil,
       session.idleExpiresAt,

@@ -14,6 +14,7 @@ import {
 } from "./dining-order-close-run.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { isMerchantRefusal, keepingCause } from "./merchant-failure.js";
 interface Scope {
   tenantReference: string;
   brandReference: string;
@@ -56,14 +57,15 @@ export function createMerchantDiningOrderCloseCommand(options: {
       return await run(input);
     } catch (error) {
       if (error instanceof OrderCloseCommandError) throw error;
-      return refuse("ORDER_CLOSE_UNAVAILABLE");
+      return keepingCause(() => refuse("ORDER_CLOSE_UNAVAILABLE"))(error);
     }
   };
   async function run(input: { sessionCookie: unknown; csrf: unknown; command: unknown }) {
     let authenticated: Awaited<ReturnType<MerchantBffService["authorize"]>>;
     try {
       authenticated = await options.authentication.authorize(input);
-    } catch {
+    } catch (error) {
+      if (!isMerchantRefusal(error)) throw error;
       return refuse("ORDER_CLOSE_PERMISSION_DENIED");
     }
     let command: Command;
@@ -121,7 +123,8 @@ export function createMerchantDiningOrderCloseCommand(options: {
                 "order.close",
                 authenticated.sessionReference,
               );
-            } catch {
+            } catch (error) {
+              if (!isMerchantRefusal(error)) throw error;
               return refuse("ORDER_CLOSE_PERMISSION_DENIED");
             }
             if ((await current.allowed()) !== true) return refuse("ORDER_CLOSE_PERMISSION_DENIED");

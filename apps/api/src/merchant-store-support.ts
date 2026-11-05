@@ -20,6 +20,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 取舍 15 (Owner 2026-10-28): platform support staff. Not a Store role: this path never uses
@@ -148,7 +149,9 @@ export function createMerchantStoreSupport(options: {
      */
     async overview(input: { sessionCookie: unknown; csrf: unknown }) {
       try {
-        const authenticated = await options.authentication.authorize(input).catch(denied);
+        const authenticated = await options.authentication
+          .authorize(input)
+          .catch(onlyRefusal(denied));
         return await options.persistence.transactions.run(async (transaction) => {
           const tx = businessTransaction(transaction);
           const found = await person(
@@ -229,7 +232,9 @@ export function createMerchantStoreSupport(options: {
     /** One Store, read-only, recorded as viewed in this same transaction or not read at all. */
     async view(input: { sessionCookie: unknown; csrf: unknown; storeReference: unknown }) {
       try {
-        const authenticated = await options.authentication.authorize(input).catch(denied);
+        const authenticated = await options.authentication
+          .authorize(input)
+          .catch(onlyRefusal(denied));
         const scope = storeNamed(input.storeReference);
         return await options.persistence.transactions.run(async (transaction) => {
           const tx = businessTransaction(transaction);
@@ -360,7 +365,9 @@ export function createMerchantStoreSupport(options: {
       if (action === "SetPickup" && typeof raw.value !== "boolean")
         throw new MerchantStoreSupportError("Invalid");
       try {
-        const authenticated = await options.authentication.authorize(input).catch(denied);
+        const authenticated = await options.authentication
+          .authorize(input)
+          .catch(onlyRefusal(denied));
         const scope = storeNamed(input.storeReference);
         // A refusal is recorded and committed; the error is thrown after the transaction.
         const outcome = await options.persistence.transactions.run(async (transaction) => {
@@ -507,7 +514,9 @@ export function createMerchantStoreSupportAccess(options: {
       }
     },
     async change(input: { sessionCookie: unknown; csrf: unknown; command: unknown }) {
-      const authenticated = await options.authentication.authorize(input).catch(denied);
+      const authenticated = await options.authentication
+        .authorize(input)
+        .catch(onlyRefusal(denied));
       let raw: Record<string, unknown>;
       try {
         raw = readClosedRecord(input.command, [

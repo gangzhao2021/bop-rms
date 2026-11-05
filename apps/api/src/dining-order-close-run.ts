@@ -245,7 +245,7 @@ export async function runDiningOrderClose(input: {
       },
     });
   }
-  if ((await authorize()) !== true) return fail();
+  if ((await authorize()) !== true) return refuseOrderClose("ORDER_CLOSE_PERMISSION_DENIED");
   return Object.freeze({
     status: result.status,
     closedOrderVersion: result.closure.orderVersion,

@@ -47,7 +47,8 @@ export function createMerchantReconciliationAssigneeQuery(
     return bridge.transactions.run(async (tx) => {
       const authority = await bridge.resolveAuthority(tx);
       const authorize = async () => {
-        if (!(await (await bridge.resolveAuthority(tx)).authorize())) return unavailable();
+        if (!(await (await bridge.resolveAuthority(tx)).authorize()))
+          throw new Error("RECONCILIATION_ASSIGNEES_DENIED");
         return true;
       };
       await authorize();

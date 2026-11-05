@@ -26,7 +26,10 @@ export function createMerchantAcceptanceConfigurationResolver(options: {
     const unavailable = (): never => {
       throw new Error("MERCHANT_ACCEPTANCE_CONFIGURATION_UNAVAILABLE");
     };
-    if (!(await options.authorize(transaction, scope))) return unavailable();
+    const denied = (): never => {
+      throw new Error("MERCHANT_ACCEPTANCE_CONFIGURATION_DENIED");
+    };
+    if (!(await options.authorize(transaction, scope))) return denied();
     const policy = await options.resolvePolicy(transaction, scope);
     if (
       policy.paymentScope.brandReference !== scope.brandReference ||
@@ -49,12 +52,9 @@ export function createMerchantAcceptanceConfigurationResolver(options: {
       scope: policy.paymentScope,
       authorize,
     }).load(transaction, query);
-    if (
-      !captured ||
-      captured.submissionReference !== identity.submissionReference ||
-      !(await authorize())
-    )
+    if (!captured || captured.submissionReference !== identity.submissionReference)
       return unavailable();
+    if (!(await authorize())) return denied();
     if (identity.kind === "Initial") {
       if (!policy.initial) return unavailable();
       return {

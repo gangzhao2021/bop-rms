@@ -333,7 +333,7 @@ it("refuses started work, legacy stock and stale versions without a partial outc
     code: "ORDER_CANCELLATION_VERSION_CONFLICT",
   });
   const k = setup();
-  d.scope.mockRejectedValue(new Error("denied"));
+  d.scope.mockRejectedValue(new Error("STORE_SERVICE_PERMISSION_DENIED"));
   await expect(k.operation.cancel(k.input)).rejects.toMatchObject({
     code: "ORDER_CANCELLATION_PERMISSION_DENIED",
   });

@@ -21,6 +21,7 @@ import {
   MerchantSoleOperatorGateError,
   requireMerchantBrandSoleOperator,
 } from "./merchant-sole-operator.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 / DEC-ALLERGEN-DECLARATIONS: CMP-ALLERGEN-REVIEW for the selected Store's Brand. Reading needs
@@ -219,10 +220,10 @@ export function createMerchantAllergens(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(() =>
-      fail("PermissionDenied"),
+    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(
+      onlyRefusal(() => fail("PermissionDenied")),
     );
     const may = async (action: string) => (await scope.authorizeAction(action))?.effect === "Allow";
     const permissions = {

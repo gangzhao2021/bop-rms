@@ -5,7 +5,9 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   refundReadFailure,
   safeRead,
@@ -68,8 +70,9 @@ export function installMerchantRefundRoutes(
         )
           .then((result) => response.json(result))
           .catch((error: unknown) => {
+            noteFailure(response, error);
             if (!(error instanceof UnmatchedCaptureRefundError)) {
-              denied(response);
+              failed(response, error);
               return;
             }
             const status = {
@@ -171,7 +174,7 @@ export function installMerchantRefundRoutes(
       )
       .catch((error: unknown) => {
         if (!(error instanceof MerchantRefundApprovalError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         refundDecisionFailure(response, error);
@@ -206,7 +209,7 @@ export function installMerchantRefundRoutes(
       )
       .catch((error: unknown) => {
         if (!(error instanceof MerchantRefundApprovalError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         refundDecisionFailure(response, error);
@@ -427,7 +430,7 @@ export function installMerchantRefundRoutes(
           },
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post("/payments/refunds/request", sameOriginMutation(options), (request, response) => {
@@ -463,7 +466,7 @@ export function installMerchantRefundRoutes(
           replayed: result.status === "AlreadyCommitted",
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post("/payments/refunds/prepare", sameOriginMutation(options), (request, response) => {
@@ -491,7 +494,7 @@ export function installMerchantRefundRoutes(
           replayed: result.status === "AlreadyCommitted",
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   for (const [path, capability, status] of [
@@ -531,7 +534,10 @@ export function installMerchantRefundRoutes(
         })
         // A failure may follow committed dispatch/observation. Never tell the client
         // to discard its original identity or infer that nothing happened.
-        .catch(() => response.status(503).json({ error: "refund_execution_unknown" }));
+        .catch((error: unknown) => {
+          noteFailure(response, error);
+          response.status(503).json({ error: "refund_execution_unknown" });
+        });
     });
   }
 }

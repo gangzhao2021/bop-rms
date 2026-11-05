@@ -36,7 +36,7 @@ it.each(["tenantReference", "brandReference", "storeReference", "actorReference"
       }),
     });
     const candidate = { ...f.query, [key]: uuid("99") };
-    await expect(source(f.tx, candidate)).rejects.toThrow("WORKFORCE_AUTHORITY_UNAVAILABLE");
+    await expect(source(f.tx, candidate)).rejects.toThrow("WORKFORCE_AUTHORITY_DENIED");
     expect(f.sql).not.toHaveBeenCalled();
   },
 );
@@ -52,7 +52,7 @@ it("rejects stale context and caller role or MFA claims", async () => {
       ...f.query,
       observedAt: "2026-07-28T12:30:00.001Z",
     }),
-  ).rejects.toThrow("WORKFORCE_AUTHORITY_UNAVAILABLE");
+  ).rejects.toThrow("WORKFORCE_AUTHORITY_DENIED");
   expect(f.sql).not.toHaveBeenCalled();
   resolveContext.mockClear();
   await expect(source(f.tx, { ...f.query, activeRoleCodes: ["Owner"] })).rejects.toThrow();

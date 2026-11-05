@@ -22,6 +22,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 Q7: taking an order on behalf of a customer. Front of house, store managers and owners
@@ -506,7 +507,7 @@ export function createMerchantCounterOrder(options: {
                 input.sessionCookie,
                 counterOrderPermission,
                 session.sessionReference,
-              ).catch(denied);
+              ).catch(onlyRefusal(denied));
               if ((await resolved.allowed()) !== true) return denied();
               return resolved;
             },

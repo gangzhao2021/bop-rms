@@ -1,6 +1,7 @@
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import { MerchantStaffPinError, type createMerchantStaffPin } from "./merchant-staff-pin.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { noteFailure } from "./merchant-bff-http.js";
 
 /**
  * WP-2423 Q18 option A: HTTP for the shared-tablet staff PIN. The tablet secret travels only in
@@ -233,7 +234,8 @@ export function staffPinFullSignInGate(options: MerchantStaffPinRouteOptions): R
           .set("Cache-Control", NO_STORE)
           .json({ error: "full_sign_in_required" });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        noteFailure(response, error);
         response
           .status(503)
           .set("Cache-Control", NO_STORE)
@@ -243,6 +245,7 @@ export function staffPinFullSignInGate(options: MerchantStaffPinRouteOptions): R
 }
 
 function failure(response: Response, error: unknown, notFound = "not_found") {
+  noteFailure(response, error);
   response.set("Cache-Control", NO_STORE);
   if (!(error instanceof MerchantStaffPinError)) {
     response.status(503).json({ error: "staff_pin_unavailable" });
@@ -295,6 +298,7 @@ export function installMerchantStaffPinRoutes(
           .json({ ...screen, fullSignIn: { ...options.fullSignIn } }),
       )
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantStaffPinError && error.code === "DeviceNotRegistered") {
           if (secret !== null) response.set("Set-Cookie", clearDeviceCookie);
           response
@@ -354,6 +358,7 @@ export function installMerchantStaffPinRoutes(
         }
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantStaffPinError && error.code === "DeviceNotRegistered") {
           response.set("Set-Cookie", clearDeviceCookie).status(404).json({
             error: "device_not_registered",
@@ -402,6 +407,7 @@ export function installMerchantStaffPinRoutes(
     void retryTransactionConflict(() => staffPin.refundRecheck(secret, input.orderNumbers))
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantStaffPinError && error.code === "DeviceNotRegistered") {
           response.set("Set-Cookie", clearDeviceCookie).status(404).json({
             error: "device_not_registered",

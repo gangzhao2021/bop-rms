@@ -11,6 +11,7 @@ import { storeOffersPoints } from "./merchant-store-features.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 取舍 18 DEC-MEMBER-POINTS (Section 88 LOY-PROGRAM-LIST): the back office of a Brand's
@@ -86,8 +87,8 @@ export function createMerchantMemberPoints(options: {
         {
           transaction,
           resolve: async () => {
-            const current = await resolveScope(transaction, sessionCookie, permission).catch(() =>
-              fail("MEMBER_POINTS_PERMISSION_DENIED"),
+            const current = await resolveScope(transaction, sessionCookie, permission).catch(
+              onlyRefusal(() => fail("MEMBER_POINTS_PERMISSION_DENIED")),
             );
             const decisions = await current.authorizeActions([
               permission,

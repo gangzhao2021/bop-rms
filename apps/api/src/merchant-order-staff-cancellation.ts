@@ -28,6 +28,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { createSubmissionInventoryRelease } from "./submission-inventory-release.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /** DEC-ORDER-CANCELLATION-PILOT: store managers and owners hold it; front of house does not. */
 export const staffOrderCancellationPermission = "ordering.order.cancel" as const;
@@ -523,7 +524,7 @@ export function createMerchantOrderStaffCancellation(options: {
                   ? "order.accept"
                   : staffOrderCancellationPermission,
                 session.sessionReference,
-              ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
               return current;
@@ -709,7 +710,7 @@ export function createMerchantOrderStaffCancellationPreview(
                   ? "order.accept"
                   : staffOrderCancellationPermission,
                 session.sessionReference,
-              ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
               return current;

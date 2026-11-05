@@ -107,14 +107,14 @@ it.each([{ requestedAt: at }, { actorReference: id(9) }, { storeReference: id(9)
 it("denies before work when dining.operate is denied at the start", async () => {
   const f = setup();
   f.authorizeAction.mockResolvedValue({ effect: "Deny" });
-  await expect(f.read(f.input)).rejects.toThrow("DINING_SESSION_START_UNAVAILABLE");
+  await expect(f.read(f.input)).rejects.toThrow("DINING_SESSION_START_DENIED");
   expect(mock.start).not.toHaveBeenCalled();
   expect(mock.table).not.toHaveBeenCalled();
 });
 it("WP-2423: a permission withdrawn or Session ended during the command refuses it before commit", async () => {
   const f = setup();
   f.allowed.mockResolvedValue(false);
-  await expect(f.read(f.input)).rejects.toThrow("DINING_SESSION_START_UNAVAILABLE");
+  await expect(f.read(f.input)).rejects.toThrow("DINING_SESSION_START_DENIED");
   expect(mock.start).toHaveBeenCalledOnce();
   // Resolved in full twice: the permission at the start, the re-check before the commit.
   expect(f.authorizeAction).toHaveBeenCalledOnce();

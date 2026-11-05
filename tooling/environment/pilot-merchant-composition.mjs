@@ -27,6 +27,7 @@ import { createInternalBatchCancellation } from "./pilot-batch-cancellation.mjs"
 import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolution.mjs";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
 import { createPilotStaffSessionFactory } from "./pilot-staff-session.mjs";
+import { createMerchantRequestReporter, storeOfDirectory } from "./pilot-unexpected.mjs";
 const factories = {
   createInternalRefundReconciliation,
   createInternalRefundSend,
@@ -72,6 +73,8 @@ export function composeMerchantDependencies(
     publicOrigin,
     exceptionPaymentMode: customer.paymentChannel,
     ...account,
+    // WP-2423 item 10: a request that failed for a reason that is not a refusal, by code and frames.
+    onUnexpectedFailure: createMerchantRequestReporter({ store: storeOfDirectory(directory) }),
     // WP-2423 Q13: the operations monitor's alert board (ops container) for the Home.
     readOperationsAlertBoard: createPilotAlertBoardReader(directory),
     expectedDatabaseName: installation.database,

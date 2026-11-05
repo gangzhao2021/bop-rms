@@ -313,10 +313,13 @@ export class BrowserSessionService {
       throw new BrowserSessionError("BROWSER_SESSION_DENIED");
     }
     const context = `${this.#configuration.environment}:session:${record.session.sessionReference}:${record.session.actor.actorReference}`;
-    const secrets = decodeSecrets(await this.#envelopes.decrypt(record.encryptedSecrets, context), [
-      "tokenBundle",
-      "csrf",
-    ]);
+    // A session whose secrets can't be opened (a replaced key) is one to sign in to again.
+    const plaintext = await this.#envelopes
+      .decrypt(record.encryptedSecrets, context)
+      .catch((): never => {
+        throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+      });
+    const secrets = decodeSecrets(plaintext, ["tokenBundle", "csrf"]);
     const csrf = parseRawBrowserCredential(secrets.csrf);
     if (!this.#hasher.equals(this.#hasher.hash(csrf), record.csrfSelectorHash)) {
       throw new BrowserSessionError("BROWSER_SESSION_DENIED");
@@ -373,8 +376,11 @@ export class BrowserSessionService {
     let current: Awaited<ReturnType<BrowserSessionStorePort["resolveSession"]>>;
     try {
       current = await this.#store.resolveSession(selectorHash);
-    } catch {
-      throw new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE");
+    } catch (cause) {
+      throw Object.defineProperty(new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE"), "cause", {
+        value: cause,
+        enumerable: false,
+      });
     }
     if (current === null) throw new BrowserSessionError("BROWSER_SESSION_ENDED");
     if (!this.#hasher.equals(csrfSelectorHash, current.csrfSelectorHash))

@@ -268,7 +268,7 @@ it("loads the open business day's settlement with card-machine payments, also wh
           settlementRunReference: async () => null,
         })({ sessionCookie: staff.sessionCookie, businessDate: today });
         if (allowed) assert.deepEqual((await answer).cardMachine, expected, "session " + n);
-        else await assert.rejects(answer, /MERCHANT_SETTLEMENT_UNAVAILABLE/u, "session " + n);
+        else await assert.rejects(answer, /MERCHANT_SETTLEMENT_DENIED/u, "session " + n);
       }
 
       // WP-2423 (v15 Sep 19 answered 403): a day before the Store's settlement records begin is

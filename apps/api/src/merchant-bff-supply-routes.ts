@@ -1,7 +1,14 @@
 /** Merchant BFF routes: inventory items, stock places, opening counts, receipts, counts and waste. Registered by createMerchantBffRouter (merchant-bff.ts). */
 import express, { type Router } from "express";
 import { MerchantInventoryItemError } from "./merchant-inventory-items.js";
-import { cookie, denied, exactHeader, sameOriginMutation } from "./merchant-bff-http.js";
+import {
+  cookie,
+  denied,
+  exactHeader,
+  failed,
+  noteFailure,
+  sameOriginMutation,
+} from "./merchant-bff-http.js";
 import { MerchantStockPlaceError } from "./merchant-stock-places.js";
 import { MerchantOpeningCountError } from "./merchant-opening-count.js";
 import { MerchantStoreReceiptError } from "./merchant-store-receipts.js";
@@ -24,8 +31,9 @@ export function installMerchantSupplyRoutes(
     Unavailable: 503,
   } as const;
   const inventoryItemFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof MerchantInventoryItemError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(inventoryItemStatus[error.code]).json({ error: error.code });
@@ -103,8 +111,9 @@ export function installMerchantSupplyRoutes(
     Unavailable: 503,
   } as const;
   const stockPlaceFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof MerchantStockPlaceError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(stockPlaceStatus[error.code]).json({ error: error.code });
@@ -152,8 +161,9 @@ export function installMerchantSupplyRoutes(
     Unavailable: 503,
   } as const;
   const openingCountFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof MerchantOpeningCountError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response
@@ -224,7 +234,7 @@ export function installMerchantSupplyRoutes(
   } as const;
   const receiptFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantStoreReceiptError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response
@@ -307,8 +317,9 @@ export function installMerchantSupplyRoutes(
     Unavailable: 503,
   } as const;
   const countFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof MerchantStockCountError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response
@@ -385,7 +396,7 @@ export function installMerchantSupplyRoutes(
   } as const;
   const wasteFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantStoreWasteError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response

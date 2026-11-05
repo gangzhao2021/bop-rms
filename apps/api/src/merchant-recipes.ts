@@ -39,6 +39,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { staffContentName } from "./staff-content-locale.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 / DEC-RECIPE-AUTHORING: RECIPE-LIST / RECIPE-EDITOR for the selected Store's Brand. Recipes
@@ -255,10 +256,10 @@ export function createMerchantRecipes(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveBrand(tx, sessionCookie, sessionReference).catch(() =>
-      fail("PermissionDenied"),
+    const scope = await resolveBrand(tx, sessionCookie, sessionReference).catch(
+      onlyRefusal(() => fail("PermissionDenied")),
     );
     const may = async (action: string) => (await scope.authorizeAction(action))?.effect === "Allow";
     if (!(await may("recipe.read"))) fail("PermissionDenied");

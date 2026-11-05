@@ -4,6 +4,7 @@ import {
   merchantTransactionPhase,
   registerMerchantTransactionLastCheck,
 } from "./merchant-category-transactions.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423: Brand-scope authorization once per transaction, with one full re-check before commit.
@@ -197,7 +198,8 @@ function pick<D extends ComparableDecision>(
 async function recheckValue(entry: Remembered): Promise<unknown> {
   try {
     return await entry.resolve();
-  } catch {
+  } catch (error) {
+    if (!isMerchantRefusal(error)) throw error;
     return refuse();
   }
 }
@@ -231,7 +233,8 @@ async function recheckAll(memo: Memo): Promise<void> {
       let value: DecisionsResult | null;
       try {
         value = await resolveActions(order);
-      } catch {
+      } catch (error) {
+        if (!isMerchantRefusal(error)) throw error;
         return refuse();
       }
       if (value === null) return refuse();

@@ -1,6 +1,11 @@
 /** Merchant BFF shared HTTP helpers: cookies, origin/host checks, safe reads and shared failure replies. */
 import express, { type Request, type RequestHandler } from "express";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
+import {
+  isExpectedContention,
+  merchantFailureCode,
+  merchantFailureKind,
+} from "./merchant-failure.js";
 
 export const NO_STORE = "no-store";
 
@@ -62,57 +67,62 @@ export function sameOriginMutation(options: MerchantBffRouterOptions): RequestHa
   };
 }
 
-/** The failure's code: an owner error's `code`, or the UPPER_SNAKE message of a plain Error. */
-function failureCode(error: unknown): string | null {
-  if (error === null || typeof error !== "object") return null;
-  const code = Object.getOwnPropertyDescriptor(error, "code")?.value;
-  if (typeof code === "string") return code;
-  return error instanceof Error && /^[A-Z][A-Z0-9_]{2,127}$/u.test(error.message)
-    ? error.message
-    : null;
+/**
+ * WP-2423 item 10: tells the log about a failure, once per request. The router installs the reporter
+ * (createMerchantBffRouter), with the Express route's own template and never an id. Contention that
+ * outlasted its own reruns is ordinary service, so it is answered and not logged; reporting never
+ * changes the answer. Only a route that answers something other than 5xx calls this itself.
+ */
+export function reportFailure(response: express.Response, error: unknown): void {
+  response.locals.failureReported = true;
+  if (isExpectedContention(error)) return;
+  const report = response.locals.reportFailure as ((failure: unknown) => void) | undefined;
+  try {
+    report?.(error);
+  } catch {
+    // Reporting never changes the answer.
+  }
 }
 
 /**
- * Why a merchant read failed, for the reply. WP-2423 Q19: a read that kept meeting a database
- * transaction conflict is "retry later" (503). v15 2026-10-18 (dd750045): a read that met facts
- * recorded while it was loading (an Order's refund history that changed under it) is
- * "changed while loading" (409, retry at once), and a dependency that could not be read is
- * "retry later" (503) — never a permission refusal, which staff read as "you may not do this".
- * Only a refusal (`*_DENIED`) or an unrecognised failure stays a plain denial (403).
+ * For a route with its own answers: if this request ends in a 5xx, that is the failure to report
+ * (the router reports it as the answer is written), so no 5xx loses its code and frames.
  */
-export function readFailureKind(error: unknown): "RetryLater" | "Changed" | "Denied" {
-  const code = failureCode(error);
-  if (code === null) return "Denied";
-  if (code === "TENANT_DATABASE_TRANSACTION_CONFLICT" || code === "TENANT_DATABASE_ACQUIRE_FAILED")
-    return "RetryLater";
-  if (code === "TENANT_DATABASE_TRANSACTION_FAILED") {
-    // A statement cancelled by its timeout or a lost connection is transient; a refused row
-    // (a missing grant) or any other database failure stays a refusal.
-    const diagnostic = Object.getOwnPropertyDescriptor(error, "diagnostic")?.value as
-      { sqlState?: unknown } | null | undefined;
-    const sqlState = diagnostic?.sqlState;
-    return typeof sqlState === "string" && (sqlState === "57014" || sqlState.startsWith("08"))
-      ? "RetryLater"
-      : "Denied";
-  }
-  if (code.endsWith("_DENIED")) return "Denied";
-  if (code.endsWith("_HISTORY_UNAVAILABLE") || code.endsWith("_READ_CHANGED")) return "Changed";
-  if (code.endsWith("_UNAVAILABLE")) return "RetryLater";
-  return "Denied";
+export function noteFailure(response: express.Response, error: unknown): void {
+  if (error !== undefined) response.locals.failure = error;
 }
 
-export function refundReadFailure(response: express.Response, error: unknown): void {
-  const kind = readFailureKind(error);
-  if (kind === "Denied") {
+/**
+ * WP-2423 item 10: the answer to any failure a route has no typed answer for. A failure is a
+ * permission refusal only when the error says so (merchantFailureKind). Facts that moved under the
+ * request answer 409, so the page reads again. Anything else is logged by code and frames and
+ * answered 503 `retry_later`, the body the workspace and refund clients already understand:
+ * "try again, it may not have saved" is true, "you have no permission" would not be.
+ */
+export function failed(response: express.Response, error: unknown): void {
+  const kind = merchantFailureKind(error);
+  if (kind === "Refused") {
     denied(response);
     return;
   }
+  if (kind === "Changed") {
+    response
+      .status(409)
+      .set("Cache-Control", NO_STORE)
+      .set("Retry-After", "0")
+      .json({ error: "changed_while_loading" });
+    return;
+  }
+  noteFailure(response, error);
   response
-    .status(kind === "Changed" ? 409 : 503)
+    .status(503)
     .set("Cache-Control", NO_STORE)
-    .set("Retry-After", kind === "Changed" ? "0" : "1")
-    .json({ error: kind === "Changed" ? "changed_while_loading" : "retry_later" });
+    .set("Retry-After", kind === "RetryLater" ? "1" : "5")
+    .json({ error: "retry_later" });
 }
+
+/** The read routes' name for the same answer (WP-2423 Q19, v15 2026-10-18). */
+export const refundReadFailure = failed;
 
 /**
  * v15 finding: a read that kept meeting a database transaction conflict after its own reruns
@@ -120,17 +130,8 @@ export function refundReadFailure(response: express.Response, error: unknown): v
  * so the page retries instead of reporting an outage. Returns false for any other error.
  */
 export function transactionConflictRetryLater(response: express.Response, error: unknown): boolean {
-  if (
-    error === null ||
-    typeof error !== "object" ||
-    Object.getOwnPropertyDescriptor(error, "code")?.value !== "TENANT_DATABASE_TRANSACTION_CONFLICT"
-  )
-    return false;
-  response
-    .status(503)
-    .set("Cache-Control", NO_STORE)
-    .set("Retry-After", "1")
-    .json({ error: "retry_later" });
+  if (merchantFailureCode(error) !== "TENANT_DATABASE_TRANSACTION_CONFLICT") return false;
+  failed(response, error);
   return true;
 }
 

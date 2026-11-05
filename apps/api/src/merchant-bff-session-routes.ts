@@ -9,14 +9,21 @@ import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import {
   cookie,
   denied,
-  readFailureKind,
   exactHeader,
+  failed,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   refundReadFailure,
+  reportFailure,
   safeRead,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
+import {
+  isDatabaseContention,
+  isMerchantRefusal,
+  merchantFailureKind,
+} from "./merchant-failure.js";
 import { parseTaxConfigAuthoringCurrent } from "@rms/pricing";
 import { parseMerchantWorkspaceSnapshot, targetStoreReference } from "./merchant-bff-workspace.js";
 import {
@@ -131,12 +138,13 @@ export function installMerchantSessionRoutes(
           options.signInEntry?.path === staffSignInPagePath &&
           exactHeader(request, "sec-fetch-dest") === "document"
         ) {
+          reportFailure(response, error);
           response
             .set("Cache-Control", NO_STORE)
             .redirect(303, staffSignInPagePath + "?signIn=unavailable");
           return;
         }
-        denied(response);
+        failed(response, error);
       });
   });
 
@@ -154,11 +162,13 @@ export function installMerchantSessionRoutes(
         if (staffPin !== undefined && tablet !== null)
           await retryTransactionConflict(() =>
             staffPin.afterFullSignIn({ deviceCookie: tablet, session: result.session }),
-          ).catch(() => undefined);
+          ).catch((error: unknown) => reportFailure(response, error));
         response.set("Set-Cookie", result.cookies.map(serializeCookie));
         response.redirect(303, result.postLoginPath);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        // The reply never hints why a sign-in failed; the log does when it is not a refusal.
+        if (!isMerchantRefusal(error)) reportFailure(response, error);
         response.set(
           "Set-Cookie",
           "__Host-bop-auth=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0",
@@ -193,6 +203,7 @@ export function installMerchantSessionRoutes(
         });
       })
       .catch(async (error: unknown) => {
+        noteFailure(response, error);
         if (
           error instanceof BrandStoreTopologyError &&
           error.code === "BRAND_STORE_TOPOLOGY_DEPENDENCY_UNAVAILABLE"
@@ -202,12 +213,18 @@ export function installMerchantSessionRoutes(
         }
         // Owner 2026-11-04: while a menu is being listed this read can wait on a lock and give up.
         // The person is still signed in: "try again", never a refusal that reads as signed out.
-        if (readFailureKind(error) === "RetryLater") {
+        if (isDatabaseContention(error) || merchantFailureKind(error) === "Changed") {
           response
             .status(503)
             .set("Cache-Control", NO_STORE)
             .set("Retry-After", "2")
             .json({ error: "retry_later" });
+          return;
+        }
+        // WP-2423 item 10: a fault will not pass while the page waits (the browser waits only on
+        // `retry_later`): it says at once what happened, with one line in the log per page load.
+        if (!isMerchantRefusal(error)) {
+          response.status(503).json({ error: "merchant_workspace_unavailable" });
           return;
         }
         // WP-2423 取舍 15: signed in with no Store workspace may be platform support, who have their
@@ -262,6 +279,7 @@ export function installMerchantSessionRoutes(
           response.json(sessionDeadlines(session));
         })
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_ENDED") {
             response.status(401).json({ error: "session_ended" });
             return;
@@ -280,7 +298,7 @@ export function installMerchantSessionRoutes(
               .json({ error: "session_check_unavailable" });
             return;
           }
-          denied(response);
+          failed(response, error);
         });
     };
   }
@@ -356,7 +374,9 @@ export function installMerchantSessionRoutes(
         );
         response.redirect(303, result.authorizationUrl);
       })
-      .catch((error: unknown) =>
+      .catch((error: unknown) => {
+        // The window says only that it did not work; the log says why when it is not a refusal.
+        if (!isMerchantRefusal(error)) reportFailure(response, error);
         response.redirect(
           303,
           stepUpComplete(
@@ -365,8 +385,8 @@ export function installMerchantSessionRoutes(
               : "failed",
             returnTo,
           ),
-        ),
-      );
+        );
+      });
   });
   router.get("/identity/step-up/callback", oidcCallbackNavigation(options), (request, response) => {
     response.set("Cache-Control", NO_STORE);
@@ -428,11 +448,12 @@ export function installMerchantSessionRoutes(
             .json({ error: "too_many_attempts", retryAfterSeconds: result.retryAfterSeconds });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantStepUpError && error.code === "NotSetUp") {
           response.status(503).set("Cache-Control", NO_STORE).json({ error: "step_up_not_set_up" });
           return;
         }
-        denied(response);
+        failed(response, error);
       });
   });
 
@@ -455,7 +476,7 @@ export function installMerchantSessionRoutes(
           .set("Set-Cookie", serializeCookie(result.cookie))
           .json({ workspace: await currentTaxNavigation(result.workspace, result.cookie.value) });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post("/protected", sameOriginMutation(options), (request, response) => {
@@ -467,7 +488,7 @@ export function installMerchantSessionRoutes(
       .then(() => {
         response.json({ authorized: true });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post("/logout", sameOriginMutation(options), (request, response) => {
@@ -476,6 +497,6 @@ export function installMerchantSessionRoutes(
       .then((mutation) => {
         response.set("Set-Cookie", serializeCookie(mutation)).status(204).end();
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 }

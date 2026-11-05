@@ -19,6 +19,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423: Section 88 IAM-ROLE-LIST / IAM-ROLE-EDITOR for the selected Store. Reads need
@@ -284,7 +285,7 @@ export function createMerchantRoleAdministration(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   const list = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await session(input);
     return retryTransactionConflict(() =>

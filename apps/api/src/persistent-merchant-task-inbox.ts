@@ -23,6 +23,9 @@ export interface PersistentMerchantTaskInboxQueueConfiguration {
 const fail = (): never => {
   throw new Error("MERCHANT_TASK_INBOX_UNAVAILABLE");
 };
+const denied = (): never => {
+  throw new Error("MERCHANT_TASK_INBOX_DENIED");
+};
 /** Server-owned queue configuration only. The source callback must use public owner
  * contracts and retain current source permission fences in the supplied transaction.
  * task.claim here is an affordance, never Queue eligibility or write authorization. */
@@ -85,13 +88,8 @@ export function createPersistentMerchantTaskInbox(options: {
       const queue = queueByScope.get(
         `${current.selected.tenantReference}:${current.context.brand.brandReference}:${current.store.storeReference}`,
       );
-      if (
-        !queue ||
-        at < queue.effectiveFrom ||
-        at >= queue.effectiveUntil ||
-        (await current.allowed()) !== true
-      )
-        return fail();
+      if (!queue || at < queue.effectiveFrom || at >= queue.effectiveUntil) return fail();
+      if ((await current.allowed()) !== true) return denied();
       const claim = await current.authorizeAction("task.claim");
       const authority: MerchantTaskInboxAuthority = Object.freeze({
         tenantReference: queue.tenantReference,
@@ -154,7 +152,7 @@ export function createPersistentMerchantTaskInbox(options: {
                 transaction,
                 resolve: () => resolveInbox(transaction),
                 recheck: (resolved) => resolved.recheck(),
-                denied: fail,
+                denied,
               },
               async (run) => {
                 runs.set(transaction, run);

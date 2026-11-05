@@ -21,6 +21,7 @@ import {
 } from "./merchant-ordinary-refund-approval.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export class MerchantStoreReceiptProfileError extends Error {
   constructor(
@@ -149,9 +150,11 @@ export function createMerchantStoreReceiptProfile(options: {
     }
   };
   const command = async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
-    const authenticated = await options.authentication.authorize(input).catch(() => {
-      throw new MerchantStoreReceiptProfileError("Denied");
-    });
+    const authenticated = await options.authentication.authorize(input).catch(
+      onlyRefusal(() => {
+        throw new MerchantStoreReceiptProfileError("Denied");
+      }),
+    );
     let raw: Readonly<Record<string, unknown>>;
     let operationReference: string;
     try {

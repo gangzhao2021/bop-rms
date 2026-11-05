@@ -118,6 +118,9 @@ export function createPersistentMerchantOrderQueue(options: {
     const unavailable = (): never => {
       throw new Error("MERCHANT_ORDER_QUEUE_UNAVAILABLE");
     };
+    const denied = (): never => {
+      throw new Error("MERCHANT_ORDER_QUEUE_DENIED");
+    };
     // WP-2423 (v15 2026-10-18, 55P03): Orders, its detail and Home's count are polled by every
     // staff screen. They read one snapshot of every owner and take no Order fence or row lock, so
     // they neither queue behind each other nor hold up staff commands (snapshot-read).
@@ -152,7 +155,7 @@ export function createPersistentMerchantOrderQueue(options: {
               // DEC-PAID-ORDER-AUTO-ACCEPT: who may turn automatic sending off from this page.
               "store.service.pause",
             ]);
-            if (decisions.get("ordering.operate")?.effect !== "Allow") return unavailable();
+            if (decisions.get("ordering.operate")?.effect !== "Allow") return denied();
             return Object.freeze({
               session,
               resolved,
@@ -173,7 +176,7 @@ export function createPersistentMerchantOrderQueue(options: {
             });
           },
           recheck: async ({ resolved }) => (await resolved.allowed()) === true,
-          denied: unavailable,
+          denied,
         },
         async (authority) => {
           const {

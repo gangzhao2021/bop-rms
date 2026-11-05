@@ -15,12 +15,16 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   refundReadFailure,
+  reportFailure,
   safeRead,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
+import { isMerchantRefusal, withCause } from "./merchant-failure.js";
 import { readClosedRecord } from "@bop/identity";
 import { parseBrandStoreTopologyWorkbench } from "./merchant-brand-store-topology-draft.js";
 import { canonicalizeRfc8785, sha256Hex } from "@bop/audit";
@@ -35,6 +39,7 @@ export function installMerchantOrganizationRoutes(
   options: MerchantBffRouterOptions,
 ): void {
   const topologyFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     const code = error instanceof BrandStoreTopologyError ? error.code : undefined;
     const invalid = code === "BRAND_STORE_TOPOLOGY_INPUT_INVALID",
       forbidden = code === "BRAND_STORE_TOPOLOGY_PERMISSION_DENIED";
@@ -154,8 +159,11 @@ export function installMerchantOrganizationRoutes(
           let result: ReturnType<typeof parseBrandStoreTopologyOperationReceipt>;
           try {
             result = parseBrandStoreTopologyOperationReceipt(value);
-          } catch {
-            throw new BrandStoreTopologyError("BRAND_STORE_TOPOLOGY_DEPENDENCY_UNAVAILABLE");
+          } catch (cause) {
+            throw withCause(
+              new BrandStoreTopologyError("BRAND_STORE_TOPOLOGY_DEPENDENCY_UNAVAILABLE"),
+              cause,
+            );
           }
           const intent =
             command.profile === "BrandStoreTopologySaveV1"
@@ -244,7 +252,7 @@ export function installMerchantOrganizationRoutes(
       .catch((error: unknown) => {
         response.set("Cache-Control", NO_STORE);
         if (!(error instanceof MerchantSoleOperatorError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         if (error.code === "Denied") response.status(403).json({ error: "brand_owner_required" });
@@ -267,8 +275,9 @@ export function installMerchantOrganizationRoutes(
     Unavailable: 503,
   } as const;
   const roleAdministrationFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof MerchantRoleAdministrationError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(roleAdministrationStatus[error.code]).json({ error: error.code });
@@ -343,7 +352,7 @@ export function installMerchantOrganizationRoutes(
   } as const;
   const staffFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantStaffAdministrationError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(staffStatus[error.code]).json({ error: error.code });
@@ -469,7 +478,10 @@ export function installMerchantOrganizationRoutes(
     void options.storeOpening
       .mayOpen({ sessionCookie, csrf })
       .then((mayOpen) => response.json({ mayOpen }))
-      .catch(() => response.json({ mayOpen: false }));
+      .catch((error: unknown) => {
+        if (!isMerchantRefusal(error)) reportFailure(response, error);
+        response.json({ mayOpen: false });
+      });
   });
   // WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens a Store.
   router.post("/organization/stores", sameOriginMutation(options), (request, response) => {
@@ -493,6 +505,7 @@ export function installMerchantOrganizationRoutes(
       .open({ sessionCookie, csrf, command: request.body })
       .then((result) => response.status(result.status === "Opened" ? 201 : 200).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof MerchantStoreOpeningError)) {
           response.status(503).json({ error: "store_opening_unavailable" });
           return;
@@ -532,8 +545,9 @@ export function installMerchantOrganizationRoutes(
         .brandLifecycle({ sessionCookie, csrf, command: request.body })
         .then((result) => response.json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (!(error instanceof BrandAdministrationServiceError)) {
-            denied(response);
+            failed(response, error);
             return;
           }
           const status =

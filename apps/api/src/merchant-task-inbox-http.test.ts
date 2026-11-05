@@ -126,8 +126,14 @@ it("fails safely when unconfigured or when reader fails", async () => {
     throw new Error("private failure");
   });
   const response = await request(root, "/merchant/tasks", { headers });
-  expect(response.status).toBe(403);
-  expect(await response.json()).toEqual({ error: "request_denied" });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: "retry_later" });
+  root = await serve(async () => {
+    throw new Error("MERCHANT_TASK_AUTHORIZATION_DENIED");
+  });
+  const refused = await request(root, "/merchant/tasks", { headers });
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).toEqual({ error: "request_denied" });
 });
 
 async function request(

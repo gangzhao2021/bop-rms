@@ -41,6 +41,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { recipeIngredientItems } from "./recipe-ingredient-items.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (coordinator 2026-10-28, accepted with four conditions):
@@ -627,7 +628,7 @@ export function createMerchantDishAllergens(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
     const body = parseDishAllergenCommandBody(input.body);
     const current = await session(input);
@@ -635,7 +636,7 @@ export function createMerchantDishAllergens(options: {
       options.persistence.transactions.run((tx: Tx) =>
         withRememberedBrandAuthorization(tx, async () => {
           const scope = await resolveBrand(tx, input.sessionCookie, current.sessionReference).catch(
-            () => fail("PermissionDenied"),
+            onlyRefusal(() => fail("PermissionDenied")),
           );
           return declareDishAllergens(tx, {
             scope: {

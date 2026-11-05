@@ -24,6 +24,8 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
+  noteFailure,
   rawHeaderValues,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
@@ -218,11 +220,13 @@ export function installMerchantPricingRoutes(
                 if (review[field] !== null) parsePricingReference(review[field]);
             }
             response.json(result);
-          } catch {
+          } catch (error) {
+            noteFailure(response, error);
             response.status(503).json({ error: "option_price_unavailable" });
           }
         })
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const feature = error instanceof MerchantProductWriteFeatureDisabled,
             code = error instanceof OptionPriceAuthoringError ? error.code : null,
             status = feature
@@ -396,11 +400,13 @@ export function installMerchantPricingRoutes(
               )
                 throw Error();
               response.json(result);
-            } catch {
+            } catch (error) {
+              noteFailure(response, error);
               response.status(503).json({ error: "option_price_unavailable" });
             }
           })
           .catch((error: unknown) => {
+            noteFailure(response, error);
             const feature = error instanceof MerchantProductWriteFeatureDisabled,
               code = error instanceof OptionPriceAuthoringError ? error.code : null,
               status = feature
@@ -774,11 +780,13 @@ export function installMerchantPricingRoutes(
                 }
               }
               response.json(result);
-            } catch {
+            } catch (error) {
+              noteFailure(response, error);
               response.status(503).json({ error: "option_price_unavailable" });
             }
           })
           .catch((error: unknown) => {
+            noteFailure(response, error);
             const feature = error instanceof MerchantProductWriteFeatureDisabled,
               code = error instanceof OptionPriceAuthoringError ? error.code : null,
               status = feature
@@ -833,8 +841,9 @@ export function installMerchantPricingRoutes(
       .priceBooks({ sessionCookie, csrf, command: request.body })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof PriceBookWorkflowError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =

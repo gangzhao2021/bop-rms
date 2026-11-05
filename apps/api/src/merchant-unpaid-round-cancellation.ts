@@ -8,6 +8,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
 import type { OpenPaymentAttemptResolution } from "./open-payment-attempt-resolution.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export const unpaidRoundCancellationErrorCodes = [
   "UNPAID_ROUND_INPUT_INVALID",
@@ -115,7 +116,7 @@ export function createMerchantUnpaidRoundCancellation(options: {
                 input.sessionCookie,
                 staffOrderCancellationPermission,
                 session.sessionReference,
-              ).catch(() => fail("UNPAID_ROUND_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("UNPAID_ROUND_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true) return fail("UNPAID_ROUND_PERMISSION_DENIED");
               return current;
             },

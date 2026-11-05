@@ -38,6 +38,7 @@ import {
   restoreBrandTransactionRowSecurity,
   sameDecision,
 } from "./merchant-brand-transaction-authorization.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 export type MerchantCurrentBrandOptions = Pick<
   PersistentMerchantBffOptions,
@@ -405,8 +406,9 @@ function currentBrandScope<
           decisions: Object.freeze(decisions),
           validUntil: deadline,
         });
-      } catch {
+      } catch (error) {
         failed = true;
+        if (!isMerchantRefusal(error)) throw error;
         return denied();
       } finally {
         active = false;

@@ -14,6 +14,7 @@ import {
   DiningTableOnlinePaymentError,
   type createDiningTableOnlinePayments,
 } from "./dining-table-online-payment.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER S4: staff stop a phone payment a guest gave up on, so the table
@@ -51,7 +52,9 @@ export function createMerchantDiningTableOnlinePaymentStop(options: {
         authenticated.sessionReference,
       );
     const first = await options.persistence.transactions.run(async (tx) => {
-      const current = await staffIn(tx as unknown as ConsumerTransaction).catch(() => null);
+      const current = await staffIn(tx as unknown as ConsumerTransaction).catch(
+        onlyRefusal(() => null),
+      );
       if (current === null || (await current.allowed()) !== true) return null;
       return { scope: scopeOf(current), actorReference: String(current.actorReference) };
     });
@@ -63,7 +66,7 @@ export function createMerchantDiningTableOnlinePaymentStop(options: {
           guestSessionReference: null,
           displayLocale: staffContentLocale(),
           allowed: async (tx) => {
-            const current = await staffIn(tx).catch(() => null);
+            const current = await staffIn(tx).catch(onlyRefusal(() => null));
             return (
               current !== null &&
               String(current.actorReference) === first.actorReference &&

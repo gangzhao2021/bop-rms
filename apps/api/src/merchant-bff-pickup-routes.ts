@@ -5,7 +5,9 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
   NO_STORE,
+  noteFailure,
   refundReadFailure,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
@@ -37,6 +39,7 @@ export function installMerchantPickupRoutes(
     void retryTransactionConflict(() => pickupQuery({ sessionCookie, csrf, query: request.body }))
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof FulfillmentReadinessError)) {
           refundReadFailure(response, error);
           return;
@@ -73,7 +76,7 @@ export function installMerchantPickupRoutes(
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof PickupHandoffError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status = {
@@ -112,7 +115,7 @@ export function installMerchantPickupRoutes(
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof PickupHandoffError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status = {
@@ -149,7 +152,7 @@ export function installMerchantPickupRoutes(
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof PickupHandoffError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status = {
@@ -185,7 +188,7 @@ export function installMerchantPickupRoutes(
       .then((result) => response.json(result))
       .catch((error: unknown) => {
         if (!(error instanceof PickupHandoffError) && !(error instanceof PickupProofError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status = {

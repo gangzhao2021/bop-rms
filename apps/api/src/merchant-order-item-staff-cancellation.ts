@@ -36,6 +36,7 @@ import {
   staffOrderCancellationPermission,
   type createMerchantOrderStaffCancellation,
 } from "./merchant-order-staff-cancellation.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export const staffItemCancellationErrorCodes = [
   "ORDER_CANCELLATION_INPUT_INVALID",
@@ -296,7 +297,7 @@ export function createMerchantOrderItemStaffCancellation(options: {
                 input.sessionCookie,
                 staffOrderCancellationPermission,
                 sessionReference,
-              ).catch(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("ORDER_CANCELLATION_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("ORDER_CANCELLATION_PERMISSION_DENIED");
               return current;

@@ -30,6 +30,7 @@ import {
   denied,
   exactHeader,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   safeRead,
   sameOriginMutation,
@@ -51,6 +52,7 @@ export function installMerchantTaxConfigRoutes(
   options: MerchantBffRouterOptions,
 ): void {
   const taxConfigAuthoringFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     if (error instanceof MerchantTaxConfigFeatureDisabled) {
       response
         .status(503)

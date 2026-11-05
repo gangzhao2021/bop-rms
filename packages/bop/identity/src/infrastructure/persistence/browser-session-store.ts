@@ -14,6 +14,7 @@ import {
 import {
   BrowserSessionError,
   createBrowserSessionRecord,
+  isBrowserSessionReadFailure,
   parseSelectorHash,
   type BrowserSessionRecord,
   type EncryptedSecretEnvelope,
@@ -457,6 +458,8 @@ function createStore(options: Options, profile: Profile) {
     } catch (error) {
       if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_VERSION_CONFLICT")
         throw error;
+      // WP-2423 item 10: what could not be read is not a refusal, and a conflict stays retryable.
+      if (isBrowserSessionReadFailure(error)) throw error;
       return denied();
     }
   }
@@ -719,7 +722,11 @@ function createStore(options: Options, profile: Profile) {
           (error.code === "BROWSER_SESSION_ENDED" || error.code === "BROWSER_SESSION_DENIED")
         )
           throw error;
-        throw new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE");
+        throw Object.defineProperty(
+          new BrowserSessionError("BROWSER_SESSION_UNAVAILABLE"),
+          "cause",
+          { value: error, enumerable: false },
+        );
       }
     },
     async revokeSession(command: Parameters<BrowserSessionStorePort["revokeSession"]>[0]) {

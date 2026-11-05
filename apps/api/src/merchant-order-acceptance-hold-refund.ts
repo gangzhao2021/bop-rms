@@ -10,6 +10,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { staffOrderCancellationPermission } from "./merchant-order-staff-cancellation.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export const acceptanceHoldRefundErrorCodes = [
   "ACCEPTANCE_HOLD_REFUND_INPUT_INVALID",
@@ -81,7 +82,7 @@ export function createMerchantOrderAcceptanceHoldRefund(options: {
                 input.sessionCookie,
                 staffOrderCancellationPermission,
                 session.sessionReference,
-              ).catch(denied);
+              ).catch(onlyRefusal(denied));
               if ((await resolved.allowed()) !== true) return denied();
               return resolved;
             },

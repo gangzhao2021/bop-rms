@@ -47,6 +47,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export type MerchantStoreFeaturesErrorCode =
   | "STORE_FEATURES_INPUT_INVALID"
@@ -420,7 +421,7 @@ export function createMerchantStoreFeatures(options: {
                 input.sessionCookie,
                 storeFeaturesPermission,
                 authenticated.sessionReference,
-              ).catch(() => fail("STORE_FEATURES_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("STORE_FEATURES_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("STORE_FEATURES_PERMISSION_DENIED");
               return current;

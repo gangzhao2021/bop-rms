@@ -14,6 +14,7 @@ import { merchantStockCatalog } from "./merchant-stock-catalog.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 / DEC-INV-OPENING: INV-OPENING-COUNT for the selected Store. Reading needs
@@ -90,7 +91,7 @@ export function createMerchantOpeningCount(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
     const scope = await resolveScope(tx, sessionCookie, "inventory.count.read", sessionReference);
     if (!(await scope.allowed())) fail("PermissionDenied");

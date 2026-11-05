@@ -16,9 +16,13 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { createMerchantSelectedContext } from "./merchant-selected-context.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { kdsOperatorProfileAllows } from "./merchant-kds-operator-profile.js";
+import { isMerchantRefusal, keepingCause } from "./merchant-failure.js";
 
 const unavailable = (): never => {
   throw new Error("MERCHANT_TASK_AUTHORIZATION_UNAVAILABLE");
+};
+const denied = (): never => {
+  throw new Error("MERCHANT_TASK_AUTHORIZATION_DENIED");
 };
 /** Current staff authority for transaction-bound Task create/assign/claim commands.
  * Injected public session/context/membership adapters must retain their fences
@@ -130,7 +134,7 @@ export function createMerchantTaskAuthorization(
           access.action !== "merchant.access" ||
           access.scopeKind !== "Store"
         )
-          return unavailable();
+          return denied();
         const decision = await policy.authorize({
           tenantContext: context,
           membership,
@@ -143,10 +147,11 @@ export function createMerchantTaskAuthorization(
           decision.action !== input.action ||
           decision.scopeKind !== "Store"
         )
-          return unavailable();
+          return denied();
         return decision;
-      } catch {
-        return unavailable();
+      } catch (cause) {
+        if (isMerchantRefusal(cause)) throw cause;
+        return keepingCause(unavailable)(cause);
       }
     },
   });

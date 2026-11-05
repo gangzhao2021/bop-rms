@@ -16,6 +16,7 @@ import {
 } from "./merchant-ordinary-refund-approval.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export class MerchantKitchenSetupError extends Error {
   constructor(readonly code: "Denied" | "Changed" | "NoChange" | "Invalid" | "Unavailable") {
@@ -205,7 +206,9 @@ export function createMerchantKitchenSetup(options: {
     }
   };
   const command = async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
-    const authenticated = await options.authentication.authorize(input).catch(() => denied());
+    const authenticated = await options.authentication
+      .authorize(input)
+      .catch(onlyRefusal(() => denied()));
     let operationReference: string, expectedVersion: number;
     try {
       const raw = readClosedRecord(input.command, ["operationReference", "expectedVersion"]);

@@ -9,7 +9,9 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   safeRead,
   sameOriginMutation,
@@ -39,6 +41,7 @@ export function installMerchantStoreSetupRoutes(
 ): void {
   // WP-2423 取舍 18 DEC-MEMBER-POINTS: the Brand's points rules, members and report.
   const memberPointsFailure = (response: Parameters<typeof denied>[0], error: unknown) => {
+    noteFailure(response, error);
     const code = error instanceof MerchantMemberPointsError ? error.code : null;
     if (code === "MEMBER_POINTS_PERMISSION_DENIED") {
       denied(response);
@@ -110,8 +113,9 @@ export function installMerchantStoreSetupRoutes(
       .storeFeatures({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof MerchantStoreFeaturesError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =
@@ -132,6 +136,7 @@ export function installMerchantStoreSetupRoutes(
       });
   });
   const storeSetupFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof StoreSetupOperationError ? error.code : undefined;
     const invalid = code === "STORE_SETUP_OPERATION_INPUT_INVALID";
@@ -268,7 +273,8 @@ export function installMerchantStoreSetupRoutes(
           )
             throw new Error("unavailable");
           response.json(result);
-        } catch {
+        } catch (error) {
+          noteFailure(response, error);
           storeSetupFailure(response, undefined);
         }
       })
@@ -340,6 +346,7 @@ export function installMerchantStoreSetupRoutes(
   });
 
   const storeSetupReferenceFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof StoreSetupReferenceError ? error.code : undefined;
     const invalid = code === "STORE_SETUP_REFERENCE_INPUT_INVALID";
@@ -474,6 +481,7 @@ export function installMerchantStoreSetupRoutes(
   });
 
   const storePaymentConfigurationFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof StorePaymentConfigurationError ? error.code : undefined;
     const invalid = code === "STORE_PAYMENT_CONFIGURATION_INPUT_INVALID";
@@ -599,6 +607,7 @@ export function installMerchantStoreSetupRoutes(
   );
 
   const receiptTemplateArtifactsFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     if (transactionConflictRetryLater(response, error)) return;
     const code = error instanceof DigitalReceiptTemplateError ? error.code : undefined;
     const invalid = code === "RECEIPT_TEMPLATE_INPUT_INVALID";
@@ -736,6 +745,7 @@ export function installMerchantStoreSetupRoutes(
 
   // WP-2423 取舍 15: platform support staff (no Store workspace) and the Owner's side of it.
   const supportFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     response.set("Cache-Control", NO_STORE);
     if (!(error instanceof MerchantStoreSupportError)) {
       response.status(503).set("Retry-After", "5").json({ error: "support_unavailable" });
@@ -842,7 +852,7 @@ export function installMerchantStoreSetupRoutes(
     void options.openingChecklist
       .read({ sessionCookie })
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
   router.get("/store/kitchen-setup", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
@@ -863,6 +873,7 @@ export function installMerchantStoreSetupRoutes(
     void retryTransactionConflict(() => port.read({ sessionCookie }))
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantKitchenSetupError && error.code === "Denied") {
           denied(response);
           return;
@@ -894,6 +905,7 @@ export function installMerchantStoreSetupRoutes(
     void command({ sessionCookie, csrf, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         response.set("Cache-Control", NO_STORE);
         if (!(error instanceof MerchantKitchenSetupError)) {
           response.status(503).json({ error: "kitchen_setup_unavailable" });
@@ -930,6 +942,7 @@ export function installMerchantStoreSetupRoutes(
     void retryTransactionConflict(() => port.read({ sessionCookie }))
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantStoreReceiptProfileError && error.code === "Denied") {
           denied(response);
           return;
@@ -968,6 +981,7 @@ export function installMerchantStoreSetupRoutes(
         }),
       )
       .catch((error: unknown) => {
+        noteFailure(response, error);
         response.set("Cache-Control", NO_STORE);
         if (!(error instanceof MerchantStoreReceiptProfileError)) {
           response.status(503).json({ error: "receipt_profile_unavailable" });
@@ -1004,6 +1018,7 @@ export function installMerchantStoreSetupRoutes(
     void retryTransactionConflict(() => port.read({ sessionCookie }))
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantStorePublicProfileError && error.code === "Denied") {
           denied(response);
           return;
@@ -1040,6 +1055,7 @@ export function installMerchantStoreSetupRoutes(
         }),
       )
       .catch((error: unknown) => {
+        noteFailure(response, error);
         response.set("Cache-Control", NO_STORE);
         if (!(error instanceof MerchantStorePublicProfileError)) {
           response.status(503).json({ error: "public_profile_unavailable" });

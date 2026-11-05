@@ -9,6 +9,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINING-GUEST-TABLE-START: whoever may pause ordering may also stop guests starting
@@ -33,7 +34,7 @@ export function createMerchantGuestTableStartOff(options: {
 }) {
   const resolve = createMerchantStoreScope(options.persistence);
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
-    const authenticated = await options.authentication.authorize(input).catch(denied);
+    const authenticated = await options.authentication.authorize(input).catch(onlyRefusal(denied));
     const raw = readClosedRecord(input.command, ["operationReference", "expectedVersion"]);
     const operationReference = String(parseDiningReference(raw.operationReference));
     if (
@@ -54,7 +55,7 @@ export function createMerchantGuestTableStartOff(options: {
                 input.sessionCookie,
                 guestTableStartOffPermission,
                 authenticated.sessionReference,
-              ).catch(denied);
+              ).catch(onlyRefusal(denied));
               if ((await current.allowed()) !== true) return denied();
               return current;
             },
@@ -90,7 +91,9 @@ export function createMerchantGuestTableStartOff(options: {
         error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT"
       )
         throw new GuestTableStartOffError("Changed");
-      throw new GuestTableStartOffError("Unavailable");
+      return keepingCause(() => {
+        throw new GuestTableStartOffError("Unavailable");
+      })(error);
     }
   };
 }

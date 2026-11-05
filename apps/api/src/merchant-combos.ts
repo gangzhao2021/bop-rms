@@ -28,6 +28,7 @@ import {
 } from "./merchant-sole-operator.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 item 8 ⑥ part 4 DEC-SINGLE-STORE-COMBO (Owner 2026-10-28 decision 10, approach B): a
@@ -537,12 +538,12 @@ export function createMerchantCombos(options: {
   ): Promise<T> => {
     const current = await options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
     return retryTransactionConflict(() =>
       options.persistence.transactions.run((tx: Tx) =>
         withRememberedBrandAuthorization(tx, async () => {
           const scope = await resolveBrand(tx, input.sessionCookie, current.sessionReference).catch(
-            () => fail("PermissionDenied"),
+            onlyRefusal(() => fail("PermissionDenied")),
           );
           const authority: BrandAuthority = {
             context: scope.context,

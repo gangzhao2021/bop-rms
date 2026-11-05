@@ -20,6 +20,9 @@ const hashes = {
 const unavailable = (): never => {
   throw new Error("DINING_JOIN_REGENERATE_UNAVAILABLE");
 };
+const denied = (): never => {
+  throw new Error("DINING_JOIN_REGENERATE_DENIED");
+};
 
 /**
  * A new join code for the table's party, in the caller's transaction, by the staff member whose
@@ -172,11 +175,11 @@ export function createMerchantDiningJoinRegenerate(options: {
               authenticated.sessionReference,
             );
             const permission = await current.authorizeAction("dining.operate");
-            if (permission?.effect !== "Allow") return unavailable();
+            if (permission?.effect !== "Allow") return denied();
             return { current, permission };
           },
           recheck: async ({ current }) => (await current.allowed()) === true,
-          denied: unavailable,
+          denied,
         },
         async (authority) => {
           const { current, permission } = authority.scope;

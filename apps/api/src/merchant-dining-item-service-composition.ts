@@ -39,7 +39,7 @@ export function createMerchantDiningItemServiceComposition(options: {
         record.storeReference !== options.scope.storeReference ||
         (await options.authorize(input.transaction, record)) !== true
       )
-        throw new Error("DINING_ITEM_SERVICE_UNAVAILABLE");
+        throw new Error("DINING_ITEM_SERVICE_PERMISSION_DENIED");
       const observedAt = parseDiningInstant(options.now());
       if (observedAt < record.recordedAt) throw new Error("DINING_ITEM_SERVICE_UNAVAILABLE");
       const current = await createDiningOrderPreparationProgress({

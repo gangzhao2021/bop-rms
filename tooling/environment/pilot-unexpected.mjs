@@ -10,6 +10,31 @@ const codeOf = (error) => {
   const code = error?.code ?? codeMessage ?? error?.name;
   return { code: /^[A-Za-z0-9_]{1,80}$/.test(code ?? "") ? code : "UNAVAILABLE", codeMessage };
 };
+/** Set by the database transaction runner on an error thrown after one of its queries failed. */
+const databaseFailure = Symbol.for("bop.database.failure");
+const sqlStatePattern = /^[0-9A-Z]{5}$/;
+const identifierPattern = /^[a-z_][a-z0-9_]{0,62}$/;
+/**
+ * WP-2423 item 10: which statement failed, from the safe identifiers the database error carries
+ * (packages/database tenant-context), its own or those of what it wraps. Never message text.
+ */
+const diagnosticOf = (error) => {
+  const found = {};
+  let at = error;
+  for (let depth = 0; depth < 4 && at !== null && typeof at === "object"; depth += 1) {
+    for (const holder of [at.diagnostic, at[databaseFailure]]) {
+      if (holder === null || typeof holder !== "object") continue;
+      if (found.sqlState === undefined && sqlStatePattern.test(holder.sqlState ?? ""))
+        found.sqlState = holder.sqlState;
+      if (found.table === undefined && identifierPattern.test(holder.table ?? ""))
+        found.table = holder.table;
+      if (found.constraint === undefined && identifierPattern.test(holder.constraint ?? ""))
+        found.constraint = holder.constraint;
+    }
+    at = at.cause;
+  }
+  return found;
+};
 const framesOf = (error) =>
   String(error?.stack ?? "")
     .match(
@@ -28,7 +53,10 @@ const ruleOf = (error) => {
   }
   return null;
 };
+/** The errors already logged, so a request's own report does not say the same failure twice. */
+const alreadyLogged = new WeakSet();
 export function reportUnexpected(event, error, context = {}) {
+  if (error !== null && typeof error === "object") alreadyLogged.add(error);
   const { code, codeMessage } = codeOf(error);
   const rule = ruleOf(error);
   // v15 2026-11-01: a wrapped error names the code of what it wraps (owner services rewrite
@@ -53,6 +81,14 @@ export function reportUnexpected(event, error, context = {}) {
       /^stores\/[a-z0-9][a-z0-9-]{0,62}$/.test(context.store)
         ? { store: context.store }
         : {}),
+      // Which merchant route failed: the route's own template, which never holds an id.
+      ...(typeof context.route === "string" && /^\/[A-Za-z0-9/_:-]{1,120}$/.test(context.route)
+        ? { route: context.route }
+        : {}),
+      // How many identical failures were not logged since the last line (see below).
+      ...(Number.isSafeInteger(context.suppressed) && context.suppressed > 0
+        ? { suppressed: context.suppressed }
+        : {}),
       // Which step of a multi-step action failed (a fixed name such as "Workspace").
       ...(typeof context.step === "string" && /^[A-Za-z]{1,40}$/.test(context.step)
         ? { step: context.step }
@@ -62,9 +98,44 @@ export function reportUnexpected(event, error, context = {}) {
       /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*:v[1-9][0-9]*$/.test(context.consumer)
         ? { consumer: context.consumer }
         : {}),
+      ...diagnosticOf(error),
       frames: framesOf(error),
       // Where the wrapped failure itself happened, when something wraps it.
       ...(deepest !== error ? { causeFrames: framesOf(deepest) } : {}),
     }),
   );
+}
+
+/**
+ * WP-2423 item 10: the line for a merchant request that failed for a reason that is not a refusal.
+ * The merchant BFF answers "try again"; this is how the operator learns why. One broken read would
+ * otherwise write a line per poll per tablet, and some inputs fail before a session is checked, so
+ * each route and code gets its first line at once and then one a minute with how many it stood for.
+ * A failure a wrapper around the service already logged is not logged again.
+ */
+const reportingWindowMs = 60_000;
+const reportingKeysMaximum = 512;
+export function createMerchantRequestReporter({ store, now = Date.now } = {}) {
+  const windows = new Map();
+  return (route, error) => {
+    if (error !== null && typeof error === "object" && alreadyLogged.has(error)) return;
+    const key = `${route} ${codeOf(error).code}`;
+    const at = now();
+    const window = windows.get(key);
+    if (window !== undefined && at - window.since < reportingWindowMs) {
+      window.suppressed += 1;
+      return;
+    }
+    if (windows.size >= reportingKeysMaximum) windows.clear();
+    windows.set(key, { since: at, suppressed: 0 });
+    reportUnexpected("MERCHANT_REQUEST_UNEXPECTED", error, {
+      route,
+      ...(store === undefined ? {} : { store }),
+      suppressed: window?.suppressed ?? 0,
+    });
+  };
+}
+/** The served Store's runtime directory name (`stores/<name>`), when this is one. */
+export function storeOfDirectory(directory) {
+  return /(?:^|\/)(stores\/[a-z0-9][a-z0-9-]{0,62})\/?$/.exec(String(directory))?.[1];
 }

@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { RequestHandler } from "express";
+import { keepingCause } from "./merchant-failure.js";
 
 export const merchantBrandApplicationRoutes = Object.freeze([
   "/",
@@ -205,7 +206,7 @@ export async function createMerchantBrandApplication(options: {
       if (request.method === "HEAD") response.end();
       else response.end(bytes);
     };
-  } catch {
-    return unavailable();
+  } catch (cause) {
+    return keepingCause(unavailable)(cause);
   }
 }

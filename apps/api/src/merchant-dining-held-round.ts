@@ -12,6 +12,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export type MerchantDiningHeldRoundErrorCode =
   | "HELD_ROUND_INPUT_INVALID"
@@ -90,7 +91,7 @@ export function createMerchantDiningHeldRound(options: {
                 input.sessionCookie,
                 "dining.operate",
                 authenticated.sessionReference,
-              ).catch(() => fail("HELD_ROUND_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("HELD_ROUND_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true) return fail("HELD_ROUND_PERMISSION_DENIED");
               return current;
             },
@@ -231,7 +232,7 @@ export function createMerchantDiningRoundHoldSetting(options: {
                 input.sessionCookie,
                 "dining.operate",
                 authenticated.sessionReference,
-              ).catch(() => fail("HELD_ROUND_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("HELD_ROUND_PERMISSION_DENIED")));
               const decisions = await current.authorizeActions([
                 "dining.operate",
                 "dining.session.close",

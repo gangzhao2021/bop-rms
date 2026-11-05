@@ -10,7 +10,9 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
   NO_STORE,
+  noteFailure,
   sameOriginMutation,
   transactionConflictRetryLater,
 } from "./merchant-bff-http.js";
@@ -51,7 +53,7 @@ export function installMerchantCommerceRoutes(
   } as const;
   const recipeFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantRecipeError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(recipeStatus[error.code]).json({ error: error.code, line: error.line });
@@ -144,7 +146,7 @@ export function installMerchantCommerceRoutes(
         .then((result) => response.json(result))
         .catch((error: unknown) => {
           if (!(error instanceof MerchantDishAllergenError)) {
-            denied(response);
+            failed(response, error);
             return;
           }
           response.status(dishAllergenStatus[error.code]).json({ error: error.code });
@@ -176,11 +178,12 @@ export function installMerchantCommerceRoutes(
         .productAlcohol({ sessionCookie, csrf, command: request.body })
         .then((result) => response.set("Cache-Control", "no-store").json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (
             !(error instanceof MerchantProductAlcoholError) ||
             error.code === "PRODUCT_ALCOHOL_PERMISSION_DENIED"
           ) {
-            denied(response);
+            failed(response, error);
             return;
           }
           response
@@ -221,11 +224,12 @@ export function installMerchantCommerceRoutes(
         .kitchenNotPrepared({ sessionCookie, csrf, command: request.body })
         .then((result) => response.set("Cache-Control", "no-store").json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (
             !(error instanceof MerchantKitchenNotPreparedError) ||
             error.code === "KITCHEN_NOT_PREPARED_PERMISSION_DENIED"
           ) {
-            denied(response);
+            failed(response, error);
             return;
           }
           response
@@ -265,11 +269,12 @@ export function installMerchantCommerceRoutes(
         .kitchenSections({ sessionCookie, csrf, command: request.body })
         .then((result) => response.set("Cache-Control", "no-store").json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (
             !(error instanceof MerchantKitchenSectionsError) ||
             error.code === "KITCHEN_SECTIONS_PERMISSION_DENIED"
           ) {
-            denied(response);
+            failed(response, error);
             return;
           }
           response
@@ -319,7 +324,7 @@ export function installMerchantCommerceRoutes(
           const code = (error as { code?: unknown } | null)?.code;
           if (error instanceof MerchantComboError && code === "PermissionDenied")
             response.status(403).json({ error: code });
-          else denied(response);
+          else failed(response, error);
         });
     },
   );
@@ -346,13 +351,14 @@ export function installMerchantCommerceRoutes(
         .command({ sessionCookie, csrf, body: request.body })
         .then((result) => response.json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const code = (error as { code?: unknown } | null)?.code;
           if (
             !(error instanceof Error) ||
             typeof code !== "string" ||
             !/^Merchant[A-Za-z]+Error$/u.test(error.name)
           ) {
-            denied(response);
+            failed(response, error);
             return;
           }
           response
@@ -401,8 +407,9 @@ export function installMerchantCommerceRoutes(
     PhotoStorageUnavailable: 503,
   } as const;
   const productFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof MerchantProductError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(productStatus[error.code]).json({ error: error.code });
@@ -514,7 +521,7 @@ export function installMerchantCommerceRoutes(
   } as const;
   const priceFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantPriceError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response
@@ -610,7 +617,7 @@ export function installMerchantCommerceRoutes(
         .then((result) => response.json(result))
         .catch((error: unknown) => {
           if (!(error instanceof MerchantStorePriceError)) {
-            denied(response);
+            failed(response, error);
             return;
           }
           response.status(storePriceStatus[error.code]).json({ error: error.code });
@@ -632,7 +639,7 @@ export function installMerchantCommerceRoutes(
   } as const;
   const allergenFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantAllergenError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(allergenStatus[error.code]).json({ error: error.code });
@@ -711,7 +718,7 @@ export function installMerchantCommerceRoutes(
   } as const;
   const menuFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantMenuError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response
@@ -783,7 +790,7 @@ export function installMerchantCommerceRoutes(
   } as const;
   const availabilityFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantAvailabilityError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(availabilityStatus[error.code]).json({ error: error.code });
@@ -847,7 +854,7 @@ export function installMerchantCommerceRoutes(
   } as const;
   const optionSetFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantOptionSetError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(optionSetStatus[error.code]).json({ error: error.code });
@@ -918,7 +925,7 @@ export function installMerchantCommerceRoutes(
   } as const;
   const optionPriceFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantOptionPriceError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response.status(optionPriceStatus[error.code]).json({ error: error.code });
@@ -1017,7 +1024,7 @@ export function installMerchantCommerceRoutes(
       .catch((error: unknown) => {
         if (error instanceof MerchantStoreTaxError)
           response.status(403).json({ error: error.code });
-        else denied(response);
+        else failed(response, error);
       });
   });
 
@@ -1032,6 +1039,7 @@ export function installMerchantCommerceRoutes(
     Unavailable: 503,
   } as const;
   const taxClassificationFailure = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (transactionConflictRetryLater(response, error)) return;
     if (!(error instanceof MerchantTaxClassificationError)) {
       response.status(503).set("Cache-Control", NO_STORE).json({ error: "Unavailable" });
@@ -1096,7 +1104,7 @@ export function installMerchantCommerceRoutes(
   } as const;
   const optionRecipeFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantOptionRecipeError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     response

@@ -26,6 +26,7 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 import { readCounterPaymentPreparation } from "./counter-payment-preparation.js";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
 import { counterOrderPermission } from "./merchant-counter-order.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export const cardMachinePaymentCommandErrorCodes = [
   "CARD_MACHINE_INPUT_INVALID",
@@ -262,7 +263,7 @@ export function createMerchantCardMachinePayment(options: {
                 input.sessionCookie,
                 counterOrderPermission,
                 session.sessionReference,
-              ).catch(() => fail("CARD_MACHINE_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("CARD_MACHINE_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true) return fail("CARD_MACHINE_PERMISSION_DENIED");
               return current;
             },

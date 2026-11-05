@@ -10,6 +10,7 @@ import {
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { createPersistentMerchantTaskInbox } from "./persistent-merchant-task-inbox.js";
+import { withCause } from "./merchant-failure.js";
 
 type Authorize = Parameters<typeof createPersistentMerchantTaskInbox>[0]["authorizeSource"];
 /** Read access to the close-session exception source, not evidence that its debt or
@@ -78,8 +79,8 @@ export function createMerchantDiningTaskSource(source: PersistentMerchantBffOpti
       )
         throw new Error("Invalid source binding");
       return run.guard(tx);
-    } catch {
-      throw new Error("MERCHANT_TASK_SOURCE_UNAVAILABLE");
+    } catch (cause) {
+      throw withCause(new Error("MERCHANT_TASK_SOURCE_UNAVAILABLE"), cause);
     }
   };
 }

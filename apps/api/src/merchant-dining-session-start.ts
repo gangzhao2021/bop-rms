@@ -24,6 +24,9 @@ export function createMerchantDiningSessionStart(options: {
   const unavailable = (): never => {
     throw new Error("DINING_SESSION_START_UNAVAILABLE");
   };
+  const denied = (): never => {
+    throw new Error("DINING_SESSION_START_DENIED");
+  };
   return async (input: { sessionCookie: unknown; csrf: unknown; command: unknown }) => {
     const authenticated = await options.authentication.authorize(input);
     const command = readClosedRecord(input.command, [
@@ -48,11 +51,11 @@ export function createMerchantDiningSessionStart(options: {
               authenticated.sessionReference,
             );
             const permission = await current.authorizeAction("dining.operate");
-            if (permission?.effect !== "Allow") return unavailable();
+            if (permission?.effect !== "Allow") return denied();
             return { current, permission };
           },
           recheck: async ({ current }) => (await current.allowed()) === true,
-          denied: unavailable,
+          denied,
         },
         async (authority) => {
           const { current, permission } = authority.scope;

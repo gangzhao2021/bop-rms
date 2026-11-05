@@ -20,7 +20,9 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   safeRead,
   sameOriginMutation,
@@ -47,6 +49,7 @@ export function installMerchantStoreConfigurationRoutes(
   options: MerchantBffRouterOptions,
 ): void {
   const ordinaryFailure = (response: express.Response, error: unknown): void => {
+    noteFailure(response, error);
     // WP-2423 (v15 2026-10-16): approved alone while sole operator was off; withdraw it instead.
     if (error instanceof MerchantSoleOperatorBasisError) {
       response
@@ -231,7 +234,8 @@ export function installMerchantStoreConfigurationRoutes(
     let before: string;
     try {
       before = parseCatalogInstant(now.call(clock));
-    } catch {
+    } catch (error) {
+      noteFailure(response, error);
       ordinaryFailure(response, undefined);
       return;
     }
@@ -265,7 +269,8 @@ export function installMerchantStoreConfigurationRoutes(
               );
           } else if (view.original !== null) throw new Error("unexpected original response");
           response.json(view);
-        } catch {
+        } catch (error) {
+          noteFailure(response, error);
           ordinaryFailure(response, undefined);
         }
       })
@@ -350,7 +355,8 @@ export function installMerchantStoreConfigurationRoutes(
         let origin: string;
         try {
           origin = parseCanonicalInstant(now.call(clock));
-        } catch {
+        } catch (error) {
+          noteFailure(response, error);
           ordinaryFailure(response, undefined);
           return;
         }
@@ -439,7 +445,7 @@ export function installMerchantStoreConfigurationRoutes(
                 csrf,
               }),
             )
-            .catch(() => denied(response));
+            .catch((error: unknown) => failed(response, error));
           return;
         }
         const withMode =
@@ -465,7 +471,8 @@ export function installMerchantStoreConfigurationRoutes(
         let before: string;
         try {
           before = parseCatalogInstant(now.call(clock));
-        } catch {
+        } catch (error) {
+          noteFailure(response, error);
           ordinaryFailure(response, undefined);
           return;
         }
@@ -491,7 +498,8 @@ export function installMerchantStoreConfigurationRoutes(
               if (at < before || receipt.occurredAt > String(at))
                 throw new Error("future ordinary response");
               response.json(receipt);
-            } catch {
+            } catch (error) {
+              noteFailure(response, error);
               ordinaryFailure(response, undefined);
             }
           })
@@ -526,7 +534,7 @@ export function installMerchantStoreConfigurationRoutes(
     void options
       .storeConfigurationState(sessionCookie)
       .then((state) => response.json(state))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post("/store-configuration", sameOriginMutation(options), (request, response) => {
@@ -594,7 +602,7 @@ export function installMerchantStoreConfigurationRoutes(
           (error instanceof Error && error.message === "STORE_CONFIGURATION_REFERENCE_INVALID")
         )
           response.status(422).json({ error: "store_configuration_rejected" });
-        else denied(response);
+        else failed(response, error);
       });
   });
 
@@ -640,6 +648,7 @@ export function installMerchantStoreConfigurationRoutes(
           response.json({ status: result.status, kind: result.kind, setupHoursRestored });
         })
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (transactionConflictRetryLater(response, error)) return;
           if (!(error instanceof MerchantStoreConfigurationWithdrawalError)) {
             response.status(503).json({ error: "store_configuration_unavailable" });
@@ -649,7 +658,8 @@ export function installMerchantStoreConfigurationRoutes(
             response.status(400).json({ error: "store_configuration_withdrawal_invalid" });
           else if (error.code === "Conflict")
             response.status(409).json({ error: "store_configuration_conflict" });
-          else denied(response);
+          else if (error.code === "Denied") denied(response);
+          else failed(response, error);
         });
     },
   );
@@ -699,7 +709,7 @@ export function installMerchantStoreConfigurationRoutes(
             code === "STORE_CONFIGURATION_REFERENCE_INVALID"
           )
             response.status(422).json({ error: "store_configuration_rejected" });
-          else denied(response);
+          else failed(response, error);
         });
     },
   );

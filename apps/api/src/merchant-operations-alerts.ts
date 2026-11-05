@@ -1,6 +1,7 @@
 import { parseCanonicalInstant } from "@bop/tenant";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause } from "./merchant-failure.js";
 
 /**
  * WP-2423 Q13 (DEC-PILOT-ALERTS-BACKUP): the operations alert read for the merchant Home.
@@ -242,8 +243,8 @@ export function createPersistentMerchantOperationsAlerts(options: {
     let board: unknown;
     try {
       board = await options.readBoard();
-    } catch {
-      return unavailable();
+    } catch (cause) {
+      return keepingCause(unavailable)(cause);
     }
     return projectOperationsAlertBoard(board, persistence.now());
   };

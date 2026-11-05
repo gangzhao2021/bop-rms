@@ -21,6 +21,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import { readDiningTableBill, scopeOf } from "./merchant-dining-table-checkout.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 export type MerchantDiningTeaChargeErrorCode =
   | "DINING_TEA_CHARGE_INPUT_INVALID"
@@ -126,8 +127,8 @@ export function createMerchantDiningTeaCharge(options: {
         {
           transaction: tx,
           resolve: async () => {
-            const current = await resolve(tx, sessionCookie, "dining.operate").catch(() =>
-              fail("DINING_TEA_CHARGE_PERMISSION_DENIED"),
+            const current = await resolve(tx, sessionCookie, "dining.operate").catch(
+              onlyRefusal(() => fail("DINING_TEA_CHARGE_PERMISSION_DENIED")),
             );
             if ((await current.allowed()) !== true)
               return fail("DINING_TEA_CHARGE_PERMISSION_DENIED");
@@ -335,8 +336,8 @@ export function createMerchantDiningTeaCharge(options: {
             {
               transaction: tx,
               resolve: async () => {
-                const current = await resolve(tx, input.sessionCookie, "dining.operate").catch(() =>
-                  fail("DINING_TEA_CHARGE_PERMISSION_DENIED"),
+                const current = await resolve(tx, input.sessionCookie, "dining.operate").catch(
+                  onlyRefusal(() => fail("DINING_TEA_CHARGE_PERMISSION_DENIED")),
                 );
                 if ((await current.allowed()) !== true)
                   return fail("DINING_TEA_CHARGE_PERMISSION_DENIED");

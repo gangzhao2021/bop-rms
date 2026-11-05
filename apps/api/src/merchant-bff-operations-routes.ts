@@ -5,6 +5,7 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
   NO_STORE,
   rawHeaderValues,
   safeRead,
@@ -76,7 +77,7 @@ export function installMerchantOperationsRoutes(
           })),
         });
       })
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   // WP-2423 Q13: operations alerts (system down, backups, certificate, disk) for the Home.
@@ -103,7 +104,7 @@ export function installMerchantOperationsRoutes(
     void options
       .operationsAlerts({ sessionCookie })
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   // WP-2423 Q21: "today" for this Store — its business day, not the calendar day.
@@ -140,7 +141,7 @@ export function installMerchantOperationsRoutes(
           closedToday: day.closedToday ?? false,
         }),
       )
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.get("/service-control", safeRead(options), (request, response) => {
@@ -163,7 +164,7 @@ export function installMerchantOperationsRoutes(
     void options
       .serviceControlState(sessionCookie)
       .then((state) => response.json(state))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
 
   router.post("/service-control", sameOriginMutation(options), (request, response) => {
@@ -190,7 +191,7 @@ export function installMerchantOperationsRoutes(
           )
         )
           response.status(409).json({ error: "service_control_conflict" });
-        else denied(response);
+        else failed(response, error);
       });
   });
 }

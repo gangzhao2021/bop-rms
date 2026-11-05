@@ -138,7 +138,6 @@ function staffEvidence(
     String(context.brand.brandReference) !== table.brandReference ||
     String(context.store?.storeReference) !== table.storeReference ||
     table.tableReference !== expected.tableReference ||
-    table.assignmentVersion !== expected.assignmentVersion ||
     table.observedAt !== expected.observedAt ||
     audit.brandId !== table.brandReference ||
     audit.storeId !== table.storeReference ||
@@ -151,6 +150,9 @@ function staffEvidence(
   ) {
     throw new DiningSessionError("DINING_SESSION_PERMISSION_DENIED");
   }
+  // WP-2423 item 10: the table moved on since the screen read it: a stale screen, not a refusal.
+  if (table.assignmentVersion !== expected.assignmentVersion)
+    throw new DiningSessionError("DINING_SESSION_VERSION_CONFLICT");
   return Object.freeze({
     actorReference: parseDiningReference(actorReference),
     table,

@@ -95,5 +95,5 @@ it("does not return a directory after final authorization is revoked", async () 
     f.allowed.mockResolvedValue(false);
     return true;
   });
-  await expect(f.read(f.input)).rejects.toThrow("RECONCILIATION_ASSIGNEES_UNAVAILABLE");
+  await expect(f.read(f.input)).rejects.toThrow("RECONCILIATION_ASSIGNEES_DENIED");
 });

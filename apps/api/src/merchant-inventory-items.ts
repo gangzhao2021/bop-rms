@@ -13,6 +13,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423: Section 60.14 / 88 INV-ITEM-LIST, INV-ITEM-DETAIL, INV-ITEM-CREATE and INV-ITEM-EDIT for
@@ -210,7 +211,7 @@ export function createMerchantInventoryItems(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   type Scope = Awaited<ReturnType<typeof resolveScope>>;
   type Decision = Awaited<ReturnType<Scope["authorizeAction"]>>;
   const denied = () => fail("PermissionDenied");

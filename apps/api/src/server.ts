@@ -322,8 +322,22 @@ export function createApiServerRuntime({
       Object.keys(tls).sort().join(",") !== "cert,key")
   )
     throw new Error("API_TLS_CONFIGURATION_INVALID");
-  const configuredMerchant =
+  const composedMerchant =
     merchantRuntime === undefined ? merchantBff : createMerchantRuntime(merchantRuntime);
+  // WP-2423 item 10: a merchant request that failed for a reason that is not a refusal is logged.
+  const configuredMerchant =
+    composedMerchant === undefined
+      ? undefined
+      : {
+          onUnexpectedFailure: (_route: string, error: unknown) => {
+            logger.error({
+              event: "merchant_request_unexpected",
+              error: { code: "INTERNAL_ERROR", value: error },
+              resultCode: "INTERNAL_ERROR",
+            });
+          },
+          ...composedMerchant,
+        };
   const configuredBrand =
     brandCognitoAdministrationRuntime !== undefined
       ? createCognitoMerchantBrandAdministrationRuntime(brandCognitoAdministrationRuntime)

@@ -97,7 +97,8 @@ export function createMerchantBusinessDayWindows(options: {
       const priorAt = new Date(Date.parse(current.startsAt) - 1).toISOString();
       // v15 2026-11-01: a Store whose first configuration took effect today has no closed day
       // yet; its last day is today's, still open (store 2's owner was refused Settlement).
-      if ((await options.authorize(tx)) !== true) return unavailable();
+      if ((await options.authorize(tx)) !== true)
+        throw new Error("MERCHANT_BUSINESS_DAY_WINDOW_DENIED");
       const first = await readStoreFirstConfigurationEffectiveFrom(tx, scope);
       if (first === null || priorAt < first)
         return {

@@ -13,6 +13,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { isMerchantRefusal } from "./merchant-failure.js";
 
 /** Why the step-up is made; recorded as evidence, never a grant by itself. */
 const purposes = {
@@ -133,6 +134,7 @@ export function createMerchantMfaStepUp(options: {
       if (error instanceof MerchantStepUpError) throw error;
       if (error instanceof WorkforceStepUpError && error.code === "WORKFORCE_STEP_UP_UNAVAILABLE")
         throw new MerchantStepUpError("NotSetUp");
+      if (!isMerchantRefusal(error)) throw error;
       throw new MerchantStepUpError("Denied");
     }
   };

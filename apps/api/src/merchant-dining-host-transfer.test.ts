@@ -113,7 +113,7 @@ it.each([
   const f = setup();
   await expect(
     f.transfer({ ...f.input, command: { ...f.input.command, ...extra } }),
-  ).rejects.toThrow("DINING_HOST_TRANSFER_UNAVAILABLE");
+  ).rejects.toMatchObject({ code: "IDENTITY_INPUT_INVALID" });
   expect(m.transfer).not.toHaveBeenCalled();
 });
 it("does not access owner store when permission denied", async () => {
@@ -176,7 +176,7 @@ it("WP-2423: resolves the caller in full twice; the owner callback takes the run
 it("WP-2423: a permission withdrawn during the transfer is refused inside the transaction", async () => {
   const f = setup();
   f.allowed.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-  await expect(f.transfer(f.input)).rejects.toThrow("DINING_HOST_TRANSFER_UNAVAILABLE");
+  await expect(f.transfer(f.input)).rejects.toThrow("DINING_HOST_TRANSFER_DENIED");
   expect(m.transfer).toHaveBeenCalledOnce();
   expect(f.allowed).toHaveBeenCalledTimes(2);
   expect(f.rolledBack()).toBe(true);

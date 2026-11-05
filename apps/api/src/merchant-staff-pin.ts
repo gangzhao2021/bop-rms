@@ -32,6 +32,7 @@ import { createStaffLabels, distinctStaffLabels } from "./merchant-staff-labels.
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { isMerchantRefusal, keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 Q18 option A (DEC-STAFF-SESSION-CONTINUITY section 5, Owner 2026-10-14): staff switch on
@@ -196,13 +197,14 @@ export function createMerchantStaffPin(options: {
     let scope: Awaited<ReturnType<typeof resolve>>;
     try {
       scope = await resolve(tx, sessionCookie, action, expectedSession);
-    } catch {
+    } catch (error) {
+      if (!isMerchantRefusal(error)) throw error;
       return fail("Denied");
     }
     return scope;
   }
   const may = async (scope: Awaited<ReturnType<typeof scopeFor>>, action: string) =>
-    (await scope.authorizeAction(action).catch(() => null))?.effect === "Allow";
+    (await scope.authorizeAction(action).catch(onlyRefusal(() => null)))?.effect === "Allow";
   const where = (scope: Awaited<ReturnType<typeof scopeFor>>) => ({
     brandReference: String(scope.context.brand.brandReference),
     storeReference: String(scope.store.storeReference),
@@ -241,7 +243,7 @@ export function createMerchantStaffPin(options: {
   const authorize = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("Denied"));
+      .catch(onlyRefusal(() => fail("Denied")));
 
   type SignedInSession = Pick<AuthenticationSession, "sessionReference" | "actor" | "createdAt">;
   async function endTabletPinSessions(
@@ -470,7 +472,7 @@ export function createMerchantStaffPin(options: {
             policy,
           );
         })
-        .catch(() => fail("Unavailable"));
+        .catch(keepingCause(() => fail("Unavailable")));
       return Object.freeze({ status: "SignedIn" as const, sessionCookie: issued.sessionCookie });
     },
 

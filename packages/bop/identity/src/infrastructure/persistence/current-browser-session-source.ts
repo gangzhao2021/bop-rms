@@ -8,6 +8,7 @@ import {
 import {
   BrowserSessionError,
   createBrowserSessionRecord,
+  isBrowserSessionReadFailure,
   type BrowserSessionRecord,
   parseRawBrowserCredential,
   parseSelectorHash,
@@ -349,7 +350,9 @@ function source(options: Options, workforce?: WorkforceOptions, byRecord = false
         return result;
       }
       return session;
-    } catch {
+    } catch (error) {
+      // WP-2423 item 10: what could not be read is not a refusal.
+      if (isBrowserSessionReadFailure(error)) throw error;
       return denied();
     }
   };

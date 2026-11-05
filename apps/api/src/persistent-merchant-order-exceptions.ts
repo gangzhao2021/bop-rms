@@ -59,6 +59,9 @@ export function createPersistentMerchantOrderExceptions(options: {
     const unavailable = (): never => {
       throw new Error("MERCHANT_ORDER_EXCEPTION_UNAVAILABLE");
     };
+    const denied = (): never => {
+      throw new Error("MERCHANT_ORDER_EXCEPTION_DENIED");
+    };
     type Resolved = Awaited<ReturnType<typeof resolve>>;
     /** Each running transaction's authorized run (resolved in full at its start). */
     const runs = new Map<ConsumerTransaction, MerchantTransactionAuthority<Resolved>>();
@@ -109,14 +112,14 @@ export function createPersistentMerchantOrderExceptions(options: {
               transaction: tx,
               resolve: async () => {
                 const value = await resolve(original, cookie, "operations.order-exception.manage");
-                if (!(await value.allowed())) return unavailable();
+                if (!(await value.allowed())) return denied();
                 return value;
               },
               recheck: async (value) => {
                 const again = await resolve(original, cookie, "operations.order-exception.manage");
                 return matches(scopeOf(again), scopeOf(value)) && (await again.allowed()) === true;
               },
-              denied: unavailable,
+              denied,
             },
             async (run) => {
               runs.set(tx, run);
@@ -174,7 +177,9 @@ export function createPersistentMerchantOrderExceptions(options: {
         });
         const references = sources.map((source) => source.sourceReference);
         const ownRefusal = (error: unknown) =>
-          error instanceof Error && error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE";
+          error instanceof Error &&
+          (error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE" ||
+            error.message === "MERCHANT_ORDER_EXCEPTION_DENIED");
         let details: ReadonlyMap<string, PaymentReconciliationExceptionDetail>;
         try {
           details = await reader(tx, references);
@@ -215,7 +220,11 @@ export function createPersistentMerchantOrderExceptions(options: {
               ? businessDate
               : null;
           } catch (error) {
-            if (error instanceof Error && error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE")
+            if (
+              error instanceof Error &&
+              (error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE" ||
+                error.message === "MERCHANT_ORDER_EXCEPTION_DENIED")
+            )
               throw error;
             return null;
           }
@@ -272,7 +281,9 @@ export function createPersistentMerchantOrderExceptions(options: {
           authorize: async (t) => t === tx && matches(await authorize(t), scope),
         });
         const ownRefusal = (error: unknown) =>
-          error instanceof Error && error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE";
+          error instanceof Error &&
+          (error.message === "MERCHANT_ORDER_EXCEPTION_UNAVAILABLE" ||
+            error.message === "MERCHANT_ORDER_EXCEPTION_DENIED");
         const due = new Map<string, string>();
         let today: Awaited<ReturnType<typeof days.dayOf>>;
         try {

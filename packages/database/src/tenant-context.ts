@@ -55,6 +55,13 @@ const connectionLossCodes: ReadonlySet<string> = new Set([
   "EPIPE",
   "ETIMEDOUT",
 ]);
+/**
+ * PostgreSQL names the table of a missing grant or a refused row only in its message, whose text is
+ * fixed by the server: "permission denied for table x", "new row violates row-level security policy
+ * for table "x"". Only that identifier is read from it; a message in any other shape gives nothing.
+ */
+const refusedTableMessage =
+  /^(?:permission denied for (?:table|relation|view|sequence|schema) |new row violates row-level security policy for table ")([a-z_][a-z0-9_]{0,62})"?$/u;
 /** Extract only safe identifiers from a driver error. */
 export function tenantContextDatabaseDiagnostic(
   error: unknown,
@@ -72,7 +79,9 @@ export function tenantContextDatabaseDiagnostic(
   return Object.freeze({
     sqlState: pick("code", state) ?? (connectionLost ? "08006" : null),
     constraint: pick("constraint", identifier),
-    table: pick("table", identifier),
+    table:
+      pick("table", identifier) ??
+      (typeof message === "string" ? (refusedTableMessage.exec(message)?.[1] ?? null) : null),
     closed,
   });
 }

@@ -119,6 +119,7 @@ import { createMerchantOptionSets } from "../../apps/api/dist/merchant-option-se
 import { createMerchantCombos } from "../../apps/api/dist/merchant-combos.js";
 import { createMerchantComboPartCommands } from "../../apps/api/dist/merchant-combo-part-commands.js";
 import { logUnexpected, reportUnexpected } from "./pilot-merchant-pickup.mjs";
+import { refusalsStayReal } from "../../apps/api/dist/merchant-failure.js";
 import { createMerchantOptionPrices } from "../../apps/api/dist/merchant-option-prices.js";
 import { createMerchantOptionRecipes } from "../../apps/api/dist/merchant-option-recipes.js";
 import { createMerchantStoreTax } from "../../apps/api/dist/merchant-store-tax.js";
@@ -174,7 +175,7 @@ import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.m
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 import { matchesPilotEnvironment, pilotProviderEnvironment } from "./pilot-environment.mjs";
 export async function createInternalMerchant(
-  resources,
+  servedResources,
   {
     createInternalRefundReconciliation,
     createInternalRefundSend,
@@ -209,8 +210,16 @@ export async function createInternalMerchant(
     productImageDirectory,
     // DEC-PILOT-MAINTENANCE-PAGE / Tls: the Store's customer origin from hosting.json.
     publicOrigin = INTERNAL_CUSTOMER_ORIGIN,
+    // WP-2423 item 10: where a merchant request's unexpected failure is reported.
+    onUnexpectedFailure,
   },
 ) {
+  // WP-2423 item 10: once, for everything this merchant runs: a refusal thrown out of a transaction
+  // after one of its queries failed is that failure, whatever an inner catch block made of it.
+  const resources =
+    servedResources.transactions === undefined
+      ? servedResources
+      : { ...servedResources, transactions: refusalsStayReal(servedResources.transactions) };
   const session = await createInternalMerchantSession(resources);
   const selected = {
     tenantReference: resources.publicProfile.binding.tenantReference,
@@ -1428,6 +1437,7 @@ export async function createInternalMerchant(
     pickupIdentityCheck,
     orderAcceptance,
     bff: {
+      ...(onUnexpectedFailure === undefined ? {} : { onUnexpectedFailure }),
       // WP-2423 Q18: TEST-ONLY staff sign-in page of the InternalTest pilot, labelled as test
       // sign-in for staff; with Cognito (DEC-COGNITO-STORE-STAFF) the staff sign-in page.
       signInEntry: session.signInEntry ?? { path: "/internal-test/staff", testOnly: true },

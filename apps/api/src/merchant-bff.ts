@@ -1,6 +1,6 @@
 import express, { type RequestHandler, type Router } from "express";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
-import { exactHeader, NO_STORE } from "./merchant-bff-http.js";
+import { exactHeader, NO_STORE, reportFailure } from "./merchant-bff-http.js";
 import {
   installMerchantStaffPinRoutes,
   staffPinFullSignInGate,
@@ -53,8 +53,34 @@ function trustedHost(options: MerchantBffRouterOptions): RequestHandler {
   };
 }
 
+/**
+ * WP-2423 item 10: who hears about a failed request, for every route in one place. No route needs
+ * a name or `options` to report: the route's own template comes from the request. As the answer is
+ * written, a 5xx nobody reported is reported, with the failure the route noted when it did
+ * (`noteFailure`), so no 5xx is ever silent, including a future route that forgets.
+ */
+function failureReporting(options: MerchantBffRouterOptions): RequestHandler {
+  return (_request, response, next) => {
+    response.locals.reportFailure = (error: unknown) => {
+      const route: unknown = (response.req.route as { path?: unknown } | undefined)?.path;
+      options.onUnexpectedFailure?.(typeof route === "string" ? route : "", error);
+    };
+    const end = response.end;
+    response.end = function (this: typeof response, ...args: Parameters<typeof end>) {
+      if (response.statusCode >= 500 && response.locals.failureReported !== true)
+        reportFailure(
+          response,
+          response.locals.failure ?? new Error("MERCHANT_BFF_UNREPORTED_FAILURE"),
+        );
+      return Reflect.apply(end, this, args);
+    } as typeof end;
+    next();
+  };
+}
+
 export function createMerchantBffRouter(options: MerchantBffRouterOptions): Router {
   const router = express.Router();
+  router.use(failureReporting(options));
   installMerchantBffBodyParsers(router, options);
   router.use(trustedHost(options));
   router.use((_request, response, next) => {

@@ -33,6 +33,7 @@ import {
 } from "./merchant-counter-order.js";
 import type { DiningPayLaterRound } from "./dining-pay-later-round.js";
 import { readStaffDiningRoundPaymentPreparation } from "./staff-dining-round-payment-preparation.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): entering a round for a table on behalf of its
@@ -397,7 +398,7 @@ export function createMerchantStaffDiningRound(options: {
                 input.sessionCookie,
                 staffDiningRoundPermission,
                 session.sessionReference,
-              ).catch(() => fail("STAFF_ROUND_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("STAFF_ROUND_PERMISSION_DENIED")));
               // WP-2423 (46940b76 L6): both permissions from one current-fact read (Session,
               // selection, membership, store assignment, permission policy), not two full ones.
               const decisions = await resolved.authorizeActions([

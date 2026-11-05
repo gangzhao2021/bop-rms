@@ -17,6 +17,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 item 8 ① segment 2 (Owner decision 2, DEC-TABLES-SERVER-MAIN): a manager comps or
@@ -147,7 +148,7 @@ export function createMerchantDiningItemComp(options: {
                 input.sessionCookie,
                 orderPriceReductionPermission,
                 session.sessionReference,
-              ).catch(() => fail("ITEM_COMP_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("ITEM_COMP_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true) return fail("ITEM_COMP_PERMISSION_DENIED");
               return current;
             },

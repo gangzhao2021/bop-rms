@@ -5,7 +5,9 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   refundReadFailure,
   safeRead,
@@ -297,6 +299,7 @@ export function installMerchantOrderRoutes(
         });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof CounterMenuError && error.code === "COUNTER_MENU_UNAVAILABLE") {
           response
             .status(503)
@@ -304,7 +307,7 @@ export function installMerchantOrderRoutes(
             .json({ error: "counter_menu_unavailable" });
           return;
         }
-        denied(response);
+        failed(response, error);
       });
   });
   const mutation = (
@@ -351,8 +354,9 @@ export function installMerchantOrderRoutes(
         });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof CounterOrderError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const [status, code] = (
@@ -419,8 +423,9 @@ export function installMerchantOrderRoutes(
         });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof StaffDiningRoundError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const [status, code] = (
@@ -496,8 +501,9 @@ export function installMerchantOrderRoutes(
         });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof CardMachinePaymentCommandError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const [status, code] = (
@@ -544,8 +550,9 @@ export function installMerchantOrderRoutes(
         });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof CardMachineRefundCommandError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const [status, code] = (
@@ -565,6 +572,7 @@ export function installMerchantOrderRoutes(
   // WP-2423 DEC-DINE-IN-PAY-LATER: a table's one payment (Orders page), and cash given back from a
   // cash payment by a manager (PIN-confirmed).
   const tablePaymentFailure = (response: ExpressResponse, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof TablePaymentError) || error.code === "TABLE_PAYMENT_UNAVAILABLE") {
       response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
       return;
@@ -650,6 +658,7 @@ export function installMerchantOrderRoutes(
       .unpaidItemRemoval({ ...auth, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (
           !(error instanceof UnpaidItemRemovalError) ||
           error.code === "UNPAID_ITEM_REMOVAL_UNAVAILABLE"
@@ -679,6 +688,7 @@ export function installMerchantOrderRoutes(
       .itemComp({ ...auth, command: request.body })
       .then((result) => response.set("Cache-Control", NO_STORE).json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof ItemCompError) || error.code === "ITEM_COMP_UNAVAILABLE") {
           response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
           return;
@@ -709,6 +719,7 @@ export function installMerchantOrderRoutes(
         .orderUnpaidDeparture({ ...auth, command: request.body })
         .then((result) => response.set("Cache-Control", NO_STORE).json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (!(error instanceof UnpaidDepartureError)) {
             response.status(503).set("Cache-Control", NO_STORE).json({ error: "unavailable" });
             return;
@@ -759,8 +770,9 @@ export function installMerchantOrderRoutes(
           });
         })
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (!(error instanceof CardMachineRefundCommandError)) {
-            denied(response);
+            failed(response, error);
             return;
           }
           const [status, code] = (
@@ -809,8 +821,9 @@ export function installMerchantOrderRoutes(
           });
         })
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (!(error instanceof AcceptanceHoldRefundError)) {
-            denied(response);
+            failed(response, error);
             return;
           }
           const [status, code] = (
@@ -829,8 +842,9 @@ export function installMerchantOrderRoutes(
     },
   );
   const staffCancellationError = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof StaffOrderCancellationError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     const [status, code] = (
@@ -877,9 +891,7 @@ export function installMerchantOrderRoutes(
         options.onOrderQueueRowsUnreadable?.(body.count as number, body.kinds as readonly string[]);
         response.status(204).set("Cache-Control", NO_STORE).end();
       })
-      .catch(() => {
-        denied(response);
-      });
+      .catch((error: unknown) => failed(response, error));
   });
   // WP-2423 Q6: staff cancel a paid order or batch before the kitchen starts it; refunded in full.
   router.post("/orders/cancel", sameOriginMutation(options), (request, response) => {
@@ -1112,8 +1124,9 @@ export function installMerchantOrderRoutes(
         response.json({ status: result.status, cancelledAt: result.cancelledAt });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof UnpaidRoundCancellationError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const [status, code] = (
@@ -1156,8 +1169,9 @@ export function installMerchantOrderRoutes(
         response.json({ status: result.status });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (!(error instanceof EndedOrderStockReleaseError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const [status, code] = (
@@ -1175,8 +1189,9 @@ export function installMerchantOrderRoutes(
   // WP-2423 Q6 step 2a: staff cancel item lines before the kitchen starts them; those items'
   // net and tax are refunded (the last remaining lines cancel the whole order or batch).
   const itemCancellationError = (response: express.Response, error: unknown) => {
+    noteFailure(response, error);
     if (!(error instanceof StaffItemCancellationError)) {
-      denied(response);
+      failed(response, error);
       return;
     }
     const [status, code] = (
@@ -1257,7 +1272,7 @@ export function installMerchantOrderRoutes(
           !Number.isSafeInteger(result.closureVersion) ||
           result.closureVersion < 1
         ) {
-          denied(response);
+          failed(response, new Error("MERCHANT_BFF_RESULT_INVALID"));
           return;
         }
         response.json({
@@ -1267,6 +1282,7 @@ export function installMerchantOrderRoutes(
         });
       })
       .catch((error: unknown) => {
+        noteFailure(response, error);
         // WP-2423 (B759): only a missing permission is a 403; an Order that is not ready, changed
         // or already closed is a 409 naming why, and a failure to decide is a 503.
         if (!(error instanceof OrderCloseCommandError)) {
@@ -1326,7 +1342,7 @@ export function installMerchantOrderRoutes(
         // (the order changed, someone accepted it already, or it can no longer be accepted), not a
         // permission refusal.
         if (!(error instanceof MerchantOrderAcceptanceError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         response

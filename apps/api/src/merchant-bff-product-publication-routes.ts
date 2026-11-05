@@ -3,6 +3,8 @@ import {
   cookie,
   denied,
   exactHeader,
+  failed,
+  noteFailure,
   rawHeaderValues,
   sameOriginMutation,
 } from "./merchant-bff-http.js";
@@ -35,7 +37,8 @@ export function installMerchantProductPublicationRoutes(
     void options
       .storeCapability({ sessionCookie, csrf, query: request.body })
       .then((decision) => response.json(decision))
-      .catch(() => {
+      .catch((error: unknown) => {
+        noteFailure(response, error);
         response.status(503).json({ error: "store_capability_unavailable" });
       });
   });
@@ -72,6 +75,7 @@ export function installMerchantProductPublicationRoutes(
         .productPublicationManagement({ sessionCookie, csrf, query: request.body, expectedScope })
         .then((view) => response.json(view))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const status =
             error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID"
               ? 400
@@ -122,6 +126,7 @@ export function installMerchantProductPublicationRoutes(
         .productPublicationManagementV2({ sessionCookie, csrf, query: request.body, expectedScope })
         .then((view) => response.json(view))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const status =
             error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID"
               ? 400
@@ -177,6 +182,7 @@ export function installMerchantProductPublicationRoutes(
         })
         .then((view) => response.json(view))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const status =
             error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID"
               ? 400
@@ -227,6 +233,7 @@ export function installMerchantProductPublicationRoutes(
         .productPublicationResolution({ sessionCookie, csrf, command: request.body, expectedScope })
         .then((result) => response.json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const status =
             error instanceof MerchantProductWriteFeatureDisabled
               ? 409
@@ -288,6 +295,7 @@ export function installMerchantProductPublicationRoutes(
         .productAuthoringResolution({ sessionCookie, csrf, command: request.body, expectedScope })
         .then((result) => response.json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const status =
             error instanceof MerchantProductWriteFeatureDisabled
               ? 409
@@ -356,6 +364,7 @@ export function installMerchantProductPublicationRoutes(
         })
         .then((result) => response.json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const status =
             error instanceof MerchantProductWriteFeatureDisabled
               ? 409
@@ -417,12 +426,13 @@ export function installMerchantProductPublicationRoutes(
         .productPublicationV2({ sessionCookie, csrf, command: request.body, expectedScope })
         .then((result) => response.json(result))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           if (error instanceof MerchantProductWriteFeatureDisabled) {
             response.status(409).json({ error: "product_publication_feature_disabled" });
             return;
           }
           if (!(error instanceof CatalogError)) {
-            denied(response);
+            failed(response, error);
             return;
           }
           const status =
@@ -483,6 +493,7 @@ export function installMerchantProductPublicationRoutes(
         .productScopeJournals({ sessionCookie, csrf, query: request.body, expectedScope })
         .then((view) => response.json(view))
         .catch((error: unknown) => {
+          noteFailure(response, error);
           const status =
             error instanceof CatalogError && error.code === "CATALOG_INPUT_INVALID"
               ? 400
@@ -532,7 +543,8 @@ export function installMerchantProductPublicationRoutes(
       void options
         .productPublicationQuery({ sessionCookie, csrf, query: request.body, expectedScope })
         .then((view) => response.json(view))
-        .catch(() => {
+        .catch((error: unknown) => {
+          noteFailure(response, error);
           response.status(503).json({ error: "product_publication_unavailable" });
         });
     },
@@ -567,12 +579,13 @@ export function installMerchantProductPublicationRoutes(
       .productPublication({ sessionCookie, csrf, command: request.body, expectedScope })
       .then((result) => response.json(result))
       .catch((error: unknown) => {
+        noteFailure(response, error);
         if (error instanceof MerchantProductWriteFeatureDisabled) {
           response.status(409).json({ error: "product_publication_feature_disabled" });
           return;
         }
         if (!(error instanceof CatalogError)) {
-          denied(response);
+          failed(response, error);
           return;
         }
         const status =

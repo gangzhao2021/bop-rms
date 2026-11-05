@@ -14,8 +14,12 @@ export function createMerchantDiningJoinState(options: {
   credentials: DiningCredentialPort;
 }) {
   const resolve = createMerchantStoreScope(options.persistence),
+    // WP-2423 item 10: the party moved on since the table was shown; the screen reads it again.
     fail = (): never => {
-      throw new Error("DINING_JOIN_STATE_UNAVAILABLE");
+      throw new Error("DINING_JOIN_STATE_CHANGED");
+    },
+    denied = (): never => {
+      throw new Error("DINING_JOIN_STATE_DENIED");
     };
   return async (input: { sessionCookie: unknown; csrf: unknown; query: unknown }) => {
     const authenticated = await options.authentication.authorize(input),
@@ -29,7 +33,7 @@ export function createMerchantDiningJoinState(options: {
           authenticated.sessionReference,
         ),
         authorize = () => current.allowed();
-      if (!(await authorize())) return fail();
+      if (!(await authorize())) return denied();
       const scope = {
         tenantReference: current.selected.tenantReference,
         brandReference: current.context.brand.brandReference,
@@ -51,10 +55,10 @@ export function createMerchantDiningJoinState(options: {
         state.session.diningSessionReference !== reference ||
         state.session.version !== session.version ||
         state.session.tableReference !== session.tableReference ||
-        state.session.tableAssignmentVersion !== session.tableAssignmentVersion ||
-        !(await authorize())
+        state.session.tableAssignmentVersion !== session.tableAssignmentVersion
       )
         return fail();
+      if (!(await authorize())) return denied();
       return Object.freeze({
         diningSessionReference: reference,
         tableReference: session.tableReference,

@@ -20,6 +20,7 @@ import { derivedReference } from "./merchant-products.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 3a: the Brand's Owner opens another Store
@@ -90,14 +91,14 @@ export function createMerchantStoreOpening(options: {
   const mayOpen = async (input: { readonly sessionCookie: unknown; readonly csrf: unknown }) => {
     const session = await options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
     return retryTransactionConflict(() =>
       options.persistence.transactions.run(async (tx) => {
         const brand = await resolveBrandScope(
           tx,
           input.sessionCookie,
           session.sessionReference,
-        ).catch(() => null);
+        ).catch(onlyRefusal(() => null));
         return (
           brand !== null &&
           (await brand.authorizeAction(storeOpeningPermission))?.effect === "Allow"
@@ -113,7 +114,7 @@ export function createMerchantStoreOpening(options: {
     const command = parseMerchantStoreOpeningCommand(input.command);
     const session = await options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
     return retryTransactionConflict(() =>
       options.persistence.transactions.run(async (tx) => {
         const scope = await resolveScope(
@@ -121,13 +122,13 @@ export function createMerchantStoreOpening(options: {
           input.sessionCookie,
           "merchant.access",
           session.sessionReference,
-        ).catch(() => fail("PermissionDenied"));
+        ).catch(onlyRefusal(() => fail("PermissionDenied")));
         if (!(await scope.allowed())) fail("PermissionDenied");
         const brand = await resolveBrandScope(
           tx,
           input.sessionCookie,
           session.sessionReference,
-        ).catch(() => null);
+        ).catch(onlyRefusal(() => null));
         if (
           brand === null ||
           (await brand.authorizeAction(storeOpeningPermission))?.effect !== "Allow"

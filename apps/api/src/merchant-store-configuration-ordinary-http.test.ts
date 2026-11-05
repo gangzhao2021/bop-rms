@@ -198,7 +198,7 @@ async function serve(
     throw new Error("Unconfigured unrelated transport");
   };
   const authorize = vi.fn<MerchantBffService["authorize"]>(async (input) => {
-    if (denyCsrf || input.csrf !== csrf) throw new Error("Controlled CSRF denial");
+    if (denyCsrf || input.csrf !== csrf) throw new Error("BROWSER_SESSION_DENIED");
     return session;
   });
   const service: MerchantBffService = {

@@ -1,5 +1,5 @@
 import type { Router } from "express";
-import { cookie, denied, exactHeader, sameOriginMutation } from "./merchant-bff-http.js";
+import { cookie, denied, exactHeader, failed, sameOriginMutation } from "./merchant-bff-http.js";
 import { MerchantComboPartError } from "./merchant-combo-part-commands.js";
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 
@@ -42,7 +42,7 @@ export function installMerchantComboPartRoutes(
         .then((result) => response.json(result))
         .catch((error: unknown) => {
           if (!(error instanceof MerchantComboPartError)) {
-            denied(response);
+            failed(response, error);
             return;
           }
           response.status(status[error.code]).json({ error: error.code });

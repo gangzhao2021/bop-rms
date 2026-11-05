@@ -1,6 +1,10 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { describe, expect, it } from "vitest";
-import { TenantContextDatabaseError, withTenantContextTransaction } from "./tenant-context.js";
+import {
+  TenantContextDatabaseError,
+  tenantContextDatabaseDiagnostic,
+  withTenantContextTransaction,
+} from "./tenant-context.js";
 
 const BRAND = "018f3f7a-8b1c-7a11-8d01-000000000041";
 const STORE = "018f3f7a-8b1c-7a11-8d01-000000000042";
@@ -264,5 +268,43 @@ describe("transaction-local Tenant database context", () => {
     expect(rejected).toBe(true);
     expect(client.destroyed).toBe(true);
     expect(client.released).toBe(1);
+  });
+});
+
+describe("the safe diagnostic of a failed statement (WP-2423 item 10)", () => {
+  const failure = (fields: Record<string, unknown>, message = "text") =>
+    Object.assign(new Error(message), fields);
+
+  it("names the table of a missing grant or a refused row, which only the message holds", () => {
+    expect(
+      tenantContextDatabaseDiagnostic(
+        failure({ code: "42501" }, "permission denied for table product_publication_content"),
+      ),
+    ).toMatchObject({ sqlState: "42501", table: "product_publication_content" });
+    expect(
+      tenantContextDatabaseDiagnostic(
+        failure(
+          { code: "42501" },
+          'new row violates row-level security policy for table "membership"',
+        ),
+      ),
+    ).toMatchObject({ sqlState: "42501", table: "membership" });
+    expect(
+      tenantContextDatabaseDiagnostic(
+        failure({ code: "42501" }, "permission denied for schema rms_x"),
+      ).table,
+    ).toBe("rms_x");
+  });
+
+  it("reads nothing else from a message", () => {
+    for (const message of [
+      "permission denied for table a; guest Sam",
+      "permission denied for table Sam's",
+      "duplicate key value violates unique constraint",
+    ])
+      expect(tenantContextDatabaseDiagnostic(failure({ code: "42501" }, message)).table).toBeNull();
+    expect(
+      tenantContextDatabaseDiagnostic(failure({ code: "23514", table: "product" }, "x")).table,
+    ).toBe("product");
   });
 });

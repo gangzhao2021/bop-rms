@@ -46,6 +46,7 @@ import {
   tipRefusal,
   type StoreTipChoices,
 } from "./merchant-store-features.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's checkout. Staff read the table's bill (each
@@ -866,7 +867,7 @@ export function createMerchantDiningTableBillRead(options: {
               input.sessionCookie,
               diningTableCheckoutPermission,
               authenticated.sessionReference,
-            ).catch(() => fail("TABLE_CHECKOUT_PERMISSION_DENIED"));
+            ).catch(onlyRefusal(() => fail("TABLE_CHECKOUT_PERMISSION_DENIED")));
             if ((await current.allowed()) !== true) return fail("TABLE_CHECKOUT_PERMISSION_DENIED");
             return current;
           },
@@ -1010,7 +1011,7 @@ export function createMerchantDiningTableSettle(options: {
                 input.sessionCookie,
                 diningTableCheckoutPermission,
                 authenticated.sessionReference,
-              ).catch(() => fail("TABLE_CHECKOUT_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("TABLE_CHECKOUT_PERMISSION_DENIED")));
               const decisions = await current.authorizeActions([
                 diningTableCheckoutPermission,
                 staffDiningRoundPermission,
@@ -1305,7 +1306,7 @@ export function createMerchantDiningTableSplit(options: {
                 input.sessionCookie,
                 diningTableCheckoutPermission,
                 authenticated.sessionReference,
-              ).catch(() => fail("TABLE_CHECKOUT_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("TABLE_CHECKOUT_PERMISSION_DENIED")));
               const decisions = await current.authorizeActions([
                 diningTableCheckoutPermission,
                 staffDiningRoundPermission,

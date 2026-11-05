@@ -109,13 +109,13 @@ function brandOrganizationSource(
           createdAt: row.created_at,
           updatedAt: row.updated_at,
         });
-        if ((!administrative && result.lifecycle !== "Active") || result.updatedAt > observedAt)
-          return unavailable();
+        if (!administrative && result.lifecycle !== "Active") return notActive();
+        if (result.updatedAt > observedAt) return unavailable();
         check();
         return result;
-      } catch {
+      } catch (error) {
         failed = true;
-        return unavailable();
+        return unavailableBecause(error);
       } finally {
         active = false;
       }
@@ -124,6 +124,16 @@ function brandOrganizationSource(
 }
 const unavailable = (): never => {
   throw new Error("MERCHANT_ORGANIZATION_UNAVAILABLE");
+};
+/** WP-2423 item 10: a suspended or archived Brand or Store is a state, not an outage to wait out. */
+const notActiveCode = "MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED";
+const notActive = (): never => {
+  throw new Error(notActiveCode);
+};
+/** Keeps what really failed behind the owner's code, for the log; a refusal stays one. */
+const unavailableBecause = (cause: unknown): never => {
+  if (cause instanceof Error && cause.message === notActiveCode) throw cause;
+  throw new Error("MERCHANT_ORGANIZATION_UNAVAILABLE", { cause });
 };
 function one(result: unknown): Record<string, unknown> | null {
   if (!result || typeof result !== "object") return unavailable();
@@ -172,10 +182,11 @@ export function createPostgresMerchantOrganizationSource(
           createdAt: at(row.created_at),
           updatedAt: at(row.updated_at),
         });
-        if (result.lifecycle !== "Active" || result.updatedAt > observedAt) return unavailable();
+        if (result.lifecycle !== "Active") return notActive();
+        if (result.updatedAt > observedAt) return unavailable();
         return result;
-      } catch {
-        return unavailable();
+      } catch (error) {
+        return unavailableBecause(error);
       }
     },
     async getStore(reference) {
@@ -203,10 +214,11 @@ export function createPostgresMerchantOrganizationSource(
           createdAt: at(row.created_at),
           updatedAt: at(row.updated_at),
         });
-        if (result.lifecycle !== "Active" || result.updatedAt > observedAt) return unavailable();
+        if (result.lifecycle !== "Active") return notActive();
+        if (result.updatedAt > observedAt) return unavailable();
         return result;
-      } catch {
-        return unavailable();
+      } catch (error) {
+        return unavailableBecause(error);
       }
     },
   });

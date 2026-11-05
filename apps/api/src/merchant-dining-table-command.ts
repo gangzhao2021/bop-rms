@@ -32,7 +32,7 @@ export function createMerchantDiningTableCommand(options: {
       "reasonCode",
     ]);
     if (raw.action !== "SetBlock" && raw.action !== "ClearBlock")
-      throw new Error("DINING_TABLE_COMMAND_UNAVAILABLE");
+      throw new Error("DINING_TABLE_COMMAND_INPUT_INVALID");
     const action = raw.action;
     const tableReference = parseDiningReference(raw.tableReference);
     const operationReference = parseDiningReference(raw.operationReference);
@@ -40,14 +40,14 @@ export function createMerchantDiningTableCommand(options: {
       !Number.isSafeInteger(raw.expectedAggregateVersion) ||
       (raw.expectedAggregateVersion as number) < 1
     )
-      throw new Error("DINING_TABLE_COMMAND_UNAVAILABLE");
+      throw new Error("DINING_TABLE_COMMAND_INPUT_INVALID");
     const expectedAggregateVersion = raw.expectedAggregateVersion as number;
     const reasonCode = action === "SetBlock" ? parseDiningTableCode(raw.reasonCode) : null;
     if (action === "ClearBlock" && raw.reasonCode !== null)
-      throw new Error("DINING_TABLE_COMMAND_UNAVAILABLE");
+      throw new Error("DINING_TABLE_COMMAND_INPUT_INVALID");
 
     const denied = (): never => {
-      throw new Error("DINING_TABLE_COMMAND_UNAVAILABLE");
+      throw new Error("DINING_TABLE_COMMAND_DENIED");
     };
     // WP-2423: one authorized run. The caller and `dining.operate` are resolved in full once at the
     // start and once more before the commit (inside this transaction, so a withdrawn permission or
@@ -94,13 +94,14 @@ export function createMerchantDiningTableCommand(options: {
               (action === "SetBlock" && prior.table.blockReasonCode !== reasonCode) ||
               (action === "ClearBlock" && prior.table.blockReasonCode !== null)
             )
-              throw new Error("DINING_TABLE_COMMAND_UNAVAILABLE");
+              throw new Error("DINING_TABLE_COMMAND_CONFLICT");
             candidate = createDiningTable(prior.table);
             observedAt = candidate.observedAt;
           } else {
             const table = await store.loadTable(tableReference);
+            // Another server changed this table since it was shown.
             if (!table || table.aggregateVersion !== expectedAggregateVersion)
-              throw new Error("DINING_TABLE_COMMAND_UNAVAILABLE");
+              throw new Error("DINING_TABLE_COMMAND_CONFLICT");
             observedAt = current.context.resolvedAt;
             candidate = transitionDiningTable(
               table,

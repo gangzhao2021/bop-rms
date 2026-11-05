@@ -32,6 +32,7 @@ import type {
   createStaffStockShortageSource,
   StaffStockShortage,
 } from "./customer-menu-inventory-evidence.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 8.5: CAT-AVAILABILITY for the selected Store — which items this Store sells now. Offering
@@ -221,12 +222,12 @@ export function createMerchantAvailability(options: {
   const session = (input: { sessionCookie: unknown; csrf: unknown }) =>
     options.authentication
       .authorize({ sessionCookie: input.sessionCookie, csrf: input.csrf })
-      .catch(() => fail("PermissionDenied"));
+      .catch(onlyRefusal(() => fail("PermissionDenied")));
   const action = availabilityPermission;
   const markAction = soldOutMarkPermission;
   async function scopeFor(tx: Tx, sessionCookie: unknown, sessionReference: string) {
-    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(() =>
-      fail("PermissionDenied"),
+    const scope = await resolveScope(tx, sessionCookie, sessionReference).catch(
+      onlyRefusal(() => fail("PermissionDenied")),
     );
     const allow = <T extends { readonly effect: string } | null>(decision: T) =>
       decision?.effect === "Allow" ? decision : null;

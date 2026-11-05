@@ -264,7 +264,7 @@ export async function exerciseTaxConfigRuntimeHttp(context) {
         ? error.code
         : [
               "STORE_SERVICE_PERMISSION_DENIED",
-              "MERCHANT_SELECTED_CONTEXT_UNAVAILABLE",
+              "MERCHANT_SELECTED_CONTEXT_DENIED",
               "BRAND_SERVICE_PERMISSION_DENIED",
             ].includes(error?.message)
           ? error.message

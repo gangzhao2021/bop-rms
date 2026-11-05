@@ -16,6 +16,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+import { onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a table's one payment as the Orders page shows it (method,
@@ -182,7 +183,7 @@ export function createMerchantDiningTablePaymentRead(options: {
               input.sessionCookie,
               tablePaymentReadPermission,
               authenticated.sessionReference,
-            ).catch(() => fail("TABLE_PAYMENT_PERMISSION_DENIED"));
+            ).catch(onlyRefusal(() => fail("TABLE_PAYMENT_PERMISSION_DENIED")));
             if ((await current.allowed()) !== true) return fail("TABLE_PAYMENT_PERMISSION_DENIED");
             return current;
           },
@@ -284,7 +285,7 @@ export function createMerchantDiningTableCashRefund(options: {
                 input.sessionCookie,
                 tableCashRefundPermission,
                 authenticated.sessionReference,
-              ).catch(() => fail("TABLE_PAYMENT_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("TABLE_PAYMENT_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("TABLE_PAYMENT_PERMISSION_DENIED");
               return current;
@@ -441,7 +442,7 @@ export function createMerchantDiningTableOnlineRefund(options: {
                 input.sessionCookie,
                 tableCashRefundPermission,
                 authenticated.sessionReference,
-              ).catch(() => fail("TABLE_PAYMENT_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("TABLE_PAYMENT_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("TABLE_PAYMENT_PERMISSION_DENIED");
               return current;
@@ -618,7 +619,7 @@ export function createMerchantDiningTableCardRefund(options: {
                 input.sessionCookie,
                 tableCashRefundPermission,
                 authenticated.sessionReference,
-              ).catch(() => fail("TABLE_PAYMENT_PERMISSION_DENIED"));
+              ).catch(onlyRefusal(() => fail("TABLE_PAYMENT_PERMISSION_DENIED")));
               if ((await current.allowed()) !== true)
                 return fail("TABLE_PAYMENT_PERMISSION_DENIED");
               return current;
