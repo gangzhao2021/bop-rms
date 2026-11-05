@@ -97,6 +97,9 @@ export class MerchantMenuError extends Error {
       | "NotSingleStore",
     /** WP-2423 (v15 2026-10-22): for ReviewBlocked, what the review found missing, named. */
     readonly problem: MenuReviewProblem | null = null,
+    /** WP-2423 item 14: why a review stopped when staff can do nothing about it, for the log only
+     * (the code as raised and the failure behind it); it never reaches the page. */
+    readonly stoppedBy: { readonly reason: string; readonly cause: unknown } | null = null,
   ) {
     super(code);
     this.name = "MerchantMenuError";
@@ -104,8 +107,9 @@ export class MerchantMenuError extends Error {
 }
 /** A menu review gap in staff terms: names only, never references or internal codes. */
 export interface MenuReviewProblem {
-  /** "Stopped": nothing was named missing; `reason` says why it stopped (v15 2026-10-29).
-   * "Tax": an item is not taxed at one of the menu's Stores (listing gates, 2026-10-31).
+  /** "Stopped": nothing was named missing; `reason` says why it stopped, from a closed list
+   * (WP-2423 item 14; v15 2026-10-29). "Tax": an item is not taxed at one of the menu's Stores
+   * (listing gates, 2026-10-31).
    * "TooManyChoices": the item has more choice combinations than one review checks (WP-2423). */
   readonly missing:
     MenuReviewGap["missing"] | "Stopped" | "Tax" | "Kitchen" | "KitchenDish" | "TooManyChoices";
@@ -124,19 +128,48 @@ const fail = (code: MerchantMenuError["code"]): never => {
   throw new MerchantMenuError(code);
 };
 /**
- * v15 2026-10-29: a listing review refused with nothing named missing says why, as a short code
- * (never a reference), so staff can pass it on and the cause is found from the page.
+ * WP-2423 item 14: why a listing review stopped, as the page may name it: the causes staff can act
+ * on, in their own words there. Anything else is "Unexpected": staff are told to try again, and the
+ * code as raised goes to the log with the failure behind it (v15 2026-10-29 sent it to the page).
  */
-const stopped = (reason: string): never => {
-  throw new MerchantMenuError("ReviewBlocked", {
-    missing: "Stopped",
-    reason: reason.slice(0, 120),
+const namedStopReasons: ReadonlySet<string> = new Set([
+  "NoAllergenList",
+  "AllergenListChanged",
+  "AllergenEvidenceDiffers",
+  "NoAllergenEvidence",
+  "NoDraft",
+  "NotAuthorized",
+  "NoConfiguration",
+]);
+export function menuStopReason(reason: string): string {
+  const last = reason.split(":").at(-1) ?? "";
+  return namedStopReasons.has(last) ? last : "Unexpected";
+}
+const stoppedError = (
+  reason: string,
+  cause: unknown,
+  at: { readonly productName: string | null; readonly sizeName: string | null } = {
     productName: null,
     sizeName: null,
-    optionName: null,
-    quantity: null,
-    ingredientName: null,
-  });
+  },
+) => {
+  const named = menuStopReason(reason);
+  return new MerchantMenuError(
+    "ReviewBlocked",
+    {
+      missing: "Stopped",
+      reason: named,
+      productName: at.productName,
+      sizeName: at.sizeName,
+      optionName: null,
+      quantity: null,
+      ingredientName: null,
+    },
+    named === "Unexpected" ? { reason: reason.slice(0, 120), cause } : null,
+  );
+};
+const stopped = (reason: string, cause?: unknown): never => {
+  throw stoppedError(reason, cause);
 };
 /** Where an error was raised: the first source file and line past its `fail` helper. */
 export function throwSite(error: unknown): string {
@@ -548,6 +581,8 @@ export function createMerchantMenus(options: {
   locale: string;
   /** Test seam: the Brand scope resolver (defaults to the current session's Brand scope). */
   resolveScope?: ReturnType<typeof createMerchantBrandScope>;
+  /** WP-2423 item 14: a listing review stopped for a reason staff can't act on: log it. */
+  onUnexpectedStop?: (reason: string, cause: unknown) => void;
 }) {
   const resolveScope = options.resolveScope ?? createMerchantBrandScope(options.persistence);
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
@@ -1485,14 +1520,9 @@ export function createMerchantMenus(options: {
                 quantity: null,
                 ingredientReference: null,
               }).catch(() => null);
-        throw new MerchantMenuError("ReviewBlocked", {
-          missing: "Stopped",
-          reason: error.reason,
+        throw stoppedError(error.reason, error, {
           productName: at?.productName ?? null,
           sizeName: at?.sizeName ?? null,
-          optionName: null,
-          quantity: null,
-          ingredientName: null,
         });
       }
       if (error instanceof MenuReviewGapError)
@@ -1524,6 +1554,7 @@ export function createMerchantMenus(options: {
               (typeof (error as { rule?: unknown }).rule === "string"
                 ? ":" + String((error as { rule?: unknown }).rule)
                 : ""),
+            error,
           );
         if (error.code === "CATALOG_PERMISSION_DENIED" && body.action === "Approve")
           return fail("ApprovalRequired");
@@ -1532,5 +1563,13 @@ export function createMerchantMenus(options: {
       throw error;
     }
   };
-  return { query, command };
+  return {
+    query,
+    command: (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) =>
+      command(input).catch((error: unknown) => {
+        if (error instanceof MerchantMenuError && error.stoppedBy !== null)
+          options.onUnexpectedStop?.(error.stoppedBy.reason, error.stoppedBy.cause);
+        throw error;
+      }),
+  };
 }

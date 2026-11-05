@@ -95,6 +95,11 @@ export function reportUnexpected(event, error, context = {}) {
       ...(typeof context.step === "string" && /^[A-Za-z]{1,40}$/.test(context.step)
         ? { step: context.step }
         : {}),
+      // Why a menu listing review stopped, as raised (a short code, never a reference).
+      ...(typeof context.stopReason === "string" &&
+      /^[A-Za-z0-9:_.@-]{1,120}$/.test(context.stopReason)
+        ? { stopReason: context.stopReason }
+        : {}),
       // Which outbox consumer failed (its registered name, e.g. "kitchen.confirmed-order:v1").
       ...(typeof context.consumer === "string" &&
       /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*:v[1-9][0-9]*$/.test(context.consumer)

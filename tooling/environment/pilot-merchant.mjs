@@ -1305,6 +1305,9 @@ export async function createInternalMerchant(
           references: { next: () => resources.credentials.reference() },
           currencyMetadata: await loadPricingCurrencyMetadata(),
           locale: "en-CA",
+          // WP-2423 item 14: staff are told to try again; the cause is in the log.
+          onUnexpectedStop: (reason, error) =>
+            reportUnexpected("MERCHANT_MENU_REVIEW_STOPPED", error, { stopReason: reason }),
         });
   const availability = createMerchantAvailability({
     persistence,

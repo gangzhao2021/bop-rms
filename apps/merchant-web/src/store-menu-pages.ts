@@ -70,7 +70,7 @@ export interface MenuReviewProblem {
     | "OptionRecipe"
     | "AllergenDeclaration"
     | "AllergenList"
-    /** v15 2026-10-29: nothing was named missing; `reason` is the code of why it stopped. */
+    /** Nothing was named missing; `reason` says why it stopped (WP-2423 item 14: never shown). */
     | "Stopped"
     /** 2026-10-31: an item is not taxed at one of the menu's Stores. */
     | "Tax"
@@ -137,6 +137,45 @@ export function menuReviewProblemFixHref(problem: MenuReviewProblem | null): str
     ? "/app/organization/stores/" + problem.storeReference + "/setup#kitchen-setup"
     : null;
 }
+/**
+ * WP-2423 item 14: why a listing stopped, in plain words: what to do, never a code or file name.
+ * The server sends a reason from a closed list; an older answer (`Check:NoAllergenList`) is read by
+ * its last part, and anything else gets the general sentence (the log has the cause). That sentence
+ * promises nothing about guests: a stop at the last step leaves new prices already showing.
+ */
+function menuStopText(reason: string | undefined, item: string): string {
+  switch (reason?.split(":").at(-1)) {
+    case "NoAllergenList":
+      // A new merchant's first listing: the one step this page can name for them.
+      return t(
+        "Approve your allergen list first: open Allergens, approve the list, then list the menu.",
+      );
+    case "AllergenListChanged":
+      return t("The allergen list changed while this was being checked. List the menu again.");
+    case "AllergenEvidenceDiffers":
+      return t(
+        "{item}: what it declares no longer matches the approved allergen list. Open the dish, check its allergens, save it, then list the menu again.",
+        { item: item },
+      );
+    case "NoAllergenEvidence":
+      return t(
+        "{item} has no allergen answers yet. Open the dish, answer each allergen, save it, then list the menu again.",
+        { item: item },
+      );
+    case "NoDraft":
+      return t("There is nothing new to list.");
+    case "NotAuthorized":
+      return t("Your sign-in no longer allows listing this menu. Ask the Owner to list it.");
+    case "NoConfiguration":
+      return t(
+        "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.",
+      );
+    default:
+      return t(
+        "The menu could not be listed this time. Try again in a minute; if it stops again, tell BOP support what time it happened.",
+      );
+  }
+}
 /** The blocked review in staff words: which item, size, option or ingredient, and where to fix it. */
 export function menuReviewProblemText(problem: MenuReviewProblem): string {
   const item =
@@ -169,15 +208,7 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         { item: item, store: problem.storeName ?? t("one of this menu's Stores") },
       );
     case "Stopped":
-      // A new merchant's first listing: the one step this page can name for them.
-      if (problem.reason?.endsWith(":NoAllergenList"))
-        return t(
-          "Approve your allergen list first: open Allergens, approve the list, then list the menu.",
-        );
-      return t(
-        "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.",
-        { item: item, reason: problem.reason ?? "Unknown" },
-      );
+      return menuStopText(problem.reason, item);
     case "Tax":
       return problem.storeName
         ? t(

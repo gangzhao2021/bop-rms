@@ -1042,7 +1042,7 @@ export function OneStoreMenuPage({
         <div className="one-menu__pending" role="alert">
           <p>
             {t(
-              "Guests can't be shown {count}: {items}. They can still order everything else. Tell the operator so it can be fixed.",
+              "Guests can't be shown {count}: {items}. They can still order everything else. Tell BOP support so it can be fixed.",
               {
                 count: countOf(guestUnreadable.length, "dish"),
                 items: guestUnreadable

@@ -1457,7 +1457,7 @@ test("@production a combo made on the one-page menu: parts, extra price, saved, 
   await expect(page.getByText("Listed. Guests see the menu as it is now.")).toBeVisible();
   expect(dishCommands.at(-1)).toMatchObject({ action: "ListAll", menuReference: MENU });
   await expect(page.getByRole("alert")).toHaveText(
-    "Guests can't be shown 1 dish: Combo for two (TEST). They can still order everything else. Tell the operator so it can be fixed.",
+    "Guests can't be shown 1 dish: Combo for two (TEST). They can still order everything else. Tell BOP support so it can be fixed.",
   );
 
   // Editing it opens the combo, as saved.

@@ -259,18 +259,62 @@ describe("WP-2423 menu page helpers", () => {
       quantity: null,
       ingredientName: null,
     };
-    // v15 2026-10-29: a review that stopped without naming a gap says where, and its code.
-    expect(
+    // WP-2423 item 14: a review that stopped without naming a gap says what to do, in plain words.
+    const stoppedAt = (reason: string | undefined) =>
       menuReviewProblemText({
         ...base,
         productName: "二人套餐",
         sizeName: null,
         missing: "Stopped",
-        reason: "AllergenEvidenceDiffers",
-      }),
-    ).toBe(
-      "The menu review stopped at 二人套餐 without naming what is missing (code AllergenEvidenceDiffers). Nothing was listed. Tell the operator this code.",
+        ...(reason === undefined ? {} : { reason }),
+      });
+    expect(stoppedAt("NoAllergenList")).toBe(
+      "Approve your allergen list first: open Allergens, approve the list, then list the menu.",
     );
+    expect(stoppedAt("Check:NoAllergenList")).toBe(stoppedAt("NoAllergenList"));
+    expect(stoppedAt("AllergenListChanged")).toBe(
+      "The allergen list changed while this was being checked. List the menu again.",
+    );
+    expect(stoppedAt("AllergenEvidenceDiffers")).toBe(
+      "二人套餐: what it declares no longer matches the approved allergen list. Open the dish, check its allergens, save it, then list the menu again.",
+    );
+    expect(stoppedAt("NoAllergenEvidence")).toBe(
+      "二人套餐 has no allergen answers yet. Open the dish, answer each allergen, save it, then list the menu again.",
+    );
+    expect(stoppedAt("NoDraft")).toBe("There is nothing new to list.");
+    expect(stoppedAt("NotAuthorized")).toBe(
+      "Your sign-in no longer allows listing this menu. Ask the Owner to list it.",
+    );
+    expect(stoppedAt("NoConfiguration")).toBe(
+      "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.",
+    );
+    const fallback =
+      "The menu could not be listed this time. Try again in a minute; if it stops again, tell BOP support what time it happened.";
+    for (const reason of [
+      undefined,
+      "Unexpected",
+      "Submit:Unavailable@merchant-menus.ts:123",
+      "Submit:Unavailable@merchant-menus.ts:123:SomeRule",
+      "Unexpected:TypeError:CATALOG_DEPENDENCY_UNAVAILABLE",
+    ])
+      expect(stoppedAt(reason)).toBe(fallback);
+    // No code, file name or the word operator in anything staff read, and no promise about guests:
+    // a stop at the last step of "List it" leaves new prices already showing.
+    for (const reason of [
+      "NoAllergenList",
+      "AllergenListChanged",
+      "AllergenEvidenceDiffers",
+      "NoAllergenEvidence",
+      "NoDraft",
+      "NotAuthorized",
+      "NoConfiguration",
+      "Submit:Unavailable@merchant-menus.ts:123",
+    ]) {
+      const text = stoppedAt(reason);
+      expect(text).not.toMatch(/\bcode\b|operator|\.ts\b|:\d/u);
+      expect(text).not.toContain(reason);
+      expect(text).not.toMatch(/guests see|Nothing changed/iu);
+    }
     expect(menuReviewProblemText({ ...base, missing: "Recipe" })).toBe(
       "Latte has no allergens declared. Declare its allergens in this menu, or publish a recipe under Recipes and assign it to this size. Then list it again.",
     );

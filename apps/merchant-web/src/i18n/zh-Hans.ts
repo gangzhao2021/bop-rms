@@ -6682,10 +6682,25 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Mark {displayName} served": "{displayName} 已上",
   "That dish is not done in the kitchen yet.": "这道菜厨房还没做好。",
   "Combo: {parts} · allergens by choice": "套餐：{parts} · 过敏原按所选菜",
-  "The menu review stopped at {item} without naming what is missing (code {reason}). Nothing was listed. Tell the operator this code.":
-    "菜单审核在 {item} 处停下，但没有指出缺什么（代码 {reason}）。没有上架任何内容。请把这个代码告诉运维。",
-  "Guests can't be shown {count}: {items}. They can still order everything else. Tell the operator so it can be fixed.":
-    "有 {count}客人看不到：{items}。其余菜品客人照常可点。请告诉运维修复。",
+  "Saving stopped part-way. What was saved stays; guests see nothing new. Save it again to finish, and tell the manager if it stops again.":
+    "保存中途停了。已保存的部分保留，客人看不到任何变化。请再保存一次完成；如果还停，请告诉店长。",
+  "{item} was saved only in part. Open it with Edit and save it again to finish it.":
+    "{item} 只保存了一部分。请点它的“编辑”，再保存一次完成。",
+  "The allergen list changed while this was being checked. List the menu again.":
+    "检查时过敏原清单有了变化。请再上架一次菜单。",
+  "{item}: what it declares no longer matches the approved allergen list. Open the dish, check its allergens, save it, then list the menu again.":
+    "{item}：它的声明和已批准的过敏原清单对不上了。请打开这道菜，核对过敏原并保存，再上架菜单。",
+  "{item} has no allergen answers yet. Open the dish, answer each allergen, save it, then list the menu again.":
+    "{item} 还没有填写过敏原。请打开这道菜，逐项回答过敏原并保存，再上架菜单。",
+  "There is nothing new to list.": "没有新的内容需要上架。",
+  "Your sign-in no longer allows listing this menu. Ask the Owner to list it.":
+    "您现在的登录已无权上架这份菜单。请让店主来上架。",
+  "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.":
+    "这份菜单还没有可以上架的菜。请先添加菜品并回答过敏原，再上架菜单。",
+  "The menu could not be listed this time. Try again in a minute; if it stops again, tell BOP support what time it happened.":
+    "这次没能上架菜单。请过一分钟再试；如果还是不行，请告诉 BOP 支持发生的时间。",
+  "Guests can't be shown {count}: {items}. They can still order everything else. Tell BOP support so it can be fixed.":
+    "有 {count}客人看不到：{items}。其余菜品客人照常可点。请告诉 BOP 支持修复。",
   "a dish without a name": "一道没有名称的菜",
   "Store features": "门店功能",
   "Counter ordering": "柜台点单",
@@ -6899,8 +6914,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A charge, no stock ingredients": "收费项目，不用库存原料",
   "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.":
     "已声明为不用库存原料的收费项目（如茶位）：不计库存、不扣库存，客人看到的过敏原为无。",
-  "This dish was already declared the other way (its allergens, or a charge with no stock ingredients). That record stays; ask the operator to change it.":
-    "这道菜之前已按另一种方式声明（声明过敏原，或不用库存原料的收费项目）。该记录保留不变；如需更改，请联系系统管理员。",
+  "This dish was already declared the other way (its allergens, or a charge with no stock ingredients). That record stays; ask BOP support to change it.":
+    "这道菜之前已按另一种方式声明（声明过敏原，或不用库存原料的收费项目）。该记录保留不变；如需更改，请联系 BOP 支持。",
   "This item has a recipe that uses stock, so it can't be the tea charge. Choose an item declared on the menu as a charge with no stock ingredients.":
     "这一项的配方会扣库存，不能作为茶位。请选在菜单里声明为不用库存原料的收费项目。",
   "This item can't be the tea now: it must be on the listed menu, shown at this store, with its price here. Check it on the menu, then choose it here.":
