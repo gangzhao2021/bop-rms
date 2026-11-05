@@ -107,6 +107,15 @@ async function pilotHome(
     unexpected.push(new URL(route.request().url()).pathname);
     return route.fulfill({ status: 404, headers, json: { error: "not_found" } });
   });
+  // The Owner's opening list on Home: a Store with every step done shows no list.
+  await page.route("**/merchant/store/opening-list", (route) =>
+    route.fulfill({
+      headers,
+      json: { setupPublished: true, allergenList: true, menuListed: true },
+    }),
+  );
+  for (const read of ["store/public-profile", "store/receipt-profile", "dining/table-qr"])
+    await page.route("**/merchant/" + read, (route) => route.fulfill({ headers, json: {} }));
   await page.route("**/merchant/store/kitchen-setup", (route) =>
     route.fulfill({
       headers,

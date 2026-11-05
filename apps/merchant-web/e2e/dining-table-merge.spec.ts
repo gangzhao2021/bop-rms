@@ -153,7 +153,15 @@ test("@production staff merge a table's party into another seated table", async 
             roundNumber: 1,
             orderBatchReference: id(21),
             submissionReference: id(31),
-            items: [{ displayName: "Milk tea", subtotalMinor: "750", totalMinor: "848" }],
+            items: [
+              {
+                orderItemReference: id(903),
+                quantity: 1,
+                displayName: "Milk tea",
+                subtotalMinor: "750",
+                totalMinor: "848",
+              },
+            ],
             subtotalMinor: "750",
             taxMinor: "98",
             totalMinor: "848",
@@ -163,7 +171,15 @@ test("@production staff merge a table's party into another seated table", async 
             roundNumber: 2,
             orderBatchReference: id(22),
             submissionReference: id(32),
-            items: [{ displayName: "Mapo tofu", subtotalMinor: "2038", totalMinor: "2303" }],
+            items: [
+              {
+                orderItemReference: id(904),
+                quantity: 1,
+                displayName: "Mapo tofu",
+                subtotalMinor: "2038",
+                totalMinor: "2303",
+              },
+            ],
             subtotalMinor: "2038",
             taxMinor: "265",
             totalMinor: "2303",

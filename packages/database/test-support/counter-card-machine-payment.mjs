@@ -171,6 +171,9 @@ export async function exerciseCounterCardMachinePayment({
     referencePrefix: "01909983",
     sessionReferencePrefix: "01909984",
   });
+  // The Orders read asks which dishes contain alcohol (the pilot api role reads it).
+  await admin.query("GRANT USAGE ON SCHEMA rms_catalog TO " + role);
+  await admin.query("GRANT SELECT ON rms_catalog.sku,rms_catalog.product_alcohol_mark TO " + role);
   // The Orders read's Payment status projection (the pilot api role reads it).
   await admin.query("GRANT SELECT ON rms_payment.payment_status_projection TO " + role);
   // The one-order read's pickup contact (pilot api SELECT grants).

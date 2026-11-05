@@ -4,6 +4,7 @@ export const productApiGrants = [
   "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO ROLE_",
   "GRANT SELECT,INSERT,UPDATE ON rms_catalog.product,rms_catalog.product_version TO ROLE_",
   "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_catalog.sku TO ROLE_",
+  "GRANT SELECT ON rms_catalog.menu,rms_catalog.menu_section,rms_catalog.sellable_placement TO ROLE_",
   "GRANT SELECT,DELETE ON rms_catalog.product_version_category_assignment,rms_catalog.product_option_binding,rms_catalog.product_option_binding_option,rms_catalog.product_option_binding_sku_scope,rms_catalog.product_option_binding_channel TO ROLE_",
   "GRANT SELECT,INSERT ON rms_catalog.product_operation_record,rms_catalog.product_operation_snapshot,rms_catalog.product_source_commit TO ROLE_",
   "GRANT SELECT,INSERT,UPDATE ON rms_catalog.product_source_head TO ROLE_",

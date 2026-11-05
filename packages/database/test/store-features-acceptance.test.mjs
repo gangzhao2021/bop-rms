@@ -82,6 +82,7 @@ it("keeps a Store's modules as versioned owner choices, per Store, under the pil
         inventory: true,
         loyalty: true,
         complianceDocuments: true,
+        alcohol: false,
       };
       // Guests at a Store never set are offered pickup.
       const offered = { state: "Open", availableServiceModes: ["DineIn", "Pickup"] };

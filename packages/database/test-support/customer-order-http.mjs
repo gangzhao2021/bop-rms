@@ -132,8 +132,7 @@ export async function exerciseCustomerOrderHttp({
       orderType,
       total: { amountMinor: expectedTotal, currency: "CAD" },
     });
-    assert.deepEqual(controller.getState(), { status: "unknown", canRetry: true });
-    await controller.retry();
+    // The lost answer is a 503 with Retry-After, so the client asks again with the same key.
     assert.equal(controller.getState().status, "submitted");
     const recovered = await send();
     assert.equal(recovered.status, 200);

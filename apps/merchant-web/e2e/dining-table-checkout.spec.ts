@@ -23,7 +23,15 @@ const unpaidBill = (phase: "Active" | "Closing", version: number) => ({
       roundNumber: 1,
       orderBatchReference: id(21),
       submissionReference: id(31),
-      items: [{ displayName: "Shoyu Ramen", subtotalMinor: "2003", totalMinor: "2263" }],
+      items: [
+        {
+          orderItemReference: id(901),
+          quantity: 1,
+          displayName: "Shoyu Ramen",
+          subtotalMinor: "2003",
+          totalMinor: "2263",
+        },
+      ],
       subtotalMinor: "2003",
       taxMinor: "260",
       totalMinor: "2263",
@@ -33,7 +41,15 @@ const unpaidBill = (phase: "Active" | "Closing", version: number) => ({
       roundNumber: 2,
       orderBatchReference: id(22),
       submissionReference: id(32),
-      items: [{ displayName: "Gyoza", subtotalMinor: "1000", totalMinor: "1130" }],
+      items: [
+        {
+          orderItemReference: id(902),
+          quantity: 1,
+          displayName: "Gyoza",
+          subtotalMinor: "1000",
+          totalMinor: "1130",
+        },
+      ],
       subtotalMinor: "1000",
       taxMinor: "130",
       totalMinor: "1130",

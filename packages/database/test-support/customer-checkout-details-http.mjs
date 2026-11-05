@@ -221,8 +221,7 @@ export async function exerciseCustomerCheckoutDetailsHttp({
       ...body,
       orderType: mode,
     });
-    assert.deepEqual(controller.getState(), { status: "unknown", canRetry: true });
-    await controller.retry();
+    // The lost answer is a 503 with Retry-After, so the client asks again with the same key.
     assert.equal(controller.getState().status, "saved");
 
     assert.equal(original?.status, "Saved");

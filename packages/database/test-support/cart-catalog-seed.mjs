@@ -109,6 +109,7 @@ export async function seedCartCatalog(
   );
 }
 export const cartCatalogTables = [
+  "product_alcohol_mark",
   "availability_rule",
   "menu_publication_revision",
   "menu_publication_release",

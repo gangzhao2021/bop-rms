@@ -70,7 +70,7 @@ export function createStoreWorkersWorkload({
   coverageCheckMs = COVERAGE_CHECK_MS,
   staggerMs = STAGGER_MS,
 }) {
-  const stopping = new AbortController();
+  const stopping = new globalThis.AbortController();
   const running = new Set();
   const pause = (ms) => wait(ms, undefined, { signal: stopping.signal }).catch(() => undefined);
   let finished;
