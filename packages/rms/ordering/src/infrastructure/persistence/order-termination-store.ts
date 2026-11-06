@@ -768,6 +768,70 @@ export function createPostgresDiningOrderPreparationSource(options: {
     void orderCheckpoint;
     return Object.freeze(existing);
   };
+  /**
+   * Parent facts for fresh Additional submission, under the same disposition fence.
+   * WP-2423 (guest-cart-503): also an Order whose every round was cancelled unpaid (a pay-first
+   * table that let its only round lapse): the guests are still seated at an Active session and
+   * may order again; the cancelled rounds stay cancelled and uncharged. A Closed Order (latest
+   * order_closure_version) never takes another round. Staff closure takes this same Order fence
+   * first and closes the Dining Session in that transaction; the Batch append re-checks the Order
+   * version and the guest's Active Session under the fence, so a closed table never gains a round.
+   * A pay-first round's payment is requested only after its Batch exists, which then holds the
+   * close (balance due).
+   */
+  /** Closure is Ordering's append-only version chain; its latest version decides (under the fence). */
+  const closed = async (transaction: ConsumerTransaction, orderReference: string) => {
+    const closure = await transaction.query(
+      "SELECT status FROM rms_ordering.order_closure_version WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY closure_version DESC LIMIT 1",
+      [brand, store, orderReference],
+    );
+    return closure.rows.length > 0 && closure.rows[0]?.status !== "Open";
+  };
+  const resolveAdditionalParent = async (input: Parameters<typeof source.resolve>[0]) => {
+    const resolved = await source.resolve(input, true);
+    if (resolved === null) return null;
+    const { canonicalPhase, orderCheckpoint, allCancelled, ...current } = resolved;
+    void canonicalPhase;
+    void orderCheckpoint;
+    void allCancelled;
+    const found = await input.transaction.query(
+      "SELECT h.created_at,r.occurred_at AS initial_at," +
+        "(SELECT count(*)::int FROM rms_ordering.order_batch b " +
+        "WHERE b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.order_id=h.order_id) AS batch_count " +
+        "FROM rms_ordering.order_header h JOIN rms_ordering.order_revision r " +
+        "ON r.brand_id=h.brand_id AND r.store_id=h.store_id AND r.order_id=h.order_id " +
+        "AND r.kind='Initial' AND r.version=1 " +
+        "WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=$3 LIMIT 2",
+      [brand, store, current.orderReference],
+    );
+    if (found.rows.length !== 1) return fail(true);
+    const row = found.rows[0];
+    if (await closed(input.transaction, current.orderReference)) return null;
+    const instant = (value: unknown) =>
+      parseOrderingInstant(value instanceof Date ? value.toISOString() : value);
+    const originalOrderCreatedAt = instant(row?.created_at);
+    const count = row?.batch_count;
+    if (
+      originalOrderCreatedAt !== instant(row?.initial_at) ||
+      originalOrderCreatedAt > parseOrderingInstant(input.observedAt) ||
+      typeof count !== "number" ||
+      !Number.isSafeInteger(count) ||
+      count < 1 ||
+      count > 10001
+    )
+      return fail(true);
+    if (
+      (await options.authorize(input.transaction, {
+        brandReference: brand,
+        storeReference: store,
+        orderReference: current.orderReference,
+        diningSessionReference: current.diningSessionReference,
+        guestSessionReference: parseOrderingReference(input.guestSessionReference),
+      })) !== true
+    )
+      return fail();
+    return Object.freeze({ ...current, originalOrderCreatedAt, nextBatchSequence: count + 1 });
+  };
   return Object.freeze({
     resolve,
     /** Current payable phase/version under the caller-retained Order disposition lock. */
@@ -802,46 +866,22 @@ export function createPostgresDiningOrderPreparationSource(options: {
           })
         : null;
     },
-    /** Parent facts for fresh Additional submission, under the same disposition fence. */
-    async resolveAdditionalParent(input: Parameters<typeof source.resolve>[0]) {
-      const current = await resolve(input);
-      if (current === null) return null;
-      const found = await input.transaction.query(
-        "SELECT h.created_at,r.occurred_at AS initial_at," +
-          "(SELECT count(*)::int FROM rms_ordering.order_batch b " +
-          "WHERE b.brand_id=h.brand_id AND b.store_id=h.store_id AND b.order_id=h.order_id) AS batch_count " +
-          "FROM rms_ordering.order_header h JOIN rms_ordering.order_revision r " +
-          "ON r.brand_id=h.brand_id AND r.store_id=h.store_id AND r.order_id=h.order_id " +
-          "AND r.kind='Initial' AND r.version=1 " +
-          "WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=$3 LIMIT 2",
-        [brand, store, current.orderReference],
-      );
-      if (found.rows.length !== 1) return fail(true);
-      const row = found.rows[0];
-      const instant = (value: unknown) =>
-        parseOrderingInstant(value instanceof Date ? value.toISOString() : value);
-      const originalOrderCreatedAt = instant(row?.created_at);
-      const count = row?.batch_count;
-      if (
-        originalOrderCreatedAt !== instant(row?.initial_at) ||
-        originalOrderCreatedAt > parseOrderingInstant(input.observedAt) ||
-        typeof count !== "number" ||
-        !Number.isSafeInteger(count) ||
-        count < 1 ||
-        count > 10001
-      )
-        return fail(true);
-      if (
-        (await options.authorize(input.transaction, {
-          brandReference: brand,
-          storeReference: store,
-          orderReference: current.orderReference,
-          diningSessionReference: current.diningSessionReference,
-          guestSessionReference: parseOrderingReference(input.guestSessionReference),
-        })) !== true
-      )
-        return fail();
-      return Object.freeze({ ...current, originalOrderCreatedAt, nextBatchSequence: count + 1 });
+    resolveAdditionalParent,
+    /**
+     * WP-2423 (guest-cart-503): the closed current-Order facts the Additional checkout validates
+     * against, by the same rule as resolveAdditionalParent (an all-cancelled Open Order included,
+     * a Closed one never).
+     */
+    async resolveForAdditional(input: Parameters<typeof source.resolve>[0]) {
+      const parent = await source.resolve(input, true);
+      if (parent === null || (await closed(input.transaction, parent.orderReference))) return null;
+      return Object.freeze({
+        brandReference: parent.brandReference,
+        storeReference: parent.storeReference,
+        diningSessionReference: parent.diningSessionReference,
+        orderReference: parent.orderReference,
+        orderVersion: parent.orderVersion,
+      });
     },
   });
 }

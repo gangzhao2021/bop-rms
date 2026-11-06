@@ -21,6 +21,7 @@ function fixture() {
     },
   ];
   const parentFacts = { created_at: at, initial_at: at, batch_count: 1 };
+  const closures: Record<string, unknown>[] = [];
   const calls: string[] = [];
   const transaction = {
     async query<Row = Record<string, unknown>>(sql: string) {
@@ -44,7 +45,9 @@ function fixture() {
                 ? revisions
                 : sql.startsWith("SELECT revision_id")
                   ? revisions.slice(-1)
-                  : [];
+                  : sql.startsWith("SELECT status FROM rms_ordering.order_closure_version")
+                    ? closures.slice(-1)
+                    : [];
       return { rows: rows as readonly Row[], rowCount: rows.length };
     },
   };
@@ -68,6 +71,7 @@ function fixture() {
     headers,
     acceptance,
     revisions,
+    closures,
     calls,
     revoke: () => {
       allowed = false;
@@ -267,7 +271,24 @@ it("does not compare obsolete initial execution after a bound terminal batch can
     phase: "Cancelled",
     orderVersion: 2,
   });
+  // WP-2423 (guest-cart-503): the guests are still seated (Open Order): they may order round 2.
+  expect(await f.source.resolveAdditionalParent(f.input)).toMatchObject({
+    orderVersion: 2,
+    nextBatchSequence: 2,
+  });
+  expect(await f.source.resolveForAdditional(f.input)).toEqual({
+    brandReference: f.input.brandReference,
+    storeReference: f.input.storeReference,
+    diningSessionReference: f.input.diningSessionReference,
+    orderReference: f.input.orderReference,
+    orderVersion: 2,
+  });
+  // A closed Order (latest closure version) never takes another round.
+  f.closures.push({ status: "Closed" });
   expect(await f.source.resolveAdditionalParent(f.input)).toBeNull();
+  expect(await f.source.resolveForAdditional(f.input)).toBeNull();
+  f.closures.push({ status: "Open" });
+  expect(await f.source.resolveAdditionalParent(f.input)).not.toBeNull();
   expect(f.calls.some((sql) => sql.startsWith("SELECT revision_id"))).toBe(false);
   const cancellation = f.revisions[1];
   if (!cancellation) throw new Error("missing fixture cancellation");

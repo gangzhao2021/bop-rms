@@ -5,6 +5,7 @@ import pg from "pg";
 import { it } from "vitest";
 import {
   createPostgresDiningOrderItemStateReader,
+  createPostgresDiningOrderPreparationSource,
   createPostgresDiningBatchCancellationCandidates,
   createPostgresDiningCheckoutExpiryCandidates,
   createPostgresOrderBatchCheckoutCancellationStore,
@@ -1051,6 +1052,86 @@ it("records and closes a guest round whose payment was never requested, never on
           )
         ).rows,
         [{ batch: unrequested.refs.batch, reason_code: "PAYMENT_NOT_STARTED" }],
+      );
+
+      // WP-2423 guest-cart-503 (Lane Dessert Table 7): the table's only round lapsed unpaid; the
+      // guests are still seated. As the restricted API role, under the Order fence: the guest's
+      // table view reads the round (cancelled, nothing charged) and round 2 may start; the
+      // cancelled round stays cancelled. Once the Order's closure says Closed, no round starts.
+      const parents = createPostgresDiningOrderPreparationSource({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async () => true,
+      });
+      const parentInput = (tx) => ({
+        transaction: tx,
+        brandReference: brand,
+        storeReference: store,
+        orderReference: unrequested.refs.order,
+        diningSessionReference: session,
+        guestSessionReference: unrequested.refs.guest,
+        observedAt: new Date().toISOString(),
+      });
+      const display = await transactions.run((tx) =>
+        createPostgresDiningOrderItemStateReader({
+          brandReference: brand,
+          storeReference: store,
+          authorize: async () => true,
+          includeCancelled: true,
+        }).load(parentInput(tx)),
+      );
+      assert.equal(display.orderVersion, evidence.orderVersion + 1);
+      const parent = await transactions.run((tx) =>
+        parents.resolveAdditionalParent(parentInput(tx)),
+      );
+      assert.equal(parent.orderReference, unrequested.refs.order);
+      assert.equal(parent.orderVersion, evidence.orderVersion + 1);
+      assert.equal(parent.nextBatchSequence, 2);
+      assert.deepEqual(
+        await transactions.run((tx) => parents.resolveForAdditional(parentInput(tx))),
+        {
+          brandReference: brand,
+          storeReference: store,
+          diningSessionReference: session,
+          orderReference: unrequested.refs.order,
+          orderVersion: evidence.orderVersion + 1,
+        },
+      );
+      // Reading changes nothing: the cancellation, its revision and event are as recorded.
+      assert.deepEqual(await counts(admin), {
+        cancellations: before.cancellations + 1,
+        revisions: before.revisions + 1,
+        events: before.events + 1,
+        audits: before.audits + 1,
+      });
+      // Staff closed the table (Ordering's closure version chain): no further round starts.
+      await admin.query("SET session_replication_role = replica");
+      try {
+        await admin.query(
+          "INSERT INTO rms_ordering.order_closure_version (closure_id,operation_id,tenant_id,brand_id,store_id,order_id,closure_version,order_version,previous_closure_id,status,actor_type,actor_id,reason_code,financial_finality_id,evidence_digest,occurred_at) VALUES ($1,$2,$3,$4,$5,$6,1,$7,NULL,'Closed','System',NULL,'ALL_ROUNDS_CANCELLED',$9,$8,date_trunc('milliseconds',clock_timestamp()))",
+          [
+            id(0x7b00),
+            id(0x7b01),
+            tenant,
+            brand,
+            store,
+            unrequested.refs.order,
+            evidence.orderVersion + 1,
+            sha("c"),
+            // A synthetic finality reference (owner seed; foreign keys are skipped for it).
+            id(0x7b02),
+          ],
+        );
+      } finally {
+        await admin.query("SET session_replication_role = origin");
+      }
+      assert.equal(
+        await transactions.run((tx) => parents.resolveAdditionalParent(parentInput(tx))),
+        null,
+      );
+      assert.equal(
+        await transactions.run((tx) => parents.resolveForAdditional(parentInput(tx))),
+        null,
       );
     } finally {
       for (const name of [role, worker]) {

@@ -841,6 +841,9 @@ function postgresDependencies(
           authorize: async () => stillAuthorized(),
           authorizeKitchen: async () => stillAuthorized(),
           authorizeDining: async () => stillAuthorized(),
+          // WP-2423 (guest-cart-503): a table whose only rounds lapsed unpaid still shows them
+          // (cancelled, nothing charged). Display only: checkout and payment use the parent rule.
+          includeCancelled: true,
         }).load({
           transaction,
           ...scope,

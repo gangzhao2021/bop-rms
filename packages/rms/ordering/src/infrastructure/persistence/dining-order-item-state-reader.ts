@@ -13,8 +13,9 @@ import {
 
 type Options = Parameters<typeof createPostgresDiningOrderPreparationSource>[0] & {
   /**
-   * WP-2423 item 2 (staff reads only): also read an Order whose every round was cancelled, so
-   * staff can see it and close its table. Customer and checkout reads never set it.
+   * WP-2423 item 2: also read an Order whose every round was cancelled, so staff can see it and
+   * close its table, and (guest-cart-503) the guest's table view shows those rounds. Display only:
+   * checkout and payment resolve their parent through resolveAdditionalParent.
    */
   readonly includeCancelled?: boolean;
 };

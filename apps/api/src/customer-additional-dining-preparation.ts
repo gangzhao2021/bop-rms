@@ -197,7 +197,10 @@ export function createPersistentAdditionalDiningPreparation(options: {
     currentOrder: {
       resolve: (input) =>
         retryTransactionConflict(() =>
-          options.transactions.run((transaction) => source.resolve({ ...input, transaction })),
+          options.transactions.run((transaction) =>
+            // WP-2423 (guest-cart-503): the same parent rule as the checkout start and commit.
+            source.resolveForAdditional({ ...input, transaction }),
+          ),
         ),
     },
   });
