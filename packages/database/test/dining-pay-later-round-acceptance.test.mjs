@@ -6306,12 +6306,14 @@ async function journey(journeyEnding) {
 
           // A redemption is a discount: the sale stands, the reports and settlement still agree.
           const report = await assertSalesCountEveryRoundOnce();
+          // v15 M130: the manager's comp and the guest's points are separate lines.
           assert.equal(
             BigInt(report.summary.compsMinor),
-            compedDish.net + 300n,
-            "reports show what came off, nothing hidden",
+            compedDish.net,
+            "reports show what a manager took off, nothing hidden",
           );
-          assert.equal(report.pointsUsedMinor, "300", "and how much of it was points");
+          assert.equal(report.summary.pointsUsedMinor, "300", "and the points apart");
+          assert.equal(report.pointsUsedMinor, "300");
           assert.equal(
             BigInt(report.summary.grossSalesMinor),
             BigInt(open.owed.subtotalMinor),
