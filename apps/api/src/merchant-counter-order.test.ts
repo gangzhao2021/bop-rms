@@ -217,7 +217,9 @@ describe("counter order command — WP-2423 Q7", () => {
         ],
       }),
     ).toMatchObject({ status: "Placed" });
-    const added = vi.mocked(pipeline.addItem).mock.calls.map((call) => call[1].customerNote);
+    const added = (
+      vi.mocked(pipeline.addItem).mock.calls as unknown as [unknown, { customerNote?: unknown }][]
+    ).map((call) => call[1].customerNote);
     expect(added).toEqual(["No green onion", null]);
     for (const customerNote of ["", "x".repeat(501), "bell\u0007", 7])
       await expect(
