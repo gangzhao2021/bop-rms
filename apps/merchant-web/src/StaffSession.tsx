@@ -3,6 +3,7 @@ import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storeTime } from "./StoreTime.js";
+import { idleReturnLeft, idleReturnNotice, markSignInEnded } from "./idle-return.js";
 import {
   announceStaffSignInEnded,
   setStaffSessionEnded,
@@ -197,6 +198,8 @@ export function StaffSessionGuard({
   client,
   awaitingAcceptance = false,
   onCover,
+  idleReturnMinutes = null,
+  returnToStaffList,
 }: {
   readonly csrf: string;
   readonly path: string;
@@ -213,6 +216,13 @@ export function StaffSessionGuard({
    * there is no cover. What sounds must stay readable on the screen staff see.
    */
   readonly onCover?: (slot: HTMLElement | null) => void;
+  /**
+   * WP-2423 M61: a shared tablet's PIN sign-in returns to the staff list after this many minutes
+   * without staff input (an operational screen's own activity does not count); null: never.
+   */
+  readonly idleReturnMinutes?: number | null;
+  /** Where the idle return goes once the sign-in is ended here (tests replace the navigation). */
+  readonly returnToStaffList?: () => void;
 }) {
   const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
   const [current, setCurrent] = useState<SessionDeadlines | null>(null);
@@ -235,8 +245,32 @@ export function StaffSessionGuard({
   const endedNow = useRef(false);
   const operational = isOperationalScreen(path) || awaitingAcceptance;
   const notice = current === null ? { kind: "None" as const } : sessionNotice(current, Date.now());
-  const now = useNow(notice.kind !== "None");
+  const now = useNow(notice.kind !== "None" || idleReturnMinutes !== null);
   const dialog = useRef<HTMLHeadingElement>(null);
+  const idle = idleReturnNotice({
+    minutes: ended === null ? idleReturnMinutes : null,
+    lastInputAt: lastInput.current,
+    now,
+  });
+  const returning = useRef(false);
+  // WP-2423 M61: at the end of the idle time this sign-in ends here first (marked in this browser,
+  // nothing reads with it), then the sign-out is sent; the staff list opens either way, and a
+  // sign-out that could not reach the server is retried there (see App).
+  useEffect(() => {
+    if (idle.kind !== "Return" || returning.current) return;
+    returning.current = true;
+    void (async () => {
+      await markSignInEnded(csrf);
+      setStaffSessionEnded(true);
+      try {
+        await source.signOut();
+      } catch {
+        // Offline or refused: the mark keeps it ended; the staff list retries the sign-out.
+      }
+      announceStaffSignInEnded();
+      (returnToStaffList ?? (() => window.location.assign("/operations/switch-staff")))();
+    })();
+  }, [csrf, idle.kind, returnToStaffList, source]);
 
   /**
    * Covers the screen only after the server has explicitly said the Session ended
@@ -467,6 +501,23 @@ export function StaffSessionGuard({
           </button>
         </section>
       </div>
+    );
+  if (idle.kind === "Warning" || idle.kind === "Return")
+    return (
+      <section
+        className="staff-session__notice"
+        role="alert"
+        aria-label={t("Returning to the staff list")}
+      >
+        <p>
+          {idle.kind === "Return"
+            ? t("Returning to the staff list…")
+            : t(
+                "Returning to the staff list in {left} so the next person signs in as themselves. Tap anywhere to keep working.",
+                { left: idleReturnLeft(idle.leftMs) },
+              )}
+        </p>
+      </section>
     );
   if (current === null || notice.kind === "None") return null;
   if (notice.kind === "Ended")

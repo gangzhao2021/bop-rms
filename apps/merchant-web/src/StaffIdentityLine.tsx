@@ -2,6 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { useSyncExternalStore } from "react";
 import { createOwnNameClient, type OwnNameClient, type OwnNameState } from "./OwnNamePrompt.js";
 import { usePinStatusSnapshot } from "./StaffPinControls.js";
+import { StaffSessionGuard } from "./StaffSession.js";
 import type { StaffPinClient } from "./staff-pin-client.js";
 
 /**
@@ -88,4 +89,16 @@ export function StaffIdentityLine({
       {text}
     </p>
   );
+}
+
+/**
+ * WP-2423 M61: the session guard with this sign-in's shared-tablet idle return (from the PIN
+ * status the footer already reads: PIN sign-ins only).
+ */
+export function TabletStaffSessionGuard(
+  props: Omit<Parameters<typeof StaffSessionGuard>[0], "idleReturnMinutes">,
+) {
+  const pin = usePinStatusSnapshot(props.csrf);
+  const minutes = pin.kind === "Ready" ? (pin.status.tabletIdleReturnMinutes ?? null) : null;
+  return <StaffSessionGuard {...props} idleReturnMinutes={minutes} />;
 }

@@ -40,6 +40,7 @@ const moduleManifestInput = {
       "staff_pin_credential",
       "staff_pin_attempt",
       "staff_pin_session",
+      "staff_pin_device_limit_clear",
       "store_staff_invitation",
       "store_staff_account",
       "order_recovery_authorization",

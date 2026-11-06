@@ -413,7 +413,7 @@ test("@production staff switch on a shared tablet: wrong PIN, lockout, busy tabl
   await page.getByRole("button", { name: "Cy Park" }).click();
   await page.keyboard.type("135790");
   await expect(page.getByRole("alert")).toHaveText(
-    "Too many tries on this tablet. Wait 2 minutes, or sign in with your account.",
+    "Too many wrong PINs on this tablet. Wait 2 minutes, or an owner or manager can sign in with their PIN to clear it.",
   );
 
   // Ben: the right PIN signs him in and opens Orders.

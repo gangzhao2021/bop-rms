@@ -129,6 +129,16 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         "INSERT INTO bop_permission.role_assignment VALUES($1,$2,$3,$4,$5,$6,$7,'Active',$8,NULL,1,$8,$8)",
         [id(91), id(90), coleMember.membership, coleMember.assignment, cole, brand, store, from],
       );
+      // WP-2423 M63: the Store owner role holds identity.staff_pin.reset (Permission owner's
+      // records), so Cole may clear a paused tablet with his own PIN; Mia and Ava hold no role.
+      await admin.query(
+        "INSERT INTO bop_permission.permission_definition VALUES($1,'identity.staff_pin.reset','Active',1,$2,$2)",
+        [id(92), from],
+      );
+      await admin.query(
+        "INSERT INTO bop_permission.permission_grant VALUES($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)",
+        [id(93), id(90), id(92), brand, store, from],
+      );
       await member(former, store, "Ended");
       await member(otherManager, otherStore, "Active", "Omar");
 
@@ -270,7 +280,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         );
       };
       const waitingAsked = [];
-      const staffPin = createMerchantStaffPin({
+      const staffPinOptions = {
         persistence: {
           transactions: api,
           now: () => clock,
@@ -300,7 +310,8 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         },
         retentionPolicyCode: "SECURITY_AUDIT",
         retentionPolicyVersion: 1,
-      });
+      };
+      const staffPin = createMerchantStaffPin(staffPinOptions);
       const csrf = "c".repeat(43);
       const at = async (offset, work) => {
         clock = T(offset);
@@ -442,10 +453,10 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         storeLabel: "Pin Store",
         timeZone: "America/Toronto",
         staff: [
-          { choice: await tokenOn(tablet, ava), name: "Ava" },
-          { choice: await tokenOn(tablet, manager), name: "Mia" },
+          { choice: await tokenOn(tablet, ava), name: "Ava", lockedUntil: null },
+          { choice: await tokenOn(tablet, manager), name: "Mia", lockedUntil: null },
           // No recorded name: named by role on the lock screen, never left out.
-          { choice: await tokenOn(tablet, cole), name: "Store owner" },
+          { choice: await tokenOn(tablet, cole), name: "Store owner", lockedUntil: null },
         ],
       });
       for (const actor of [ava, cole, manager, brand, store])
@@ -463,16 +474,23 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       await rejects(staffPin.switchScreen(null), "DeviceNotRegistered");
 
       // ── 3b. v15 cbff9d6f: with nobody signed in, the tablet re-checks the orders it was warning
-      //        about. Only the asked numbers are answered (18 waits too but was not asked); 16 was
-      //        accepted elsewhere (null); a repeated number takes its soonest deadline.
+      //        about: 16 was accepted elsewhere (null); a repeated number takes its soonest
+      //        deadline. WP-2423 M61: then every other order waiting at the Store (18, placed after
+      //        the tablet last knew), so the staff list warns about it before it is refunded.
       const recheck = await at(4.6, () => staffPin.refundRecheck(tablet, ["16", "17"]));
       assert.deepEqual(recheck, {
         checkedAt: T(4.6),
         orders: [
           { orderNumber: "16", acceptBy: null },
           { orderNumber: "17", acceptBy: T(35) },
+          { orderNumber: "18", acceptBy: T(45) },
         ],
       });
+      // A tablet that remembers nothing still learns what waits (soonest first).
+      assert.deepEqual((await at(4.6, () => staffPin.refundRecheck(tablet, []))).orders, [
+        { orderNumber: "17", acceptBy: T(35) },
+        { orderNumber: "18", acceptBy: T(45) },
+      ]);
       assert.deepEqual(waitingAsked.at(-1), {
         brandReference: brand,
         storeReference: store,
@@ -483,7 +501,6 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         assert.ok(!JSON.stringify(recheck).includes(value), "no reference reaches the browser");
       const askedBefore = waitingAsked.length;
       for (const numbers of [
-        [],
         ["16", "16"],
         ["<b>"],
         "16",
@@ -533,7 +550,14 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
         pin: { state: "Set", changedAt: T(3), lockedUntil: null },
         signIn: "Pin",
         verifiedUntil: null,
+        // WP-2423 M61: a PIN sign-in on the shared tablet returns to the staff list when unused.
+        tabletIdleReturnMinutes: 5,
       });
+      assert.equal(
+        (await at(5, () => staffPin.ownPin({ sessionCookie: avaFull }))).tabletIdleReturnMinutes,
+        null,
+        "an account sign-in keeps the ordinary idle rule only",
+      );
       // The next person on the same tablet ends Ava's PIN session, even without her cookie.
       const coleSwitch = await at(6, () => unlock(cole, "730418"));
       assert.equal(coleSwitch.status, "SignedIn");
@@ -815,25 +839,98 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       );
       const patio = third.deviceCookie;
       const spray = [
-        [cole, "100001"],
-        [cole, "100002"],
-        [cole, "100003"],
-        [cole, "100004"],
-        [manager, "100005"],
-        [manager, "100006"],
-        [manager, "100007"],
-        [manager, "100008"],
-        [ava, "100009"],
-        [ava, "100010"],
+        [manager, "100001"],
+        [manager, "100002"],
+        [manager, "100003"],
+        [manager, "100004"],
+        [ava, "100005"],
+        [ava, "100006"],
+        [ava, "100007"],
+        [cole, "100008"],
+        [cole, "100009"],
+        [cole, "100010"],
       ];
       for (const [k, [who, pin]] of spray.entries())
         assert.deepEqual(await at(31 + k * 0.5, () => unlock(who, pin, null, patio)), {
           status: "Rejected",
         });
-      assert.deepEqual(await at(36, () => unlock(cole, "730419", null, patio)), {
+      assert.deepEqual(await at(36, () => unlock(ava, "482913", null, patio)), {
         status: "Throttled",
         retryAfterSeconds: 600,
       });
+      // ── 7b. WP-2423 M63: the Store owner may still enter his own PIN there. If whether he may
+      //        cannot be answered, he waits like everyone and no PIN is read or recorded.
+      const patioAttempts = async () =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM bop_identity.staff_pin_attempt WHERE device_id=$1",
+            [third.device.device],
+          )
+        ).rows[0].n;
+      const beforeFailing = await patioAttempts();
+      const failingClear = createMerchantStaffPin({
+        ...staffPinOptions,
+        mayClearTabletLimit: async () => {
+          throw new Error("PERMISSION_UNAVAILABLE");
+        },
+      });
+      assert.deepEqual(
+        await at(36, async () =>
+          failingClear.unlock({
+            deviceCookie: patio,
+            sessionCookie: null,
+            choice: await tokenOn(patio, cole),
+            pin: "730419",
+          }),
+        ),
+        { status: "Throttled", retryAfterSeconds: 600 },
+      );
+      assert.equal(await patioAttempts(), beforeFailing, "no PIN was read");
+      // His wrong PIN counts against his own five tries and clears nothing: Ava still waits.
+      assert.deepEqual(await at(36.1, () => unlock(cole, "100011", null, patio)), {
+        status: "Rejected",
+      });
+      assert.deepEqual(await at(36.2, () => unlock(ava, "482913", null, patio)), {
+        status: "Throttled",
+        retryAfterSeconds: 588,
+      });
+      // His right PIN signs him in and clears the tablet, recorded and audited in his name.
+      assert.equal((await at(36.3, () => unlock(cole, "730419", null, patio))).status, "SignedIn");
+      const clears = (
+        await admin.query(
+          "SELECT c.actor_id::text AS actor,a.outcome FROM bop_identity.staff_pin_device_limit_clear c JOIN bop_identity.staff_pin_attempt a ON a.attempt_id=c.attempt_id WHERE c.device_id=$1 ORDER BY c.decided_at",
+          [third.device.device],
+        )
+      ).rows.map((row) => [row.actor, row.outcome]);
+      assert.deepEqual(clears, [
+        [cole, "Rejected"],
+        [cole, "Verified"],
+      ]);
+      assert.equal(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM platform_audit.audit_record WHERE action_code='IDENTITY_STORE_DEVICE_LIMIT_CLEARED' AND actor_reference=$1",
+            [cole],
+          )
+        ).rows[0].n,
+        1,
+      );
+      // The next person signs in at once, without waiting the 15 minutes.
+      assert.equal((await at(36.4, () => unlock(ava, "482913", null, patio))).status, "SignedIn");
+      // The clear history cannot be changed, and a check past the limit without one is refused.
+      for (const sql of [
+        "UPDATE bop_identity.staff_pin_device_limit_clear SET decided_at=decided_at",
+        "DELETE FROM bop_identity.staff_pin_device_limit_clear",
+      ])
+        await assert.rejects(
+          api.run(async (tx) => {
+            await tx.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [brand, store],
+            );
+            await tx.query(sql, []);
+          }),
+        );
       // Other tablets keep working; this one frees up 15 minutes after its first rejection.
       assert.equal(
         (await at(36, () => unlock(cole, "730419", null, kitchenTablet))).status,
@@ -1187,6 +1284,7 @@ it("WP-2423 staff PIN: tablets, PINs, lockout, tablet limit, reset, switch and s
       const byCode = Object.fromEntries(audits.map((row) => [row.action_code, row.n]));
       assert.equal(byCode.IDENTITY_STORE_DEVICE_REGISTERED, 4);
       assert.equal(byCode.IDENTITY_STORE_DEVICE_REVOKED, 1);
+      assert.equal(byCode.IDENTITY_STORE_DEVICE_LIMIT_CLEARED, 1);
       assert.equal(byCode.IDENTITY_STAFF_PIN_SET, 6);
       assert.equal(byCode.IDENTITY_STAFF_PIN_RESET, 1);
       assert.equal(byCode.IDENTITY_STAFF_PIN_LOCKED, 1);

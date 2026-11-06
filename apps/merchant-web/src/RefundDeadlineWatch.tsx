@@ -203,7 +203,9 @@ export function RefundDeadlineWatch({
       const shown = options.deadlines
         .filter((deadline) => Date.parse(deadline.acceptBy) > at)
         .map((deadline) => deadline.orderNumber);
-      if (signedOut && (shown.length === 0 || options.recheck === undefined)) return;
+      // WP-2423 M61: a tablet re-checks even with nothing shown, so a paid order placed after the
+      // last person left it is warned about here too.
+      if (signedOut && options.recheck === undefined) return;
       const controller = new AbortController();
       active = controller;
       const work: Promise<unknown> =

@@ -4975,8 +4975,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Today · {text}": "今天 · {text}",
   "Today's payments are checked against the payment provider after the business day ends. Look at the result when you open.":
     "营业日结束后，会将今天的付款与支付方核对。开店时请查看结果。",
-  "Too many tries on this tablet. Wait {minutes} {value}, or sign in with your account.":
-    "这台平板尝试次数太多。请等待 {minutes} 分钟，或用你的账号登录。",
   "Too many wrong PINs. {name}'s PIN is locked until {until}. Ask a manager to reset it, or sign in with your account.":
     "输错 PIN 次数太多。{name} 的 PIN 已锁定至 {until}。请店长重置，或用你的账号登录。",
   "Too many wrong codes for this order. Check the customer in person instead: the order number with the name or the last four digits of the phone on the order.":
@@ -5448,8 +5446,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "在 {entry}：使用量比清点数多 {usedBeyondCount}。",
   "at {entry}: {onHand} in stock, {reserved} held for open orders —":
     "在 {entry}：库存 {onHand}，未完成订单占用 {reserved} —",
-  "change is": "项更改",
-  "changes are": "项更改",
   "check it and publish it yourself (Sole operator is on and you are the only person who holds price approval, so you verify with your authenticator code first)":
     '核对后自行发布（"独立经营者"已开启且你是唯一持有价格审批权限的人，因此需先用验证器验证码验证）',
   closed: "停业",
@@ -5664,8 +5660,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{days} day{value}": "{days} 天",
   "{decision} by {reviewerLabel} on": "{reviewerLabel} 于以下时间{decision}",
   "{descriptionLeft} characters left": "还剩 {descriptionLeft} 个字符",
-  "{earlierChanges} earlier {value} kept in the record.":
-    "更早的 {earlierChanges} 项{value}保留在记录中。",
   "{failed} could not be served right now. {value} still ready; try again.":
     "{failed} 暂时无法上桌。{value}仍为可上桌状态，请重试。",
   "{freeCount} available": "{freeCount} 张空闲",
@@ -5736,8 +5730,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{length} table{value}": "{length} 张桌台",
   "{length} tickets": "{length} 张票据",
   "{length} work {value}": "{length} 项工作",
-  "{length} {value} not set yet. An unfinished draft can be saved.":
-    "{length} 项{value}尚未设置。未完成的草稿也可以保存。",
   "{line}: {value} to hand over": "{line}：交付 {value}",
   "{locale} receipt template, draft {draftRevision}, as checked when it was sent for approval.":
     "{locale} 收据模板，草稿 {draftRevision}，以提交审批时的核对结果为准。",
@@ -8833,4 +8825,60 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{name} · signed in with PIN": "{name} · 已用 PIN 登录",
   "{name} · signed in": "{name} · 已登录",
   "Signed in on this screen": "当前登录的人",
+  "Payment taken": "收款",
+  "Store owner": "店主",
+  "Brand owner": "品牌负责人",
+  "Store manager": "店长",
+  "Area manager": "区域经理",
+  "Round cancelled": "这一轮已取消",
+  "Items cancelled": "已取消菜品",
+  "Round {round} accepted": "第 {round} 轮接单",
+  "Automatically, when paid · {at}": "付款后自动接单 · {at}",
+  "{name} · {at}": "{name} · {at}",
+  "Paid online by the guest": "客人已在线付款",
+  "Part {part} paid": "第 {part} 份已付",
+  "Round {round} paid": "第 {round} 轮已付",
+  "Paid online by the guest · {at}": "客人在线付款 · {at}",
+  "{method} · {name} · {at}": "{method} · {name} · {at}",
+  "Refund {amount}": "退款 {amount}",
+  "{method} · asked by {name}, approved by {approver} · {at}":
+    "{method} · {name} 申请，{approver} 批准 · {at}",
+  "Written off {amount}": "核销 {amount}",
+  "Asked by {name}, approved by {approver} · {at}": "{name} 申请，{approver} 批准 · {at}",
+  "Returning to the staff list": "即将回到选人界面",
+  "Returning to the staff list…": "正在回到选人界面…",
+  "Returning to the staff list in {left} so the next person signs in as themselves. Tap anywhere to keep working.":
+    "{left} 后回到选人界面，下一位用自己的 PIN 登录。点任意处继续使用。",
+  "Too many wrong PINs on this tablet. Wait 1 minute, or an owner or manager can sign in with their PIN to clear it.":
+    "这台平板输错次数过多。请等 1 分钟，或请店主或店长用自己的 PIN 登录来解除。",
+  "Too many wrong PINs on this tablet. Wait {minutes} minutes, or an owner or manager can sign in with their PIN to clear it.":
+    "这台平板输错次数过多。请等 {minutes} 分钟，或请店主或店长用自己的 PIN 登录来解除。",
+  "Locked until {until}": "已锁定至 {until}",
+  "Points are off for this store.": "本店未开启积分。",
+  "Ask the owner to turn on points.": "请店主开启积分。",
+  "Turn on in Store features": "在门店功能中开启",
+  "Cancel the round": "取消这一轮",
+  "Cancel {length} rounds": "取消 {length} 轮",
+  " (in use here)": "（本店使用中）",
+  "On sale": "可售",
+  Refused: "拒收",
+  "Not approved": "未批准",
+  "1 earlier change is kept in the record.": "更早的 1 项更改保留在记录中。",
+  "{earlierChanges} earlier changes are kept in the record.":
+    "更早的 {earlierChanges} 项更改保留在记录中。",
+  "1 setting is not set yet. An unfinished draft can be saved.":
+    "1 项设置尚未设置。未完成的草稿也可以保存。",
+  "{length} settings are not set yet. An unfinished draft can be saved.":
+    "{length} 项设置尚未设置。未完成的草稿也可以保存。",
+  "Use a whole number.": "请填写整数。",
+  "Must be at least {limit}.": "不能少于 {limit}。",
+  "Must be at most {limit}.": "不能超过 {limit}。",
+  "Must be fewer days than the expiry ({limit}).": "必须少于过期天数（{limit}）。",
+  "Some numbers can't be used. Each one says why below it.": "有些数字不能使用，原因写在各自下方。",
+  "Guests earn no points with these numbers.": "按这些数字，客人不会获得积分。",
+  "About {percent}% back: a guest earns {earn} points per $1 and {redeem} points take $1 off.":
+    "约返 {percent}%：每消费 $1 得 {earn} 分，{redeem} 分抵 $1。",
+  "That gives back more than most stores (2–5%).": "这比大多数门店（2–5%）返得多。",
+  "About {percent}% back: a guest earns 1 point per $1 and {redeem} points take $1 off.":
+    "约返 {percent}%：每消费 $1 得 1 分，{redeem} 分抵 $1。",
 });

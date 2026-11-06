@@ -6101,6 +6101,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 menu-authoring-and-prices (M71): why a price book draft was started and what it was copied from, so \"List it\" never publishes a Prices-page change or overwrites a later one (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_device_limit_clear",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 bundle staff-identity-stock-and-wording (M63): an owner or manager's PIN check past a paused shared tablet's limit, and the clear it makes (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_identity",
+      "object": "staff_pin_device_limit_clear",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 bundle staff-identity-stock-and-wording (M63): an owner or manager's PIN check past a paused shared tablet's limit, and the clear it makes (append-only)"
     }
   ]
 }

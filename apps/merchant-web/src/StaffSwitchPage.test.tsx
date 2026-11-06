@@ -18,8 +18,8 @@ const ready: SwitchLoad = {
   storeLabel: "Queen St",
   timeZone: "America/Toronto",
   staff: [
-    { choice: "c-1", name: "Ana" },
-    { choice: "c-2", name: "Ben" },
+    { choice: "c-1", name: "Ana", lockedUntil: null },
+    { choice: "c-2", name: "Ben", lockedUntil: null },
   ],
   fullSignIn: entry,
 };
@@ -75,14 +75,18 @@ describe("messages", () => {
         "Ana",
         undefined,
       ),
-    ).toBe("Too many tries on this tablet. Wait 2 minutes, or sign in with your account.");
+    ).toBe(
+      "Too many wrong PINs on this tablet. Wait 2 minutes, or an owner or manager can sign in with their PIN to clear it.",
+    );
     expect(
       switchMessageText(
         switchMessageFor(new StaffPinError("Busy", { retryAfterSeconds: 30 })),
         "Ana",
         undefined,
       ),
-    ).toBe("Too many tries on this tablet. Wait 1 minute, or sign in with your account.");
+    ).toBe(
+      "Too many wrong PINs on this tablet. Wait 1 minute, or an owner or manager can sign in with their PIN to clear it.",
+    );
     expect(switchMessageText(switchMessageFor(new Error("x")), "Ana", undefined)).toBe(
       "Couldn't check the PIN. Try again.",
     );
@@ -102,6 +106,20 @@ describe("screen", () => {
     expect(html).toContain("choose “My PIN” to set one");
     plain(html.replace("TEST-ONLY", ""));
   });
+  it("M63: marks who is locked after five wrong PINs, with the time, until it passes", () => {
+    const locked: SwitchLoad = {
+      ...ready,
+      staff: [
+        { choice: "c-1", name: "Ana", lockedUntil: "2026-10-14T19:42:00.000Z" },
+        { choice: "c-2", name: "Ben", lockedUntil: "2026-10-14T19:20:00.000Z" },
+      ],
+    };
+    const html = view(locked);
+    expect(html).toContain('Ana<span class="staff-switch__locked">Locked until 3:42 PM</span>');
+    // Ben's lock already passed at the time shown.
+    expect(html).toContain(">Ben</button>");
+    plain(html.replace("TEST-ONLY", ""));
+  });
   it("asks to choose again when the person picked left the list", () => {
     const html = view(ready, null, true);
     expect(html).toContain("The staff list has changed. Choose your name again.");
@@ -111,7 +129,7 @@ describe("screen", () => {
   });
   it("shows only how many digits were typed, never the digits", () => {
     const html = view(ready, {
-      person: { choice: "c-1", name: "Ana" },
+      person: { choice: "c-1", name: "Ana", lockedUntil: null },
       pinLength: 3,
       busy: false,
       message: { kind: "Rejected" },
@@ -128,7 +146,7 @@ describe("screen", () => {
   });
   it("holds the keypad while a PIN is locked", () => {
     const html = view(ready, {
-      person: { choice: "c-1", name: "Ana" },
+      person: { choice: "c-1", name: "Ana", lockedUntil: null },
       pinLength: 0,
       busy: false,
       message: { kind: "Locked", until: "2026-10-14T19:45:00.000Z" },

@@ -1178,6 +1178,8 @@ async function scanUnsupported(root, module, diagnostics) {
             "staff_pin_session",
             "authentication_session",
             "workforce_mfa_step_up",
+            // WP-2423 M63: an owner or manager's check past a paused tablet's limit.
+            "staff_pin_device_limit_clear",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/staff-pin-store.ts";
         // WP-2423 DEC-COGNITO-STORE-STAFF: Store staff invitations and their Cognito accounts.

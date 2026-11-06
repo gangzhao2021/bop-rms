@@ -548,6 +548,13 @@ export async function checkStaffPin(
     readonly attemptReference: string;
     readonly auditReference: string;
     readonly lockAuditReference: string;
+    /**
+     * WP-2423 M63: asked only when the tablet is past its limit — whether this person holds
+     * identity.staff_pin.reset at the Store. True: they may still check their own PIN (their own
+     * lock applies) and a verified check clears the limit. False, or a failure to answer: refused
+     * before any PIN is read, as everyone else is.
+     */
+    readonly mayClearTabletLimit?: () => Promise<boolean>;
   },
   kdf: StaffPinKdf,
   policy: StaffPinAuditPolicy,
@@ -570,7 +577,8 @@ export async function checkStaffPin(
   if (tablet[0]?.status !== "Active") return Object.freeze({ status: "DeviceInactive" as const });
   const deviceFailures = rows(
     await tx.query(
-      "SELECT attempted_at FROM bop_identity.staff_pin_attempt WHERE brand_id=$1 AND store_id=$2 AND device_id=$3 AND outcome='Rejected' AND attempted_at>$4 AND attempted_at<=$5 ORDER BY attempted_at ASC LIMIT 100",
+      // Rejected checks in the window since the latest verified check made past the limit.
+      "SELECT a.attempted_at FROM bop_identity.staff_pin_attempt a WHERE a.brand_id=$1 AND a.store_id=$2 AND a.device_id=$3 AND a.outcome='Rejected' AND a.attempted_at>$4 AND a.attempted_at<=$5 AND a.attempted_at>coalesce((SELECT max(v.attempted_at) FROM bop_identity.staff_pin_device_limit_clear c JOIN bop_identity.staff_pin_attempt v ON v.brand_id=c.brand_id AND v.store_id=c.store_id AND v.attempt_id=c.attempt_id WHERE c.brand_id=$1 AND c.store_id=$2 AND c.device_id=$3 AND v.outcome='Verified'),'-infinity'::timestamptz) ORDER BY a.attempted_at ASC LIMIT 100",
       [
         scope.brandReference,
         scope.storeReference,
@@ -580,7 +588,12 @@ export async function checkStaffPin(
       ],
     ),
   );
-  if (deviceFailures.length >= staffPinPolicy.deviceFailureLimit) {
+  const overLimit = deviceFailures.length >= staffPinPolicy.deviceFailureLimit;
+  if (
+    overLimit &&
+    (input.mayClearTabletLimit === undefined ||
+      (await input.mayClearTabletLimit().catch(() => false)) !== true)
+  ) {
     const freeing = deviceFailures[deviceFailures.length - staffPinPolicy.deviceFailureLimit];
     const freeAt =
       Date.parse(at(freeing?.attempted_at)) + minutes(staffPinPolicy.deviceWindowMinutes);
@@ -598,6 +611,13 @@ export async function checkStaffPin(
   const insert =
     "INSERT INTO bop_identity.staff_pin_attempt (brand_id,store_id,attempt_id,device_id,actor_id,credential_version,outcome,rejection_reason,failure_number,attempted_at,audit_id,data_classification) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'IndirectIdentifier')";
   const auditReference = ref(input.auditReference);
+  // Past the limit, an owner or manager's check is recorded as such first (the database lets the
+  // check through only with it, and a verified one clears the limit).
+  if (overLimit)
+    await tx.query(
+      "INSERT INTO bop_identity.staff_pin_device_limit_clear (brand_id,store_id,attempt_id,device_id,actor_id,permission_code,decided_at,data_classification) VALUES ($1,$2,$3,$4,$5,'identity.staff_pin.reset',$6,'IndirectIdentifier')",
+      [scope.brandReference, scope.storeReference, attempt, device, actor, observedAt],
+    );
   const rejectedAudit = (failureNumber: number | null) =>
     audit(tx, policy, {
       auditReference,
@@ -751,6 +771,20 @@ export async function checkStaffPin(
     occurredAt: observedAt,
     deviceReference: device,
   });
+  if (overLimit)
+    await audit(tx, policy, {
+      auditReference: ref(input.lockAuditReference),
+      scope,
+      actorReference: actor,
+      actionCode: "IDENTITY_STORE_DEVICE_LIMIT_CLEARED",
+      targetType: "StoreSignInDevice",
+      targetReference: device,
+      reasonCode: "STAFF_PIN_MANAGER_CLEARED_TABLET",
+      correlationReference: attempt,
+      occurredAt: observedAt,
+      deviceReference: device,
+      afterSummary: { rejectedChecks: deviceFailures.length },
+    });
   return Object.freeze({ status: "Verified" as const, attemptReference: attempt });
 }
 

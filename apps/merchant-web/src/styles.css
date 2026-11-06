@@ -9079,6 +9079,14 @@ body:has(.product-complete-draft) .bop-shell__header,
   text-align: start;
   overflow-wrap: anywhere;
 }
+/* WP-2423 M63: who is locked after five wrong PINs, in words beside the name. */
+.staff-switch__locked {
+  display: block;
+  margin-top: 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
 .staff-switch__person:hover,
 .staff-switch__key:hover:not(:disabled),
 .staff-switch__back:hover:not(:disabled) {
@@ -10212,4 +10220,16 @@ tr[data-drop-target="true"] {
   display: flex;
   flex-wrap: wrap;
   gap: var(--bop-space-2);
+}
+/* WP-2423 M135: why a points rule number can't be used, under that field. */
+.member-points__rules .field-problem {
+  display: block;
+  margin-top: 4px;
+  color: var(--bop-color-danger);
+  font-size: 14px;
+}
+.member-points__rules label > .bop-muted {
+  display: block;
+  margin-top: 4px;
+  font-size: 14px;
 }

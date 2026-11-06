@@ -213,7 +213,11 @@ export function saveLastKnownRefundDeadlines(value: LastKnownRefundDeadlines): v
 }
 
 /** The last known deadlines still ahead of `now`, or null when there are none. */
-export function loadLastKnownRefundDeadlines(now: number): LastKnownRefundDeadlines | null {
+export function loadLastKnownRefundDeadlines(
+  now: number,
+  /** WP-2423 M61: keep what was stored even when no deadline is left (its time zone, who). */
+  keepEmpty = false,
+): LastKnownRefundDeadlines | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(tabStorage()?.getItem(LAST_KNOWN_KEY) ?? "null");
@@ -248,7 +252,7 @@ export function loadLastKnownRefundDeadlines(now: number): LastKnownRefundDeadli
         ]
       : [];
   });
-  if (deadlines.length === 0) return null;
+  if (deadlines.length === 0 && !keepEmpty) return null;
   return {
     deadlines,
     checkedAt: body.checkedAt as number,

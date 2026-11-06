@@ -15,6 +15,8 @@ export interface SwitchStaffChoice {
   /** Opaque token the server gave this tablet for the person; sent back as is with the PIN. */
   readonly choice: string;
   readonly name: string;
+  /** WP-2423 M63: locked after five wrong PINs until then (null: not locked). */
+  readonly lockedUntil: string | null;
 }
 export type StaffSwitchRead =
   | {
@@ -36,6 +38,8 @@ export interface PinStatus {
   readonly pin: PinRecord;
   readonly signIn: "Account" | "Pin";
   readonly verifiedUntil: string | null;
+  /** WP-2423 M61: a shared tablet's PIN sign-in returns to the staff list after this (else null). */
+  readonly tabletIdleReturnMinutes?: number | null;
 }
 export interface StoreDevice {
   readonly device: string;
@@ -175,8 +179,15 @@ export function parseStaffSwitch(status: number, value: unknown): StaffSwitchRea
       storeLabel: text(raw.storeLabel),
       timeZone: timeZone(raw.timeZone),
       staff: list(raw.staff, (entry) => {
-        const item = record(entry, ["choice", "name"]);
-        return Object.freeze({ choice: opaque(item.choice), name: text(item.name) });
+        // WP-2423 M63: absent from an older server (nobody shown as locked then).
+        const withLock =
+          entry !== null && typeof entry === "object" && Object.hasOwn(entry, "lockedUntil");
+        const item = record(entry, ["choice", "name", ...(withLock ? ["lockedUntil"] : [])]);
+        return Object.freeze({
+          choice: opaque(item.choice),
+          name: text(item.name),
+          lockedUntil: withLock ? optionalInstant(item.lockedUntil) : null,
+        });
       }),
       fullSignIn: signInEntry(raw.fullSignIn),
     });
@@ -189,12 +200,27 @@ export function parseStaffSwitch(status: number, value: unknown): StaffSwitchRea
   return invalid();
 }
 export function parsePinStatus(value: unknown): PinStatus {
-  const raw = record(value, ["pin", "signIn", "verifiedUntil"]);
+  // WP-2423 M61: absent from an older server (no return to the staff list then).
+  const withIdle =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "tabletIdleReturnMinutes");
+  const raw = record(value, [
+    "pin",
+    "signIn",
+    "verifiedUntil",
+    ...(withIdle ? ["tabletIdleReturnMinutes"] : []),
+  ]);
   if (raw.signIn !== "Account" && raw.signIn !== "Pin") return invalid();
+  const idle = withIdle ? raw.tabletIdleReturnMinutes : null;
+  if (
+    idle !== null &&
+    (typeof idle !== "number" || !Number.isInteger(idle) || idle < 1 || idle > 30)
+  )
+    return invalid();
   return Object.freeze({
     pin: pinRecord(raw.pin),
     signIn: raw.signIn,
     verifiedUntil: optionalInstant(raw.verifiedUntil),
+    tabletIdleReturnMinutes: idle as number | null,
   });
 }
 export function parseStoreDevices(value: unknown): StoreDevicesRead {
@@ -285,7 +311,10 @@ export interface RefundRecheck {
   }[];
 }
 const ORDER_NUMBER = /^[A-Za-z0-9-]{1,20}$/u;
-/** The tablet re-check answer, as a closed record naming only the asked orders. */
+/**
+ * The tablet re-check answer, as a closed record: the asked orders first, in the order asked, then
+ * (WP-2423 M61) any other paid order waiting at the Store, each named once, at most 40.
+ */
 export function parseRefundRecheck(value: unknown, asked: readonly string[]): RefundRecheck {
   const raw = record(value, ["checkedAt", "orders"]);
   const orders = list(raw.orders, (entry) => {
@@ -313,8 +342,11 @@ export function parseRefundRecheck(value: unknown, asked: readonly string[]): Re
     });
   });
   if (
-    orders.length !== asked.length ||
-    orders.some((order, index) => order.orderNumber !== asked[index])
+    orders.length < asked.length ||
+    orders.length > asked.length + 40 ||
+    asked.some((orderNumber, index) => orders[index]?.orderNumber !== orderNumber) ||
+    new Set(orders.map((order) => order.orderNumber)).size !== orders.length ||
+    orders.slice(asked.length).some((order) => order.acceptBy === null)
   )
     return invalid();
   return Object.freeze({ checkedAt: instant(raw.checkedAt), orders });
@@ -409,11 +441,7 @@ export function createStaffPinClient(
       throw new StaffPinError("Unavailable");
     },
     async refundRecheck(orderNumbers: readonly string[], signal?: AbortSignal) {
-      if (
-        orderNumbers.length === 0 ||
-        orderNumbers.length > 10 ||
-        orderNumbers.some((value) => !ORDER_NUMBER.test(value))
-      )
+      if (orderNumbers.length > 10 || orderNumbers.some((value) => !ORDER_NUMBER.test(value)))
         throw new StaffPinError("Invalid");
       const asked = [...orderNumbers];
       const { status, data } = await send(

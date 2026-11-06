@@ -75,10 +75,15 @@ export function switchMessageText(
         { name: name, until: storeClockTime(message.until, timeZone) },
       );
     case "Busy":
-      return t(
-        "Too many tries on this tablet. Wait {minutes} {value}, or sign in with your account.",
-        { minutes: message.minutes, value: message.minutes === 1 ? "minute" : "minutes" },
-      );
+      // WP-2423 M63: an owner or manager's own PIN clears the tablet at once.
+      return message.minutes === 1
+        ? t(
+            "Too many wrong PINs on this tablet. Wait 1 minute, or an owner or manager can sign in with their PIN to clear it.",
+          )
+        : t(
+            "Too many wrong PINs on this tablet. Wait {minutes} minutes, or an owner or manager can sign in with their PIN to clear it.",
+            { minutes: message.minutes },
+          );
     case "Unavailable":
       return t("Couldn't check the PIN. Try again.");
     case "SigningIn":
@@ -220,6 +225,14 @@ export function StaffSwitchView({
                     onClick={() => onChoose(person)}
                   >
                     {person.name}
+                    {/* WP-2423 M63: who is locked out after five wrong PINs, and until when. */}
+                    {person.lockedUntil !== null && Date.parse(person.lockedUntil) > now ? (
+                      <span className="staff-switch__locked">
+                        {t("Locked until {until}", {
+                          until: storeClockTime(person.lockedUntil, load.timeZone),
+                        })}
+                      </span>
+                    ) : null}
                   </button>
                 </li>
               ))}

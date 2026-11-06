@@ -24,14 +24,13 @@ import {
 import { Navigate, Route, Routes, useLocation } from "react-router";
 import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 import {
-  StaffSessionGuard,
   OrganizationNotActivePage,
   StaffSignedOutPage,
   StaffSignedOutPanel,
   StaffSwitchButton,
 } from "./StaffSession.js";
 import { OwnNamePrompt } from "./OwnNamePrompt.js";
-import { StaffIdentityLine } from "./StaffIdentityLine.js";
+import { StaffIdentityLine, TabletStaffSessionGuard } from "./StaffIdentityLine.js";
 import { StaffPinControls } from "./StaffPinControls.js";
 import { StaffSwitchPage } from "./StaffSwitchPage.js";
 import { StaffSignInPage } from "./StaffSignInPage.js";
@@ -43,6 +42,7 @@ import { MerchantShell } from "./MerchantShell.js";
 import { StoreOverview } from "./StoreOverview.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { useStaleRetry } from "./stale-read.js";
+import { PointsOffPage } from "./PointsOffPage.js";
 import { KitchenBoardPage, KitchenWorkItemPage } from "./KitchenBoardPages.js";
 import { createKitchenBoardClient } from "./kitchen-board-client.js";
 import { parseKitchenBoardView, type KitchenBoardView } from "./kitchen-board.js";
@@ -55,7 +55,9 @@ import {
   type RefundRecheckResult,
 } from "./RefundDeadlineWatch.js";
 import { createStaffPinClient, StaffPinError } from "./staff-pin-client.js";
-import { useStaffSessionLive } from "./staff-session-reads.js";
+import { setStaffSessionEnded, useStaffSessionLive } from "./staff-session-reads.js";
+import { createStaffSessionClient } from "./staff-session.js";
+import { retrySignOut, signInMarkedEnded } from "./idle-return.js";
 import { loadLastKnownRefundDeadlines, type RefundDeadline } from "./refund-deadline-warning.js";
 import { OrderingEndingNotice } from "./OrderingEndingNotice.js";
 import type { MerchantDemoClients } from "./merchant-demo.js";
@@ -235,10 +237,6 @@ const LoyaltyProgramEditorPage = lazyPage(
   "LoyaltyProgramEditorPage",
 );
 const MemberPointsPage = lazyPage(() => import("./MemberPointsPage.js"), "MemberPointsPage");
-const LoyaltyProgramListPage = lazyPage(
-  () => import("./LoyaltyProgramPages.js"),
-  "LoyaltyProgramListPage",
-);
 const LoyaltyAccountDetailPage = lazyPage(
   () => import("./LoyaltyAccountPages.js"),
   "LoyaltyAccountDetailPage",
@@ -556,6 +554,9 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     pathname === "/app/commerce/availability" &&
     new URLSearchParams(search).get("from") === "kitchen";
   const switching = useRef(false);
+  // WP-2423 M61: the sign-out retry of a sign-in ended at a shared tablet's idle return.
+  const endedRetry = useRef<(() => void) | null>(null);
+  useEffect(() => () => endedRetry.current?.(), []);
   const sessionPending =
     demo === null && (state.kind === "Loading" || (state.kind === "Ready" && state.switching));
   // WP-2423 "Warn before timeouts": every screen warns before a paid order nobody accepted is
@@ -620,16 +621,30 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
   }, []);
   // Without a sign-in (the PIN screen, a signed-out staff page) the screen shows what this tab
   // last knew, labelled with when it was checked; nothing is read without a Session.
-  const remembered = useMemo(
-    () =>
-      demo === null &&
-      (pathname === "/operations/switch-staff" ||
+  // WP-2423 M61: on a registered tablet's staff list the warning is always there to re-check the
+  // Store's waiting paid orders (a new one placed after everyone left the tablet included); a
+  // browser that is not a registered tablet stops at the first answer and shows nothing new.
+  const remembered = useMemo(() => {
+    if (
+      demo !== null ||
+      !(
+        pathname === "/operations/switch-staff" ||
         pathname === "/operations/sign-in" ||
-        state.kind === "SignedOut")
-        ? loadLastKnownRefundDeadlines(Date.now())
-        : null,
-    [demo, pathname, state.kind],
-  );
+        state.kind === "SignedOut"
+      )
+    )
+      return null;
+    const now = Date.now();
+    if (pathname !== "/operations/switch-staff") return loadLastKnownRefundDeadlines(now);
+    return (
+      loadLastKnownRefundDeadlines(now, true) ?? {
+        deadlines: [],
+        checkedAt: now,
+        canAccept: true,
+        timeZone: null,
+      }
+    );
+  }, [demo, pathname, state.kind]);
   // v15 cbff9d6f: without a sign-in, a registered Store tablet re-checks only the orders it shows
   // (numbers and times, no Customer details); anywhere else the countdown says it may be out of date.
   const tabletRecheck = useMemo(() => {
@@ -690,7 +705,19 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
     let active = true;
     void client
       .bootstrap()
-      .then((result) => {
+      .then(async (result) => {
+        if (!active) return;
+        // WP-2423 M61: this sign-in was ended here at a shared tablet's idle return and its
+        // sign-out never reached the server: it stays ended (never resumed by Back or a link),
+        // and the sign-out is retried until it goes through.
+        if (result !== null && (await signInMarkedEnded(result.csrf))) {
+          if (!active) return;
+          setStaffSessionEnded(true);
+          setState({ kind: "SignedOut" });
+          endedRetry.current?.();
+          endedRetry.current = retrySignOut(() => createStaffSessionClient().signOut());
+          return;
+        }
         if (!active) return;
         setState(
           result === null
@@ -2017,7 +2044,17 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                 }
               />
             ) : (
-              <LoyaltyProgramListPage />
+              // WP-2423 M129: never the internal placeholder, while loading or with points off.
+              <PointsOffPage
+                loading={state.kind !== "Ready" || state.switching}
+                storeFeaturesHref={
+                  state.kind === "Ready"
+                    ? (state.workspace.navigation.find(
+                        (item) => item.screenId === "STORE-CAPABILITY",
+                      )?.href ?? null)
+                    : null
+                }
+              />
             )
           }
         />
@@ -2413,7 +2450,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         </WorkspaceReconnectContext.Provider>
         {/* WP-2423 Q18: keep the Session alive while staff work; warn before it ends. */}
         {state.kind === "Ready" && demo === null && !sessionless ? (
-          <StaffSessionGuard
+          <TabletStaffSessionGuard
             key={state.csrf}
             csrf={state.csrf}
             path={pathname}

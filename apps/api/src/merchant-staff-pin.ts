@@ -27,7 +27,7 @@ import {
   type MemberDirectoryTransaction,
   type StoreMember,
 } from "@bop/membership";
-import type { RoleAssignmentTransaction } from "@bop/permission";
+import { storeActionHeldWithoutDeny, type RoleAssignmentTransaction } from "@bop/permission";
 import { createStaffLabels, distinctStaffLabels } from "./merchant-staff-labels.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -92,6 +92,14 @@ const DEVICE_COOKIE = /^[A-Za-z0-9_-]{43}$/u;
 const ORDER_NUMBER = /^[A-Za-z0-9-]{1,20}$/u;
 /** At most this many remembered orders are re-checked in one request. */
 export const REFUND_RECHECK_MAX_ORDERS = 10;
+/**
+ * WP-2423 M61: a shared tablet's PIN sign-in returns to the staff list after 5 minutes without
+ * use (the usual point-of-sale default). TEST-ENVIRONMENT NOTE: one value for every tablet until a
+ * manager can choose it per tablet (2–30 minutes; listed in WP-2423).
+ */
+export const TABLET_IDLE_RETURN_MINUTES = 5;
+/** At most this many other waiting orders are answered besides the asked ones. */
+export const REFUND_RECHECK_MAX_WAITING = 40;
 export interface TabletRefundRecheck {
   readonly checkedAt: string;
   /** Each asked order; `acceptBy` is null once it no longer waits (accepted, refunded, closed). */
@@ -153,10 +161,31 @@ export function createMerchantStaffPin(options: {
       readonly autoAccepted?: "Marked" | "NotReached";
     }[]
   >;
+  /**
+   * WP-2423 M63: whether this person may clear a paused tablet with their own PIN (an owner or
+   * manager: identity.staff_pin.reset at the Store). Asked only past the tablet limit; any failure
+   * reads as no. Defaults to the Permission owner's fail-closed single-actor read.
+   */
+  mayClearTabletLimit?(
+    tx: Query,
+    scope: {
+      readonly brandReference: string;
+      readonly storeReference: string;
+      readonly actorReference: string;
+      readonly at: string;
+    },
+  ): Promise<boolean>;
   readonly retentionPolicyCode: string;
   readonly retentionPolicyVersion: number;
 }) {
   const persistence = options.persistence;
+  const mayClearTabletLimit =
+    options.mayClearTabletLimit ??
+    ((tx: Query, scope: Parameters<NonNullable<typeof options.mayClearTabletLimit>>[1]) =>
+      storeActionHeldWithoutDeny(tx as unknown as RoleAssignmentTransaction, {
+        ...scope,
+        action: "identity.staff_pin.reset",
+      }));
   const resolve = createMerchantStoreScope(persistence);
   const policy = {
     retentionPolicyCode: options.retentionPolicyCode,
@@ -319,12 +348,18 @@ export function createMerchantStaffPin(options: {
           storeLabel: profile.label,
           timeZone: profile.timeZone,
           staff: withPin
-            .map((member) =>
-              Object.freeze({
+            .map((member) => {
+              // WP-2423 M63: a person locked after five wrong PINs is marked on the list.
+              const lockedUntil = states.get(member.actorReference)?.lockedUntil ?? null;
+              return Object.freeze({
                 choice: options.choiceTokens.issue(named, member.actorReference),
                 name: labels.get(member.actorReference) ?? "Staff member",
-              }),
-            )
+                lockedUntil:
+                  lockedUntil !== null && Date.parse(lockedUntil) > Date.parse(at)
+                    ? lockedUntil
+                    : null,
+              });
+            })
             .sort((a, b) => a.name.localeCompare(b.name, "en")),
         });
       });
@@ -334,9 +369,11 @@ export function createMerchantStaffPin(options: {
      * v15 cbff9d6f (DEC-STAFF-SESSION-CONTINUITY 2026-10-17 correction): with nobody signed in, a
      * registered Store tablet asks whether the paid orders it was already warning about still wait
      * for acceptance, so its lock screen or signed-out cover stops counting down (and chiming) for
-     * an order someone accepted elsewhere. Authorized only by the tablet binding; answers only for
-     * the order numbers asked (no list of the Store's orders), with numbers and times only — no
-     * Customer, item or payment details. A read: not audited (the HTTP route rate-limits it).
+     * an order someone accepted elsewhere. WP-2423 M61 (idle return to the staff list): it also
+     * answers every other paid order now waiting at the tablet's Store with its refund deadline,
+     * so an order placed after the last person left the tablet is still warned about there before
+     * it is refunded. Authorized only by the tablet binding; numbers and times only — no Customer,
+     * item or payment details. A read: not audited (the HTTP route rate-limits it).
      */
     async refundRecheck(
       deviceCookie: unknown,
@@ -344,7 +381,6 @@ export function createMerchantStaffPin(options: {
     ): Promise<TabletRefundRecheck> {
       if (
         !Array.isArray(orderNumbers) ||
-        orderNumbers.length === 0 ||
         orderNumbers.length > REFUND_RECHECK_MAX_ORDERS ||
         orderNumbers.some((value) => typeof value !== "string" || !ORDER_NUMBER.test(value)) ||
         new Set(orderNumbers).size !== orderNumbers.length
@@ -369,19 +405,24 @@ export function createMerchantStaffPin(options: {
           if (known === undefined || Date.parse(order.acceptBy) < Date.parse(known.acceptBy))
             soonest.set(order.orderNumber, order);
         }
+        const answer = (orderNumber: string) => {
+          const order = soonest.get(orderNumber);
+          return Object.freeze({
+            orderNumber,
+            acceptBy: order?.acceptBy ?? null,
+            // Only where it applies, so a tablet at a Store without it keeps reading this.
+            ...(order?.autoAccepted === undefined ? {} : { autoAccepted: order.autoAccepted }),
+          });
+        };
+        // The asked orders first (in the order asked), then the others waiting, soonest first.
+        const others = [...soonest.values()]
+          .filter((order) => !asked.includes(order.orderNumber))
+          .sort((a, b) => Date.parse(a.acceptBy) - Date.parse(b.acceptBy))
+          .slice(0, REFUND_RECHECK_MAX_WAITING)
+          .map((order) => order.orderNumber);
         return Object.freeze({
           checkedAt: at,
-          orders: Object.freeze(
-            asked.map((orderNumber) => {
-              const order = soonest.get(orderNumber);
-              return Object.freeze({
-                orderNumber,
-                acceptBy: order?.acceptBy ?? null,
-                // Only where it applies, so a tablet at a Store without it keeps reading this.
-                ...(order?.autoAccepted === undefined ? {} : { autoAccepted: order.autoAccepted }),
-              });
-            }),
-          ),
+          orders: Object.freeze([...asked, ...others].map(answer)),
         });
       });
     },
@@ -418,6 +459,7 @@ export function createMerchantStaffPin(options: {
         const eligible = members.some(
           (member) => member.actorReference === choice && active(member),
         );
+        const at = now();
         const result = await checkStaffPin(
           tx,
           {
@@ -426,7 +468,14 @@ export function createMerchantStaffPin(options: {
             actorReference: choice,
             eligible,
             pin: input.pin,
-            at: now(),
+            at,
+            // Only a current member is ever asked; anyone else waits like everyone.
+            ...(eligible
+              ? {
+                  mayClearTabletLimit: () =>
+                    mayClearTabletLimit(tx, { ...scope, actorReference: choice, at }),
+                }
+              : {}),
             attemptReference,
             auditReference,
             lockAuditReference,
@@ -511,6 +560,10 @@ export function createMerchantStaffPin(options: {
           pin: states.get(actor) ?? notSet,
           signIn: session.pinIssued ? ("Pin" as const) : ("Account" as const),
           verifiedUntil: session.verifiedUntil,
+          // WP-2423 M61: a PIN sign-in is on a shared Store tablet; it returns to the staff list
+          // after this many minutes without anyone using the screen, so the next person signs in
+          // as themselves. An account sign-in keeps the ordinary 30-minute idle rule only.
+          tabletIdleReturnMinutes: session.pinIssued ? TABLET_IDLE_RETURN_MINUTES : null,
         });
       });
     },

@@ -69,9 +69,18 @@ describe("parsing", () => {
       kind: "Ready",
       storeLabel: "Queen St",
       timeZone: "America/Toronto",
-      staff: [{ choice: "c-1", name: "Ana" }],
+      staff: [{ choice: "c-1", name: "Ana", lockedUntil: null }],
       fullSignIn: entry,
     });
+    // WP-2423 M63: a person locked after five wrong PINs is marked with the time.
+    expect(
+      parseStaffSwitch(200, {
+        storeLabel: "Queen St",
+        timeZone: "America/Toronto",
+        staff: [{ choice: "c-1", name: "Ana", lockedUntil: "2026-10-14T20:00:00.000Z" }],
+        fullSignIn: entry,
+      }).kind === "Ready",
+    ).toBe(true);
     expect(parseStaffSwitch(404, { error: "device_not_registered", fullSignIn: entry })).toEqual({
       kind: "NotRegistered",
       fullSignIn: entry,
@@ -113,7 +122,25 @@ describe("parsing", () => {
       pin: { state: "Set", changedAt: at, lockedUntil: null },
       signIn: "Pin",
       verifiedUntil: null,
+      tabletIdleReturnMinutes: null,
     });
+    // WP-2423 M61: a shared tablet's PIN sign-in says when it returns to the staff list.
+    expect(
+      parsePinStatus({
+        pin: { state: "Set", changedAt: at, lockedUntil: null },
+        signIn: "Pin",
+        verifiedUntil: null,
+        tabletIdleReturnMinutes: 5,
+      }).tabletIdleReturnMinutes,
+    ).toBe(5);
+    expect(() =>
+      parsePinStatus({
+        pin: { state: "Set", changedAt: at, lockedUntil: null },
+        signIn: "Pin",
+        verifiedUntil: null,
+        tabletIdleReturnMinutes: 0,
+      }),
+    ).toThrow(StaffPinError);
     expect(() =>
       parsePinStatus({
         pin: { state: "Unknown", changedAt: null, lockedUntil: null },
@@ -272,10 +299,25 @@ describe("v15 cbff9d6f: tablet re-check of remembered refund countdowns", () => 
     expect((init?.headers as Record<string, string>)["X-BOP-CSRF"]).toBeUndefined();
     expect(JSON.parse(String(init?.body))).toEqual({ orderNumbers: ["16", "17"] });
   });
-  it("accepts only an answer for exactly the asked orders, with no extra fields", () => {
+  it("accepts the asked orders first, then other waiting orders, with no extra fields", () => {
     expect(parseRefundRecheck(answer, ["16", "17"])).toEqual(answer);
     expect(() => parseRefundRecheck(answer, ["17", "16"])).toThrow(StaffPinError);
-    expect(() => parseRefundRecheck(answer, ["16"])).toThrow(StaffPinError);
+    // WP-2423 M61: an order waiting at the Store that the tablet did not ask about is listed
+    // after the asked ones, always with its deadline, each order once.
+    expect(parseRefundRecheck(answer, ["16"])).toEqual(answer);
+    expect(parseRefundRecheck({ ...answer, orders: [answer.orders[1]] }, [])).toEqual({
+      ...answer,
+      orders: [answer.orders[1]],
+    });
+    // An order nobody asked about is listed only while it waits.
+    expect(() => parseRefundRecheck(answer, [])).toThrow(StaffPinError);
+    expect(() => parseRefundRecheck(answer, ["17"])).toThrow(StaffPinError);
+    expect(() =>
+      parseRefundRecheck(
+        { ...answer, orders: [...answer.orders, { orderNumber: "17", acceptBy: at }] },
+        ["16"],
+      ),
+    ).toThrow(StaffPinError);
     expect(() =>
       parseRefundRecheck(
         { ...answer, orders: [{ orderNumber: "16", acceptBy: null, customer: "x" }] },
@@ -312,7 +354,6 @@ describe("v15 cbff9d6f: tablet re-check of remembered refund countdowns", () => 
     expect((await recheck(404, null)).code).toBe("Unavailable");
     const fetcher = respond(200, answer);
     const client = createStaffPinClient(null, fetcher);
-    expect((await failure(client.refundRecheck([]))).code).toBe("Invalid");
     expect((await failure(client.refundRecheck(["<b>"]))).code).toBe("Invalid");
     expect(fetcher).not.toHaveBeenCalled();
   });

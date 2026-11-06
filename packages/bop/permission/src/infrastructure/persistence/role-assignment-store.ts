@@ -692,3 +692,36 @@ const storeActionCandidatesSql = `SELECT DISTINCT a.actor_id::text actor
        JOIN bop_permission.permission_definition d ON d.permission_id=o.permission_id AND d.lifecycle='Active' AND d.action_code=$3
        WHERE o.brand_id=$1 AND ${brandOrStore("o")} AND o.effect='Allow' AND ${inWindow("o")}
        LIMIT 1001`;
+
+/**
+ * WP-2423 M63: whether one Actor holds `action` at a Store for a decision that must fail closed
+ * (letting an owner or manager past a shared tablet's wrong-PIN limit with their own PIN): they
+ * are a candidate ({@link storeActionCandidates}: an Active role grant or Allow override at the
+ * Brand or this Store) and no Active Deny override for the action applies to them at the Brand or
+ * this Store. A subset of who evaluation would allow only in that Deny is the one rule a candidate
+ * can still fail on here; Membership currency is checked by its owner. Any failure reads as false.
+ */
+export async function storeActionHeldWithoutDeny(
+  tx: RoleAssignmentTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly actorReference: string;
+    readonly action: string;
+    readonly at: string;
+  },
+): Promise<boolean> {
+  const candidates = await storeActionCandidates(tx, input);
+  if (!candidates.includes(input.actorReference)) return false;
+  const denied = (
+    await tx.query(
+      `SELECT 1 FROM bop_permission.permission_override o
+       JOIN bop_permission.permission_definition d ON d.permission_id=o.permission_id AND d.lifecycle='Active' AND d.action_code=$3
+       WHERE o.brand_id=$1 AND (o.store_id IS NULL OR o.store_id=$2::uuid) AND o.actor_id=$5::uuid AND o.effect='Deny'
+         AND o.lifecycle='Active' AND o.effective_from<=$4::timestamptz AND (o.effective_until IS NULL OR o.effective_until>$4::timestamptz)
+       LIMIT 1`,
+      [input.brandReference, input.storeReference, input.action, input.at, input.actorReference],
+    )
+  ).rows;
+  return denied.length === 0;
+}
