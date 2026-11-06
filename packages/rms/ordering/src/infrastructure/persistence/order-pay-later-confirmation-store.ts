@@ -650,7 +650,11 @@ export function createPostgresOrderRoundStaffHoldStore(options: {
       );
     },
 
-    /** The rounds of these Orders that wait for staff now (Tables "needs action"). */
+    /**
+     * The rounds of these Orders that wait for staff now (Tables "needs action"): held, not
+     * released, and not ended some other way (cancelled, or the Order ended). A round that no
+     * longer waits never stops the table from paying.
+     */
     async listWaiting(input: {
       transaction: ConsumerTransaction;
       orderReferences: readonly string[];
@@ -665,6 +669,12 @@ export function createPostgresOrderRoundStaffHoldStore(options: {
         `SELECT ${holdColumns} FROM rms_ordering.order_round_staff_hold h LEFT JOIN rms_ordering.order_round_staff_hold_release r
           ON r.brand_id=h.brand_id AND r.store_id=h.store_id AND r.order_batch_id=h.order_batch_id
           WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=ANY($3::uuid[]) AND r.order_batch_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation c
+              WHERE c.brand_id=h.brand_id AND c.store_id=h.store_id AND c.order_batch_id=h.order_batch_id)
+            AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation x
+              WHERE x.brand_id=h.brand_id AND x.store_id=h.store_id AND x.order_id=h.order_id AND x.order_batch_id=h.order_batch_id)
+            AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t
+              WHERE t.brand_id=h.brand_id AND t.store_id=h.store_id AND t.order_id=h.order_id)
           ORDER BY h.held_at LIMIT 501`,
         [brand, store, orders],
       );
