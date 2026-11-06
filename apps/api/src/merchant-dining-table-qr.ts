@@ -102,6 +102,16 @@ function item(table: DiningTable, issue: DiningTableQrIssue | undefined): TableQ
   });
 }
 
+/** WP-2423 M150: the instant's calendar date at the Store (YYYY-MM-DD). */
+export function storeLocalDay(instant: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(instant));
+}
+
 export function createMerchantDiningTableQr(options: Options) {
   const resolve = createMerchantStoreScope(options.persistence);
   const customerOrigin = origin(options.customerOrigin);
@@ -761,7 +771,15 @@ export function createMerchantDiningTableQr(options: Options) {
           const publicName = published?.localizedFields[published.defaultLocale]?.storeDisplayName;
           const store = current.store as { displayName?: unknown; timeZone?: unknown };
           return Object.freeze({
-            fileName: "table-qr-codes-" + occurredAt.slice(0, 10) + ".html",
+            // WP-2423 M150: named by the Store's own date, never UTC's (23:22 in Toronto is
+            // still that day).
+            fileName:
+              "table-qr-codes-" +
+              storeLocalDay(
+                occurredAt,
+                typeof store.timeZone === "string" ? store.timeZone : "UTC",
+              ) +
+              ".html",
             html: renderTableQrSheet({
               storeName:
                 publicName ?? (typeof store.displayName === "string" ? store.displayName : ""),

@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { createMerchantDiningTableQr } from "./merchant-dining-table-qr.js";
+import { createMerchantDiningTableQr, storeLocalDay } from "./merchant-dining-table-qr.js";
 
 const m = vi.hoisted(() => ({
   resolve: vi.fn(),
@@ -187,4 +187,10 @@ it("WP-2423: a permission withdrawn during a code change refuses it before commi
   expect(f.allowed).toHaveBeenCalledTimes(2);
   // Thrown inside the transaction callback, so the table change does not commit.
   expect(f.thrownInside()).toBe(true);
+});
+
+it("WP-2423 M150: the printed QR file is named by the Store's own date, not UTC's", () => {
+  // 23:22 in Toronto on Nov 4 is already Nov 5 in UTC.
+  expect(storeLocalDay("2026-11-05T04:22:00.000Z", "America/Toronto")).toBe("2026-11-04");
+  expect(storeLocalDay("2026-11-05T04:22:00.000Z", "UTC")).toBe("2026-11-05");
 });
