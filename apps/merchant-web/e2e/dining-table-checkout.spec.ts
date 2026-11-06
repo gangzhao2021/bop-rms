@@ -273,7 +273,8 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
   expect(settles).toEqual([]);
   await page.screenshot({ path: "test-results/dining-table-checkout-confirm.png", fullPage: true });
   await confirm.getByRole("button", { name: "Confirm $38.45 cash received" }).click();
-  // The browser sends intent only: method, tip choice and the cash handed over — never totals.
+  // The browser sends intent only: method, tip choice and the cash handed over. The server prices
+  // the payment; the bill staff saw goes along only to be checked (refused if it changed since).
   expect(settles).toEqual([
     {
       operationReference: expect.stringMatching(/^[0-9a-f-]{36}$/u),
@@ -284,6 +285,7 @@ test("@production DEC-DINE-IN-PAY-LATER: staff start checkout, take cash rounded
       slipReference: null,
       recordedAfterOutage: false,
       takenAt: null,
+      owedMinor: "3393",
     },
   ]);
   // One receipt for the whole table: tip, cash rounding, total, how it was paid and the change.
@@ -900,4 +902,132 @@ test("@production a table payment the server failed goes again as the same reque
   await expect(checkout.getByLabel("Receipt for table T2")).toContainText("$33.95");
   expect(settles).toHaveLength(2);
   expect(settles[1]?.operationReference).toBe(settles[0]?.operationReference);
+});
+
+// v15 2026-11-06 (Fireside Table 5): a guest round waiting for staff OK is not on the bill and
+// no payment is taken until staff decide it, right in checkout. Sending it puts it on the bill.
+test("@production a round waiting for staff OK is decided in checkout before the table pays", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state);
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  let sent = false;
+  const decisions: Record<string, unknown>[] = [];
+  const settles: Record<string, unknown>[] = [];
+  const waiting = {
+    ...unpaidBill("Closing", 7),
+    rounds: unpaidBill("Closing", 7).rounds.slice(0, 1),
+    owed: { subtotalMinor: "2003", taxMinor: "260", totalMinor: "2263" },
+    waitingRounds: [
+      {
+        orderReference: id(3),
+        orderBatchReference: id(22),
+        heldAt: "2026-10-15T18:50:00.000Z",
+        reason: "PhoneRapid",
+        itemCount: 1,
+        totalMinor: "1130",
+        orderedBy: 2,
+      },
+    ],
+    tips: { enabled: false, tierPercents: [12, 18, 20] },
+  };
+  const afterSend = {
+    ...unpaidBill("Closing", 7),
+    waitingRounds: [],
+    tips: { enabled: false, tierPercents: [12, 18, 20] },
+  };
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: sent ? afterSend : waiting }),
+  );
+  await page.route("**/merchant/dining/held-round", (route) => {
+    decisions.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+    sent = true;
+    return route.fulfill({ headers, json: { status: "Sent" } });
+  });
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    settles.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Recorded",
+        bill: {
+          ...afterSend,
+          rounds: afterSend.rounds.map((round) => ({ ...round, paid: true })),
+          owed: { subtotalMinor: "0", taxMinor: "0", totalMinor: "0" },
+          settlement: {
+            method: "CardMachine",
+            roundsMinor: "3393",
+            tipMinor: "0",
+            roundingMinor: "0",
+            totalMinor: "3393",
+            tenderedMinor: null,
+            changeMinor: null,
+            recordedAt: "2026-10-15T19:05:00.000Z",
+            recordedAfterOutage: false,
+          },
+        },
+      },
+    });
+  });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await expect(checkout).toContainText(
+    "1 round is waiting for your OK and is not on this bill ($11.30). Send it to the kitchen or cancel it before taking payment.",
+  );
+  await expect(checkout).toContainText("A round the guests were already served or charged for");
+  // The bill is round 1 only; no payment until the waiting round is decided.
+  await expect(checkout).toContainText("Total with tax$22.63");
+  await checkout.getByRole("radio", { name: "Card machine" }).check();
+  const blocked = checkout.getByRole("button", {
+    name: "Decide the rounds waiting for your OK first",
+  });
+  await expect(blocked).toBeDisabled();
+  await expect(page.getByText("cancelled automatically")).toHaveCount(0);
+  await expect(page.getByText("Card payment not confirmed")).toHaveCount(0);
+  const results = await new AxeBuilder({ page }).include(".table-checkout").analyze();
+  expect(results.violations).toEqual([]);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await checkout.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: `test-results/held-round-checkout-${width}.png`,
+      fullPage: false,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Staff send it to the kitchen: it is on the bill, and the payment takes the new total.
+  await checkout.getByRole("button", { name: "Send to kitchen" }).click();
+  expect(decisions[0]).toMatchObject({
+    action: "Confirm",
+    orderReference: id(3),
+    orderBatchReference: id(22),
+  });
+  await expect(checkout).toContainText("Total with tax$33.93");
+  await expect(checkout).not.toContainText("waiting for your OK and is not on this bill");
+  const pay = checkout.getByRole("button", { name: "Paid on card machine · $33.93" });
+  await expect(pay).toBeEnabled();
+  await pay.click();
+  await checkout.getByRole("button", { name: "Confirm $33.93 paid" }).click();
+  await expect.poll(() => settles.length).toBe(1);
+  expect(settles[0]).toMatchObject({ method: "CardMachine", owedMinor: "3393" });
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
