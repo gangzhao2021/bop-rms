@@ -17,7 +17,7 @@ import {
 import type { StaffDiningTable, StaffDiningTableSession } from "./dining-session-client.js";
 import { compedText } from "./ItemCompAction.js";
 import { TableSplitControls } from "./TableSplit.js";
-import { floorServerProblemText, notConfirmedPressAgainText } from "./failure-words.js";
+import { notConfirmedPressAgainText, paymentNotConfirmedText } from "./failure-words.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -91,7 +91,7 @@ function errorText(error: unknown): string {
         "We couldn't confirm the result. Press the button again: it is never recorded twice.",
       );
     case "ServerProblem":
-      return notConfirmedPressAgainText + " " + floorServerProblemText;
+      return notConfirmedPressAgainText + " " + paymentNotConfirmedText;
     default:
       return t("This couldn't be done right now. Try again.");
   }

@@ -5,6 +5,7 @@ import {
   mergedPickupLines,
   pickupOfflineState,
   pickupRefreshIntervalMs,
+  pickupRetryAttempts,
   PickupQueueScreen,
   PickupStatePanel,
 } from "./PickupPages.js";
@@ -337,6 +338,19 @@ it("IDR-0039: the browser going offline turns the loaded queue read-only at once
   const loading = { key: "k", failures: 0, state: { kind: "Loading" as const } };
   expect(pickupOfflineState(loading)).toBe(loading);
   expect(pickupRefreshIntervalMs).toBe(10_000);
+});
+
+it("WP-2423 item 10: a queue that never loaded keeps trying after a fault, not after a refusal", () => {
+  for (const kind of ["ServerProblem", "Unavailable", "Offline"] as const)
+    expect(pickupRetryAttempts({ kind }, 2)).toBe(2);
+  for (const kind of ["PermissionDenied", "NotFound"] as const)
+    expect(pickupRetryAttempts({ kind }, 2)).toBeNull();
+  expect(pickupRetryAttempts({ kind: "Loading" }, 2)).toBeNull();
+  const view = parsePickupQueueView(pickupQueueFixture());
+  const loadedAt = "2026-08-12T15:12:30.000Z";
+  expect(pickupRetryAttempts({ kind: "Found", view, loadedAt }, 0)).toBeNull();
+  const stale = { reason: "ServerProblem" as const, lastLoadedAt: loadedAt, attempts: 3 };
+  expect(pickupRetryAttempts({ kind: "Found", view, loadedAt, stale }, 3)).toBe(3);
 });
 
 it("WP-2423 Q26: tells staff to wait when the kitchen is remaking part of the order", () => {

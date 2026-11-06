@@ -7802,6 +7802,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Showing the last update.": "显示的是最后一次更新。",
   "Our system has a problem; your wifi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.":
     "我们的系统出了问题，您的网络没有问题。请继续营业：新点的菜写纸单，付款用刷卡机。这个页面会一直重试。",
+  "Our system has a problem; your wifi is fine. Cook from the paper slips the floor brings. This screen keeps trying.":
+    "我们的系统出了问题，您的网络没有问题。请按前厅送来的纸单做菜。这个页面会一直重试。",
+  "Our system has a problem; your wifi is fine. Hand over by checking the order number and items on the guest's phone or slip. This screen keeps trying.":
+    "我们的系统出了问题，您的网络没有问题。交餐时请核对客人手机或小票上的单号和菜品。这个页面会一直重试。",
+  "Our system has a problem; your wifi is fine.": "我们的系统出了问题，您的网络没有问题。",
+  "If the guest has already paid or been charged, do not charge them again; check the bill.":
+    "如果客人已经付款或已被扣款，请不要再收一次；请查看账单。",
   "We couldn't confirm the result. Press again: it is never recorded twice.":
     "没能确认结果。请再按一次，不会重复记录。",
   "We couldn't confirm the result. Press the button again: it is never recorded twice.":

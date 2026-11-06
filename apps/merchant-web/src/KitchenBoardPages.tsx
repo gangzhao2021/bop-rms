@@ -1119,7 +1119,7 @@ import {
   type KitchenWorkItemDetailView,
 } from "./kitchen-board.js";
 import { StaffSignInLink, StaffSwitchButton } from "./StaffSession.js";
-import { floorServerProblemHeading, floorServerProblemText } from "./failure-words.js";
+import { floorServerProblemHeading, kitchenServerProblemText } from "./failure-words.js";
 
 export type LoadState<T> =
   | { readonly kind: "Loading" }
@@ -1244,7 +1244,7 @@ export function KitchenBoardStatePanel({
       t("Kitchen unavailable"),
       t("The kitchen queue could not be loaded. Refresh to try again."),
     ],
-    ServerProblem: [floorServerProblemHeading, floorServerProblemText],
+    ServerProblem: [floorServerProblemHeading, kitchenServerProblemText],
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>
@@ -2662,6 +2662,7 @@ export function KitchenBoardScreen({
                   <StaleReadNotice
                     stale={stale}
                     className="kitchen-board-lock kitchen-board-stale"
+                    serverProblemText={kitchenServerProblemText}
                   />
                 ) : null}
                 {statusDetails}

@@ -30,7 +30,7 @@ import {
   type PickupQueueView,
   type PickupWorkstation,
 } from "./pickup.js";
-import { floorServerProblemHeading, floorServerProblemText } from "./failure-words.js";
+import { floorServerProblemHeading, pickupServerProblemText } from "./failure-words.js";
 export type PickupLoadState = State;
 type State =
   | { readonly kind: "Loading" }
@@ -57,7 +57,7 @@ export function PickupStatePanel({ state }: { readonly state: Exclude<State["kin
       t("Pickups unavailable"),
       t("The pickup queue could not be loaded. Refresh to try again."),
     ],
-    ServerProblem: [floorServerProblemHeading, floorServerProblemText],
+    ServerProblem: [floorServerProblemHeading, pickupServerProblemText],
   } as const;
   return (
     <StatePanel heading={copy[state][0]} tone={state === "Loading" ? "neutral" : "error"} status>
@@ -82,6 +82,16 @@ export function pickupOfflineState<
       stale: { reason: "Offline", lastLoadedAt: previous.state.loadedAt, attempts: failures },
     },
   };
+}
+/**
+ * How many reads in a row failed, for the retry backoff, or null when nothing should retry: a
+ * queue that never loaded keeps trying after an outage or a server fault, as its text says, but
+ * not after access itself was refused.
+ */
+export function pickupRetryAttempts(state: PickupLoadState, failures: number): number | null {
+  if (state.kind === "Found") return state.stale?.attempts ?? null;
+  if (state.kind === "Loading" || replacesLastRead(state.kind)) return null;
+  return failures;
 }
 /** Waiting-time tier for the eyebrow colour: a pickup left too long turns visibly late. */
 export function waitTier(waitMinutes: number, completed: boolean): "ok" | "warning" | "late" {
@@ -459,7 +469,7 @@ export function PickupQueueScreen({
           </p>
         ) : null}
         {stale ? (
-          <StaleReadNotice stale={stale} />
+          <StaleReadNotice stale={stale} serverProblemText={pickupServerProblemText} />
         ) : readOnly ? (
           <StatePanel heading={t("Data may be out of date")} tone="offline" status>
             <p>{t("Refresh before confirming a handoff.")}</p>
@@ -753,7 +763,9 @@ export function PickupQueuePage(props: {
     };
   }, [key, queueKey, load]);
   const stale = state.kind === "Found" ? state.stale : undefined;
-  useStaleRetry(stale?.attempts ?? null, () => setRevision((value) => value + 1));
+  useStaleRetry(pickupRetryAttempts(state, stored.failures), () =>
+    setRevision((value) => value + 1),
+  );
   // IDR-0039: the browser saying the network is gone is enough to go read-only at once.
   useBrowserOffline(() => setStored(pickupOfflineState));
   // Re-read on its own while visible, like the Kitchen board, so an outage is noticed.

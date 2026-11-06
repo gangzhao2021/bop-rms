@@ -60,6 +60,7 @@ import {
 } from "./stale-read.js";
 import {
   floorServerProblemText,
+  serverSideProblemText,
   isServerProblem,
   notConfirmedPressAgainText,
   tableChangedText,
@@ -422,7 +423,7 @@ function tableActionFailureText(error: unknown): string {
     case "Unknown":
       return t("The result is unknown. Press it again: the same request is sent, never twice.");
     case "ServerProblem":
-      return notConfirmedPressAgainText + " " + floorServerProblemText;
+      return notConfirmedPressAgainText + " " + serverSideProblemText;
     case "Changed":
       return tableChangedText;
     case "Denied":

@@ -20,6 +20,27 @@ export const floorServerProblemText = t(
   "Our system has a problem; your wifi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.",
 );
 
+/** The Kitchen board: the cook needs to know what to cook from, not how guests pay. */
+export const kitchenServerProblemText = t(
+  "Our system has a problem; your wifi is fine. Cook from the paper slips the floor brings. This screen keeps trying.",
+);
+
+/** The pickup counter: hand over against what the guest holds, never on trust. */
+export const pickupServerProblemText = t(
+  "Our system has a problem; your wifi is fine. Hand over by checking the order number and items on the guest's phone or slip. This screen keeps trying.",
+);
+
+/** After a command that may have gone through: no serving or payment advice, only what happened. */
+export const serverSideProblemText = t("Our system has a problem; your wifi is fine.");
+
+/**
+ * A checkout or payment whose result could not be confirmed: it may already be recorded, so the
+ * one thing never to do is charge the guest again.
+ */
+export const paymentNotConfirmedText = t(
+  "If the guest has already paid or been charged, do not charge them again; check the bill.",
+);
+
 /**
  * A command whose answer was a server failure: a lost COMMIT looks the same as nothing saved. The
  * same operation goes again, and it is recorded once.

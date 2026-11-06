@@ -90,9 +90,12 @@ export function useBrowserOffline(onOffline: () => void): void {
 export function StaleReadNotice({
   stale,
   className,
+  serverProblemText = floorServerProblemText,
 }: {
   readonly stale: StaleRead;
   readonly className?: string;
+  /** What staff on this screen do while the server fails (the Kitchen and Pickup have their own). */
+  readonly serverProblemText?: string;
 }) {
   const timeZone = useContext(StoreTimeZoneContext);
   const offline = stale.reason === "Offline";
@@ -100,7 +103,7 @@ export function StaleReadNotice({
     return (
       <div className={className ?? "stale-read-notice"} data-stale-reason={stale.reason}>
         <StatePanel heading={floorServerProblemHeading} tone="offline" status>
-          <p>{floorServerProblemText}</p>
+          <p>{serverProblemText}</p>
           <p>
             {t("Showing the last update from")}{" "}
             <time dateTime={stale.lastLoadedAt}>{storeTime(stale.lastLoadedAt, timeZone)}</time>

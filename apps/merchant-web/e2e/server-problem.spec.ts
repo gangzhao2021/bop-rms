@@ -14,7 +14,19 @@ const scope = {
 };
 const words =
   "Our system has a problem; your wifi is fine. Keep serving: paper slips for new rounds, card machine for payment. This screen keeps trying.";
+const kitchenWords =
+  "Our system has a problem; your wifi is fine. Cook from the paper slips the floor brings. This screen keeps trying.";
+const pickupWords =
+  "Our system has a problem; your wifi is fine. Hand over by checking the order number and items on the guest's phone or slip. This screen keeps trying.";
 const retryLater = { status: 503, headers, json: { error: "retry_later" } };
+const pickupQueue = {
+  source: "CurrentFulfillment",
+  workstation: { deviceReference: id(10), pickupLocationReference: id(11) },
+  storeReference: scope.storeReference,
+  observedAt: "2026-11-05T16:00:00.000Z",
+  nextAfterFulfillmentReference: null,
+  items: [],
+};
 
 async function session(
   page: Page,
@@ -208,11 +220,14 @@ test("@production the Kitchen board says what to do when the server fails", asyn
   await session(page, kitchenNavigation);
   await page.route("**/merchant/kitchen/query", (route) => route.fulfill(retryLater));
   await page.goto("/operations/kitchen");
-  await expect(page.getByText(words)).toBeVisible();
+  await expect(page.getByText(kitchenWords)).toBeVisible();
+  await expect(page.getByText(words)).toHaveCount(0);
   await expectNoBlame(page);
 });
 
-test("@production Pickup says what to do when the server fails", async ({ page }) => {
+test("@production Pickup says what to do when the server fails, and comes back by itself", async ({
+  page,
+}) => {
   await session(page, [
     {
       screenId: "FUL-PICKUP-QUEUE",
@@ -221,10 +236,18 @@ test("@production Pickup says what to do when the server fails", async ({ page }
       permission: "fulfillment.operate",
     },
   ]);
-  await page.route("**/merchant/pickup/query", (route) => route.fulfill(retryLater));
+  let down = true;
+  await page.route("**/merchant/pickup/query", (route) =>
+    down ? route.fulfill(retryLater) : route.fulfill({ headers, json: pickupQueue }),
+  );
   await page.goto("/operations/pickup");
-  await expect(page.getByText(words)).toBeVisible();
+  await expect(page.getByText(pickupWords)).toBeVisible();
+  await expect(page.getByText(words)).toHaveCount(0);
   await expectNoBlame(page);
+  // Nobody presses Refresh: the queue comes back on its own once the server does.
+  down = false;
+  await expect(page.getByText(pickupWords)).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByText("No pickups waiting")).toBeVisible();
 });
 
 test("@production Home says what to do when the server fails on what it reads", async ({

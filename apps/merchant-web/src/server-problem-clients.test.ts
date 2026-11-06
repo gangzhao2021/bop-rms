@@ -10,6 +10,10 @@ import { menuErrorText } from "./StoreMenuPages.js";
 import { zhHans } from "./i18n/zh-Hans.js";
 import {
   floorServerProblemText,
+  kitchenServerProblemText,
+  paymentNotConfirmedText,
+  pickupServerProblemText,
+  serverSideProblemText,
   notConfirmedPressAgainText,
   serverProblemText,
   tableChangedText,
@@ -101,7 +105,20 @@ describe("the words", () => {
     floorServerProblemText,
     notConfirmedPressAgainText,
     tableChangedText,
+    kitchenServerProblemText,
+    pickupServerProblemText,
+    serverSideProblemText,
+    paymentNotConfirmedText,
   ];
+  it("tell each screen what to do there, and never advise a payment that may be recorded", () => {
+    expect(kitchenServerProblemText).toContain("Cook from the paper slips");
+    expect(kitchenServerProblemText).not.toContain("card machine");
+    expect(pickupServerProblemText).toContain("order number");
+    expect(pickupServerProblemText).not.toContain("card machine");
+    expect(paymentNotConfirmedText).toContain("do not charge them again");
+    expect(paymentNotConfirmedText).not.toContain("card machine");
+    expect(serverSideProblemText).not.toContain("card machine");
+  });
   it("never blame the person's permissions or their connection", () => {
     for (const text of words) {
       expect(text.toLowerCase()).not.toContain("permission");
