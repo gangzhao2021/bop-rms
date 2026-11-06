@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { request as httpRequest, type Server } from "node:http";
+import { BrowserSessionError } from "@bop/identity";
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
@@ -90,6 +91,24 @@ async function serve(options: Partial<MerchantBffRouterOptions>) {
     reported,
     post: (path: string, body: unknown = {}) => send("POST", path, JSON.stringify(body)),
     get: (path: string) => send("GET", path),
+    /** A top-level page load (the sign-in callback, as the identity provider redirects to it). */
+    navigate: (path: string) =>
+      new Promise<{ readonly status: number; readonly location: string | undefined }>(
+        (resolve, reject) => {
+          const outgoing = httpRequest(
+            root + path,
+            { method: "GET", headers: { ...readHeaders, "sec-fetch-dest": "document" } },
+            (incoming) => {
+              incoming.resume();
+              incoming.once("end", () =>
+                resolve({ status: incoming.statusCode ?? 0, location: incoming.headers.location }),
+              );
+            },
+          );
+          outgoing.once("error", reject);
+          outgoing.end();
+        },
+      ),
   };
 }
 
@@ -310,6 +329,37 @@ describe("replies that say nothing about why still tell the log", () => {
     } as never);
     await refused.get("/callback?code=x&state=y");
     expect(refused.reported).toEqual([]);
+  });
+
+  it("a sign-in to a Store BOP closed lands on the page that says so, and logs nothing", async () => {
+    const signInEntry = { path: "/operations/sign-in", testOnly: false };
+    // As the sign-in writes it over: the session store's denial, then the sign-in's own.
+    const closed = new BrowserSessionError("BROWSER_SESSION_DENIED", {
+      cause: new BrowserSessionError("BROWSER_SESSION_DENIED", {
+        cause: new Error("MERCHANT_SESSION_SELECTION_DENIED", {
+          cause: new Error("MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED"),
+        }),
+      }),
+    });
+    const app = await serve({ signInEntry, service: { callback: rejecting(closed) } } as never);
+    const page = await app.navigate("/callback?code=x&state=y");
+    expect(page.status).toBe(303);
+    expect(page.location).toBe("/operations/sign-in?signIn=not_active");
+    expect(app.reported).toEqual([]);
+    // Any other refused sign-in keeps its own page.
+    const refused = await serve({
+      signInEntry,
+      service: {
+        callback: rejecting(
+          new BrowserSessionError("BROWSER_SESSION_DENIED", {
+            cause: new Error("MERCHANT_SESSION_SELECTION_DENIED"),
+          }),
+        ),
+      },
+    } as never);
+    expect((await refused.navigate("/callback?code=x&state=y")).location).toBe(
+      "/operations/sign-in?signIn=failed",
+    );
   });
 
   it("may-open answers no, and a fault behind it is seen", async () => {

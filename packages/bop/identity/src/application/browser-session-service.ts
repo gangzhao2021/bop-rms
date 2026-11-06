@@ -295,8 +295,9 @@ export class BrowserSessionService {
           Object.freeze({ descriptor: merchantSessionCookie, value: selector, clear: false }),
         ]),
       });
-    } catch {
-      throw new BrowserSessionError("BROWSER_SESSION_DENIED");
+    } catch (cause) {
+      // The answer stays a denial; why (a refused Store selection, say) stays behind it.
+      throw new BrowserSessionError("BROWSER_SESSION_DENIED", { cause });
     }
   }
 

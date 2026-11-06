@@ -176,6 +176,16 @@ test("@production staff sign in with their own account from the sign-in page", a
     "Signing in isn't available right now. Staff who are already signed in can keep working, and a shared store tablet still switches staff with a PIN. Try again in a few minutes; if it keeps happening, tell your manager so they can contact BOP support.",
   );
   await checkScreen(page, "sign-in-unavailable", [1440, 390]);
+
+  // WP-2423 item 10: every Store this person works in is paused or closed on BOP (the sign-in
+  // callback's answer, proven against the database in cognito-store-staff-acceptance): the page
+  // says so and who to call, not the invitation guidance.
+  await page.goto("/operations/sign-in?signIn=not_active");
+  await expect(page.getByRole("alert")).toHaveText(
+    "This store is not open on BOPBOP has paused or closed this store or business, so its screens can't open. Contact BOP support to find out why or to reopen it.",
+  );
+  await expect(page.getByText("ask your manager", { exact: false })).toHaveCount(0);
+  await checkScreen(page, "sign-in-not-active", [1440, 390]);
 });
 
 test("@production signing out returns to the staff sign-in page", async ({ page }) => {

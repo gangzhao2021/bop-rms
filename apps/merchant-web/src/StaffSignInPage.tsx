@@ -28,13 +28,24 @@ export const SIGN_IN_UNAVAILABLE_TEXT = t(
   "Signing in isn't available right now. Staff who are already signed in can keep working, and a shared store tablet still switches staff with a PIN. Try again in a few minutes; if it keeps happening, tell your manager so they can contact BOP support.",
 );
 
+/**
+ * WP-2423 item 10: every Store this person works in is paused or closed on BOP. Signing in again
+ * will not open it, and their manager may be them: the page says who can.
+ */
+export const SIGN_IN_NOT_ACTIVE_TITLE = t("This store is not open on BOP");
+export const SIGN_IN_NOT_ACTIVE_TEXT = t(
+  "BOP has paused or closed this store or business, so its screens can't open. Contact BOP support to find out why or to reopen it.",
+);
+
 export function StaffSignInView({
   failed = false,
   unavailable = false,
+  notActive = false,
   testEntry,
 }: {
   readonly failed?: boolean;
   readonly unavailable?: boolean;
+  readonly notActive?: boolean;
   /** The labelled test sign-in, on a pilot without the managed sign-in service. */
   readonly testEntry?: string;
 }) {
@@ -47,7 +58,13 @@ export function StaffSignInView({
         <h1>{t("Staff sign-in")}</h1>
         <LanguageSwitch className="staff-switch__language" />
       </header>
-      {failed || unavailable ? (
+      {notActive ? (
+        <p role="alert" className="staff-switch__message">
+          <strong>{SIGN_IN_NOT_ACTIVE_TITLE}</strong>
+          <br />
+          {SIGN_IN_NOT_ACTIVE_TEXT}
+        </p>
+      ) : failed || unavailable ? (
         <p role="alert" className="staff-switch__message">
           {unavailable ? SIGN_IN_UNAVAILABLE_TEXT : SIGN_IN_FAILED_TEXT}
         </p>
@@ -115,6 +132,7 @@ export function StaffSignInPage() {
     <StaffSignInView
       failed={signIn === "failed"}
       unavailable={signIn === "unavailable"}
+      notActive={signIn === "not_active"}
       {...(entry?.testOnly ? { testEntry: entry.path } : {})}
     />
   );

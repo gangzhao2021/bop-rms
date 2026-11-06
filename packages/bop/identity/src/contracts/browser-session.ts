@@ -27,9 +27,14 @@ export type BrowserSessionErrorCode = (typeof browserSessionErrorCodes)[number];
 export class BrowserSessionError extends Error {
   readonly code: BrowserSessionErrorCode;
 
-  constructor(code: BrowserSessionErrorCode) {
+  /**
+   * `cause`: the owner's own refusal behind a denial (for example a Store BOP closed), kept
+   * non-enumerable for the caller to recognise; never answered or serialized.
+   */
+  constructor(code: BrowserSessionErrorCode, options?: { readonly cause?: unknown }) {
     super(
       code === "BROWSER_SESSION_VERSION_CONFLICT" ? "session version conflict" : "request denied",
+      options?.cause === undefined ? undefined : { cause: options.cause },
     );
     this.name = "BrowserSessionError";
     this.code = code;

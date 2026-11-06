@@ -102,8 +102,10 @@ export function StaffSignedOutPage() {
 }
 
 /**
- * The Store or the merchant is paused or closed on BOP. Signing in again leads back here, so the
- * page says what the state is and who can change it, and lets the person sign out.
+ * The Store or the merchant is paused or closed on BOP, under a sign-in made before. Signing in
+ * again will not open it (a person with another open Store signs in to that one; otherwise the
+ * sign-in page says the same), so the page says what the state is and who can change it, and lets
+ * the person sign out.
  */
 export function OrganizationNotActivePage() {
   return (

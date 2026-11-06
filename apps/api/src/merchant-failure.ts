@@ -152,7 +152,8 @@ export function merchantFailureKind(error: unknown): MerchantFailureKind {
 /** Whether the failure, or one it was written over, carries this code. */
 export function failureNamed(error: unknown, code: string): boolean {
   let current = error;
-  for (let depth = 0; depth < 4 && current !== null && typeof current === "object"; depth += 1) {
+  // A sign-in's refusal is written over up to four times (selection, session store, sign-in).
+  for (let depth = 0; depth < 6 && current !== null && typeof current === "object"; depth += 1) {
     if (merchantFailureCode(current) === code) return true;
     current = own(current, "cause");
   }

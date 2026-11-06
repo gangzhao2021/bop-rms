@@ -22,6 +22,8 @@ import {
   KITCHEN_SIGN_IN_HREF,
   SIGN_IN_FAILED_TEXT,
   SIGN_IN_HREF,
+  SIGN_IN_NOT_ACTIVE_TEXT,
+  SIGN_IN_NOT_ACTIVE_TITLE,
   SIGN_IN_UNAVAILABLE_TEXT,
   StaffSignInView,
 } from "./StaffSignInPage.js";
@@ -224,5 +226,18 @@ describe("WP-2423 DEC-COGNITO-STORE-STAFF Staff sign-in", () => {
     plain(html);
     expect(parseStepUpResult("unavailable")).toBe("unavailable");
     expect(stepUpResultText.unavailable).toContain("nothing was changed");
+  });
+  it("WP-2423 item 10: a Store BOP paused or closed says so and who to call, not the invitation", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <StaffSignInView notActive />
+      </MemoryRouter>,
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain(SIGN_IN_NOT_ACTIVE_TITLE);
+    expect(html).toContain(SIGN_IN_NOT_ACTIVE_TEXT.replace(/'/gu, "&#x27;"));
+    expect(SIGN_IN_NOT_ACTIVE_TEXT).toContain("Contact BOP support");
+    expect(html).not.toContain(SIGN_IN_FAILED_TEXT.replace(/'/gu, "&#x27;"));
+    plain(html);
   });
 });

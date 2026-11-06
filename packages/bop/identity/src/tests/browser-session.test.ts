@@ -599,6 +599,30 @@ describe("browser Session and same-origin BFF Domain orchestration", () => {
     ).rejects.toMatchObject({ code: "BROWSER_SESSION_DENIED" });
   });
 
+  it("WP-2423 item 10: a refused sign-in stays a denial and keeps why behind it", async () => {
+    const { service, store, provider } = fixture();
+    const start = await service.start("/");
+    const closed = new Error("MERCHANT_SESSION_SELECTION_DENIED", {
+      cause: new Error("MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED"),
+    });
+    store.createSession = async () => {
+      throw closed;
+    };
+    const refused: unknown = await service
+      .callback({
+        code: Buffer.alloc(32, 96).toString("base64url"),
+        state: required(provider.authorizationRequest).state,
+        authCookie: start.cookie.value,
+      })
+      .catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(BrowserSessionError);
+    expect(refused).toMatchObject({ code: "BROWSER_SESSION_DENIED", message: "request denied" });
+    expect((refused as Error).cause).toBe(closed);
+    // Kept out of what is serialized.
+    expect(JSON.stringify(refused)).not.toContain("NOT_ACTIVE");
+    expect(Object.keys(refused as object)).not.toContain("cause");
+  });
+
   it("revokes locally, asks the Provider, and always clears the Cookie", async () => {
     const { service, provider } = fixture();
     const start = await service.start("/");

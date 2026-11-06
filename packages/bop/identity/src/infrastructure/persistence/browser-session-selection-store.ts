@@ -176,7 +176,8 @@ export function createPostgresBrowserSessionSelectionStore(options: {
       } catch (error) {
         // WP-2423 item 10: what could not be read is not a refusal of the selection.
         if (isBrowserSessionReadFailure(error)) throw error;
-        return denied();
+        // A refusal stays a denial, with the owner's reason behind it (a Store BOP closed).
+        throw new Error("BROWSER_SESSION_SELECTION_DENIED", { cause: error });
       }
     },
   });

@@ -181,9 +181,14 @@ export function installMerchantSessionRoutes(
           options.signInEntry?.path === staffSignInPagePath &&
           exactHeader(request, "sec-fetch-dest") === "document"
         ) {
+          // WP-2423 item 10: every Store this person works in is paused or closed on BOP. The page
+          // says so and who to call, not "check your invitation, ask your manager".
+          const outcome = failureNamed(error, "MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED")
+            ? "not_active"
+            : "failed";
           response
             .set("Cache-Control", NO_STORE)
-            .redirect(303, staffSignInPagePath + "?signIn=failed");
+            .redirect(303, staffSignInPagePath + "?signIn=" + outcome);
           return;
         }
         denied(response);

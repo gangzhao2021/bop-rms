@@ -20,6 +20,7 @@ import { createStoreStaffSignIn } from "../../../apps/api/src/store-staff-sign-i
 import { createMerchantStaffAdministration } from "../../../apps/api/src/merchant-staff-administration.ts";
 import { createMerchantProviderStepUp } from "../../../apps/api/src/merchant-provider-step-up.ts";
 import { createMerchantBffRouter } from "../../../apps/api/src/merchant-bff.ts";
+import { createMerchantSessionSelection } from "../../../apps/api/src/merchant-session-selection.ts";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { startCognitoTestProvider } from "../../../tooling/environment/cognito-test-provider.mjs";
 import { inviteThroughOperator } from "../../../tooling/environment/store-staff-sign-in.mjs";
@@ -1145,6 +1146,57 @@ it("WP-2423 Cognito store staff: invite, first sign-in, sessions, step-up, resen
         });
         assert.equal(refused.status, 303);
         assert.equal(refused.headers.location, "/operations/sign-in?signIn=failed");
+        // WP-2423 item 10: BOP paused the Store. A fresh sign-in, through the merchant session
+        // selection the pilot composes, lands on the page that says so and who to call, not on
+        // "check your invitation, ask your manager"; nothing was signed in. Then it reopens.
+        const closedSignIn = new BrowserSessionService({
+          ...identity,
+          store: createPostgresBrowserSessionStore({
+            ...identity.configuration,
+            transactions: api,
+            now: clock,
+            currentActor: people.currentActor,
+            onSessionCreated: (tx, record) =>
+              createMerchantSessionSelection({
+                scope,
+                actorReference: record.session.actor.actorReference,
+                previousSessionReference: null,
+                now: clock,
+                validateAssociation,
+              })(tx, record),
+          }),
+          now: clock,
+        });
+        const ordinary = { start: minimal.start, callback: minimal.callback };
+        minimal.start = (path) => closedSignIn.start(path);
+        minimal.callback = (input) => closedSignIn.callback(input);
+        const lifecycle = (value) =>
+          admin.query(
+            "UPDATE bop_tenant.store SET lifecycle=$2,version=version+1,updated_at=$3 WHERE store_id=$1",
+            [store, value, new Date().toISOString()],
+          );
+        const sessionsBefore = (
+          await rows("SELECT count(*)::int AS n FROM bop_identity.authentication_session", [])
+        )[0].n;
+        await lifecycle("Suspended");
+        const closedLogin = await send("/merchant/login?returnTo=/app");
+        assert.equal(closedLogin.status, 303);
+        const closedBack = new URL(fake.signIn(closedLogin.headers.location, samPassword));
+        const closed = await send(closedBack.pathname + closedBack.search, {
+          cookie: cookieOf(closedLogin, "__Host-bop-auth"),
+          headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "document" },
+        });
+        assert.equal(closed.status, 303);
+        assert.equal(closed.headers.location, "/operations/sign-in?signIn=not_active");
+        assert.equal(cookieOf(closed, "__Host-bop-merchant"), undefined);
+        assert.equal(
+          (await rows("SELECT count(*)::int AS n FROM bop_identity.authentication_session", []))[0]
+            .n,
+          sessionsBefore,
+        );
+        await lifecycle("Active");
+        minimal.start = ordinary.start;
+        minimal.callback = ordinary.callback;
         // The pool stops requiring the authenticator app: once the five-minute check is due, the
         // sign-in page and the step-up window say signing in is unavailable (checked on a fresh
         // router whose provider has not checked the pool yet).

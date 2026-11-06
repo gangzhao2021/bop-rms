@@ -460,7 +460,7 @@ function createStore(options: Options, profile: Profile) {
         throw error;
       // WP-2423 item 10: what could not be read is not a refusal, and a conflict stays retryable.
       if (isBrowserSessionReadFailure(error)) throw error;
-      return denied();
+      throw new BrowserSessionError("BROWSER_SESSION_DENIED", { cause: error });
     }
   }
   return Object.freeze({
