@@ -4,8 +4,10 @@ import pg from "pg";
 import { it } from "vitest";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
+import { createHash } from "node:crypto";
 import {
   createPostgresCatalogLineStandingSource,
+  createPostgresCatalogOrderSnapshotSource,
   createPostgresCatalogSelectionService,
   createPostgresCurrentOptionBindingsStore,
 } from "../../rms/catalog/src/index.ts";
@@ -117,6 +119,11 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
         observedAt: now,
       });
       const validate = async (option) => (await selection.validateSelection(line(option))).status;
+      let generated = 70000;
+      const orders = createPostgresCatalogOrderSnapshotSource(readRunner, scope, safety, {
+        generate: () => id(++generated),
+        hash: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+      });
 
       // Ordinary: both choices sell.
       assert.equal(await validate(hot), "Accepted");
@@ -138,6 +145,12 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
       );
       assert.deepEqual(await standing.explainMany([line(hot)]), ["Available"]);
 
+      // Pay first: the order's lines are captured when it is submitted, before any payment starts.
+      const captured = await orders.capture(line(hot));
+      assert.deepEqual(
+        captured.options.map((option) => option.optionReference),
+        [hot],
+      );
       // Untick Offer Hot (as Option sets Save writes it): the stored default is now off.
       await admin.query("UPDATE rms_catalog.option SET lifecycle='Inactive' WHERE option_id=$1", [
         hot,
@@ -152,6 +165,13 @@ it("WP-2423 (cart-unsellable-dishes): a hidden dish or a default choice turned o
         "OptionsChanged",
         "Available",
       ]);
+      // Hot turned off after the guest's quote but before the order was submitted: the capture is
+      // a plain refusal (the checkout asks to price again, and the quote then names the line),
+      // never an outage. An order submitted earlier keeps the lines it captured; payment never
+      // reads Catalog again, so a guest who paid gets the Hot soy milk they ordered.
+      assert.equal(await orders.capture(line(hot)), null);
+      assert.ok(Object.isFrozen(captured));
+      assert.equal((await orders.capture(line(iced))).options[0].optionReference, iced);
       // List it's read (Listing rules) still names the default that is off; selling reads it.
       const bindingInput = {
         sellableReference: sku,
