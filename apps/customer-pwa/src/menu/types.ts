@@ -27,8 +27,11 @@ export interface MenuOptionRule {
     readonly name: string;
     readonly maximumQuantity: number;
     readonly conflictOptionReferences: readonly string[];
+    /** The choice the dish is configured to start with; never started with while not offered. */
     readonly selectedByDefault: boolean;
     readonly defaultQuantity?: number;
+    /** WP-2423 (cart-unsellable-dishes): present only when the Store doesn't offer it right now. */
+    readonly offeredNow?: false;
     /** What one adds now ("0.75" CAD); null when the Store has not priced it yet. */
     readonly price: { readonly amount: string; readonly currency: string } | null;
   }[];

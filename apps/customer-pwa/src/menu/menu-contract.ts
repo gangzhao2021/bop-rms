@@ -167,8 +167,16 @@ function optionRule(value: unknown): MenuOptionRule {
   if (!Array.isArray(raw.options)) throw new TypeError("options required");
   const options = Object.freeze(
     raw.options.map((candidate) => {
+      // WP-2423 (cart-unsellable-dishes): `offeredNow: false` marks a choice the Store does not
+      // offer right now. Its configured default is unchanged (the rule's limits still hold), so
+      // the guest's start choice skips it instead (see startingSelections).
+      const off =
+        candidate !== null &&
+        typeof candidate === "object" &&
+        Object.hasOwn(candidate, "offeredNow");
       const option = exact(candidate, [
         ...(quantity ? ["defaultQuantity"] : []),
+        ...(off ? ["offeredNow"] : []),
         "optionReference",
         "name",
         "maximumQuantity",
@@ -199,6 +207,7 @@ function optionRule(value: unknown): MenuOptionRule {
         Number(option.maximumQuantity) < 1 ||
         Number(option.maximumQuantity) > 999 ||
         typeof option.selectedByDefault !== "boolean" ||
+        (off && option.offeredNow !== false) ||
         conflictOptionReferences.includes(optionReference) ||
         !(
           (incrementalPrice.status === "Available" &&
@@ -222,6 +231,7 @@ function optionRule(value: unknown): MenuOptionRule {
         conflictOptionReferences,
         selectedByDefault: option.selectedByDefault,
         ...(quantity ? { defaultQuantity } : {}),
+        ...(off ? { offeredNow: false as const } : {}),
         price:
           incrementalPrice.status === "Available"
             ? Object.freeze({

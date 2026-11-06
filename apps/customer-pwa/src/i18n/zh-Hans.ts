@@ -836,6 +836,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "This session isn’t part of the table any more, or only the person who started the table can restart this cart. Scan the table QR code again or ask staff for help.":
     "这个会话已不属于这一桌，或只有开这桌的人可以重开购物车。请重新扫描桌上的二维码或向店员求助。",
   "This size is sold out": "这个规格已售罄",
+  "{name} isn't available right now.": "{name} 现在不供应。",
+  "Not available now": "现在不供应",
+  "One of your choices isn’t available right now. Please choose another.":
+    "你选的一项现在不供应，请另选。",
+  "This item isn’t available right now.": "这道菜现在不供应。",
+  "{option} isn't available right now. Please choose another.": "{option} 现在不供应，请另选。",
   "This size is sold out right now. Please choose another size.":
     "这个规格目前已售罄，请选择其他规格。",
   "This table QR code is no longer in use": "这个桌台二维码已停用",

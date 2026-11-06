@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { allergensForChoice } from "./menu-families.js";
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
+import { defaultMenuOptionSelections, requiredGroupNotOffered } from "./option-configuration.js";
 import type { MenuJourneyContext } from "./types.js";
 
 const references = Object.freeze({
@@ -568,5 +569,57 @@ it("starts a combo part with nothing chosen, whatever the defaults underneath", 
   expect(parsed?.comboPart).toBe(true);
   expect(parsed?.options.every((o) => !o.selectedByDefault)).toBe(true);
   Object.assign(rule, { comboPart: false });
+  expect((await client.load()).kind).not.toBe("Found");
+});
+
+it("WP-2423 (cart-unsellable-dishes): a min-1 group whose only default is not offered now loads, and starts with nothing", async () => {
+  const value = found();
+  const rule = value.menu.sections[0]?.sellables[0]?.optionRules[0];
+  const hot = rule?.options[0];
+  if (!rule || !hot) throw new Error("fixture");
+  const iced = {
+    ...structuredClone(hot),
+    optionReference: references.allergen,
+    name: "Iced",
+    selectedByDefault: false,
+    defaultQuantity: 0,
+  };
+  Object.assign(rule, {
+    semanticsVersion: 2,
+    activationOptionReferences: [],
+    minimumSelections: 1,
+    maximumSelections: 1,
+    enabledOptionReferences: [hot.optionReference, iced.optionReference],
+    defaultOptionReferences: [hot.optionReference],
+    options: [
+      Object.assign(hot, {
+        name: "Hot",
+        selectedByDefault: true,
+        defaultQuantity: 1,
+        offeredNow: false,
+      }),
+      iced,
+    ],
+  });
+  const client = createCustomerMenuClient(context, {
+    fetch: async () => response(200, value),
+    online: () => true,
+  });
+  const result = await client.load();
+  if (result.kind !== "Found") throw new Error("the menu must load");
+  const parsed = result.menu.sections[0]?.sellables[0]?.optionRules ?? [];
+  expect(parsed[0]?.options.map((o) => o.offeredNow)).toEqual([false, undefined]);
+  // The configured default is kept, but the guest never starts with a choice that is off.
+  expect(parsed[0]?.options[0]?.selectedByDefault).toBe(true);
+  expect([...defaultMenuOptionSelections(parsed)]).toEqual([]);
+  expect(requiredGroupNotOffered(parsed)).toBe(false);
+  Object.assign(iced, { offeredNow: false });
+  const allOff = await client.load();
+  if (allOff.kind !== "Found") throw new Error("the menu must load");
+  expect(requiredGroupNotOffered(allOff.menu.sections[0]?.sellables[0]?.optionRules ?? [])).toBe(
+    true,
+  );
+  // Only `false` is a mark; anything else is not a menu this client reads.
+  Object.assign(iced, { offeredNow: true });
   expect((await client.load()).kind).not.toBe("Found");
 });

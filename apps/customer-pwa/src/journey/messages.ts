@@ -99,6 +99,11 @@ export function cartIssueMessage(code: string): string | null {
     OPTION_UNAVAILABLE: t("One of the chosen options is no longer available."),
     SELLABLE_UNAVAILABLE: t("This item is no longer available."),
     SOLD_OUT: t("This item is sold out right now."),
+    // WP-2423 (cart-unsellable-dishes): the menu changed since the page was shown.
+    CATALOG_OPTION_NOT_OFFERED: t(
+      "One of your choices isn’t available right now. Please choose another.",
+    ),
+    CATALOG_ITEM_UNAVAILABLE: t("This item isn’t available right now."),
     // WP-2423: the store's stock can't make the quantity asked.
     ITEM_SHORT: t("We can’t make that many right now. Choose fewer."),
     NOTE_TOO_LONG: t("Your note is too long."),

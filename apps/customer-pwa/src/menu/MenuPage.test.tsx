@@ -823,3 +823,60 @@ describe("Owner 2026-11-03: one tap for a dish with nothing to choose", () => {
     expect(screen(withOptions, { readOnlyNotice: "Read only" })).not.toContain(add);
   });
 });
+
+describe("WP-2423 (cart-unsellable-dishes): a choice the Store does not offer now", () => {
+  const option = sellable.optionRules[0]?.options[0];
+  if (!option) throw new Error("fixture");
+  const serve = (icedOff: boolean): MenuSellable => ({
+    ...sellable,
+    name: "Soy milk",
+    optionRules: [
+      {
+        name: "Serve",
+        minimumSelections: 1,
+        maximumSelections: 1,
+        activationOptionReferences: [],
+        options: [
+          {
+            ...option,
+            optionReference: "hot",
+            name: "Hot",
+            selectedByDefault: true,
+            defaultQuantity: 1,
+            offeredNow: false,
+          },
+          {
+            ...option,
+            optionReference: "iced",
+            name: "Iced",
+            selectedByDefault: false,
+            defaultQuantity: 0,
+            ...(icedOff ? { offeredNow: false as const } : {}),
+          },
+        ],
+      },
+    ],
+  });
+  const render = (value: MenuSellable) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <SellableConfigurator sellable={value} />
+      </MemoryRouter>,
+    );
+  it("greys the off choice, never starts with it, and leaves the other choice to the guest", () => {
+    const html = render(serve(false));
+    const hot = /<input[^>]*>(?=<span class="configure-option__name">Hot)/u.exec(html)?.[0] ?? "";
+    const iced = /<input[^>]*>(?=<span class="configure-option__name">Iced)/u.exec(html)?.[0] ?? "";
+    expect(hot).toContain("disabled");
+    expect(hot).not.toContain("checked");
+    expect(iced).not.toContain("disabled");
+    expect(iced).not.toContain("checked");
+    expect(html).toContain("Not available now");
+    expect(html).not.toContain("isn’t available right now");
+  });
+  it("says the dish isn't available when every choice of a required group is off", () => {
+    const html = render(serve(true));
+    expect(html).toContain("Soy milk isn&#x27;t available right now.");
+    expect(/<button[^>]*type="submit"[^>]*disabled/u.test(html)).toBe(true);
+  });
+});

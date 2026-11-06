@@ -37,7 +37,8 @@ export function defaultMenuOptionSelections(
   return new Map(
     rules.flatMap((rule) =>
       rule.options
-        .filter((option) => option.selectedByDefault)
+        // WP-2423 (cart-unsellable-dishes): never start with a choice not offered right now.
+        .filter((option) => option.selectedByDefault && option.offeredNow !== false)
         .map((option) => [option.optionReference, option.defaultQuantity ?? 1] as const),
     ),
   );
@@ -58,5 +59,20 @@ export function selectedMenuOptions(
           }),
         ),
     ),
+  );
+}
+
+/**
+ * WP-2423 (cart-unsellable-dishes): a group the guest must choose in (always shown) that has fewer
+ * choices offered right now than its minimum, so the dish can't be had now.
+ */
+export function requiredGroupNotOffered(rules: readonly MenuOptionRule[]): boolean {
+  return rules.some(
+    (rule) =>
+      !rule.activationOptionReferences?.length &&
+      rule.minimumSelections > 0 &&
+      rule.options
+        .filter((option) => option.offeredNow !== false)
+        .reduce((sum, option) => sum + option.maximumQuantity, 0) < rule.minimumSelections,
   );
 }

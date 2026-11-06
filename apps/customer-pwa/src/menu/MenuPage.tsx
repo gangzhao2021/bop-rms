@@ -2,6 +2,7 @@ import { clauseSeparator, listSeparator, sentenceEnd, t } from "../i18n/i18n.js"
 import {
   activeMenuOptionRules,
   defaultMenuOptionSelections,
+  requiredGroupNotOffered,
   selectedMenuOptions,
 } from "./option-configuration.js";
 import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
@@ -176,7 +177,19 @@ function useMenuLoad(
     // Owner 2026-11-03 walkthrough: moving the focus never moves the guest off where they were.
     if (state.kind !== "Loading") heading.current?.focus({ preventScroll: true });
   }, [state.kind]);
-  return { state, heading, retry: () => setRevision((value) => value + 1) };
+  return {
+    state,
+    heading,
+    retry: () => setRevision((value) => value + 1),
+    // WP-2423 (cart-unsellable-dishes): read the menu again in place (no loading screen), so
+    // a choice turned off since it was shown greys out while the guest keeps their page.
+    refresh: () => {
+      if (client === null || input === null) return;
+      void client.load(input).then((next) => {
+        if (next.kind === "Found") setState(next);
+      });
+    },
+  };
 }
 
 /** One choice only: shown as radio buttons. */
@@ -356,6 +369,7 @@ export function SellableDetailPage({
       headingRef={loaded.heading}
       mode="detail"
       onRetry={loaded.retry}
+      onRefresh={loaded.refresh}
       readOnlyNotice={readOnlyNotice}
       storeProfile={storeProfile}
       state={state}
@@ -371,6 +385,8 @@ export interface MenuScreenProps {
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly mode: "browse" | "search" | "detail";
   readonly onRetry?: (() => void) | undefined;
+  /** WP-2423 (cart-unsellable-dishes): re-read the menu in place after a refused add. */
+  readonly onRefresh?: (() => void) | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
   readonly cartSummary?: CartSummaryLoader | undefined;
   readonly storeProfile?: StoreProfileLoader | null | undefined;
@@ -388,6 +404,7 @@ export function MenuScreen({
   headingRef,
   mode,
   onRetry,
+  onRefresh,
   readOnlyNotice,
   cartSummary,
   storeProfile,
@@ -514,6 +531,7 @@ export function MenuScreen({
                   headingRef={headingRef}
                   mode={mode}
                   onRetry={onRetry}
+                  onRefresh={onRefresh}
                   readOnlyNotice={readOnlyNotice}
                   state={state}
                 />
@@ -668,6 +686,7 @@ function MenuState({
   headingRef,
   mode,
   onRetry,
+  onRefresh,
   readOnlyNotice,
   state,
 }: Omit<MenuScreenProps, "context" | "search" | "searchTerm"> & {
@@ -767,6 +786,7 @@ function MenuState({
         sellable={detail}
         headingRef={headingRef}
         readOnlyNotice={readOnlyNotice}
+        onRefresh={onRefresh}
       />
     );
   return <MenuContents menu={state.menu} headingRef={headingRef} mode={mode} />;
@@ -1169,12 +1189,14 @@ function SellableDetail({
   sellable,
   headingRef,
   readOnlyNotice,
+  onRefresh,
 }: {
   readonly channel?: MenuJourneyContext["channel"] | undefined;
   readonly family: MenuFamily;
   readonly sellable: MenuSellable;
   readonly headingRef?: React.RefObject<HTMLHeadingElement | null> | undefined;
   readonly readOnlyNotice?: React.ReactNode | undefined;
+  readonly onRefresh?: (() => void) | undefined;
 }) {
   const [photo, photoFailed] = useShownPhoto(sellable.photo ?? familyPhoto(family));
   const sized = family.variants.length > 1;
@@ -1234,6 +1256,7 @@ function SellableDetail({
             key={family.key}
             sellable={sellable}
             variants={family.variants}
+            onRefresh={onRefresh}
           />
         )}
       </div>
@@ -1303,6 +1326,11 @@ function configurationIssues(
         )
       )
         issues.push(t("{name} conflicts with another selected choice.", { name: option.name }));
+      // WP-2423 (cart-unsellable-dishes): chosen before it was turned off.
+      if (optionQuantity > 0 && option.offeredNow === false)
+        issues.push(
+          t("{option} isn't available right now. Please choose another.", { option: option.name }),
+        );
     });
   });
   if (note !== note.normalize("NFC") || note.length > 500)
@@ -1418,9 +1446,9 @@ function carryOverSelections(
 ): ReadonlyMap<string, number> {
   const next = new Map<string, number>();
   for (const rule of rules) {
-    const kept = rule.options.filter((option) => selected.has(option.optionReference));
-    const options =
-      kept.length > 0 ? kept : rule.options.filter((option) => option.selectedByDefault);
+    const offered = rule.options.filter((option) => option.offeredNow !== false);
+    const kept = offered.filter((option) => selected.has(option.optionReference));
+    const options = kept.length > 0 ? kept : offered.filter((option) => option.selectedByDefault);
     for (const option of options)
       next.set(
         option.optionReference,
@@ -1437,12 +1465,15 @@ export function SellableConfigurator({
   sellable,
   variants,
   controller: provided,
+  onRefresh,
 }: {
   readonly channel?: MenuJourneyContext["channel"] | undefined;
   readonly sellable: MenuSellable;
   /** The sizes to choose between; the size is the sellable added. */
   readonly variants?: readonly MenuVariant[] | undefined;
   readonly controller?: ConfigureController | undefined;
+  /** WP-2423 (cart-unsellable-dishes): re-read the menu in place after a refused add. */
+  readonly onRefresh?: (() => void) | undefined;
 }) {
   const navigate = useNavigate();
   const [controller] = useState(
@@ -1483,7 +1514,9 @@ export function SellableConfigurator({
   const busy = state.status === "pending";
   const unresolved = state.status === "outcome-unknown" || state.status === "offline";
   const locked = busy || unresolved || state.status === "added";
-  const soldOut = sellable.availability === "SoldOut";
+  // WP-2423 (cart-unsellable-dishes): a required choice group with nothing offered right now.
+  const notNow = requiredGroupNotOffered(sellable.optionRules);
+  const soldOut = sellable.availability === "SoldOut" || notNow;
   const total =
     issues.length === 0 ? configuredItemTotal(sellable, activeRules, current, quantity) : null;
   useEffect(() => {
@@ -1507,6 +1540,17 @@ export function SellableConfigurator({
     });
     void controller.submit(sellable.sellableReference, draft);
   };
+  // WP-2423 (cart-unsellable-dishes): the add was refused because a choice or the dish is not
+  // offered now: read the menu again once, so the page shows what can be chosen.
+  useEffect(() => {
+    if (
+      state.status === "validation" &&
+      state.issueCodes.some(
+        (code) => code === "CATALOG_OPTION_NOT_OFFERED" || code === "CATALOG_ITEM_UNAVAILABLE",
+      )
+    )
+      onRefresh?.();
+  }, [state, onRefresh]);
   // Owner 2026-11-03 walkthrough: added, the guest goes on choosing. A cart that was cleared has
   // something to say, so that one stays.
   useEffect(() => {
@@ -1578,7 +1622,10 @@ export function SellableConfigurator({
                     type={singleChoice(rule) ? "radio" : "checkbox"}
                     name={`configure-group-${groupIndex}`}
                     checked={current.has(option.optionReference)}
-                    disabled={locked}
+                    disabled={
+                      locked ||
+                      (option.offeredNow === false && !current.has(option.optionReference))
+                    }
                     {...(described === "" ? {} : { "aria-describedby": described })}
                     onChange={() => {
                       const next = new Map(current);
@@ -1594,7 +1641,9 @@ export function SellableConfigurator({
                   />
                   <span className="configure-option__name">{option.name}</span>
                 </label>
-                {priceId === null ? null : (
+                {option.offeredNow === false ? (
+                  <span className="configure-option__price">{t("Not available now")}</span>
+                ) : priceId === null ? null : (
                   <span id={priceId} className="configure-option__price">
                     {price}
                   </span>
@@ -1654,7 +1703,9 @@ export function SellableConfigurator({
       ) : null}
       {soldOut ? (
         <p className="configure-sold-out" role="status">
-          {t("This size is sold out right now. Please choose another size.")}
+          {notNow
+            ? t("{name} isn't available right now.", { name: sellable.name })
+            : t("This size is sold out right now. Please choose another size.")}
         </p>
       ) : null}
       <ConfigureStatus state={state} controller={controller} />
