@@ -135,7 +135,8 @@ export interface SettlementView {
   readonly projectedAt: string;
 }
 export interface SettlementDayEndCheck {
-  readonly state: "Waiting" | "NotRun";
+  /** NotCovered: the day closed before this Store's day-end checks started; never compared. */
+  readonly state: "Waiting" | "NotRun" | "NotCovered";
   readonly closedForMs: number;
   readonly supportAlerted: boolean;
 }
@@ -497,11 +498,11 @@ export function parseSettlementView(value: unknown): SettlementView {
             if (raw.dayEndCheck === null) return null;
             const d = exact(raw.dayEndCheck, ["state", "closedForMs", "supportAlerted"]);
             if (
-              (d.state !== "Waiting" && d.state !== "NotRun") ||
+              (d.state !== "Waiting" && d.state !== "NotRun" && d.state !== "NotCovered") ||
               !Number.isSafeInteger(d.closedForMs) ||
               (d.closedForMs as number) < 0 ||
               typeof d.supportAlerted !== "boolean" ||
-              (d.state === "Waiting" && d.supportAlerted)
+              (d.state !== "NotRun" && d.supportAlerted)
             )
               return fail();
             return Object.freeze({

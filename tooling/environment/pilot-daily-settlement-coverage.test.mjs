@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import {
   DAILY_SETTLEMENT_COVERAGE_BEFORE_STORE_RECORDS,
+  createDayEndCheckCoveredFrom,
   resolveDailySettlementCoverage,
 } from "./pilot-daily-settlement-coverage.mjs";
 import { createCoverageGatedRun } from "./pilot-daily-settlement-execution.mjs";
@@ -197,4 +198,29 @@ it("a coverage read that fails fails the cycle (health attention), and is asked 
   await expect(run()).rejects.toBe(refused);
   await expect(run()).rejects.toBe(refused);
   expect(resolveCoverage).toHaveBeenCalledTimes(2);
+});
+
+it("Settlement learns where a Pilot Store's day-end checks start; any other Store from its first day", async () => {
+  const recorded = recordOf(firstDay);
+  const pilot = createDayEndCheckCoveredFrom({
+    installation: installationWith(recorded),
+    pilotStore: true,
+  });
+  await expect(pilot(binding)).resolves.toBe(firstDay.startsAt);
+  // Another Store's read, or a Pilot Store without its record, never gets an answer.
+  await expect(pilot({ ...binding, storeReference: id(4) })).rejects.toThrow();
+  await expect(
+    createDayEndCheckCoveredFrom({ installation: installationWith(null), pilotStore: true })(
+      binding,
+    ),
+  ).rejects.toThrow();
+  // InternalTest and hosted Stores are covered from their own first business day: no file read.
+  const load = vi.fn();
+  await expect(
+    createDayEndCheckCoveredFrom({
+      installation: { loadRecordedDailySettlementCoverage: load },
+      pilotStore: false,
+    })(binding),
+  ).resolves.toBeNull();
+  expect(load).not.toHaveBeenCalled();
 });

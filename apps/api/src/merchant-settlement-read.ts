@@ -111,8 +111,12 @@ export interface MerchantSettlementView {
  */
 export const merchantSettlementNotRunAfterMs = 6 * 60 * 60_000;
 export interface MerchantSettlementDayEndCheck {
-  /** Waiting: the day closed less than 6 h ago (the run normally lands within minutes). */
-  readonly state: "Waiting" | "NotRun";
+  /**
+   * Waiting: the day closed less than 6 h ago (the run normally lands within minutes). NotRun: a
+   * covered day whose check is overdue. NotCovered: the day closed before this Store's day-end
+   * checks started (a real Pilot Store's issued record), so it is never compared.
+   */
+  readonly state: "Waiting" | "NotRun" | "NotCovered";
   readonly closedForMs: number;
   /**
    * NotRun only: the monitor has raised the alert for it and BOP's support channels are set up to
@@ -228,6 +232,12 @@ export function createMerchantSettlementRead(options: {
    * run" alert for this Store now. Not composed (or failing): the page never says BOP was told.
    */
   dayEndCheckAlerted?(): Promise<boolean>;
+  /**
+   * WP-2423 (settlement-coverage): the instant this Store's day-end checks start from (a real
+   * Pilot Store's issued record); null when they cover every day from the Store's first business
+   * day. Failing: no day-end check line is shown, neither "not run" nor "not covered".
+   */
+  dayEndCheckCoveredFrom?(scope: MerchantSettlementScope): Promise<string | null>;
   now(): string;
 }) {
   return async (input: {
@@ -311,14 +321,33 @@ export function createMerchantSettlementRead(options: {
       if (window.status === "Closed" && reconciliation !== null && !reconciliation.settlement) {
         const closedForMs = Math.max(0, Date.parse(projectedAt) - Date.parse(window.endsAt));
         if (!Number.isSafeInteger(closedForMs)) return unavailable();
-        const state = closedForMs > merchantSettlementNotRunAfterMs ? "NotRun" : "Waiting";
-        let supportAlerted = false;
-        if (state === "NotRun" && options.dayEndCheckAlerted !== undefined)
-          supportAlerted = await options.dayEndCheckAlerted().then(
-            (alerted) => alerted === true,
-            () => false,
-          );
-        dayEndCheck = Object.freeze({ state, closedForMs, supportAlerted });
+        const coveredFrom =
+          options.dayEndCheckCoveredFrom === undefined
+            ? { at: null }
+            : await options.dayEndCheckCoveredFrom(scope).then(
+                (value) =>
+                  value === null ||
+                  (typeof value === "string" && Number.isFinite(Date.parse(value)))
+                    ? { at: value }
+                    : null,
+                () => null,
+              );
+        if (coveredFrom !== null) {
+          const covered =
+            coveredFrom.at === null || Date.parse(window.startsAt) >= Date.parse(coveredFrom.at);
+          const state = !covered
+            ? "NotCovered"
+            : closedForMs > merchantSettlementNotRunAfterMs
+              ? "NotRun"
+              : "Waiting";
+          let supportAlerted = false;
+          if (state === "NotRun" && options.dayEndCheckAlerted !== undefined)
+            supportAlerted = await options.dayEndCheckAlerted().then(
+              (alerted) => alerted === true,
+              () => false,
+            );
+          dayEndCheck = Object.freeze({ state, closedForMs, supportAlerted });
+        }
       }
       const again = await options.authorize(tx, { sessionCookie: input.sessionCookie, permission });
       if (!again || !sameScope(again, scope)) return unavailable();

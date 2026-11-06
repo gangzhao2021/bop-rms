@@ -276,6 +276,37 @@ describe("WP-2423 P1 settlement report", () => {
       }),
     ).toThrow("Unavailable");
   });
+  // WP-2423 (settlement-coverage): a real Pilot Store's day before its day-end checks started is
+  // never compared, so it never promises a check that will run.
+  it("a closed day before the Store's day-end checks started says it is not compared", () => {
+    const base = settlementViewFixture();
+    const view = {
+      ...base,
+      reconciliation: openSettlementReconciliationFixture(),
+      dayEndCheck: { state: "NotCovered", closedForMs: 13 * 3600_000, supportAlerted: false },
+    };
+    const html = render(view);
+    expect(html).toContain('data-reconciled="not-covered"');
+    expect(html).toContain(
+      "Not compared with the payment provider. Day-end checks for this Store started after this business day, so this day is not compared; the figures above are not affected.",
+    );
+    expect(html).not.toContain("once it is fixed");
+    expect(html).not.toContain("has not completed");
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(render(view)).toContain(
+        "没有和支付方核对。本店的日结核对在这个营业日之后才开始，这一天不做核对；上面的数字不受影响。",
+      );
+    } finally {
+      setLanguageForTest("en");
+    }
+    expect(() =>
+      parseSettlementView({
+        ...base,
+        dayEndCheck: { state: "NotCovered", closedForMs: 1, supportAlerted: true },
+      }),
+    ).toThrow("Unavailable");
+  });
   it("refuses a view whose counts disagree", () => {
     const view = settlementViewFixture();
     view.reconciliation.differenceCount = 1;

@@ -300,3 +300,40 @@ it("waits as long as the operations monitor before a day counts as not run", asy
   )) as { SETTLEMENT_MISSING_GRACE_MS: number };
   expect(merchantSettlementNotRunAfterMs).toBe(SETTLEMENT_MISSING_GRACE_MS);
 });
+// WP-2423 (settlement-coverage): a real Pilot Store's day-end checks start at its issued record;
+// a closed day before that is never compared, so it is never "runs by itself once it is fixed".
+it("a closed day before the Store's day-end checks start is NotCovered, never NotRun", async () => {
+  const read = (coveredFrom: () => Promise<string | null>) =>
+    createMerchantSettlementRead({
+      transactions: { run: async (work) => work({ query: vi.fn() } as ConsumerTransaction) },
+      authorize: async () => scope,
+      storeLabel: async () => "Synthetic Store",
+      window: async () => window,
+      captured: async () => null,
+      refunded: async () => null,
+      reconciliation: async () => emptyDay,
+      now: () => "2026-09-22T21:00:00.000Z",
+      dayEndCheckAlerted: async () => true,
+      dayEndCheckCoveredFrom: coveredFrom,
+    })({ sessionCookie: "c", businessDate: null });
+  // Checks start with the next day: this day is outside coverage.
+  expect((await read(async () => "2026-09-22T08:00:00.000Z")).dayEndCheck).toEqual({
+    state: "NotCovered",
+    closedForMs: 13 * 3600_000,
+    supportAlerted: false,
+  });
+  // Checks start with this day (or with the Store's first day): an ordinary not-run day.
+  expect((await read(async () => "2026-09-21T08:00:00.000Z")).dayEndCheck).toMatchObject({
+    state: "NotRun",
+    supportAlerted: true,
+  });
+  expect((await read(async () => null)).dayEndCheck).toMatchObject({ state: "NotRun" });
+  // Where checks start cannot be read: no claim either way.
+  expect(
+    (
+      await read(async () => {
+        throw Error("ENOENT");
+      })
+    ).dayEndCheck,
+  ).toBeNull();
+});

@@ -2409,6 +2409,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "还没有和支付方核对。这个营业日已结束 {duration}，日结核对还没有运行。已通知 BOP 技术支持；上面的数字不受影响。",
   "Not compared with the payment provider yet. This business day closed {duration} ago and its day-end check has not run. It runs by itself once it is fixed; the figures above are not affected.":
     "还没有和支付方核对。这个营业日已结束 {duration}，日结核对还没有运行。修好后会自动补做；上面的数字不受影响。",
+  "Not compared with the payment provider. Day-end checks for this Store started after this business day, so this day is not compared; the figures above are not affected.":
+    "没有和支付方核对。本店的日结核对在这个营业日之后才开始，这一天不做核对；上面的数字不受影响。",
   "Not settled yet. The settlement run for this day has not completed.":
     "尚未结算。这一天的结算运行尚未完成。",
   "Not started": "未开始",

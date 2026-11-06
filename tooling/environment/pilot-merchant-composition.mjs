@@ -23,6 +23,7 @@ import { createInternalCounterOrder } from "./pilot-counter-order.mjs";
 import { createInternalQrLoaders } from "./pilot-qr.mjs";
 import { createMerchantDiningTableQr } from "../../apps/api/dist/merchant-dining-table-qr.js";
 import { createPilotAlertBoardReader } from "./pilot-ops-files.mjs";
+import { createDayEndCheckCoveredFrom } from "./pilot-daily-settlement-coverage.mjs";
 import { createInternalBatchCancellation } from "./pilot-batch-cancellation.mjs";
 import { createInternalOpenPaymentResolution } from "./pilot-open-payment-resolution.mjs";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
@@ -86,6 +87,8 @@ export function composeMerchantDependencies(
     // WP-2423 Q13: the operations monitor's alert board (ops container) for the Home.
     readOperationsAlertBoard: createPilotAlertBoardReader(directory),
     operationsAlertAudience: operationsAlertAudienceOf(directory),
+    // WP-2423 (settlement-coverage): where this Store's day-end checks start (Settlement page).
+    dayEndCheckCoveredFrom: createDayEndCheckCoveredFrom({ installation }),
     expectedDatabaseName: installation.database,
     roleMapping: config.roleMapping,
     ...(config.product?.optionPriceSources?.currencyMetadata === undefined

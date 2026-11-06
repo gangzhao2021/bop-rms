@@ -511,6 +511,13 @@ export function SettlementReport({
                       { duration: elapsedWords(view.dayEndCheck.closedForMs) },
                     )}
               </p>
+            ) : settlement === null && view.dayEndCheck?.state === "NotCovered" ? (
+              // WP-2423 (settlement-coverage): before a real Pilot Store's issued record.
+              <p role="status" data-reconciled="not-covered">
+                {t(
+                  "Not compared with the payment provider. Day-end checks for this Store started after this business day, so this day is not compared; the figures above are not affected.",
+                )}
+              </p>
             ) : settlement === null ? (
               <p role="status" data-reconciled="pending">
                 {t("Not settled yet. The settlement run for this day has not completed.")}

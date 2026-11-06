@@ -129,6 +129,8 @@ it("preserves configured refund roles, provider and Pickup workstation without g
       "readOperationsAlertBoard",
       // DEC-PILOT-ALERTS-BACKUP correction 2: a Store below stores/ reads as a merchant.
       "operationsAlertAudience",
+      // WP-2423 (settlement-coverage): where this Store's day-end checks start.
+      "dayEndCheckCoveredFrom",
       "exceptionPaymentMode",
       "providerAccountReference",
       "createInternalUnpaidRoundCancellation",

@@ -21,9 +21,11 @@ export function createPilotMerchantSettlement({
   selected,
   refundConfiguration,
   readOperationsAlertBoard,
+  dayEndCheckCoveredFrom,
 }) {
   return createPersistentMerchantSettlement({
     persistence,
+    ...(dayEndCheckCoveredFrom === undefined ? {} : { dayEndCheckCoveredFrom }),
     ...(readOperationsAlertBoard === undefined
       ? {}
       : {

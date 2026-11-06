@@ -147,3 +147,25 @@ it("WP-2423 (settlement-coverage): Settlement says BOP was told only from this S
   );
   expect(settlement).toContain('"settlement.not_run"');
 });
+
+it("WP-2423 (settlement-coverage): Settlement learns where this Store's day-end checks start", async () => {
+  const pilot = await readFile(new URL("./pilot-merchant.mjs", import.meta.url), "utf8");
+  const call = pilot.slice(pilot.indexOf("createPilotMerchantSettlement({"));
+  expect(call.slice(0, call.indexOf("INTERNAL_OPERATIONS_ALERTS_UNAVAILABLE"))).toContain(
+    "...(dayEndCheckCoveredFrom === undefined ? {} : { dayEndCheckCoveredFrom })",
+  );
+  const settlement = await readFile(
+    new URL("./pilot-merchant-settlement.mjs", import.meta.url),
+    "utf8",
+  );
+  expect(settlement).toContain(
+    "...(dayEndCheckCoveredFrom === undefined ? {} : { dayEndCheckCoveredFrom })",
+  );
+  const composition = await readFile(
+    new URL("./pilot-merchant-composition.mjs", import.meta.url),
+    "utf8",
+  );
+  expect(composition).toContain(
+    "dayEndCheckCoveredFrom: createDayEndCheckCoveredFrom({ installation })",
+  );
+});

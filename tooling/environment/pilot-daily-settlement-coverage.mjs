@@ -84,3 +84,25 @@ export async function resolveDailySettlementCoverage({
 }
 
 export const sameCoverageWindow = (a, b) => FIELDS.every((key) => a[key] === b[key]);
+
+/**
+ * WP-2423 (settlement-coverage): for the Settlement page, the instant this Store's day-end checks
+ * start from. A real Pilot Store's issued record (an earlier closed day is never compared, so the
+ * page never promises it will be); null for any other Store, which is covered from its own first
+ * business day. A read for another Store, or a Pilot Store without its record, throws: the page
+ * then claims nothing about the check.
+ */
+export function createDayEndCheckCoveredFrom({ installation, pilotStore = isPilotStore() }) {
+  return async (scope) => {
+    if (!pilotStore) return null;
+    const recorded = await installation.loadRecordedDailySettlementCoverage();
+    if (
+      recorded === null ||
+      ["tenantReference", "brandReference", "storeReference"].some(
+        (key) => recorded.scope?.[key] !== scope?.[key],
+      )
+    )
+      throw Error("PILOT_INSTALLATION_UNAVAILABLE");
+    return recorded.firstWindow.startsAt;
+  };
+}
