@@ -854,6 +854,13 @@ export const checkoutText = Object.freeze({
   get pickupEmail() {
     return t("Pickup email");
   },
+  /** M111: said on the field itself, which is marked invalid and gets the focus. */
+  get mobileNumberInvalid() {
+    return t("Enter a mobile number like 613 555 0123.");
+  },
+  get emailInvalid() {
+    return t("Enter an email like name@example.com.");
+  },
   get dineInNoContact() {
     return t("No contact details are required for your dine-in order.");
   },
@@ -907,9 +914,6 @@ export const checkoutText = Object.freeze({
   /** WP-2423 M112: under the field Continue found a problem with. */
   get enterYourName() {
     return t("Enter your name");
-  },
-  get enterMobileNumber() {
-    return t("Enter a mobile number, like 416 555 0123");
   },
   get enterEmail() {
     return t("Enter an email address, like name@example.com");

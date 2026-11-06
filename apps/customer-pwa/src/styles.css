@@ -3191,3 +3191,26 @@
   flex: none;
   white-space: nowrap;
 }
+
+/* M111 (200% zoom on a phone is a 195 CSS px wide page): the guest app never forces a wider page
+   than the screen (the shared tokens keep 320 px for the staff app), and the cart bar wraps
+   instead of covering the subtotal; the page leaves room under its content for the taller bar. */
+body {
+  min-width: 0;
+}
+@media (max-width: 22.5rem) {
+  .menu-cart-bar {
+    flex-wrap: wrap;
+  }
+  .customer-page .menu-cart-bar__link {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .customer-page--menu .bop-shell__main {
+    padding-bottom: calc(10rem + env(safe-area-inset-bottom, 0px));
+  }
+  .customer-page .bop-shell__header,
+  .customer-page .bop-shell__nav {
+    flex-wrap: wrap;
+  }
+}

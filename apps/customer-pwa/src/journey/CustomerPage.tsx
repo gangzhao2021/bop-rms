@@ -6,6 +6,25 @@ import { Link } from "react-router";
 export type CustomerJourneyStep =
   "entry" | "menu" | "cart" | "checkout" | "payment" | "order" | "receipt" | "table" | "other";
 
+/** M111: "Cart · Harbour Store": the step first, then the Store ("BOP Order" before a Store). */
+export function customerPageTitle(step: CustomerJourneyStep, storeName?: string): string {
+  if (storeName === undefined) return t("BOP Order");
+  const name = {
+    entry: t("Start your order"),
+    menu: t("Menu"),
+    cart: t("Cart"),
+    checkout: t("Checkout"),
+    payment: t("Payment"),
+    order: t("Your order"),
+    receipt: t("Receipt"),
+    table: t("Your table"),
+    other: null,
+  }[step];
+  return name === null
+    ? t("{storeName} · Order", { storeName })
+    : `${name} · ${storeName}`;
+}
+
 export interface CustomerStoreContext {
   readonly storeName: string;
   readonly brandName?: string | undefined;
@@ -38,12 +57,11 @@ export function CustomerPage({
 }) {
   const { language } = useLanguage();
   const mode = serviceModeLabel(store?.serviceMode);
-  // The browser tab and the installed app carry the Store's name, not the product's.
+  // The browser tab and the installed app carry the Store's name, not the product's; M111: and
+  // which step this is first, so a screen reader announces where the guest is.
   useEffect(() => {
-    document.title = store
-      ? t("{storeName} · Order", { storeName: store.storeName })
-      : t("BOP Order");
-  }, [store, language]);
+    document.title = customerPageTitle(step, store?.storeName);
+  }, [step, store, language]);
   const description = store
     ? [store.brandName, mode].filter((part) => part !== undefined && part !== "").join(" · ")
     : t("Scan the location QR code to begin");

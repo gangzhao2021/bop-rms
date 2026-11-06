@@ -50,7 +50,6 @@ export interface CheckoutDetailsFormHandle {
 export type DetailsField = "name" | "value" | "receiptEmail" | "policies";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
-const phonePattern = /^\+[1-9][0-9]{6,14}$/u;
 
 /**
  * WP-2423 M112: the first field that would be refused (the same rules the Store applies), or null.
@@ -64,9 +63,8 @@ export function firstDetailsProblem(
   if (contact !== null) {
     const name = contact.name.trim();
     if (name.length < 1 || name.length > 120) return "name";
-    if (contact.channel === "Phone" && !phonePattern.test(normalizePhoneNumber(contact.value)))
-      return "value";
-    if (contact.channel === "Email" && !emailPattern.test(contact.value.trim())) return "value";
+    // M111: the same contact rule the Store applies.
+    if (!pickupContactValueValid(contact.channel, contact.value)) return "value";
   }
   if (
     draft.receipt.choice === "TransactionalEmail" &&
@@ -87,6 +85,15 @@ export function normalizePhoneNumber(value: string): string {
   if (/^1\d{10}$/u.test(compact)) return "+" + compact;
   if (/^00\d{7,14}$/u.test(compact)) return "+" + compact.slice(2);
   return compact;
+}
+
+/**
+ * M111: the same rule the server applies, checked before saving so the guest is told which field
+ * to fix (E.164 after normalizing; an email with one @ and a dot in its domain).
+ */
+export function pickupContactValueValid(channel: "Phone" | "Email", value: string): boolean {
+  if (channel === "Phone") return /^\+[1-9]\d{7,14}$/u.test(normalizePhoneNumber(value.trim()));
+  return /^[^\s@]{1,64}@[^\s@]+\.[^\s@]{2,}$/u.test(value.trim()) && value.trim().length <= 254;
 }
 
 export type PickupContactDraft = NonNullable<CheckoutDetailsDraft["pickupContact"]>;
@@ -314,6 +321,14 @@ export function CheckoutDetailsForm({
       (policy.documents.length > 0 && !confirmed)
     )
       return null;
+    // M111: a contact the Store can't use is named on its own field, which gets the focus; nothing is saved.
+    if (
+      draft.pickupContact !== null &&
+      !pickupContactValueValid(draft.pickupContact.channel, draft.pickupContact.value)
+    ) {
+      showProblem("value");
+      return null;
+    }
     await saver.save({
       ...draft,
       pickupContact:
@@ -331,6 +346,8 @@ export function CheckoutDetailsForm({
   };
   const showProblem = (field: DetailsField) => {
     setProblem(field);
+    // The field is already on the page: the cursor goes there now (M111), and again once it is marked.
+    document.getElementById("checkout-details-" + field)?.focus();
     // After the marked field renders: bring it into view and put the cursor in it.
     window.setTimeout(() => {
       const element = document.getElementById("checkout-details-" + field);
@@ -345,20 +362,26 @@ export function CheckoutDetailsForm({
     return field;
   };
   useImperativeHandle(ref, () => ({ save: submit, validate }));
-  // A server "invalid" answer goes to the field too (the first one the rules find, else the name).
+  // A server "invalid" answer goes to the field too (the first one the rules find, else the
+  // pickup contact it is about (M111), else the name).
   useEffect(() => {
     if (save.status !== "invalid" || draft === null || policy === null) return;
-    showProblem(firstDetailsProblem(draft, policy.documents.length, confirmed) ?? "name");
+    showProblem(
+      firstDetailsProblem(draft, policy.documents.length, confirmed) ??
+        (draft.pickupContact !== null ? "value" : "name"),
+    );
     // Once per answer.
   }, [save.status]);
+  const errorId = (field: DetailsField) =>
+    field === "value" ? "pickup-contact-error" : "checkout-details-" + field + "-error";
   const fieldProps = (field: DetailsField) => ({
     id: "checkout-details-" + field,
     "aria-invalid": problem === field ? (true as const) : undefined,
-    "aria-describedby": problem === field ? "checkout-details-" + field + "-error" : undefined,
+    "aria-describedby": problem === field ? errorId(field) : undefined,
   });
   const fieldError = (field: DetailsField, text: string) =>
     problem === field ? (
-      <span className="checkout-details-form__error" id={"checkout-details-" + field + "-error"}>
+      <span className="checkout-details-form__error" id={errorId(field)}>
         {text}
       </span>
     ) : null;
@@ -531,9 +554,10 @@ export function CheckoutDetailsForm({
                 />
                 {fieldError(
                   "value",
+                  // M111: says what the Store can call, text or email.
                   draft.pickupContact.channel === "Phone"
-                    ? checkoutText.enterMobileNumber
-                    : checkoutText.enterEmail,
+                    ? checkoutText.mobileNumberInvalid
+                    : checkoutText.emailInvalid,
                 )}
               </label>
             </>

@@ -207,6 +207,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Edit cart": "修改购物车",
   Email: "邮箱",
   "Email my receipt": "把收据发到我的邮箱",
+  "Enter a mobile number like 613 555 0123.": "请输入手机号码，例如 613 555 0123。",
+  "Enter an email like name@example.com.": "请输入邮箱，例如 name@example.com。",
   "Enter a valid amount with up to two decimal places.": "请输入有效金额，最多两位小数。",
   "Enter an amount in dollars. Your tip is fixed when you continue to payment.":
     "请输入金额（加元）。点击去付款后小费即确定。",
@@ -1649,7 +1651,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "A dish": "一道菜",
   "Checkout asks you to accept the new prices before you pay.": "结账时会请你先确认新价格再付款。",
   "Enter your name": "请填写姓名",
-  "Enter a mobile number, like 416 555 0123": "请填写手机号，例如 416 555 0123",
   "Enter an email address, like name@example.com": "请填写邮箱，例如 name@example.com",
   "Tick this to continue": "勾选后才能继续",
   "You earn points on every order you scan to place. Points can be used only when you pay a table’s bill at the end, not on pickup or pay-first tables.":
