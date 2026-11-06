@@ -51,6 +51,7 @@ const moduleManifestInput = {
       "brand_role_provisioning",
       "role_assignment_change",
       "role_assignment_change_decision",
+      "role_assignment_sole_operator_approval",
       "role",
       "role_assignment",
       "permission_grant",

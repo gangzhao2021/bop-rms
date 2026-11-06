@@ -6029,6 +6029,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 for pilot DB grants (\"我都批准，之后不需要问我\"); WP-2423 DEC-DINING-GUEST-TABLE-START: a guest starting a free table at a Store that turned the switch on is recorded, and the worker and Tables read it"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment_sole_operator_approval",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL staff roles: a sole owner's own approval of a staff role, recorded as approved alone (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "bop_permission",
+      "object": "role_assignment_sole_operator_approval",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL staff roles: a sole owner's own approval of a staff role, recorded as approved alone (append-only)"
     }
   ]
 }

@@ -24,6 +24,16 @@ interface Query {
 const denied = (): never => {
   throw new Error("WORKFORCE_AUTHORITY_DENIED");
 };
+/**
+ * WP-2423 M07: the person holds no merchant workspace access at the Store (for example a new
+ * cashier with no role yet), so they cannot approve anything there. Same message as any refusal.
+ */
+export class MerchantWorkforceNoAccessError extends Error {
+  constructor() {
+    super("WORKFORCE_AUTHORITY_DENIED");
+    this.name = "MerchantWorkforceNoAccessError";
+  }
+}
 /** Composition only. Identity/Tenant resolver must authorize this lookup purpose
  * and retain current actor/association fences in the borrowed transaction.
  * Role interpretation and refund-specific policy stay with Payment.
@@ -94,7 +104,7 @@ export function createMerchantWorkforcePermissionSource(options: {
     const policy = createPostgresCurrentPermissionPolicySource(tx);
     const input = { tenantContext: context, membership, storeAssignment: assignment };
     if ((await policy.authorize({ ...input, action: "merchant.access" })).effect !== "Allow")
-      return denied();
+      throw new MerchantWorkforceNoAccessError();
     const authorized = await policy.authorizeWithRoles({ ...input, action: query.permissionCode });
     return Object.freeze({
       ...query,

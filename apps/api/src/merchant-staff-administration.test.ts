@@ -20,6 +20,8 @@ describe("WP-2423 staff administration command input", () => {
     },
     { operation: "Approve", changeReference: id(4) },
     { operation: "Withdraw", changeReference: id(4) },
+    // WP-2423 M07: the requester's own approval as sole operator.
+    { operation: "ApproveAlone", changeReference: id(4) },
     { operation: "Revoke", assignmentReference: id(5), operationReference: id(2) },
     { operation: "RemoveFromStore", actorReference: id(1), operationReference: id(2) },
     // DEC-BRAND-MULTI-STORE-ONE-INSTALLATION segment 8.
@@ -42,6 +44,15 @@ describe("WP-2423 staff administration command input", () => {
     ],
     ["extra field", { operation: "Approve", changeReference: id(4), decidedBy: id(9) }],
     ["bad reference", { operation: "Approve", changeReference: "not-a-uuid" }],
+    // WP-2423 M07: the browser never says who approves, when they verified or for whom.
+    [
+      "approving alone with a second-factor time",
+      { operation: "ApproveAlone", changeReference: id(4), actorMfaAt: "2026-11-06T10:00:00.000Z" },
+    ],
+    [
+      "approving alone for someone",
+      { operation: "ApproveAlone", changeReference: id(4), actorReference: id(1) },
+    ],
     [
       "negative version",
       {

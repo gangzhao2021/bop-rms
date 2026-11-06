@@ -16,6 +16,7 @@ import {
 import {
   decideRoleAssignment,
   listRoleAdministration,
+  storePermissionCatalog,
   listStoreRoleAssignments,
   requestRoleAssignment,
   revokeRoleAssignment,
@@ -46,6 +47,12 @@ import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { onlyRefusal } from "./merchant-failure.js";
+import {
+  MerchantSoleOperatorGateError,
+  merchantStaffRoleSoleOperatorGate,
+  requireMerchantStaffRoleSoleOperator,
+  type ResolveContext,
+} from "./merchant-sole-operator.js";
 
 /**
  * WP-2423: Section 88 IAM-USER-LIST / IAM-USER-DETAIL for the selected Store. Reads need
@@ -57,6 +64,9 @@ import { onlyRefusal } from "./merchant-failure.js";
  * WP-2423 step 9: removing someone from the Store (organization.staff.manage) ends their Store roles
  * and Store assignment and signs them out at once; their Brand roles end with it, which
  * needs the same action at Brand scope. The last owner cannot be removed; nobody removes themselves.
+ * WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL (staff roles): while sole operator is in effect for staff
+ * role approval at the role's scope, its requester may approve it alone ("ApproveAlone"), after a
+ * second-factor check at most 15 minutes old; never for themselves, never by default.
  */
 export class MerchantStaffAdministrationError extends Error {
   constructor(
@@ -71,7 +81,12 @@ export class MerchantStaffAdministrationError extends Error {
       // WP-2423 DEC-COGNITO-STORE-STAFF: an open invitation already goes to this email.
       | "AlreadyInvited"
       // The email typed to resend is not the invitation's email (invite again instead).
-      | "EmailMismatch",
+      | "EmailMismatch"
+      // WP-2423 M07: approving alone is not in effect now (`reason` says why), or the second
+      // factor is older than 15 minutes.
+      | "SoleOperatorNotInEffect"
+      | "NeedsReverification",
+    readonly reason?: "Off" | "OtherApprovers",
   ) {
     super(code);
     this.name = "MerchantStaffAdministrationError";
@@ -99,7 +114,8 @@ export type StaffCommand =
       readonly operationReference: string;
     }
   | {
-      readonly operation: "Approve" | "Reject" | "Withdraw";
+      /** WP-2423 M07: "ApproveAlone" is the requester's own approval as sole operator. */
+      readonly operation: "Approve" | "Reject" | "Withdraw" | "ApproveAlone";
       readonly changeReference: string;
     }
   | {
@@ -153,6 +169,7 @@ export function parseStaffCommand(value: unknown): StaffCommand {
     case "Approve":
     case "Reject":
     case "Withdraw":
+    case "ApproveAlone":
       if (keys !== "changeReference,operation") return fail("Invalid");
       return { operation: r.operation, changeReference: ref(r.changeReference) };
     case "Revoke":
@@ -248,12 +265,24 @@ export function parseOwnNameCommand(value: unknown): OwnNameCommand {
   };
 }
 
+type StaffScope = Awaited<ReturnType<ReturnType<typeof createMerchantStoreScope>>>;
+/** WP-2423 M07: the role's high-risk permissions in staff words (catalog descriptions). */
+const catalogDescriptions = new Map(
+  storePermissionCatalog().map((entry) => [entry.code, entry.description]),
+);
+
 export function createMerchantStaffAdministration(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
   references: { next(): string };
   /** WP-2423 DEC-COGNITO-STORE-STAFF: in-app invitations (staff sign in with Cognito). */
   invitations?: StaffInvitationOptions;
+  /**
+   * WP-2423 M07: the run's workforce context for evaluating who else at the Store holds staff
+   * role approval (each member as an approval would evaluate them). Absent: nobody approves their
+   * own request.
+   */
+  soleOperator?: { resolveContext(tx: unknown, scope: StaffScope): ResolveContext };
 }) {
   const resolveScope = createMerchantStoreScope(options.persistence);
   const resolveBrandScope = createMerchantBrandScope(options.persistence);
@@ -306,6 +335,75 @@ export function createMerchantStaffAdministration(options: {
     };
   }
 
+  /** Membership owner's confirmation that the subject is still an Active member. */
+  const confirmMember = (
+    tx: Tx,
+    owner: { brandReference: string; storeReference: string },
+    member: {
+      readonly actorReference: string;
+      readonly membershipReference: string;
+      readonly storeAssignmentReference: string | null;
+    },
+    at: string,
+  ) =>
+    member.storeAssignmentReference === null
+      ? confirmBrandMemberScope(directoryTx(tx), {
+          brandReference: owner.brandReference,
+          actorReference: member.actorReference,
+          membershipReference: member.membershipReference,
+          at,
+        })
+      : confirmStoreMemberScope(directoryTx(tx), {
+          ...owner,
+          actorReference: member.actorReference,
+          membershipReference: member.membershipReference,
+          storeAssignmentReference: member.storeAssignmentReference,
+          at,
+        });
+  /** WP-2423 M07: the staff role gate at a scope, for the requester (null when not wired). */
+  interface SoleOperatorView {
+    readonly status: "Effective" | "NotSet" | "OtherApprovers";
+    readonly otherApprovers: readonly { readonly displayName: string | null }[];
+    readonly verifiedUntil: string | null;
+  }
+  const gateInput = (
+    tx: Tx,
+    scope: StaffScope,
+    level: "Store" | "Brand",
+    brandAllowed: (action: string) => Promise<boolean>,
+    observedAt: string,
+  ) => {
+    if (options.soleOperator === undefined) return null;
+    return {
+      tenantReference: String(scope.selected.tenantReference),
+      brandReference: String(scope.context.brand.brandReference),
+      storeReference: String(scope.store.storeReference),
+      level,
+      actorReference: String(scope.actorReference),
+      observedAt,
+      resolveContext: options.soleOperator.resolveContext(tx, scope),
+      allowed: () =>
+        level === "Store"
+          ? may(scope, "identity.role.approve")
+          : brandAllowed("identity.role.approve"),
+    };
+  };
+  async function soleOperatorView(
+    tx: Tx,
+    scope: StaffScope,
+    level: "Store" | "Brand",
+    brandAllowed: (action: string) => Promise<boolean>,
+  ): Promise<SoleOperatorView | null> {
+    const input = gateInput(tx, scope, level, brandAllowed, options.persistence.now());
+    if (input === null) return null;
+    const gate = await merchantStaffRoleSoleOperatorGate(tx as never, input);
+    return Object.freeze({
+      status: gate.status,
+      otherApprovers: gate.otherApprovers,
+      verifiedUntil: gate.verifiedUntil,
+    });
+  }
+
   async function view(
     tx: Tx,
     scope: Awaited<ReturnType<typeof scopeFor>>,
@@ -332,7 +430,16 @@ export function createMerchantStaffAdministration(options: {
     // WP-2423 DEC-COGNITO-STORE-STAFF: who was invited, when it was sent and whether it expired.
     const invitations =
       options.invitations === undefined ? null : await staffInvitationsByActor(tx, owner);
-    const roles = (await listRoleAdministration(permissionTx(tx), owner, now))
+    const administered = await listRoleAdministration(permissionTx(tx), owner, now);
+    const highRisk = new Map(
+      administered.map((role) => [
+        String(role.record.roleReference),
+        role.record.selections
+          .filter((item) => item.highRisk && catalogDescriptions.has(item.action))
+          .map((item) => catalogDescriptions.get(item.action) as string),
+      ]),
+    );
+    const roles = administered
       .filter((role) => role.record.lifecycle === "Active")
       .map((role) => ({
         roleReference: role.record.roleReference,
@@ -341,6 +448,28 @@ export function createMerchantStaffAdministration(options: {
         scope: role.record.storeReference === null ? ("Brand" as const) : ("Store" as const),
       }))
       .filter((role) => manages(role.scope));
+    // WP-2423 M07: whether the viewer may approve their own request alone, read once per scope
+    // (one read at a time: each read sets the transaction's scope).
+    const joinedMembers = new Set(
+      members
+        .filter((member) => member.membershipLifecycle !== "PendingActivation")
+        .map((member) => member.actorReference),
+    );
+    const gates = new Map<"Store" | "Brand", SoleOperatorView>();
+    for (const level of ["Store", "Brand"] as const)
+      if (
+        pending.some(
+          (item) =>
+            item.scope === level &&
+            item.requestedBy === viewer &&
+            item.actorReference !== viewer &&
+            joinedMembers.has(item.actorReference) &&
+            approves(level),
+        )
+      ) {
+        const gate = await soleOperatorView(tx, scope, level, brandAllowed);
+        if (gate !== null) gates.set(level, gate);
+      }
     const names = new Map(
       (actor === null ? members : await listStoreMembers(directoryTx(tx), owner)).map((member) => [
         member.actorReference,
@@ -414,6 +543,7 @@ export function createMerchantStaffAdministration(options: {
               scope: item.scope,
               since: item.effectiveFrom,
               mayRevoke: manages(item.scope) && !self,
+              approvedAlone: item.approvedAlone,
             })),
           pending: pending
             .filter((item) => item.actorReference === member.actorReference)
@@ -425,6 +555,11 @@ export function createMerchantStaffAdministration(options: {
               requestedAt: item.requestedAt,
               mayDecide: approves(item.scope) && !self && item.requestedBy !== viewer && joined,
               mayWithdraw: manages(item.scope) && item.requestedBy === viewer,
+              highRiskPermissions: highRisk.get(item.roleReference) ?? [],
+              soleOperator:
+                item.requestedBy === viewer && !self && joined && approves(item.scope)
+                  ? (gates.get(item.scope) ?? null)
+                  : null,
             })),
           mayRequest: (mayManage || brandMayManage) && !self && joined,
           // Someone still invited is withdrawn with "Cancel invitation" instead.
@@ -451,6 +586,85 @@ export function createMerchantStaffAdministration(options: {
           if (error instanceof MemberDirectoryError) return fail("NotFound");
           throw error;
         }
+      }),
+    );
+  };
+
+  /**
+   * WP-2423 M07: staff role requests at the selected Store (Store roles here and Brand roles of
+   * its members) waiting for the signed-in person (organization.staff.read): another person's
+   * request they may decide (they hold identity.role.approve at its scope, are neither requester
+   * nor subject, and the subject has joined), or their own request they may approve alone now
+   * (sole operator in effect at that scope). Names and role names only; the reference opens the
+   * person's page. Nothing is guessed: a failed read fails.
+   */
+  const roleRequests = async (input: { sessionCookie: unknown; csrf: unknown }) => {
+    const current = await session(input);
+    return retryTransactionConflict(() =>
+      options.persistence.transactions.run(async (tx) => {
+        const scope = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+        const brandAllowed = await brandMay(tx, input.sessionCookie, current.sessionReference);
+        const viewer = String(scope.actorReference);
+        const owner = {
+          brandReference: String(scope.context.brand.brandReference),
+          storeReference: String(scope.store.storeReference),
+        };
+        const approves = {
+          Store: await may(scope, "identity.role.approve"),
+          Brand: await brandAllowed("identity.role.approve"),
+        };
+        const now = options.persistence.now();
+        if (!approves.Store && !approves.Brand)
+          return { screenId: "APPROVAL-INBOX" as const, sourceAsOf: now, requests: [] };
+        const members = new Map(
+          (await listStoreMembers(directoryTx(tx), owner)).map((member) => [
+            member.actorReference,
+            member,
+          ]),
+        );
+        const { assignments, pending } = await assignmentsOf(tx, owner);
+        const eligible = pending.filter((item) => {
+          const subject = members.get(item.actorReference);
+          return (
+            approves[item.scope] &&
+            item.actorReference !== viewer &&
+            subject !== undefined &&
+            subject.membershipLifecycle !== "PendingActivation"
+          );
+        });
+        const gates = new Map<"Store" | "Brand", SoleOperatorView | null>();
+        for (const level of ["Store", "Brand"] as const)
+          if (eligible.some((item) => item.scope === level && item.requestedBy === viewer))
+            gates.set(level, await soleOperatorView(tx, scope, level, brandAllowed));
+        const waiting = eligible.filter(
+          (item) => item.requestedBy !== viewer || gates.get(item.scope)?.status === "Effective",
+        );
+        const names = new Map(
+          [...members.values()].map((member) => [member.actorReference, member.displayName]),
+        );
+        const unnamed = waiting
+          .map((item) => item.requestedBy)
+          .filter((reference) => reference !== viewer && !names.get(reference));
+        for (const [reference, name] of await memberDisplayNames(directoryTx(tx), owner, unnamed))
+          names.set(reference, name);
+        const label = (reference: string) =>
+          reference === viewer
+            ? "You"
+            : (names.get(reference) ??
+              staffRoleLabel(assignments.filter((item) => item.actorReference === reference)));
+        return {
+          screenId: "APPROVAL-INBOX" as const,
+          sourceAsOf: now,
+          requests: waiting.map((item) => ({
+            actorReference: item.actorReference,
+            person: label(item.actorReference),
+            roleName: item.roleName,
+            scope: item.scope,
+            requestedBy: label(item.requestedBy),
+            requestedAt: item.requestedAt,
+            action: item.requestedBy === viewer ? ("ApproveAlone" as const) : ("Decide" as const),
+          })),
+        };
       }),
     );
   };
@@ -776,6 +990,53 @@ export function createMerchantStaffAdministration(options: {
                 auditReference: options.references.next(),
               });
             }
+            case "ApproveAlone": {
+              const open = (await assignmentsOf(tx, owner)).pending.find(
+                (item) => item.changeReference === command.changeReference,
+              );
+              // A retried approval answers from its decision (no second mark): the change is no
+              // longer open, at whichever scope it was asked.
+              const levels = open === undefined ? (["Store", "Brand"] as const) : [open.scope];
+              for (const level of levels) {
+                if (
+                  !(await (level === "Store"
+                    ? may(scope, "identity.role.approve")
+                    : brandAllowed("identity.role.approve")))
+                ) {
+                  if (open !== undefined) fail("PermissionDenied");
+                  continue;
+                }
+                const input = gateInput(tx, scope, level, brandAllowed, at);
+                if (input === null) return fail("SoleOperatorNotInEffect");
+                try {
+                  return await decideRoleAssignment(
+                    permissionTx(tx),
+                    {
+                      ...scoped(level),
+                      changeReference: command.changeReference,
+                      decision: "Approved",
+                      decidedBy: viewer,
+                      at,
+                      auditReference: options.references.next(),
+                      snapshotReference: options.references.next(),
+                      soleOperator: {
+                        confirm: () => requireMerchantStaffRoleSoleOperator(tx as never, input),
+                      },
+                    },
+                    (member) => confirmMember(tx, owner, member, at),
+                  );
+                } catch (error) {
+                  if (
+                    open === undefined &&
+                    error instanceof RoleAssignmentError &&
+                    error.code === "ROLE_ASSIGNMENT_NOT_FOUND"
+                  )
+                    continue;
+                  throw error;
+                }
+              }
+              return fail("NotFound");
+            }
             case "Approve":
             case "Reject":
             case "Withdraw": {
@@ -802,21 +1063,7 @@ export function createMerchantStaffAdministration(options: {
                   auditReference: options.references.next(),
                   snapshotReference: options.references.next(),
                 },
-                (member) =>
-                  member.storeAssignmentReference === null
-                    ? confirmBrandMemberScope(directoryTx(tx), {
-                        brandReference: owner.brandReference,
-                        actorReference: member.actorReference,
-                        membershipReference: member.membershipReference,
-                        at,
-                      })
-                    : confirmStoreMemberScope(directoryTx(tx), {
-                        ...owner,
-                        actorReference: member.actorReference,
-                        membershipReference: member.membershipReference,
-                        storeAssignmentReference: member.storeAssignmentReference,
-                        at,
-                      }),
+                (member) => confirmMember(tx, owner, member, at),
               );
             }
             case "RemoveFromStore": {
@@ -977,6 +1224,13 @@ export function createMerchantStaffAdministration(options: {
             }
           }
         } catch (error) {
+          if (error instanceof MerchantSoleOperatorGateError)
+            throw error.code === "NeedsReverification"
+              ? new MerchantStaffAdministrationError("NeedsReverification")
+              : new MerchantStaffAdministrationError(
+                  "SoleOperatorNotInEffect",
+                  error.reason ?? "OtherApprovers",
+                );
           if (error instanceof MemberDirectoryError)
             return fail(
               error.code === "MEMBER_DIRECTORY_NOT_FOUND"
@@ -1085,5 +1339,5 @@ export function createMerchantStaffAdministration(options: {
       throw error;
     }
   }
-  return { query, command, ownProfile, nameSelf };
+  return { query, command, ownProfile, nameSelf, roleRequests };
 }

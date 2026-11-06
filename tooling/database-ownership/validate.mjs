@@ -3291,6 +3291,8 @@ async function scanUnsupported(root, module, diagnostics) {
             "role_assignment",
             "role_assignment_change",
             "role_assignment_change_decision",
+            // WP-2423 M07: the mark of a sole owner's own approval.
+            "role_assignment_sole_operator_approval",
             "role",
             "role_administration_version",
             "policy_state",

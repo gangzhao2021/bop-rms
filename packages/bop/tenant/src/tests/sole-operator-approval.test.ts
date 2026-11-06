@@ -41,11 +41,14 @@ describe("WP-2423 Q19 sole operator decision", () => {
     expect(parseSoleOperatorPermissionCode("store.service.approve")).toBe("store.service.approve");
     // ... and so is receipt template approval (Owner access to the Store, WP-2423).
     expect(parseSoleOperatorPermissionCode("organization.manage")).toBe("organization.manage");
+    // WP-2423 M07: staff role assignment approval (a one-owner store hires its first cashier).
+    expect(parseSoleOperatorPermissionCode("identity.role.approve")).toBe("identity.role.approve");
     for (const code of [
       "publishing.release.publish",
       "publishing.review.approve",
       "store.service.publish",
-      "identity.role.approve",
+      "identity.role.activate",
+      "organization.staff.manage",
       "x",
     ])
       expect(() => parseSoleOperatorPermissionCode(code)).toThrow();

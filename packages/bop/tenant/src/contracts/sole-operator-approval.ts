@@ -36,6 +36,9 @@ export const soleOperatorApprovalPermissionCodes: ReadonlySet<string> = new Set(
   "catalog.menu.approve",
   "recipe.approve",
   "catalog.allergen_registry.manage",
+  // Store and Brand gate (WP-2423 M07): staff role assignment approval, as the staff page checks
+  // it at the role's own scope.
+  "identity.role.approve",
 ]);
 
 export class SoleOperatorApprovalError extends Error {

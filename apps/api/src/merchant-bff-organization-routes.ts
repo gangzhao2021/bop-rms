@@ -349,14 +349,54 @@ export function installMerchantOrganizationRoutes(
     Invalid: 400,
     AlreadyInvited: 409,
     EmailMismatch: 409,
+    // WP-2423 M07: approving a staff role alone; the body says only why, never who.
+    SoleOperatorNotInEffect: 409,
+    NeedsReverification: 409,
   } as const;
   const staffFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantStaffAdministrationError)) {
       failed(response, error);
       return;
     }
-    response.status(staffStatus[error.code]).json({ error: error.code });
+    response
+      .status(staffStatus[error.code])
+      .json(
+        error.reason === undefined
+          ? { error: error.code }
+          : { error: error.code, reason: error.reason },
+      );
   };
+  // WP-2423 M07: staff role requests waiting for the signed-in person (Approvals page and badge).
+  router.post(
+    "/organization/staff/role-requests",
+    sameOriginMutation(options),
+    (request, response) => {
+      const sessionCookie = cookie(request, "__Host-bop-merchant");
+      const csrf = exactHeader(request, "x-bop-csrf");
+      const body = request.body as Record<string, unknown> | undefined;
+      if (
+        sessionCookie === null ||
+        csrf === null ||
+        csrf.length === 0 ||
+        Object.keys(request.query).length !== 0 ||
+        body === undefined ||
+        body === null ||
+        typeof body !== "object" ||
+        Object.keys(body).length !== 0
+      ) {
+        denied(response);
+        return;
+      }
+      if (!options.staffAdministration) {
+        response.status(503).json({ error: "staff_administration_unavailable" });
+        return;
+      }
+      void options.staffAdministration
+        .roleRequests({ sessionCookie, csrf })
+        .then((result) => response.json(result))
+        .catch((error: unknown) => staffFailure(response, error));
+    },
+  );
   router.post("/organization/staff/query", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");
     const csrf = exactHeader(request, "x-bop-csrf");

@@ -3,6 +3,7 @@ import type { TenantContext } from "@bop/tenant";
 import {
   activeBrandMemberActors,
   listStoreMembers,
+  memberDisplayNames,
   MembershipContractError,
 } from "@bop/membership";
 import { brandActionHolders, type RoleAssignmentTransaction } from "@bop/permission";
@@ -19,7 +20,10 @@ import {
   type SoleOperatorSettingTransaction,
 } from "@bop/tenant";
 import { readStoreConfigurationSoleOperatorApproval } from "@rms/store";
-import { createMerchantWorkforcePermissionSource } from "./merchant-workforce-authority-source.js";
+import {
+  createMerchantWorkforcePermissionSource,
+  MerchantWorkforceNoAccessError,
+} from "./merchant-workforce-authority-source.js";
 
 export type ResolveContext = Parameters<
   typeof createMerchantWorkforcePermissionSource
@@ -34,8 +38,9 @@ export interface StoreScope {
  * WP-2423 Q19: every person who currently holds an approval permission at a Store. Candidates are
  * the Store's members (Membership owner read, a superset); each is evaluated by the Identity,
  * Membership and Permission owners exactly as an approval would be. A member whose membership or
- * Store assignment is not active is not a holder; any other failure to evaluate counts the person
- * as a holder (fail closed: the two-person rule then applies).
+ * Store assignment is not active, or who has no merchant workspace access here, is not a holder;
+ * any other failure to evaluate counts the person as a holder (fail closed: the two-person rule
+ * then applies).
  */
 export function createMerchantApprovalHolders(options: { resolveContext: ResolveContext }) {
   const permission = createMerchantWorkforcePermissionSource(options);
@@ -68,6 +73,9 @@ export function createMerchantApprovalHolders(options: { resolveContext: Resolve
             error.code === "ACTIVE_STORE_ASSIGNMENT_NOT_FOUND")
         )
           continue;
+        // WP-2423 M07: someone with no access to the merchant workspace here (a new cashier
+        // whose first role is waiting) cannot approve anything at this Store.
+        if (error instanceof MerchantWorkforceNoAccessError) continue;
         holders.push(member.actorReference);
       }
     }
@@ -110,6 +118,11 @@ export async function merchantBrandApprovalHolders(
 export function createMerchantSoleOperatorApproval(options: {
   resolveContext?: ResolveContext;
   authorize(tx: ConsumerTransaction): Promise<boolean>;
+  /**
+   * WP-2423 M07: a Store gate whose permission a Brand-level role also grants there (staff role
+   * approval) counts the Brand-level holders too: the union is a superset of who could approve.
+   */
+  includeBrandHolders?: boolean;
 }) {
   const storeHolders =
     options.resolveContext === undefined
@@ -123,10 +136,18 @@ export function createMerchantSoleOperatorApproval(options: {
       if (query.storeReference === null)
         return merchantBrandApprovalHolders(tx as ConsumerTransaction, query);
       if (storeHolders === null) throw new SoleOperatorApprovalError("SOLE_OPERATOR_UNAVAILABLE");
-      return storeHolders(tx as ConsumerTransaction, {
+      const atStore = await storeHolders(tx as ConsumerTransaction, {
         ...query,
         storeReference: query.storeReference,
       });
+      if (options.includeBrandHolders !== true) return atStore;
+      const atBrand = await merchantBrandApprovalHolders(tx as ConsumerTransaction, query);
+      // The Brand-level read leaves the transaction without a Store; the caller's Store again.
+      await (tx as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [query.brandReference, query.storeReference],
+      );
+      return Object.freeze([...new Set([...atStore, ...atBrand])]);
     },
   });
   return async (
@@ -311,11 +332,14 @@ export async function merchantStoreSoleOperatorGate(
     readonly observedAt: string;
     readonly resolveContext: ResolveContext;
     allowed(): Promise<boolean>;
+    /** WP-2423 M07: also count Brand-level holders (see `createMerchantSoleOperatorApproval`). */
+    readonly includeBrandHolders?: boolean;
   },
 ) {
   const decision = await createMerchantSoleOperatorApproval({
     resolveContext: input.resolveContext,
     authorize: input.allowed,
+    ...(input.includeBrandHolders === true ? { includeBrandHolders: true } : {}),
   })(tx, {
     tenantReference: input.tenantReference,
     brandReference: input.brandReference,
@@ -338,13 +362,24 @@ export async function merchantStoreSoleOperatorGate(
           brandReference: input.brandReference,
           storeReference: input.storeReference,
         });
+  // A Brand-level holder who is not a member here is named Brand-wide; without a recorded name
+  // they are shown as "another staff member", never by a code.
+  const elsewhere = decision.otherHolderReferences.filter(
+    (actor) => !members.some((member) => member.actorReference === actor),
+  );
+  const brandNames =
+    input.includeBrandHolders === true && elsewhere.length > 0
+      ? await memberDisplayNames(tx as never, input, elsewhere)
+      : new Map<string, string>();
   return Object.freeze({
     status: decision.status,
     otherApprovers: Object.freeze(
       decision.otherHolderReferences.map((actor) =>
         Object.freeze({
           displayName:
-            members.find((member) => member.actorReference === actor)?.displayName ?? null,
+            members.find((member) => member.actorReference === actor)?.displayName ??
+            brandNames.get(actor) ??
+            null,
         }),
       ),
     ),
@@ -361,6 +396,69 @@ export async function requireMerchantStoreSoleOperator(
   input: Parameters<typeof merchantStoreSoleOperatorGate>[1],
 ): Promise<{ readonly actorMfaAt: string }> {
   const gate = await merchantStoreSoleOperatorGate(tx, input);
+  if (gate.status !== "Effective")
+    throw new MerchantSoleOperatorGateError(
+      "NotInEffect",
+      gate.status === "NotSet" ? "Off" : "OtherApprovers",
+    );
+  if (gate.actorMfaAt === null || !soleOperatorMfaRecent(gate.actorMfaAt, input.observedAt))
+    throw new MerchantSoleOperatorGateError("NeedsReverification");
+  return Object.freeze({ actorMfaAt: gate.actorMfaAt });
+}
+
+/**
+ * WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL (staff roles): whether the requester of a staff role may
+ * approve it alone. A Store role counts everyone who holds staff role approval at the Store: its
+ * members evaluated as an approval would be, together with the Brand-level holders (a superset,
+ * so it fails closed). A Brand role counts the Brand-level holders. Names are the selected
+ * Store's, then the Brand's. `allowed` must hold the caller's current access at that scope.
+ */
+export const staffRoleApprovalPermission = "identity.role.approve";
+export async function merchantStaffRoleSoleOperatorGate(
+  tx: ConsumerTransaction,
+  input: StoreScope & {
+    readonly level: "Store" | "Brand";
+    readonly actorReference: string;
+    readonly observedAt: string;
+    readonly resolveContext: ResolveContext;
+    allowed(): Promise<boolean>;
+  },
+) {
+  const gate =
+    input.level === "Store"
+      ? await merchantStoreSoleOperatorGate(tx, {
+          tenantReference: input.tenantReference,
+          brandReference: input.brandReference,
+          storeReference: input.storeReference,
+          actorReference: input.actorReference,
+          permissionCode: staffRoleApprovalPermission,
+          observedAt: input.observedAt,
+          resolveContext: input.resolveContext,
+          allowed: input.allowed,
+          includeBrandHolders: true,
+        })
+      : await merchantBrandSoleOperatorGate(tx, {
+          tenantReference: input.tenantReference,
+          brandReference: input.brandReference,
+          storeReference: input.storeReference,
+          actorReference: input.actorReference,
+          permissionCode: staffRoleApprovalPermission,
+          observedAt: input.observedAt,
+          allowed: input.allowed,
+        });
+  // Both reads may leave the transaction at Brand scope; the selected Store's again.
+  await (tx as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [input.brandReference, input.storeReference],
+  );
+  return gate;
+}
+/** The staff role gate for a command: throws unless in effect with a second factor ≤ 15 minutes. */
+export async function requireMerchantStaffRoleSoleOperator(
+  tx: ConsumerTransaction,
+  input: Parameters<typeof merchantStaffRoleSoleOperatorGate>[1],
+): Promise<{ readonly actorMfaAt: string }> {
+  const gate = await merchantStaffRoleSoleOperatorGate(tx, input);
   if (gate.status !== "Effective")
     throw new MerchantSoleOperatorGateError(
       "NotInEffect",

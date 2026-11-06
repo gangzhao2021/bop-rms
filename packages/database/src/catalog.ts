@@ -532,7 +532,12 @@ function validateSql(
           (file ===
             "migrations/2000-release-001/2000_074_create_option_price_sole_operator_approval.sql" &&
             metadata.owner === "@rms/pricing" &&
-            metadata.schema === "rms_pricing")) &&
+            metadata.schema === "rms_pricing") ||
+          // WP-2423 M07: a sole owner's own staff role approval.
+          (file ===
+            "migrations/2000-release-001/2000_240_create_role_assignment_sole_operator_approval.sql" &&
+            metadata.owner === "@bop/permission" &&
+            metadata.schema === "bop_permission")) &&
         match[1] === "bop_tenant" &&
         (match[2] === "hold_brand_sole_operator_on" || match[2] === "brand_sole_operator_was_on") &&
         /^\s*\(/u.test(body.slice(match.index + match[0].length))

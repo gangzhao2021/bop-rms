@@ -1250,6 +1250,23 @@ export async function createInternalMerchant(
     references: { next: () => resources.credentials.reference() },
     // WP-2423 DEC-COGNITO-STORE-STAFF: in-app invitations when staff sign in with Cognito.
     ...(session.invitations === undefined ? {} : { invitations: session.invitations }),
+    // WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL: who else at the Store holds staff role approval,
+    // each member read from Identity, Membership and Permission as an approval would be.
+    soleOperator: {
+      resolveContext: (tx, scope) =>
+        createInternalRefundWorkforceContext({
+          expected: {
+            tenantReference: scope.selected.tenantReference,
+            brandReference: scope.context.brand.brandReference,
+            storeReference: scope.store.storeReference,
+          },
+          persistence,
+          sessionActorReference: String(scope.actorReference),
+          sessionContext: async () => scope.context,
+          current: async (t) => t === tx && (await scope.allowed()),
+          permissions: ["identity.role.approve"],
+        }),
+    },
   });
   const inventoryItems = createMerchantInventoryItems({
     persistence,

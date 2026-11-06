@@ -27,6 +27,8 @@ export interface StoreRoleAssignmentView {
   readonly roleName: string;
   readonly actorReference: string;
   readonly effectiveFrom: string;
+  /** WP-2423 M07: approved by its requester alone, as sole operator. */
+  readonly approvedAlone: boolean;
 }
 export interface PendingRoleAssignmentView {
   readonly changeReference: string;
@@ -79,7 +81,10 @@ export async function listStoreRoleAssignments(
   await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
   const assignments = (
     await tx.query(
-      `SELECT a.assignment_id::text assignment,a.role_id::text role,r.role_code,${roleNameSql} role_name,a.actor_id::text actor,a.effective_from
+      `SELECT a.assignment_id::text assignment,a.role_id::text role,r.role_code,${roleNameSql} role_name,a.actor_id::text actor,a.effective_from,
+         EXISTS (SELECT 1 FROM bop_permission.role_assignment_change c
+           JOIN bop_permission.role_assignment_sole_operator_approval m ON m.change_id=c.change_id
+           WHERE c.brand_id=a.brand_id AND c.assignment_id=a.assignment_id AND c.kind='Assign') approved_alone
        FROM bop_permission.role_assignment a JOIN bop_permission.role r ON r.role_id=a.role_id AND r.brand_id=a.brand_id
        WHERE a.brand_id=$1 AND ${storeMatch("a.store_id", "$2")} AND a.lifecycle='Active'
          AND a.effective_from<=$3::timestamptz AND (a.effective_until IS NULL OR a.effective_until>$3::timestamptz)
@@ -94,6 +99,7 @@ export async function listStoreRoleAssignments(
       roleName: String(row.role_name),
       actorReference: String(row.actor),
       effectiveFrom: iso(row.effective_from),
+      approvedAlone: row.approved_alone === true,
     }),
   );
   const pending = (
@@ -267,6 +273,14 @@ export async function decideRoleAssignment(
     readonly snapshotReference: string;
     /** Signed Platform approval evidence when Platform support decides instead of the Store. */
     readonly platformApprovalEvidence?: string;
+    /**
+     * WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL: the requester approves their own request alone.
+     * `confirm` is the caller's sole-operator gate (setting On, the requester the only holder of
+     * staff role approval at this scope, second factor at most 15 minutes old); it runs after the
+     * subject's lock and the Brand's permission policy fence are held, so a concurrent grant of
+     * approval rights to someone else either commits first and is seen, or waits.
+     */
+    readonly soleOperator?: { confirm(): Promise<{ readonly actorMfaAt: string }> };
   },
   /** Membership owner's confirmation that the subject is still an Active member (of the Store). */
   confirmMember: (member: {
@@ -291,6 +305,16 @@ export async function decideRoleAssignment(
   await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
     "bop_permission.role_assignment:" + lockScope(input) + ":" + String(change.actor),
   ]);
+  const alone = input.soleOperator !== undefined;
+  // Approving alone is only ever the requester's own approval, never for themselves.
+  if (
+    alone &&
+    (input.decision !== "Approved" ||
+      input.decidedBy !== change.requested_by ||
+      input.decidedBy === change.actor ||
+      input.platformApprovalEvidence !== undefined)
+  )
+    fail("ROLE_ASSIGNMENT_INVALID");
   const decided = (
     await tx.query(
       "SELECT decision,decided_by::text decided_by,policy_version FROM bop_permission.role_assignment_change_decision WHERE change_id=$1",
@@ -308,9 +332,17 @@ export async function decideRoleAssignment(
   if (
     input.decision === "Withdrawn"
       ? input.decidedBy !== change.requested_by
-      : input.decidedBy === change.requested_by || input.decidedBy === change.actor
+      : input.decidedBy === change.actor || (input.decidedBy === change.requested_by && !alone)
   )
     fail("ROLE_ASSIGNMENT_SELF");
+  let actorMfaAt: string | null = null;
+  if (input.soleOperator !== undefined) {
+    await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+      "PermissionPolicyFence:" + input.brandReference,
+    ]);
+    actorMfaAt = (await input.soleOperator.confirm()).actorMfaAt;
+    await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  }
   let policyVersion: number | null = null;
   if (input.decision === "Approved") {
     await activeRole(tx, input, String(change.role));
@@ -351,6 +383,20 @@ export async function decideRoleAssignment(
       ],
     );
   }
+  if (actorMfaAt !== null)
+    await tx.query(
+      `INSERT INTO bop_permission.role_assignment_sole_operator_approval(change_id,brand_id,store_id,approval_mode,actor_id,actor_mfa_at,approved_at,audit_id,data_classification)
+       VALUES($1,$2,$3,'SoleOperator',$4,$5,$6,$7,'ConfigurationMetadata')`,
+      [
+        input.changeReference,
+        input.brandReference,
+        input.storeReference,
+        input.decidedBy,
+        actorMfaAt,
+        input.at,
+        input.auditReference,
+      ],
+    );
   await tx.query(
     `INSERT INTO bop_permission.role_assignment_change_decision(change_id,brand_id,store_id,decision,decided_by,decided_at,policy_version,audit_id,data_classification)
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'ConfigurationMetadata')`,
@@ -377,6 +423,7 @@ export async function decideRoleAssignment(
       subject: String(change.actor),
       policyVersion,
       platformApprovalEvidence: input.platformApprovalEvidence ?? null,
+      ...(actorMfaAt === null ? {} : { approvalMode: "SoleOperator", actorMfaAt }),
     },
   });
   return { status: "Applied", policyVersion };
