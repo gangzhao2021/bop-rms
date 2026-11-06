@@ -344,3 +344,100 @@ test("@production a Store Manager who approves roles finds the waiting role on A
   await page.waitForURL("**/app/organization/users/" + sam);
   await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
 });
+
+// WP-2423 M07 (v15 2026-11-06): the sole owner's own request waits for them on Approvals (the
+// read lists it with "ApproveAlone" once nobody else can approve). If someone else gets staff
+// role approval before the owner approves, the command answers 409 OtherApprovers and the page
+// names them.
+test("@production the sole owner finds their own role request on Approvals, in English and Chinese", async ({
+  page,
+}) => {
+  await session(page);
+  await page.route("**/merchant/payments/refunds/approvals", (route) =>
+    route.fulfill({ status: 403, headers, json: { error: "forbidden" } }),
+  );
+  await page.route("**/merchant/organization/staff/role-requests", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        screenId: "APPROVAL-INBOX",
+        sourceAsOf: minutesFromNow(0),
+        requests: [
+          {
+            actorReference: sam,
+            person: "Sam",
+            roleName: "Front of House",
+            scope: "Store",
+            requestedBy: "You",
+            requestedAt: minutesFromNow(-2),
+            action: "ApproveAlone",
+          },
+        ],
+      },
+    }),
+  );
+  const state = {
+    gate: { status: "Effective", otherApprovers: [], verifiedUntil: null } as Gate,
+    approved: false,
+  };
+  await page.route("**/merchant/organization/staff/query", (route) =>
+    route.fulfill({ headers, json: detail(cashier(state)) }),
+  );
+  const commands: Record<string, unknown>[] = [];
+  await page.route("**/merchant/organization/staff/command", (route) => {
+    commands.push(body(route));
+    // Mia was made a Store Manager meanwhile: the gate is read again for this request.
+    state.gate = {
+      status: "OtherApprovers",
+      otherApprovers: [{ displayName: "Mia" }],
+      verifiedUntil: null,
+    };
+    return route.fulfill({
+      status: 409,
+      headers,
+      json: { error: "SoleOperatorNotInEffect", reason: "OtherApprovers" },
+    });
+  });
+  await page.goto("/app/approvals");
+  const navigation = page.getByRole("navigation", { name: "Workspace" });
+  await expect(navigation.getByRole("link", { name: "Approvals 1 waiting" })).toBeVisible();
+  const section = page.locator("section.role-approvals");
+  await expect(section.getByRole("heading", { name: "Staff roles waiting for you" })).toBeVisible();
+  await expect(
+    section.getByText(/Sam · Front of House · asked by you, you may approve it on your own/u),
+  ).toBeVisible();
+  await checkScreen(page, "owner-approvals");
+  await section.getByRole("link", { name: "Open their page" }).click();
+  await page.waitForURL("**/app/organization/users/" + sam);
+  const panel = page.locator(".staff-sole-operator");
+  const approve = panel.getByRole("button", { name: "Approve on my own" });
+  await expect(approve).toBeDisabled();
+  await panel.getByRole("button", { name: "Verify to approve on your own" }).click();
+  const dialog = page.getByRole("dialog", { name: "Confirm it is you" });
+  await dialog.getByLabel("Six-digit code").fill("123456");
+  await dialog.getByRole("button", { name: "Verify" }).click();
+  await expect(dialog).toBeHidden();
+  await panel.getByLabel("I checked this role and approve on my own").check();
+  await approve.click();
+  expect(commands).toEqual([{ operation: "ApproveAlone", changeReference: change }]);
+  await expect(
+    page.getByText("Someone else can now approve staff roles here, so they must approve this."),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Sole operator is on, but Mia also holds staff role approval, so they must approve this.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve on my own" })).toHaveCount(0);
+  await checkScreen(page, "owner-now-other-approver");
+
+  // The Approvals row in Chinese.
+  await page.addInitScript(() => localStorage.setItem("bop.merchant.language", "zh-Hans"));
+  await page.goto("/app/approvals");
+  await expect(
+    page.locator("section.role-approvals").getByRole("heading", { name: "等待你批准的员工角色" }),
+  ).toBeVisible();
+  await expect(page.getByText(/由你申请，你可以自行批准/u)).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开其页面" })).toBeVisible();
+  await checkScreen(page, "owner-approvals-zh");
+});

@@ -6,7 +6,11 @@ import {
   memberDisplayNames,
   MembershipContractError,
 } from "@bop/membership";
-import { brandActionHolders, type RoleAssignmentTransaction } from "@bop/permission";
+import {
+  brandActionHolders,
+  storeActionCandidates,
+  type RoleAssignmentTransaction,
+} from "@bop/permission";
 import {
   createPostgresCurrentWorkforceMfaSource,
   createPostgresLatestWorkforceStepUpSource,
@@ -36,11 +40,15 @@ export interface StoreScope {
 
 /**
  * WP-2423 Q19: every person who currently holds an approval permission at a Store. Candidates are
- * the Store's members (Membership owner read, a superset); each is evaluated by the Identity,
- * Membership and Permission owners exactly as an approval would be. A member whose membership or
- * Store assignment is not active, or who has no merchant workspace access here, is not a holder;
- * any other failure to evaluate counts the person as a holder (fail closed: the two-person rule
- * then applies).
+ * the Store's members (Membership owner read) whose current roles or Allow overrides grant the
+ * permission at this Store (Permission owner read, `storeActionCandidates`: the only evidence
+ * evaluation allows on, so a superset of the holders). Someone whose roles do not grant it is
+ * never a holder, whatever their sign-in state (WP-2423 M07, v15 2026-11-06: a joined member
+ * nobody can sign in as, with no role, was counted). Each candidate is evaluated by the Identity,
+ * Membership and Permission owners exactly as an approval would be. A candidate whose membership
+ * or Store assignment is not active, or who has no merchant workspace access here, is not a
+ * holder; any other failure to evaluate a candidate counts them as a holder (fail closed: they do
+ * hold a granting role, so the two-person rule then applies).
  */
 export function createMerchantApprovalHolders(options: { resolveContext: ResolveContext }) {
   const permission = createMerchantWorkforcePermissionSource(options);
@@ -48,13 +56,25 @@ export function createMerchantApprovalHolders(options: { resolveContext: Resolve
     tx: ConsumerTransaction,
     query: StoreScope & { readonly permissionCode: string; readonly observedAt: string },
   ): Promise<readonly string[]> => {
+    const candidates = new Set(
+      await storeActionCandidates(tx as unknown as RoleAssignmentTransaction, {
+        brandReference: query.brandReference,
+        storeReference: query.storeReference,
+        action: query.permissionCode,
+        at: query.observedAt,
+      }),
+    );
     const members = await listStoreMembers(tx, {
       brandReference: query.brandReference,
       storeReference: query.storeReference,
     });
     const holders: string[] = [];
     for (const member of members) {
-      if (member.membershipLifecycle !== "Active" || member.assignmentLifecycle !== "Active")
+      if (
+        member.membershipLifecycle !== "Active" ||
+        member.assignmentLifecycle !== "Active" ||
+        !candidates.has(member.actorReference)
+      )
         continue;
       try {
         const result = await permission(tx, {
@@ -123,7 +143,15 @@ export function createMerchantSoleOperatorApproval(options: {
    * approval) counts the Brand-level holders too: the union is a superset of who could approve.
    */
   includeBrandHolders?: boolean;
+  /**
+   * WP-2423 M07: people who never count as another approver for this request: the person a staff
+   * role is for can never approve their own role. Never the requester themselves.
+   */
+  excludeReferences?: readonly string[];
 }) {
+  const excluded = new Set(options.excludeReferences ?? []);
+  const counted = (holders: readonly string[]) =>
+    Object.freeze(holders.filter((holder) => !excluded.has(holder)));
   const storeHolders =
     options.resolveContext === undefined
       ? null
@@ -134,20 +162,20 @@ export function createMerchantSoleOperatorApproval(options: {
     }),
     holders: async (tx, query) => {
       if (query.storeReference === null)
-        return merchantBrandApprovalHolders(tx as ConsumerTransaction, query);
+        return counted(await merchantBrandApprovalHolders(tx as ConsumerTransaction, query));
       if (storeHolders === null) throw new SoleOperatorApprovalError("SOLE_OPERATOR_UNAVAILABLE");
       const atStore = await storeHolders(tx as ConsumerTransaction, {
         ...query,
         storeReference: query.storeReference,
       });
-      if (options.includeBrandHolders !== true) return atStore;
+      if (options.includeBrandHolders !== true) return counted(atStore);
       const atBrand = await merchantBrandApprovalHolders(tx as ConsumerTransaction, query);
       // The Brand-level read leaves the transaction without a Store; the caller's Store again.
       await (tx as { query(sql: string, values: unknown[]): Promise<unknown> }).query(
         "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
         [query.brandReference, query.storeReference],
       );
-      return Object.freeze([...new Set([...atStore, ...atBrand])]);
+      return counted([...new Set([...atStore, ...atBrand])]);
     },
   });
   return async (
@@ -158,7 +186,12 @@ export function createMerchantSoleOperatorApproval(options: {
       readonly actorReference: string;
       readonly observedAt: string;
     },
-  ) => source(tx as SoleOperatorSettingTransaction, query);
+  ) => {
+    // Leaving out the requester would let them pass as the only holder: refused (fail closed).
+    if (excluded.has(query.actorReference))
+      throw new SoleOperatorApprovalError("SOLE_OPERATOR_UNAVAILABLE");
+    return source(tx as SoleOperatorSettingTransaction, query);
+  };
 }
 
 /** The actor's latest second-factor verification at the selected Store (Identity owner reads:
@@ -262,9 +295,16 @@ export async function merchantBrandSoleOperatorGate(
     readonly permissionCode: string;
     readonly observedAt: string;
     allowed(): Promise<boolean>;
+    /** WP-2423 M07: never counted as another approver (see `createMerchantSoleOperatorApproval`). */
+    readonly excludeReferences?: readonly string[];
   },
 ) {
-  const decision = await createMerchantSoleOperatorApproval({ authorize: input.allowed })(tx, {
+  const decision = await createMerchantSoleOperatorApproval({
+    authorize: input.allowed,
+    ...(input.excludeReferences === undefined
+      ? {}
+      : { excludeReferences: input.excludeReferences }),
+  })(tx, {
     tenantReference: input.tenantReference,
     brandReference: input.brandReference,
     storeReference: null,
@@ -334,12 +374,17 @@ export async function merchantStoreSoleOperatorGate(
     allowed(): Promise<boolean>;
     /** WP-2423 M07: also count Brand-level holders (see `createMerchantSoleOperatorApproval`). */
     readonly includeBrandHolders?: boolean;
+    /** WP-2423 M07: never counted as another approver (see `createMerchantSoleOperatorApproval`). */
+    readonly excludeReferences?: readonly string[];
   },
 ) {
   const decision = await createMerchantSoleOperatorApproval({
     resolveContext: input.resolveContext,
     authorize: input.allowed,
     ...(input.includeBrandHolders === true ? { includeBrandHolders: true } : {}),
+    ...(input.excludeReferences === undefined
+      ? {}
+      : { excludeReferences: input.excludeReferences }),
   })(tx, {
     tenantReference: input.tenantReference,
     brandReference: input.brandReference,
@@ -410,8 +455,10 @@ export async function requireMerchantStoreSoleOperator(
  * WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL (staff roles): whether the requester of a staff role may
  * approve it alone. A Store role counts everyone who holds staff role approval at the Store: its
  * members evaluated as an approval would be, together with the Brand-level holders (a superset,
- * so it fails closed). A Brand role counts the Brand-level holders. Names are the selected
- * Store's, then the Brand's. `allowed` must hold the caller's current access at that scope.
+ * so it fails closed). A Brand role counts the Brand-level holders. The person the role is for
+ * (`subjectReference`) is never counted: they can never approve their own role, so the gate is
+ * read for one request, not for a scope. Names are the selected Store's, then the Brand's.
+ * `allowed` must hold the caller's current access at that scope.
  */
 export const staffRoleApprovalPermission = "identity.role.approve";
 export async function merchantStaffRoleSoleOperatorGate(
@@ -419,6 +466,8 @@ export async function merchantStaffRoleSoleOperatorGate(
   input: StoreScope & {
     readonly level: "Store" | "Brand";
     readonly actorReference: string;
+    /** The person the requested role is for. */
+    readonly subjectReference: string;
     readonly observedAt: string;
     readonly resolveContext: ResolveContext;
     allowed(): Promise<boolean>;
@@ -436,6 +485,7 @@ export async function merchantStaffRoleSoleOperatorGate(
           resolveContext: input.resolveContext,
           allowed: input.allowed,
           includeBrandHolders: true,
+          excludeReferences: [input.subjectReference],
         })
       : await merchantBrandSoleOperatorGate(tx, {
           tenantReference: input.tenantReference,
@@ -445,6 +495,7 @@ export async function merchantStaffRoleSoleOperatorGate(
           permissionCode: staffRoleApprovalPermission,
           observedAt: input.observedAt,
           allowed: input.allowed,
+          excludeReferences: [input.subjectReference],
         });
   // Both reads may leave the transaction at Brand scope; the selected Store's again.
   await (tx as { query(sql: string, values: unknown[]): Promise<unknown> }).query(

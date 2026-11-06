@@ -366,13 +366,17 @@ export function createMerchantStaffAdministration(options: {
           storeAssignmentReference: member.storeAssignmentReference,
           at,
         });
-  /** WP-2423 M07: the staff role gate at a scope, for the requester (null when not wired). */
+  /**
+   * WP-2423 M07: the staff role gate for the requester's request for `subjectReference` at a
+   * scope (null when not wired). The subject never counts as another approver.
+   */
   const gateInput = (
     tx: Tx,
     scope: StaffScope,
     level: "Store" | "Brand",
     brandAllowed: (action: string) => Promise<boolean>,
     observedAt: string,
+    subjectReference: string,
   ) => {
     if (options.soleOperator === undefined) return null;
     return {
@@ -381,6 +385,7 @@ export function createMerchantStaffAdministration(options: {
       storeReference: String(scope.store.storeReference),
       level,
       actorReference: String(scope.actorReference),
+      subjectReference,
       observedAt,
       resolveContext: options.soleOperator.resolveContext(tx, scope),
       allowed: () =>
@@ -394,8 +399,16 @@ export function createMerchantStaffAdministration(options: {
     scope: StaffScope,
     level: "Store" | "Brand",
     brandAllowed: (action: string) => Promise<boolean>,
+    subjectReference: string,
   ): Promise<SoleOperatorView | null> {
-    const input = gateInput(tx, scope, level, brandAllowed, options.persistence.now());
+    const input = gateInput(
+      tx,
+      scope,
+      level,
+      brandAllowed,
+      options.persistence.now(),
+      subjectReference,
+    );
     if (input === null) return null;
     const gate = await merchantStaffRoleSoleOperatorGate(tx as never, input);
     return Object.freeze({
@@ -450,27 +463,33 @@ export function createMerchantStaffAdministration(options: {
       }))
       .filter((role) => manages(role.scope));
     // WP-2423 M07: whether the viewer may approve their own request alone, read once per scope
-    // (one read at a time: each read sets the transaction's scope).
+    // and subject (the subject never counts as another approver; one read at a time: each read
+    // sets the transaction's scope).
     const joinedMembers = new Set(
       members
         .filter((member) => member.membershipLifecycle !== "PendingActivation")
         .map((member) => member.actorReference),
     );
-    const gates = new Map<"Store" | "Brand", SoleOperatorView>();
-    for (const level of ["Store", "Brand"] as const)
+    const gates = new Map<string, SoleOperatorView>();
+    for (const item of pending) {
+      const key = item.scope + ":" + item.actorReference;
       if (
-        pending.some(
-          (item) =>
-            item.scope === level &&
-            item.requestedBy === viewer &&
-            item.actorReference !== viewer &&
-            joinedMembers.has(item.actorReference) &&
-            approves(level),
-        )
+        !gates.has(key) &&
+        item.requestedBy === viewer &&
+        item.actorReference !== viewer &&
+        joinedMembers.has(item.actorReference) &&
+        approves(item.scope)
       ) {
-        const gate = await soleOperatorView(tx, scope, level, brandAllowed);
-        if (gate !== null) gates.set(level, gate);
+        const gate = await soleOperatorView(
+          tx,
+          scope,
+          item.scope,
+          brandAllowed,
+          item.actorReference,
+        );
+        if (gate !== null) gates.set(key, gate);
       }
+    }
     const names = new Map(
       (actor === null ? members : await listStoreMembers(directoryTx(tx), owner)).map((member) => [
         member.actorReference,
@@ -559,7 +578,7 @@ export function createMerchantStaffAdministration(options: {
               highRiskPermissions: highRisk.get(item.roleReference) ?? [],
               soleOperator:
                 item.requestedBy === viewer && !self && joined && approves(item.scope)
-                  ? (gates.get(item.scope) ?? null)
+                  ? (gates.get(item.scope + ":" + item.actorReference) ?? null)
                   : null,
             })),
           mayRequest: (mayManage || brandMayManage) && !self && joined,
@@ -633,12 +652,19 @@ export function createMerchantStaffAdministration(options: {
             subject.membershipLifecycle !== "PendingActivation"
           );
         });
-        const gates = new Map<"Store" | "Brand", SoleOperatorView | null>();
-        for (const level of ["Store", "Brand"] as const)
-          if (eligible.some((item) => item.scope === level && item.requestedBy === viewer))
-            gates.set(level, await soleOperatorView(tx, scope, level, brandAllowed));
+        // One gate read per scope and subject of the viewer's own requests (the subject never
+        // counts as another approver).
+        const gates = new Map<string, SoleOperatorView | null>();
+        const gateKey = (item: { scope: string; actorReference: string }) =>
+          item.scope + ":" + item.actorReference;
+        for (const item of eligible)
+          if (item.requestedBy === viewer && !gates.has(gateKey(item)))
+            gates.set(
+              gateKey(item),
+              await soleOperatorView(tx, scope, item.scope, brandAllowed, item.actorReference),
+            );
         const waiting = eligible.filter(
-          (item) => item.requestedBy !== viewer || gates.get(item.scope)?.status === "Effective",
+          (item) => item.requestedBy !== viewer || gates.get(gateKey(item))?.status === "Effective",
         );
         const names = new Map(
           [...members.values()].map((member) => [member.actorReference, member.displayName]),
@@ -1007,8 +1033,7 @@ export function createMerchantStaffAdministration(options: {
                   if (open !== undefined) fail("PermissionDenied");
                   continue;
                 }
-                const input = gateInput(tx, scope, level, brandAllowed, at);
-                if (input === null) return fail("SoleOperatorNotInEffect");
+                if (options.soleOperator === undefined) return fail("SoleOperatorNotInEffect");
                 try {
                   return await decideRoleAssignment(
                     permissionTx(tx),
@@ -1021,7 +1046,19 @@ export function createMerchantStaffAdministration(options: {
                       auditReference: options.references.next(),
                       snapshotReference: options.references.next(),
                       soleOperator: {
-                        confirm: () => requireMerchantStaffRoleSoleOperator(tx as never, input),
+                        // Read for this change's subject, inside the approval after its locks.
+                        confirm: (change) => {
+                          const input = gateInput(
+                            tx,
+                            scope,
+                            level,
+                            brandAllowed,
+                            at,
+                            change.subjectReference,
+                          );
+                          if (input === null) return fail("SoleOperatorNotInEffect");
+                          return requireMerchantStaffRoleSoleOperator(tx as never, input);
+                        },
                       },
                     },
                     (member) => confirmMember(tx, owner, member, at),

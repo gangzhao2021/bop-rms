@@ -8,6 +8,7 @@ import {
   createMerchantStaffAdministration,
   MerchantStaffAdministrationError,
 } from "../../../apps/api/src/merchant-staff-administration.ts";
+import { createInternalMerchantSession } from "../../../tooling/environment/pilot-merchant-session.mjs";
 import { createInternalRefundWorkforceContext } from "../../../tooling/environment/pilot-refund-workforce.mjs";
 import { createIdentityActor } from "../../bop/identity/src/index.ts";
 import {
@@ -44,7 +45,9 @@ vi.mock("../../../apps/api/src/merchant-brand-scope.ts", () => ({
 
 const { Client } = pg;
 const id = (n) => "0190a7d1-0000-7000-8000-" + n.toString(16).padStart(12, "0");
-const [tenant, brand, store, owner, sam, mia, lee, otherBrand] = [1, 2, 3, 4, 5, 6, 7, 8].map(id);
+const [tenant, brand, store, owner, sam, mia, lee, otherBrand, leo] = [
+  1, 2, 3, 4, 5, 6, 7, 8, 9,
+].map(id);
 const mark = "bop_permission.role_assignment_sole_operator_approval";
 let references = 0xb000;
 const fresh = () =>
@@ -54,6 +57,311 @@ const fresh = () =>
     .replace(/^(.{8})(.{4})$/u, "$1-$2") +
   "-7000-8000-" +
   (references++).toString(16).padStart(12, "0");
+
+/**
+ * Owner-seeded Solo Store (Ana the owner, Sam a new cashier with no role, Mia, Lee a Brand member
+ * elsewhere, and with `withLeo` Leo, a joined Store member nobody can sign in as) and the staff
+ * page composed as the pilot composes it, run as the restricted pilot API role. `workforceActor`
+ * builds the Identity read the workforce context uses for other members (default: everyone).
+ */
+async function openSoloStore(
+  context,
+  admin,
+  { rolePrefix = "wp2423_sosr", withLeo = false, workforceActor } = {},
+) {
+  let sequence = 0x1000;
+  const next = () => id(++sequence);
+  const role = await createPilotApiRole(admin, context, rolePrefix);
+  const base = Date.parse(await dbNow(admin));
+  const from = new Date(base - 3 * 3600_000).toISOString();
+  await admin.query(
+    "INSERT INTO bop_tenant.brand VALUES ($1,'SOLO','Solo Brand','en-CA','CAD','Active',1,$2,$2)",
+    [brand, from],
+  );
+  await admin.query(
+    "INSERT INTO bop_tenant.store VALUES ($1,$2,'SOLO_STORE','Solo Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+    [store, brand, from],
+  );
+  const brandFact = createBrand({
+    brandReference: brand,
+    code: "SOLO",
+    displayName: "Solo Brand",
+    defaultLocale: "en-CA",
+    currencyCode: "CAD",
+    lifecycle: "Active",
+    version: 1,
+    createdAt: from,
+    updatedAt: from,
+  });
+  const storeFact = createStore({
+    storeReference: store,
+    brandReference: brand,
+    code: "SOLO_STORE",
+    displayName: "Solo Store",
+    timeZone: "America/Toronto",
+    locale: "en-CA",
+    currencyCode: "CAD",
+    lifecycle: "Active",
+    version: 1,
+    createdAt: from,
+    updatedAt: from,
+  });
+  // Owner, Sam (a new cashier, no role yet) and Mia work here; Lee is a Brand member elsewhere.
+  const people = { [owner]: "Ana", [sam]: "Sam", [mia]: "Mia", [lee]: "Lee", [leo]: "Leo" };
+  const members = new Map();
+  let n = 0x100;
+  for (const actor of withLeo ? [owner, sam, mia, lee, leo] : [owner, sam, mia, lee]) {
+    const membership = id(n++),
+      assignment = actor === lee ? null : id(n++);
+    members.set(actor, { membership, assignment });
+    await admin.query(
+      "INSERT INTO bop_membership.membership(membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,'Active',$5,NULL,1,$5,$5)",
+      [membership, actor, brand, id(n++), from],
+    );
+    if (assignment !== null)
+      await admin.query(
+        "INSERT INTO bop_membership.store_assignment(assignment_id,membership_id,actor_id,brand_id,store_id,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)",
+        [assignment, membership, actor, brand, store, from],
+      );
+    await admin.query(
+      "INSERT INTO bop_membership.member_profile_version (membership_id,version,brand_id,actor_id,display_name,operation_id,changed_by,changed_at,data_classification) VALUES ($1,1,$2,$3,$4,$5,$3,$6,'PersonalData')",
+      [membership, brand, actor, people[actor], id(n++), from],
+    );
+    await admin.query(
+      "INSERT INTO bop_identity.workforce_mfa_status (actor_id,status,provider_evidence_id,verified_at,reset_at,version) VALUES ($1,'TotpVerified',$2,$3,NULL,1)",
+      [actor, id(n++), new Date(base - 2 * 3600_000).toISOString()],
+    );
+  }
+  await openSyntheticStoreRoles(admin, {
+    tenant,
+    brand,
+    store,
+    operator: id(20),
+    approver: id(21),
+    at: from,
+    next,
+    owner: {
+      actorReference: owner,
+      membershipReference: members.get(owner).membership,
+      storeAssignmentReference: members.get(owner).assignment,
+    },
+  });
+  await openSyntheticBrandRoles(admin, {
+    tenant,
+    brand,
+    operator: id(20),
+    approver: id(21),
+    at: from,
+    next,
+    owner: { actorReference: owner, membershipReference: members.get(owner).membership },
+  });
+  const roleIds = new Map(
+    (
+      await admin.query(
+        "SELECT role_code,role_id::text id FROM bop_permission.role WHERE brand_id=$1",
+        [brand],
+      )
+    ).rows.map((row) => [row.role_code, row.id]),
+  );
+
+  // ── The staff page composed as the pilot composes it, run as the restricted API role.
+  const transactions = {
+    async run(work) {
+      const client = new Client(context.clientConfig);
+      await client.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE " + role);
+        await client.query("SET LOCAL lock_timeout='20s'");
+        await client.query("SET LOCAL statement_timeout='30s'");
+        const result = await work({
+          query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
+        });
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        await client.end();
+      }
+    },
+  };
+  const currentActor = async (_tx, reference, authenticatedAt) =>
+    createIdentityActor({
+      actorType: "User",
+      actorReference: reference,
+      accountKind: "Workforce",
+      status: "Active",
+      authenticationMethod: "Oidc",
+      verificationLevel: "SingleFactor",
+      authenticatedAt,
+      recentMfaAt: null,
+    });
+  const cookies = { owner, sam, mia, lee };
+  signedIn.scopeFor = async (tx, cookie, action) => {
+    const actorReference = cookies[cookie];
+    const resolvedAt = new Date().toISOString();
+    const actor = await currentActor(tx, actorReference, from);
+    const decide = async (requested) => {
+      try {
+        const at = new Date().toISOString();
+        return (
+          await createMerchantWorkforcePermissionSource({
+            resolveContext: async () => ({
+              tenantReference: tenant,
+              context: createTenantContext(actor, brandFact, storeFact, at),
+            }),
+          })(tx, {
+            tenantReference: tenant,
+            brandReference: brand,
+            storeReference: store,
+            actorReference,
+            observedAt: at,
+            permissionCode: requested,
+          })
+        ).decision;
+      } catch {
+        return null;
+      }
+    };
+    return {
+      selected: { tenantReference: tenant },
+      context: createTenantContext(actor, brandFact, storeFact, resolvedAt),
+      store: storeFact,
+      actorReference,
+      sessionReference: id(0x800 + Object.keys(cookies).indexOf(cookie)),
+      allowed: async () => (await decide(action))?.effect === "Allow",
+      authorizeAction: decide,
+      kdsOperatorProfileAllows: (requested) =>
+        kdsOperatorProfileAllows({ policy: { code: "WorkforceStandard" } }, requested),
+    };
+  };
+  signedIn.brandScopeFor = async (tx, cookie) => {
+    const actorReference = cookies[cookie];
+    return {
+      authorizeAction: async (action) => {
+        try {
+          const at = new Date().toISOString();
+          const actor = await currentActor(tx, actorReference, from);
+          const memberships = createPostgresCurrentMembershipSource(
+            tx,
+            createTenantContext(actor, brandFact, storeFact, at),
+          );
+          const membership = resolveActiveMembership(
+            await memberships.findMemberships(actorReference, brand),
+            actorReference,
+            brand,
+            at,
+          );
+          const decision = await createPostgresCurrentPermissionPolicySource(tx).authorize({
+            tenantContext: createTenantContext(actor, brandFact, null, at),
+            membership,
+            storeAssignment: null,
+            action,
+          });
+          return decision.scopeKind === "Brand" ? decision : null;
+        } catch {
+          return null;
+        }
+      },
+    };
+  };
+  // Who the workforce context can resolve: by default everyone; the v15 case uses the
+  // InternalTest roster itself, which cannot resolve a member who has no sign-in.
+  const workforceCurrentActor =
+    workforceActor === undefined ? currentActor : await workforceActor();
+  const staff = createMerchantStaffAdministration({
+    persistence: { transactions, now: () => new Date().toISOString() },
+    authentication: {
+      authorize: async (input) => ({
+        sessionReference: id(0x800 + Object.keys(cookies).indexOf(input.sessionCookie)),
+      }),
+    },
+    references: { next: fresh },
+    soleOperator: {
+      resolveContext: (tx, scope) =>
+        createInternalRefundWorkforceContext({
+          expected: { tenantReference: tenant, brandReference: brand, storeReference: store },
+          persistence: { currentActor: workforceCurrentActor },
+          sessionActorReference: String(scope.actorReference),
+          sessionContext: async () => scope.context,
+          current: async (t) => t === tx && (await scope.allowed()),
+          permissions: ["identity.role.approve"],
+        }),
+    },
+  });
+  const as = (who) => ({ sessionCookie: who, csrf: "synthetic-csrf" });
+  const person = async (who, actor) =>
+    (await staff.query({ ...as(who), actorReference: actor })).staff[0];
+  const command = (who, body) => staff.command({ ...as(who), body });
+  const request = async (who, actor, roleCode) => {
+    const change = fresh();
+    assert.equal(
+      (
+        await command(who, {
+          operation: "RequestRole",
+          actorReference: actor,
+          roleReference: roleIds.get(roleCode),
+          operationReference: change,
+        })
+      ).status,
+      "Requested",
+    );
+    return change;
+  };
+  const alone = (who, change) =>
+    command(who, { operation: "ApproveAlone", changeReference: change });
+  const refused = (code, reason) => (error) => {
+    assert.ok(error instanceof MerchantStaffAdministrationError, String(error));
+    assert.equal(error.code, code);
+    assert.equal(error.reason, reason);
+    return true;
+  };
+  const marks = async () => (await admin.query(`SELECT count(*)::int n FROM ${mark}`)).rows[0].n;
+  const raw = async (work) => {
+    await admin.query("BEGIN");
+    try {
+      await admin.query("SET LOCAL ROLE " + role);
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+        [brand, store],
+      );
+      await work();
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+  };
+  const insertMark = (change, actor, approvedAt, mfaAt, audit = fresh()) =>
+    admin.query(
+      `INSERT INTO ${mark}(change_id,brand_id,store_id,approval_mode,actor_id,actor_mfa_at,approved_at,audit_id,data_classification) VALUES($1,$2,$3,'SoleOperator',$4,$5,$6,$7,'ConfigurationMetadata')`,
+      [change, brand, store, actor, mfaAt, approvedAt, audit],
+    );
+  const insertDecision = (change, actor, at, audit = fresh()) =>
+    admin.query(
+      "INSERT INTO bop_permission.role_assignment_change_decision(change_id,brand_id,store_id,decision,decided_by,decided_at,policy_version,audit_id,data_classification) VALUES($1,$2,$3,'Approved',$4,$5,NULL,$6,'ConfigurationMetadata')",
+      [change, brand, store, actor, at, audit],
+    );
+  return {
+    role,
+    from,
+    members,
+    roleIds,
+    staff,
+    as,
+    person,
+    command,
+    request,
+    alone,
+    refused,
+    marks,
+    raw,
+    insertMark,
+    insertDecision,
+  };
+}
 
 /**
  * WP-2423 M07 DEC-SOLE-OPERATOR-APPROVAL (staff roles): a store with one owner gives its first
@@ -70,280 +378,23 @@ it("staff roles: a sole owner approves alone, and the two-person rule returns", 
   await withIsolatedDatabase({ caseId: "wp2423_so_staff" }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
-    let sequence = 0x1000;
-    const next = () => id(++sequence);
     try {
-      const role = await createPilotApiRole(admin, context, "wp2423_sosr");
-      const base = Date.parse(await dbNow(admin));
-      const from = new Date(base - 3 * 3600_000).toISOString();
-      await admin.query(
-        "INSERT INTO bop_tenant.brand VALUES ($1,'SOLO','Solo Brand','en-CA','CAD','Active',1,$2,$2)",
-        [brand, from],
-      );
-      await admin.query(
-        "INSERT INTO bop_tenant.store VALUES ($1,$2,'SOLO_STORE','Solo Store','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
-        [store, brand, from],
-      );
-      const brandFact = createBrand({
-        brandReference: brand,
-        code: "SOLO",
-        displayName: "Solo Brand",
-        defaultLocale: "en-CA",
-        currencyCode: "CAD",
-        lifecycle: "Active",
-        version: 1,
-        createdAt: from,
-        updatedAt: from,
-      });
-      const storeFact = createStore({
-        storeReference: store,
-        brandReference: brand,
-        code: "SOLO_STORE",
-        displayName: "Solo Store",
-        timeZone: "America/Toronto",
-        locale: "en-CA",
-        currencyCode: "CAD",
-        lifecycle: "Active",
-        version: 1,
-        createdAt: from,
-        updatedAt: from,
-      });
-      // Owner, Sam (a new cashier, no role yet) and Mia work here; Lee is a Brand member elsewhere.
-      const people = { [owner]: "Ana", [sam]: "Sam", [mia]: "Mia", [lee]: "Lee" };
-      const members = new Map();
-      let n = 0x100;
-      for (const actor of [owner, sam, mia, lee]) {
-        const membership = id(n++),
-          assignment = actor === lee ? null : id(n++);
-        members.set(actor, { membership, assignment });
-        await admin.query(
-          "INSERT INTO bop_membership.membership(membership_id,actor_id,brand_id,workforce_relationship_reference,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,'Active',$5,NULL,1,$5,$5)",
-          [membership, actor, brand, id(n++), from],
-        );
-        if (assignment !== null)
-          await admin.query(
-            "INSERT INTO bop_membership.store_assignment(assignment_id,membership_id,actor_id,brand_id,store_id,lifecycle,effective_from,effective_until,version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)",
-            [assignment, membership, actor, brand, store, from],
-          );
-        await admin.query(
-          "INSERT INTO bop_membership.member_profile_version (membership_id,version,brand_id,actor_id,display_name,operation_id,changed_by,changed_at,data_classification) VALUES ($1,1,$2,$3,$4,$5,$3,$6,'PersonalData')",
-          [membership, brand, actor, people[actor], id(n++), from],
-        );
-        await admin.query(
-          "INSERT INTO bop_identity.workforce_mfa_status (actor_id,status,provider_evidence_id,verified_at,reset_at,version) VALUES ($1,'TotpVerified',$2,$3,NULL,1)",
-          [actor, id(n++), new Date(base - 2 * 3600_000).toISOString()],
-        );
-      }
-      await openSyntheticStoreRoles(admin, {
-        tenant,
-        brand,
-        store,
-        operator: id(20),
-        approver: id(21),
-        at: from,
-        next,
-        owner: {
-          actorReference: owner,
-          membershipReference: members.get(owner).membership,
-          storeAssignmentReference: members.get(owner).assignment,
-        },
-      });
-      await openSyntheticBrandRoles(admin, {
-        tenant,
-        brand,
-        operator: id(20),
-        approver: id(21),
-        at: from,
-        next,
-        owner: { actorReference: owner, membershipReference: members.get(owner).membership },
-      });
-      const roleIds = new Map(
-        (
-          await admin.query(
-            "SELECT role_code,role_id::text id FROM bop_permission.role WHERE brand_id=$1",
-            [brand],
-          )
-        ).rows.map((row) => [row.role_code, row.id]),
-      );
-
-      // ── The staff page composed as the pilot composes it, run as the restricted API role.
-      const transactions = {
-        async run(work) {
-          const client = new Client(context.clientConfig);
-          await client.connect();
-          try {
-            await client.query("BEGIN");
-            await client.query("SET LOCAL ROLE " + role);
-            await client.query("SET LOCAL lock_timeout='20s'");
-            await client.query("SET LOCAL statement_timeout='30s'");
-            const result = await work({
-              query: (sql, values) => client.query(sql, values === undefined ? [] : [...values]),
-            });
-            await client.query("COMMIT");
-            return result;
-          } catch (error) {
-            await client.query("ROLLBACK").catch(() => undefined);
-            throw error;
-          } finally {
-            await client.end();
-          }
-        },
-      };
-      const currentActor = async (_tx, reference, authenticatedAt) =>
-        createIdentityActor({
-          actorType: "User",
-          actorReference: reference,
-          accountKind: "Workforce",
-          status: "Active",
-          authenticationMethod: "Oidc",
-          verificationLevel: "SingleFactor",
-          authenticatedAt,
-          recentMfaAt: null,
-        });
-      const cookies = { owner, sam, mia, lee };
-      signedIn.scopeFor = async (tx, cookie, action) => {
-        const actorReference = cookies[cookie];
-        const resolvedAt = new Date().toISOString();
-        const actor = await currentActor(tx, actorReference, from);
-        const decide = async (requested) => {
-          try {
-            const at = new Date().toISOString();
-            return (
-              await createMerchantWorkforcePermissionSource({
-                resolveContext: async () => ({
-                  tenantReference: tenant,
-                  context: createTenantContext(actor, brandFact, storeFact, at),
-                }),
-              })(tx, {
-                tenantReference: tenant,
-                brandReference: brand,
-                storeReference: store,
-                actorReference,
-                observedAt: at,
-                permissionCode: requested,
-              })
-            ).decision;
-          } catch {
-            return null;
-          }
-        };
-        return {
-          selected: { tenantReference: tenant },
-          context: createTenantContext(actor, brandFact, storeFact, resolvedAt),
-          store: storeFact,
-          actorReference,
-          sessionReference: id(0x800 + Object.keys(cookies).indexOf(cookie)),
-          allowed: async () => (await decide(action))?.effect === "Allow",
-          authorizeAction: decide,
-          kdsOperatorProfileAllows: (requested) =>
-            kdsOperatorProfileAllows({ policy: { code: "WorkforceStandard" } }, requested),
-        };
-      };
-      signedIn.brandScopeFor = async (tx, cookie) => {
-        const actorReference = cookies[cookie];
-        return {
-          authorizeAction: async (action) => {
-            try {
-              const at = new Date().toISOString();
-              const actor = await currentActor(tx, actorReference, from);
-              const memberships = createPostgresCurrentMembershipSource(
-                tx,
-                createTenantContext(actor, brandFact, storeFact, at),
-              );
-              const membership = resolveActiveMembership(
-                await memberships.findMemberships(actorReference, brand),
-                actorReference,
-                brand,
-                at,
-              );
-              const decision = await createPostgresCurrentPermissionPolicySource(tx).authorize({
-                tenantContext: createTenantContext(actor, brandFact, null, at),
-                membership,
-                storeAssignment: null,
-                action,
-              });
-              return decision.scopeKind === "Brand" ? decision : null;
-            } catch {
-              return null;
-            }
-          },
-        };
-      };
-      const staff = createMerchantStaffAdministration({
-        persistence: { transactions, now: () => new Date().toISOString() },
-        authentication: {
-          authorize: async (input) => ({
-            sessionReference: id(0x800 + Object.keys(cookies).indexOf(input.sessionCookie)),
-          }),
-        },
-        references: { next: fresh },
-        soleOperator: {
-          resolveContext: (tx, scope) =>
-            createInternalRefundWorkforceContext({
-              expected: { tenantReference: tenant, brandReference: brand, storeReference: store },
-              persistence: { currentActor },
-              sessionActorReference: String(scope.actorReference),
-              sessionContext: async () => scope.context,
-              current: async (t) => t === tx && (await scope.allowed()),
-              permissions: ["identity.role.approve"],
-            }),
-        },
-      });
-      const as = (who) => ({ sessionCookie: who, csrf: "synthetic-csrf" });
-      const person = async (who, actor) =>
-        (await staff.query({ ...as(who), actorReference: actor })).staff[0];
-      const command = (who, body) => staff.command({ ...as(who), body });
-      const request = async (who, actor, roleCode) => {
-        const change = fresh();
-        assert.equal(
-          (
-            await command(who, {
-              operation: "RequestRole",
-              actorReference: actor,
-              roleReference: roleIds.get(roleCode),
-              operationReference: change,
-            })
-          ).status,
-          "Requested",
-        );
-        return change;
-      };
-      const alone = (who, change) =>
-        command(who, { operation: "ApproveAlone", changeReference: change });
-      const refused = (code, reason) => (error) => {
-        assert.ok(error instanceof MerchantStaffAdministrationError, String(error));
-        assert.equal(error.code, code);
-        assert.equal(error.reason, reason);
-        return true;
-      };
-      const marks = async () =>
-        (await admin.query(`SELECT count(*)::int n FROM ${mark}`)).rows[0].n;
-      const raw = async (work) => {
-        await admin.query("BEGIN");
-        try {
-          await admin.query("SET LOCAL ROLE " + role);
-          await admin.query(
-            "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
-            [brand, store],
-          );
-          await work();
-          await admin.query("COMMIT");
-        } catch (error) {
-          await admin.query("ROLLBACK");
-          throw error;
-        }
-      };
-      const insertMark = (change, actor, approvedAt, mfaAt, audit = fresh()) =>
-        admin.query(
-          `INSERT INTO ${mark}(change_id,brand_id,store_id,approval_mode,actor_id,actor_mfa_at,approved_at,audit_id,data_classification) VALUES($1,$2,$3,'SoleOperator',$4,$5,$6,$7,'ConfigurationMetadata')`,
-          [change, brand, store, actor, mfaAt, approvedAt, audit],
-        );
-      const insertDecision = (change, actor, at, audit = fresh()) =>
-        admin.query(
-          "INSERT INTO bop_permission.role_assignment_change_decision(change_id,brand_id,store_id,decision,decided_by,decided_at,policy_version,audit_id,data_classification) VALUES($1,$2,$3,'Approved',$4,$5,NULL,$6,'ConfigurationMetadata')",
-          [change, brand, store, actor, at, audit],
-        );
-
+      const {
+        role,
+        from,
+        members,
+        staff,
+        as,
+        person,
+        command,
+        request,
+        alone,
+        refused,
+        marks,
+        raw,
+        insertMark,
+        insertDecision,
+      } = await openSoloStore(context, admin);
       // ── (a) Sole operator not set: the owner sees why and cannot approve their own request.
       const toCashier = await request("owner", sam, "front_of_house");
       let pending = (await person("owner", sam)).pending[0];
@@ -641,6 +692,200 @@ it("staff roles: a sole owner approves alone, and the two-person rule returns", 
       );
       assert.equal(await marks(), 5);
     } finally {
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 M07 (v15 live 2026-11-06, fabf0261): the store as v15 has it. Leo joined the Store but
+ * nobody can sign in as him (he is not in the InternalTest roster, like "Leaver (test)"; in
+ * production a removed account whose membership was never ended). He holds no role. The workforce
+ * context is the pilot's own: createInternalRefundWorkforceContext over the InternalTest roster
+ * session's Identity read, which refuses anyone not on the roster with a plain error. Someone whose
+ * roles do not grant staff role approval is never another approver, whatever their sign-in state,
+ * and the person the role is for is never their own approver. A real holder whose sign-in cannot
+ * be checked still counts (fail closed).
+ */
+it("staff roles on v15: a member nobody can sign in as, or the role's subject, never blocks the sole owner", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_so_staff_v15" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    try {
+      const validUntil = new Date(Date.now() + 24 * 3600_000).toISOString();
+      const scope = { tenantReference: tenant, brandReference: brand, storeReference: store };
+      const { staff, as, person, command, request, alone, refused, marks, members } =
+        await openSoloStore(context, admin, {
+          rolePrefix: "wp2423_sosv",
+          withLeo: true,
+          // The pilot's InternalTest roster session (v15 schemaVersion 2): Ana, Sam, Mia and Lee
+          // can sign in; Leo cannot.
+          workforceActor: async (transactions) =>
+            (
+              await createInternalMerchantSession(
+                {
+                  scope: { brandReference: brand, storeReference: store },
+                  publicProfile: { binding: scope },
+                  now: () => new Date().toISOString(),
+                  transactions,
+                  credentials: { reference: fresh },
+                },
+                {
+                  loadEmployee: async () => ({
+                    schemaVersion: 2,
+                    environment: "InternalTest",
+                    database: "synthetic_pilot",
+                    scope,
+                    actors: [
+                      { selector: "ana", actorReference: owner, validUntil },
+                      { selector: "sam", actorReference: sam, validUntil },
+                      { selector: "mia", actorReference: mia, validUntil },
+                      { selector: "lee", actorReference: lee, validUntil },
+                    ],
+                  }),
+                  expectedDatabaseName: "synthetic_pilot",
+                  createInternalMerchantCredentials: async () => ({
+                    hasher: { hash: () => "synthetic" },
+                    envelopes: {
+                      encrypt: async () => ({ algorithm: "SYNTHETIC", ciphertext: "synthetic" }),
+                    },
+                  }),
+                },
+              )
+            ).currentActor,
+        });
+      await seedSoleOperatorSetting(admin, {
+        id,
+        n: 0x2000,
+        tenantReference: tenant,
+        brandReference: brand,
+        actorReference: owner,
+        state: "On",
+        version: 1,
+      });
+
+      // ── Ana asks for Sam's first role: she is the only person who holds staff role approval.
+      const toCashier = await request("owner", sam, "front_of_house");
+      assert.deepEqual((await person("owner", sam)).pending[0].soleOperator, {
+        status: "Effective",
+        otherApprovers: [],
+        verifiedUntil: null,
+      });
+      await assert.rejects(alone("owner", toCashier), refused("NeedsReverification", undefined));
+      assert.equal(await marks(), 0);
+      await seedStepUp(admin, {
+        id,
+        n: 0x2200,
+        brandReference: brand,
+        storeReference: store,
+        actorReference: owner,
+        ageMs: 5 * 60_000,
+      });
+      // Her own request waits for her on Approvals.
+      assert.deepEqual(
+        (await staff.roleRequests(as("owner"))).requests.map((item) => [
+          item.person,
+          item.requestedBy,
+          item.action,
+        ]),
+        [["Sam", "You", "ApproveAlone"]],
+      );
+      assert.equal((await alone("owner", toCashier)).status, "Applied");
+      assert.equal((await alone("owner", toCashier)).status, "AlreadyApplied");
+      assert.equal(await marks(), 1);
+      const decided = (
+        await admin.query(
+          "SELECT decision,decided_by::text decided_by FROM bop_permission.role_assignment_change_decision WHERE change_id=$1",
+          [toCashier],
+        )
+      ).rows;
+      assert.deepEqual(decided, [{ decision: "Approved", decided_by: owner }]);
+      assert.deepEqual(
+        (await person("owner", sam)).assignments.map((item) => [item.roleName, item.approvedAlone]),
+        [["Front of House", true]],
+      );
+      // Sam now has the role, in effect.
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT lifecycle FROM bop_permission.role_assignment WHERE actor_id=$1",
+            [sam],
+          )
+        ).rows,
+        [{ lifecycle: "Active" }],
+      );
+
+      // ── A role for Leo (no sign-in, no role) is also Ana's alone; Leo is never named.
+      const forLeo = await request("owner", leo, "kitchen");
+      assert.equal((await person("owner", leo)).pending[0].soleOperator.status, "Effective");
+      await command("owner", { operation: "Withdraw", changeReference: forLeo });
+
+      // ── Ana approves Mia as Store Manager alone; from then on Mia must approve Sam's roles.
+      const toManager = await request("owner", mia, "store_manager");
+      assert.equal((await alone("owner", toManager)).status, "Applied");
+      const toKitchen = await request("owner", sam, "kitchen");
+      assert.deepEqual((await person("owner", sam)).pending[0].soleOperator.otherApprovers, [
+        { displayName: "Mia" },
+      ]);
+      await assert.rejects(
+        alone("owner", toKitchen),
+        refused("SoleOperatorNotInEffect", "OtherApprovers"),
+      );
+      assert.deepEqual(
+        (await staff.roleRequests(as("mia"))).requests.map((item) => [
+          item.person,
+          item.requestedBy,
+          item.action,
+        ]),
+        [["Sam", "Ana", "Decide"]],
+      );
+
+      // ── A second role for Mia, the only other holder: Mia cannot approve her own role, so it
+      // is Ana's alone (DEC-SOLE-OPERATOR-APPROVAL, the subject is never their own approver),
+      // while Sam's request in the same state still names Mia.
+      const miaSecond = await request("owner", mia, "inventory_manager");
+      const forMia = (await person("owner", mia)).pending[0].soleOperator;
+      assert.equal(forMia.status, "Effective");
+      assert.deepEqual(forMia.otherApprovers, []);
+      assert.equal((await person("owner", sam)).pending[0].soleOperator.status, "OtherApprovers");
+      assert.deepEqual(
+        (await staff.roleRequests(as("owner"))).requests.map((item) => [item.person, item.action]),
+        [["Mia", "ApproveAlone"]],
+      );
+      assert.equal((await alone("owner", miaSecond)).status, "Applied");
+      assert.equal(await marks(), 3);
+      assert.equal(
+        (await command("mia", { operation: "Approve", changeReference: toKitchen })).status,
+        "Applied",
+      );
+      assert.equal(await marks(), 3);
+
+      // ── Leo made a Store Manager (Mia approves Ana's request) but nobody can sign in as him:
+      // he does hold staff role approval, so he still counts once Mia's roles are revoked.
+      const leoManager = await request("owner", leo, "store_manager");
+      assert.equal(
+        (await command("mia", { operation: "Approve", changeReference: leoManager })).status,
+        "Applied",
+      );
+      for (const item of (await person("owner", mia)).assignments)
+        await command("owner", {
+          operation: "Revoke",
+          assignmentReference: item.assignmentReference,
+          operationReference: fresh(),
+        });
+      const toServer = await request("owner", sam, "store_manager");
+      const gate = (await person("owner", sam)).pending[0].soleOperator;
+      assert.equal(gate.status, "OtherApprovers");
+      assert.deepEqual(gate.otherApprovers, [{ displayName: "Leo" }]);
+      await assert.rejects(
+        alone("owner", toServer),
+        refused("SoleOperatorNotInEffect", "OtherApprovers"),
+      );
+      assert.equal(await marks(), 3);
+      assert.ok(members.has(leo));
+    } finally {
+      vi.unstubAllEnvs();
       await admin.end();
     }
   });

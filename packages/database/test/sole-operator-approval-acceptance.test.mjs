@@ -72,7 +72,7 @@ vi.mock("../../../apps/api/src/merchant-target-store-authority.ts", () => ({
 const { Client } = pg;
 const id = (n) => "0190a7c6-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const hash = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
-const [tenant, brand, store, provider, owner, mia, noah] = [1, 2, 3, 4, 5, 6, 7].map(id);
+const [tenant, brand, store, provider, owner, mia, noah, leo] = [1, 2, 3, 4, 5, 6, 7, 8].map(id);
 const scope = { tenantReference: tenant, brandReference: brand, storeReference: store };
 const minutes = (n) => n * 60_000;
 let references = 0xa000;
@@ -270,8 +270,8 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
           );
         }
       }
-      const names = { [owner]: "Sam", [mia]: "Mia", [noah]: "Noah" };
-      const memberNumber = { [owner]: 100, [mia]: 110, [noah]: 120 };
+      const names = { [owner]: "Sam", [mia]: "Mia", [noah]: "Noah", [leo]: "Leo" };
+      const memberNumber = { [owner]: 100, [mia]: 110, [noah]: 120, [leo]: 130 };
       async function addMember(actor, held) {
         const n = memberNumber[actor];
         await admin.query(
@@ -312,6 +312,10 @@ it("sole operator: set by the Brand Owner, self-approval with MFA, lapse on a se
       }
       await addMember(owner, [roles.owner, roles.brandOwner]);
       await addMember(mia, [roles.manager]);
+      // WP-2423 M07 (v15 2026-11-06): Leo joined the Store with no role, and nobody can sign in as
+      // him (the roster double below refuses him). He holds no refund approval, so he never
+      // stops the Owner's sole operator approval.
+      await addMember(leo, []);
       // Identity roster double (pilot `currentActor`): an active workforce actor per reference.
       const currentActor = async (_tx, reference, authenticatedAt) => {
         assert.ok([owner, mia, noah].includes(reference));
