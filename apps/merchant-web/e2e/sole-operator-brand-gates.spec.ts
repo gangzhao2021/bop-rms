@@ -153,7 +153,8 @@ test("@production the price book author publishes alone as sole operator after c
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByLabel("I checked these prices and approve on my own").check();
   await publish.click();
-  await expect(page.getByText("Published.")).toBeVisible();
+  // Exactly the notice: the summary above also ends "fixed for good once published.".
+  await expect(page.getByText("Published.", { exact: true })).toBeVisible();
   expect(JSON.parse(commands[0] ?? "{}")).toMatchObject({
     action: "Publish",
     priceBookReference: id(10),
