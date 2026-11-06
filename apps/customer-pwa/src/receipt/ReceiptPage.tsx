@@ -223,7 +223,7 @@ function ReceiptVersion({ record }: { readonly record: ReceiptRecordView }) {
         {t("Version")} {record.version}: {kindText[record.kind]}
       </h2>
       <p>
-        {t("Recorded")} {formatDateTime(record.recordedAt, snapshot.locale)}
+        {t("Recorded")} {formatDateTime(record.recordedAt)}
       </p>
       {receiptVersionReason(record) ? (
         <p>

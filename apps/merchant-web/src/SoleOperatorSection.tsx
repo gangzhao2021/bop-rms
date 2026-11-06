@@ -215,10 +215,11 @@ export function SoleOperatorSection({
           </ol>
           {earlierChanges > 0 ? (
             <p>
-              {t("{earlierChanges} earlier {value} kept in the record.", {
-                earlierChanges: earlierChanges,
-                value: earlierChanges === 1 ? t("change is") : t("changes are"),
-              })}
+              {earlierChanges === 1
+                ? t("1 earlier change is kept in the record.")
+                : t("{earlierChanges} earlier changes are kept in the record.", {
+                    earlierChanges: earlierChanges,
+                  })}
             </p>
           ) : null}
         </section>

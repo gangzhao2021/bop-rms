@@ -22,7 +22,7 @@ import {
 } from "../store/store-profile-client.js";
 import { StoreIdentityCard } from "../store/StoreIdentity.js";
 import { nextOpeningText } from "../store/store-hours-text.js";
-import { endSentence, formatClockTime } from "../journey/format.js";
+import { endSentence, formatClockTime, formatStoreLocalTime } from "../journey/format.js";
 import { unpaidPickup } from "../order-status/OrderStatusPage.js";
 import { createHttpOrderStatusClient } from "../order-status/order-status-client.js";
 import type { CustomerOrderStatusClient } from "../order-status/order-status-controller.js";
@@ -77,10 +77,12 @@ export interface EntryContextPageProps {
 
 const browserStoreProfile: StoreProfileLoader = createStoreProfileClient();
 
-/** "21:30:00" → "9:30 PM" (published local time; no time zone conversion). */
+/**
+ * "21:30:00" → "9:30 p.m." / "21:30" (published local time; no time zone conversion), in the
+ * guest's language (WP-2423 M122: Chinese reads 24-hour time).
+ */
 export function entryClock(value: string): string {
-  const [hour = 0, minute = 0] = value.split(":").map(Number);
-  return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`;
+  return formatStoreLocalTime(value);
 }
 
 export function EntryContextPage({

@@ -177,3 +177,14 @@ it("says a table's own name as written, and the word Table only with a number or
   }
   setLanguageForTest("en");
 });
+
+it("WP-2423 M122: no Chinese sentence is pieced together around a counted English fragment", () => {
+  // "更早的 1 项{value}" read "项项更改"; "{length} 项{value}" put English inside Chinese.
+  const pieced = Object.entries(zhHans).filter(([, value]) => /(?<!选)项\{value\}/u.test(value));
+  expect(pieced).toEqual([]);
+  // Chinese text ends with Chinese punctuation, never an English full stop.
+  const englishStop = Object.entries(zhHans).filter(([, value]) =>
+    /[\u4e00-\u9fff]\.$/u.test(value),
+  );
+  expect(englishStop).toEqual([]);
+});

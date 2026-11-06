@@ -134,7 +134,7 @@ export const roleChangeStatusLabels: Readonly<Record<RoleChangeView["status"], s
 export const roleDecisionLabels: Readonly<Record<string, string>> = Object.freeze({
   Submitted: t("Sent for approval"),
   Approved: t("Approved"),
-  Rejected: t("Rejected"),
+  Rejected: t("Not approved"),
   Activated: t("Turned on"),
   Deactivated: t("Removed"),
   Withdrawn: t("Withdrawn"),

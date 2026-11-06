@@ -1572,10 +1572,11 @@ export function StoreSetupDraftReview({ content }: { readonly content: StoreSetu
           ? t("Some edited times or wait values need correction before saving.")
           : missing.length === 0
             ? t("Every setting is set.")
-            : t("{length} {value} not set yet. An unfinished draft can be saved.", {
-                length: missing.length,
-                value: missing.length === 1 ? "setting is" : "settings are",
-              })}
+            : missing.length === 1
+              ? t("1 setting is not set yet. An unfinished draft can be saved.")
+              : t("{length} settings are not set yet. An unfinished draft can be saved.", {
+                  length: missing.length,
+                })}
       </p>
       {missing !== null && missing.length > 0 && (
         <section aria-label={t("Settings not set yet")}>

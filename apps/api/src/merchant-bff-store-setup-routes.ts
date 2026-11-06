@@ -48,7 +48,16 @@ export function installMerchantStoreSetupRoutes(
       return;
     }
     if (code === "MEMBER_POINTS_INPUT_INVALID") {
-      response.status(422).set("Cache-Control", NO_STORE).json({ error: "member_points_invalid" });
+      const problems = error instanceof MerchantMemberPointsError ? error.problems : [];
+      // WP-2423 M135: the field and the rule it broke, so the page says it under that field.
+      response
+        .status(422)
+        .set("Cache-Control", NO_STORE)
+        .json(
+          problems.length === 0
+            ? { error: "member_points_invalid" }
+            : { error: "rule_invalid", problems },
+        );
       return;
     }
     if (code === "MEMBER_POINTS_CHANGED") {

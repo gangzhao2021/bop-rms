@@ -369,7 +369,7 @@ export function StoreReceiptFormPage({
                 />
               </label>
               <label>
-                {t("Rejected")}
+                {t("Refused")}
                 <input
                   inputMode="decimal"
                   value={line.rejected}
@@ -525,7 +525,7 @@ export function StoreReceiptDetailPage({
             <th>{t("Location")}</th>
             <th>{t("Lot / expiry")}</th>
             <th>{t("Accepted")}</th>
-            <th>{t("Rejected")}</th>
+            <th>{t("Refused")}</th>
             <th>{t("Damaged")}</th>
             <th>{t("Reason")}</th>
             <th>{t("Unit cost")}</th>

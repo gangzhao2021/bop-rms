@@ -8859,7 +8859,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Turn on in Store features": "在门店功能中开启",
   "Cancel the round": "取消这一轮",
   "Cancel {length} rounds": "取消 {length} 轮",
-  " (in use here)": "（本店使用中）",
   "On sale": "可售",
   Refused: "拒收",
   "Not approved": "未批准",

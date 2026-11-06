@@ -2,7 +2,9 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createMemberPointsStore,
   MemberPointsError,
+  MemberPointsRuleInvalidError,
   type MemberPhoneProtector,
+  type MemberPointsRuleProblem,
 } from "@rms/customer-loyalty";
 import { readClosedRecord } from "@bop/identity";
 import { listBrandSkuChoices } from "@rms/catalog";
@@ -26,7 +28,11 @@ export type MerchantMemberPointsErrorCode =
   | "MEMBER_POINTS_CHANGED"
   | "MEMBER_POINTS_UNAVAILABLE";
 export class MerchantMemberPointsError extends Error {
-  constructor(readonly code: MerchantMemberPointsErrorCode) {
+  constructor(
+    readonly code: MerchantMemberPointsErrorCode,
+    /** WP-2423 M135: each wrong rule number, for MEMBER_POINTS_INPUT_INVALID. */
+    readonly problems: readonly MemberPointsRuleProblem[] = [],
+  ) {
     super(code);
     this.name = "MerchantMemberPointsError";
   }
@@ -128,6 +134,8 @@ export function createMerchantMemberPoints(options: {
       if (error instanceof MerchantMemberPointsError) throw error;
       if (error instanceof MemberPointsError && error.code === "MEMBER_RULE_CHANGED")
         return fail("MEMBER_POINTS_CHANGED");
+      if (error instanceof MemberPointsRuleInvalidError)
+        throw new MerchantMemberPointsError("MEMBER_POINTS_INPUT_INVALID", error.problems);
       if ((error as { code?: unknown } | null)?.code === "CUSTOMER_PROFILE_INVALID")
         return fail("MEMBER_POINTS_INPUT_INVALID");
       return keepingCause(() => fail("MEMBER_POINTS_UNAVAILABLE"))(error);

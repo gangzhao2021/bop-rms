@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import {
   guestsLeftRoundText,
   kitchenMayHaveStartedRound,
+  closeOutButtonText,
   nothingRefundedText,
 } from "./TableGuestsLeft.js";
 import { setLanguageForTest } from "./i18n/i18n.js";
@@ -369,4 +370,17 @@ it("WP-2423 live minor 21: closing out rounds that took no money says so, and ne
   } finally {
     setLanguageForTest("en");
   }
+});
+
+it("WP-2423 M123: the close-out button says refund only when a round took money", () => {
+  const unpaid = round({ state: "NotPaid", refund: null });
+  const paid = round({ state: "PaidNotSent" });
+  expect(closeOutButtonText([unpaid])).toBe("Cancel the round");
+  expect(closeOutButtonText([unpaid, unpaid])).toBe("Cancel 2 rounds");
+  expect(closeOutButtonText([paid])).toBe("Cancel the round and refund");
+  expect(closeOutButtonText([unpaid, paid])).toBe("Cancel 2 rounds and refund");
+  setLanguageForTest("zh-Hans");
+  expect(closeOutButtonText([unpaid])).toBe("取消这一轮");
+  expect(closeOutButtonText([unpaid, unpaid])).toBe("取消 2 轮");
+  setLanguageForTest("en");
 });

@@ -54,6 +54,25 @@ export function nothingRefundedText(actionable: readonly TableCloseRound[]): str
 }
 
 /**
+ * WP-2423 M123: the close-out button says "and refund" only when a round took money; rounds that
+ * were never paid (or are waiting for staff, or whose payment never finished) are only cancelled.
+ */
+export function closeOutButtonText(actionable: readonly TableCloseRound[]): string {
+  const tookMoney = actionable.some(
+    (round) =>
+      round.state !== "NotPaid" &&
+      round.state !== "PaymentInProgress" &&
+      round.state !== "WaitingForStaff",
+  );
+  if (actionable.length === 1)
+    return tookMoney ? t("Cancel the round and refund") : t("Cancel the round");
+  const length = String(actionable.length);
+  return tookMoney
+    ? t("Cancel {length} rounds and refund", { length })
+    : t("Cancel {length} rounds", { length });
+}
+
+/**
  * DEC-TABLE-CLOSE-GUESTS-LEFT: one round of a table whose guests left, in staff words — what it is
  * and what closing the table does with it. `partlyRefund`: the line refund the item cancellation
  * previewed (PartlyStarted).
@@ -460,9 +479,7 @@ export function TableGuestsLeft({
               ? t("Closing out the rounds…")
               : run === "Unknown" || run === "FullSignInRequired"
                 ? t("Try again")
-                : actionable.length === 1
-                  ? t("Cancel the round and refund")
-                  : t("Cancel {length} rounds and refund", { length: String(actionable.length) })}
+                : closeOutButtonText(actionable)}
           </button>
         </>
       ) : null}

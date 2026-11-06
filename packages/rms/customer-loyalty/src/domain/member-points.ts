@@ -52,9 +52,59 @@ const whole = (value: unknown, minimum: number, maximum: number): number =>
     ? (value as number)
     : fail();
 
+/** WP-2423 M135: which rule number is wrong and why, so the page says it under that field. */
+export type MemberPointsRuleField =
+  | "earnPointsPerDollar"
+  | "redeemPointsPerDollar"
+  | "minimumRedemptionPoints"
+  | "redemptionIncrementPoints"
+  | "inactivityExpiryDays"
+  | "expiryNoticeDays";
+export interface MemberPointsRuleProblem {
+  readonly field: MemberPointsRuleField;
+  readonly rule: "WholeNumber" | "AtLeast" | "AtMost" | "BelowExpiry";
+  readonly limit: number | null;
+}
+const ruleLimits: readonly (readonly [MemberPointsRuleField, number, number])[] = [
+  ["earnPointsPerDollar", 0, 100],
+  ["redeemPointsPerDollar", 1, 10_000],
+  ["minimumRedemptionPoints", 1, 1_000_000],
+  ["redemptionIncrementPoints", 1, 1_000_000],
+  ["inactivityExpiryDays", 90, 3650],
+  ["expiryNoticeDays", 7, 89],
+];
+/** Every wrong rule number of a change, first problem per field, in the page's field order. */
+export function memberPointsRuleProblems(value: unknown): readonly MemberPointsRuleProblem[] {
+  const raw = (value !== null && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const problems: MemberPointsRuleProblem[] = [];
+  for (const [field, minimum, maximum] of ruleLimits) {
+    const number = raw[field];
+    if (!Number.isSafeInteger(number)) problems.push({ field, rule: "WholeNumber", limit: null });
+    else if ((number as number) < minimum)
+      problems.push({ field, rule: "AtLeast", limit: minimum });
+    else if ((number as number) > maximum) problems.push({ field, rule: "AtMost", limit: maximum });
+    else if (
+      field === "expiryNoticeDays" &&
+      Number.isSafeInteger(raw.inactivityExpiryDays) &&
+      (number as number) >= (raw.inactivityExpiryDays as number)
+    )
+      problems.push({ field, rule: "BelowExpiry", limit: raw.inactivityExpiryDays as number });
+  }
+  return Object.freeze(problems.map((problem) => Object.freeze(problem)));
+}
+/** A rule change with wrong numbers; `problems` names each one (WP-2423 M135). */
+export class MemberPointsRuleInvalidError extends CustomerProfileError {
+  constructor(readonly problems: readonly MemberPointsRuleProblem[]) {
+    super("CUSTOMER_PROFILE_INVALID");
+    this.name = "MemberPointsRuleInvalidError";
+  }
+}
+
 export function parseMemberPointsRuleChange(value: unknown): Omit<MemberPointsRule, "version"> {
   const raw = value as Record<string, unknown> | null;
   if (raw === null || typeof raw !== "object") return fail();
+  const problems = memberPointsRuleProblems(raw);
+  if (problems.length > 0) throw new MemberPointsRuleInvalidError(problems);
   const inactivityExpiryDays = whole(raw.inactivityExpiryDays, 90, 3650);
   const rewards = raw.rewards;
   if (!Array.isArray(rewards) || rewards.length > 100) return fail();

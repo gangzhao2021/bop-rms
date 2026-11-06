@@ -70,6 +70,84 @@ const fields = [
 ] as const;
 type Field = (typeof fields)[number][0];
 
+/** WP-2423 M135: the same limits the server checks (domain `memberPointsRuleProblems`). */
+const limits: Record<Field, readonly [number, number]> = {
+  earnPointsPerDollar: [0, 100],
+  redeemPointsPerDollar: [1, 10_000],
+  minimumRedemptionPoints: [1, 1_000_000],
+  redemptionIncrementPoints: [1, 1_000_000],
+  inactivityExpiryDays: [90, 3650],
+  expiryNoticeDays: [7, 89],
+};
+export interface RuleProblem {
+  readonly field: Field;
+  readonly rule: "WholeNumber" | "AtLeast" | "AtMost" | "BelowExpiry";
+  readonly limit: number | null;
+}
+export function ruleProblems(values: Readonly<Record<Field, number>>): readonly RuleProblem[] {
+  const problems: RuleProblem[] = [];
+  for (const [field] of fields) {
+    const value = values[field];
+    const [minimum, maximum] = limits[field];
+    if (!Number.isSafeInteger(value)) problems.push({ field, rule: "WholeNumber", limit: null });
+    else if (value < minimum) problems.push({ field, rule: "AtLeast", limit: minimum });
+    else if (value > maximum) problems.push({ field, rule: "AtMost", limit: maximum });
+    else if (field === "expiryNoticeDays" && value >= values.inactivityExpiryDays)
+      problems.push({ field, rule: "BelowExpiry", limit: values.inactivityExpiryDays });
+  }
+  return problems;
+}
+export function ruleProblemText(problem: RuleProblem): string {
+  switch (problem.rule) {
+    case "WholeNumber":
+      return t("Use a whole number.");
+    case "AtLeast":
+      return t("Must be at least {limit}.", { limit: String(problem.limit) });
+    case "AtMost":
+      return t("Must be at most {limit}.", { limit: String(problem.limit) });
+    case "BelowExpiry":
+      return t("Must be fewer days than the expiry ({limit}).", { limit: String(problem.limit) });
+  }
+}
+/** The server's 422 problems, kept only when each is one this page knows. */
+export function parseRuleProblems(value: unknown): readonly RuleProblem[] | null {
+  const body = value as { error?: unknown; problems?: unknown } | null;
+  if (body?.error !== "rule_invalid" || !Array.isArray(body.problems)) return null;
+  const known = new Set<string>(fields.map(([field]) => field));
+  const problems = body.problems.filter(
+    (problem): problem is RuleProblem =>
+      problem !== null &&
+      typeof problem === "object" &&
+      known.has((problem as RuleProblem).field) &&
+      ["WholeNumber", "AtLeast", "AtMost", "BelowExpiry"].includes((problem as RuleProblem).rule) &&
+      ((problem as RuleProblem).limit === null ||
+        Number.isSafeInteger((problem as RuleProblem).limit)),
+  );
+  return problems.length === body.problems.length ? problems : null;
+}
+/**
+ * WP-2423 M135: what the earn and redeem numbers give back, e.g. "About 1% back: a guest earns 1
+ * point per $1 and 100 points take $1 off." (one decimal, from the exact ratio).
+ */
+export function pointsRateText(earn: number, redeem: number): string | null {
+  if (!Number.isSafeInteger(earn) || !Number.isSafeInteger(redeem) || redeem < 1 || earn < 0)
+    return null;
+  if (earn === 0) return t("Guests earn no points with these numbers.");
+  const tenths = Math.round((earn * 1000) / redeem);
+  const percent = tenths % 10 === 0 ? String(tenths / 10) : (tenths / 10).toFixed(1);
+  const text =
+    earn === 1
+      ? t("About {percent}% back: a guest earns 1 point per $1 and {redeem} points take $1 off.", {
+          percent,
+          redeem: String(redeem),
+        })
+      : t(
+          "About {percent}% back: a guest earns {earn} points per $1 and {redeem} points take $1 off.",
+          { percent, earn: String(earn), redeem: String(redeem) },
+        );
+  return tenths > 100 ? text + " " + t("That gives back more than most stores (2–5%).") : text;
+}
+
 export function MemberPointsPage({
   csrf,
   storeFeaturesHref,
@@ -84,7 +162,14 @@ export function MemberPointsPage({
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({});
   const [operation, setOperation] = useState(() => serviceOperationReference());
   const [message, setMessage] = useState<string | null>(null);
+  const [problems, setProblems] = useState<readonly RuleProblem[]>([]);
   const [busy, setBusy] = useState(false);
+  const showProblems = (found: readonly RuleProblem[]) => {
+    setProblems(found);
+    const first = found[0];
+    if (first !== undefined)
+      requestAnimationFrame(() => document.getElementById("member-rule-" + first.field)?.focus());
+  };
   const load = useCallback(async () => {
     try {
       const response = await fetcher("/merchant/member-points", {
@@ -122,6 +207,13 @@ export function MemberPointsPage({
   };
   const save = async () => {
     if (view === null || values === null) return;
+    // The same checks the server makes, before anything is sent.
+    const local = ruleProblems(values);
+    showProblems(local);
+    if (local.length > 0) {
+      setMessage(t("Some numbers can't be used. Each one says why below it."));
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -153,7 +245,11 @@ export function MemberPointsPage({
         setDraftRewards(null);
         await load();
       } else if (response.status === 422) {
-        setMessage(t("Those numbers can't be used. Check them and try again."));
+        const found = parseRuleProblems(await response.json().catch(() => null));
+        if (found !== null && found.length > 0) {
+          showProblems(found);
+          setMessage(t("Some numbers can't be used. Each one says why below it."));
+        } else setMessage(t("Those numbers can't be used. Check them and try again."));
         setOperation(serviceOperationReference());
       } else
         setMessage(
@@ -238,21 +334,40 @@ export function MemberPointsPage({
                 void save();
               }}
             >
-              {fields.map(([key, label]) => (
-                <label key={key}>
-                  {label()}
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    disabled={!view.canManage || busy}
-                    value={draft[key] ?? String(view.rule[key])}
-                    onChange={(event) =>
-                      setDraft((current) => ({ ...current, [key]: event.target.value }))
-                    }
-                  />
-                </label>
-              ))}
+              {fields.map(([key, label]) => {
+                const problem = problems.find((entry) => entry.field === key);
+                return (
+                  <label key={key}>
+                    {label()}
+                    <input
+                      id={"member-rule-" + key}
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      disabled={!view.canManage || busy}
+                      value={draft[key] ?? String(view.rule[key])}
+                      aria-invalid={problem === undefined ? undefined : true}
+                      aria-describedby={
+                        problem === undefined ? undefined : "member-rule-" + key + "-problem"
+                      }
+                      onChange={(event) => {
+                        setDraft((current) => ({ ...current, [key]: event.target.value }));
+                        setProblems((current) => current.filter((entry) => entry.field !== key));
+                      }}
+                    />
+                    {problem === undefined ? null : (
+                      <span id={"member-rule-" + key + "-problem"} className="field-problem">
+                        {ruleProblemText(problem)}
+                      </span>
+                    )}
+                    {key === "redeemPointsPerDollar" ? (
+                      <span className="bop-muted">
+                        {pointsRateText(values.earnPointsPerDollar, values.redeemPointsPerDollar)}
+                      </span>
+                    ) : null}
+                  </label>
+                );
+              })}
               <h3>{t("Dishes guests can get with points")}</h3>
               {rewards.length === 0 ? (
                 <p className="bop-muted">

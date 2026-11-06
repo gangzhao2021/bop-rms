@@ -56,7 +56,8 @@ const copy: Record<AvailabilityErrorCode | "Loading", string> = {
   Unavailable: serverProblemText,
 };
 const statusText = {
-  Available: t("Available"),
+  // WP-2423 M122: an item on sale ("可售"), not a free table ("空闲").
+  Available: t("On sale"),
   SoldOut: t("Sold out"),
   Unavailable: t("Not available here"),
   NotOffered: t("Not offered at this Store"),
