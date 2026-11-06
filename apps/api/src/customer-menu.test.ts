@@ -366,8 +366,11 @@ it("WP-2423 (cart-unsellable-dishes): sends a choice not offered now as offeredN
   Object.assign(option, { offeredNow: false });
   const catalog = new MutablePort();
   catalog.result = value;
-  const body = await (await fetch(url(await listen(catalog)))).json();
-  const sent = body.menu.sections[0].sellables[0].optionRules[0].options;
-  expect(sent[0].offeredNow).toBe(false);
+  const body = (await (await fetch(url(await listen(catalog)))).json()) as {
+    menu: { sections: { sellables: { optionRules: { options: object[] }[] }[] }[] };
+  };
+  const sent: { offeredNow?: unknown }[] =
+    body.menu.sections[0]?.sellables[0]?.optionRules[0]?.options ?? [];
+  expect(sent[0]?.offeredNow).toBe(false);
   expect(sent.slice(1).some((o: object) => "offeredNow" in o)).toBe(false);
 });
