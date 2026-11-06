@@ -274,8 +274,6 @@ export function composeMerchantDependencies(
       }),
     // WP-2423 Q18 option A: staff PIN pepper and shared-tablet key (TEST-ONLY derived keys).
     createInternalStaffPinCredentials: credentials.createInternalStaffPinCredentials,
-    // WP-2423: the settlement page answers a day before coverage with the first covered day.
-    loadDailySettlementCoverage: installation.loadDailySettlementCoverage,
     // WP-2423 DEC-COGNITO-STORE-STAFF: staff-sign-in.json selects Cognito sign-in (own accounts,
     // in-app invitations, sign-in step-up, PIN keys from secret files); without it the TEST-ONLY
     // sign-in of the InternalTest pilot is used, unchanged. The customer composition's dining

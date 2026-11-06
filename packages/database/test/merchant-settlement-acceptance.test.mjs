@@ -98,11 +98,12 @@ it("loads the open business day's settlement with card-machine payments, also wh
         // Catalog v17: the settlement read has its own permission; exceptions keep theirs.
         extraPermissions: ["operations.order-exception.manage", "payment.settlement.read"],
       });
+      // Published days back so yesterday (the across-midnight case) is a business day too.
+      const publishedAt = new Date(Date.now() - minutes(3 * 24 * 60)).toISOString();
       await seedJourneyStorePublication({
         client: admin,
         scope: ownerScope,
-        // Published days back so yesterday (the across-midnight case) is a business day too.
-        publishedAt: new Date(Date.now() - minutes(3 * 24 * 60)).toISOString(),
+        publishedAt,
         validUntil: new Date(Date.now() + minutes(24 * 60)).toISOString(),
         businessDayStart: "00:00:00",
         prefix: "01a1e100",
@@ -273,7 +274,14 @@ it("loads the open business day's settlement with card-machine payments, also wh
 
       // WP-2423 (v15 Sep 19 answered 403): a day before the Store's settlement records begin is
       // an answer naming the first covered day, after the caller's scope is resolved; the first
-      // covered day itself reads normally.
+      // covered day itself reads normally. WP-2423 M160: that first day is the Store's own (the
+      // business day its first configuration took effect in), not a composition option.
+      const firstDay = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Toronto",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(publishedAt));
       const covered = createPersistentMerchantSettlement({
         persistence: {
           ...session.persistence,
@@ -290,21 +298,25 @@ it("loads the open business day's settlement with card-machine payments, also wh
           environment: "Test",
         }),
         settlementRunReference: async () => null,
-        firstBusinessDate: async () => today,
       });
-      const dayBefore = new Date(Date.parse(today + "T12:00:00.000Z") - 86_400_000)
+      const dayBefore = new Date(Date.parse(firstDay + "T12:00:00.000Z") - 86_400_000)
         .toISOString()
         .slice(0, 10);
       await assert.rejects(
         covered({ sessionCookie: session.sessionCookie, businessDate: dayBefore }),
         (error) =>
-          error.code === "MERCHANT_SETTLEMENT_NOT_COVERED" && error.firstBusinessDate === today,
+          error.code === "MERCHANT_SETTLEMENT_NOT_COVERED" && error.firstBusinessDate === firstDay,
       );
       await assert.rejects(
         covered({ sessionCookie: "not-a-session", businessDate: dayBefore }),
         (error) => error.code !== "MERCHANT_SETTLEMENT_NOT_COVERED",
       );
       assert.equal((await read(covered)).businessDate, today);
+      assert.equal(
+        (await covered({ sessionCookie: session.sessionCookie, businessDate: firstDay }))
+          .businessDate,
+        firstDay,
+      );
 
       // The Store's order exceptions (same staff permission), measured here as the nearest
       // acceptance with a real staff session (WP-2423 query budget): the scope is resolved at the

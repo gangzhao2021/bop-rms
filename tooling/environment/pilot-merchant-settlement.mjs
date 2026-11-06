@@ -8,14 +8,12 @@ import {
 /**
  * WP-2423 P1: the day-end settlement read of this merchant composition's own Store (`selected`),
  * with the Provider account it settles and the run references its daily settlement scheduler
- * derives for a closed day.
+ * derives for a closed day. WP-2423 M160: the first day it can show is the Store's own (its
+ * business-day owner), not the installation's daily-settlement coverage file, which names the one
+ * Store the reconciliation scheduler runs for; a day the scheduler does not cover shows its
+ * figures with the reconciliation "not checked yet".
  */
-export function createPilotMerchantSettlement({
-  persistence,
-  selected,
-  refundConfiguration,
-  loadDailySettlementCoverage,
-}) {
+export function createPilotMerchantSettlement({ persistence, selected, refundConfiguration }) {
   return createPersistentMerchantSettlement({
     persistence,
     resolveConfiguration: async (tx, scope) => {
@@ -52,19 +50,5 @@ export function createPilotMerchantSettlement({
         dailySettlementRecheckRunReference(day, n + 1),
       );
     },
-    // WP-2423: the first business day the installation's settlement coverage starts.
-    ...(loadDailySettlementCoverage === undefined
-      ? {}
-      : {
-          firstBusinessDate: async (scope) => {
-            for (const key of ["tenantReference", "brandReference", "storeReference"])
-              if (scope[key] !== selected[key]) throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
-            const coverage = await loadDailySettlementCoverage();
-            for (const key of ["tenantReference", "brandReference", "storeReference"])
-              if (coverage.scope[key] !== selected[key])
-                throw new Error("INTERNAL_SETTLEMENT_SCOPE_DENIED");
-            return coverage.firstWindow.businessDate;
-          },
-        }),
   });
 }

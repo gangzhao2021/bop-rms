@@ -111,3 +111,23 @@ it("AGENTS.md \"Warn before timeouts\": any staff member's read comes from this 
   expect(read.slice(0, read.indexOf("})"))).toContain("readBoard: readOperationsAlertBoard");
   expect(pilot).toContain("...(orderingEnding === undefined ? {} : { orderingEnding })");
 });
+
+it("WP-2423 M160: a Store's settlement days begin at its own first day, not at the installation's coverage file", async () => {
+  // v15 2026-11-06: every dated Settlement of a merchant other than the installation's own Store
+  // failed (PILOT_INSTALLATION_UNAVAILABLE): its first day came from daily-settlement-coverage.json,
+  // which names the one Store the reconciliation scheduler runs for.
+  const pilot = await readFile(new URL("./pilot-merchant.mjs", import.meta.url), "utf8");
+  const call = pilot.slice(pilot.indexOf("createPilotMerchantSettlement({"));
+  expect(call.slice(0, call.indexOf("})"))).not.toContain("Coverage");
+  expect(pilot).not.toContain("loadDailySettlementCoverage");
+  const settlement = await readFile(
+    new URL("./pilot-merchant-settlement.mjs", import.meta.url),
+    "utf8",
+  );
+  expect(settlement).not.toMatch(/Coverage\b|firstBusinessDate/u);
+  // The settlement read takes the first day from the Store's business-day owner, always.
+  const read = await readFile(new URL("persistent-merchant-settlement.ts", api), "utf8");
+  expect(read).toMatch(
+    /firstBusinessDate: async \(tx, scope\) => \{\s*await authorize\(tx\);\s*return days\(tx, scope\)\.firstBusinessDate\(tx\);/u,
+  );
+});

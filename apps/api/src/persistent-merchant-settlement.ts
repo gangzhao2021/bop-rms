@@ -66,8 +66,6 @@ export function createPersistentMerchantSettlement(options: {
     scope: MerchantSettlementScope,
     window: MerchantSettlementWindow,
   ): Promise<readonly string[]>;
-  /** WP-2423: the first business day the Store's settlement records cover; null when unknown. */
-  firstBusinessDate?(scope: MerchantSettlementScope): Promise<string | null>;
   /**
    * Waits before each rerun of a read that lost a lock wait (lock timeout, deadlock or
    * serialization failure). The read writes nothing, so rerunning it is safe.
@@ -299,14 +297,13 @@ export function createPersistentMerchantSettlement(options: {
       authorize: async (tx) => authorize(tx),
       storeLabel: async (tx) => storeOf(tx).displayName,
       now: () => persistence.now(),
-      ...(options.firstBusinessDate
-        ? {
-            firstBusinessDate: async (tx: ConsumerTransaction, scope: MerchantSettlementScope) => {
-              await authorize(tx);
-              return (await options.firstBusinessDate?.(scope)) ?? null;
-            },
-          }
-        : {}),
+      // WP-2423 M160: every Store's own first business day (when its records begin), from the
+      // Store's business-day owner under this transaction's authorization — not an installation
+      // file that names one Store.
+      firstBusinessDate: async (tx, scope) => {
+        await authorize(tx);
+        return days(tx, scope).firstBusinessDate(tx);
+      },
       window: async (tx, scope, businessDate): Promise<MerchantSettlementWindow> =>
         days(tx, scope).window(tx, businessDate),
       captured: (tx, scope, window) =>
