@@ -3,6 +3,7 @@ import {
   createMerchantRoleAdministration,
   generatedRoleCode,
   parseRoleCommandInput,
+  roleCommandIntentDigest,
 } from "./merchant-role-administration.js";
 
 const id = (n: number) => "01909a0a-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -334,6 +335,7 @@ describe("WP-2423 role administration authorization", () => {
     d.prior.mockResolvedValue({
       commandType: "Submit",
       actorReference: id(5),
+      intentDigest: roleCommandIntentDigest(parseRoleCommandInput(command())),
       roleReference: id(1),
       version: 3,
       lifecycle: "InReview",
@@ -347,12 +349,59 @@ describe("WP-2423 role administration authorization", () => {
     d.prior.mockResolvedValue({
       commandType: "Submit",
       actorReference: id(8),
+      intentDigest: roleCommandIntentDigest(parseRoleCommandInput(command())),
       roleReference: id(1),
       version: 3,
       lifecycle: "InReview",
     });
     await expect(f.service.command({ ...f.input, body: command() })).rejects.toMatchObject({
       code: "Conflict",
+    });
+  });
+  it("a retry under the same operation reference with other content is a conflict, never the first answer", async () => {
+    const f = setup();
+    const first = command({ operation: "SaveDraft", draft });
+    d.prior.mockResolvedValue({
+      commandType: "SaveDraft",
+      actorReference: id(5),
+      intentDigest: roleCommandIntentDigest(parseRoleCommandInput(first)),
+      roleReference: id(1),
+      version: 3,
+      lifecycle: "Draft",
+    });
+    await expect(f.service.command({ ...f.input, body: first })).resolves.toEqual({
+      roleReference: id(1),
+      version: 3,
+      status: "Draft",
+    });
+    // The same actions in another order ask for the same thing.
+    await expect(
+      f.service.command({
+        ...f.input,
+        body: command({
+          operation: "SaveDraft",
+          draft: { ...draft, actions: [...draft.actions].reverse() },
+        }),
+      }),
+    ).resolves.toMatchObject({ status: "Draft" });
+    for (const other of [
+      command({ operation: "SaveDraft", draft: { ...draft, displayName: "Night lead" } }),
+      command({
+        operation: "SaveDraft",
+        draft: { ...draft, actions: [...draft.actions, "ordering.order.accept"] },
+      }),
+      command({ operation: "SaveDraft", draft, roleReference: id(9) }),
+      command({ operation: "SaveDraft", draft, expectedVersion: 1 }),
+    ])
+      await expect(f.service.command({ ...f.input, body: other })).rejects.toMatchObject({
+        code: "Conflict",
+      });
+    expect(d.execute).not.toHaveBeenCalled();
+    // The digest recorded with the first attempt is the request's.
+    d.prior.mockResolvedValue(null);
+    await f.service.command({ ...f.input, body: command() });
+    expect(d.ports.mock.calls.at(-1)?.[0]).toMatchObject({
+      intentDigest: roleCommandIntentDigest(parseRoleCommandInput(command())),
     });
   });
   it("lists another person's waiting change for an approver, never the viewer's own without the gate", async () => {

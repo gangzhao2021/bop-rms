@@ -283,6 +283,8 @@ export async function findRoleAdministrationOperation(
 ): Promise<{
   readonly commandType: string;
   readonly actorReference: string;
+  /** What the first attempt asked for: a retry with other content is a conflict, not a replay. */
+  readonly intentDigest: string;
   readonly roleReference: string;
   readonly version: number;
   readonly lifecycle: string;
@@ -290,7 +292,7 @@ export async function findRoleAdministrationOperation(
   await tx.query(scopeSql, [scope.brandReference, scope.storeReference]);
   const row = (
     await tx.query(
-      `SELECT o.command_type,o.actor_reference::text actor,v.role_id::text role,v.version::int version,v.lifecycle
+      `SELECT o.command_type,o.actor_reference::text actor,o.intent_digest,v.role_id::text role,v.version::int version,v.lifecycle
        FROM bop_permission.role_administration_operation o
        JOIN bop_permission.role_administration_version v ON v.brand_id=o.brand_id AND v.administration_reference=o.administration_reference AND v.version=o.resulting_version
        WHERE o.brand_id=$1 AND o.operation_reference=$2`,
@@ -302,6 +304,7 @@ export async function findRoleAdministrationOperation(
     : {
         commandType: String(row.command_type),
         actorReference: String(row.actor),
+        intentDigest: String(row.intent_digest),
         roleReference: String(row.role),
         version: Number(row.version),
         lifecycle: String(row.lifecycle),
@@ -376,6 +379,11 @@ export function createPostgresRoleAdministrationPorts(options: {
   readonly authorization: RoleAdministrationPorts["authorization"];
   readonly clock: { now(): string };
   readonly nextReference: () => string;
+  /**
+   * The digest of what the caller asked for (operation, role, expected version, content). A retry
+   * under the same operation reference must carry the same one. Absent: the planned version's.
+   */
+  readonly intentDigest?: string;
 }): RoleAdministrationPorts {
   const tx = options.transaction;
   return {
@@ -401,10 +409,11 @@ export function createPostgresRoleAdministrationPorts(options: {
       async commit(input) {
         const { next } = input;
         const intentDigest =
+          options.intentDigest ??
           "sha256:" +
-          createHash("sha256")
-            .update(canonicalizeRfc8785({ operation: options.operation, next }))
-            .digest("hex");
+            createHash("sha256")
+              .update(canonicalizeRfc8785({ operation: options.operation, next }))
+              .digest("hex");
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
           "bop_permission.role_administration:" + next.administrationReference,
         ]);

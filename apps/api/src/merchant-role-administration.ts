@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { canonicalizeRfc8785 } from "@bop/audit";
 import { listStoreMembers, type MemberDirectoryTransaction } from "@bop/membership";
 import {
   createPostgresRoleAdministrationPorts,
@@ -186,6 +187,35 @@ export function parseRoleCommandInput(value: unknown): RoleCommandInput {
     reasonCode: r.reasonCode,
     draft,
   };
+}
+
+/**
+ * What a command asks for, independent of when it runs: a retry under the same operation
+ * reference must ask for exactly this again (another name, other permissions or another role is a
+ * conflict, never the first answer).
+ */
+export function roleCommandIntentDigest(command: RoleCommandInput): string {
+  return (
+    "sha256:" +
+    createHash("sha256")
+      .update(
+        canonicalizeRfc8785({
+          operation: command.operation,
+          roleReference: command.roleReference,
+          expectedVersion: command.expectedVersion,
+          reasonCode: command.reasonCode,
+          draft:
+            command.draft === null
+              ? null
+              : {
+                  displayName: command.draft.displayName,
+                  description: command.draft.description,
+                  actions: [...command.draft.actions].sort(),
+                },
+        }),
+      )
+      .digest("hex")
+  );
 }
 
 /** A new role's internal code: from its operation reference, so a retry names the same role. */
@@ -637,6 +667,7 @@ export function createMerchantRoleAdministration(options: {
 
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
     const command = parseRoleCommandInput(input.body);
+    const intentDigest = roleCommandIntentDigest(command);
     const action = operationAction[command.operation];
     const current0 = await session(input);
     return retryTransactionConflict(() =>
@@ -658,7 +689,11 @@ export function createMerchantRoleAdministration(options: {
               command.operationReference,
             );
             if (prior !== null) {
-              if (prior.commandType !== command.operation || prior.actorReference !== viewer)
+              if (
+                prior.commandType !== command.operation ||
+                prior.actorReference !== viewer ||
+                prior.intentDigest !== intentDigest
+              )
                 return fail("Conflict");
               return {
                 roleReference: prior.roleReference,
@@ -739,6 +774,7 @@ export function createMerchantRoleAdministration(options: {
               },
               clock: { now: () => now },
               nextReference: () => options.references.next(),
+              intentDigest,
             });
             const wired = options.soleOperator;
             const soleOperator =
