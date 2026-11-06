@@ -36,6 +36,8 @@ export interface DiningCartItemOptions {
   readonly checkoutHold?: DiningCartCheckoutHoldPort;
   readonly now: () => string;
   readonly catalog: CartItemCommandPorts["catalog"];
+  /** WP-2423 (same-table-ordering): lets anyone remove a line whose adder left the table. */
+  readonly adders?: CartItemCommandPorts["adders"];
   readonly references: CartItemCommandPorts["references"];
   /** Owner adapter must scope aggregate reads by DiningSession and history by Cart and Guest. */
   readonly repository: (
@@ -331,6 +333,7 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
         );
         let loaded: ReturnType<typeof owned> | null = null;
         const service = createCartItemCommandService({
+          ...(options.adders === undefined ? {} : { adders: options.adders }),
           catalog: {
             validateSelection: (selection, context) =>
               guarded(() => options.catalog.validateSelection(selection, context)),

@@ -193,6 +193,8 @@ describe("WP-1205 in-memory Cart state", () => {
       [["OTHER_PARTICIPANT_ITEM"], false],
       [["OTHER_PARTICIPANT_ITEM", "ITEM_UNAVAILABLE"], true],
       [["OTHER_PARTICIPANT_ITEM", "ITEM_OPTIONS_CHANGED"], true],
+      // WP-2423 same-table-ordering: its phone has left the table.
+      [["OTHER_PARTICIPANT_ITEM", "ADDER_LEFT_TABLE"], true],
     ] as const) {
       const f = fixture();
       const base = cart();

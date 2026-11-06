@@ -81,8 +81,10 @@ import {
   type CartQueryTransactionRunner,
 } from "@rms/ordering";
 import { createCustomerCartReadPort } from "./customer-cart-read-composition.js";
+import { createCustomerCartAdderStanding } from "./customer-cart-adder-standing.js";
 import { CustomerCartHandler, type CustomerCartReplacementPort } from "./customer-cart.js";
 import {
+  createPostgresGuestParticipantSessionSource,
   createPostgresGuestSessionEntryStore,
   GuestSessionService,
   type GuestSessionEntryTransactionRunner,
@@ -361,22 +363,35 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
   let checkoutDetails = options.checkoutDetails;
   let configuredQuote: CustomerQuotePort | undefined;
   if (options.cartTransactions !== undefined) {
+    const sessionBinding =
+      options.diningAdmission === undefined
+        ? entry.session.binding
+        : createCustomerDiningSessionBinding({
+            scope,
+            binding: entry.session.binding,
+            repository: options.diningAdmission.binding.dining.binding,
+            contexts: options.diningAdmission.binding.contexts,
+            now,
+          });
     const sessions = new GuestSessionService({
       ...entry.session,
       store,
       admission: { consume: async () => null },
       now,
-      binding:
-        options.diningAdmission === undefined
-          ? entry.session.binding
-          : createCustomerDiningSessionBinding({
-              scope,
-              binding: entry.session.binding,
-              repository: options.diningAdmission.binding.dining.binding,
-              contexts: options.diningAdmission.binding.contexts,
-              now,
-            }),
+      binding: sessionBinding,
     });
+    // WP-2423 (same-table-ordering): a line whose phone can no longer act at the table (the same
+    // binding check as above) can be removed by anyone at the table.
+    const adders =
+      options.diningAdmission === undefined
+        ? undefined
+        : createCustomerCartAdderStanding({
+            sessions: createPostgresGuestParticipantSessionSource(
+              options.sessionTransactions,
+              scope,
+            ),
+            binding: sessionBinding,
+          });
     if (options.channelOrderSubmission !== undefined)
       orderSubmission = createCustomerOrderSubmissionChannel({
         ...options.channelOrderSubmission,
@@ -507,6 +522,7 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       catalog,
       stores,
       now,
+      ...(adders === undefined ? {} : { adders }),
       // WP-2423: a timed-out table Cart is replaced through the owner command, not a dead end.
       ...(options.cartReplacement === undefined ? {} : { replacement: options.cartReplacement }),
     };

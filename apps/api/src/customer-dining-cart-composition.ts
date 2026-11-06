@@ -333,6 +333,8 @@ export interface CustomerDiningCartCompositionOptions {
   readonly stores: CustomerDiningCartViewPorts["stores"];
   /** WP-2423 (guest-cart-503): marks lines a stable Catalog fact says can't be sold now. */
   readonly availability?: CustomerDiningCartViewPorts["availability"];
+  /** WP-2423 (same-table-ordering): a line whose phone left the table can be removed by anyone. */
+  readonly adders?: CustomerDiningCartViewPorts["adders"];
   readonly now: () => string;
   /** WP-2423: owner replacement used to continue past a timed-out table Cart (omitted: refused). */
   readonly replacement?: CustomerCartReplacementPort;
@@ -388,6 +390,7 @@ export function createCustomerDiningCartComposition(
     catalog: options.catalog,
     stores: options.stores,
     ...(options.availability === undefined ? {} : { availability: options.availability }),
+    ...(options.adders === undefined ? {} : { adders: options.adders }),
   });
   const replacement = options.replacement;
   const succession = createPostgresDiningCartSuccessionSource(options.cartTransactions, fixedScope);
@@ -431,6 +434,7 @@ export function createCustomerDiningCartComposition(
             now,
             references: itemOptions.references,
             catalog: itemOptions.catalog,
+            ...(options.adders === undefined ? {} : { adders: options.adders }),
             audit: itemOptions.audit,
             repository: (bound) => ({
               load: createPostgresDiningCartCommandQueryStore(options.cartTransactions, bound).load,

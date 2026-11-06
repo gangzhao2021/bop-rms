@@ -15,6 +15,7 @@ import {
   type CartQuoteAttachment,
 } from "../domain/cart-quote-attachment.js";
 import type { DiningCartReadResult, DiningCartViewer } from "./dining-cart-read-service.js";
+import type { CartAdderStandingPort } from "./ports/cart-item-command-ports.js";
 import type { PickupCartReadResult } from "./pickup-cart-read-service.js";
 
 export interface CustomerCartDisplayMoney {
@@ -106,8 +107,14 @@ export interface CustomerDiningCartViewPorts {
   readonly catalog: CustomerCartViewPorts["catalog"];
   readonly stores: CustomerCartViewPorts["stores"];
   readonly availability?: CustomerCartLineStandingPort;
+  /**
+   * WP-2423 (same-table-ordering): marks another phone's line `ADDER_LEFT_TABLE` when that phone
+   * can no longer act at the table, so anyone may remove it. Optional and fail-open (no mark).
+   */
+  readonly adders?: CartAdderStandingPort;
 }
 type ViewPorts = Omit<CustomerCartViewPorts, "reads"> & {
+  readonly adders?: CartAdderStandingPort;
   readonly reads: {
     read(input: unknown): Promise<PickupCartReadResult | DiningCartReadResult | null>;
   };
@@ -335,6 +342,40 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             // Fail-open: the cart is still shown; the quote names the line if it is refused.
           }
         }
+        // WP-2423 (same-table-ordering): other phones' lines whose phone has left the table.
+        const gone = new Set<string>();
+        const others = [
+          ...new Set(
+            cart.items
+              .map((item) => item.addedByParticipantReference)
+              .filter(
+                (participant): participant is NonNullable<typeof participant> =>
+                  participant !== null &&
+                  first.viewer !== null &&
+                  participant !== first.viewer.participantReference,
+              )
+              .map(String),
+          ),
+        ];
+        if (
+          ports.adders !== undefined &&
+          others.length > 0 &&
+          cart.diningSessionReference !== null
+        ) {
+          try {
+            const standings = await ports.adders.standing({
+              diningSessionReference: String(cart.diningSessionReference),
+              participantReferences: Object.freeze(others),
+              observedAt: first.observedAt,
+            });
+            if (Array.isArray(standings))
+              for (const standing of standings)
+                if (standing.standing === "Gone" && others.includes(standing.participantReference))
+                  gone.add(standing.participantReference);
+          } catch {
+            // Fail-open: no line is marked; the remove command checks again at its own instant.
+          }
+        }
         const items = Object.freeze(
           cart.items.map((item, index) => {
             const description = closed(descriptions[index], [
@@ -389,6 +430,10 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
                 ...(first.viewer !== null &&
                 item.addedByParticipantReference !== first.viewer.participantReference
                   ? ["OTHER_PARTICIPANT_ITEM"]
+                  : []),
+                ...(item.addedByParticipantReference !== null &&
+                gone.has(String(item.addedByParticipantReference))
+                  ? ["ADDER_LEFT_TABLE"]
                   : []),
                 ...(marks[index] == null ? [] : [marks[index] as string]),
               ]),

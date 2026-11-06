@@ -18,6 +18,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Add something from the menu to get started.": "先从菜单中加点东西吧。",
   "Add to cart": "加入购物车",
   "Add to your order": "加入订单",
+  "Added by a phone that has left this table. Anyone at the table can remove it.":
+    "由已离开这桌的手机添加，同桌任何人都可以删除。",
   "Added by another guest. Only they can change this item.":
     "由同桌其他客人添加，只有对方可以修改这件商品。",
   "Added to your cart.": "已加入购物车。",

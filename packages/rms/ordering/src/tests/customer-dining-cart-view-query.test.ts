@@ -176,6 +176,45 @@ describe("safe shared Dining Cart display", () => {
     expect(Object.isFrozen(first?.cart.items)).toBe(true);
     expect(f.read).toHaveBeenCalledTimes(4);
   });
+  it("WP-2423 same-table-ordering: marks another phone's line when that phone has left the table", async () => {
+    const read = vi.fn(async (): Promise<DiningCartReadResult | null> => shared());
+    const describeMany = vi.fn(async () => [description(), description()]);
+    const standing = vi.fn(async () => [{ participantReference: id(42), standing: "Gone" }]);
+    const query = createCustomerDiningCartViewQuery({
+      reads: { read },
+      stores: { getPublicStore: async () => profile() },
+      catalog: { describeMany },
+      adders: { standing },
+    });
+    const view = await query.read(request);
+    expect(view?.cart.items.map((x) => x.warnings)).toEqual([
+      [],
+      ["OTHER_PARTICIPANT_ITEM", "ADDER_LEFT_TABLE"],
+    ]);
+    // Only other phones are asked about; the viewer's own lines never are.
+    expect(standing).toHaveBeenCalledWith({
+      diningSessionReference: id(30),
+      participantReferences: [id(42)],
+      observedAt: at,
+    });
+    // Still at the table, or the answer fails: shown unmarked (the command checks again).
+    for (const answer of [
+      async () => [{ participantReference: id(42), standing: "AtTable" }],
+      async () => {
+        throw new Error("synthetic outage");
+      },
+    ]) {
+      const unmarked = createCustomerDiningCartViewQuery({
+        reads: { read },
+        stores: { getPublicStore: async () => profile() },
+        catalog: { describeMany },
+        adders: { standing: answer },
+      });
+      expect((await unmarked.read(request))?.cart.items[1]?.warnings).toEqual([
+        "OTHER_PARTICIPANT_ITEM",
+      ]);
+    }
+  });
   it("publishes only the existing customer schema and passes no notes or actors to display dependencies", async () => {
     const f = fixture();
     const result = await f.query.read(request);

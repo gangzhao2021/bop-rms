@@ -480,6 +480,46 @@ async function removableAsUnsellable(
   }
 }
 
+/**
+ * WP-2423 (same-table-ordering): a table line whose adder can no longer act at this table (staff
+ * removed the phone, the table QR was replaced, its session ended) may be removed by anyone at the
+ * table, so nobody has to pay for a dish no one can take out. Checked inside the command at its own
+ * instant; an unknown answer or a failure keeps the remove refused. Update stays the adder's.
+ */
+export async function removableAsAdderGone(
+  ports: Pick<CartItemCommandPorts, "adders">,
+  cart: CartAggregate,
+  item: CartAggregate["items"][number],
+  at: OrderingInstant,
+): Promise<boolean> {
+  const adders = ports.adders;
+  const participant = item.addedByParticipantReference;
+  if (
+    cart.orderType !== "DineIn" ||
+    adders === undefined ||
+    participant === null ||
+    cart.diningSessionReference === null
+  )
+    return false;
+  try {
+    const standings = await adders.standing(
+      Object.freeze({
+        diningSessionReference: String(cart.diningSessionReference),
+        participantReferences: Object.freeze([String(participant)]),
+        observedAt: at,
+      }),
+    );
+    return (
+      Array.isArray(standings) &&
+      standings.length === 1 &&
+      standings[0]?.participantReference === String(participant) &&
+      standings[0]?.standing === "Gone"
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function commit(
   ports: CartItemCommandPorts,
   input: {
@@ -752,7 +792,8 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
       if (
         !canMutateItem(item, current.aggregate, current.session) &&
-        !(await removableAsUnsellable(ports, current.aggregate, item, requestedAt))
+        !(await removableAsUnsellable(ports, current.aggregate, item, requestedAt)) &&
+        !(await removableAsAdderGone(ports, current.aggregate, item, requestedAt))
       )
         throw new CartError("CART_PERMISSION_DENIED");
       const aggregate = parseCartAggregate({

@@ -71,7 +71,8 @@ const lineEstimateReasons: Readonly<Record<string, string>> = Object.freeze({
 
 /** Sentence for a cart line warning, or null when the code carries nothing a customer can act on. */
 export function cartItemWarningMessage(code: string): string | null {
-  if (code === "OTHER_PARTICIPANT_ITEM") return null;
+  // Both are said by the line's ownership sentence instead.
+  if (code === "OTHER_PARTICIPANT_ITEM" || code === "ADDER_LEFT_TABLE") return null;
   return cartItemWarnings[code] ?? t("Please check this item with staff before paying.");
 }
 
@@ -325,6 +326,10 @@ export const cartText = Object.freeze({
     /** WP-2423 (guest-cart-503): another phone's line that can't be sold now blocks the table. */
     get addedByAnotherGuestRemovable() {
       return t("Added by another guest. Anyone at the table can remove it now.");
+    },
+    /** WP-2423 (same-table-ordering): the phone that added it can no longer act at the table. */
+    get addedByPhoneThatLeft() {
+      return t("Added by a phone that has left this table. Anyone at the table can remove it.");
     },
     get removeUnavailableFirst() {
       return t("Remove the dishes that aren’t available right now, then order.");

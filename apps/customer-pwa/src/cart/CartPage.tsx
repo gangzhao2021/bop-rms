@@ -105,6 +105,8 @@ function CartItem({
   const foreign = item.warnings.includes("OTHER_PARTICIPANT_ITEM");
   // WP-2423 (guest-cart-503): a line that can't be sold now may be removed by anyone at the table.
   const unsellable = cartLineUnsellable(item);
+  // WP-2423 (same-table-ordering): the phone that added it has left the table; anyone may remove it.
+  const stranded = item.warnings.includes("ADDER_LEFT_TABLE");
   const ownershipDescription = `cart-item-ownership-${item.cartItemReference}`;
   const configuration = describeConfiguration(item);
   const updateQuantity = (quantity: number) =>
@@ -144,9 +146,11 @@ function CartItem({
       </div>
       {foreign ? (
         <p className="cart-warning" id={ownershipDescription}>
-          {unsellable
-            ? cartText.line.addedByAnotherGuestRemovable
-            : cartText.line.addedByAnotherGuest}
+          {stranded
+            ? cartText.line.addedByPhoneThatLeft
+            : unsellable
+              ? cartText.line.addedByAnotherGuestRemovable
+              : cartText.line.addedByAnotherGuest}
         </p>
       ) : null}
       {warnings.map((warning) => (
@@ -183,7 +187,7 @@ function CartItem({
           className="cart-link-button"
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={readOnly || (foreign && !unsellable) || pending}
+          disabled={readOnly || (foreign && !unsellable && !stranded) || pending}
           onClick={() => void controller.removeItem(item.cartItemReference)}
         >
           {cartText.line.remove}

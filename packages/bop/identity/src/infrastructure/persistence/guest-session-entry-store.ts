@@ -515,3 +515,71 @@ export function createPostgresGuestSessionLegacyInspector(
     },
   });
 }
+
+/**
+ * WP-2423 (same-table-ordering): the live Guest Sessions bound to some Dining participants, for the
+ * cart's "has this phone left the table" answer. Read only; the caller still runs the ordinary
+ * binding check on each session. No credential or selector leaves this function.
+ */
+export function createPostgresGuestParticipantSessionSource(
+  runner: GuestSessionEntryTransactionRunner,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+) {
+  const brand = parseOpaqueUuidV7(scope.brandReference, "IDENTITY_INPUT_INVALID");
+  const store = parseOpaqueUuidV7(scope.storeReference, "IDENTITY_INPUT_INVALID");
+  return Object.freeze({
+    async listBound(input: {
+      readonly diningSessionReference: string;
+      readonly participantReferences: readonly string[];
+      readonly observedAt: string;
+    }) {
+      const diningSession = parseOpaqueUuidV7(
+        input.diningSessionReference,
+        "IDENTITY_INPUT_INVALID",
+      );
+      const participants = input.participantReferences.map((reference) =>
+        parseOpaqueUuidV7(reference, "IDENTITY_INPUT_INVALID"),
+      );
+      const observedAt = parseCanonicalInstant(input.observedAt);
+      if (participants.length === 0 || participants.length > 50) throw unavailable();
+      try {
+        const result = await runner.run(async (transaction) => {
+          await transaction.query(
+            "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
+            [brand, store],
+          );
+          return transaction.query(
+            `${select} AND dining_session_id = $3 AND dining_participant_id = ANY($4::uuid[])
+             AND dining_state = 'DiningBound' AND status = 'Active'
+             AND idle_expires_at > $5 AND absolute_expires_at > $5
+             AND (closure_expires_at IS NULL OR closure_expires_at > $5)
+             ORDER BY created_at DESC LIMIT 200`,
+            [brand, store, diningSession, participants, observedAt],
+          );
+        });
+        if (
+          typeof result !== "object" ||
+          result === null ||
+          !("rows" in result) ||
+          !Array.isArray(result.rows)
+        )
+          throw unavailable();
+        return Object.freeze(
+          result.rows.map((row: { record?: unknown }) => {
+            const parsed = createGuestSessionRecord(row?.record).session;
+            if (
+              parsed.brandReference !== brand ||
+              parsed.storeReference !== store ||
+              String(parsed.diningSessionReference) !== diningSession ||
+              !participants.includes(String(parsed.diningParticipantReference) as never)
+            )
+              throw unavailable();
+            return parsed;
+          }),
+        );
+      } catch {
+        throw unavailable();
+      }
+    },
+  });
+}

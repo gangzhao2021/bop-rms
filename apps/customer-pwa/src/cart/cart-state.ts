@@ -251,7 +251,9 @@ export function createCartStateController({
           !(
             removal &&
             (item.warnings.includes("ITEM_UNAVAILABLE") ||
-              item.warnings.includes("ITEM_OPTIONS_CHANGED"))
+              item.warnings.includes("ITEM_OPTIONS_CHANGED") ||
+              // WP-2423 (same-table-ordering): its phone has left the table.
+              item.warnings.includes("ADDER_LEFT_TABLE"))
           ),
       )
     )

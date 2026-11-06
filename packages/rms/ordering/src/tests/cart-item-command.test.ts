@@ -137,6 +137,7 @@ function fixture(
     catalogMode?: "Rejected" | "Mismatch" | "Failure";
     rejectReason?: string;
     explainMany?: NonNullable<CartItemCommandPorts["catalog"]["explainMany"]>;
+    adders?: CartItemCommandPorts["adders"];
   } = {},
 ) {
   let aggregate = options.aggregate ?? cart();
@@ -144,6 +145,7 @@ function fixture(
   let generated = 0;
   let validations = 0;
   const ports: CartItemCommandPorts = {
+    ...(options.adders === undefined ? {} : { adders: options.adders }),
     catalog: {
       async validateSelection(input) {
         validations += 1;
@@ -489,6 +491,97 @@ describe("Cart Item Add / Update / Remove commands", () => {
         customerNote: null,
       }),
     ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+  });
+
+  it("WP-2423 same-table-ordering: anyone at the table removes a line whose phone left the table", async () => {
+    const otherItem = {
+      cartItemReference: ids.item,
+      cartReference: ids.cart,
+      sellableReference: ids.sellable,
+      quantity: 1,
+      optionSelections: [],
+      customerNote: null,
+      catalogSelectionEvidence: null,
+      addedByActorReference: ids.session,
+      addedByParticipantReference: ids.participant,
+      addedAt: createdAt,
+    };
+    const diningCart = cart({
+      orderType: "DineIn",
+      diningSessionReference: ids.diningSession as never,
+      items: [otherItem] as never,
+    });
+    const remover = guest({
+      channel: "DineIn",
+      diningState: "DiningBound",
+      diningSessionReference: ids.diningSession as never,
+      sessionReference: ids.otherSession as never,
+      diningParticipantReference: ids.otherParticipant as never,
+      publicTableReference: id(32) as never,
+    });
+    const remove = {
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 1,
+      operationReference: ids.operation,
+      requestedAt,
+    };
+    const standing = vi.fn(async () => [
+      { participantReference: ids.participant, standing: "Gone" },
+    ]);
+    const gone = fixture({ aggregate: diningCart, session: remover, adders: { standing } });
+    await expect(gone.service.remove(remove)).resolves.toMatchObject({
+      status: "Applied",
+      aggregate: { items: [], aggregateVersion: 2 },
+    });
+    // Asked about the adder only, at the command's own instant.
+    expect(standing).toHaveBeenCalledWith({
+      diningSessionReference: ids.diningSession,
+      participantReferences: [ids.participant],
+      observedAt: requestedAt,
+    });
+    // The ordinary attributed remove: the remover's Guest Session, never the adder's.
+    expect(gone.operation(ids.operation)?.guestSessionReference).toBe(ids.otherSession);
+    // Still at the table, an answer about someone else, a failure or no port: refused.
+    for (const adders of [
+      { standing: async () => [{ participantReference: ids.participant, standing: "AtTable" }] },
+      { standing: async () => [{ participantReference: ids.otherParticipant, standing: "Gone" }] },
+      { standing: async () => [] },
+      {
+        standing: async () => {
+          throw new Error("synthetic Dining outage");
+        },
+      },
+      undefined,
+    ]) {
+      const state = fixture({
+        aggregate: diningCart,
+        session: remover,
+        ...(adders === undefined ? {} : { adders }),
+      });
+      await expect(state.service.remove(remove)).rejects.toMatchObject({
+        code: "CART_PERMISSION_DENIED",
+      });
+      expect(state.operations()).toBe(0);
+    }
+    // Changing it stays the adder's, gone or not.
+    const edit = fixture({ aggregate: diningCart, session: remover, adders: { standing } });
+    await expect(
+      edit.service.update({ ...remove, quantity: 2, optionSelections: [], customerNote: null }),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    // A pickup cart never asks.
+    const pickupStanding = vi.fn(async () => [
+      { participantReference: ids.participant, standing: "Gone" },
+    ]);
+    const pickup = fixture({
+      aggregate: cart({ items: [{ ...otherItem, addedByParticipantReference: null }] as never }),
+      session: guest({ sessionReference: ids.otherSession as never }),
+      adders: { standing: pickupStanding },
+    });
+    await expect(pickup.service.remove(remove)).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(pickupStanding).not.toHaveBeenCalled();
   });
 
   it("bounds sensitive Customer Note and rejects accessor-bearing commands", async () => {

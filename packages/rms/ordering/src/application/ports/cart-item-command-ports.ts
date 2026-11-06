@@ -33,7 +33,23 @@ export interface CartSelectionContext {
   readonly quantity: number;
 }
 
+/**
+ * WP-2423 (same-table-ordering): whether the phone that added a table line can still act at this
+ * table. `Gone` means no Guest Session bound to that participant passes the current table check
+ * any more (removed by staff, table QR replaced, moved without following, or its session ended),
+ * so the line is stranded. Derived from the same binding check every cart command uses.
+ */
+export interface CartAdderStandingPort {
+  standing(input: {
+    readonly diningSessionReference: string;
+    readonly participantReferences: readonly string[];
+    readonly observedAt: string;
+  }): Promise<readonly { readonly participantReference: string; readonly standing: string }[]>;
+}
+
 export interface CartItemCommandPorts {
+  /** Optional; without it, or when it fails, another phone's line stays the adder's. */
+  readonly adders?: CartAdderStandingPort;
   readonly catalog: {
     validateSelection(
       input: ValidateCatalogSelectionInput,

@@ -235,6 +235,7 @@ export {
   createPostgresGuestSessionEntryStore,
   createPostgresFencedGuestSessionEntryStore,
   createPostgresGuestSessionLegacyInspector,
+  createPostgresGuestParticipantSessionSource,
   type GuestSessionEntryStore,
   type GuestSessionLegacyClassification,
   type GuestSessionEntryTransaction,
