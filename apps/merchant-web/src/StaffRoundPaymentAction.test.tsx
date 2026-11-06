@@ -127,3 +127,16 @@ it("says what the kitchen starts in the staff member's language, for an order or
     setLanguageForTest("en");
   }
 });
+
+it("WP-2423 M96: a paper order already paid during the outage is recorded, never charged again", () => {
+  try {
+    expect(chargeFirstText("1130", "order", true)).toBe(
+      "Already paid on paper. Enter what the slip or cash record shows, then record it. Don't charge again.",
+    );
+    expect(chargeFirstText("1130", "round", true)).not.toContain("Charge $11.30");
+    setLanguageForTest("zh-Hans");
+    expect(chargeFirstText("1130", "order", true)).toContain("请勿重复收款");
+  } finally {
+    setLanguageForTest("en");
+  }
+});

@@ -189,7 +189,12 @@ export function CounterAwaitingPayment({
                 ) : (
                   <StaffRoundPaymentAction
                     subject="order"
-                    label={t("Charge on card machine")}
+                    label={
+                      // WP-2423 M96: a paper order was paid during the outage; it is recorded only.
+                      order.counter?.recordedAfterOutage
+                        ? t("Record the paper order's payment")
+                        : t("Charge on card machine")
+                    }
                     csrf={csrf}
                     fetcher={fetcher}
                     orderReference={order.orderReference}

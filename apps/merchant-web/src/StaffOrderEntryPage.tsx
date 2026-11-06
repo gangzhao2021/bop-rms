@@ -1444,9 +1444,13 @@ export function StaffOrderEntryPage({
                         ? t("Sent and paid: {totalMinor} with tax and tip.", {
                             totalMinor: cad(placed.totalMinor),
                           })
-                        : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
-                            totalMinor: cad(placed.totalMinor),
-                          })
+                        : placed.recordedAfterOutage
+                          ? t(
+                              "Sent. This paper order was paid during the outage: don't charge again, record it below.",
+                            )
+                          : t("Sent. Charge {totalMinor} with tax and tip on the card machine.", {
+                              totalMinor: cad(placed.totalMinor),
+                            })
                     : tablePaysLater
                       ? t(
                           "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
@@ -1673,9 +1677,13 @@ export function StaffOrderEntryPage({
                       value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
                     })
                   : t("Order {orderNumber} paid", { orderNumber: placed.orderNumber })
-                : t("Charge {totalMinor} on the card machine", {
-                    totalMinor: cad(placed.totalMinor),
-                  })}
+                : placed.recordedAfterOutage
+                  ? t("Paper order {orderNumber}: record the payment taken during the outage", {
+                      orderNumber: placed.orderNumber,
+                    })
+                  : t("Charge {totalMinor} on the card machine", {
+                      totalMinor: cad(placed.totalMinor),
+                    })}
             </h2>
             {removedNote !== null ? (
               <p className="order-accept-by" data-tier="warning" role="note">

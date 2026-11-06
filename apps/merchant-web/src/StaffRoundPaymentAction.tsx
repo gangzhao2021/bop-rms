@@ -22,7 +22,17 @@ const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CA
  * WP-2423 (v15 fabf0261 F3): what staff do first, a whole sentence for an order or a round (the
  * Chinese text never takes the English word for what is charged).
  */
-export function chargeFirstText(amountMinor: string, subject: "round" | "order"): string {
+export function chargeFirstText(
+  amountMinor: string,
+  subject: "round" | "order",
+  paper = false,
+): string {
+  // WP-2423 M96: a paper order entered after an outage was already paid; it is recorded, never
+  // charged a second time.
+  if (paper)
+    return t(
+      "Already paid on paper. Enter what the slip or cash record shows, then record it. Don't charge again.",
+    );
   return subject === "order"
     ? t(
         "Charge {amount} on the card machine first, then record it here. The kitchen starts this order once it is recorded.",
@@ -226,7 +236,7 @@ export function StaffRoundPaymentAction({
         void record();
       }}
     >
-      <p>{chargeFirstText(amount, subject)}</p>
+      <p>{chargeFirstText(amount, subject, recordedAfterOutage)}</p>
       {payBy !== null
         ? (() => {
             const notice = paymentWindowNotice({
