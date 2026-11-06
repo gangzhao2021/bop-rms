@@ -417,6 +417,18 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     await mobileSearch.getByRole("button", { name: "Clear search" }).click();
     await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
     await expect(filterSheet).not.toBeVisible();
+    // WP-2423 M157: on the phone, typing the number and tapping Done finds it; no "Find" needed.
+    await filterToggle.click();
+    await mobileOrderInput.fill(width === 390 ? "16" : "15");
+    await filterSheet.getByRole("button", { name: "Done" }).click();
+    await expect(filterSheet).not.toBeVisible();
+    await expect(page.locator(".kitchen-work-item")).toHaveCount(1);
+    await expect(page.locator(".kitchen-work-item")).toContainText(
+      width === 390 ? "Synthetic bread" : "Synthetic stew",
+    );
+    await filterToggle.click();
+    await mobileSearch.getByRole("button", { name: "Clear search" }).click();
+    await expect(page.locator(".kitchen-work-item")).toHaveCount(3);
     await expectNoHorizontalOverflow(page);
     await page.screenshot({ path: `test-results/kitchen-board-${width}.png`, fullPage: true });
   }

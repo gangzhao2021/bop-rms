@@ -2257,8 +2257,8 @@ export function KitchenBoardScreen({
           const value = event.currentTarget.value;
           setOrderInput(value);
           // Owner 2026-11-03: the row finds as staff type, so a touch screen needs no key or button.
-          if (layout === "desktop")
-            setOrderSearch(kitchenOrderSearchTerm(value) === null ? null : value.trim());
+          // WP-2423 M157: the phone's sheet finds as staff type too; Done then shows the result.
+          setOrderSearch(kitchenOrderSearchTerm(value) === null ? null : value.trim());
         }}
         maxLength={40}
         autoComplete="off"
@@ -2420,7 +2420,11 @@ export function KitchenBoardScreen({
         <button
           className="kitchen-filter-sheet__done"
           type="button"
-          onClick={() => filterSheetRef.current?.close()}
+          onClick={() => {
+            // WP-2423 M157: Done applies what was typed, so a number never needs "Find" as well.
+            setOrderSearch(kitchenOrderSearchTerm(orderInput) === null ? null : orderInput.trim());
+            filterSheetRef.current?.close();
+          }}
         >
           {t("Done")}
         </button>
