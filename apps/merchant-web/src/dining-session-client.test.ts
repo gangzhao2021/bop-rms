@@ -211,6 +211,24 @@ it("WP-2423: offers the Order host section only when the server says this staff 
   // An older server sends nothing: offered as before; the server decides.
   expect((await read({})).canTransferHost).toBe(true);
 });
+it("WP-2423 M08: reads whether this staff member may add a round for a table, or that the server didn't say", async () => {
+  const read = (extra: Record<string, unknown>) =>
+    createDiningSessionClient(
+      vi.fn(async () =>
+        response({
+          canOperateTables: true,
+          items: [table],
+          nextAfterTableReference: null,
+          ...extra,
+        }),
+      ),
+    ).tables("A".repeat(43));
+  expect((await read({ canTakeTableRounds: true })).canTakeTableRounds).toBe(true);
+  // A kitchen-only role: no "Take order for table".
+  expect((await read({ canTakeTableRounds: false })).canTakeTableRounds).toBe(false);
+  // An older server sends nothing: null, so the page falls back to its own rule.
+  expect((await read({})).canTakeTableRounds).toBeNull();
+});
 it("WP-2423 item 8 ⑤: reads rounds waiting for staff and phones that just joined, only at open tables", async () => {
   const open = {
     ...table,

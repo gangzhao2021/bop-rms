@@ -514,6 +514,12 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
         canCancelUnpaidRounds: data.canCancelUnpaidRounds === true,
         /** WP-2423 item 8 ①: a manager may record that the guests left without paying. */
         canWriteOff: data.canWriteOff === true,
+        /**
+         * WP-2423 M08: the staff member may add a round for a seated table here, whatever the
+         * counter-ordering switch says (null: an older server said nothing).
+         */
+        canTakeTableRounds:
+          typeof data.canTakeTableRounds === "boolean" ? data.canTakeTableRounds : null,
         /** DEC-DINING-GUEST-TABLE-START: present while guests can start free tables here. */
         guestTableStart:
           data.guestTableStart === undefined || data.guestTableStart === null

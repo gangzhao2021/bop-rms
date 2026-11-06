@@ -37,6 +37,28 @@ describe("WP-2423 workspace layout", () => {
     expect(currentNavigationItem(items, "/app/commerce/menusx")).toBeNull();
     expect(currentNavigationItem(items, "/operations/orders")).toBe("OPS-ORDER-QUEUE");
   });
+  it("WP-2423 M08: marks Tables while staff take a round for a table", () => {
+    const floor = [
+      { screenId: "DIN-FLOOR-BOARD", label: "Tables", href: "/operations/dining", permission: "x" },
+      {
+        screenId: "OPS-ORDER-ENTRY",
+        label: "Counter order",
+        href: "/operations/order-entry",
+        permission: "x",
+      },
+    ] as never;
+    const table = "?table=01909985-0000-7000-8000-000000000042";
+    expect(currentNavigationItem(floor, "/operations/order-entry", table)).toBe("DIN-FLOOR-BOARD");
+    // Counter ordering off: no "Counter order" entry, Tables is still where staff are.
+    expect(
+      currentNavigationItem([(floor as never[])[0]] as never, "/operations/order-entry", table),
+    ).toBe("DIN-FLOOR-BOARD");
+    // A walk-up order is the counter's.
+    expect(currentNavigationItem(floor, "/operations/order-entry")).toBe("OPS-ORDER-ENTRY");
+    expect(currentNavigationItem(floor, "/operations/order-entry", "?table=")).toBe(
+      "OPS-ORDER-ENTRY",
+    );
+  });
   it("WP-2423 Q5: shows each destination once in the workspace links", () => {
     const approvals = {
       screenId: "APPROVAL-INBOX",

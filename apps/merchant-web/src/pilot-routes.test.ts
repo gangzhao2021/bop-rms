@@ -71,6 +71,23 @@ describe("merchant route classification", () => {
     expect(pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"])).toBe(
       "/operations/dining",
     );
+    // WP-2423 M08: a round for a seated table is served with counter ordering off.
+    const table = "?table=01909985-0000-7000-8000-000000000042";
+    expect(pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"], table)).toBeNull();
+    expect(pilotHiddenRedirect("/operations/order-entry", listed, table)).toBeNull();
+    // No table, or an empty one: the walk-up address still goes to Tables.
+    for (const search of ["", "?table=", "?other=1"])
+      expect(pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"], search)).toBe(
+        "/operations/dining",
+      );
+    // A typed bad reference is served; the page says it can't open that table.
+    expect(
+      pilotHiddenRedirect("/operations/order-entry", ["HOME-OVERVIEW"], "?table=not-a-table"),
+    ).toBeNull();
+    // Only the table-mode screen: Pickup with ?table= still goes to Tables.
+    expect(pilotHiddenRedirect("/operations/pickup", ["HOME-OVERVIEW"], table)).toBe(
+      "/operations/dining",
+    );
     expect(pilotHiddenRedirect("/app/supply/items/x", listed)).toBeNull();
     expect(pilotHiddenRedirect("/operations/receiving", listed)).toBe("/app");
     expect(pilotHiddenRedirect("/app/commerce/recipes", ["HOME-OVERVIEW"])).toBe("/app");

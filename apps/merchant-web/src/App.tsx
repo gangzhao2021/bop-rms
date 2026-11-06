@@ -741,6 +741,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         csrf={demo === null ? state.csrf : null}
         items={state.workspace.navigation}
         path={pathname}
+        search={search}
         storeLabel={state.workspace.selectedScope.storeLabel}
         footer={
           demo === null ? (
@@ -2219,6 +2220,7 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
       ? pilotHiddenRedirect(
           pathname,
           state.kind === "Ready" ? state.workspace.navigation.map((item) => item.screenId) : null,
+          search,
         )
       : null;
   // A screen whose code did not arrive offers "Try again" in place of the page.

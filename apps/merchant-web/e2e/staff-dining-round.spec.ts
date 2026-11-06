@@ -118,7 +118,14 @@ const table = {
   qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
 };
 
-async function signIn(page: Page, tableItem: Record<string, unknown> = table) {
+async function signIn(
+  page: Page,
+  tableItem: Record<string, unknown> = table,
+  {
+    counterOrder = true,
+    tables = {},
+  }: { readonly counterOrder?: boolean; readonly tables?: Record<string, unknown> } = {},
+) {
   await page.route("**/merchant/session", (route) =>
     route.fulfill({
       headers,
@@ -140,12 +147,17 @@ async function signIn(page: Page, tableItem: Record<string, unknown> = table) {
               href: "/operations/orders",
               permission: "ordering.operate",
             },
-            {
-              screenId: "OPS-ORDER-ENTRY",
-              label: "Counter order",
-              href: "/operations/order-entry",
-              permission: "ordering.order.create_staff",
-            },
+            // WP-2423 M08: the full-service setting (counter ordering off) does not list it.
+            ...(counterOrder
+              ? [
+                  {
+                    screenId: "OPS-ORDER-ENTRY",
+                    label: "Counter order",
+                    href: "/operations/order-entry",
+                    permission: "ordering.order.create_staff",
+                  },
+                ]
+              : []),
             {
               screenId: "DIN-FLOOR-BOARD",
               label: "Tables",
@@ -160,7 +172,12 @@ async function signIn(page: Page, tableItem: Record<string, unknown> = table) {
   await page.route("**/merchant/dining/tables", (route) =>
     route.fulfill({
       headers,
-      json: { canOperateTables: false, items: [tableItem], nextAfterTableReference: null },
+      json: {
+        canOperateTables: false,
+        items: [tableItem],
+        nextAfterTableReference: null,
+        ...tables,
+      },
     }),
   );
 }
@@ -892,4 +909,158 @@ test("@production DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the k
       fullPage: true,
     });
   }
+});
+
+/** WP-2423 M08: the Store's business day, guests' last orders 20 minutes ago. */
+async function pastLastOrders(page: Page) {
+  const now = Date.now();
+  await page.route("**/merchant/business-day", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        businessDate: "2026-10-15",
+        startsAt: new Date(now - 18 * 3_600_000).toISOString(),
+        endsAt: new Date(now + 6 * 3_600_000).toISOString(),
+        timeZone: "America/Toronto",
+        observedAt: new Date(now).toISOString(),
+        lastOrdersAt: new Date(now - 20 * 60_000).toISOString(),
+      },
+    }),
+  );
+}
+
+/** A pay-later table's round that the server sent to the kitchen. */
+async function placesRounds(page: Page) {
+  const rounds: Record<string, unknown>[] = [];
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    rounds.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "7",
+        orderVersion: 5,
+        tableLabel: "T4",
+        orderMinor: "700",
+        tipMinor: "0",
+        totalMinor: "700",
+        payBy: null,
+        payLater: true,
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  return rounds;
+}
+
+async function expectAccessible(page: Page) {
+  const axe = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    axe.violations
+      .filter((v) => v.impact === "serious" || v.impact === "critical")
+      .map((v) => v.id),
+  ).toEqual([]);
+}
+
+test("@production M08: with counter ordering off and after last orders, staff still send a round for a table", async ({
+  page,
+}) => {
+  await signIn(
+    page,
+    { ...table, paymentTiming: "PayLater" },
+    { counterOrder: false, tables: { canTakeTableRounds: true } },
+  );
+  await pastLastOrders(page);
+  const rounds = await placesRounds(page);
+
+  await page.goto("/operations/dining");
+  // The last-orders banner's promise holds: guests stopped, staff can still add a round.
+  await expect(page.locator(".last-orders-notice")).toContainText(
+    "(last orders). You can still add a round for a table.",
+  );
+  // Walk-up counter ordering is off: no "Counter order" in the sidebar.
+  await expect(page.getByRole("link", { name: "Counter order", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Select T4", exact: true }).click();
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+  await page.getByRole("link", { name: "Take order for table T4" }).click();
+  // The table's order page, not sent back to Tables.
+  await expect(page).toHaveURL(new RegExp("/operations/order-entry\\?table=" + tableReference));
+  await expect(page.getByRole("heading", { level: 1, name: "Table T4 order" })).toBeVisible();
+  // Staff can tell where they are: Tables is the current page.
+  await expect(page.getByRole("link", { name: "Tables", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Table T4 round sent to the kitchen" }),
+  ).toBeVisible();
+  expect(rounds).toHaveLength(1);
+  expect(rounds[0]).toMatchObject({ tableReference, tip: { kind: "None" } });
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(
+      page.getByRole("heading", { name: "Table T4 round sent to the kitchen" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/staff-dining-round-counter-off-${width}.png`,
+      fullPage: true,
+    });
+  }
+});
+
+test("@production M08: the table round reads in the staff member's language with counter ordering off", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+  });
+  await signIn(
+    page,
+    { ...table, paymentTiming: "PayLater" },
+    { counterOrder: false, tables: { canTakeTableRounds: true } },
+  );
+  await placesRounds(page);
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "选择 T4", exact: true }).click();
+  await page.getByRole("link", { name: "为桌台 T4 点单" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "桌台 T4 的订单" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "柜台点单", exact: true })).toHaveCount(0);
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+});
+
+test("@production M08: no table round is offered when the Tables read says this staff member can't take one", async ({
+  page,
+}) => {
+  await signIn(page, table, { counterOrder: false, tables: { canTakeTableRounds: false } });
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T4", exact: true }).click();
+  await expect(page.getByText("Manage this table")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Take order for table T4" })).toHaveCount(0);
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+});
+
+test("@production M08: with counter ordering off the walk-up order address still goes to Tables", async ({
+  page,
+}) => {
+  await signIn(page, table, { counterOrder: false, tables: { canTakeTableRounds: true } });
+  await page.goto("/operations/order-entry");
+  await expect(page).toHaveURL(/\/operations\/dining$/u);
+  await expect(page.getByRole("button", { name: "Select T4", exact: true })).toBeVisible();
+  await expectNoInternalText(page);
+  await expectAccessible(page);
 });

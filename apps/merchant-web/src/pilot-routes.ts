@@ -19,7 +19,15 @@ export interface MerchantRoute {
    * A working screen this deployment serves only when the session's navigation lists it (the
    * server composes its sources); otherwise the address goes to `to`.
    */
-  readonly listed?: { readonly screenId: string; readonly to: string };
+  readonly listed?: {
+    readonly screenId: string;
+    readonly to: string;
+    /**
+     * WP-2423 M08: the address with `?table=` (a round for a seated table) is served even while
+     * the screen is unlisted; the Tables read decides who is offered it and the server authorizes.
+     */
+    readonly tableMode?: true;
+  };
 }
 
 const ref = "01909985-0000-7000-8000-000000000042";
@@ -31,8 +39,13 @@ function route(path: string, hiddenTo?: string): MerchantRoute {
   return hiddenTo === undefined ? { path, sample } : { path, sample, hiddenTo };
 }
 
-function listedRoute(path: string, screenId: string, to: string): MerchantRoute {
-  return { ...route(path), listed: { screenId, to } };
+function listedRoute(
+  path: string,
+  screenId: string,
+  to: string,
+  extra: { readonly tableMode?: true } = {},
+): MerchantRoute {
+  return { ...route(path), listed: { screenId, to, ...extra } };
 }
 
 export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
@@ -90,7 +103,10 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
   route("/operations/orders"),
   route("/operations/orders/:id"),
   // A module the Store turned off (DEC-STORE-FEATURES) is not listed; its address goes to Tables.
-  listedRoute("/operations/order-entry", "OPS-ORDER-ENTRY", "/operations/dining"),
+  // WP-2423 M08: counter ordering off removes walk-up orders only, never a table's round.
+  listedRoute("/operations/order-entry", "OPS-ORDER-ENTRY", "/operations/dining", {
+    tableMode: true,
+  }),
   route("/operations/order-exceptions"),
   route("/operations/kitchen"),
   route("/operations/kitchen/work-items/:id"),
@@ -206,20 +222,25 @@ export const merchantRoutes: readonly MerchantRoute[] = Object.freeze([
  * Where the signed-in workspace sends `pathname` instead of a screen without sources, or null
  * when the address is a working screen (or unknown, which the catch-all route handles).
  * `screens` is the session's navigation (null while there is no session: the screen then shows
- * its own loading or sign-in state).
+ * its own loading or sign-in state). `search` is the address's query (`?table=…` for table mode).
  */
 export function pilotHiddenRedirect(
   pathname: string,
   screens: readonly string[] | null = null,
+  search = "",
 ): string | null {
   // A working screen wins over a hidden pattern that would also match its address.
   const working = merchantRoutes.find(
     (entry) => !entry.hiddenTo && matchPath(entry.path, pathname),
   );
-  if (working)
-    return working.listed && screens !== null && !screens.includes(working.listed.screenId)
-      ? working.listed.to
-      : null;
+  if (working) {
+    if (!working.listed || screens === null || screens.includes(working.listed.screenId))
+      return null;
+    // A round for a table: served whatever the module's sidebar entry says (M08).
+    if (working.listed.tableMode && (new URLSearchParams(search).get("table") ?? "") !== "")
+      return null;
+    return working.listed.to;
+  }
   for (const entry of merchantRoutes)
     if (entry.hiddenTo && matchPath(entry.path, pathname)) return entry.hiddenTo;
   return null;

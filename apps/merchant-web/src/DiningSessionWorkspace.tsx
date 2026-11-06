@@ -448,7 +448,10 @@ export function DiningSessionWorkspace({
   readonly storeLabel: string;
   /** The Store's IANA time zone, for the times staff are told (WP-2423 item 5). */
   readonly timeZone?: string | undefined;
-  /** WP-2423 Q7 slice 2: the staff member may enter a round for a table (staff ordering). */
+  /**
+   * WP-2423 Q7 slice 2: the staff member may enter a round for a table (staff ordering) — the
+   * fallback when the Tables read doesn't say (an older server); M08: the read decides otherwise.
+   */
   readonly canTakeOrders?: boolean;
   /** The Table QR codes page, when this staff member may create codes there. */
   readonly tableQrHref?: string | undefined;
@@ -471,6 +474,8 @@ export function DiningSessionWorkspace({
   const [canTransferHost, setCanTransferHost] = useState(false);
   const [canCancelUnpaidRounds, setCanCancelUnpaidRounds] = useState(false);
   const [canWriteOff, setCanWriteOff] = useState(false);
+  // WP-2423 M08: from the Tables read, never from the "Counter order" sidebar entry.
+  const [canTakeTableRounds, setCanTakeTableRounds] = useState<boolean | null>(null);
   // DEC-DINING-GUEST-TABLE-START: guests can start free tables here, and whether this person stops it.
   const [guestStarts, setGuestStarts] = useState<{
     readonly version: number;
@@ -609,6 +614,7 @@ export function DiningSessionWorkspace({
         setCanTransferHost(loaded.canTransferHost);
         setCanCancelUnpaidRounds(loaded.canCancelUnpaidRounds);
         setCanWriteOff(loaded.canWriteOff);
+        setCanTakeTableRounds(loaded.canTakeTableRounds);
         setGuestStarts(loaded.guestTableStart);
         guestStartsNow.current = loaded.guestTableStart;
         if (loaded.items.length === 0 && !more)
@@ -1312,7 +1318,7 @@ export function DiningSessionWorkspace({
               canCancelUnpaidRounds={canCancelUnpaidRounds}
               canWriteOff={canWriteOff}
               canOperateTables={canOperateTables}
-              canTakeOrders={canTakeOrders}
+              canTakeOrders={canTakeTableRounds ?? canTakeOrders}
               guestStartsOn={guestStarts !== null}
               tableQrHref={tableQrHref}
               checkoutRevision={checkoutRevision}

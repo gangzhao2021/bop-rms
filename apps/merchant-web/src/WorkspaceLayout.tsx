@@ -33,11 +33,18 @@ export const usesWorkspaceLayout = (path: string) =>
   (path === "/app" || path.startsWith("/app/") || path.startsWith("/operations/")) &&
   !ownNavigation.some((pattern) => pattern.test(path));
 
-/** The item whose route is the longest prefix of the current path is the current page. */
+/**
+ * The item whose route is the longest prefix of the current path is the current page. A round for
+ * a seated table (`/operations/order-entry?table=…`) is Tables' work, not the walk-up counter's
+ * (WP-2423 M08), so Tables is marked there.
+ */
 export function currentNavigationItem(
   items: readonly MerchantNavigationItem[],
   path: string,
+  search = "",
 ): string | null {
+  if (path === "/operations/order-entry" && (new URLSearchParams(search).get("table") ?? "") !== "")
+    path = "/operations/dining";
   const matches = items.filter(
     (item) => item.href !== "/app" && (path === item.href || path.startsWith(item.href + "/")),
   );
@@ -208,6 +215,7 @@ function storeOpenGroups(groups: ReadonlySet<WorkspaceNavigationGroup>) {
 export function WorkspaceLayout({
   items,
   path,
+  search = "",
   storeLabel,
   children,
   footer = null,
@@ -217,12 +225,14 @@ export function WorkspaceLayout({
   readonly csrf?: string | null;
   readonly items: readonly MerchantNavigationItem[];
   readonly path: string;
+  /** The address's query, so a table's round marks Tables (WP-2423 M08). */
+  readonly search?: string;
   readonly storeLabel: string;
   readonly children: ReactNode;
   /** WP-2423 Q18: session actions (Switch staff) under the navigation. */
   readonly footer?: ReactNode;
 }) {
-  const current = currentNavigationItem(items, path);
+  const current = currentNavigationItem(items, path, search);
   const sections = workspaceNavigationSections(items);
   // WP-2423 Q35: refunds waiting for an approver are counted beside "Approvals" on every page.
   const approvals = useApprovalsWaiting(items.some((item) => item.screenId === "APPROVAL-INBOX"));
