@@ -6,6 +6,7 @@ import {
   recordMerchantFirstContent,
   recordMerchantOpening,
 } from "../../../apps/api/dist/merchant-opening.js";
+import { recordStoreOpening } from "../../../apps/api/src/merchant-store-opening.ts";
 import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
 import { parseStoreSetupReferenceVersion } from "../../rms/store/src/contracts/store-setup-reference.ts";
 import { createInternalPricingPolicy } from "../../../tooling/environment/pilot-pricing-policy.mjs";
@@ -41,7 +42,8 @@ const ref = (n) => "01909a4e-1111-7aaa-8bbb-" + n.toString(16).padStart(12, "0")
  * 1. its gate and tax evidence renew (a dry run first, then once, append-only and audited, then
  *    AlreadyRenewed), only for a Store the files say is served;
  * 2. refused: a Store the files do not say is served, a merchant whose Brand is not labelled
- *    TEST, a Store that is not the merchant's own.
+ *    TEST, an Owner the opening did not place, a labelled lookalike never opened by the merchant
+ *    opening, a Store opened from another Store on the Stores page, a Store not the merchant's.
  */
 it("a TEST merchant's Store renews its launch gate and tax evidence with the installation", async () => {
   vi.stubEnv("NODE_ENV", "development");
@@ -132,7 +134,10 @@ it("a TEST merchant's Store renews its launch gate and tax evidence with the ins
           await admin.query("ROLLBACK");
           throw error;
         }
-        return merchantOpeningReferences(operationReference);
+        return {
+          ...merchantOpeningReferences(operationReference),
+          owner: command.ownerActorReference,
+        };
       };
       const tea = await open(
         ref(0x30),
@@ -282,6 +287,7 @@ it("a TEST merchant's Store renews its launch gate and tax evidence with the ins
           dryRun: true,
           nextReference,
           servedTestMerchant: true,
+          ownerActorReference: m.owner,
           ...extra,
         });
       const renewTax = (m, extra = {}) =>
@@ -297,6 +303,7 @@ it("a TEST merchant's Store renews its launch gate and tax evidence with the ins
           dryRun: true,
           nextReference,
           servedTestMerchant: true,
+          ownerActorReference: m.owner,
           ...extra,
         });
       const facts = async (m) => {
@@ -343,8 +350,102 @@ it("a TEST merchant's Store renews its launch gate and tax evidence with the ins
             readRole: api,
             brandReference: tea.brandReference,
             storeReference: binding.storeReference,
+            ownerActorReference: tea.owner,
           }),
           { reason: "merchant-not-labelled-test" },
+        );
+      } finally {
+        await admin.query("ROLLBACK");
+      }
+      // Someone the opening did not place there (another staff file entry) is not its Owner.
+      await assert.rejects(renewStore(tea, { ownerActorReference: ref(0x99) }), {
+        reason: "merchant-owner-not-placed-by-opening",
+      });
+      await assert.rejects(renewTax(tea, { ownerActorReference: ref(0x99) }), {
+        reason: "merchant-owner-not-placed-by-opening",
+      });
+      // Labelled but not opened by the TEST tooling: a lookalike written without the merchant
+      // opening (no opening audit pair), and a Store the Owner opened from another Store on the
+      // Stores page (the product's own opening, not the merchant opening).
+      const fake = {
+        tenantReference: ref(0x40),
+        brandReference: ref(0x41),
+        storeReference: ref(0x42),
+        owner: tea.owner,
+      };
+      await admin.query(
+        "INSERT INTO bop_tenant.brand(brand_id,code,display_name,default_locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,'FAKE','Lookalike TEST - not production','en-CA','CAD','Active',1,$2,$2)",
+        [fake.brandReference, from],
+      );
+      await admin.query(
+        "INSERT INTO bop_tenant.store(store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,'MAIN','Lookalike TEST Main - not production','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [fake.storeReference, fake.brandReference, from],
+      );
+      await admin.query(
+        "INSERT INTO bop_membership.membership VALUES ($1,$2,$3,$4,'Active',$5,NULL,1,$5,$5)",
+        [ref(0x43), fake.owner, fake.brandReference, ref(0x44), from],
+      );
+      await admin.query(
+        "INSERT INTO bop_membership.store_assignment VALUES ($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)",
+        [ref(0x45), ref(0x43), fake.owner, fake.brandReference, fake.storeReference, from],
+      );
+      await admin.query(
+        "INSERT INTO bop_tenant.store_opening(opening_id,brand_id,store_id,opened_from_store_id,actor_id,membership_id,store_assignment_id,code,display_name,time_zone,locale,intent_digest,audit_id,opened_at) VALUES ($1,$2,$1,NULL,$3,$4,$5,'MAIN','Lookalike TEST Main - not production','America/Toronto','en-CA',$6,$7,$8)",
+        [
+          fake.storeReference,
+          fake.brandReference,
+          fake.owner,
+          ref(0x43),
+          ref(0x45),
+          "sha256:" + "b".repeat(64),
+          ref(0x46),
+          from,
+        ],
+      );
+      await assert.rejects(renewStore(fake), { reason: "merchant-not-opened-by-test-tooling" });
+      const second = {
+        ...tea,
+        storeReference: ref(0x50),
+      };
+      await admin.query("BEGIN");
+      try {
+        await admin.query("SET LOCAL ROLE " + api);
+        await admin.query(
+          "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+          [tea.brandReference, tea.storeReference],
+        );
+        await recordStoreOpening(
+          { query: (sql, values) => admin.query(sql, values === undefined ? [] : [...values]) },
+          {
+            command: {
+              operationReference: second.storeReference,
+              code: "SECOND",
+              displayName: "Half Sugar Tea TEST Second - not production",
+              timeZone: "America/Toronto",
+              locale: "en-CA",
+            },
+            brandReference: tea.brandReference,
+            openedFromStoreReference: tea.storeReference,
+            actorReference: tea.owner,
+            membershipReference: tea.membershipReference,
+            openedAt: new Date().toISOString(),
+          },
+        );
+        await admin.query("COMMIT");
+      } catch (error) {
+        await admin.query("ROLLBACK");
+        throw error;
+      }
+      await admin.query("BEGIN");
+      try {
+        await assert.rejects(
+          proveInternalTestMerchant(admin, {
+            readRole: api,
+            brandReference: second.brandReference,
+            storeReference: second.storeReference,
+            ownerActorReference: tea.owner,
+          }),
+          { reason: "merchant-not-opened-by-test-tooling" },
         );
       } finally {
         await admin.query("ROLLBACK");
@@ -353,7 +454,7 @@ it("a TEST merchant's Store renews its launch gate and tax evidence with the ins
 
       // Dry runs show the renewal and keep nothing.
       assert.equal((await renewStore(tea)).status, "DryRun");
-      assert.equal((await renewTax(tea)).status, "Renewed");
+      assert.equal((await renewTax(tea)).status, "DryRun");
       assert.deepEqual(await facts(tea), before);
 
       // The renewal: a new gate version and a new tax version, each audited; then nothing more.

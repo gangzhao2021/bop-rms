@@ -663,18 +663,15 @@ const UUID_V7_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{
  * other) own end is kept and reported.
  */
 export async function planServedStoreRenewal({ storeDirectory, from, until }) {
-  const { rosterActorKind } = await import("./pilot-internal-test-renew.mjs");
+  const { rosterActorKind, privateDirectory, readPrivateFile, parseExact } =
+    await import("./pilot-internal-test-renew.mjs");
   const own = await realpath(storeDirectory).catch(() => unavailable("store-directory-missing"));
   const name = basename(own);
   const root = dirname(dirname(own));
   if (basename(dirname(own)) !== "stores") return unavailable("store-not-served");
-  const json = async (base, file) => {
-    try {
-      return JSON.parse(await readFile(join(base, file), "utf8"));
-    } catch {
-      return unavailable("store-file-unreadable");
-    }
-  };
+  // Owner-only directories and files in their exact written form, as the installation's renewal.
+  for (const directory of [root, dirname(own), own]) await privateDirectory(directory);
+  const json = async (base, file) => parseExact(await readPrivateFile(join(base, file))).value;
   const list = await json(root, "stores.json");
   if (
     list?.schemaVersion !== 1 ||
@@ -753,6 +750,8 @@ export async function planServedStoreRenewal({ storeDirectory, from, until }) {
   return Object.freeze({
     store: "stores/" + name,
     testMerchant: merchant,
+    // The database half proves this is the Owner the merchant opening placed.
+    ownerActorReference: merchant ? roster.actors[0].actorReference : undefined,
     roster: changes.length === 0 ? null : { ...roster, actors },
     rosterChanges: changes,
     retainedRosterEntries: retained,
@@ -804,6 +803,7 @@ async function renew(options) {
       dryRun: options.dryRun,
       nextReference: () => uuidV7(),
       servedTestMerchant: plan.testMerchant,
+      ownerActorReference: plan.ownerActorReference,
     });
     // Its own tax evidence (`tax`), when it has its own configuration.
     const tax = await import("./pilot-internal-test-store-tax.mjs");
@@ -829,6 +829,7 @@ async function renew(options) {
       dryRun: options.dryRun,
       nextReference: () => uuidV7(),
       servedTestMerchant: plan.testMerchant,
+      ownerActorReference: plan.ownerActorReference,
     });
   } finally {
     await client.end().catch(() => undefined);

@@ -511,16 +511,19 @@ export async function setUpInternalTestStore(
  * merchant the InternalTest tooling opened from nothing (`pilot-internal-test-store-open.mjs
  * merchant`): its Brand and Store are both named "… not production", the Store was opened from
  * nothing (no source Store), and the merchant opening's own audit records (`BRAND_CREATED` and
- * `STORE_OPENED`, reason `MERCHANT_OPENED`) name this Brand and Store under one operation. Reads
+ * `STORE_OPENED`, reason `MERCHANT_OPENED`, written by the tooling's `DEPLOYMENT` channel, never
+ * the product's Stores page) name this Brand and Store under one operation, and the staff file's
+ * Owner is the person that opening placed there (its opener, an Active member whose relationship
+ * evidence is the opening, assigned to this Store). Reads
  * only, inside the caller's transaction (a savepoint, so its role and scope are restored).
  */
 export async function proveInternalTestMerchant(
   client,
-  { readRole, brandReference, storeReference },
+  { readRole, brandReference, storeReference, ownerActorReference },
 ) {
   if (
     !IDENTIFIER.test(readRole) ||
-    ![brandReference, storeReference].every(
+    ![brandReference, storeReference, ownerActorReference].every(
       (value) => typeof value === "string" && UUID_V7.test(value),
     )
   )
@@ -542,20 +545,20 @@ export async function proveInternalTestMerchant(
     ).rows;
     const brandOpened = (
       await client.query(
-        "SELECT correlation_id::text c FROM platform_audit.audit_record WHERE brand_id=$1 AND store_id IS NULL AND action_code='BRAND_CREATED' AND reason_code='MERCHANT_OPENED' AND target_type='Brand' AND target_id::text=$1::text",
+        "SELECT correlation_id::text c FROM platform_audit.audit_record WHERE brand_id=$1 AND store_id IS NULL AND action_code='BRAND_CREATED' AND reason_code='MERCHANT_OPENED' AND source_channel='DEPLOYMENT' AND target_type='Brand' AND target_id::text=$1::text",
         [brandReference],
       )
     ).rows.map((row) => row.c);
     await scope(storeReference);
     const [store] = (
       await client.query(
-        "SELECT s.display_name,o.opened_from_store_id FROM bop_tenant.store s JOIN bop_tenant.store_opening o ON o.brand_id=s.brand_id AND o.store_id=s.store_id WHERE s.brand_id=$1 AND s.store_id=$2",
+        "SELECT s.display_name,o.opened_from_store_id,o.actor_id::text opener FROM bop_tenant.store s JOIN bop_tenant.store_opening o ON o.brand_id=s.brand_id AND o.store_id=s.store_id WHERE s.brand_id=$1 AND s.store_id=$2",
         [brandReference, storeReference],
       )
     ).rows;
     const storeOpened = (
       await client.query(
-        "SELECT correlation_id::text c FROM platform_audit.audit_record WHERE brand_id=$1 AND store_id=$2 AND action_code='STORE_OPENED' AND reason_code='MERCHANT_OPENED' AND target_type='Store' AND target_id::text=$2::text",
+        "SELECT correlation_id::text c FROM platform_audit.audit_record WHERE brand_id=$1 AND store_id=$2 AND action_code='STORE_OPENED' AND reason_code='MERCHANT_OPENED' AND source_channel='DEPLOYMENT' AND target_type='Store' AND target_id::text=$2::text",
         [brandReference, storeReference],
       )
     ).rows.map((row) => row.c);
@@ -573,6 +576,17 @@ export async function proveInternalTestMerchant(
       brandOpened[0] !== storeOpened[0]
     )
       unavailable("merchant-not-opened-by-test-tooling");
+    // The staff file's Owner is the person the opening placed: its opener, an Active member whose
+    // relationship evidence is that opening, assigned to this Store.
+    const placed = (
+      await client.query(
+        "SELECT 1 FROM bop_membership.membership m JOIN bop_membership.store_assignment a ON a.membership_id=m.membership_id AND a.brand_id=m.brand_id AND a.store_id=$2 AND a.actor_id=m.actor_id AND a.lifecycle='Active' WHERE m.brand_id=$1 AND m.actor_id=$3 AND m.lifecycle='Active' AND m.workforce_relationship_reference::text=$4::text",
+        [brandReference, storeReference, ownerActorReference, brandOpened[0]],
+      )
+    ).rows;
+    if (store.opener !== ownerActorReference || placed.length !== 1)
+      unavailable("merchant-owner-not-placed-by-opening");
+    return Object.freeze({ operationReference: brandOpened[0] });
   } finally {
     await client.query("ROLLBACK TO SAVEPOINT internal_test_merchant_proof");
   }
@@ -605,6 +619,8 @@ export async function renewInternalTestStore(
      * proven again in the database, when the Store's Brand is not a synthetic fixture.
      */
     servedTestMerchant = false,
+    /** Its Owner on the Store's staff file (`owner-<name>`), proven as the opening's Owner. */
+    ownerActorReference,
   },
 ) {
   if (environment !== "InternalTest") return unavailable("internal-test-only");
@@ -637,6 +653,7 @@ export async function renewInternalTestStore(
         readRole,
         brandReference: brand,
         storeReference: store,
+        ownerActorReference,
       });
     await client.query(`SET LOCAL ROLE "${setupRole}"`);
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [

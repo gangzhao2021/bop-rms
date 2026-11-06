@@ -106,7 +106,7 @@ export function operatorAccountName(read = userInfo) {
   return "uid:" + process.getuid();
 }
 
-async function privateDirectory(directory) {
+export async function privateDirectory(directory) {
   if (typeof directory !== "string" || !isAbsolute(directory))
     return unavailable("directory-not-absolute");
   const state = await lstat(directory).catch(keepReason("directory-missing"));
@@ -115,7 +115,7 @@ async function privateDirectory(directory) {
   if ((state.mode & 0o777) !== 0o700) return unavailable("directory-not-0700");
   if ((await realpath(directory)) !== directory) return unavailable("directory-path-not-canonical");
 }
-async function readPrivateFile(file) {
+export async function readPrivateFile(file) {
   let handle;
   try {
     handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -134,7 +134,7 @@ async function readPrivateFile(file) {
   }
 }
 /** Accepts only files whose bytes are exactly the compact or 2-space form, so rewriting keeps them. */
-function parseExact(bytes) {
+export function parseExact(bytes) {
   let value;
   const text = bytes.toString("utf8");
   try {

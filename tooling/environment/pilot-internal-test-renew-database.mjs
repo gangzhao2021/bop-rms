@@ -18,6 +18,7 @@ import {
   internalTestTaxVersionIdentity,
 } from "./pilot-pricing-policy.mjs";
 import { uuidV7 } from "./permission-catalog-install.mjs";
+import { proveInternalTestMerchant } from "./pilot-internal-test-store-setup.mjs";
 
 /**
  * WP-2423: the database half of the Owner-approved InternalTest renewal
@@ -244,7 +245,6 @@ async function readChecks(tx, { scope, at, gates, requiredCodes, policy }) {
   return { at, roster, launchGate, tax };
 }
 
-const TEST_LABEL = /not production/iu;
 const TEST_SUPPORT_NAME = /^TEST /u;
 const ownerRowsSql = `SELECT 'Membership' type,membership_id::text id,lifecycle,effective_until
   FROM bop_membership.membership WHERE brand_id=$1 AND actor_id=$3
@@ -258,15 +258,15 @@ const isoOrNull = (value) => (value instanceof Date ? value.toISOString() : null
 /**
  * v15 2026-11-06: the TEST people the installation's staff file names besides the DEMO fixtures,
  * proven from the database as the services' role sees it (no renewal privilege needed):
- * - a TEST merchant's Owner: their merchant's Brand and Store are both labelled "not production"
- *   (the store-open tooling refuses any other name), and they are an Active member placed at that
- *   Store. Their membership, Store assignment and role assignments are listed with their end; one
+ * - a TEST merchant's Owner: `proveInternalTestMerchant` (Brand and Store labelled "not
+ *   production", opened from nothing by the TEST tooling's merchant opening, its audit pair under
+ *   one operation, and this person the Owner it placed at that Store). Their membership, Store assignment and role assignments are listed with their end; one
  *   ending at the installation's expiry refuses (it would lapse unrenewed: such rows come only
  *   from the DEMO fixtures, never from opening a merchant, which writes them without an end);
  * - TEST platform support staff: their current record is named "TEST …" and ends exactly when the
  *   staff file says (their own end, kept as it is).
  */
-export async function verifyInternalTestActors(tx, { testActors, from }) {
+export async function verifyInternalTestActors(tx, { testActors, from, readRole }) {
   const verified = [];
   for (const actor of testActors) {
     if (actor.kind === "TestPlatformSupport") {
@@ -290,32 +290,22 @@ export async function verifyInternalTestActors(tx, { testActors, from }) {
       continue;
     }
     if (actor.kind !== "TestMerchantOwner") unavailable("identity-not-synthetic");
-    const scoped = (store) =>
-      tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
-        actor.brandReference,
-        store,
-      ]);
-    // Brand facts are read without a Store (brand_scope_policy).
-    await scoped("");
-    const [brand] = (
-      await tx.query("SELECT display_name FROM bop_tenant.brand WHERE brand_id=$1", [
-        actor.brandReference,
-      ])
-    ).rows;
-    await scoped(actor.storeReference);
-    const [store] = (
-      await tx.query(
-        "SELECT display_name FROM bop_tenant.store WHERE brand_id=$1 AND store_id=$2",
-        [actor.brandReference, actor.storeReference],
-      )
-    ).rows;
-    if (
-      brand === undefined ||
-      store === undefined ||
-      !TEST_LABEL.test(String(brand.display_name)) ||
-      !TEST_LABEL.test(String(store.display_name))
-    )
-      unavailable("test-owner-merchant-not-labelled");
+    // The same proof as the Store's own renewal: a merchant the TEST tooling opened from nothing
+    // (labels, opening audit pair under one operation, DEPLOYMENT channel) with this Owner placed.
+    await proveInternalTestMerchant(tx, {
+      readRole,
+      brandReference: actor.brandReference,
+      storeReference: actor.storeReference,
+      ownerActorReference: actor.actorReference,
+    }).catch((error) =>
+      unavailable(
+        typeof error?.reason === "string" ? "test-owner-" + error.reason : "test-owner-unproven",
+      ),
+    );
+    await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      actor.brandReference,
+      actor.storeReference,
+    ]);
     const rows = (
       await tx.query(ownerRowsSql, [
         actor.brandReference,
@@ -446,7 +436,7 @@ export async function renewInternalTestDatabase(
       );
     await asReader();
     // Before anything changes: the TEST people the staff file names are what they claim.
-    const testActorsVerified = await verifyInternalTestActors(tx, { testActors, from });
+    const testActorsVerified = await verifyInternalTestActors(tx, { testActors, from, readRole });
     await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
       scope.brandReference,
       scope.storeReference,

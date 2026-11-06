@@ -320,6 +320,7 @@ export async function renewInternalTestStoreTax(
     nextReference,
     /** As in `renewInternalTestStore`: a TEST merchant's served Store, proven from the files. */
     servedTestMerchant = false,
+    ownerActorReference,
   },
 ) {
   if (profile?.storeTaxConfiguration === undefined) return Object.freeze({ status: "None" });
@@ -351,6 +352,7 @@ export async function renewInternalTestStoreTax(
         readRole,
         brandReference: profile.binding.brandReference,
         storeReference: profile.binding.storeReference,
+        ownerActorReference,
       });
     await client.query(`SET LOCAL ROLE "${role}"`);
     const tx = { query: (sql, values = []) => client.query(sql, [...values]) };
@@ -399,7 +401,10 @@ export async function renewInternalTestStoreTax(
     if (!(await servicesRead(client, tx, { readRole, policy: next, at })))
       unavailable("read-check-failed");
     await client.query(dryRun ? "ROLLBACK" : "COMMIT");
-    return Object.freeze({ status: "Renewed", taxConfigurationVersion: nextVersion });
+    return Object.freeze({
+      status: dryRun ? "DryRun" : "Renewed",
+      taxConfigurationVersion: nextVersion,
+    });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof InternalTestStoreSetupError) throw error;

@@ -2465,9 +2465,14 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    way since v15 2026-11-06. The database half first proves, as the services' role, that its
    Brand and Store are both named "… not production", that the Store was opened from nothing,
    and that the merchant opening's own audit records (`BRAND_CREATED`, `STORE_OPENED`, reason
-   `MERCHANT_OPENED`) name both under one operation. Otherwise it refuses with
-   `merchant-not-labelled-test` or `merchant-not-opened-by-test-tooling`, and a Store directory
-   that `stores.json` does not serve refuses with `store-not-served`.
+   `MERCHANT_OPENED`, written through the tooling's `DEPLOYMENT` channel, never the Stores page)
+   name both under one operation, and that its staff file's `owner-<name>` is the Owner that
+   opening placed (its opener, an Active member whose relationship evidence is the opening,
+   assigned to the Store). Otherwise it refuses with `merchant-not-labelled-test`,
+   `merchant-not-opened-by-test-tooling` or `merchant-owner-not-placed-by-opening`; a Store
+   directory that `stores.json` does not serve refuses with `store-not-served`. The files are
+   read owner-only and in their exact written form, as the installation's renewal reads its own.
+   A dry run reports the gate and the tax as `DryRun`.
 
 ## Platform support staff
 
@@ -2631,8 +2636,10 @@ Besides the DEMO fixtures, the staff file may name only the TEST people the Inte
 added; anyone else refuses everything (`identity-not-synthetic`). A TEST merchant's Owner
 (`owner-<name>`, added by `directory --merchant`) is accepted only when `stores.json` serves
 `stores/<name>/`, that owner-only directory is an InternalTest Store of the same database with
-its own tenant and Brand and exactly this Owner on its staff file, and in the database its Brand
-and Store are both named "… not production" and the Owner is an Active member placed there.
+its own tenant and Brand and exactly this Owner on its staff file, and in the database the same
+proof as the Store's own renewal holds (step 8 of opening a TEST Store); its refusals are
+`test-owner-merchant-not-labelled-test`, `test-owner-merchant-not-opened-by-test-tooling` and
+`test-owner-merchant-owner-not-placed-by-opening`.
 Their membership, Store assignment and role assignments have no end (opening a merchant writes
 none); the dry run lists them, and one ending at the installation's expiry refuses
 (`test-owner-validity-shares-expiry`). TEST platform support staff (`support-<n>`) must be named
