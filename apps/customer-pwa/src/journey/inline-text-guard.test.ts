@@ -237,7 +237,19 @@ const pageMachineCodes: Readonly<Record<string, ReadonlySet<string>>> = {
   "dining/SettledTableReceipt.tsx": new Set(["settled table receipt "]),
   // The name of the kind of tip sent to the server.
   "dining/TablePayPanel.tsx": new Set(["None", "Amount", "Percent"]),
-  "entry/EntryContextPage.tsx": new Set(["Missing", "Loading", "/menu"]),
+  // The guest's answer to a free table (Start, Join, NewParty) and what starting it gave the menu
+  // (Started, Refused, InUse): intents passed between handlers, never rendered.
+  "entry/EntryContextPage.tsx": new Set([
+    "Missing",
+    "Loading",
+    "/menu",
+    "Start",
+    "Join",
+    "NewParty",
+    "Started",
+    "Refused",
+    "InUse",
+  ]),
   "member/MemberPage.tsx": new Set(["Loading", "Ready", "Failed", "Left"]),
   "menu/MenuPage.tsx": new Set([
     "Loading",
