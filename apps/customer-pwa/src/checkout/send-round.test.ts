@@ -637,6 +637,67 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     expect(ports.send.mock.calls[1]?.[1]).not.toBe(ports.send.mock.calls[0]?.[1]);
   });
 
+  it.each([
+    [
+      "the send",
+      (ports: ReturnType<typeof setUp>["ports"]) =>
+        ports.send.mockRejectedValueOnce(new SessionPaymentClientError("requote_required")),
+    ],
+    [
+      "the checkout start",
+      (ports: ReturnType<typeof setUp>["ports"]) =>
+        ports.createSession.mockRejectedValueOnce(
+          new CheckoutSessionClientError("requote_required"),
+        ),
+    ],
+  ] as const)(
+    "a menu updated before %s prices the round again once and places it once",
+    async (_, refuse) => {
+      const { controller, ports, calls } = setUp();
+      refuse(ports);
+      await controller.send(cart(), seen);
+      expect(controller.getState()).toEqual({ status: "sent", held: false });
+      expect(ports.quote).toHaveBeenCalledTimes(2);
+      expect(ports.quote.mock.calls[1]?.[1]).not.toBe(ports.quote.mock.calls[0]?.[1]);
+      expect(ports.createSession.mock.calls[1]?.[0].quoteReference).toBe(id(102));
+      // Placed once: the refused attempt placed nothing.
+      expect(calls.filter((call) => call === "send")).toHaveLength(1);
+    },
+  );
+
+  it("a menu update that raised the price asks the guest before the round goes, once", async () => {
+    let quoted = 0;
+    const { controller, ports } = setUp({
+      quote: vi.fn<SendRoundPorts["quote"]>(async () => {
+        quoted += 1;
+        return quoted === 1
+          ? quote({ quoteReference: id(101) })
+          : quote({ quoteReference: id(102), subtotal: cad("2200"), total: cad("2486") });
+      }),
+    });
+    ports.send.mockRejectedValueOnce(new SessionPaymentClientError("requote_required"));
+    await controller.send(cart(), seen);
+    expect(controller.getState()).toEqual({
+      status: "confirm-total",
+      total: cad("2486"),
+      reason: "changed",
+    });
+    expect(ports.send).toHaveBeenCalledTimes(1);
+    await controller.send(cart(), seen);
+    expect(controller.getState()).toEqual({ status: "sent", held: false });
+    expect(ports.quote).toHaveBeenCalledTimes(2);
+    expect(ports.send).toHaveBeenCalledTimes(2);
+    expect(ports.createSession.mock.calls.at(-1)?.[0].quoteReference).toBe(id(102));
+  });
+
+  it("a menu that moves again while it is priced again stops, saying nothing was placed", async () => {
+    const { controller, ports } = setUp();
+    ports.send.mockRejectedValue(new SessionPaymentClientError("requote_required"));
+    await controller.send(cart(), seen);
+    expect(controller.getState()).toEqual(unsent);
+    expect(ports.send).toHaveBeenCalledTimes(2);
+  });
+
   it("an ended session says so", async () => {
     const quoted = setUp({
       quote: vi.fn<SendRoundPorts["quote"]>(async () => {

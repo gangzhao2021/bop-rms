@@ -323,7 +323,7 @@ export function createSendRoundController(
     active: Plan,
     quote: CheckoutQuote,
     options: CheckoutMutationOptions,
-  ): Promise<SendRoundState | null> => {
+  ): Promise<SendRoundState | null | "restart"> => {
     active.sessionAttempted = true;
     try {
       active.session = await ports.createSession(
@@ -351,6 +351,10 @@ export function createSendRoundController(
         case "store_closed":
           plan = null;
           return { status: "store-closed" };
+        // The restaurant updated its menu since this round was priced: no checkout was opened and
+        // nothing placed, so it is priced again once (a changed total asks the guest first).
+        case "requote_required":
+          return "restart";
         case "checkout_in_progress":
           // Nothing was created: the retry after the wait is a new operation.
           active.sessionOperation = keyFactory();
@@ -395,9 +399,9 @@ export function createSendRoundController(
         case "items_short":
           plan = null;
           return { status: "refused", refusal: "item_short", line: null };
-        case "not_ready":
         // The restaurant updated its menu since this round was priced: nothing was placed or
         // charged, so it is priced again once (a changed total asks the guest first).
+        case "not_ready":
         case "requote_required":
           return "restart";
         case "denied":
@@ -488,6 +492,7 @@ export function createSendRoundController(
         }
       }
       const created = await sessionStep(active, quote, options);
+      if (created === "restart") return restart(active, options);
       if (created !== null) return created;
     }
     const session = active.session;

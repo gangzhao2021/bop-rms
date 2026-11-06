@@ -331,6 +331,8 @@ function PreparedSessionPaymentPage({
     status === "closed" ||
     // The server places a table's round before it records the tip: the dishes may be on the table.
     status === "tips_off" ||
+    // Nothing was placed, so the dishes are in the cart, unless another phone at the table placed them.
+    status === "requote_required" ||
     (status === "denied" && !cardOffered);
   const back = useCheckoutReturn(failedStart, store?.serviceMode === "DineIn");
   // While a payment may be under way (or just failed), a second checkout is the last thing to offer.
@@ -441,10 +443,15 @@ function PreparedSessionPaymentPage({
         <section className="checkout-attention" role="alert">
           <h2>{t("The menu was just updated")}</h2>
           <p>
-            {t(
-              "The restaurant updated its menu while you were checking out, so you haven’t been charged. Go back to checkout to see your total and pay.",
-            )}
+            {back === "cart"
+              ? t(
+                  "The restaurant updated its menu while you were checking out, so you haven’t been charged. Go back to checkout to see your total and pay.",
+                )
+              : t(
+                  "The restaurant updated its menu while you were checking out, so you haven’t been charged. Pay for your order from your table page.",
+                )}
           </p>
+          <SavedOnTable to={back} />
           <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
         </section>
       ) : null}

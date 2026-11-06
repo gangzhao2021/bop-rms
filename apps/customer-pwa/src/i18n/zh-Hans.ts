@@ -1227,6 +1227,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The restaurant stopped taking tips": "餐厅已停止收小费",
   "The restaurant updated its menu while you were checking out, so you haven’t been charged. Go back to checkout to see your total and pay.":
     "您结账时餐厅更新了菜单，因此没有向您收费。请返回结账页查看总价后再付款。",
+  "The restaurant updated its menu while you were checking out, so you haven’t been charged. Pay for your order from your table page.":
+    "您结账时餐厅更新了菜单，因此没有向您收费。请在本桌页面付款。",
   "Tips were turned off while you were checking out, so this order hasn’t been charged. Go back to checkout to pay without a tip.":
     "你结账时门店关闭了小费，这一单没有扣款。请回到结账页，不加小费付款。",
   "Your table is checking out. To add dishes, ask a staff member.":
