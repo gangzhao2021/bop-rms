@@ -8157,4 +8157,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "上架中途停止了。新价格可能已经显示给客人，菜单还没有更新。请再上架一次来完成。",
   "This form changed after saving stopped. Close it and open the item again to change it; nothing is lost.":
     "保存停止后这份表单又改动过。请关闭后重新打开这一项再改，已保存的内容不会丢。",
+  // WP-2423 item 13 ② (Owner 2026-11-05): the platform paused this merchant's new guests.
+  "New guests are paused for this restaurant by the platform, so no new table can be opened. Tables already seated carry on as usual: serve, take payment and refund. Ask the owner about it.":
+    "平台已暂停本店接待新客人，暂时不能开新桌。已入座的桌照常上菜、收款和退款。有疑问请问店主。",
+  "New guests are paused for this restaurant by the platform, so the counter can't take a new order. Nothing was sent or charged. Orders already placed carry on as usual: prepare, hand over and refund them. Ask the owner about it.":
+    "平台已暂停本店接待新客人，柜台暂时不能接新单，没有发送也没有扣款。已下的单照常制作、交付和退款。有疑问请问店主。",
 });

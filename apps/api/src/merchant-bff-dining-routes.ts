@@ -1,5 +1,6 @@
 /** Merchant BFF routes: dining sessions, tables, table QR, order progress, serving and closing. Registered by createMerchantBffRouter (merchant-bff.ts). */
 import { GuestTableStartOffError } from "./merchant-dining-guest-table-start.js";
+import { DiningSessionStartPausedError } from "./merchant-dining-session-start.js";
 import {
   cookie,
   denied,
@@ -645,7 +646,14 @@ export function installMerchantDiningRoutes(
           ...(result.status === "Issued" ? { joinCredential: result.joinCredential } : {}),
         });
       })
-      .catch((error: unknown) => failed(response, error));
+      .catch((error: unknown) => {
+        // WP-2423 item 13 ②: staff are told why, and that seated tables carry on.
+        if (error instanceof DiningSessionStartPausedError) {
+          response.status(409).set("Cache-Control", NO_STORE).json({ error: "new_guests_paused" });
+          return;
+        }
+        failed(response, error);
+      });
   });
 
   router.post("/dining/tables", sameOriginMutation(options), (request, response) => {

@@ -58,8 +58,11 @@ export function counterEntryOperatingReader(
     async readCurrent(input: Parameters<CustomerEntryOperatingReader["readCurrent"]>[0]) {
       const current = await reader.readCurrent(input);
       if (current === null) return null;
+      // WP-2423 item 13 ②: whether staff may start a new guest while the platform paused the
+      // merchant is the staff command's rule (a counter order, a free table); this view drops it.
       return Object.freeze({
         ...current,
+        newGuestsPaused: false,
         state: "Open" as const,
         availableServiceModes: Object.freeze([
           ...new Set([...current.availableServiceModes, mode]),
@@ -102,6 +105,11 @@ export function createCounterGuestPipeline(options: {
   takesOrder(input: { readonly recordedAfterOutage: boolean }): Promise<boolean>;
   /** WP-2423: whether a pickup time covers now (to explain a refused order to staff). */
   pickupTimesNow?(): Promise<boolean>;
+  /**
+   * WP-2423 item 13 ② (Owner 2026-11-05): the platform paused this merchant's new guests. Staff
+   * finish what is already open; a new walk-up order is refused (a paper order taken before is not).
+   */
+  newGuestsPaused?(): Promise<boolean>;
   payment: (credentials: CounterGuestCredentials) => PaymentOptions;
   /**
    * WP-2423 (v15 run): the stock check the counter Cart's item command makes (the Catalog
@@ -124,6 +132,9 @@ export function createCounterGuestPipeline(options: {
     ...(options.pickupTimesNow === undefined
       ? {}
       : { pickupTimesNow: options.pickupTimesNow.bind(options) }),
+    ...(options.newGuestsPaused === undefined
+      ? {}
+      : { newGuestsPaused: options.newGuestsPaused.bind(options) }),
     async open(input) {
       const result = (await options.entry.establish({
         entryRequestReference: options.nextReference(),

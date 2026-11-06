@@ -67,8 +67,9 @@ export function createPersistentEntryOperatingReader(options: {
           status.evaluatedAt !== request.evaluatedAt
         )
           return null;
-        // WP-2423 item 13 ② (Owner 2026-11-05): a merchant the platform paused starts no new visit;
-        // guests already in one and staff carry on (their paths do not read this).
+        // WP-2423 item 13 ② (Owner 2026-11-05): a merchant the platform paused starts no new visit.
+        // Only said here; the Store's hours, services and open state stay as they are, so guests
+        // already in a visit, staff, and paid orders (auto-acceptance) carry on unchanged.
         const paused =
           (
             await readBrandGuestIntake(
@@ -80,10 +81,8 @@ export function createPersistentEntryOperatingReader(options: {
           brandReference,
           storeReference,
           evaluatedAt: status.evaluatedAt,
-          state: paused ? ("Closed" as const) : status.state,
-          availableServiceModes: paused
-            ? (Object.freeze([]) as typeof status.availableServiceModes)
-            : status.availableServiceModes,
+          state: status.state,
+          availableServiceModes: status.availableServiceModes,
           todayHours: status.todayHours,
           localTime: String(status.localTime),
           localDate: String(status.localDate),

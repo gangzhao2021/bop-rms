@@ -537,3 +537,53 @@ describe("DEC-DINING-GUEST-TABLE-START: a scan at a Store where guests start tab
     }
   });
 });
+
+describe("WP-2423 item 13 ② (Owner 2026-11-05): a merchant the platform paused", () => {
+  const paused = (f: ReturnType<typeof fixture>, table?: object) =>
+    createCustomerEntryComposition({
+      qr: f.options.qr,
+      profile: f.options.profile,
+      admission: f.options.admission,
+      session: f.options.session,
+      ...(table === undefined ? {} : { table }),
+      operatingReader: {
+        readCurrent: async () => ({
+          brandReference: id(1),
+          storeReference: id(2),
+          evaluatedAt: now,
+          state: "Open" as const,
+          availableServiceModes: ["DineIn", "Pickup"],
+          newGuestsPaused: true,
+        }),
+      },
+    });
+  const seated = (changes: object = {}) => ({
+    isOpen: vi.fn(async () => true),
+    guestStart: vi.fn(async () => "MayStart" as const),
+    ...changes,
+  });
+  it("starts no new visit: a free table, a guest-started table or a new party, with no hours", async () => {
+    for (const [table, intent] of [
+      [undefined, undefined],
+      [seated({ isOpen: vi.fn(async () => false) }), "Start"],
+      [seated(), "NewParty"],
+    ] as const) {
+      const f = fixture();
+      const result = await paused(f, table).establish({
+        ...f.input(),
+        ...(intent ? { intent } : {}),
+      });
+      expect(result).toMatchObject({ status: "NotAccepting", newGuestsPaused: true });
+      expect(f.admission).not.toHaveBeenCalled();
+      expect(f.create).not.toHaveBeenCalled();
+    }
+  });
+  it("lets a phone join the party already seated, so that visit finishes as usual", async () => {
+    const f = fixture();
+    expect(await paused(f, seated()).establish(f.input())).toMatchObject({
+      status: "Established",
+      tableOpen: true,
+    });
+    expect(f.create).toHaveBeenCalledOnce();
+  });
+});

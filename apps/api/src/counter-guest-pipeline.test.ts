@@ -357,6 +357,15 @@ describe("counter opening rule — WP-2423 Q7 (online pause does not stop the co
     });
     reader.readCurrent.mockResolvedValueOnce(null as never);
     expect(await counterEntryOperatingReader(reader).readCurrent(input)).toBeNull();
+    // WP-2423 item 13 ②: the staff command decides about a paused merchant (a round for a table
+    // already seated goes on), so the entry rule does not refuse the staff member's guest.
+    reader.readCurrent.mockResolvedValueOnce({
+      ...(await reader.readCurrent()),
+      newGuestsPaused: true,
+    } as never);
+    expect(await counterEntryOperatingReader(reader).readCurrent(input)).toMatchObject({
+      newGuestsPaused: false,
+    });
   });
 });
 

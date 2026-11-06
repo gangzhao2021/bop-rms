@@ -542,6 +542,12 @@ describe("staff dine-in round command — WP-2423 Q7 slice 2", () => {
     blocked.pipeline.openTable.mockResolvedValueOnce({ status: "TableUnavailable" } as never);
     await expect(blocked.send()).rejects.toMatchObject({ code: "STAFF_ROUND_TABLE_UNAVAILABLE" });
     expect(blocked.pipeline.join).not.toHaveBeenCalled();
+    // WP-2423 item 13 ②: a free table while the platform paused new guests says so.
+    state.entries.clear();
+    const paused = setup();
+    paused.pipeline.openTable.mockResolvedValueOnce({ status: "NewGuestsPaused" } as never);
+    await expect(paused.send()).rejects.toMatchObject({ code: "STAFF_ROUND_NEW_GUESTS_PAUSED" });
+    expect(paused.pipeline.join).not.toHaveBeenCalled();
   });
 
   it("DEC-STAFF-DINE-IN-ROUND: a table without a QR code is refused before the table is opened", async () => {

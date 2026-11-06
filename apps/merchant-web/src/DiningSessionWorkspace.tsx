@@ -426,6 +426,10 @@ function tableActionFailureText(error: unknown): string {
       return notConfirmedPressAgainText + " " + serverSideProblemText;
     case "Changed":
       return tableChangedText;
+    case "NewGuestsPaused":
+      return t(
+        "New guests are paused for this restaurant by the platform, so no new table can be opened. Tables already seated carry on as usual: serve, take payment and refund. Ask the owner about it.",
+      );
     case "Denied":
       return t("Your access doesn't allow this table action. Ask a manager.");
     default:

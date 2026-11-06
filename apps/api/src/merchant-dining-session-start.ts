@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readClosedRecord } from "@bop/identity";
+import { readBrandGuestIntake } from "@bop/tenant";
 import {
   createDiningSessionService,
   parseDiningReference,
@@ -11,6 +12,17 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import type { MerchantBffService } from "./merchant-bff.js";
+/**
+ * WP-2423 item 13 ② (Owner 2026-11-05): the platform paused this merchant's new guests, so no
+ * party is seated at a free table. Tables already seated carry on (a new code is issued as usual).
+ */
+export class DiningSessionStartPausedError extends Error {
+  constructor() {
+    super("DINING_SESSION_START_NEW_GUESTS_PAUSED");
+    this.name = "DiningSessionStartPausedError";
+  }
+}
+
 export function createMerchantDiningSessionStart(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -70,6 +82,19 @@ export function createMerchantDiningSessionStart(options: {
             equals: (a, b) => a === b,
           });
           const start = createPostgresDiningSessionStartStore(runner, scope, options.credentials);
+          // A malformed command is left to the Dining service's own validation.
+          const table =
+            typeof command.tableReference === "string" &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+              command.tableReference,
+            )
+              ? await tables.loadTable(parseDiningReference(command.tableReference))
+              : null;
+          if (
+            table?.activeDiningSessionReference === null &&
+            (await readBrandGuestIntake(tx as never, scope.brandReference)).state === "Paused"
+          )
+            throw new DiningSessionStartPausedError();
           const service = createDiningSessionService({
             credentials: options.credentials,
             pepperVersion: options.pepperVersion,

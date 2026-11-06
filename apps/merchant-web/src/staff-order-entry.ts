@@ -19,6 +19,8 @@ export class CounterOrderClientError extends Error {
       | "StoreNotTakingOrders"
       /** WP-2423 item 8 ⑦: the Store turned counter ordering off (Store features). */
       | "CounterOrderingOff"
+      /** WP-2423 item 13 ②: the platform paused this merchant's new guests. */
+      | "NewGuestsPaused"
       /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; nothing was sent. */
       | "TipsOff"
       /** The tip percentage is not one the Store offers now (the choices are read again). */
@@ -534,6 +536,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
         throw new CounterOrderClientError("TableCheckoutInProgress");
       if (code === "table_unavailable") throw new CounterOrderClientError("TableUnavailable");
       if (code === "table_qr_missing") throw new CounterOrderClientError("TableHasNoQr");
+      if (code === "new_guests_paused") throw new CounterOrderClientError("NewGuestsPaused");
       if (code === "store_not_taking_dine_in_orders")
         throw new CounterOrderClientError("StoreNotTakingOrders");
       if (code === "order_not_priced") throw new CounterOrderClientError("NotPriced");
@@ -571,6 +574,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "counter_order_conflict") throw new CounterOrderClientError("Conflict");
       if (code === "counter_order_no_pickup_times")
         throw new CounterOrderClientError("NoPickupTimes");
+      if (code === "new_guests_paused") throw new CounterOrderClientError("NewGuestsPaused");
       if (code === "counter_ordering_turned_off")
         throw new CounterOrderClientError("CounterOrderingOff");
       if (code === "tips_turned_off") throw new CounterOrderClientError("TipsOff");

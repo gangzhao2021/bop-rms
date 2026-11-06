@@ -100,6 +100,23 @@ describe("staff table code", () => {
     });
   });
 
+  it("WP-2423 item 13 ②: seats no free table while new guests are paused; a seated one goes on", async () => {
+    const ports = { ...base(), newGuestsPaused: vi.fn(async () => true) };
+    expect(await createStaffTableCode(ports)(staff, { tableReference: id(30) })).toEqual({
+      status: "NewGuestsPaused",
+    });
+    expect(ports.start).not.toHaveBeenCalled();
+    ports.loadTable.mockResolvedValue({
+      aggregateVersion: 3,
+      activeDiningSessionReference: id(31),
+      seatable: true,
+    });
+    expect(await createStaffTableCode(ports)(staff, { tableReference: id(30) })).toMatchObject({
+      status: "Opened",
+      started: false,
+    });
+  });
+
   it("answers TableUnavailable for a table that can't be seated or keeps changing", async () => {
     const ports = base();
     ports.loadTable.mockResolvedValue({

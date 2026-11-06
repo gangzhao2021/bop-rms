@@ -47,6 +47,8 @@ export const counterOrderErrorCodes = [
   "COUNTER_ORDER_NO_PICKUP_TIMES",
   /** WP-2423 item 8 ⑦ DEC-STORE-FEATURES: the Store turned counter ordering off. */
   "COUNTER_ORDER_TURNED_OFF",
+  /** WP-2423 item 13 ②: the platform paused this merchant's new guests (open orders carry on). */
+  "COUNTER_ORDER_NEW_GUESTS_PAUSED",
   /** WP-2423 item 8 ⑦ (Owner decision 11): the Store turned tips off; send it with no tip. */
   "COUNTER_ORDER_TIPS_OFF",
   /** The tip percentage is not one the Store offers now: read the choices again. */
@@ -189,6 +191,11 @@ export interface CounterGuestPipeline {
    * only after an unexpected failure, so staff are told the real reason instead of "try again".
    */
   pickupTimesNow?(): Promise<boolean>;
+  /**
+   * WP-2423 item 13 ② (Owner 2026-11-05): the platform paused this merchant's new guests. Staff
+   * finish what is already open; a new walk-up order is refused (a paper order taken before is not).
+   */
+  newGuestsPaused?(): Promise<boolean>;
   open(input: {
     readonly requestedAt: string;
   }): Promise<
@@ -616,6 +623,8 @@ export function createMerchantCounterOrder(options: {
         return found;
       });
       if (prior !== null) return await earlier(prior);
+      if (!command.recordedAfterOutage && (await options.pipeline.newGuestsPaused?.()) === true)
+        return fail("COUNTER_ORDER_NEW_GUESTS_PAUSED");
       if (
         !(await options.pipeline.takesOrder({ recordedAfterOutage: command.recordedAfterOutage }))
       )

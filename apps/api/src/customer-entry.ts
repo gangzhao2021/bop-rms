@@ -74,6 +74,8 @@ export interface CustomerEntryNotAccepting {
   readonly localDate: string | null;
   /** WP-2423 item 11: not a closing time; this Store isn't ready to take orders yet. */
   readonly notReadyForOrders?: true;
+  /** WP-2423 item 13 ②: the platform paused this merchant's new guests (no hours to wait for). */
+  readonly newGuestsPaused?: true;
 }
 
 /**
@@ -492,8 +494,12 @@ function parsePortResult(
       "nextOpening",
       "localDate",
       ...(Object.hasOwn(value as object, "notReadyForOrders") ? ["notReadyForOrders"] : []),
+      ...(Object.hasOwn(value as object, "newGuestsPaused") ? ["newGuestsPaused"] : []),
     ]);
-    if (raw.notReadyForOrders !== undefined && raw.notReadyForOrders !== true)
+    if (
+      (raw.notReadyForOrders !== undefined && raw.notReadyForOrders !== true) ||
+      (raw.newGuestsPaused !== undefined && raw.newGuestsPaused !== true)
+    )
       throw new TypeError("invalid not-accepting result");
     const time = /^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/u;
     if (
@@ -551,6 +557,7 @@ function parsePortResult(
       nextOpening,
       localDate: raw.localDate as string | null,
       ...(raw.notReadyForOrders === true ? { notReadyForOrders: true as const } : {}),
+      ...(raw.newGuestsPaused === true ? { newGuestsPaused: true as const } : {}),
     });
   }
   throw new TypeError("unknown Customer-entry result");
@@ -768,6 +775,7 @@ export class CustomerEntryHandler {
               nextOpening: result.nextOpening,
               localDate: result.localDate,
               ...(result.notReadyForOrders === true ? { notReadyForOrders: true } : {}),
+              ...(result.newGuestsPaused === true ? { newGuestsPaused: true } : {}),
             },
           });
           return;

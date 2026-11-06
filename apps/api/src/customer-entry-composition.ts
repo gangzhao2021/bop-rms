@@ -169,6 +169,7 @@ export function createCustomerEntryComposition(
         let localDate: string | null = null;
         let turnedOff: readonly string[] = [];
         let notReady = false;
+        let newGuestsPaused = false;
         if ("operatingReader" in options) {
           const current = await options.operatingReader.readCurrent({
             ...scope,
@@ -183,6 +184,7 @@ export function createCustomerEntryComposition(
           localDate = current.localDate ?? null;
           turnedOff = current.servicesTurnedOff ?? [];
           notReady = current.notReadyForOrders === true;
+          newGuestsPaused = current.newGuestsPaused === true;
         } else {
           const operating = await createStoreOperatingStatusService({
             ...options.operating,
@@ -230,6 +232,24 @@ export function createCustomerEntryComposition(
             .isOpen({ ...scope, tableReference: String(tableReference) })
             .catch(() => undefined);
         }
+        // WP-2423 item 13 ② (Owner 2026-11-05): while the platform has paused this merchant, no new
+        // visit starts (a pickup code, a free table, a guest-started table). A phone joining a party
+        // already seated is part of that visit, so it still enters and the party finishes as usual;
+        // a new party at that table ("NewParty") is a new visit.
+        if (
+          newGuestsPaused &&
+          !(qr.context.channel === "DineIn" && tableOpen === true && input.intent !== "NewParty")
+        )
+          return Object.freeze({
+            status: "NotAccepting" as const,
+            storeDisplayName: profile.profile.storeDisplayName,
+            operatingState: operatingStatus.state,
+            todayHours,
+            todayKind: upcoming?.todayKind ?? null,
+            nextOpening: upcoming?.nextOpening ?? null,
+            localDate,
+            newGuestsPaused: true as const,
+          });
         const publicContext = {
           brandDisplayName: profile.profile.brandDisplayName,
           storeDisplayName: profile.profile.storeDisplayName,

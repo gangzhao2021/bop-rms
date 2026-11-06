@@ -249,6 +249,20 @@ describe("counter order command — WP-2423 Q7", () => {
     expect(pipeline.takesOrder).toHaveBeenLastCalledWith({ recordedAfterOutage: true });
   });
 
+  it("WP-2423 item 13 ②: refuses a new walk-up order while new guests are paused, not a paper one", async () => {
+    const { pipeline, send } = setup();
+    const paused = vi.fn(async () => true);
+    Object.assign(pipeline, { newGuestsPaused: paused });
+    await expect(send()).rejects.toMatchObject({ code: "COUNTER_ORDER_NEW_GUESTS_PAUSED" });
+    expect(pipeline.open).not.toHaveBeenCalled();
+    // A paper order taken before (entered after an outage) is recorded as usual.
+    expect(await send({ operationReference: id(35), recordedAfterOutage: true })).toMatchObject({
+      status: "Placed",
+    });
+    paused.mockResolvedValue(false);
+    expect(await send({ operationReference: id(36) })).toMatchObject({ status: "Placed" });
+  });
+
   it("tells staff an unfinished send is still running, then lets them start over", async () => {
     const clock = { at: "2026-10-13T18:00:00.000Z" };
     const { pipeline, send, onUnexpected } = setup(clock);

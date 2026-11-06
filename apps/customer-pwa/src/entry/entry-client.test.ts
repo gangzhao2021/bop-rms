@@ -292,8 +292,13 @@ describe("customer entry browser boundary", () => {
       .fn()
       .mockResolvedValueOnce(response(409, body("Closed")))
       .mockResolvedValueOnce(response(409, body("TemporarilyClosed")))
+      .mockResolvedValueOnce(response(409, { ...body("Closed"), store: { storeDisplayName: "x" } }))
+      // WP-2423 item 13 ②: the platform paused this merchant's new guests.
       .mockResolvedValueOnce(
-        response(409, { ...body("Closed"), store: { storeDisplayName: "x" } }),
+        response(409, {
+          ...body("Open"),
+          store: { ...body("Open").store, newGuestsPaused: true },
+        }),
       );
     const start = () =>
       createCustomerEntryClient({
@@ -316,6 +321,7 @@ describe("customer entry browser boundary", () => {
     await expect(start()).resolves.toMatchObject({ kind: "NotAccepting", paused: true });
     // A malformed body is a failed command, never a guessed Store state.
     await expect(start()).resolves.toEqual({ kind: "CommandFailed" });
+    await expect(start()).resolves.toMatchObject({ kind: "NotAccepting", newGuestsPaused: true });
   });
 
   it("reports offline without sending a request and retries only when explicitly asked", async () => {

@@ -44,6 +44,8 @@ export function createStaffTableCode(options: {
   }>;
   start(staff: Staff, command: Record<string, unknown>): Promise<unknown>;
   regenerate(staff: Staff, command: Record<string, unknown>): Promise<unknown>;
+  /** WP-2423 item 13 ②: the platform paused new guests; a free table is then not seated. */
+  newGuestsPaused?(): Promise<boolean>;
   nextReference(): string;
 }): StaffTableGuestPipeline["openTable"] {
   const issued = (value: unknown, diningSessionReference: string | null) => {
@@ -76,6 +78,8 @@ export function createStaffTableCode(options: {
       if (table === null || !table.seatable) return Object.freeze({ status: "TableUnavailable" });
       try {
         if (table.activeDiningSessionReference === null) {
+          if ((await options.newGuestsPaused?.()) === true)
+            return Object.freeze({ status: "NewGuestsPaused" as const });
           const opened = issued(
             await options.start(staff, {
               tableReference: input.tableReference,

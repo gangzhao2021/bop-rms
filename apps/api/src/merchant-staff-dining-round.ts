@@ -62,6 +62,11 @@ export const staffDiningRoundErrorCodes = [
   "STAFF_ROUND_TIPS_OFF",
   /** The tip percentage is not one the Store offers now: read the choices again. */
   "STAFF_ROUND_TIP_CHOICES_CHANGED",
+  /**
+   * WP-2423 item 13 ②: the platform paused this merchant's new guests, so a free table is not
+   * seated; rounds for tables already seated carry on.
+   */
+  "STAFF_ROUND_NEW_GUESTS_PAUSED",
   "STAFF_ROUND_UNAVAILABLE",
 ] as const;
 export type StaffDiningRoundErrorCode = (typeof staffDiningRoundErrorCodes)[number];
@@ -147,6 +152,8 @@ export interface StaffTableGuestPipeline extends Pick<
         readonly generation: number | null;
       }
     | { readonly status: "TableUnavailable" }
+    /** WP-2423 item 13 ②: the table is free and the platform paused new guests. */
+    | { readonly status: "NewGuestsPaused" }
   >;
   /**
    * WP-2423 item 7: closes a dining session this request started when the round failed before
@@ -604,6 +611,7 @@ export function createMerchantStaffDiningRound(options: {
         { sessionCookie: input.sessionCookie, csrf: input.csrf },
         { tableReference: command.tableReference },
       );
+      if (table.status === "NewGuestsPaused") return fail("STAFF_ROUND_NEW_GUESTS_PAUSED");
       if (table.status !== "Opened") return fail("STAFF_ROUND_TABLE_UNAVAILABLE");
       if (table.started)
         startedTable = {

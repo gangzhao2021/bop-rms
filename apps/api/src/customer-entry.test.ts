@@ -423,6 +423,13 @@ describe("WP-1004 Customer-entry contract", () => {
         localDate: "2026-12-25",
       },
     });
+    // WP-2423 item 13 ②: the platform paused this merchant's new guests; the page is told.
+    port.result = { ...(port.result as object), newGuestsPaused: true };
+    expect((await (await post(await listen(customerEntry(port)))).json()).store).toMatchObject({
+      newGuestsPaused: true,
+    });
+    port.result = { ...(port.result as object), newGuestsPaused: false };
+    expect((await post(await listen(customerEntry(port)))).status).toBe(503);
     port.result = { ...(port.result as object), storeDisplayName: "<script>" };
     expect((await post(await listen(customerEntry(port)))).status).toBe(503);
   });

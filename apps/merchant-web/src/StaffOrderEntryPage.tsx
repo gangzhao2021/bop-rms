@@ -268,6 +268,15 @@ export function placeErrorText(
       return t(
         "The store's tip choices just changed, so nothing was sent or charged. Choose the tip again and send.",
       );
+    // WP-2423 item 13 ② (Owner 2026-11-05): only new guests stop; what is open carries on.
+    case "NewGuestsPaused":
+      return table !== null
+        ? t(
+            "New guests are paused for this restaurant by the platform, so no new table can be opened. Tables already seated carry on as usual: serve, take payment and refund. Ask the owner about it.",
+          )
+        : t(
+            "New guests are paused for this restaurant by the platform, so the counter can't take a new order. Nothing was sent or charged. Orders already placed carry on as usual: prepare, hand over and refund them. Ask the owner about it.",
+          );
     case "CounterOrderingOff":
       return t(
         "Counter ordering is turned off for this store, so nothing was sent or charged. The owner can turn it back on in Store features.",

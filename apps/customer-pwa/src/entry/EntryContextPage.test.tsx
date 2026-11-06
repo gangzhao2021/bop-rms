@@ -212,6 +212,23 @@ describe("WP-2423 Q4 not accepting orders", () => {
     expect(text).not.toContain("closed");
     expect(text.toLowerCase()).not.toContain("kitchen");
   });
+  it("WP-2423 item 13 ②: a paused merchant says it takes no new orders, asks for staff, no hours", () => {
+    const text = render({
+      kind: "NotAccepting",
+      storeDisplayName: "Synthetic Store",
+      paused: false,
+      todayHours: [{ start: "11:00:00", end: "21:30:00", endsNextDay: false }],
+      todayKind: null,
+      nextOpening: null,
+      localDate: "2026-12-22",
+      newGuestsPaused: true,
+    });
+    expect(text).toContain("Synthetic Store isn’t taking new orders right now");
+    expect(text).toContain("Please ask a staff member for help.");
+    expect(text).not.toContain("Today’s hours");
+    expect(text).not.toContain("closed");
+    expect(text.toLowerCase()).not.toContain("platform");
+  });
   it("names the store, says why and gives today's hours instead of a dead link", () => {
     const closed = render({
       kind: "NotAccepting",

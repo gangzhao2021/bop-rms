@@ -521,6 +521,19 @@ function EntryState({
       </div>
     );
 
+  // WP-2423 item 13 ② (Owner 2026-11-05): the restaurant isn't taking new guests for now. There
+  // is no time to wait for, so no hours; staff can tell the guest more.
+  if (state.kind === "NotAccepting" && state.newGuestsPaused === true)
+    return (
+      <div className="entry-state entry-state--warning" role="alert">
+        <StateHeading headingRef={headingRef}>
+          {state.storeDisplayName} {t("isn’t taking new orders right now")}
+        </StateHeading>
+        <p>{t("Please ask a staff member for help.")}</p>
+        <RetryAction onRetry={onRetry} />
+      </div>
+    );
+
   if (state.kind === "NotAccepting")
     return (
       <div className="entry-state entry-state--warning" role="alert">

@@ -1410,6 +1410,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff moved your party to table {table}. Everything your table ordered moved with you. Scan the code on table {table} to keep ordering and paying together.":
     "店员已把您这桌换到 {table} 桌，已点的菜和账单都一起转过去了。请扫 {table} 桌的桌台二维码，继续一起点单和付款。",
   "isn’t taking orders yet": "暂时还不能下单",
+  // WP-2423 item 13 ②
+  "isn’t taking new orders right now": "现在不接新订单",
+  "Please ask a staff member for help.": "请询问店员。",
   "This store is still getting ready. Please ask a staff member, or try again later.":
     "这家店还在准备中。请询问店员，或稍后再试。",
   // WP-2423 取舍 18 DEC-MEMBER-POINTS

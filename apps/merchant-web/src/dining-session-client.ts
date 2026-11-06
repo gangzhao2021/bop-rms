@@ -1,6 +1,15 @@
 import { t } from "./i18n/i18n.js";
 export class DiningSessionClientError extends Error {
-  constructor(readonly code: "Denied" | "Unavailable" | "Unknown" | "Changed" | "ServerProblem") {
+  constructor(
+    readonly code:
+      | "Denied"
+      | "Unavailable"
+      | "Unknown"
+      | "Changed"
+      | "ServerProblem"
+      /** WP-2423 item 13 ②: the platform paused new guests, so a free table is not opened. */
+      | "NewGuestsPaused",
+  ) {
     super(t("Dining session request unavailable"));
   }
 }
@@ -185,7 +194,14 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
       if (response.status === 401 || response.status === 403)
         throw new DiningSessionClientError("Denied");
       // WP-2423 item 10: another server got there first, or the table moved on: not a refusal.
-      if (response.status === 409) throw new DiningSessionClientError("Changed");
+      if (response.status === 409) {
+        const answer = await response.json().catch(() => null);
+        throw new DiningSessionClientError(
+          (answer as { error?: unknown } | null)?.error === "new_guests_paused"
+            ? "NewGuestsPaused"
+            : "Changed",
+        );
+      }
       // The server answered, and failed. Told apart from no answer at all.
       if (response.status >= 500) throw new DiningSessionClientError("ServerProblem");
       if (
@@ -200,7 +216,10 @@ export function createDiningSessionClient(fetcher: typeof fetch = fetch) {
     } catch (error) {
       if (
         error instanceof DiningSessionClientError &&
-        (error.code === "Denied" || error.code === "Changed" || error.code === "ServerProblem")
+        (error.code === "Denied" ||
+          error.code === "Changed" ||
+          error.code === "NewGuestsPaused" ||
+          error.code === "ServerProblem")
       )
         throw error;
       throw new DiningSessionClientError(mutation ? "Unknown" : "Unavailable");

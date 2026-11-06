@@ -3,6 +3,7 @@ import {
   GuestSessionService,
   createPostgresGuestSessionEntryStore,
 } from "../../packages/bop/identity/src/index.ts";
+import { readBrandGuestIntake } from "../../packages/bop/tenant/src/index.ts";
 import {
   createCatalogSelectionDisplayQuery,
   createCustomerMenuQueryService,
@@ -68,6 +69,16 @@ import { matchesPilotEnvironment, pilotProviderEnvironment } from "./pilot-envir
  * checks, configured Quote with tax, store-open gate, checkout, submission, tip and payment clock);
  * the Cart is a counter (Pos) Cart and staff are recorded by Ordering. No Provider is involved.
  */
+
+/**
+ * WP-2423 item 13 ② (Owner 2026-11-05): whether the platform paused this merchant's new guests, read
+ * for staff commands that would start one (a walk-up counter order, seating a free table).
+ */
+const newGuestsPausedReader = (transactions, scope) => () =>
+  transactions.run(
+    async (tx) => (await readBrandGuestIntake(tx, scope.brandReference)).state === "Paused",
+  );
+
 export async function createInternalCounterOrder(
   resources,
   persistence,
@@ -206,6 +217,7 @@ export async function createInternalCounterOrder(
       read: (value) => checkoutRead.read(value),
     },
     takesOrder: async (input) => counterTakesOrder(await operatingNow(), input),
+    newGuestsPaused: newGuestsPausedReader(transactions, scope),
     // WP-2423: whether a pickup time covers now, asked only to explain an unexpected refusal.
     pickupTimesNow: () =>
       createPostgresCurrentPickupCapacityStore(transactions, scope).covers(now()),
@@ -519,6 +531,7 @@ async function createInternalStaffDiningRound(
         }),
       loadJoinState,
       start: (staff, command) => owner.start({ ...staff, command }),
+      newGuestsPaused: newGuestsPausedReader(transactions, scope),
       regenerate: (staff, command) => owner.regenerate({ ...staff, command }),
       nextReference: reference,
     }),
