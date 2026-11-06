@@ -192,6 +192,14 @@ export async function exercisePilotStoreMonitors(context) {
         binding: resourcesOf(of).publicProfile.binding,
       }),
       loadDailySettlementCoverage: async () => coverage.get(of.name),
+      // No Store here has a Workflow binding file in its directory: the real installation
+      // (pilot-installation.mjs) refuses to load one that is not there.
+      loadWorkflow: async () => {
+        throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
+      },
+      loadCancellationWorkflow: async () => {
+        throw new Error("PILOT_INSTALLATION_UNAVAILABLE");
+      },
     };
     const dependencies = await composeBusinessDependencies({
       directory: storeDirectory,
@@ -365,7 +373,10 @@ export async function exercisePilotStoreMonitors(context) {
       ).readOwnerPublishedSetup(resourcesOf(of));
     assert.equal(await openedOf(unopened), false);
     assert.equal(await openedOf(never), false);
-    assert.equal(await openedOf(second), true);
+    // DEC-STORE-FIRST-OPENING (WP-2423 item 14): only a publication made from Store setup opens a
+    // Store. The second merchant's only configuration was installed for it, under an ordinary
+    // reason code, so its Owner still has Store setup to answer, whatever that reason code says.
+    assert.equal(await openedOf(second), false);
     assert.equal(await openedOf(first), true);
     const aside = await mkdtemp(path.join(tmpdir(), "store-monitors-unopened-"));
     try {
