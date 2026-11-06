@@ -82,6 +82,7 @@ import {
 } from "../../../apps/api/src/customer-dining-table-payment.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
+import { tableClosePlanResponse } from "../../../apps/api/src/merchant-dining-table-close-plan-response.ts";
 import { createKitchenInventoryConsumption } from "../../../apps/api/src/kitchen-inventory-consumption.ts";
 import {
   changeKitchenNotPreparedProduct,
@@ -3517,6 +3518,31 @@ async function journey(journeyEnding) {
           const mocha = String(items2[0].orderItemReference);
           // On the kitchen board, nobody tapped anything.
           await cookAndServeRound1([round2], { queuedOnly: true });
+          // v15 2026-11-06: the close plan, as the route sends it, says when the kitchen got round 2
+          // (read under the pilot grants) and that round 1 has no kitchen ticket.
+          const queuedPlan = await createMerchantDiningTableClosePlan({
+            persistence: persistenceOf(manager),
+            authentication: manager.authentication,
+            resolveRefundConfiguration: async () => ({
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+          })({
+            ...as(manager),
+            query: { orderReference, diningSessionReference: sessionReference },
+          });
+          const queuedWire = JSON.parse(JSON.stringify(tableClosePlanResponse(queuedPlan)));
+          const received = new Map(
+            queuedWire.rounds.map((round) => [round.orderBatchReference, round.kitchenReceivedAt]),
+          );
+          const [first, second] = [round1, round2].map((round) =>
+            String(round.c.orderBatchReference),
+          );
+          assert.equal(received.get(first), null);
+          assert.match(received.get(second), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u);
+          assert.ok(Date.parse(received.get(second)) <= Date.now());
+          for (const round of queuedWire.rounds)
+            assert.ok(Object.hasOwn(round, "kitchenReceivedAt"));
           const comped = await comp(manager, { orderItemReferences: [mocha] });
           assert.deepEqual(
             comped.reductions.map((entry) => [entry.kind, entry.reasonCode]),
@@ -5560,9 +5586,21 @@ async function journey(journeyEnding) {
             ...as(server),
             query: { orderReference, diningSessionReference: sessionReference },
           });
+        const openPlan = await closePlan();
         assert.deepEqual(
-          (await closePlan()).rounds.map((round) => [round.sequence, round.state, round.refund]),
+          openPlan.rounds.map((round) => [round.sequence, round.state, round.refund]),
           [[1, "OnTableBill", null]],
+        );
+        // v15 2026-11-06: what the route sends (it once dropped kitchenReceivedAt, and the Tables
+        // panel could not read any open round).
+        const openWire = JSON.parse(JSON.stringify(tableClosePlanResponse(openPlan)));
+        // No kitchen ticket in this journey: the key is sent, and says "not received".
+        assert.deepEqual(
+          openWire.rounds.map((round) => [
+            Object.hasOwn(round, "kitchenReceivedAt"),
+            round.kitchenReceivedAt,
+          ]),
+          [[true, null]],
         );
         if (ending === "PaidByDish") {
           // What this table still owes: one round, one line of two dishes.
