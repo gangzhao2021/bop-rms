@@ -9,8 +9,12 @@ import {
   listBrandProducts,
   listBrandProductSections,
   loadBrandProduct,
+  optionBindingDefaultRules,
+  parseCatalogCode,
   parseCatalogHash,
   parseCatalogReference,
+  productOptionBindingRule,
+  rebuiltProductOptionBinding,
   type OptionSetAggregate,
   type ProductAggregate,
   type ProductLifecycleTransaction,
@@ -63,11 +67,29 @@ export class MerchantProductError extends Error {
       | "PhotoTooLarge"
       | "PhotoTooSmall"
       | "PhotoUnreadable"
-      | "PhotoStorageUnavailable",
+      | "PhotoStorageUnavailable"
+      /**
+       * WP-2423 (v15 2026-11-05): a choice group of the dish does not fit its option set as it
+       * is now (no default guests can start with is still offered, or a choice was removed since
+       * the editor opened). `problem` names the dish and the group.
+       */
+      | "ChoiceGroup",
+    /** For ChoiceGroup: the dish and group named, as the menu pages show a stopped review. */
+    readonly problem: ChoiceGroupProblem | null = null,
   ) {
     super(code);
     this.name = "MerchantProductError";
   }
+}
+/** A choice group a dish save cannot keep, in staff names only (never references or rule codes). */
+export interface ChoiceGroupProblem {
+  readonly missing: "Stopped";
+  readonly reason: "ChoiceGroupDefault" | "ChoiceGroupOption";
+  readonly productName: string | null;
+  readonly sizeName: null;
+  readonly optionName: string | null;
+  readonly quantity: null;
+  readonly ingredientName: null;
 }
 const fail = (code: MerchantProductError["code"]): never => {
   throw new MerchantProductError(code);
@@ -719,6 +741,22 @@ export function createMerchantProducts(options: {
             if (changed && (await s.decision("catalog.option_set.read"))?.effect !== "Allow")
               fail("PermissionDenied");
             const sets = await listBrandOptionSets(productTx, { brandReference: brand });
+            // The dish's own name in the page locale, for a choice group that cannot be kept.
+            const dishName = staffContentName(product.draft.localizedNames, options.locale) || null;
+            const choiceGroup = (
+              set: OptionSetAggregate,
+              reason: ChoiceGroupProblem["reason"],
+            ): never => {
+              throw new MerchantProductError("ChoiceGroup", {
+                missing: "Stopped",
+                reason,
+                productName: dishName,
+                sizeName: null,
+                optionName: staffContentName(set.draft.localizedNames, options.locale) || null,
+                quantity: null,
+                ingredientName: null,
+              });
+            };
             return inputs.map((input, sortOrder) => {
               const set = sets.find((item) => item.optionSetReference === input.optionSetReference);
               if (set === undefined) return fail("Invalid");
@@ -731,38 +769,38 @@ export function createMerchantProducts(options: {
                   .filter((option) => option.lifecycle !== "Archived")
                   .map((option) => String(option.optionReference)),
               );
+              // A choice removed (archived) since the editor read the group.
               if (input.enabledOptionReferences.some((reference) => !usable.has(reference)))
-                fail("Invalid");
-              const enabled = [...input.enabledOptionReferences].sort();
-              const defaults = set.draft.options
-                .filter(
-                  (option) =>
-                    option.defaultEligible &&
-                    option.lifecycle === "Active" &&
-                    enabled.includes(String(option.optionReference)),
-                )
-                .slice(0, set.draft.maximumSelection ?? undefined)
-                .map((option) => ({ optionReference: option.optionReference, quantity: 1 }))
-                .sort((a, b) => (a.optionReference < b.optionReference ? -1 : 1));
-              return {
-                bindingReference:
-                  existing?.bindingReference ??
-                  parseCatalogReference(
-                    derivedReference(operation, "binding:" + input.optionSetReference),
-                  ),
-                optionSetReference: set.optionSetReference,
-                optionSetVersionReference: set.draft.versionReference,
-                purpose: existing?.purpose ?? "CUSTOMER_CHOICE",
-                sortOrder,
-                enabledOptionReferences: enabled.map(parseCatalogReference),
-                defaultSelections: defaults,
-                minimumSelectionOverride: null,
-                maximumSelectionOverride: null,
-                includedSkuReferences: [],
-                excludedSkuReferences: [],
-                channelCodes: [],
-                storeOverrideAllowed: false,
-              };
+                choiceGroup(set, "ChoiceGroupOption");
+              // One rule (Catalog's): the set's offered default choices among those enabled.
+              const binding = rebuiltProductOptionBinding(
+                {
+                  bindingReference:
+                    existing?.bindingReference ??
+                    parseCatalogReference(
+                      derivedReference(operation, "binding:" + input.optionSetReference),
+                    ),
+                  optionSetReference: set.optionSetReference,
+                  optionSetVersionReference: set.draft.versionReference,
+                  purpose: existing?.purpose ?? parseCatalogCode("CUSTOMER_CHOICE"),
+                  sortOrder,
+                  enabledOptionReferences: input.enabledOptionReferences.map(parseCatalogReference),
+                  defaultSelections: [],
+                  minimumSelectionOverride: null,
+                  maximumSelectionOverride: null,
+                  includedSkuReferences: [],
+                  excludedSkuReferences: [],
+                  channelCodes: [],
+                  storeOverrideAllowed: false,
+                },
+                set,
+              );
+              // Checked here, where the group can be named: no default guests can start with that
+              // is still offered is fixed under Option sets, never by saving the dish again.
+              const rule = productOptionBindingRule(binding, set);
+              if (rule !== null && optionBindingDefaultRules.has(rule))
+                choiceGroup(set, "ChoiceGroupDefault");
+              return binding;
             });
           };
           /**

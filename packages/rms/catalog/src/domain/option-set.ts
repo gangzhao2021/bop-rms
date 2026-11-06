@@ -314,6 +314,12 @@ export type OptionBindingRule =
   | "DefaultsAboveMaximum"
   | "DefaultsAboveTotal"
   | "DefaultAboveOptionMaximum";
+/** The rules about the choices guests start with (the defaults), as opposed to the limits. */
+export const optionBindingDefaultRules: ReadonlySet<OptionBindingRule> = new Set([
+  "DefaultUnavailable",
+  "DefaultNotEligible",
+  "DefaultsBelowMinimum",
+]);
 /** The first rule a binding breaks against its option set, or null when it fits. */
 export function productOptionBindingRule(
   binding: ProductOptionBinding,
@@ -372,6 +378,37 @@ export function productOptionBindingRule(
   )
     return "DefaultAboveOptionMaximum";
   return null;
+}
+
+/**
+ * WP-2423 (v15 2026-11-05): a product's binding as a dish save rebuilds it against the option
+ * set's current version: the enabled options it was given, the set's options that guests start with
+ * (default-eligible and offered, at most the set's maximum, one each), and the set's current
+ * version. One rule for the dish save and for telling staff whether saving the dish would fix a
+ * binding; checking it with `productOptionBindingRule` says whether it fits.
+ */
+export function rebuiltProductOptionBinding(
+  binding: ProductOptionBinding,
+  optionSet: OptionSetAggregate,
+): ProductOptionBinding {
+  const enabled = [...binding.enabledOptionReferences].sort();
+  const defaultSelections = optionSet.draft.options
+    .filter(
+      (option) =>
+        option.defaultEligible &&
+        option.lifecycle === "Active" &&
+        enabled.includes(option.optionReference),
+    )
+    .slice(0, optionSet.draft.maximumSelection ?? undefined)
+    .map((option) => ({ optionReference: option.optionReference, quantity: 1 }))
+    .sort((a, b) => (a.optionReference < b.optionReference ? -1 : 1));
+  return Object.freeze({
+    ...binding,
+    optionSetReference: optionSet.optionSetReference,
+    optionSetVersionReference: optionSet.draft.versionReference,
+    enabledOptionReferences: enabled,
+    defaultSelections,
+  });
 }
 
 export function validateProductOptionBinding(

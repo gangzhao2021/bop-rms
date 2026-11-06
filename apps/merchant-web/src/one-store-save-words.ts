@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { MenuPageError } from "./store-menu-pages.js";
+import { MenuPageError, menuReviewProblemText } from "./store-menu-pages.js";
 import { menuErrorText } from "./StoreMenuPages.js";
 
 /**
@@ -21,6 +21,9 @@ export function oneStoreSaveFailureText(error: unknown, existing: boolean): stri
   if (!(error instanceof MenuPageError))
     return t("That didn't go through. Read the menu again and retry.");
   if (error.code === "Unavailable" && existing) return menuErrorText.StoppedPartWay;
+  // WP-2423 (v15 2026-11-05): a refusal that names what to fix (a dish's choice group) says it.
+  if (error.problem !== null)
+    return menuReviewProblemText(error.problem, error.code === "ChoiceGroup");
   return menuErrorText[error.code];
 }
 

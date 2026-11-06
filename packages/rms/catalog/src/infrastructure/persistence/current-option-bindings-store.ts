@@ -8,9 +8,10 @@ import {
 import {
   OptionBindingRuleError,
   parseOptionSetAggregate,
-  validateProductOptionBinding,
+  productOptionBindingRule,
   type OptionBindingRule,
 } from "../../contracts/option-set.js";
+import type { ProductOptionBinding } from "../../contracts/product.js";
 import type { AvailabilityQueryTransactionRunner } from "./availability-query-store.js";
 function closed(value: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> {
   if (
@@ -168,7 +169,10 @@ export function createPostgresCurrentOptionBindingsStore(
               const pair = closed(value, ["binding", "optionSet"]);
               const binding = parseProductOptionBinding(pair.binding),
                 optionSet = parseOptionSetAggregate(pair.optionSet);
-              validateProductOptionBinding(binding, optionSet);
+              const rule = productOptionBindingRule(binding, optionSet);
+              // The group and the binding as stored, so the caller can tell whether saving the
+              // dish against the set's current version would fix it.
+              if (rule !== null) throw new OptionBindingSourceError(rule, sku, binding);
               if (
                 optionSet.brandReference !== brand ||
                 optionSet.updatedAt > at ||
@@ -201,6 +205,7 @@ export function createPostgresCurrentOptionBindingsStore(
         });
       } catch (error) {
         // v15 2026-10-29: a binding that no longer fits its option set says which rule it breaks.
+        if (error instanceof OptionBindingSourceError) throw error;
         if (error instanceof OptionBindingRuleError)
           throw new OptionBindingSourceError(error.rule, named);
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
@@ -215,6 +220,8 @@ export class OptionBindingSourceError extends CatalogError {
     readonly rule: OptionBindingRule,
     /** The sellable whose binding it is (WP-2423 item 14): the page names its dish. */
     readonly sellableReference: string | null = null,
+    /** The stored binding that breaks it (its option set named in it), when known. */
+    readonly binding: ProductOptionBinding | null = null,
   ) {
     super("CATALOG_DEPENDENCY_UNAVAILABLE");
     this.name = "OptionBindingSourceError";

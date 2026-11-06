@@ -60,6 +60,9 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
   ReviewBlocked: t(
     "The review could not be prepared. Every item needs a published recipe whose ingredients all have current allergen declarations (see Allergens and Recipes), and the Brand allergen list must be approved.",
   ),
+  ChoiceGroup: t(
+    "One of this dish's choice groups no longer fits it: a choice was removed, or the choice guests start with is no longer offered. Check the group under Option sets, then save the dish again.",
+  ),
   OptionPriceMissing: t(
     "Some options on this menu's items have no published price, so customers could not order them. Set and publish them under Option prices, then submit again.",
   ),

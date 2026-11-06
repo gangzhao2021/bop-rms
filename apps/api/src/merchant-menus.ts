@@ -22,7 +22,12 @@ import {
   listStoreAvailabilityRules,
   parseCatalogHash,
   parseCatalogReference,
+  optionBindingDefaultRules,
+  productOptionBindingRule,
+  rebuiltProductOptionBinding,
   type MenuAggregate,
+  type OptionSetAggregate,
+  type ProductOptionBinding,
   type ProductLifecycleTransaction,
   type PublishedSellablePresentation,
   type ReviewedMenuContent,
@@ -140,9 +145,12 @@ const namedStopReasons: ReadonlySet<string> = new Set([
   "NoDraft",
   "NotAuthorized",
   "NoConfiguration",
-  // A dish's choice group no longer fits it (an option archived, a default no longer offered):
+  // A dish's choice group no longer fits it, and saving the dish fixes it (an option archived):
   // the Owner fixes it on the dish. Trying again never would.
   "ChoiceGroup",
+  // WP-2423 (v15 2026-11-05): a dish's choice group has no default guests can start with that
+  // is still offered: only Option sets can fix it (offer it again, or let another be the default).
+  "ChoiceGroupDefault",
 ]);
 export function menuStopReason(reason: string): string {
   const last = reason.split(":").at(-1) ?? "";
@@ -151,7 +159,12 @@ export function menuStopReason(reason: string): string {
 const stoppedError = (
   reason: string,
   cause: unknown,
-  at: { readonly productName: string | null; readonly sizeName: string | null } = {
+  at: {
+    readonly productName: string | null;
+    readonly sizeName: string | null;
+    /** For a choice group: the group's staff name. */
+    readonly optionName?: string | null;
+  } = {
     productName: null,
     sizeName: null,
   },
@@ -164,7 +177,7 @@ const stoppedError = (
       reason: named,
       productName: at.productName,
       sizeName: at.sizeName,
-      optionName: null,
+      optionName: at.optionName ?? null,
       quantity: null,
       ingredientName: null,
     },
@@ -174,6 +187,85 @@ const stoppedError = (
 const stopped = (reason: string, cause?: unknown): never => {
   throw stoppedError(reason, cause);
 };
+/**
+ * WP-2423 (v15 2026-11-05): where a stored binding that breaks its option set is fixed. The
+ * binding is rebuilt as Save dish rebuilds it, against the set's current version (the version Save
+ * dish reads, never the one the binding is pinned to), without options archived since. If that
+ * still leaves no offered default, only Option sets can fix it ("ChoiceGroupDefault"); otherwise
+ * opening the dish, checking its choices and saving it does ("ChoiceGroup").
+ */
+export function choiceGroupReason(
+  binding: ProductOptionBinding | null,
+  current: OptionSetAggregate | undefined,
+): "ChoiceGroup" | "ChoiceGroupDefault" {
+  if (binding === null || current === undefined) return "ChoiceGroup";
+  const usable = binding.enabledOptionReferences.filter((reference) =>
+    current.draft.options.some(
+      (option) => option.optionReference === reference && option.lifecycle !== "Archived",
+    ),
+  );
+  const rebuilt = rebuiltProductOptionBinding(
+    {
+      ...binding,
+      enabledOptionReferences: usable,
+      minimumSelectionOverride: null,
+      maximumSelectionOverride: null,
+    },
+    current,
+  );
+  const rule = productOptionBindingRule(rebuilt, current);
+  return rule !== null && optionBindingDefaultRules.has(rule)
+    ? "ChoiceGroupDefault"
+    : "ChoiceGroup";
+}
+/** A dish whose choice group broke a rule, in staff names, and where it is fixed. */
+export interface ChoiceGroupAt {
+  readonly productName: string | null;
+  readonly sizeName: string | null;
+  readonly optionName: string | null;
+  readonly reason: "ChoiceGroup" | "ChoiceGroupDefault";
+}
+/**
+ * The page's answer to a Catalog refusal of a menu command. "Submit" and "Check" (List it's
+ * listing check) name a dish's choice group that breaks a rule, and say a review that could not
+ * read something stopped (logged, "try again"); they never answer "Invalid", whose text is about
+ * section names.
+ */
+export function menuCatalogError(
+  error: CatalogError,
+  action: MenuCommandBody["action"],
+  choiceGroup: ChoiceGroupAt | null,
+): MerchantMenuError {
+  const reviewing = action === "Submit" || action === "Check";
+  if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && action === "SaveDraft")
+    return new MerchantMenuError("Frozen");
+  if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && action === "Revise")
+    return new MerchantMenuError("NotRevisable");
+  if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && action === "DiscardDraft")
+    return new MerchantMenuError("NotDiscardable");
+  // WP-2423 item 14: a product's choice group binding names the rule it breaks, and the item:
+  // the dish and its group are named, and the Owner told where it is fixed.
+  if (
+    error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" &&
+    reviewing &&
+    typeof (error as { rule?: unknown }).rule === "string"
+  )
+    return stoppedError(choiceGroup?.reason ?? "ChoiceGroup", error, {
+      productName: choiceGroup?.productName ?? null,
+      sizeName: choiceGroup?.sizeName ?? null,
+      optionName: choiceGroup?.optionName ?? null,
+    });
+  // v15 2026-10-29: the review stopped on something it could not read; say where.
+  if (error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" && reviewing)
+    return stoppedError(action + ":Unavailable@" + throwSite(error), error);
+  if (error.code === "CATALOG_PERMISSION_DENIED" && action === "Approve")
+    return new MerchantMenuError("ApprovalRequired");
+  if (error.code === "CATALOG_PERMISSION_DENIED") return new MerchantMenuError("PermissionDenied");
+  // A listing check refused for any other reason is not the menu's sections: it stopped.
+  if (action === "Check")
+    return stoppedError("Check:" + error.code + "@" + throwSite(error), error);
+  return new MerchantMenuError(catalogErrors[error.code] ?? "Invalid");
+}
 /** Where an error was raised: the first source file and line past its `fail` helper. */
 export function throwSite(error: unknown): string {
   const frames = (error instanceof Error ? (error.stack ?? "") : "").split("\n").slice(1);
@@ -763,6 +855,38 @@ export function createMerchantMenus(options: {
     };
   };
   /** Names a review gap for staff in a fresh read (the failed review's transaction is gone). */
+  /** A dish whose choice group breaks a rule: its names and the group's, and whether saving fixes it. */
+  const describeChoiceGroup = (
+    sessionCookie: unknown,
+    sessionReference: string,
+    skuReference: string | null,
+    binding: ProductOptionBinding | null,
+  ): Promise<ChoiceGroupAt> =>
+    options.persistence.transactions.run((tx) =>
+      withRememberedBrandAuthorization(tx, async () => {
+        const s = await scopeFor(tx, sessionCookie, sessionReference);
+        const sku =
+          skuReference === null
+            ? undefined
+            : (await listBrandSkuChoices(ptx(tx) as never, s.owner)).find(
+                (item) => item.skuReference === skuReference,
+              );
+        // The set's current version: the one Save dish rebuilds the binding against.
+        const set =
+          binding === null
+            ? undefined
+            : (await listBrandOptionSets(ptx(tx), s.owner)).find(
+                (item) => item.optionSetReference === binding.optionSetReference,
+              );
+        await brandScope(tx, s.owner.brandReference);
+        return {
+          productName: sku ? name(sku.productLocalizedNames, sku.skuCode) : null,
+          sizeName: sku ? name(sku.localizedNames, sku.skuCode) : null,
+          optionName: set ? name(set.draft.localizedNames, "") || null : null,
+          reason: choiceGroupReason(binding, set),
+        };
+      }),
+    );
   const describeGap = (
     sessionCookie: unknown,
     sessionReference: string,
@@ -1219,6 +1343,13 @@ export function createMerchantMenus(options: {
     const current = await session(input);
     if (body.action === "List") return list(input, body, current.sessionReference);
     if (body.action === "Check")
+      return checkListing().catch((error: unknown) => mapCommandError(error));
+    try {
+      return await commandBody();
+    } catch (error) {
+      return mapCommandError(error);
+    }
+    function checkListing() {
       return retryTransactionConflict(() =>
         options.persistence.transactions.run((tx) =>
           withRememberedBrandAuthorization(tx, async () => {
@@ -1240,7 +1371,8 @@ export function createMerchantMenus(options: {
           }),
         ),
       );
-    try {
+    }
+    async function commandBody(): Promise<unknown> {
       if (body.action === "Submit" || body.action === "Approve" || body.action === "Publish") {
         // Facts the publication command needs that the client does not supply.
         const prepared = await retryTransactionConflict(() =>
@@ -1511,7 +1643,8 @@ export function createMerchantMenus(options: {
           }),
         ),
       );
-    } catch (error) {
+    }
+    async function mapCommandError(error: unknown): Promise<never> {
       if (error instanceof MerchantMenuError) throw error;
       if (error instanceof MenuReviewStoppedError) {
         // v15 2026-10-29: where and why the review stopped (the item named, the reason a code).
@@ -1545,42 +1678,23 @@ export function createMerchantMenus(options: {
           error.code === "NotInEffect" ? "SoleOperatorNotInEffect" : "NeedsReverification",
         );
       if (error instanceof CatalogError) {
-        if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && body.action === "SaveDraft")
-          return fail("Frozen");
-        if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && body.action === "Revise")
-          return fail("NotRevisable");
-        if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && body.action === "DiscardDraft")
-          return fail("NotDiscardable");
-        // WP-2423 item 14: a product's choice group binding names the rule it breaks, and the
-        // item: the dish is named and the Owner told to fix it there.
-        if (
+        const rule = typeof (error as { rule?: unknown }).rule === "string";
+        const sku = (error as { sellableReference?: unknown }).sellableReference;
+        const binding = (error as { binding?: unknown }).binding;
+        const choiceGroup =
+          rule &&
           error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" &&
-          body.action === "Submit" &&
-          typeof (error as { rule?: unknown }).rule === "string"
-        ) {
-          const sku = (error as { sellableReference?: unknown }).sellableReference;
-          const at =
-            typeof sku !== "string"
-              ? null
-              : await describeGap(input.sessionCookie, current.sessionReference, {
-                  skuReference: sku,
-                  storeReference: "",
-                  missing: "Recipe",
-                  optionReference: null,
-                  quantity: null,
-                  ingredientReference: null,
-                }).catch(() => null);
-          throw stoppedError("ChoiceGroup", error, {
-            productName: at?.productName ?? null,
-            sizeName: at?.sizeName ?? null,
-          });
-        }
-        // v15 2026-10-29: the review stopped on something it could not read; say where.
-        if (error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" && body.action === "Submit")
-          return stopped("Submit:Unavailable@" + throwSite(error), error);
-        if (error.code === "CATALOG_PERMISSION_DENIED" && body.action === "Approve")
-          return fail("ApprovalRequired");
-        return fail(catalogErrors[error.code] ?? "Invalid");
+          (body.action === "Submit" || body.action === "Check")
+            ? await describeChoiceGroup(
+                input.sessionCookie,
+                current.sessionReference,
+                typeof sku === "string" ? sku : null,
+                typeof binding === "object" && binding !== null
+                  ? (binding as ProductOptionBinding)
+                  : null,
+              ).catch(() => null)
+            : null;
+        throw menuCatalogError(error, body.action, choiceGroup);
       }
       throw error;
     }

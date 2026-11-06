@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { parseMenuReviewProblem, type MenuReviewProblem } from "./store-menu-pages.js";
 /** WP-2423 / DEC-CAT-PRODUCT-ADMIN: CAT-PRODUCT-LIST / CAT-PRODUCT-EDIT view contract and client. */
 export type ProductErrorCode =
   | "PermissionDenied"
@@ -9,10 +10,19 @@ export type ProductErrorCode =
   | "TaxClassUnavailable"
   | "Lifecycle"
   | "Invalid"
+  /**
+   * WP-2423 (v15 2026-11-05): a choice group of the product does not fit its option set as it is
+   * now (no offered default, or a choice removed since the page opened); `problem` names it.
+   */
+  | "ChoiceGroup"
   | "Offline"
   | "Unavailable";
 export class ProductPageError extends Error {
-  constructor(readonly code: ProductErrorCode) {
+  constructor(
+    readonly code: ProductErrorCode,
+    /** For ChoiceGroup: the product and the group, named. */
+    readonly problem: MenuReviewProblem | null = null,
+  ) {
     super(t("Products are unavailable"));
     this.name = "ProductPageError";
   }
@@ -426,6 +436,7 @@ const codes = new Set<ProductErrorCode>([
   "TaxClassUnavailable",
   "Lifecycle",
   "Invalid",
+  "ChoiceGroup",
 ]);
 export function createProductClient(csrf: string, fetcher: typeof fetch = fetch): ProductClient {
   const post = async (path: string, body: unknown) => {
@@ -441,10 +452,14 @@ export function createProductClient(csrf: string, fetcher: typeof fetch = fetch)
       throw new ProductPageError("Offline");
     }
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      const payload = (await response.json().catch(() => null)) as {
+        error?: unknown;
+        problem?: unknown;
+      } | null;
       const code = String(payload?.error) as ProductErrorCode;
       throw new ProductPageError(
         codes.has(code) ? code : response.status === 403 ? "PermissionDenied" : "Unavailable",
+        code === "ChoiceGroup" ? parseMenuReviewProblem(payload?.problem) : null,
       );
     }
     return response.json() as Promise<unknown>;

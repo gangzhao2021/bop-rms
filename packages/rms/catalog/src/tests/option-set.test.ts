@@ -9,6 +9,8 @@ import type {
 import { parseProductOptionBinding } from "../domain/product.js";
 import {
   parseOptionSetAggregate,
+  productOptionBindingRule,
+  rebuiltProductOptionBinding,
   validateProductOptionBinding,
   type OptionSetAggregate,
 } from "../domain/option-set.js";
@@ -307,6 +309,53 @@ describe("Option Set / Option / Product Binding minimum model", () => {
         created.aggregate,
       ),
     ).toThrowError(expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }));
+  });
+
+  it("WP-2423: a dish save's rebuilt binding starts guests with an offered default, or names the rule", async () => {
+    const state = fixture();
+    const created = await state.service.create(createInput());
+    // "Serve": one of Hot (milk) or Iced (oat); only Hot may be the default.
+    const serve = (hot: "Active" | "Inactive", icedDefault: boolean) =>
+      parseOptionSetAggregate({
+        ...created.aggregate,
+        draft: {
+          ...created.aggregate.draft,
+          options: created.aggregate.draft.options.map((option) =>
+            option.optionReference === ids.milk
+              ? { ...option, lifecycle: hot }
+              : { ...option, lifecycle: "Active", defaultEligible: icedDefault },
+          ),
+        },
+      });
+    const binding = parseProductOptionBinding({
+      bindingReference: ids.binding,
+      optionSetReference: ids.set,
+      optionSetVersionReference: id(77),
+      purpose: "CUSTOMER_CHOICE",
+      sortOrder: 0,
+      enabledOptionReferences: [ids.oat, ids.milk],
+      defaultSelections: [{ optionReference: ids.milk, quantity: 1 }],
+      minimumSelectionOverride: null,
+      maximumSelectionOverride: null,
+      includedSkuReferences: [],
+      excludedSkuReferences: [],
+      channelCodes: [],
+      storeOverrideAllowed: false,
+    });
+    const offered = rebuiltProductOptionBinding(binding, serve("Active", false));
+    expect(offered.optionSetVersionReference).toBe(ids.version);
+    expect(offered.defaultSelections).toEqual([{ optionReference: ids.milk, quantity: 1 }]);
+    expect(productOptionBindingRule(offered, serve("Active", false))).toBeNull();
+    // Hot not offered and Iced not a default: no default left, saving the dish cannot fix it.
+    const hotOff = serve("Inactive", false);
+    const rebuilt = rebuiltProductOptionBinding(binding, hotOff);
+    expect(rebuilt.defaultSelections).toEqual([]);
+    expect(productOptionBindingRule(rebuilt, hotOff)).toBe("DefaultsBelowMinimum");
+    // Iced may be the default: the rebuilt binding starts with Iced and fits.
+    const icedDefault = serve("Inactive", true);
+    const fixed = rebuiltProductOptionBinding(binding, icedDefault);
+    expect(fixed.defaultSelections).toEqual([{ optionReference: ids.oat, quantity: 1 }]);
+    expect(productOptionBindingRule(fixed, icedDefault)).toBeNull();
   });
 
   it("rejects self-trigger, dangling conflicts, duplicate codes and markup", () => {

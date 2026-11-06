@@ -945,3 +945,91 @@ it("List it publishes 1,200 waiting choice prices, and the Option prices page re
     },
   );
 });
+
+/** The group as Option sets saves it: each choice offered or not, its default as it was. */
+const saveGroup = async (f, group, kind, limits, offered = () => true) =>
+  (
+    await f.optionSets.command({
+      ...f.session,
+      body: {
+        action: "Save",
+        operationReference: f.op(),
+        optionSetReference: group.optionSetReference,
+        expectedAggregateVersion: group.aggregateVersion,
+        name: group.name,
+        nameZh: "",
+        kind,
+        minimum: limits.minimum ?? 0,
+        maximum: limits.maximum === undefined ? (kind === "One" ? 1 : null) : limits.maximum,
+        perOptionMaximum: limits.perOptionMaximum ?? 1,
+        options: group.options.map((option) => ({
+          optionReference: option.optionReference,
+          name: option.name,
+          nameZh: "",
+          offered: offered(option),
+          defaultChoice: option.defaultChoice,
+        })),
+      },
+    })
+  ).optionSet;
+const listingRecords = async (admin, brand) =>
+  (
+    await admin.query(
+      "SELECT (SELECT count(*)::int FROM rms_catalog.menu_publication_operation_record WHERE brand_id=$1) AS menus,(SELECT count(*)::int FROM platform_audit.audit_record WHERE brand_id=$1) AS audits",
+      [brand],
+    )
+  ).rows[0];
+
+it("a default no longer offered is named on Save dish and on List it; offering it again lists", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_bdefault", timeoutMs: 600_000 }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const role = await createPilotApiRole(admin, context, "wp2423_bd");
+    const f = await createOneStoreMenuFixture(admin, context, { role });
+    try {
+      // 1. "Serve": one of Hot or Iced, guests start with Hot; Iced is never the default.
+      const serve = await f.makeGroup("Serve (TEST)", "One", ["Hot", "Iced"], { minimum: 1 });
+      const groups = choiceGroups({ serve });
+      const dish = await f.saveDish({ name: "Soy milk (TEST)", nameZh: "", choiceGroups: groups });
+      assert.equal((await f.listAll()).status, "Listed");
+      // 2. The hot machine is down: Option sets, "Offer Hot" unticked, saved.
+      const hotOff = await saveGroup(f, serve, "One", { minimum: 1 }, (o) => o.name !== "Hot");
+      // 3. Save dish (a new description) names the dish and the group; nothing about sections.
+      const again = {
+        productReference: dish.productReference,
+        name: "Soy milk (TEST)",
+        nameZh: "",
+        description: "Fresh soy milk (TEST)",
+      };
+      await assert.rejects(f.saveDish({ ...again, choiceGroups: groups }), (error) => {
+        assert.equal(error.name, "MerchantProductError");
+        assert.equal(error.code, "ChoiceGroup");
+        assert.equal(error.problem.reason, "ChoiceGroupDefault");
+        assert.equal(error.problem.optionName, "Serve (TEST)");
+        assert.equal(error.problem.productName, "Soy milk (TEST)");
+        return true;
+      });
+      // 4. List it says the same, and lists nothing: no publication, no record at all.
+      // Something new to list: another dish.
+      await f.saveDish({ name: "Warm water (TEST)", nameZh: "", priceMinor: "100" });
+      const before = await listingRecords(admin, f.brandReference);
+      await assert.rejects(f.listAll(), (error) => {
+        assert.equal(error.name, "MerchantMenuError", String(error.name) + ":" + error.code);
+        assert.equal(error.code, "ReviewBlocked");
+        assert.equal(error.problem.reason, "ChoiceGroupDefault");
+        assert.equal(error.problem.productName, "Soy milk (TEST)");
+        assert.equal(error.problem.optionName, "Serve (TEST)");
+        assert.equal(error.stoppedBy, null);
+        return true;
+      });
+      assert.deepEqual(await listingRecords(admin, f.brandReference), before);
+      // 5. Hot offered again: the dish saves and the menu lists.
+      await saveGroup(f, hotOff, "One", { minimum: 1 });
+      await f.saveDish({ ...again, choiceGroups: groups });
+      assert.equal((await f.listAll()).status, "Listed");
+    } finally {
+      await f.close();
+      await admin.end();
+    }
+  });
+});

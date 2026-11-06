@@ -7,7 +7,9 @@ import {
   ProductListPage,
   photoUploadMessage,
 } from "./ProductPages.js";
+import { menuReviewProblemText } from "./store-menu-pages.js";
 import {
+  ProductPageError,
   ProductPhotoError,
   createProductClient,
   parseProductDetailView,
@@ -80,6 +82,27 @@ describe("WP-2423 product page helpers", () => {
     await expect(
       createProductClient("csrf", () => Promise.reject(new TypeError("offline"))).load(null),
     ).rejects.toMatchObject({ code: "Offline" });
+    // WP-2423: a choice group the save cannot keep is named, never read as an outage.
+    const named = (await createProductClient("csrf", () =>
+      reply(409, {
+        error: "ChoiceGroup",
+        problem: {
+          missing: "Stopped",
+          reason: "ChoiceGroupDefault",
+          productName: "Soy milk",
+          sizeName: null,
+          optionName: "Serve",
+          quantity: null,
+          ingredientName: null,
+        },
+      }),
+    )
+      .load(null)
+      .catch((error: unknown) => error)) as ProductPageError;
+    expect(named.code).toBe("ChoiceGroup");
+    expect(named.problem && menuReviewProblemText(named.problem, true)).toBe(
+      "Soy milk: Serve has no choice guests start with that is still offered. Under Option sets, open Serve and offer that choice again, or let another choice be the default. Then save the dish.",
+    );
   });
   it("renders the empty list with a create link only for creators", () => {
     const view = parseProductListView({

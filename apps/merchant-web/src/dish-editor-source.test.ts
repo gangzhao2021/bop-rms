@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { groupStart, typedExtras, type TypedChoice } from "./dish-editor-source.js";
+import {
+  dishEditorSource,
+  groupStart,
+  typedExtras,
+  type TypedChoice,
+} from "./dish-editor-source.js";
 import type { ProductOptionSetChoice } from "./product-pages.js";
 
 const id = (n: number) => "0190996c-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -54,4 +59,21 @@ describe("WP-2423 item 3 D: extras typed in New choice group", () => {
     // A group read with another number of choices matches nothing.
     expect(typedExtras(group(["Pearls"]), typed).size).toBe(0);
   });
+});
+
+it("WP-2423: a choice removed from its group since the dish was saved is not sent back", () => {
+  const toppings = group(["Pearls", "Pudding"]);
+  const source = dishEditorSource(id(90), {
+    product: {
+      taxClasses: [],
+      optionSetChoices: [toppings],
+      product: {
+        name: "Milk tea",
+        // Pudding (11) is still in the group; 19 was archived since.
+        optionSets: [{ optionSetReference: id(1), enabledOptionReferences: [id(11), id(19)] }],
+      },
+    },
+    optionPrices: { products: [] },
+  });
+  expect([...(source.chosen.get(id(1))?.keys() ?? [])]).toEqual([id(11)]);
 });

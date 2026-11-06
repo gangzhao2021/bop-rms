@@ -39,6 +39,7 @@ import {
   type ProductTaxClass,
 } from "./product-pages.js";
 import { serverProblemText } from "./failure-words.js";
+import { menuReviewProblemText } from "./store-menu-pages.js";
 import { PageDidNotLoad, readingAgain } from "./PageDidNotLoad.js";
 
 /** WP-2423 / DEC-CAT-PRODUCT-ADMIN: Brand Products and their sizes (SKUs). */
@@ -57,6 +58,9 @@ const copy: Record<ProductErrorCode | "Loading", string> = {
   Lifecycle: t("This step is not possible in the product's current state."),
   Invalid: t(
     "The product is not valid. A name, a code (capital letters, digits, hyphen), a tax class and at least one size with its own code and name are required; size names must differ.",
+  ),
+  ChoiceGroup: t(
+    "One of this product's choice groups no longer fits it: a choice was removed, or the choice guests start with is no longer offered. Check the group under Option sets, then save again.",
   ),
   Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
   Unavailable: serverProblemText,
@@ -357,7 +361,12 @@ function ProductEditor({
       const code = error instanceof ProductPageError ? error.code : "Unavailable";
       // Only an unconfirmed attempt is retried with the same operation; a refusal is final.
       if (code !== "Offline" && code !== "Unavailable") setPending(null);
-      setMessage({ tone: "error", text: copy[code] });
+      // A choice group named by the server: the product, the group and where it is fixed.
+      const problem = error instanceof ProductPageError ? error.problem : null;
+      setMessage({
+        tone: "error",
+        text: problem === null ? copy[code] : menuReviewProblemText(problem, true),
+      });
     } finally {
       setBusy(false);
     }

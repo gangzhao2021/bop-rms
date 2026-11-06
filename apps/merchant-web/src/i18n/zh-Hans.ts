@@ -7377,6 +7377,24 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your store setup is published. The allergen list is waiting for {people}. They approve it on Allergens.":
     "门店设置已发布。过敏原清单正在等待{people}批准，在“过敏原”页批准。",
   "Your store setup is published.": "门店设置已发布。",
+  "{item}: {group} has no choice guests start with that is still offered. Under Option sets, open {group} and offer that choice again, or let another choice be the default. Then save the dish.":
+    "{item}：「{group}」里没有仍在供应的默认选项。请在“选项组”中打开「{group}」，重新供应该选项，或把另一个选项设为默认，然后再保存这道菜。",
+  "{item}: {group} has no choice guests start with that is still offered. Under Option sets, open {group} and offer that choice again, or let another choice be the default. Then list the menu again. Nothing was listed.":
+    "{item}：「{group}」里没有仍在供应的默认选项。请在“选项组”中打开「{group}」，重新供应该选项，或把另一个选项设为默认，然后再上架菜单。这次没有上架任何内容。",
+  "{item}: one of its choice groups has no choice guests start with that is still offered. Under Option sets, offer that choice again, or let another choice be the default. Then save the dish.":
+    "{item}：有一个选项组里没有仍在供应的默认选项。请在“选项组”中重新供应该选项，或把另一个选项设为默认，然后再保存这道菜。",
+  "{item}: one of its choice groups has no choice guests start with that is still offered. Under Option sets, offer that choice again, or let another choice be the default. Then list the menu again. Nothing was listed.":
+    "{item}：有一个选项组里没有仍在供应的默认选项。请在“选项组”中重新供应该选项，或把另一个选项设为默认，然后再上架菜单。这次没有上架任何内容。",
+  "{item}: a choice in {group} was removed. Close the dish, open it again and save it.":
+    "{item}：「{group}」里有一个选项已被删除。请关闭这道菜，重新打开后再保存。",
+  "{item}: a choice in one of its groups was removed. Close the dish, open it again and save it.":
+    "{item}：有一个选项组里的选项已被删除。请关闭这道菜，重新打开后再保存。",
+  "{item}: its choices in {group} changed. Open the dish, check its choices, save it, then list the menu again.":
+    "{item}：「{group}」的选项有变动。请打开这道菜，检查选项并保存，然后再上架菜单。",
+  "One of this product's choice groups no longer fits it: a choice was removed, or the choice guests start with is no longer offered. Check the group under Option sets, then save again.":
+    "这个商品的某个选项组已不再适用：有选项被删除，或顾客默认的选项已不再供应。请在“选项组”中检查该选项组，然后再保存。",
+  "One of this dish's choice groups no longer fits it: a choice was removed, or the choice guests start with is no longer offered. Check the group under Option sets, then save the dish again.":
+    "这道菜的某个选项组已不再适用：有选项被删除，或顾客默认的选项已不再供应。请在“选项组”中检查该选项组，然后再保存这道菜。",
   "{item}: one of its choices no longer fits its choice group (an option was removed, or a default is no longer offered). Open the dish, check its choices, save it, then list the menu again.":
     "{item}：有一项选项已不符合它的选项组（某个选项被移除，或默认选项已不再提供）。请打开这道菜，检查它的选项并保存，然后重新上架菜单。",
   "The store's name, address or phone was changed after the store setup was sent, so it can't be approved as it is. Ask whoever sent it to open Store setup and send it again, or send it back.":

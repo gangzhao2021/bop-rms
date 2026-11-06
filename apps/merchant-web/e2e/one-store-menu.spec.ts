@@ -33,6 +33,17 @@ let released: string | null = null;
 let refuseListing = false;
 let listingStops = false;
 let dishSaveStops = false;
+/** WP-2423 (v15 2026-11-05): the next one-page command is refused with this answer (409). */
+let oneStoreRefusal: Record<string, unknown> | null = null;
+const choiceGroupProblem = (productName: string) => ({
+  missing: "Stopped",
+  reason: "ChoiceGroupDefault",
+  productName,
+  sizeName: null,
+  optionName: "Serve (TEST)",
+  quantity: null,
+  ingredientName: null,
+});
 function builder(version: number, order: number[][]) {
   return {
     screenId: "CAT-MENU-BUILDER",
@@ -194,6 +205,11 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     menuCommands.push({ ...body, action: body.action === "ListAll" ? "List" : body.action });
     if (listingStops)
       return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
+    if (oneStoreRefusal !== null) {
+      const json = oneStoreRefusal;
+      oneStoreRefusal = null;
+      return route.fulfill({ status: 409, headers, json });
+    }
     if (refuseListing)
       return route.fulfill({
         status: 409,
@@ -341,6 +357,24 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     }),
   ).toBeVisible();
   refuseListing = false;
+  // WP-2423 (v15 2026-11-05): a dish's choice group with no offered default is named, with where
+  // it is fixed; nothing was listed, so the page never says prices may be showing.
+  oneStoreRefusal = {
+    error: "ReviewBlocked",
+    part: "Menu",
+    problem: choiceGroupProblem("Soy milk (TEST)"),
+  };
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect(
+    page.getByText(
+      "Soy milk (TEST): Serve (TEST) has no choice guests start with that is still offered. Under Option sets, open Serve (TEST) and offer that choice again, or let another choice be the default. Then list the menu again. Nothing was listed.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("Listing stopped part-way", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("Each section needs a distinct name", { exact: false })).toHaveCount(
+    0,
+  );
+  await expectNoInternalText(page);
   // WP-2423 item 10: a stop on the server may be after the prices went live, so it does not say
   // guests see nothing new; listing again carries on as the same listing.
   listingStops = true;
@@ -365,15 +399,16 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     page.getByText("There are saved changes not listed yet.", { exact: false }),
   ).toHaveCount(0);
   const listings = menuCommands.filter((command) => command.action === "List");
-  expect(listings).toHaveLength(3);
-  expect(Object.keys(listings[1] ?? {}).sort()).toEqual([
+  expect(listings).toHaveLength(4);
+  expect(Object.keys(listings[2] ?? {}).sort()).toEqual([
     "action",
     "menuReference",
     "operationReference",
   ]);
   // A refused listing is finished; the next press is a new listing, and a stopped one goes on.
   expect(listings[0]?.operationReference).not.toBe(listings[1]?.operationReference);
-  expect(listings[2]?.operationReference).toBe(listings[1]?.operationReference);
+  expect(listings[1]?.operationReference).not.toBe(listings[2]?.operationReference);
+  expect(listings[3]?.operationReference).toBe(listings[2]?.operationReference);
 });
 
 test("@production one dish edited on the one-page menu: names, price, choices, allergens; new dish and section; List it", async ({
@@ -632,6 +667,11 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
       dishSaveStops = false;
       return route.fulfill({ status: 503, headers, json: { error: "retry_later" } });
     }
+    if (oneStoreRefusal !== null) {
+      const json = oneStoreRefusal;
+      oneStoreRefusal = null;
+      return route.fulfill({ status: 409, headers, json });
+    }
     if (body.action === "SaveDish" && body.allergens === "NoIngredients") teaSaved = true;
     if (body.action === "SaveDish" && body.productReference !== null) {
       const sku = id(Number.parseInt(String(body.productReference).slice(-12), 16) - 100);
@@ -812,6 +852,29 @@ test("@production one dish edited on the one-page menu: names, price, choices, a
   await fresh.getByLabel("Price ($)").fill("6.50");
   await fresh.getByRole("combobox", { name: "Section", exact: true }).selectOption("SOUPS-TEST");
   await fresh.getByRole("radiogroup", { name: "Wheat 小麦" }).getByLabel("Contains").check();
+  // WP-2423 (v15 2026-11-05): a choice group the save cannot keep is named with where it is
+  // fixed, never the menu's section rule.
+  oneStoreRefusal = {
+    error: "ChoiceGroup",
+    part: "Product",
+    problem: choiceGroupProblem("Hot and sour soup (TEST)"),
+  };
+  await fresh.getByRole("button", { name: "Save dish" }).click();
+  await expect(fresh.getByRole("alert")).toContainText(
+    "Hot and sour soup (TEST): Serve (TEST) has no choice guests start with that is still offered. Under Option sets, open Serve (TEST) and offer that choice again, or let another choice be the default. Then save the dish.",
+  );
+  await expect(fresh.getByText("Each section needs a distinct name", { exact: false })).toHaveCount(
+    0,
+  );
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await fresh.getByRole("alert").scrollIntoViewIfNeeded();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({ path: `test-results/one-store-choice-group-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   // WP-2423 item 10: the server fails on a new dish: nothing is claimed about what was saved, the
   // form stays, and saving again is the same operation, so it can't make a second dish.
   dishSaveStops = true;

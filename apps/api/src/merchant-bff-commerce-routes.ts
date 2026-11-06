@@ -405,6 +405,7 @@ export function installMerchantCommerceRoutes(
     PhotoTooSmall: 400,
     PhotoUnreadable: 400,
     PhotoStorageUnavailable: 503,
+    ChoiceGroup: 409,
   } as const;
   const productFailure = (response: express.Response, error: unknown) => {
     noteFailure(response, error);
@@ -412,7 +413,10 @@ export function installMerchantCommerceRoutes(
       failed(response, error);
       return;
     }
-    response.status(productStatus[error.code]).json({ error: error.code });
+    // WP-2423: a choice group that cannot be kept names the dish and the group (names only).
+    response
+      .status(productStatus[error.code])
+      .json(error.problem ? { error: error.code, problem: error.problem } : { error: error.code });
   };
   router.post("/commerce/products/query", sameOriginMutation(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

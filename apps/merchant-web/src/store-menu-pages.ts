@@ -45,6 +45,12 @@ export type MenuErrorCode =
   /** A dish in the combo has a real recipe (combos offer dishes with declared allergens). */
   | "DishHasRecipe"
   /**
+   * WP-2423 (v15 2026-11-05): saving a dish refused a choice group that does not fit its option
+   * set as it is now (no offered default, or a choice removed since the editor opened); the
+   * problem names the dish and the group.
+   */
+  | "ChoiceGroup"
+  /**
    * v15 2026-10-29: a one-page menu save stopped at a later step (another page's command refused
    * it); what was saved before stays, and saving again goes on from there.
    */
@@ -143,8 +149,46 @@ export function menuReviewProblemFixHref(problem: MenuReviewProblem | null): str
  * its last part, and anything else gets the general sentence (the log has the cause). That sentence
  * promises nothing about guests: a stop at the last step leaves new prices already showing.
  */
-function menuStopText(reason: string | undefined, item: string): string {
+function menuStopText(
+  reason: string | undefined,
+  item: string,
+  group: string | null,
+  saving: boolean,
+): string {
   switch (reason?.split(":").at(-1)) {
+    case "ChoiceGroupDefault":
+      // Only Option sets can fix it: saving the dish again would be refused the same way.
+      return group === null
+        ? saving
+          ? t(
+              "{item}: one of its choice groups has no choice guests start with that is still offered. Under Option sets, offer that choice again, or let another choice be the default. Then save the dish.",
+              { item },
+            )
+          : t(
+              "{item}: one of its choice groups has no choice guests start with that is still offered. Under Option sets, offer that choice again, or let another choice be the default. Then list the menu again. Nothing was listed.",
+              { item },
+            )
+        : saving
+          ? t(
+              "{item}: {group} has no choice guests start with that is still offered. Under Option sets, open {group} and offer that choice again, or let another choice be the default. Then save the dish.",
+              { item, group },
+            )
+          : t(
+              "{item}: {group} has no choice guests start with that is still offered. Under Option sets, open {group} and offer that choice again, or let another choice be the default. Then list the menu again. Nothing was listed.",
+              { item, group },
+            );
+    case "ChoiceGroupOption":
+      return group === null
+        ? t(
+            "{item}: a choice in one of its groups was removed. Close the dish, open it again and save it.",
+            {
+              item,
+            },
+          )
+        : t("{item}: a choice in {group} was removed. Close the dish, open it again and save it.", {
+            item,
+            group,
+          });
     case "NoAllergenList":
       // A new merchant's first listing: the one step this page can name for them.
       return t(
@@ -171,18 +215,26 @@ function menuStopText(reason: string | undefined, item: string): string {
         "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.",
       );
     case "ChoiceGroup":
-      return t(
-        "{item}: one of its choices no longer fits its choice group (an option was removed, or a default is no longer offered). Open the dish, check its choices, save it, then list the menu again.",
-        { item: item },
-      );
+      return group === null
+        ? t(
+            "{item}: one of its choices no longer fits its choice group (an option was removed, or a default is no longer offered). Open the dish, check its choices, save it, then list the menu again.",
+            { item: item },
+          )
+        : t(
+            "{item}: its choices in {group} changed. Open the dish, check its choices, save it, then list the menu again.",
+            { item, group },
+          );
     default:
       return t(
         "The menu could not be listed this time. Try again in a minute; if it stops again, tell BOP support what time it happened.",
       );
   }
 }
-/** The blocked review in staff words: which item, size, option or ingredient, and where to fix it. */
-export function menuReviewProblemText(problem: MenuReviewProblem): string {
+/**
+ * The blocked review in staff words: which item, size, option or ingredient, and where to fix it.
+ * `saving`: the refusal came from saving a dish (its next step is saving it), not from listing.
+ */
+export function menuReviewProblemText(problem: MenuReviewProblem, saving = false): string {
   const item =
     problem.productName === null
       ? t("An item on this menu")
@@ -213,7 +265,7 @@ export function menuReviewProblemText(problem: MenuReviewProblem): string {
         { item: item, store: problem.storeName ?? t("one of this menu's Stores") },
       );
     case "Stopped":
-      return menuStopText(problem.reason, item);
+      return menuStopText(problem.reason, item, problem.optionName, saving);
     case "Tax":
       return problem.storeName
         ? t(
@@ -924,6 +976,7 @@ const codes = new Set<MenuErrorCode>([
   "DishUnavailable",
   "DishAllergensMissing",
   "DishHasRecipe",
+  "ChoiceGroup",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {
@@ -955,6 +1008,7 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
               ? "StoppedPartWay"
               : "Unavailable",
         code === "ReviewBlocked" ||
+          code === "ChoiceGroup" ||
           code === "OptionRecipeMissing" ||
           code === "TaxNotCovered" ||
           code === "KitchenNotReady"

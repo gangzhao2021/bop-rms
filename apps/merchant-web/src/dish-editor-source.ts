@@ -51,6 +51,14 @@ export function dishEditorSource(
   const usual = new Map<string, string>();
   for (const [option, minor] of Object.entries(object(optionView?.usual) ?? {}))
     if (typeof minor === "string") usual.set(option, minorToDollars(minor));
+  // WP-2423 (v15 2026-11-05): a choice removed (archived) from its group since the dish was
+  // saved is not sent back: saving the dish drops it instead of being refused for it.
+  const current = new Map(
+    (Array.isArray(view.optionSetChoices) ? view.optionSetChoices : []).map(
+      (g: ProductOptionSetChoice) =>
+        [g.optionSetReference, new Set(g.options.map((o) => o.optionReference))] as const,
+    ),
+  );
   const chosen = new Map<string, Map<string, string>>();
   if (product !== null)
     for (const set of (product.optionSets ?? []) as {
@@ -59,7 +67,11 @@ export function dishEditorSource(
     }[])
       chosen.set(
         set.optionSetReference,
-        new Map(set.enabledOptionReferences.map((o) => [o, prices.get(o) ?? "0.00"])),
+        new Map(
+          set.enabledOptionReferences
+            .filter((o) => current.get(set.optionSetReference)?.has(o) ?? true)
+            .map((o) => [o, prices.get(o) ?? "0.00"]),
+        ),
       );
   const presentation = object(product?.presentation);
   return {
