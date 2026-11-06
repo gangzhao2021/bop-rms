@@ -116,6 +116,27 @@ it("DEC-BRAND-MULTI-STORE-ONE-INSTALLATION 3d: the TEST Store's files name it, w
     }),
   ).toEqual(derived);
 });
+// v15 2026-11-06 (points-sweep): the dining-exception worker (points sweep, payment finality)
+// reads the Store's money under the Store's own Provider account, as its business worker and guest
+// runtime do; never the installation Store's, whose ledger never holds this Store's captures.
+it("the TEST Store's dining-exception worker names the Store's own Provider account", () => {
+  const installationAccount = "0190fa60-0000-7000-8000-000000000020";
+  const pilot = files();
+  // As on v15: one account in the guest runtime, business and dining-exception workers; none in
+  // the merchant runtime.
+  pilot["business-worker.json"].providerAccountReference = installationAccount;
+  pilot["dining-exception-worker.json"].providerAccountReference = installationAccount;
+  const derived = deriveInternalTestStoreFiles(pilot, {
+    storeReference: store2,
+    operationReference: operation,
+    stockSiteReference: site2,
+  });
+  const own = derived["business-worker.json"].providerAccountReference;
+  expect(own).not.toBe(installationAccount);
+  expect(derived["customer-runtime.json"].providerAccountReference).toBe(own);
+  expect(derived["dining-exception-worker.json"].providerAccountReference).toBe(own);
+  expect(JSON.stringify(derived)).not.toContain(installationAccount);
+});
 it("refuses outside InternalTest or for the installation's own Store", () => {
   const pilot = files();
   pilot["installation.json"].environment = "Pilot";

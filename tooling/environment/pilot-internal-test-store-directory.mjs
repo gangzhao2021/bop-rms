@@ -58,6 +58,8 @@ export const storeOwnReferenceFields = Object.freeze({
     "providerAccountReference",
   ],
   "business-worker.json": ["providerAccountReference"],
+  // v15 2026-11-06: its points sweep and payment finality read the Store's own ledger.
+  "dining-exception-worker.json": ["providerAccountReference"],
   "internal-test-receipt-template.json": ["familyReference", "versionReference"],
 });
 /**
