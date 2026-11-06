@@ -326,6 +326,14 @@ export function createMerchantRecipes(options: {
               name(entry.localizedNames, entry.code),
             ]),
           );
+          // WP-2423 (M75): each name's registry code, in the same order, so staff screens name
+          // it in the chosen language.
+          const allergenCode = new Map(
+            (registry?.entries ?? []).map((entry) => [entry.allergenReference, entry.code]),
+          );
+          const codesOf = (
+            allergens: readonly { readonly allergenReference: string }[],
+          ): readonly string[] => allergens.map((a) => allergenCode.get(a.allergenReference) ?? "");
           /** "Declared" (with allergens, possibly none), "Outdated" (older item version) or "Missing". */
           const allergenStatus = (item: (typeof items)[number]) => {
             const d = declarationOf(item);
@@ -338,6 +346,10 @@ export function createMerchantRecipes(options: {
                 mayContain: d.allergens
                   .filter((a) => a.classification === "CrossContactPossible")
                   .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference),
+                containsCodes: codesOf(d.allergens.filter((a) => a.classification === "Contains")),
+                mayContainCodes: codesOf(
+                  d.allergens.filter((a) => a.classification === "CrossContactPossible"),
+                ),
               };
             return {
               status: declarations.has(item.itemReference)
@@ -464,10 +476,14 @@ export function createMerchantRecipes(options: {
                   const classification = (allergen: string) =>
                     declaration?.allergens.find((a) => a.allergenReference === allergen)
                       ?.classification ?? "Contains";
+                  const of = (kind: "Contains" | "CrossContactPossible") =>
+                    requirement.allergens.filter(
+                      (a) => classification(a.allergenReference) === kind,
+                    );
                   const names = (kind: "Contains" | "CrossContactPossible") =>
-                    requirement.allergens
-                      .filter((a) => classification(a.allergenReference) === kind)
-                      .map((a) => allergenName.get(a.allergenReference) ?? a.allergenReference);
+                    of(kind).map(
+                      (a) => allergenName.get(a.allergenReference) ?? a.allergenReference,
+                    );
                   return {
                     line: index + 1,
                     kind: requirement.sourceKind,
@@ -475,6 +491,8 @@ export function createMerchantRecipes(options: {
                     current: declaration !== undefined,
                     contains: names("Contains"),
                     mayContain: names("CrossContactPossible"),
+                    containsCodes: codesOf(of("Contains")),
+                    mayContainCodes: codesOf(of("CrossContactPossible")),
                   };
                 }),
                 authorLabel: label(detail.authorReference),

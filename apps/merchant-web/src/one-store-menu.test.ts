@@ -10,6 +10,7 @@ import {
 } from "./one-store-menu.js";
 import { moveTo } from "./reorder.js";
 import { allergenSummary } from "./dish-allergens.js";
+import { setLanguageForTest, t } from "./i18n/i18n.js";
 import type { MenuSectionRow } from "./one-store-menu.js";
 import type { MenuBuilderView } from "./store-menu-pages.js";
 import type { AvailabilityItem } from "./store-availability-page.js";
@@ -217,6 +218,35 @@ describe("WP-2423 item 8 ⑥ one-page menu", () => {
         row.dishes.map((d) => d.name),
       ),
     ).toEqual(["Siu mai (TEST)", "Dan dan noodles (TEST)"]);
+  });
+
+  it("WP-2423 (M75): names a dish's allergens in Chinese from the registry code, joined with 、", () => {
+    const rows = menuRows(view(), stock);
+    // The test registry names allergens in English only (as CA_PRIORITY_TEST does).
+    const choices = [
+      { allergenReference: id(90), code: "CRUSTACEAN_MOLLUSC", name: "Crustaceans", nameZh: "" },
+      { allergenReference: id(91), code: "SOY", name: "Soy", nameZh: "" },
+    ];
+    const harGow = rows[0]?.dishes[0];
+    const bothContain = harGow && {
+      ...harGow,
+      allergens: {
+        ...harGow.allergens,
+        declared: harGow.allergens.declared.map((a) => ({
+          ...a,
+          classification: "Contains" as const,
+        })),
+      },
+    };
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(bothContain && allergenSummary(bothContain, choices)).toBe(
+        t("Contains {list}", { list: "甲壳类和软体类海鲜、大豆" }),
+      );
+    } finally {
+      setLanguageForTest("en");
+    }
+    expect(bothContain && allergenSummary(bothContain, choices)).toBe("Contains Crustaceans, Soy");
   });
 
   it("takes the server's listing step: listed stays listed whatever version ids the view shows", () => {

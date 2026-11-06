@@ -1,4 +1,4 @@
-import { listSeparator, t } from "./i18n/i18n.js";
+import { allergenName, listSeparator, t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
 /** WP-2423 / DEC-RECIPE-AUTHORING: RECIPE-LIST / RECIPE-EDITOR view contract and same-origin client. */
 export type RecipeErrorCode =
@@ -90,6 +90,9 @@ export interface IngredientAllergenStatus {
   readonly status: "Declared" | "Outdated" | "Missing";
   readonly contains: readonly string[];
   readonly mayContain: readonly string[];
+  /** WP-2423 (M75): each name's registry code, same order (absent from an older server). */
+  readonly containsCodes?: readonly string[];
+  readonly mayContainCodes?: readonly string[];
 }
 /** What a saved version declares for one ingredient line. */
 export interface IngredientLineAllergens {
@@ -99,11 +102,30 @@ export interface IngredientLineAllergens {
   readonly current: boolean;
   readonly contains: readonly string[];
   readonly mayContain: readonly string[];
+  readonly containsCodes?: readonly string[];
+  readonly mayContainCodes?: readonly string[];
 }
-export function allergenText(value: {
+/** WP-2423 (M75): the names in the chosen language, from each name's registry code. */
+export function translatedAllergens(value: {
   readonly contains: readonly string[];
   readonly mayContain: readonly string[];
+  readonly containsCodes?: readonly string[];
+  readonly mayContainCodes?: readonly string[];
+}): { readonly contains: readonly string[]; readonly mayContain: readonly string[] } {
+  const named = (names: readonly string[], codes: readonly string[] | undefined) =>
+    names.map((name, index) => allergenName(codes?.[index] ?? "", name));
+  return {
+    contains: named(value.contains, value.containsCodes),
+    mayContain: named(value.mayContain, value.mayContainCodes),
+  };
+}
+export function allergenText(input: {
+  readonly contains: readonly string[];
+  readonly mayContain: readonly string[];
+  readonly containsCodes?: readonly string[];
+  readonly mayContainCodes?: readonly string[];
 }): string {
+  const value = translatedAllergens(input);
   if (!value.contains.length && !value.mayContain.length) return t("No priority allergens");
   return [
     value.contains.length

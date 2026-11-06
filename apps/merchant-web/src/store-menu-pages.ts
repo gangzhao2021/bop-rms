@@ -443,6 +443,8 @@ export interface DishAllergens {
 }
 export interface AllergenChoice {
   readonly allergenReference: string;
+  /** WP-2423 (M75): the registry code ("EGG"); absent from an older server. */
+  readonly code?: string;
   readonly name: string;
   readonly nameZh: string;
 }

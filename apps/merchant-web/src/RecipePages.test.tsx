@@ -100,3 +100,25 @@ describe("WP-2423 recipe authoring page helpers", () => {
     expect(html).toContain("Loading recipes");
   });
 });
+
+it("WP-2423 (M75): names a recipe's allergens in Chinese from their registry codes", async () => {
+  const { allergenText } = await import("./recipe-pages.js");
+  const { setLanguageForTest } = await import("./i18n/i18n.js");
+  const line = {
+    contains: ["Egg", "Wheat"],
+    mayContain: ["Sesame"],
+    containsCodes: ["EGG", "WHEAT_TRITICALE"],
+    mayContainCodes: ["SESAME"],
+  };
+  setLanguageForTest("zh-Hans");
+  try {
+    const text = allergenText(line);
+    expect(text).toContain("蛋、小麦和黑小麦");
+    expect(text).toContain("芝麻");
+    expect(text).not.toMatch(/Egg|Wheat|Sesame/u);
+  } finally {
+    setLanguageForTest("en");
+  }
+  // An older server without codes keeps its names.
+  expect(allergenText({ contains: ["Egg"], mayContain: [] })).toBe("Contains Egg");
+});

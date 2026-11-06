@@ -24,6 +24,7 @@ import {
   type RecipeErrorCode,
   type RecipeListView,
   allergenText,
+  translatedAllergens,
   unitText,
 } from "./recipe-pages.js";
 import { serverProblemText, offlineCheckBeforeRepeatText } from "./failure-words.js";
@@ -638,8 +639,10 @@ function lineAllergens(recipe: RecipeDetail, line: number): string {
 function AllergenSummary({ recipe }: { readonly recipe: RecipeDetail }) {
   const lines = (recipe.ingredientAllergens ?? []).filter((line) => line.kind === "InventoryItem");
   if (!lines.length) return null;
-  const contains = [...new Set(lines.flatMap((line) => line.contains))].sort();
-  const mayContain = [...new Set(lines.flatMap((line) => line.mayContain))]
+  // WP-2423 (M75): named in the chosen language before they are combined.
+  const named = lines.map(translatedAllergens);
+  const contains = [...new Set(named.flatMap((line) => line.contains))].sort();
+  const mayContain = [...new Set(named.flatMap((line) => line.mayContain))]
     .filter((name) => !contains.includes(name))
     .sort();
   const undeclared = lines.filter((line) => !line.declared).length;

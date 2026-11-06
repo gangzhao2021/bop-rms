@@ -952,6 +952,8 @@ export function createMerchantMenus(options: {
       recipeHere,
       choices: (registry?.entries ?? []).map((entry) => ({
         allergenReference: entry.allergenReference,
+        // WP-2423 (M75): the registry code, so staff screens name it in the chosen language.
+        code: entry.code,
         name: name(entry.localizedNames, entry.code),
         nameZh: chineseOf(entry.localizedNames),
       })),

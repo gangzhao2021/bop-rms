@@ -443,6 +443,12 @@
 .one-menu .dish-editor__allergen {
   flex: 1 1 160px;
 }
+/* WP-2423 (M75): the English name under the Chinese one, quieter. */
+.one-menu .dish-editor__allergen-other {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--bop-color-text-muted);
+}
 .one-menu .dish-editor__options {
   display: flex;
   gap: 0 16px;
