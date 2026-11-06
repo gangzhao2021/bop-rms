@@ -190,7 +190,11 @@ async function prove(context) {
       resources,
       installation: {},
       now,
-      settlementExceptions: { count: 0, oldestAgeMs: 0 },
+      // A recent clean settlement answer is reused: this test reads the retrying updates only.
+      settlement: {
+        settlementExceptions: { count: 0, oldestAgeMs: 0 },
+        settlementNotRun: { count: 0, oldestAgeMs: 0 },
+      },
       dependencies: {
         createReconciliationExceptions: () => async () => ({
           items: [],
