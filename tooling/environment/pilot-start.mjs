@@ -61,6 +61,14 @@ const cycleObserved = (value) =>
   Number.isSafeInteger(value.completedCycles) &&
   value.completedCycles > 0 &&
   typeof value.lastCycleCompletedAt === "string";
+/**
+ * v15 2026-11-06 (points-sweep): the member points workload of this process has begun its first
+ * sweep. A sweep that fails is raised by its own attention, never by holding up the start: guests
+ * order, pay and earn without it.
+ */
+const memberPointsStarted = (value) =>
+  (value?.state === "running" || value?.state === "attention_required") &&
+  typeof value.lastCycleStartedAt === "string";
 export async function startPilotRuntime({
   runtimeDirectory = pilotRuntimeDirectory,
   requireBatchCancellation = false,
@@ -133,7 +141,9 @@ export async function startPilotRuntime({
                       ].includes(name) ||
                         [health.reportAgeMs, health.lastCompletionAgeMs].every(
                           (age) => Number.isFinite(age) && age >= 0 && age <= 35000,
-                        ));
+                        )) &&
+                      (name !== "dining-exception-worker" ||
+                        memberPointsStarted(health.workloads?.memberPoints));
               };
       if (!(await observe(probe)))
         return {

@@ -407,7 +407,8 @@ export async function runPilotService(
           : service === "reconciliation-worker"
             ? { service, pid, ...snapshots.reconciliation }
             : service === "dining-exception-worker"
-              ? { service, pid, ...snapshots.diningException }
+              ? // Its recovery's fields as before; each of its workloads (points too) for attention.
+                { service, pid, ...snapshots.diningException, workloads: snapshots }
               : { service, pid, workloads: snapshots };
     }
     // Recheck identity immediately before signalling. Never expose the captured environment.

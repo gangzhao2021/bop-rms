@@ -40,6 +40,7 @@ const COMPONENT_NAMES = Object.freeze({
   reconciliation: "payment checks",
   dailySettlement: "day-end settlement",
   diningException: "table follow-ups",
+  memberPoints: "member points after refunds and expiry",
   workload: "background work",
 });
 const DISK_NAMES = Object.freeze({

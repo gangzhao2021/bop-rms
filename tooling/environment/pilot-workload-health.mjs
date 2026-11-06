@@ -199,6 +199,7 @@ export function createPilotWorkloadHealthObserver(directory, component) {
       "reconciliation-worker",
       "daily-settlement-worker",
       "dining-exception-worker",
+      "dining-exception-member-points",
     ].includes(component)
   )
     return fail();
@@ -250,7 +251,11 @@ export function pilotHealthComponents(
   { requireBatchCancellation = false, requireCompensation = false } = {},
 ) {
   if (service === "dining-exception-worker")
-    return Object.freeze({ diningException: "dining-exception-worker.health.json" });
+    return Object.freeze({
+      diningException: "dining-exception-worker.health.json",
+      // v15 2026-11-06 (points-sweep): the member points sweep, its own supervised workload.
+      memberPoints: "dining-exception-member-points.health.json",
+    });
   if (service === "daily-settlement-worker")
     return Object.freeze({ dailySettlement: "daily-settlement-worker.health.json" });
   if (service === "reconciliation-worker")

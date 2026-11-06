@@ -117,6 +117,14 @@ it("reports alert-worthy workloads of a running worker without restarting it", a
       };
     }
     if (name === "kitchen-queue-worker") throw Error("PILOT_PROCESS_UNAVAILABLE");
+    // v15 2026-11-06 (points-sweep): its recovery's fields, and each of its workloads.
+    if (name === "dining-exception-worker")
+      return {
+        service: name,
+        pid: 10,
+        attention: false,
+        workloads: { diningException: { attention: false }, memberPoints: { attention: true } },
+      };
     return { service: name, pid: 10, attention: name === "reconciliation-worker" };
   });
   const workloadHealth = vi.fn(async (name) =>
@@ -140,6 +148,9 @@ it("reports alert-worthy workloads of a running worker without restarting it", a
     health: "unavailable",
   });
   expect(result.find((r) => r.service === "reconciliation-worker").attention).toEqual(["workload"]);
+  expect(result.find((r) => r.service === "dining-exception-worker").attention).toEqual([
+    "memberPoints",
+  ]);
   expect(result.find((r) => r.service === "api")).toEqual({
     service: "api",
     state: "running",

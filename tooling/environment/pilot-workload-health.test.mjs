@@ -8,6 +8,7 @@ import {
   createPilotKitchenHealthObserver,
   createPilotWorkloadHealthObserver,
   pilotHealthComponents,
+  readHostedStoreHealth,
 } from "./pilot-workload-health.mjs";
 const identity = { pid: 123, started: "456" };
 const at = "2026-09-20T12:00:00.000Z";
@@ -329,4 +330,54 @@ it("logs retried failures of a workload without a health file, once per failed c
       sqlState: "40P01",
     }),
   ]);
+});
+
+// v15 2026-11-06 (points-sweep): the dining-exception worker's points sweep has its own health; a
+// Store whose sweep needs a person is reported so, though its recovery is healthy.
+it("reads a Store's dining-exception worker with its member points workload, and raises a failing sweep", async () => {
+  expect(pilotHealthComponents("dining-exception-worker")).toEqual({
+    diningException: "dining-exception-worker.health.json",
+    memberPoints: "dining-exception-member-points.health.json",
+  });
+  const now = new Date().toISOString();
+  const record = (state, failures) => ({
+    pid: 77,
+    started: "900",
+    observedAt: now,
+    snapshot: {
+      state,
+      cycleInFlight: false,
+      completedCycles: 1,
+      lastCycleStartedAt: now,
+      lastCycleCompletedAt: now,
+      lastCycleFailure:
+        failures === 0
+          ? null
+          : {
+              occurredAt: now,
+              category: "Unclassified",
+              code: "MEMBER_POINTS_LEDGER_MISMATCH",
+              sqlState: null,
+            },
+      consecutiveFailures: failures,
+      failingSince: failures === 0 ? null : now,
+    },
+  });
+  const files = {
+    "/proc/77/stat":
+      "77 (node) S " + Array.from({ length: 19 }, (_, i) => (i === 18 ? "900" : "0")).join(" "),
+    "/s/dining-exception-worker.health.json": JSON.stringify(record("running", 0)),
+    "/s/dining-exception-member-points.health.json": JSON.stringify(
+      record("attention_required", 1),
+    ),
+  };
+  const read = async (file) => {
+    if (!Object.hasOwn(files, file)) throw Object.assign(new Error("absent"), { code: "ENOENT" });
+    return files[file];
+  };
+  expect(await readHostedStoreHealth("/s", "dining-exception-worker", 77, read)).toEqual({
+    attention: ["memberPoints"],
+  });
+  files["/s/dining-exception-member-points.health.json"] = JSON.stringify(record("running", 0));
+  expect(await readHostedStoreHealth("/s", "dining-exception-worker", 77, read)).toEqual({});
 });

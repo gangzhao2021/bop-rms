@@ -6,6 +6,7 @@ import { loadPilotInstallation } from "./pilot-installation.mjs";
 import { createBackgroundPilotResources } from "./pilot-configured-resources.mjs";
 import process from "node:process";
 import { startWorkerRuntime } from "../../apps/worker/dist/index.js";
+import { createCompositeWorkerWorkload } from "../../apps/worker/dist/composite-workload.js";
 import {
   createOutboxWorkload,
   supervisedCycleFailures,
@@ -15,6 +16,81 @@ import { createPilotWorkloadHealthObserver } from "./pilot-workload-health.mjs";
 import { reportUnexpected } from "./pilot-unexpected.mjs";
 import { createInternalMemberSweep } from "./pilot-member.mjs";
 import { memberPointsSweepIntervalMs } from "../../apps/api/dist/member-points-sweep.js";
+/** The ledger's agreement checks: a disagreement needs a person (wrong account or a missing fact). */
+const LEDGER_DISAGREEMENTS = new Set([
+  "OnlineCapturesDisagree",
+  "OnlineRefundWithoutCapture",
+  "TableRefundWithoutSettlement",
+]);
+const ledgerRuleOf = (error) => {
+  let at = error;
+  for (let depth = 0; depth < 8 && at !== null && typeof at === "object"; depth++) {
+    if (typeof at.rule === "string" && LEDGER_DISAGREEMENTS.has(at.rule)) return at.rule;
+    at = at.cause;
+  }
+  return null;
+};
+
+/**
+ * WP-2423 取舍 18, v15 2026-11-06 (points-sweep): points follow refunds and expire after notice, as
+ * the dining-exception worker's second supervised workload, with its own health file. A failed sweep
+ * is retried and shows in that health (never hidden in a sibling's success): a lost connection is
+ * retried every minute and raised once it lasts two minutes; a ledger that disagrees with itself
+ * (MEMBER_POINTS_LEDGER_MISMATCH) needs a person at once and is retried every five minutes.
+ */
+export function createMemberPointsWorkload({
+  directory,
+  resources,
+  providerAccountReference,
+  createMemberSweep = createInternalMemberSweep,
+  onSnapshot,
+  now = Date.now,
+}) {
+  const store = /(?:^|\/)(stores\/[^/]+)$/u.exec(directory)?.[1];
+  let sweep = null;
+  let sweptAt = null;
+  const loop = createOutboxWorkload({
+    pollIntervalMs: 60000,
+    drainDeadlineMs: 25000,
+    supervision: supervisedCycleFailures,
+    onSnapshot,
+    dispatcher: {
+      runOnce: async () => {
+        if (resources.publicProfile === undefined) return 0;
+        if (sweptAt !== null && now() - sweptAt < memberPointsSweepIntervalMs) return 0;
+        const startedAt = now();
+        let changed;
+        try {
+          sweep ??= await createMemberSweep({ directory, resources, providerAccountReference });
+          changed = await sweep.settlePoints();
+          await sweep.expirePoints();
+        } catch (error) {
+          reportUnexpected(
+            "MEMBER_POINTS_SWEEP_UNAVAILABLE",
+            error,
+            store === undefined ? {} : { store },
+          );
+          const rule = ledgerRuleOf(error);
+          if (rule === null) throw error;
+          throw Object.assign(new Error("MEMBER_POINTS_LEDGER_MISMATCH", { cause: error }), {
+            rule,
+          });
+        }
+        sweptAt = startedAt;
+        return Number.isSafeInteger(changed) && changed >= 0 ? changed : 0;
+      },
+      stop: async () => "drained",
+    },
+  });
+  // Its health file exists from the start, before its first cycle (the health reads need it).
+  try {
+    onSnapshot?.(loop.snapshot());
+  } catch {
+    /* Diagnostics must not change the workload. */
+  }
+  return loop;
+}
+
 export async function startPilotDiningExceptionWorker({
   directory,
   createResources,
@@ -28,25 +104,7 @@ export async function startPilotDiningExceptionWorker({
   const close = () => (closing ??= Promise.resolve().then(() => resources.close()));
   try {
     const recover = createRecovery({ resources, providerAccountReference });
-    // WP-2423 取舍 18: points follow refunds and expire after notice, on this quiet worker.
-    let memberSweep = null;
-    let memberSweptAt = 0;
-    const sweepMembers = async () => {
-      if (
-        resources.publicProfile === undefined ||
-        Date.now() - memberSweptAt < memberPointsSweepIntervalMs
-      )
-        return;
-      memberSweptAt = Date.now();
-      try {
-        memberSweep ??= await createMemberSweep({ directory, resources, providerAccountReference });
-        await memberSweep.settlePoints();
-        await memberSweep.expirePoints();
-      } catch (error) {
-        reportUnexpected("MEMBER_POINTS_SWEEP_UNAVAILABLE", error);
-      }
-    };
-    const loop = createOutboxWorkload({
+    const recovery = createOutboxWorkload({
       pollIntervalMs: 5000,
       drainDeadlineMs: 25000,
       // WP-2423 v15: supervised like the other pilot workloads — a failing cycle is retried
@@ -55,7 +113,6 @@ export async function startPilotDiningExceptionWorker({
       onSnapshot: createPilotWorkloadHealthObserver(directory, "dining-exception-worker"),
       dispatcher: {
         runOnce: async () => {
-          await sweepMembers();
           const result = await recover();
           if (
             !result ||
@@ -70,13 +127,22 @@ export async function startPilotDiningExceptionWorker({
         stop: async () => "drained",
       },
     });
+    const memberPoints = createMemberPointsWorkload({
+      directory,
+      resources,
+      providerAccountReference,
+      createMemberSweep,
+      onSnapshot: createPilotWorkloadHealthObserver(directory, "dining-exception-member-points"),
+    });
+    // One workload for the runtime (the Stores' shared process keeps exactly one per worker).
+    const group = createCompositeWorkerWorkload([recovery, memberPoints]);
     await startRuntime({
       workload: {
-        completion: loop.completion,
-        start: () => loop.start(),
+        completion: group.completion,
+        start: () => group.start(),
         stop: async () => {
           try {
-            await loop.stop();
+            await group.stop();
           } finally {
             await close();
           }

@@ -473,6 +473,22 @@ it.each([
     reportAgeMs: 35001,
     lastCompletionAgeMs: 0,
   },
+  // v15 2026-11-06 (points-sweep): its member points workload has not begun.
+  {
+    state: "running",
+    completedCycles: 1,
+    lastCycleCompletedAt: "2026-09-21T00:00:00.000Z",
+    reportAgeMs: 0,
+    lastCompletionAgeMs: 0,
+  },
+  {
+    state: "running",
+    completedCycles: 1,
+    lastCycleCompletedAt: "2026-09-21T00:00:00.000Z",
+    reportAgeMs: 0,
+    lastCompletionAgeMs: 0,
+    workloads: { memberPoints: { state: "idle", lastCycleStartedAt: null } },
+  },
 ])("requires fresh isolated dining-exception worker when explicitly selected", async (health) => {
   const f = fixture(),
     original = f.service.getMockImplementation();
@@ -501,6 +517,13 @@ it("accepts healthy isolated dining-exception without changing default startup",
                 lastCycleCompletedAt: "2026-09-21T00:00:00.000Z",
                 reportAgeMs: 0,
                 lastCompletionAgeMs: 0,
+                // A sweep that needs a person still lets the Store start: it is raised on its own.
+                workloads: {
+                  memberPoints: {
+                    state: "attention_required",
+                    lastCycleStartedAt: "2026-09-21T00:00:00.000Z",
+                  },
+                },
               }
             : {}),
         }

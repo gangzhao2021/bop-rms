@@ -5,6 +5,7 @@ import {
   ALERT_KEYS,
   advanceAlertState,
   buildAlertBoard,
+  describeAttention,
   emptyAlertState,
   evaluateAlertConditions,
   evaluateStoreConditions,
@@ -1583,4 +1584,11 @@ describe("a Store's own conditions", () => {
     expect(none.subject).toBe("Main St: URGENT - Order or payment updates are stuck");
     expect(none.text).toMatch(/^Problem \(urgent\)/u);
   });
+});
+
+// v15 2026-11-06 (points-sweep): the operator reads which part of table service needs a person.
+it("names the member points sweep of the table follow-ups in plain words", () => {
+  expect(describeAttention("dining-exception-worker:memberPoints")).toBe(
+    "Table service follow-ups (member points after refunds and expiry)",
+  );
 });
