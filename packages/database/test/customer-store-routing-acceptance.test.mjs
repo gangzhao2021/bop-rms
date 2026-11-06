@@ -33,16 +33,16 @@ it("guest requests reach their own Store's customer API from server-side records
       const createdAt = (
         await admin.query("SELECT date_trunc('milliseconds',now()) at")
       ).rows[0].at.toISOString();
-      const seed = async (n, store, publicStore) => {
-        const credential = credentials.generateCredential("Session");
+      const seed = async (n, store, publicStore, key = credentials) => {
+        const credential = key.generateCredential("Session");
         await admin.query(
           "INSERT INTO bop_identity.guest_session (guest_session_id,session_selector_hash,csrf_selector_hash,operation_id,operation_intent_hash,brand_id,store_id,public_store_id,public_table_id,channel,locale,qr_id,qr_revocation_version,dining_state,status,created_at,last_seen_at,idle_expires_at,absolute_expires_at,version) VALUES ($1,decode($2,'hex'),decode($3,'hex'),$4,decode($5,'hex'),$6,$7,$8,NULL,'Pickup','en-CA',$9,1,'ContextOnly','Active',$10,$10,$10::timestamptz + interval '4 hours',$10::timestamptz + interval '24 hours',1)",
           [
             id(100 + n),
-            credentials.hashCredential("Session", credential),
-            credentials.hashCredential("Csrf", credentials.generateCredential("Csrf")),
+            key.hashCredential("Session", credential),
+            key.hashCredential("Csrf", key.generateCredential("Csrf")),
             id(200 + n),
-            credentials.hashOperationIntent("seed" + n),
+            key.hashOperationIntent("seed" + n),
             brand,
             store,
             publicStore,
@@ -124,13 +124,110 @@ it("guest requests reach their own Store's customer API from server-side records
           body: Buffer.from(JSON.stringify({ qrToken: token(publicStoreReference) })),
         });
       assert.equal(await entry(publicTwo), 4301);
-      assert.equal(await entry(id(99)), 4300);
+      // M02: a well-formed reference to a Store this installation doesn't serve now is an outage
+      // to retry (503 CUSTOMER_STORE_UNAVAILABLE), never another Store that would refuse the code;
+      // a code naming no well-formed reference still goes to the first Store, which refuses it.
+      await assert.rejects(entry(id(99)), { message: "CUSTOMER_STORE_UNAVAILABLE" });
+      assert.equal(await entry("not-a-store"), 4300);
+      assert.equal(
+        await portOf({
+          method: "POST",
+          url: "/bff/customer/entry",
+          body: Buffer.from(JSON.stringify({ qrToken: "garbage" })),
+        }),
+        4300,
+      );
       assert.equal(
         await portOf({ method: "GET", url: "/api/v1/public/stores/" + publicTwo + "/menu" }),
         4301,
       );
       assert.equal(
         await portOf({ method: "GET", url: "/api/v1/public/stores/" + id(98) + "/menu" }),
+        4300,
+      );
+      // M02, two Tenants (each its own guest key), as the pilot role: a replay of the waiting scan
+      // (`{resume:true}`) goes to the Store its `__Secure-bop-scan` cookie names; with no cookie,
+      // or a malformed one, to no Store; naming a Store not served now, a retryable outage.
+      const keyTwo = createGuestSessionCredentialProvider(randomBytes(32));
+      const guestThree = await seed(3, storeTwo, publicTwo, keyTwo);
+      const tenants = createCustomerStoreRouting({
+        stores: [
+          { ...store(storeOne, publicOne, 4300), tenantReference: id(21) },
+          {
+            ...store(storeTwo, publicTwo, 4301),
+            tenantReference: id(22),
+            hashSession: (credential) => keyTwo.hashCredential("Session", credential),
+          },
+        ],
+      });
+      const resume = (scan) =>
+        tenants({
+          method: "POST",
+          url: "/bff/customer/entry",
+          cookie: scan === undefined ? "theme=x" : "theme=x; __Secure-bop-scan=" + scan,
+          body: Buffer.from(JSON.stringify({ resume: true })),
+        });
+      assert.equal((await resume(token(publicTwo))).port, 4301);
+      assert.equal((await resume(token(publicOne))).port, 4300);
+      assert.equal(await resume(undefined), null);
+      assert.equal(await resume("garbage"), null);
+      await assert.rejects(resume(token(id(99))), { message: "CUSTOMER_STORE_UNAVAILABLE" });
+      // A Session at Tenant B reaches B (found in B's own records under B's key), and a Session
+      // no Store holds reaches no Store: never the primary Store.
+      assert.equal(
+        (
+          await tenants({
+            method: "GET",
+            url: "/api/v1/dine-in/session",
+            cookie: cookie(guestThree),
+          })
+        ).port,
+        4301,
+      );
+      assert.equal(
+        await tenants({
+          method: "GET",
+          url: "/bff/customer/cart",
+          cookie: cookie(keyTwo.generateCredential("Session")),
+        }),
+        null,
+      );
+      assert.equal(
+        (await tenants({ method: "GET", url: "/bff/customer/cart", cookie: cookie(guestOne) }))
+          .port,
+        4300,
+      );
+      // stores.json names two Stores but only the first started: a scan or replay of the other is
+      // a retryable outage, the first Store's own scans still reach it.
+      const degraded = createCustomerStoreRouting({
+        stores: [store(storeOne, publicOne, 4300)],
+        multiStore: true,
+      });
+      await assert.rejects(
+        degraded({
+          method: "POST",
+          url: "/bff/customer/entry",
+          body: Buffer.from(JSON.stringify({ qrToken: token(publicTwo) })),
+        }),
+        { message: "CUSTOMER_STORE_UNAVAILABLE" },
+      );
+      await assert.rejects(
+        degraded({
+          method: "POST",
+          url: "/bff/customer/entry",
+          cookie: "__Secure-bop-scan=" + token(publicTwo),
+          body: Buffer.from(JSON.stringify({ resume: true })),
+        }),
+        { message: "CUSTOMER_STORE_UNAVAILABLE" },
+      );
+      assert.equal(
+        (
+          await degraded({
+            method: "POST",
+            url: "/bff/customer/entry",
+            body: Buffer.from(JSON.stringify({ qrToken: token(publicOne) })),
+          })
+        ).port,
         4300,
       );
       // A one-Store installation never reads anything.
