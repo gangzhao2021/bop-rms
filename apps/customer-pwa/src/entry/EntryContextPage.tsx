@@ -22,7 +22,11 @@ import {
 } from "../store/store-profile-client.js";
 import { StoreIdentityCard } from "../store/StoreIdentity.js";
 import { nextOpeningText } from "../store/store-hours-text.js";
-import { endSentence } from "../journey/format.js";
+import { endSentence, formatClockTime } from "../journey/format.js";
+import { unpaidPickup } from "../order-status/OrderStatusPage.js";
+import { createHttpOrderStatusClient } from "../order-status/order-status-client.js";
+import type { CustomerOrderStatusClient } from "../order-status/order-status-controller.js";
+import type { OrderStatusView } from "../order-status/types.js";
 import type {
   CustomerEntryClient,
   CustomerEntryEstablishedContext,
@@ -284,18 +288,53 @@ export function EntryContextPage({
   );
 }
 
+/** WP-2423 M18: whether a pickup order on this phone still has to be paid, or was cancelled unpaid. */
+export type CurrentOrderPayment =
+  { readonly kind: "due"; readonly payBy: string } | { readonly kind: "cancelledUnpaid" } | null;
+export function currentOrderPayment(view: unknown): CurrentOrderPayment {
+  if (view === null || typeof view !== "object" || !("order" in view)) return null;
+  const status = view as OrderStatusView;
+  if (status.order.orderType !== "Pickup") return null;
+  if (status.sources?.unpaidCancellation?.cancelledAt) return { kind: "cancelledUnpaid" };
+  const due = unpaidPickup(status);
+  return due === null || due.ended ? null : { kind: "due", payBy: due.payBy };
+}
+
 /** WP-2423 Q10: the customer's order in progress, offered before any new visit starts. */
 export function CurrentOrderView({
   order,
   store,
   onStartNew,
+  orderStatusClient,
+  payment: shownPayment,
 }: Readonly<{
   order: CustomerCurrentOrder;
   store?: CustomerStoreContext | undefined;
   onStartNew?: (() => void) | undefined;
+  /** WP-2423 M18: the order status read used to tell an unpaid pickup (default: the HTTP read). */
+  orderStatusClient?: CustomerOrderStatusClient;
+  /** The payment state already known (tests); otherwise it is read once. */
+  payment?: CurrentOrderPayment;
 }>) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
+  const [readPayment, setReadPayment] = useState<CurrentOrderPayment>(null);
+  const [statusClient] = useState(() => orderStatusClient ?? createHttpOrderStatusClient());
+  useEffect(() => {
+    if (shownPayment !== undefined || order.orderType !== "Pickup") return;
+    let stopped = false;
+    // A failed read keeps the ordinary wording: it never guesses that the order is unpaid.
+    void statusClient
+      .load(order.orderReference)
+      .then((view) => {
+        if (!stopped) setReadPayment(currentOrderPayment(view));
+      })
+      .catch(() => undefined);
+    return () => {
+      stopped = true;
+    };
+  }, [statusClient, order.orderReference, order.orderType, shownPayment]);
+  const payment = shownPayment ?? readPayment;
   return (
     <CustomerPage
       step="entry"
@@ -310,17 +349,28 @@ export function CurrentOrderView({
             {t("Your order")} {order.orderNumber}
           </StateHeading>
           <p>
-            {order.orderType === "DineIn"
-              ? t(
-                  "You ordered at a table from this phone. You can check your order and everything your table ordered.",
-                )
-              : t(
-                  "You placed a pickup order from this phone. Check its status and your pickup code.",
-                )}
+            {payment?.kind === "due"
+              ? t("Not paid yet. Pay by {time}, or it is cancelled and you won’t be charged.", {
+                  time: formatClockTime(payment.payBy),
+                })
+              : payment?.kind === "cancelledUnpaid"
+                ? t("This order was cancelled because it wasn’t paid in time. You weren’t charged.")
+                : order.orderType === "DineIn"
+                  ? t(
+                      "You ordered at a table from this phone. You can check your order and everything your table ordered.",
+                    )
+                  : t(
+                      "You placed a pickup order from this phone. Check its status and your pickup code.",
+                    )}
           </p>
           <div className="shell-actions">
-            <Link className="entry-action" to={`/orders/${order.orderReference}`}>
-              {t("View order")} {order.orderNumber}
+            <Link
+              className={payment?.kind === "cancelledUnpaid" ? undefined : "entry-action"}
+              to={`/orders/${order.orderReference}`}
+            >
+              {payment?.kind === "due"
+                ? t("Finish paying")
+                : t("View order") + " " + order.orderNumber}
             </Link>
             {order.orderType === "DineIn" ? (
               <Link to="/dine-in/session">{t("Your table")}</Link>
@@ -333,7 +383,13 @@ export function CurrentOrderView({
                   "Starting a new order here closes this order on this phone. The store still has it.",
                 )}
               </p>
-              <button className="entry-secondary-action" type="button" onClick={onStartNew}>
+              <button
+                className={
+                  payment?.kind === "cancelledUnpaid" ? "entry-action" : "entry-secondary-action"
+                }
+                type="button"
+                onClick={onStartNew}
+              >
                 {t("Start a new order")}
               </button>
             </>

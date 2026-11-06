@@ -352,6 +352,17 @@ export class CustomerOrderStatusHandler {
                                 refundStatus: sources.storeAcceptance.refundStatus,
                               },
                       }),
+                  // WP-2423 M18 / M118: online payments not paid yet, until when, and whether
+                  // their newest attempt is still open.
+                  ...(sources.paymentsDue === undefined
+                    ? {}
+                    : {
+                        paymentsDue: sources.paymentsDue.map((due) => ({
+                          orderBatchReference: due.orderBatchReference,
+                          payBy: due.payBy,
+                          lastAttempt: due.lastAttempt,
+                        })),
+                      }),
                   // WP-2423 Q10: the Store's published phone and address.
                   ...(sources.storeContact === undefined
                     ? {}

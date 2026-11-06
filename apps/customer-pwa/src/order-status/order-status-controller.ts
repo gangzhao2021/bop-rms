@@ -207,6 +207,9 @@ function parseSources(
     ...(value !== null && typeof value === "object" && Object.hasOwn(value, "refunds")
       ? ["refunds"]
       : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "paymentsDue")
+      ? ["paymentsDue"]
+      : []),
   ]);
   const checkedAt = parseInstant(raw.checkedAt);
   if (Date.parse(checkedAt) < Date.parse(submittedAt)) return invalid();
@@ -555,6 +558,32 @@ function parseSources(
       }),
     );
   }
+  // WP-2423 M18 / M118: online payments not paid yet (absent from an older server, or none).
+  let paymentsDue: OrderStatusSources["paymentsDue"];
+  if (Object.hasOwn(raw, "paymentsDue")) {
+    if (
+      !Array.isArray(raw.paymentsDue) ||
+      raw.paymentsDue.length < 1 ||
+      raw.paymentsDue.length > 100
+    )
+      return invalid();
+    paymentsDue = Object.freeze(
+      raw.paymentsDue.map((value: unknown) => {
+        const entry = exact(value, ["orderBatchReference", "payBy", "lastAttempt"]);
+        const orderBatchReference = parseReference(entry.orderBatchReference);
+        if (
+          !batches.some((batch) => batch.orderBatchReference === orderBatchReference) ||
+          !["Open", "Declined", "NotCompleted"].includes(String(entry.lastAttempt))
+        )
+          return invalid();
+        return Object.freeze({
+          orderBatchReference,
+          payBy: parseInstant(entry.payBy),
+          lastAttempt: entry.lastAttempt as "Open" | "Declined" | "NotCompleted",
+        });
+      }),
+    );
+  }
   // WP-2423 Q26: items of this order the kitchen is remaking; each item at most once.
   let remakes: OrderStatusSources["remakes"];
   if (Object.hasOwn(raw, "remakes")) {
@@ -761,6 +790,7 @@ function parseSources(
     ...(staffCancellations === undefined ? {} : { staffCancellations }),
     ...(itemCancellations === undefined ? {} : { itemCancellations }),
     ...(batchPayments === undefined ? {} : { batchPayments }),
+    ...(paymentsDue === undefined ? {} : { paymentsDue }),
     ...(unpaidCancellations === undefined ? {} : { unpaidCancellations }),
     ...(storeAcceptance === undefined ? {} : { storeAcceptance }),
     // WP-2423 Q16: contact still held (never its value) and the Store's privacy notice.

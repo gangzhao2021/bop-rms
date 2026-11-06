@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
-import { CurrentOrderView, EntryContextView } from "./EntryContextPage.js";
+import { CurrentOrderView, EntryContextView, currentOrderPayment } from "./EntryContextPage.js";
+import { formatClockTime } from "../journey/format.js";
 import type { CustomerEntryEstablishedContext, CustomerEntryScreenState } from "./types.js";
 import { setSettledTable } from "../session/customer-transaction-context.js";
 import { zhHans as zh } from "../i18n/zh-Hans.js";
@@ -332,6 +333,58 @@ describe("WP-2423 Q10 continue the order in progress", () => {
     expect(html).toContain("scan the QR code at your table or at the counter");
     // No "start a new order" action in the page (the header only carries the language switch).
     expect(html.split("<main")[1]).not.toContain("<button");
+  });
+});
+
+describe("WP-2423 M18: an unpaid pickup on the entry page", () => {
+  const order = Object.freeze({
+    orderReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ac",
+    orderNumber: "12",
+    orderType: "Pickup" as const,
+  });
+  const view = (props: Parameters<typeof CurrentOrderView>[0]) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <CurrentOrderView {...props} />
+      </MemoryRouter>,
+    );
+  it("says it isn't paid, until when, and leads to finishing the payment", () => {
+    const html = view({
+      order,
+      onStartNew: vi.fn(),
+      payment: { kind: "due", payBy: "2026-08-11T14:10:00.000Z" },
+    });
+    expect(html).toContain(
+      `Not paid yet. Pay by ${formatClockTime("2026-08-11T14:10:00.000Z")}, or it is cancelled`,
+    );
+    expect(html).toMatch(/class="entry-action" href="\/orders\/[^"]+"[^>]*>Finish paying</u);
+    expect(html).not.toContain("Check its status and your pickup code");
+  });
+  it("says an order cancelled for not being paid wasn't charged, and starting again comes first", () => {
+    const html = view({ order, onStartNew: vi.fn(), payment: { kind: "cancelledUnpaid" } });
+    expect(html).toContain("cancelled because it wasn’t paid in time. You weren’t charged.");
+    expect(html).toContain('class="entry-action" type="button"');
+  });
+  it("reads the order's payment from its status: due, cancelled unpaid, or nothing to say", () => {
+    const status = (sources: object) => ({
+      order: { orderType: "Pickup", canonicalPhase: "Submitted", batches: [] },
+      sources: { checkedAt: "2026-08-11T14:00:00.000Z", kitchen: null, payments: [], ...sources },
+    });
+    const due = [
+      { orderBatchReference: "x", payBy: "2026-08-11T14:10:00.000Z", lastAttempt: "Open" },
+    ];
+    expect(currentOrderPayment(status({ paymentsDue: due }))).toEqual({
+      kind: "due",
+      payBy: "2026-08-11T14:10:00.000Z",
+    });
+    expect(
+      currentOrderPayment(
+        status({ unpaidCancellation: { cancelledAt: "2026-08-11T14:10:00.000Z" } }),
+      ),
+    ).toEqual({ kind: "cancelledUnpaid" });
+    expect(currentOrderPayment(status({}))).toBeNull();
+    // The order received but not yet projected: nothing claimed.
+    expect(currentOrderPayment({ status: "received" })).toBeNull();
   });
 });
 

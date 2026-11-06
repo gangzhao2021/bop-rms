@@ -227,6 +227,28 @@ it("WP-2423 Q12: serializes only the time a pickup was cancelled for an unpaid p
   const open = (await (await f.send()).json()) as typeof body;
   expect(open.status.sources.unpaidCancellation).toBeNull();
 });
+it("WP-2423 M18: serializes an unpaid payment's deadline and newest attempt, nothing else", async () => {
+  const f = await setup();
+  const due = {
+    orderBatchReference: "0198a001-0000-7000-8000-000000000071",
+    payBy: "2026-09-12T12:10:00.000Z",
+    lastAttempt: "Open",
+  };
+  f.read.mockResolvedValue({
+    ...f.result,
+    sources: {
+      checkedAt: "2026-09-12T12:00:00.000Z",
+      kitchen: null,
+      payments: null,
+      paymentsDue: [{ ...due, paymentIntentReference: "private" }],
+    },
+  });
+  const body = (await (await f.send()).json()) as {
+    status: { sources: Record<string, unknown> };
+  };
+  expect(body.status.sources.paymentsDue).toEqual([due]);
+  expect(JSON.stringify(body)).not.toContain("private");
+});
 it("WP-2423 Q6: serializes only customer-safe store cancellations with their refund status", async () => {
   const f = await setup();
   const cancellation = {

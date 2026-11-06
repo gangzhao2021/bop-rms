@@ -14,7 +14,9 @@ import {
   createPostgresCardMachinePaymentStore,
   createPostgresPaymentStatusStore,
   listOrderPaymentTerminalOutcomes,
+  listOrderPaymentsDue,
   listStoreOrderBatchPaymentOutcomes,
+  type OrderPaymentDue,
 } from "@rms/payment";
 import { loadPickupNotCollected } from "@rms/fulfillment";
 import type { ConsumerTransaction } from "@bop/eventing";
@@ -52,6 +54,7 @@ import {
 import { readCurrentStoreReceiptProfile } from "@rms/store";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { withFailureCause } from "./customer-failure-diagnostic.js";
+import { reportOrderPaymentOutcomes } from "./customer-order-payment-outcomes.js";
 import type { CustomerCheckoutSessionAuthorizationOptions } from "./customer-checkout-session-authorization.js";
 import type { PersistentPublicStoreProfileOptions } from "./persistent-public-store-profile.js";
 import { readCustomerStoreContact, type CustomerStoreContact } from "./customer-store-contact.js";
@@ -348,6 +351,9 @@ export function createCustomerOrderStatusRead(
                 method?: "CardMachine";
                 orderBatchReference?: string;
               }[] = null;
+          // WP-2423 M18 / M118: online payments of this order not paid yet, with their payment
+          // window and what their newest attempt did (a card may be in flight after a decline).
+          let paymentsDue: readonly OrderPaymentDue[] = [];
           let tips:
             | null
             | {
@@ -367,19 +373,18 @@ export function createCustomerOrderStatusRead(
               authorize: async () => stillAuthorized(),
             });
             const projections = await paymentReader.listByOrder({ transaction, orderReference });
-            payments = projections.map((projection) => ({
+            const projected = projections.map((projection) => ({
+              paymentIntentReference: String(projection.snapshot.paymentIntentReference),
               status: projection.snapshot.terminalStatus,
               occurredAt: projection.snapshot.terminalOccurredAt,
               amount: projection.snapshot.amount,
               freshnessStatus: projection.freshnessStatus,
             }));
+            payments = reportOrderPaymentOutcomes(projected, []);
             // WP-2423 Q10: the status projection is updated asynchronously. A payment the Payment
             // owner already recorded as final (what the payment result page shows) is reported
             // from that fact, so this page never says "pending" after "Payment confirmed".
             if (await stillAuthorized()) {
-              const projected = new Set(
-                projections.map((projection) => String(projection.snapshot.paymentIntentReference)),
-              );
               const facts = await listOrderPaymentTerminalOutcomes(
                 transaction,
                 options.paymentScope,
@@ -402,14 +407,12 @@ export function createCustomerOrderStatusRead(
                 orderBatchReference,
                 amount: { amountMinor, currencyCode: "CAD" },
               }));
-              for (const fact of facts)
-                if (!projected.has(fact.paymentIntentReference))
-                  payments.push({
-                    status: fact.outcome,
-                    occurredAt: fact.occurredAt,
-                    amount: fact.amount,
-                    freshnessStatus: "Fresh",
-                  });
+              // WP-2423 M118: a newer card on a declined payment is reported before it is projected.
+              payments = reportOrderPaymentOutcomes(projected, facts);
+              if (await stillAuthorized())
+                paymentsDue = (
+                  await listOrderPaymentsDue(transaction, options.paymentScope, orderReference)
+                ).filter((due) => expectedBatches.has(due.orderBatchReference));
               // WP-2423 (v15 3cd0f8dd H1): a round staff took payment for on the Store's card
               // machine is paid too. Payment owns both tenders and the staff order view reads the
               // same records, so the guest sees everything paid for the order (and that round's
@@ -781,6 +784,15 @@ export function createCustomerOrderStatusRead(
               ...(contactDetails === null ? {} : { contactDetails }),
               ...(privacyNoticeUrl === null ? {} : { privacyNoticeUrl }),
               ...(storeAcceptance === null ? {} : { storeAcceptance }),
+              ...(paymentsDue.length === 0 || unpaid
+                ? {}
+                : {
+                    paymentsDue: paymentsDue.map((due) => ({
+                      orderBatchReference: due.orderBatchReference,
+                      payBy: due.payBy,
+                      lastAttempt: due.lastAttempt,
+                    })),
+                  }),
             },
           };
         });

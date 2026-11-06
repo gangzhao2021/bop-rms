@@ -467,6 +467,97 @@ export async function listOrderPaymentTerminalOutcomes(
   }
 }
 
+/** WP-2423 M18: an online payment of the order that has not gone through (yet). */
+export interface OrderPaymentDue {
+  /** The round (or the pickup's single batch) this payment is for. */
+  readonly orderBatchReference: string;
+  /** The end of its payment window: unpaid, the order (round) is cancelled then, never charged. */
+  readonly payBy: string;
+  /**
+   * Its newest attempt: still open (a card may be in flight, or the guest left before paying),
+   * declined, or never finished and cancelled when its time ran out.
+   */
+  readonly lastAttempt: "Open" | "Declined" | "NotCompleted";
+}
+
+/**
+ * WP-2423 M18 / M118: the order's online payments that are not paid, each with its payment window
+ * and what its newest attempt did. An intent with any succeeded fact is paid and left out. Read
+ * only from Payment's own records (intent, attempts, terminal facts); the caller authorizes the
+ * order and owns the transaction.
+ */
+export async function listOrderPaymentsDue(
+  transaction: { query(text: string, values: readonly unknown[]): Promise<unknown> },
+  scope: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly providerAccountReference: string;
+    readonly environment: "Test" | "Live";
+  },
+  orderReference: string,
+): Promise<readonly OrderPaymentDue[]> {
+  try {
+    const brand = parsePaymentReference(scope.brandReference),
+      store = parsePaymentReference(scope.storeReference),
+      account = parsePaymentReference(scope.providerAccountReference),
+      order = parsePaymentReference(orderReference);
+    if (scope.environment !== "Test" && scope.environment !== "Live") return fail();
+    await transaction.query(
+      "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+      [brand, store],
+    );
+    const result: unknown = await transaction.query(
+      "SELECT i.order_batch_id::text AS order_batch_id," +
+        "to_char(i.capacity_expires_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS pay_by," +
+        "latest.terminal_outcome,latest.failure_reason " +
+        "FROM rms_payment.payment_intent i " +
+        "JOIN LATERAL (SELECT a.payment_attempt_id FROM rms_payment.payment_attempt a " +
+        "WHERE a.brand_id=i.brand_id AND a.store_id=i.store_id AND a.payment_intent_id=i.payment_intent_id " +
+        "ORDER BY a.attempt_number DESC LIMIT 1) attempt ON true " +
+        "LEFT JOIN LATERAL (SELECT f.terminal_outcome,f.failure_reason FROM rms_payment.payment_terminal_fact f " +
+        "WHERE f.brand_id=i.brand_id AND f.store_id=i.store_id AND f.payment_intent_id=i.payment_intent_id " +
+        "AND f.payment_attempt_id=attempt.payment_attempt_id AND f.provider_account_id=$4 AND f.provider_environment=$5 " +
+        "ORDER BY f.occurred_at DESC,f.recorded_at DESC LIMIT 1) latest ON true " +
+        "WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=$3 " +
+        "AND NOT EXISTS (SELECT 1 FROM rms_payment.payment_terminal_fact s WHERE s.brand_id=i.brand_id " +
+        "AND s.store_id=i.store_id AND s.payment_intent_id=i.payment_intent_id AND s.terminal_outcome='Succeeded') " +
+        "ORDER BY i.created_at,i.payment_intent_id LIMIT 101",
+      [brand, store, order, account, scope.environment],
+    );
+    const found: unknown =
+      result !== null && typeof result === "object"
+        ? Object.getOwnPropertyDescriptor(result, "rows")?.value
+        : undefined;
+    if (!Array.isArray(found) || found.length > 100) return fail();
+    return Object.freeze(
+      found.map((value: unknown) => {
+        const row = exactPaymentObject(value, [
+          "order_batch_id",
+          "pay_by",
+          "terminal_outcome",
+          "failure_reason",
+        ]);
+        const lastAttempt =
+          row.terminal_outcome === null && row.failure_reason === null
+            ? ("Open" as const)
+            : row.terminal_outcome === "Failed"
+              ? row.failure_reason === "Cancelled"
+                ? ("NotCompleted" as const)
+                : ("Declined" as const)
+              : fail();
+        return Object.freeze({
+          orderBatchReference: String(parsePaymentReference(row.order_batch_id)),
+          payBy: String(parsePaymentInstant(row.pay_by)),
+          lastAttempt,
+        });
+      }),
+    );
+  } catch (error) {
+    if (error instanceof PaymentTerminalError) throw error;
+    return fail();
+  }
+}
+
 /**
  * WP-2423 abandoned payment: which of these order batches (dine-in rounds) Payment has already
  * recorded as paid online — a succeeded terminal fact for one of the batch's payment intents. Read

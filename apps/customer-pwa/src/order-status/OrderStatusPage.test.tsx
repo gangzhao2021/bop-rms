@@ -1815,3 +1815,107 @@ describe("WP-2423 (v15 3cd0f8dd) payments and refunds the guest sees", () => {
     expect(findInternalText([staticText(html)])).toEqual([]);
   });
 });
+
+describe("WP-2423 M18 / M118: an order that isn't paid says so, with its deadline", () => {
+  const withSources = (
+    sources: NonNullable<OrderStatusView["sources"]>,
+    orderType: "Pickup" | "DineIn" = "Pickup",
+  ): OrderStatusState => {
+    const state = readyState();
+    if (state.status !== "ready") throw new Error("fixture");
+    return {
+      ...state,
+      view: { ...state.view, order: { ...state.view.order, orderType }, sources },
+    };
+  };
+  const due = (lastAttempt: "Open" | "Declined" | "NotCompleted") => ({
+    orderBatchReference: id(3),
+    payBy: "2026-08-11T14:10:00.000Z",
+    lastAttempt,
+  });
+  const declined = {
+    status: "Failed" as const,
+    occurredAt: "2026-08-11T13:57:00.000Z",
+    amount: null,
+    freshnessStatus: "Fresh" as const,
+  };
+
+  it("an unpaid pickup says 'not paid yet' and until when, not 'order submitted'", () => {
+    const html = render(
+      withSources({
+        checkedAt: "2026-08-11T14:00:00.000Z",
+        kitchen: null,
+        payments: [],
+        paymentsDue: [due("Open")],
+      }),
+    );
+    const time = formatClockTime("2026-08-11T14:10:00.000Z");
+    expect(html).toContain('order-progress-heading">Not paid yet<');
+    expect(html).toContain(
+      endSentence(`Pay by ${time}, or the order is cancelled and you won’t be charged.`).slice(
+        0,
+        20,
+      ),
+    );
+    expect(html).toContain(`Not paid yet — pay by ${time}`);
+    expect(html).not.toContain("Order submitted");
+    expect(html).not.toContain("Payment pending");
+    // No checkout on this phone: where the guest can still finish it.
+    expect(html).toContain("Finish paying on the phone you ordered with");
+  });
+
+  it("once its time has ended on the server's clock, it says the order is being cancelled", () => {
+    const html = render(
+      withSources({
+        checkedAt: "2026-08-11T14:11:00.000Z",
+        kitchen: null,
+        payments: [],
+        paymentsDue: [due("Open")],
+      }),
+    );
+    expect(html).toContain("Time to pay has ended");
+    expect(html).toContain("you haven’t been charged");
+    expect(html).not.toContain("Finish paying on the phone");
+  });
+
+  it("another card in flight after a decline says pending, never 'payment attempt failed'", () => {
+    const pickup = render(
+      withSources({
+        checkedAt: "2026-08-11T14:11:00.000Z",
+        kitchen: null,
+        payments: [declined],
+        paymentsDue: [due("Open")],
+      }),
+    );
+    expect(pickup).not.toContain("Payment attempt failed");
+    // A pay-first table round, with no pickup deadline at all.
+    const table = render(
+      withSources(
+        {
+          checkedAt: "2026-08-11T14:00:00.000Z",
+          kitchen: null,
+          payments: [declined],
+          paymentsDue: [due("Open")],
+        },
+        "DineIn",
+      ),
+    );
+    expect(table).toContain("Payment pending");
+    expect(table).not.toContain("Payment attempt failed");
+  });
+
+  it("a decline with nothing newer still says the attempt failed", () => {
+    const table = render(
+      withSources(
+        {
+          checkedAt: "2026-08-11T14:00:00.000Z",
+          kitchen: null,
+          payments: [declined],
+          paymentsDue: [due("Declined")],
+        },
+        "DineIn",
+      ),
+    );
+    expect(table).toContain("Payment attempt failed");
+  });
+});

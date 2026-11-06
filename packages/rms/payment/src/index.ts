@@ -90,8 +90,10 @@ export { createPostgresPaymentTerminalSource } from "./infrastructure/persistenc
 export {
   createPostgresPaymentTerminalStore,
   listOrderPaymentTerminalOutcomes,
+  listOrderPaymentsDue,
   listStoreOrderBatchesPaidOnline,
   type OrderPaymentTerminalOutcome,
+  type OrderPaymentDue,
 } from "./infrastructure/persistence/payment-terminal-store.js";
 
 export { createPostgresPaymentProviderObservationStore } from "./infrastructure/persistence/payment-provider-observation-store.js";

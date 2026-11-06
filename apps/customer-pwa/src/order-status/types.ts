@@ -46,6 +46,11 @@ export interface OrderStatusSources {
   readonly staffCancellations?: readonly StaffCancellation[];
   /** WP-2423 Q6 step 2: single items the Store cancelled after payment, before the kitchen started. */
   readonly itemCancellations?: readonly ItemCancellation[];
+  /**
+   * WP-2423 M18 / M118: the order's online payments not paid yet, until when, and what their newest
+   * attempt did (Open: a card may be in flight, or the guest left before paying). Absent when none.
+   */
+  readonly paymentsDue?: readonly PaymentDue[];
   /** WP-2423: each dine-in round's payment; a failed one is cancelled automatically at cancelsAt. */
   readonly batchPayments?: readonly BatchPayment[];
   /** WP-2423: dine-in rounds cancelled because their payment didn't go through (never charged). */
@@ -109,6 +114,12 @@ export interface OrderRefunds {
     readonly total: { readonly amountMinor: bigint; readonly currencyCode: string };
     readonly tip: { readonly amountMinor: bigint; readonly currencyCode: string };
   }[];
+}
+
+export interface PaymentDue {
+  readonly orderBatchReference: string;
+  readonly payBy: string;
+  readonly lastAttempt: "Open" | "Declined" | "NotCompleted";
 }
 
 export interface BatchPayment {

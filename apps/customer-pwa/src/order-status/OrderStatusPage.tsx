@@ -18,6 +18,7 @@ import type {
   StaffCancellationReason,
 } from "./types.js";
 import { PickupCodePanel } from "../pickup-code/PickupCodePanel.js";
+import { FinishPickupPayment } from "./FinishPickupPayment.js";
 import type { PickupCodeController } from "../pickup-code/pickup-code-controller.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import {
@@ -530,6 +531,50 @@ function kitchenStatus(
  * Everything paid for this order so far: every successful payment, one per round for a dine-in
  * order shared by the table (tips included). Refunds are stated separately on the page.
  */
+/**
+ * WP-2423 M18: a pickup placed but not paid: its payment window and whether it has ended on the
+ * server's clock (the read's checkedAt, never the phone's). Null once paid, cancelled or unknown.
+ */
+export function unpaidPickup(
+  view: OrderStatusView,
+): { readonly payBy: string; readonly ended: boolean } | null {
+  const due = view.sources?.paymentsDue?.[0];
+  if (
+    view.order.orderType !== "Pickup" ||
+    due === undefined ||
+    paidTotal(view) !== null ||
+    Boolean(view.sources?.unpaidCancellation?.cancelledAt) ||
+    view.order.canonicalPhase === "Cancelled" ||
+    view.order.canonicalPhase === "Rejected"
+  )
+    return null;
+  const checkedAt = view.sources?.checkedAt;
+  return Object.freeze({
+    payBy: due.payBy,
+    ended: checkedAt !== undefined && Date.parse(due.payBy) <= Date.parse(checkedAt),
+  });
+}
+
+/**
+ * WP-2423 M118: what an online payment that hasn't gone through says. The newest attempt wins: a
+ * card in flight after a decline is "pending", never "attempt failed"; an older decline followed
+ * by nothing newer still says it failed. Works for a pickup and for every pay-first table round.
+ */
+export function unpaidOnlinePaymentState(view: OrderStatusView): "pending" | "attemptFailed" {
+  const due = view.sources?.paymentsDue ?? [];
+  if (due.some((entry) => entry.lastAttempt === "Open")) return "pending";
+  if (due.length > 0) return "attemptFailed";
+  const online = (view.sources?.payments ?? []).filter((payment) => payment.method === undefined);
+  const newest = online.reduce<(typeof online)[number] | null>(
+    (latest, payment) =>
+      latest === null || Date.parse(payment.occurredAt) >= Date.parse(latest.occurredAt)
+        ? payment
+        : latest,
+    null,
+  );
+  return newest?.status === "Failed" ? "attemptFailed" : "pending";
+}
+
 export function paidTotal(
   view: OrderStatusView,
 ): { readonly amountMinor: bigint; readonly currencyCode: string } | null {
@@ -655,6 +700,8 @@ function StatusContent({
   const unpaidPickupCancelled =
     view.order.orderType === "Pickup" && Boolean(view.sources?.unpaidCancellation?.cancelledAt);
   const storeCancelled = staffCancelledOrder(view);
+  // WP-2423 M18: placed but not paid yet (cancelled at its deadline, never charged).
+  const pickupDue = unpaidPickup(view);
   // WP-2423 Q9-G1: not accepted in time (refunded automatically), or waiting after a store outage.
   const storeAcceptance =
     view.order.orderType === "Pickup" ? (view.sources?.storeAcceptance ?? null) : null;
@@ -739,57 +786,61 @@ function StatusContent({
         ? [progress.awaitingStoreHeading, progress.awaitingStore]
         : unpaidPickupCancelled
           ? [progress.cancelledHeading, progress.unpaidPickupCancelled]
-          : complete
-            ? [progress.collectedHeading, progress.collected]
-            : // A pickup the store closed as not collected is reported as Cancelled; say why.
-              notCollected
-              ? [progress.notCollectedHeading, progress.notCollected]
-              : view.order.canonicalPhase === "Cancelled"
-                ? [progress.cancelledHeading, progress.cancelled]
-                : view.order.canonicalPhase === "Rejected"
-                  ? [progress.notAcceptedHeading, progress.rejected]
-                  : remakes.length > 0
-                    ? pickup
-                      ? [progress.remakingPickupHeading, progress.remakingPickup]
-                      : [
-                          progress.remakingDineInHeading,
-                          calledByNumber
-                            ? progress.remakingByNumber(view.order.orderNumber)
-                            : progress.remakingDineIn,
-                        ]
-                    : allServed
-                      ? [progress.servedHeading, progress.served]
-                      : view.order.canonicalPhase === "Fulfilled"
-                        ? pickup
-                          ? [progress.completeHeading, progress.complete]
-                          : // Dine-in: everything was served; the table may still order more.
-                            [progress.servedHeading, progress.served]
-                        : kitchenLabel === "AwaitingPayment"
-                          ? [
-                              progress.awaitingPaymentHeading,
-                              someServed
-                                ? progress.awaitingPaymentSomeServed
-                                : progress.awaitingPayment,
-                            ]
-                          : someServed
-                            ? [progress.servingHeading, progress.serving]
-                            : stage === "Ready"
-                              ? pickup
-                                ? [progress.readyPickupHeading, progress.readyPickup]
-                                : [
-                                    progress.readyDineInHeading,
-                                    calledByNumber
-                                      ? progress.readyByNumber(view.order.orderNumber)
-                                      : progress.readyDineIn,
-                                  ]
-                              : stage === "Preparing"
-                                ? [progress.preparingHeading, progress.preparing]
-                                : stage === "Accepted"
-                                  ? [
-                                      progress.acceptedHeading,
-                                      pickup ? progress.acceptedPickup : progress.acceptedDineIn,
+          : pickupDue !== null
+            ? pickupDue.ended
+              ? [progress.unpaidEndedHeading, progress.unpaidEnded]
+              : [progress.unpaidHeading, progress.unpaid(formatClockTime(pickupDue.payBy))]
+            : complete
+              ? [progress.collectedHeading, progress.collected]
+              : // A pickup the store closed as not collected is reported as Cancelled; say why.
+                notCollected
+                ? [progress.notCollectedHeading, progress.notCollected]
+                : view.order.canonicalPhase === "Cancelled"
+                  ? [progress.cancelledHeading, progress.cancelled]
+                  : view.order.canonicalPhase === "Rejected"
+                    ? [progress.notAcceptedHeading, progress.rejected]
+                    : remakes.length > 0
+                      ? pickup
+                        ? [progress.remakingPickupHeading, progress.remakingPickup]
+                        : [
+                            progress.remakingDineInHeading,
+                            calledByNumber
+                              ? progress.remakingByNumber(view.order.orderNumber)
+                              : progress.remakingDineIn,
+                          ]
+                      : allServed
+                        ? [progress.servedHeading, progress.served]
+                        : view.order.canonicalPhase === "Fulfilled"
+                          ? pickup
+                            ? [progress.completeHeading, progress.complete]
+                            : // Dine-in: everything was served; the table may still order more.
+                              [progress.servedHeading, progress.served]
+                          : kitchenLabel === "AwaitingPayment"
+                            ? [
+                                progress.awaitingPaymentHeading,
+                                someServed
+                                  ? progress.awaitingPaymentSomeServed
+                                  : progress.awaitingPayment,
+                              ]
+                            : someServed
+                              ? [progress.servingHeading, progress.serving]
+                              : stage === "Ready"
+                                ? pickup
+                                  ? [progress.readyPickupHeading, progress.readyPickup]
+                                  : [
+                                      progress.readyDineInHeading,
+                                      calledByNumber
+                                        ? progress.readyByNumber(view.order.orderNumber)
+                                        : progress.readyDineIn,
                                     ]
-                                  : [progress.submittedHeading, progress.submitted];
+                                : stage === "Preparing"
+                                  ? [progress.preparingHeading, progress.preparing]
+                                  : stage === "Accepted"
+                                    ? [
+                                        progress.acceptedHeading,
+                                        pickup ? progress.acceptedPickup : progress.acceptedDineIn,
+                                      ]
+                                    : [progress.submittedHeading, progress.submitted];
   const payments = view.sources?.payments;
   const paid = paidTotal(view);
   const refunded = view.sources?.refunds?.refunded ?? null;
@@ -827,9 +878,9 @@ function StatusContent({
             ? paymentReceivedText(view, paid)
             : unpaidPickupCancelled
               ? orderStatusText.payment.notPaid
-              : payments.some((payment) => payment.status === "Failed")
-                ? orderStatusText.payment.attemptFailed
-                : orderStatusText.payment.pending;
+              : pickupDue !== null && !pickupDue.ended
+                ? orderStatusText.payment.notPaidPayBy(formatClockTime(pickupDue.payBy))
+                : orderStatusText.payment[unpaidOnlinePaymentState(view)];
   // The kitchen has no ticket for this order yet: the order is in, preparation hasn't started.
   // Once the order has ended (cancelled, not paid, collected, closed) the row says nothing useful.
   const orderEnded =
@@ -879,6 +930,9 @@ function StatusContent({
         <p className="bop-eyebrow">{orderStatusText.orderEyebrow(view.order.orderNumber)}</p>
         <h2 id="order-progress-heading">{progressHeading}</h2>
         <p>{progressMessage}</p>
+        {pickupDue !== null && !pickupDue.ended ? (
+          <FinishPickupPayment orderReference={view.order.orderReference} />
+        ) : null}
         {/* Only once the payment is confirmed: before that the page is about paying. */}
         {pickup &&
         (paid !== null || complete) &&

@@ -1609,4 +1609,15 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Pay by {time}": "请在 {time} 前付款",
   "About 5 minutes left to pay. After {time} this order is cancelled and you won’t be charged.":
     "付款时间还剩约 5 分钟。{time} 之后订单会取消，不会扣款。",
+  "Pay by {time}, or the order is cancelled and you won’t be charged.":
+    "请在 {time} 前付款，否则订单会取消，不会扣款。",
+  "Time to pay has ended": "付款时间已过",
+  "This order is being cancelled; you haven’t been charged.": "订单正在取消，没有扣款。",
+  "Finish paying on the phone you ordered with, or ask a staff member for help.":
+    "请用下单的手机完成付款，或请店员帮忙。",
+  "Not paid yet — pay by {time}": "未付款，请在 {time} 前付款",
+  "Not paid yet. Pay by {time}, or it is cancelled and you won’t be charged.":
+    "这单还未付款。请在 {time} 前付款，否则会取消，不会扣款。",
+  "This order was cancelled because it wasn’t paid in time. You weren’t charged.":
+    "这单因未按时付款已取消，没有扣款。",
 });

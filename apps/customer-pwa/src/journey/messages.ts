@@ -1033,6 +1033,21 @@ export const orderStatusText = Object.freeze({
     get complete() {
       return t("Your order is complete. Thank you for visiting!");
     },
+    /** WP-2423 M18: a pickup placed but not paid yet (it is cancelled at payBy, never charged). */
+    get unpaidHeading() {
+      return t("Not paid yet");
+    },
+    unpaid: (time: string) =>
+      t("Pay by {time}, or the order is cancelled and you won’t be charged.", { time }),
+    get unpaidEndedHeading() {
+      return t("Time to pay has ended");
+    },
+    get unpaidEnded() {
+      return t("This order is being cancelled; you haven’t been charged.");
+    },
+    get unpaidElsewhere() {
+      return t("Finish paying on the phone you ordered with, or ask a staff member for help.");
+    },
     get awaitingPaymentHeading() {
       return t("Waiting for payment");
     },
@@ -1101,6 +1116,8 @@ export const orderStatusText = Object.freeze({
     get notPaid() {
       return t("Not paid");
     },
+    /** WP-2423 M18: a pickup not paid yet, with its deadline. */
+    notPaidPayBy: (time: string) => t("Not paid yet — pay by {time}", { time }),
     get attemptFailed() {
       return t("Payment attempt failed");
     },

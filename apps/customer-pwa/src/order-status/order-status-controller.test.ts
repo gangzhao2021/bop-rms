@@ -374,6 +374,31 @@ describe("independent order status sources", () => {
     ])
       expect(() => parseOrderStatusView(with_(bad), id(1))).toThrow();
   });
+  it("WP-2423 M18: admits unpaid payments with their deadline and newest attempt, in exact shape", () => {
+    const input = sourced();
+    const batch = input.order.batches[0]?.orderBatchReference;
+    const due = {
+      orderBatchReference: batch,
+      payBy: "2026-08-11T14:10:00.000Z",
+      lastAttempt: "Open",
+    };
+    const with_ = (paymentsDue: unknown) => ({
+      ...input,
+      sources: { ...input.sources, paymentsDue },
+    });
+    expect(parseOrderStatusView(with_([due]), id(1)).sources?.paymentsDue).toEqual([due]);
+    // An older server sends none.
+    expect(parseOrderStatusView(input, id(1)).sources?.paymentsDue).toBeUndefined();
+    for (const bad of [
+      [],
+      [{ ...due, lastAttempt: "Succeeded" }],
+      [{ ...due, orderBatchReference: id(99) }],
+      [{ ...due, paymentIntentReference: id(5) }],
+      [{ ...due, payBy: "soon" }],
+      null,
+    ])
+      expect(() => parseOrderStatusView(with_(bad), id(1))).toThrow();
+  });
   it("WP-2423 Q12: admits an unpaid pickup cancellation only for Pickup and within the source window", () => {
     const input = sourced();
     const cancelled = {
