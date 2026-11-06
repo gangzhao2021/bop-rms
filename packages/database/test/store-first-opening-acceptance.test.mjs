@@ -323,7 +323,7 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
         return { scope, base, people, installed, listening };
       };
       /** The Store's tax rates, as BOP support leaves them (TEST-ONLY, owner-seeded). */
-      const seedTax = async ({ base, scope, installed, people }) => {
+      const seedTax = async ({ base, scope, installed, people }, evidenceHours = 240) => {
         const tax = quoteInput().taxConfiguration;
         await seedTaxConfiguration(
           admin,
@@ -344,11 +344,11 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
             },
             registrationEvidence: {
               ...tax.registrationEvidence,
-              validUntil: new Date(Date.now() + 240 * hour).toISOString(),
+              validUntil: new Date(Date.now() + evidenceHours * hour).toISOString(),
             },
             professionalEvidence: {
               ...tax.professionalEvidence,
-              validUntil: new Date(Date.now() + 240 * hour).toISOString(),
+              validUntil: new Date(Date.now() + evidenceHours * hour).toISOString(),
             },
             rules: tax.rules.map((rule) => ({ ...rule, ruleReference: id(base, 0x201) })),
             createdAt: new Date(Date.now() - 24 * hour).toISOString(),
@@ -705,6 +705,66 @@ it("a first Store's Owner publishes with one action, alone or with a second Owne
           assert.equal(finished.templates, 1);
           assert.deepEqual(await press(), { kind: "AlreadyPublished" });
           assert.deepEqual(await counts(opened.scope.storeReference), finished);
+        });
+      }
+
+      // --- One Owner whose tax rates' evidence has run out: referenced, not in force.
+      {
+        const opened = await openedStore("01a8f300", ["owner"]);
+        const owner = opened.people.owner;
+        await seedTax(opened, -1);
+        const store = {
+          base: opened.base,
+          scope: opened.scope,
+          ownerActor: owner.actor,
+          profile: null,
+          receiptVersion: 0,
+          kitchenVersion: 0,
+          soleOperator: "Off",
+        };
+        await opened.listening(owner, async (fetcher) => {
+          const deps = depsFor(owner, opened, store, journalsFor(), fetcher);
+          const facts = await loadOpeningFacts(deps);
+          // The Store still points at them, as publication's Tax check reads them: they fail it.
+          assert.equal(typeof facts.live.storeTaxConfigurationReference, "string");
+          assert.equal(facts.taxRatesSet, false);
+          const before = await counts(opened.scope.storeReference);
+          // The page's own press, the tick given: nothing asked alone, no setting changed.
+          const input = openingAnswersInput(
+            facts,
+            details,
+            answers,
+            openingConfirmationFromFacts(facts, details, answers),
+          );
+          assert.deepEqual([input.approveAlone, input.turnOnSoleOperator], [false, false]);
+          assert.deepEqual(await runStoreOpening(deps, input), {
+            kind: "DetailsSaved",
+            missing: ["TaxRates"],
+          });
+          // Even a press built as if they were in force stops before anything is sent.
+          assert.deepEqual(
+            await runStoreOpening(deps, { ...input, approveAlone: true, turnOnSoleOperator: true }),
+            { kind: "DetailsSaved", missing: ["TaxRates"] },
+          );
+          assert.equal(store.soleOperator, "Off");
+          const after = await counts(opened.scope.storeReference);
+          assert.equal(after.payments, before.payments);
+          assert.equal(after.templates, before.templates);
+          assert.equal(after.configurations, before.configurations);
+          assert.equal(after.publishing, before.publishing);
+          assert.equal(await setupPublished(opened), false);
+          for (const table of [
+            "rms_store.store_configuration_sole_operator_approval",
+            "rms_device.digital_receipt_template_sole_operator_approval",
+          ])
+            assert.equal(
+              (
+                await admin.query("SELECT count(*)::int n FROM " + table + " WHERE store_id=$1", [
+                  opened.scope.storeReference,
+                ])
+              ).rows[0].n,
+              0,
+            );
         });
       }
 

@@ -13,10 +13,12 @@ import {
   openingAnswerProblems,
   openingAnswersFromRecords,
   openingAnswersInput,
+  openingApprovableGates,
   openingApprovalPlan,
   openingApproveInput,
   openingConfirmationFromFacts,
   openingContentOf,
+  openingListAfterPublish,
   openingMissing,
   openingPeriodEndsNextDay,
   openingSentSummary,
@@ -546,6 +548,33 @@ function answersFrom(facts: OpeningFacts): OpeningAnswers {
   };
 }
 const pstProvinces: ReadonlySet<string> = new Set(["BC", "SK", "MB"]);
+/** A publication check that failed, as what to do and who does it. */
+export function checkWords(code: string): string {
+  switch (code) {
+    case "Tax":
+      return t(
+        "Waiting for BOP support: your tax rates are not in force. Tell BOP support, and come back here once they have set them; what you entered stays.",
+      );
+    case "GoLive":
+      return t(
+        "Waiting for BOP support: they have not approved this store to open yet. Tell BOP support, and come back here once they have; what you entered stays.",
+      );
+    case "Hours":
+      return t(
+        "The opening hours need another look: each day you open needs its times, for an order type you offer. Fix them above, then press the button again.",
+      );
+    case "Fees":
+      return t(
+        "A charge set under All settings, step by step is for an order type this store does not offer. Turn it off there, or offer that order type here, then press the button again.",
+      );
+    default:
+      // The Brand's settings, the time zone, the business day start and the start date are not
+      // asked on this page: BOP support sets them up.
+      return t(
+        "One of this store's settings does not match how BOP support set the store up. Tell BOP support what time this happened; what you entered stays.",
+      );
+  }
+}
 function stopWords(outcome: Extract<StoreOpeningOutcome, { kind: "Stopped" }>): string {
   const carryOn = t(
     "What was done stays. Press Continue, here or on another device; nothing is done twice.",
@@ -574,21 +603,12 @@ function stopWords(outcome: Extract<StoreOpeningOutcome, { kind: "Stopped" }>): 
     case "NotBrandOwner":
       return t("Only the brand owner can approve these alone. Ask them to open this page.");
     case "ChecksFailed":
-      return t("{step} can't be published yet: {checks}. {carryOn}", {
-        step: stepWords(outcome.step),
-        checks: (outcome.failedChecks ?? [])
-          .map((code) =>
-            code === "Tax"
-              ? t("your tax rates are not in force")
-              : code === "GoLive"
-                ? t("BOP support has not approved this store to open")
-                : code === "Hours"
-                  ? t("the opening hours need another look")
-                  : t("a setting differs from the live store"),
-          )
-          .join(listSeparator()),
-        carryOn,
-      });
+      // Each check says who acts: BOP support's never ends in "press Continue", which would only
+      // stop the same way again.
+      return [
+        t("{step} can't be published yet.", { step: stepWords(outcome.step) }),
+        ...new Set((outcome.failedChecks ?? []).map(checkWords)),
+      ].join(" ");
     case "OutcomeUnknown":
       return t("We couldn't confirm {step}. {carryOn}", {
         step: stepWords(outcome.step),
@@ -604,6 +624,15 @@ export type OpeningPublished = Extract<
   StoreOpeningOutcome,
   { readonly kind: "Published" | "AlreadyPublished" }
 >;
+/** Once published, who the allergen list still waits for, in words: this Owner, or the people named. */
+export type OpeningListStill =
+  { readonly kind: "You" } | { readonly kind: "Others"; readonly people: string } | null;
+const listStill = (wait: OpeningWait | null): OpeningListStill =>
+  wait === null
+    ? null
+    : wait.who.length === 0
+      ? Object.freeze({ kind: "You" as const })
+      : Object.freeze({ kind: "Others" as const, people: peopleOf([wait]) });
 const testAllergenTemplate = "CA_PRIORITY_TEST";
 export function StoreFirstOpeningPanel({
   scope,
@@ -621,7 +650,7 @@ export function StoreFirstOpeningPanel({
   /** What is saved moved on: the folded settings read again. */
   readonly onChanged: () => void;
   /** Published, by this press or by anyone since this page last read: this page is over. */
-  readonly onPublished: (outcome: OpeningPublished) => void;
+  readonly onPublished: (outcome: OpeningPublished, list: OpeningListStill) => void;
   /** The folded name-and-address panel published: Store setup's own records follow it. */
   readonly registerProfileSync: (sync: (() => void) | null) => void;
 }) {
@@ -658,7 +687,10 @@ export function StoreFirstOpeningPanel({
         if (current.signal.aborted) return;
         // Published since this page last read, on another device or by the other Owner.
         if (next.live.current?.setupBasis !== undefined) {
-          onPublished(Object.freeze({ kind: "Published", waits: Object.freeze([]) }));
+          onPublished(
+            Object.freeze({ kind: "Published", waits: Object.freeze([]) }),
+            listStill(openingListAfterPublish(next, [])),
+          );
           return;
         }
         setFacts(next);
@@ -784,7 +816,11 @@ export function StoreFirstOpeningPanel({
       </section>
     );
 
-  const missing = openingMissing(facts.live, facts.workspace.scope.actorReference);
+  const missing = openingMissing(
+    facts.live,
+    facts.workspace.scope.actorReference,
+    facts.taxRatesSet,
+  );
   const waits = openingWaitsFromFacts(facts);
   // Who decides what, and what a press does about it: the same answer the press works from.
   const plan = openingApprovalPlan(facts);
@@ -824,7 +860,12 @@ export function StoreFirstOpeningPanel({
     if (current.signal.aborted) return;
     onChanged();
     if (result.kind === "Published" || result.kind === "AlreadyPublished") {
-      onPublished(result);
+      onPublished(
+        result,
+        result.kind === "Published"
+          ? listStill(openingListAfterPublish(facts, result.waits))
+          : null,
+      );
       return;
     }
     setOutcome(result);
@@ -929,14 +970,19 @@ export function StoreFirstOpeningPanel({
       allergenRow={allergenRow()}
     />
   );
-  const profileAddress = (() => {
-    const address = facts.profile.current?.address;
-    return address === undefined
-      ? ""
-      : [address.addressLines.join(", "), address.locality, address.regionCode, address.postalCode]
-          .filter((part) => part !== "")
-          .join(", ");
-  })();
+  // The address as it was sent: from the records the version waiting points at, when one is.
+  const sentAddress = (value: OpeningConfirmation) =>
+    [
+      value.address.lines.join(", "),
+      value.address.locality,
+      value.address.regionCode,
+      // Kept without its space, for comparing: shown as Canada Post writes it.
+      /^[A-Z]\d[A-Z]\d[A-Z]\d$/u.test(value.address.postalCode)
+        ? value.address.postalCode.slice(0, 3) + " " + value.address.postalCode.slice(3)
+        : value.address.postalCode,
+    ]
+      .filter((part) => part !== "")
+      .join(", ");
   const tickShown = needsCode;
   const status = (
     <>
@@ -968,6 +1014,18 @@ export function StoreFirstOpeningPanel({
     setChanging(true);
   };
 
+  const approvable = openingApprovableGates(facts);
+  const changedNote = waits.sentChanged ? (
+    <p role="note">
+      {waits.forYou.includes("StoreSetup")
+        ? t(
+            "The store's name, address or phone was changed after the store setup was sent, so it can't be approved as it is. Ask whoever sent it to open Store setup and send it again, or send it back.",
+          )
+        : t(
+            "Your store's name, address or phone was changed after this was sent. Press Change my answers and send it again, so what is approved is what customers see.",
+          )}
+    </p>
+  ) : null;
   if (waits.forYou.length > 0 && !changing && !stoppedAnswers)
     return (
       <section id="store-opening" className="store-opening" aria-labelledby="store-opening-heading">
@@ -979,17 +1037,22 @@ export function StoreFirstOpeningPanel({
           )}
         </p>
         {waitingLine === null ? null : <p>{waitingLine}</p>}
-        {sent === null ? null : summaryOf(t("What you are approving"), sent, profileAddress)}
+        {changedNote}
+        {sent === null || waits.sentChanged
+          ? null
+          : summaryOf(t("What you are approving"), sent, sentAddress(sent))}
         {status}
         <div className="store-opening__actions">
-          <button
-            type="button"
-            className="store-opening__primary"
-            disabled={running}
-            onClick={pressApprove}
-          >
-            {running ? t("Working…") : t("Approve and continue")}
-          </button>
+          {approvable.length === 0 ? null : (
+            <button
+              type="button"
+              className="store-opening__primary"
+              disabled={running}
+              onClick={pressApprove}
+            >
+              {running ? t("Working…") : t("Approve and continue")}
+            </button>
+          )}
           {!waits.forYou.includes("StoreSetup") ? (
             <button
               type="button"
@@ -1045,7 +1108,10 @@ export function StoreFirstOpeningPanel({
         <h3 id="store-opening-heading">{t("Open your store")}</h3>
         <p className="store-opening__lead">{waitingLine}</p>
         {listLine}
-        {sent === null ? null : summaryOf(t("What was sent"), sent, profileAddress)}
+        {changedNote}
+        {sent === null || waits.sentChanged
+          ? null
+          : summaryOf(t("What was sent"), sent, sentAddress(sent))}
         {status}
         <div className="store-opening__actions">
           <button

@@ -92,6 +92,7 @@ import {
   StoreKitchenSetupClientError,
   type StoreKitchenSetupView,
 } from "./store-kitchen-setup-client.js";
+import { loadOpeningListRead, type OpeningListRead } from "./store-opening-list-client.js";
 import {
   createStorePaymentConfigurationClient,
   type StorePaymentConfigurationContent,
@@ -616,6 +617,8 @@ export interface StoreOpeningDeps {
   readonly soleOperator: ReturnType<typeof createSoleOperatorClient>;
   readonly allergens: AllergenClient;
   readonly loadApprovers: () => Promise<OpeningApprovers>;
+  /** Home's opening list: whether the Store's tax rates are in force, as publication checks them. */
+  readonly openingList: () => Promise<OpeningListRead>;
   /** One reference per intended write, kept across presses: a lost answer repeats the same write. */
   readonly operations: Map<string, { readonly reference: string; readonly content: string }>;
 }
@@ -686,6 +689,7 @@ export function createStoreOpeningDeps(input: {
     soleOperator: createSoleOperatorClient(fetcher),
     allergens: createAllergenClient(csrf, fetcher),
     loadApprovers: () => loadOpeningApprovers(fetcher, signal),
+    openingList: () => loadOpeningListRead(fetcher, signal),
     operations: input.operations ?? new Map(),
   });
 }
@@ -1084,6 +1088,31 @@ const openVersion = ({ latest, latestWithdrawal, observedAt }: VersionRead) =>
     ? latest
     : null;
 /**
+ * The address and contact a version points at, as Store setup's records hold them. Null once those
+ * records have moved on (the name, address or phone published since): the version then carries
+ * what was there before, which can no longer be shown, so it is not approved as it stands.
+ */
+function recordsOf(
+  records: StoreSetupReferencesCurrent,
+  version: Pick<StoreConfigurationSnapshot, "addressReference" | "contactReference">,
+): {
+  readonly address: StoreSetupBusinessAddress;
+  readonly contact: StoreSetupBusinessContact;
+} | null {
+  const address = records.address,
+    contact = records.contact;
+  if (
+    address === null ||
+    contact === null ||
+    address.reference !== version.addressReference ||
+    contact.reference !== version.contactReference ||
+    !("addressLines" in address.content) ||
+    "addressLines" in contact.content
+  )
+    return null;
+  return { address: address.content, contact: contact.content };
+}
+/**
  * What only someone else can settle: nothing is sent for approval until it is. The tax rates are BOP
  * support's. A change that did not come from Store setup (a Manager's hours, sent on Hours & ordering)
  * has to be approved or declined there before a configuration can be made over it.
@@ -1091,10 +1120,18 @@ const openVersion = ({ latest, latestWithdrawal, observedAt }: VersionRead) =>
 export function openingMissing(
   live: VersionRead & Pick<StoreConfigurationOrdinaryWorkspace, "storeTaxConfigurationReference">,
   actor: string,
+  /**
+   * From the opening list: rates whose evidence has lapsed are still referenced, but publication's
+   * Tax check fails on them, so they are not set. Unknown (an older server, a failed read): the
+   * reference alone decides, and Submit's checks still stop it.
+   */
+  taxRatesSet?: boolean,
 ): readonly OpeningMissing[] {
   const open = openVersion(live);
   return Object.freeze([
-    ...(live.storeTaxConfigurationReference === null ? (["TaxRates"] as const) : []),
+    ...(live.storeTaxConfigurationReference === null || taxRatesSet === false
+      ? (["TaxRates"] as const)
+      : []),
     ...(open !== null && open.setupBasis === undefined && open.authoredByReference !== actor
       ? (["OtherChange"] as const)
       : []),
@@ -1562,28 +1599,22 @@ async function confirmationOnRecord(
     expectedScope: deps.scope,
     signal: deps.signal,
   });
-  const address = references.address,
-    contact = references.contact;
+  const record = recordsOf(references, latest);
   if (
-    address === null ||
-    contact === null ||
+    record === null ||
     payment.snapshot === null ||
-    address.reference !== latest.addressReference ||
-    contact.reference !== latest.contactReference ||
-    payment.snapshot.configurationReference !== latest.paymentConfigurationReference ||
-    !("addressLines" in address.content) ||
-    "addressLines" in contact.content
+    payment.snapshot.configurationReference !== latest.paymentConfigurationReference
   )
     throw new ConfirmAgain();
   return Object.freeze({
-    name: textKey(contact.content.contactName),
+    name: textKey(record.contact.contactName),
     address: Object.freeze({
-      lines: address.content.addressLines.map(textKey),
-      locality: textKey(address.content.locality),
-      regionCode: address.content.regionCode,
-      postalCode: postalKey(address.content.postalCode),
+      lines: record.address.addressLines.map(textKey),
+      locality: textKey(record.address.locality),
+      regionCode: record.address.regionCode,
+      postalCode: postalKey(record.address.postalCode),
     }),
-    phone: phoneKey(contact.content.businessPhone),
+    phone: phoneKey(record.contact.businessPhone),
     timeZone: latest.timeZone,
     businessDayStart: latest.businessDayStartLocalTime,
     serviceModes: latest.enabledServiceModes,
@@ -1817,6 +1848,14 @@ async function approveWhatWaits(
           open.authoredByReference === deps.scope.actorReference
         )
           break;
+        // The name, address and phone shown were read from the records this version points at.
+        // Published again since, the version carries what was there before: never approved unseen.
+        const records = await deps.references.load({
+          storeReference: deps.scope.storeReference,
+          expectedScope: deps.scope,
+          signal: deps.signal,
+        });
+        if (recordsOf(records, open) === null) throw new ConfirmAgain();
         await configurationStep(deps, workspace, "Approve", null);
       } else if (open.lifecycle === "Approved") {
         await configurationStep(deps, workspace, "Publish", null);
@@ -1825,6 +1864,12 @@ async function approveWhatWaits(
   }
 }
 
+/** Whether the Store's tax rates are in force; undefined when the opening list can't say. */
+const taxRatesNow = (deps: Pick<StoreOpeningDeps, "openingList">) =>
+  deps.openingList().then(
+    (read) => read.taxRatesSet,
+    () => undefined,
+  );
 /** The press: everything the Owner answered, then the rest, in order. Pressing again carries on. */
 export async function runStoreOpening(
   deps: StoreOpeningDeps,
@@ -1881,7 +1926,11 @@ export async function runStoreOpening(
     }
     enter("Answers");
     // What only someone else can settle: nothing is sent for approval until it is.
-    const missing = openingMissing(await liveNow(), deps.scope.actorReference);
+    const missing = openingMissing(
+      await liveNow(),
+      deps.scope.actorReference,
+      await taxRatesNow(deps),
+    );
     if (missing.length > 0) return Object.freeze({ kind: "DetailsSaved", missing });
     if (input.answers !== null && openingAnswerProblems(input.answers).length > 0)
       throw new OpeningStop("HoursNotAnswered");
@@ -1936,6 +1985,10 @@ export interface OpeningFacts {
   readonly allergens: AllergenListView | null;
   readonly payment: StorePaymentConfigurationCurrent;
   readonly template: OpeningTemplateState;
+  /** Store setup's address and contact records: what a version waiting points at. */
+  readonly records: StoreSetupReferencesCurrent;
+  /** The Store's tax rates are in force (Home's opening list); undefined when it can't say. */
+  readonly taxRatesSet: boolean | undefined;
 }
 export async function loadOpeningFacts(deps: StoreOpeningDeps): Promise<OpeningFacts> {
   const [
@@ -1950,6 +2003,8 @@ export async function loadOpeningFacts(deps: StoreOpeningDeps): Promise<OpeningF
     allergens,
     payment,
     template,
+    records,
+    taxRatesSet,
   ] = await Promise.all([
     readSetup(deps),
     deps.configuration.load(deps.scope, { signal: deps.signal }),
@@ -1975,6 +2030,12 @@ export async function loadOpeningFacts(deps: StoreOpeningDeps): Promise<OpeningF
       signal: deps.signal,
     }),
     readOpeningTemplate(deps),
+    deps.references.load({
+      storeReference: deps.scope.storeReference,
+      expectedScope: deps.scope,
+      signal: deps.signal,
+    }),
+    taxRatesNow(deps),
   ]);
   // No configuration to start from, in the real composition, fails the read above. Said the same way.
   if (live.current === null) throw new StoreSetupClientError("Unavailable");
@@ -1990,6 +2051,8 @@ export async function loadOpeningFacts(deps: StoreOpeningDeps): Promise<OpeningF
     allergens,
     payment,
     template,
+    records,
+    taxRatesSet,
   });
 }
 export const openingContentOf = (facts: Pick<OpeningFacts, "workspace">): StoreSetupContent =>
@@ -2053,15 +2116,36 @@ export function openingSentSummary(facts: OpeningFacts): OpeningConfirmation | n
   const version = openVersion(facts.live);
   if (version?.setupBasis !== undefined) {
     const allergens = facts.allergens;
+    // The name, address and phone the version points at. Published again since, they are no longer
+    // on record: what customers see now is shown, and openingWaitsFromFacts says it changed.
+    const record = recordsOf(facts.records, version);
+    const sent =
+      record === null
+        ? {
+            name: defaultName(profile),
+            lines: details.addressLines,
+            locality: details.locality,
+            regionCode: details.regionCode,
+            postalCode: details.postalCode,
+            phone: details.phone,
+          }
+        : {
+            name: record.contact.contactName,
+            lines: record.address.addressLines,
+            locality: record.address.locality,
+            regionCode: record.address.regionCode,
+            postalCode: record.address.postalCode,
+            phone: record.contact.businessPhone,
+          };
     return Object.freeze({
-      name: textKey(defaultName(profile)),
+      name: textKey(sent.name),
       address: Object.freeze({
-        lines: Object.freeze(details.addressLines.map(textKey).filter((line) => line !== "")),
-        locality: textKey(details.locality),
-        regionCode: details.regionCode,
-        postalCode: postalKey(details.postalCode),
+        lines: Object.freeze(sent.lines.map(textKey).filter((line) => line !== "")),
+        locality: textKey(sent.locality),
+        regionCode: sent.regionCode,
+        postalCode: postalKey(sent.postalCode),
       }),
-      phone: phoneKey(details.phone),
+      phone: phoneKey(sent.phone),
       timeZone: version.timeZone,
       businessDayStart: version.businessDayStartLocalTime,
       serviceModes: version.enabledServiceModes,
@@ -2163,7 +2247,8 @@ export function openingAnswersInput(
   confirmed: OpeningConfirmation | null,
 ): StoreOpeningInput {
   const plan = openingApprovalPlan(facts);
-  const blocked = openingMissing(facts.live, facts.workspace.scope.actorReference).length > 0;
+  const blocked =
+    openingMissing(facts.live, facts.workspace.scope.actorReference, facts.taxRatesSet).length > 0;
   return Object.freeze({
     details,
     answers,
@@ -2174,8 +2259,16 @@ export function openingAnswersInput(
     approvers: facts.approvers,
   });
 }
+/** What "Approve" approves: what waits for this person, less a Store setup that changed since sent. */
+export function openingApprovableGates(facts: OpeningFacts): readonly OpeningGate[] {
+  const waits = openingWaitsFromFacts(facts);
+  return Object.freeze(
+    waits.forYou.filter((gate) => !(gate === "StoreSetup" && waits.sentChanged)),
+  );
+}
 /** The press of "Approve", as the page shows it: what waits for this person, and nothing typed. */
 export function openingApproveInput(facts: OpeningFacts): StoreOpeningInput {
+  const gates = openingApprovableGates(facts);
   return Object.freeze({
     details: null,
     answers: null,
@@ -2183,14 +2276,41 @@ export function openingApproveInput(facts: OpeningFacts): StoreOpeningInput {
     approveAlone: false,
     turnOnSoleOperator: false,
     approve: Object.freeze({
-      gates: openingWaitsFromFacts(facts).forYou,
+      // A Store setup carrying a name, address or phone since replaced is sent again, not approved.
+      gates,
       configuration: openVersion(facts.live)?.configurationReference ?? null,
       // Someone else approves what follows, so this press can go on to it. Otherwise it is this
-      // person's alone: back to the page, for the tick and the code.
-      carryOn: !openingApprovalPlan(facts).publishes,
+      // person's alone: back to the page, for the tick and the code. With nothing to approve
+      // here, nothing is done.
+      carryOn: gates.length > 0 && !openingApprovalPlan(facts).publishes,
     }),
     approvers: facts.approvers,
   });
+}
+/**
+ * Once the Store's setup is published, who the allergen list still waits for: the person who pressed
+ * (`who` empty) or the people named. Null when nothing waits on it, or this person cannot see it.
+ * `facts` are those the press began from; `waits` what the press itself sent.
+ */
+export function openingListAfterPublish(
+  facts: OpeningFacts,
+  waits: readonly OpeningWait[],
+): OpeningWait | null {
+  const sent = waits.find((wait) => wait.what === "AllergenList");
+  if (sent !== undefined) return sent;
+  const list = facts.allergens;
+  if (list === null || list.registry !== null) return null;
+  const before = openingWaitsFromFacts(facts);
+  // Approved by this press, with what else waited for this person.
+  if (before.forYou.includes("AllergenList")) return null;
+  const plan = openingApprovalPlan(facts);
+  if (before.listForYou || plan.allergenListLater) return waitOnYou("AllergenList");
+  return (
+    before.listForOthers ??
+    before.forOthers.find((wait) => wait.what === "AllergenList") ??
+    plan.others.find((wait) => wait.what === "AllergenList") ??
+    null
+  );
 }
 export interface OpeningWaits {
   /** Approved here, with what was sent shown above the button. */
@@ -2207,6 +2327,11 @@ export interface OpeningWaits {
   readonly ranOut: boolean;
   /** Someone sent back what this person's Store setup made. */
   readonly sentBack: boolean;
+  /**
+   * The Store setup waiting was made before the name, address or phone were published again: it
+   * carries the old ones. Nobody approves it as it stands; whoever sent it sends it again.
+   */
+  readonly sentChanged: boolean;
 }
 /**
  * What another Owner has sent that waits for this one, and what this one sent that waits for
@@ -2239,6 +2364,10 @@ export function openingWaitsFromFacts(facts: OpeningFacts): OpeningWaits {
     else beforeAnswers.push("ReceiptTemplate");
   }
   const version = openVersion(facts.live);
+  const sentChanged =
+    version?.setupBasis !== undefined &&
+    version.lifecycle === "PendingApproval" &&
+    recordsOf(facts.records, version) === null;
   // A change that did not come from Store setup is not this page's: it stops the press, by name.
   if (version?.setupBasis !== undefined && version.lifecycle === "PendingApproval") {
     if (facts.live.soleOperator !== undefined || version.authoredByReference === actor)
@@ -2291,5 +2420,6 @@ export function openingWaitsFromFacts(facts: OpeningFacts): OpeningWaits {
       latest?.setupBasis !== undefined &&
       facts.live.latestWithdrawal?.kind === "Declined" &&
       !facts.live.latestWithdrawal.byYou,
+    sentChanged,
   });
 }

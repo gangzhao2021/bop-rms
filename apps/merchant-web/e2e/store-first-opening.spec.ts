@@ -1357,16 +1357,26 @@ test("@production an established Store sees the page as it always was", async ({
   await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
 });
 
-test("@production a failed read says so and keeps the steps folded, and a retry recovers", async ({
+test("@production a failed read shows the page as it always was, for an established Store or a first one", async ({
   page,
 }) => {
-  const state = await install(page, { openingListFails: true });
-  await page.goto(href);
-  await expect(page.getByText("This didn't load. Try again.")).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Setup steps" })).toHaveCount(0);
-  state.openingListFails = false;
-  await page.getByRole("button", { name: "Try again", exact: true }).click();
-  await expect(panel(page)).toBeVisible();
+  for (const setupPublished of [true, false]) {
+    const state = await install(page, { setupPublished, openingListFails: true });
+    await page.goto(href);
+    // Nothing about the Store is swapped for an error: every step and section is there.
+    await expect(page.getByRole("navigation", { name: "Setup steps" })).toBeVisible();
+    await expect(page.getByText("Saving a draft does not change the live Store.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh saved setup" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Kitchen", exact: true })).toBeVisible();
+    await expect(panel(page)).toHaveCount(0);
+    await expect(page.getByText("All settings, step by step")).toHaveCount(0);
+    // A first Store gets its one page back once the read answers.
+    state.openingListFails = false;
+    await page.reload();
+    if (setupPublished) await expect(panel(page)).toHaveCount(0);
+    else await expect(panel(page)).toBeVisible();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
 });
 
 test("@production the step-by-step settings stay usable under the fold", async ({ page }) => {

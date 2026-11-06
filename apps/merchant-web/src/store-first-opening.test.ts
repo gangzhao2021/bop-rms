@@ -14,10 +14,12 @@ import {
   openingAnswerProblems,
   openingAnswersFromRecords,
   openingAnswersInput,
+  openingApprovableGates,
   openingApprovalPlan,
   openingApproveInput,
   openingConfirmationFromFacts,
   openingFeeContexts,
+  openingListAfterPublish,
   openingMissing,
   openingPeriodEndsNextDay,
   openingSentSummary,
@@ -234,6 +236,8 @@ function world(options: WorldOptions = {}) {
     configurationApprovals: [] as (string | undefined)[],
     templateApprovals: [] as (string | undefined)[],
     taxReference: options.taxReference === undefined ? id(25) : options.taxReference,
+    /** The tax rates' evidence has run out: still referenced, not in force. */
+    taxLapsed: false,
   };
   if (options.profilePublished === true)
     state.profile = {
@@ -838,6 +842,12 @@ function world(options: WorldOptions = {}) {
       },
     },
     loadApprovers: async () => approversNow,
+    openingList: async () => ({
+      setupPublished: false,
+      allergenList: state.registry !== null,
+      menuListed: false,
+      taxRatesSet: state.taxReference !== null && !state.taxLapsed,
+    }),
   } as unknown as StoreOpeningDeps;
   return { deps, state, writes, journals };
 }
@@ -912,6 +922,23 @@ function sentByAnother(
           ),
         },
       }),
+    };
+    // Store setup's records, as the answers' address and contact point at them.
+    w.state.address = {
+      reference: id(0x31),
+      revision: 1,
+      content: {
+        addressLines: ["1 King Street West"],
+        locality: "Toronto",
+        regionCode: "ON",
+        postalCode: "M5H 1A1",
+        countryCode: "CA",
+      },
+    };
+    w.state.contact = {
+      reference: id(0x32),
+      revision: 1,
+      content: { contactName: "Maple Noodle House", businessPhone: "+14165550100" },
     };
     w.state.profile = {
       version: 1,
@@ -1121,6 +1148,46 @@ describe("WP-2423 item 14: the press", () => {
       "SetUpKitchen",
       "SaveSetup",
     ]);
+  });
+  it("tax rates whose evidence ran out are not set: nothing is sent, no setting is changed", async () => {
+    const w = world({ approvers: { receiptTemplate: [], storeSetup: [], allergenList: [] } });
+    w.state.taxLapsed = true;
+    const facts = await loadOpeningFacts(w.deps);
+    // Still referenced by the Store, as publication's Tax check sees it: not in force.
+    expect(facts.live.storeTaxConfigurationReference).toBe(id(25));
+    expect(openingMissing(facts.live, scope.actorReference, facts.taxRatesSet)).toEqual([
+      "TaxRates",
+    ]);
+    const input = openingAnswersInput(
+      facts,
+      details,
+      answers,
+      openingConfirmationFromFacts(facts, details, answers),
+    );
+    expect([input.approveAlone, input.turnOnSoleOperator]).toEqual([false, false]);
+    expect(await runStoreOpening(w.deps, input)).toEqual({
+      kind: "DetailsSaved",
+      missing: ["TaxRates"],
+    });
+    expect(w.writes).not.toContain("TurnOnSoleOperator");
+    expect(w.writes).not.toContain("SavePayment");
+    expect(w.writes.some((write) => /Approve|Materialize|Submit|Record/u.test(write))).toBe(false);
+    // Even a press from a page read before they ran out stops there, before any approval.
+    w.state.taxLapsed = false;
+    const early = await loadOpeningFacts(w.deps);
+    w.state.taxLapsed = true;
+    expect(
+      await runStoreOpening(
+        w.deps,
+        openingAnswersInput(
+          early,
+          details,
+          answers,
+          openingConfirmationFromFacts(early, details, answers),
+        ),
+      ),
+    ).toEqual({ kind: "DetailsSaved", missing: ["TaxRates"] });
+    expect(w.writes).not.toContain("TurnOnSoleOperator");
   });
   it("refuses to start from hours nobody answered", async () => {
     const w = world();
@@ -1418,6 +1485,8 @@ describe("WP-2423 item 14: Approve acts only on what it names", () => {
     sentByAnother(w, { answers: true });
     w.state.latest = {
       ...firstConfiguration,
+      addressReference: id(0x31),
+      contactReference: id(0x32),
       configurationReference: id(0x78),
       configurationVersion: 2,
       lifecycle: "PendingApproval",
@@ -1442,6 +1511,53 @@ describe("WP-2423 item 14: Approve acts only on what it names", () => {
     expect(await pressApprove(w)).toEqual({ kind: "Published", waits: [] });
     expect(w.writes).toEqual(["ApproveConfiguration", "PublishConfiguration"]);
     expect(w.state.configurationApprovals).toEqual([undefined]);
+  });
+  it("a name, address or phone published after it was sent: shown as sent, never approved as it stands", async () => {
+    const w = world({ approvers: twoOwners });
+    sentByAnother(w, { answers: true });
+    const pending = {
+      ...firstConfiguration,
+      addressReference: id(0x31),
+      contactReference: id(0x32),
+      configurationReference: id(0x78),
+      configurationVersion: 2,
+      lifecycle: "PendingApproval",
+      reasonCode: "STORE_SETUP_MATERIALIZATION",
+      authoredByReference: other,
+      approvedByReference: null,
+      createdAt: new Date().toISOString(),
+      setupBasis: {
+        setupDraftReference: id(0x30),
+        sourceRevision: 1,
+        feeContexts: [{ chargeType: "ServiceCharge", state: "Disabled" }],
+      },
+    };
+    w.state.latest = pending;
+    // The page shows the records the version points at, not what customers see since.
+    const shown = w.state.profile as NonNullable<typeof w.state.profile>;
+    w.state.profile = { ...shown, address: { ...shown.address, addressLines: ["9 Elm Street"] } };
+    const before = await loadOpeningFacts(w.deps);
+    expect(openingSentSummary(before)?.address.lines).toEqual(["1 King Street West"]);
+    expect(openingWaitsFromFacts(before).sentChanged).toBe(false);
+    const input = openingApproveInput(before);
+    expect(input.approve?.gates).toEqual(["StoreSetup"]);
+    // The sender publishes a corrected address from the fold: Store setup's records follow it,
+    // and the version waiting still carries the old one.
+    const sent = w.state.address as NonNullable<typeof w.state.address>;
+    w.state.address = { ...sent, reference: id(0x33), revision: 2 };
+    // A press of what was shown, from before: refused, nothing approved.
+    expect(await runStoreOpening(w.deps, input)).toEqual({ kind: "ConfirmAgain" });
+    expect(w.writes).not.toContain("ApproveConfiguration");
+    // Read again: it says it changed, and Approve is not offered for it.
+    const after = await loadOpeningFacts(w.deps);
+    expect(openingWaitsFromFacts(after)).toMatchObject({
+      forYou: ["StoreSetup"],
+      sentChanged: true,
+    });
+    expect(openingApprovableGates(after)).toEqual([]);
+    expect(await pressApprove(w)).toEqual({ kind: "Waiting", waits: [] });
+    expect(w.writes).not.toContain("ApproveConfiguration");
+    expect(w.state.configurationApprovals).toEqual([]);
   });
   it("nothing answered yet: nothing is approved here, and the form stays, whoever recorded what", async () => {
     for (const taxReference of [id(25), null]) {
@@ -1661,6 +1777,24 @@ describe("WP-2423 item 14: a page left open", () => {
       { what: "StoreSetup", who: [{ displayName: "Mia" }] },
     ]);
     expect(w.writes).not.toContain("ApproveConfiguration");
+  });
+});
+
+describe("WP-2423 item 14: once published, the allergen list's next step is said", () => {
+  it("names who it waits for, or says it is the Owner's own, and nothing once approved", async () => {
+    // A second Owner approves the Store's gates; only this one holds the list.
+    const w = world({
+      approvers: { receiptTemplate: ["Mia"], storeSetup: ["Mia"], allergenList: [] },
+    });
+    const facts = await loadOpeningFacts(w.deps);
+    expect(openingApprovalPlan(facts).allergenListLater).toBe(true);
+    expect(openingListAfterPublish(facts, [])).toEqual({ what: "AllergenList", who: [] });
+    // What the press itself sent says it first.
+    const mia = { what: "AllergenList" as const, who: [{ displayName: "Mia" }] };
+    expect(openingListAfterPublish(facts, [mia])).toEqual(mia);
+    // Approved already: nothing to say.
+    w.state.registry = { entries: [] };
+    expect(openingListAfterPublish(await loadOpeningFacts(w.deps), [])).toBeNull();
   });
 });
 

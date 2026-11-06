@@ -61,6 +61,7 @@ const StoreFirstOpeningPanel = lazyPage(
   "StoreFirstOpeningPanel",
 );
 type OpeningPublished = import("./StoreFirstOpeningPanel.js").OpeningPublished;
+type OpeningListStill = import("./StoreFirstOpeningPanel.js").OpeningListStill;
 const steps = [
   t("Identity"),
   t("Address and timezone"),
@@ -744,12 +745,14 @@ export function StoreSetupDraftPage({
   }, [liveScope, step, live === null]);
   const ownerOnly = storeSetupOwnerOnly(error, workspace, id === storeReference);
   // WP-2423 item 14 (DEC-STORE-FIRST-OPENING): a Store whose setup has not been published gets one
-  // page and one action. Only a successful read saying it has shows the page as it always was; a
-  // read that fails keeps the steps folded, so a moment's failure never swaps the page under the
-  // Owner. Someone who can't read the setup is not asked anything.
+  // page and one action, and only once a read has said so. A read that fails shows the page as it
+  // always was: an established Store never loses its page to a moment's failure, and a first Store
+  // still has every step. Someone who can't read the setup is not asked anything.
   const [opening, setOpening] = useState<"Loading" | "First" | "Established" | "Failed">("Loading"),
-    [openingRead, setOpeningRead] = useState(0),
-    [publishedNote, setPublishedNote] = useState<string | null>(null);
+    [publishedNote, setPublishedNote] = useState<{
+      readonly text: string;
+      readonly list: OpeningListStill;
+    } | null>(null);
   useEffect(() => {
     const request = new AbortController();
     setOpening("Loading");
@@ -762,7 +765,7 @@ export function StoreSetupDraftPage({
       },
     );
     return () => request.abort();
-  }, [fetcher, storeReference, openingRead]);
+  }, [fetcher, storeReference]);
   const profileSync = useRef<(() => void) | null>(null);
   const registerProfileSync = useCallback((sync: (() => void) | null) => {
     profileSync.current = sync;
@@ -772,20 +775,37 @@ export function StoreSetupDraftPage({
   useEffect(() => {
     latestRefresh.current = refresh;
   });
-  const openingPublished = useCallback((result: OpeningPublished) => {
+  const openingPublished = useCallback((result: OpeningPublished, list: OpeningListStill) => {
     setPublishedNote(
       result.kind === "AlreadyPublished"
-        ? t(
-            "This store's setup was already published, on another device or by another Owner, so what was on that page was not saved. Check the live settings below and change them here if you need to.",
-          )
-        : result.waits.length > 0
-          ? t("Your store setup is published. The allergen list still needs approval.")
-          : t("Your store setup is published."),
+        ? {
+            text: t(
+              "This store's setup was already published, on another device or by another Owner, so what was on that page was not saved. Check the live settings below and change them here if you need to.",
+            ),
+            list: null,
+          }
+        : {
+            text:
+              list === null
+                ? t("Your store setup is published.")
+                : list.kind === "You"
+                  ? t(
+                      "Your store setup is published. The allergen list still needs your approval before you list a menu.",
+                    )
+                  : t(
+                      "Your store setup is published. The allergen list is waiting for {people}. They approve it on Allergens.",
+                      { people: list.people },
+                    ),
+            list,
+          },
     );
     setOpening("Established");
     void latestRefresh.current(true);
   }, []);
-  const firstStore = workspace !== null && id === storeReference && opening !== "Established";
+  const firstStore = workspace !== null && id === storeReference && opening === "First";
+  // Until the read has said which page this is, neither is drawn: one would only be swapped for the
+  // other, and a first Store's sections, put there and then folded, would each load twice.
+  const deciding = workspace !== null && id === storeReference && opening === "Loading";
   // On a first Store these are about the steps under the fold (a save pending, a read that failed);
   // the one page says what concerns it. Above it they would read as something being wrong with it.
   const stepsStatus = (
@@ -824,7 +844,12 @@ export function StoreSetupDraftPage({
       />
       {publishedNote === null ? null : (
         <p role="status" className="store-opening__published">
-          {publishedNote} <Link to="/app/commerce/menus">{t("Add your menu")}</Link>
+          {publishedNote.text}{" "}
+          {publishedNote.list?.kind === "You" ? (
+            <Link to="/app/compliance/allergens">{t("Approve it on Allergens")}</Link>
+          ) : (
+            <Link to="/app/commerce/menus">{t("Add your menu")}</Link>
+          )}
         </p>
       )}
       {id !== storeReference && (
@@ -832,9 +857,7 @@ export function StoreSetupDraftPage({
           <p>{t("Choose this Store in the workspace before opening its setup.")}</p>
         </StatePanel>
       )}
-      {/* Until a read has said which page this is, a first Store's sections stay off it: put there
-          and then folded, each would load twice. */}
-      {id === storeReference && !firstStore && (opening === "Established" || setupAnswered)
+      {id === storeReference && !firstStore && !deciding && (opening !== "Loading" || setupAnswered)
         ? children
         : null}
       {!online && (
@@ -843,7 +866,8 @@ export function StoreSetupDraftPage({
         </p>
       )}
       {firstStore ? null : stepsStatus}
-      {workspace && (
+      {deciding ? <p role="status">{t("Loading…")}</p> : null}
+      {workspace && !deciding && (
         <FirstStoreFold
           active={firstStore}
           status={stepsStatus}
@@ -853,31 +877,16 @@ export function StoreSetupDraftPage({
             </StoreProfilePublishedContext.Provider>
           }
           panel={
-            opening === "Loading" ? (
-              <p role="status">{t("Loading your store…")}</p>
-            ) : opening === "Failed" ? (
-              <section className="store-opening">
-                <p role="alert">{t("This didn't load. Try again.")}</p>
-                <button
-                  type="button"
-                  className="store-opening__primary"
-                  onClick={() => setOpeningRead((value) => value + 1)}
-                >
-                  {t("Try again")}
-                </button>
-              </section>
-            ) : (
-              <Suspense fallback={<p role="status">{t("Loading your store…")}</p>}>
-                <StoreFirstOpeningPanel
-                  scope={workspace.scope}
-                  locale={workspace.store.locale}
-                  csrf={csrf}
-                  onChanged={() => void refresh()}
-                  onPublished={openingPublished}
-                  registerProfileSync={registerProfileSync}
-                />
-              </Suspense>
-            )
+            <Suspense fallback={<p role="status">{t("Loading your store…")}</p>}>
+              <StoreFirstOpeningPanel
+                scope={workspace.scope}
+                locale={workspace.store.locale}
+                csrf={csrf}
+                onChanged={() => void refresh()}
+                onPublished={openingPublished}
+                registerProfileSync={registerProfileSync}
+              />
+            </Suspense>
           }
         >
           <nav className="store-setup-steps" aria-label={t("Setup steps")}>

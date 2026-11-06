@@ -7244,6 +7244,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Only the brand owner can approve these alone. Ask them to open this page.":
     "只有品牌负责人才能自行批准这些。请让对方打开这个页面。",
   "{step} can't be published yet: {checks}. {carryOn}": "{step}还不能发布：{checks}。{carryOn}",
+  "{step} can't be published yet.": "{step}还不能发布。",
+  "Waiting for BOP support: your tax rates are not in force. Tell BOP support, and come back here once they have set them; what you entered stays.":
+    "正在等待 BOP 支持：您的税率还没有生效。请联系 BOP 支持，等他们设置好后再回到这里；您填写的内容都会保留。",
+  "Waiting for BOP support: they have not approved this store to open yet. Tell BOP support, and come back here once they have; what you entered stays.":
+    "正在等待 BOP 支持：他们还没有批准这家店开业。请联系 BOP 支持，等他们批准后再回到这里；您填写的内容都会保留。",
+  "The opening hours need another look: each day you open needs its times, for an order type you offer. Fix them above, then press the button again.":
+    "营业时间需要再检查：每个营业日都要填写时间，并且只能用于本店提供的点餐方式。请在上面修改后再按一次按钮。",
+  "A charge set under All settings, step by step is for an order type this store does not offer. Turn it off there, or offer that order type here, then press the button again.":
+    "在“所有设置（分步）”里设置的某项收费，用于本店不提供的点餐方式。请在那里关闭它，或在这里开通该点餐方式，然后再按一次按钮。",
+  "One of this store's settings does not match how BOP support set the store up. Tell BOP support what time this happened; what you entered stays.":
+    "本店有一项设置和 BOP 支持开店时的设置不一致。请把发生的时间告诉 BOP 支持；您填写的内容都会保留。",
   "your tax rates are not in force": "税率还没有生效",
   "BOP support has not approved this store to open": "BOP 支持还没有批准这家店开业",
   "the opening hours need another look": "营业时间需要再检查",
@@ -7351,9 +7362,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Still to do: {items}.": "还差：{items}。",
   "All settings, step by step": "所有设置（分步）",
   "Add your menu": "添加菜单",
-  "Your store setup is published. The allergen list still needs approval.":
-    "门店设置已发布。过敏原清单还需要批准。",
+  "Your store setup is published. The allergen list still needs your approval before you list a menu.":
+    "门店设置已发布。过敏原清单还需要您批准，之后才能上架菜单。",
+  "Your store setup is published. The allergen list is waiting for {people}. They approve it on Allergens.":
+    "门店设置已发布。过敏原清单正在等待{people}批准，在“过敏原”页批准。",
   "Your store setup is published.": "门店设置已发布。",
+  "{item}: one of its choices no longer fits its choice group (an option was removed, or a default is no longer offered). Open the dish, check its choices, save it, then list the menu again.":
+    "{item}：有一项选项已不符合它的选项组（某个选项被移除，或默认选项已不再提供）。请打开这道菜，检查它的选项并保存，然后重新上架菜单。",
+  "The store's name, address or phone was changed after the store setup was sent, so it can't be approved as it is. Ask whoever sent it to open Store setup and send it again, or send it back.":
+    "门店设置送审之后，店名、地址或电话又改过了，所以不能按原样批准。请让送审的人打开“门店设置”重新送审，或者把它退回。",
+  "Your store's name, address or phone was changed after this was sent. Press Change my answers and send it again, so what is approved is what customers see.":
+    "送审之后，门店的店名、地址或电话又改过了。请按“修改我的回答”后重新送审，让批准的内容和顾客看到的一致。",
   "This store's setup was already published, on another device or by another Owner, so what was on that page was not saved. Check the live settings below and change them here if you need to.":
     "这家店的设置已经发布过了（在另一台设备上，或由另一位店主发布），所以那一页上的内容没有保存。请看下面的在营设置，需要的话在这里修改。",
   "After your store setup": "门店设置发布之后",
