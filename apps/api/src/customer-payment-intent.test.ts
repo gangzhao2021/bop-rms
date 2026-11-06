@@ -266,6 +266,17 @@ it.each([
   });
 });
 
+it("WP-2423: says staff moved the table while the round was being sent (nothing placed or charged)", async () => {
+  const f = await setup();
+  f.create.mockRejectedValue(new OrderCreationError("ORDER_CREATE_TABLE_MOVED"));
+  const response = await f.send();
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    schemaVersion: 1,
+    error: { code: "payment_table_moved", messageKey: "customer.payment.table_moved" },
+  });
+});
+
 it.each([
   [new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED"), 422],
   [new CheckoutSessionServiceError("REQUOTE_REQUIRED"), 409],

@@ -74,7 +74,12 @@ type ExplicitRejection =
   /** WP-2423: an owner listed after this checkout began; nothing placed, the cart prices again. */
   | "requote_required"
   /** WP-2423 M03: these dishes are already in an Order; nothing new was placed or charged. */
-  | "already_ordered";
+  | "already_ordered"
+  /**
+   * WP-2423 (table-move-payment review): staff moved the party while this round was being sent;
+   * nothing was placed or charged, and checkout starts again at the party's current table.
+   */
+  | "table_moved";
 /**
  * WP-2423 M03: the guest's own Order that already holds these dishes, so the page can open it.
  * Only references the guest already holds; never another guest's Order.
@@ -278,6 +283,7 @@ function failure(error: unknown) {
       CHECKOUT_STOCK_SHORT: 409,
       ORDER_CREATE_STOCK_SHORT: 409,
       ORDER_CREATE_ALREADY_ORDERED: 409,
+      ORDER_CREATE_TABLE_MOVED: 409,
       CHECKOUT_QUOTE_EXPIRED: 422,
       CHECKOUT_QUOTE_MISSING: 422,
       CHECKOUT_SELECTION_INVALID: 422,
@@ -335,6 +341,8 @@ function stockRejection(error: unknown): ExplicitRejection | undefined {
     (error instanceof CheckoutSessionServiceError && error.code === "REQUOTE_REQUIRED")
   )
     return "requote_required";
+  if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_TABLE_MOVED")
+    return "table_moved";
   return undefined;
 }
 /** WP-2423 Q20: what the customer needs to know when another card cannot be tried. */

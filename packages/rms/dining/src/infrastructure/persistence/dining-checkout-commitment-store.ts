@@ -32,7 +32,13 @@ export class DiningCheckoutStoreError extends Error {
     readonly code:
       | "DINING_CHECKOUT_STORE_INVALID"
       | "DINING_CHECKOUT_STORE_CONFLICT"
-      | "DINING_CHECKOUT_STORE_UNAVAILABLE",
+      | "DINING_CHECKOUT_STORE_UNAVAILABLE"
+      /**
+       * WP-2423 (table-move-payment review, 2026-11-06): staff moved the party off the table this
+       * round is being sent from after it was prepared. The round cannot be sent from the old table;
+       * the guest starts checkout again at the table the party sits at now.
+       */
+      | "DINING_CHECKOUT_STORE_TABLE_MOVED",
   ) {
     super("dining checkout storage is unavailable");
     this.name = "DiningCheckoutStoreError";
@@ -213,6 +219,24 @@ export function createPostgresDiningCheckoutCommitmentStore(
     }
     return records;
   }
+  /** Dining recorded a Move of this session off the round's table since the round was prepared. */
+  async function movedOff(tx: DiningTableTransaction, record: DiningCheckoutCommitment) {
+    return (
+      rows(
+        await tx.query(
+          "SELECT 1 AS moved FROM rms_dining.dining_session_move_operation WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND source_table_id=$5 AND occurred_at>=$6::timestamptz LIMIT 1",
+          [
+            tenant,
+            brand,
+            store,
+            record.diningSessionReference,
+            record.tableReference,
+            record.preparedAt,
+          ],
+        ),
+      ).length === 1
+    );
+  }
   async function current(tx: DiningTableTransaction, record: DiningCheckoutCommitment, at: string) {
     // Match Move's table-before-session order; only Dining's own current rows are locked.
     const tables = rows(
@@ -233,13 +257,27 @@ export function createPostgresDiningCheckoutCommitmentStore(
       table.operationalState !== "Available" ||
       table.observedAt > at
     )
-      return fail("DINING_CHECKOUT_STORE_CONFLICT");
+      return fail(
+        (await movedOff(tx, record))
+          ? "DINING_CHECKOUT_STORE_TABLE_MOVED"
+          : "DINING_CHECKOUT_STORE_CONFLICT",
+      );
     const sessions = rows(
       await tx.query(
         "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 FOR UPDATE",
         [tenant, brand, store, record.diningSessionReference],
       ),
     );
+    // Moved away and seated back at the same table since the round was prepared (A to B to A).
+    if (sessions.length === 1) {
+      const seated = parseDiningSession(closed(sessions[0], ["session"]).session);
+      if (
+        (seated.tableReference !== record.tableReference ||
+          seated.tableAssignmentVersion !== record.tableAssignmentVersion) &&
+        (await movedOff(tx, record))
+      )
+        return fail("DINING_CHECKOUT_STORE_TABLE_MOVED");
+    }
     const participants = rows(
       await tx.query(
         "SELECT participant_snapshot AS participant FROM rms_dining.dining_participant WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND participant_id=$5 FOR UPDATE",

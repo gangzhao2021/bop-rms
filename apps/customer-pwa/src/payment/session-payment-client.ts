@@ -43,6 +43,8 @@ export class SessionPaymentClientError extends Error {
       | "requote_required"
       /** WP-2423 M03: these dishes are already in an order; nothing new was placed or charged. */
       | "already_ordered"
+      /** WP-2423: staff moved the table while this round was being sent; nothing was charged. */
+      | "table_moved"
       | "unknown",
     /** already_ordered: the guest's own order that holds these dishes, when the server named it. */
     readonly placedOrder: {
@@ -112,6 +114,7 @@ export function createSessionPaymentClient() {
     payment_tips_turned_off: "tips_off",
     payment_requote_required: "requote_required",
     payment_already_ordered: "already_ordered",
+    payment_table_moved: "table_moved",
   } as const;
   async function post(
     session: string,

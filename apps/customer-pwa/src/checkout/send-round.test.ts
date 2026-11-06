@@ -673,6 +673,12 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
           new CheckoutSessionClientError("requote_required"),
         ),
     ],
+    // WP-2423 (table-move-payment review): staff moved the table while the round was being sent.
+    [
+      "staff moved the table during the send",
+      (ports: ReturnType<typeof setUp>["ports"]) =>
+        ports.send.mockRejectedValueOnce(new SessionPaymentClientError("table_moved")),
+    ],
   ] as const)(
     "a menu updated before %s prices the round again once and places it once",
     async (_, refuse) => {

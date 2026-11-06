@@ -58,6 +58,7 @@ describe("WP-2423 item 2: what a failed payment start may say", () => {
     ["conflict", "denied"],
     ["pay_later_table", "table_pays_later"],
     ["already_ordered", "already_ordered"],
+    ["table_moved", "table_moved"],
     // Who knows what the result page knows: never a claim about money.
     ["already_paid", "unknown"],
     ["window_ended", "unknown"],
@@ -82,6 +83,7 @@ describe("WP-2423 item 2: what a failed payment start may say", () => {
     "tips_off",
     "not_ready",
     "requote_required",
+    "table_moved",
     "invalid",
     "unknown",
     "already_paid",

@@ -118,6 +118,21 @@ it("WP-2423: tells a menu update after checkout began apart from other refusals"
   });
 });
 
+it("WP-2423: says staff moved the table while the round was being sent", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({ schemaVersion: 1, error: { code: "payment_table_moved" } }, { status: 409 }),
+    ),
+  );
+  await expect(createSessionPaymentClient().create(id(1), id(4), "200")).rejects.toMatchObject({
+    code: "table_moved",
+  });
+  await expect(createSessionPaymentClient().sendToKitchen(id(1), id(4))).rejects.toMatchObject({
+    code: "table_moved",
+  });
+});
+
 it("WP-2423 M03: says these dishes are already ordered, naming the guest's own order", async () => {
   const order = { orderReference: id(13), orderNumber: "13" };
   vi.stubGlobal(

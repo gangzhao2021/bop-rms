@@ -140,7 +140,8 @@
                   "payment_intent_conflict",
                   "payment_not_ready",
                   "payment_service_unavailable",
-                  "payment_items_short"
+                  "payment_items_short",
+                  "payment_table_moved"
                 ]
               },
               "messageKey": {

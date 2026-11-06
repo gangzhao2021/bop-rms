@@ -146,7 +146,10 @@ export function CheckoutPage({
         state: { placed: sent.status === "Held" ? "Held" : "Sent" },
       });
     } catch (error) {
-      if (error instanceof SessionPaymentClientError && error.code === "requote_required") {
+      if (
+        error instanceof SessionPaymentClientError &&
+        (error.code === "requote_required" || error.code === "table_moved")
+      ) {
         priceAgainAfterMenuUpdate();
         return;
       }

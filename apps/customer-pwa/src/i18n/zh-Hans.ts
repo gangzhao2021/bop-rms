@@ -1240,6 +1240,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The tip choices just changed. Choose a tip again to pay.":
     "小费选项刚刚变了，请重新选择后付款。",
   "The menu was just updated": "菜单刚刚更新",
+  "Your table was changed": "你们换了桌",
+  "Staff moved your party to another table while you were paying, so you haven’t been charged. Go back to checkout to pay at your new table.":
+    "付款时店员把你们换到了另一张桌，这次没有扣款。请回到结账，在新桌上付款。",
   "The restaurant just updated its menu, so we priced your order again. Nothing was sent or charged. Check the total, then continue.":
     "餐厅刚更新了菜单，我们已为您重新计价。订单尚未发送，也没有收费。请核对总价后继续。",
   "The restaurant stopped taking tips": "餐厅已停止收小费",

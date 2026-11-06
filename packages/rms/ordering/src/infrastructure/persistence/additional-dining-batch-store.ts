@@ -513,6 +513,9 @@ export function createPostgresAdditionalDiningBatchStore(options: {
         // WP-2423: the stock ran out after checkout; the guest is told plainly, nothing charged.
         if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_STOCK_SHORT")
           throw error;
+        // WP-2423: staff moved the party while the round was being sent; nothing was written.
+        if (error instanceof OrderCreationError && error.code === "ORDER_CREATE_TABLE_MOVED")
+          throw error;
         return fail();
       }
       return Object.freeze({ status: "Created" as const, snapshot });

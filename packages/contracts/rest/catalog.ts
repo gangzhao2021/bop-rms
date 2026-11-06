@@ -259,6 +259,9 @@ const CustomerPaymentError = z
           "payment_service_unavailable",
           // WP-2423: 409, items ran out after checkout; no order was placed, nothing charged.
           "payment_items_short",
+          // WP-2423: 409, staff moved the table while the round was being sent; nothing placed or
+          // charged, checkout starts again at the party's table.
+          "payment_table_moved",
         ]),
         messageKey: z.string().regex(/^customer\.payment\.[a-z_]+$/u),
       })

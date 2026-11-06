@@ -43,6 +43,12 @@ export const orderCreationErrorCodes = [
    * Cart version produces at most one Order; nothing was written and nothing will be charged.
    */
   "ORDER_CREATE_ALREADY_ORDERED",
+  /**
+   * WP-2423 (table-move-payment review, 2026-11-06): staff moved the party to another table while
+   * this round was being sent. Nothing was written and nothing will be charged; the guest starts
+   * checkout again at the table the party sits at now.
+   */
+  "ORDER_CREATE_TABLE_MOVED",
   "ORDER_CREATE_DEPENDENCY_UNAVAILABLE",
 ] as const;
 

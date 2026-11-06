@@ -761,6 +761,15 @@ it.each([
             (await unresolved()).map((value) => value),
             [event1.eventId],
           );
+          // A round prepared at the table the party left can no longer be sent from it (review
+          // 2026-11-06): Dining answers that the table moved, so the phone starts checkout again
+          // at the party's table instead of retrying the same checkout until it lapses.
+          await assert.rejects(
+            createPostgresDiningCheckoutCommitmentStore(transactions(), ownerScope, {
+              now,
+            }).withCurrentFacts(commitment1, async () => true),
+            { code: "DINING_CHECKOUT_STORE_TABLE_MOVED" },
+          );
 
           // ── Staff accept the paid round at its new table, from the Orders page.
           const before = await queued();

@@ -8,6 +8,7 @@ import {
   type createPostgresAdditionalDiningBatchStore,
 } from "@rms/ordering";
 import { diningOrderCapacityLinkFromHistory } from "./customer-dining-checkout-composition.js";
+import { refuseRoundOfMovedTable } from "./customer-dining-table-moved.js";
 
 type Gate = Parameters<typeof createPostgresAdditionalDiningBatchStore>[0]["finalize"];
 /** Read and fence only through Dining's owner contract. Identity/CSRF and current
@@ -34,9 +35,8 @@ export function createCustomerAdditionalDiningCurrentGate(scope: {
       fixed,
       { now: () => context.observedAt },
     );
-    const valid = await owner.withCurrentFacts(
-      capacityLink.commitmentReference,
-      async (_, facts) => {
+    const valid = await refuseRoundOfMovedTable(() =>
+      owner.withCurrentFacts(capacityLink.commitmentReference, async (_, facts) => {
         const commitment = assertDiningCheckoutPreparedForOrdering(
           facts.commitment,
           { session: facts.session, participant: facts.participant },
@@ -55,7 +55,7 @@ export function createCustomerAdditionalDiningCurrentGate(scope: {
         )
           throw new AdditionalDiningBatchStoreError();
         return true;
-      },
+      }),
     );
     if (valid !== true) throw new AdditionalDiningBatchStoreError();
   };

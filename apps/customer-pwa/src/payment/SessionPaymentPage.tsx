@@ -51,6 +51,8 @@ export type PaymentStartFailureState =
   | "requote_required"
   /** WP-2423 M03: these dishes are already in an order; nothing new was charged. */
   | "already_ordered"
+  /** WP-2423: staff moved the table while this round was being sent; nothing was charged. */
+  | "table_moved"
   /** The table pays at the end, so nothing here takes payment: back to its cart. */
   | "table_pays_later";
 
@@ -82,6 +84,8 @@ export function paymentStartFailureState(
       return "expired";
     case "requote_required":
       return "requote_required";
+    case "table_moved":
+      return "table_moved";
     case "invalid":
     case "unknown":
       return "start_failed";
@@ -160,6 +164,8 @@ function PreparedSessionPaymentPage({
     | "requote_required"
     /** WP-2423 M03: these dishes are already in an order; nothing new was charged. */
     | "already_ordered"
+    /** WP-2423: staff moved the table while this round was being sent; nothing was charged. */
+    | "table_moved"
     /** WP-2423 item 2: the payment couldn't start; no card was offered, so nothing was charged. */
     | "start_failed"
     /** WP-2423 item 2: the checkout's prices no longer hold; no card was offered. */
@@ -342,6 +348,7 @@ function PreparedSessionPaymentPage({
     status === "tips_off" ||
     // Nothing was placed, so the dishes are in the cart, unless another phone at the table placed them.
     status === "requote_required" ||
+    status === "table_moved" ||
     (status === "denied" && !cardOffered);
   const back = useCheckoutReturn(failedStart, store?.serviceMode === "DineIn");
   // While a payment may be under way (or just failed), a second checkout is the last thing to offer.
@@ -480,6 +487,18 @@ function PreparedSessionPaymentPage({
               : t(
                   "The restaurant updated its menu while you were checking out, so you haven’t been charged. Pay for your order from your table page.",
                 )}
+          </p>
+          <SavedOnTable to={back} />
+          <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
+        </section>
+      ) : null}
+      {status === "table_moved" ? (
+        <section className="checkout-attention" role="alert">
+          <h2>{t("Your table was changed")}</h2>
+          <p>
+            {t(
+              "Staff moved your party to another table while you were paying, so you haven’t been charged. Go back to checkout to pay at your new table.",
+            )}
           </p>
           <SavedOnTable to={back} />
           <CheckoutReturnLink to={back} cartPath="/checkout" cartText={t("Back to checkout")} />
