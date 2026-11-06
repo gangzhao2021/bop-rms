@@ -23,8 +23,11 @@ it("lets the joined Host make a code over the composed API that seats the next g
         await client.query(
           "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
         );
-      // Exactly the pilot's grants: a read the entry gains (e.g. a merchant's paused new guests)
-      // is refused here as on v15 until the pilot ACL holds it.
+      // The rendered pilot ACL: a read the entry gains (e.g. a merchant's paused new guests) is
+      // refused here as on v15 until the pilot ACL holds it. Known gap (WP-2423): the shared entry
+      // helpers (current-entry-profile.mjs, persistent-profile-entry.mjs) still add setup grants to
+      // this role beyond the pilot ACL (UPDATE on profile versions/timing and audit rows, UPDATE and
+      // DELETE on guest admissions), so a rewrite of that history would not be caught here.
       const root = new URL("../../../docs/spec/", import.meta.url);
       const matrices = await Promise.all(
         ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
