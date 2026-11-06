@@ -102,6 +102,32 @@ export function StaffSignedOutPage() {
 }
 
 /**
+ * The Store or the merchant is paused or closed on BOP. Signing in again leads back here, so the
+ * page says what the state is and who can change it, and lets the person sign out.
+ */
+export function OrganizationNotActivePage() {
+  return (
+    <main id="main-content" tabIndex={-1} className="bop-shell__main staff-switch staff-sign-in">
+      <header className="staff-switch__header">
+        <p className="staff-switch__brand">
+          <strong aria-label="BOP">BOP</strong>
+        </p>
+        <h1>{t("This store is not open on BOP")}</h1>
+        <LanguageSwitch className="staff-switch__language" />
+      </header>
+      <section className="staff-switch__panel" role="status">
+        <p>
+          {t(
+            "BOP has paused or closed this store or business, so its screens can't open. Contact BOP support to find out why or to reopen it.",
+          )}
+        </p>
+        <StaffSwitchButton label={t("Sign out")} />
+      </section>
+    </main>
+  );
+}
+
+/**
  * WP-2423 Q18: "Switch staff" on a shared tablet — ends this staff member's Session and opens the
  * sign-in so the next person signs in as themselves. Nothing of the previous Session stays usable.
  */

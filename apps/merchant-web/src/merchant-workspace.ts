@@ -363,6 +363,17 @@ export class MerchantPlatformSupportSession extends Error {
   }
 }
 
+/**
+ * The Store or the merchant has been paused or closed by BOP. Signing in again cannot help; the
+ * screen says so and who to call.
+ */
+export class MerchantOrganizationNotActive extends Error {
+  constructor() {
+    super("MERCHANT_ORGANIZATION_NOT_ACTIVE");
+    this.name = "MerchantOrganizationNotActive";
+  }
+}
+
 export function createMerchantWorkspaceClient(
   request: typeof fetch = globalThis.fetch,
 ): MerchantWorkspaceClient {
@@ -394,6 +405,7 @@ export function createMerchantWorkspaceClient(
     if (response.status === 403) {
       const denial = (await response.json().catch(() => null)) as { error?: unknown } | null;
       if (denial?.error === "platform_support") throw new MerchantPlatformSupportSession();
+      if (denial?.error === "organization_not_active") throw new MerchantOrganizationNotActive();
       return null;
     }
     if (response.status === 401 || response.status === 404) return null;

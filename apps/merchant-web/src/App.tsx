@@ -16,6 +16,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 import { usesWorkspaceLayout, WorkspaceLayout } from "./WorkspaceLayout.js";
 import {
   StaffSessionGuard,
+  OrganizationNotActivePage,
   StaffSignedOutPage,
   StaffSignedOutPanel,
   StaffSwitchButton,
@@ -51,6 +52,7 @@ import { FULL_SIGN_IN_REQUIRED, needsFullSignIn } from "./full-sign-in.js";
 import { lazyModule, lazyPage, PageChunkBoundary, WithModule } from "./route-chunks.js";
 import {
   createMerchantWorkspaceClient,
+  MerchantOrganizationNotActive,
   MerchantPlatformSupportSession,
   type MerchantWorkspaceClient,
   type MerchantWorkspaceSnapshot,
@@ -461,6 +463,8 @@ type WorkspaceState =
   | { readonly kind: "SignedOut" }
   | { readonly kind: "Offline" }
   | { readonly kind: "Failure" }
+  /** BOP paused or closed this Store or merchant: not a sign-in to repeat. */
+  | { readonly kind: "NotActive" }
   | {
       readonly kind: "Ready";
       readonly csrf: string;
@@ -669,6 +673,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             window.location.assign("/platform/support-cases");
           return;
         }
+        if (error instanceof MerchantOrganizationNotActive) {
+          setState({ kind: "NotActive" });
+          return;
+        }
         setState({ kind: navigator.onLine ? "Failure" : "Offline" });
       });
     return () => {
@@ -786,7 +794,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
                     />
                   ) : null
                 }
-                state={state}
+                // NotActive never reaches the shell: its own page is shown instead of the routes.
+                state={state.kind === "NotActive" ? { kind: "Failure" } : state}
                 onSwitchStore={switchStore}
               />
             </LocalDemoRoute>
@@ -2273,6 +2282,8 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
             workspaceFrame(routes)
           ) : state.kind === "SignedOut" && demo === null && staffPage ? (
             <StaffSignedOutPage />
+          ) : state.kind === "NotActive" && demo === null && !sessionless ? (
+            <OrganizationNotActivePage />
           ) : (
             routes
           )}

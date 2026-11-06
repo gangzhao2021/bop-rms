@@ -149,6 +149,16 @@ export function merchantFailureKind(error: unknown): MerchantFailureKind {
   return code.endsWith("_UNAVAILABLE") ? "RetryLater" : "Unexpected";
 }
 
+/** Whether the failure, or one it was written over, carries this code. */
+export function failureNamed(error: unknown, code: string): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4 && current !== null && typeof current === "object"; depth += 1) {
+    if (merchantFailureCode(current) === code) return true;
+    current = own(current, "cause");
+  }
+  return false;
+}
+
 /** True only for an error that says the request was refused. */
 export function isMerchantRefusal(error: unknown): boolean {
   return merchantFailureKind(error) === "Refused";

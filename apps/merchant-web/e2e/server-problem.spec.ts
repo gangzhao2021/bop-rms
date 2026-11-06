@@ -451,3 +451,18 @@ test("@production a back office page opens once a try works", async ({ page }) =
   await expect(page.getByRole("heading", { name: "No products yet" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "This page didn't load" })).toHaveCount(0);
 });
+
+test("@production a Store BOP paused says so and who to call, instead of asking to sign in again", async ({
+  page,
+}) => {
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({ status: 403, headers, json: { error: "organization_not_active" } }),
+  );
+  await page.goto("/operations/orders");
+  await expect(page.getByRole("heading", { name: "This store is not open on BOP" })).toBeVisible();
+  await expect(page.getByText("Contact BOP support")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(page.getByText("Sign in required")).toHaveCount(0);
+  await page.goto("/app");
+  await expect(page.getByRole("heading", { name: "This store is not open on BOP" })).toBeVisible();
+});

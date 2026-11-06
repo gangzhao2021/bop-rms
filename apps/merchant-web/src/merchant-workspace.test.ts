@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createMerchantWorkspaceClient, parseMerchantWorkspace } from "./merchant-workspace.js";
+import {
+  createMerchantWorkspaceClient,
+  MerchantOrganizationNotActive,
+  parseMerchantWorkspace,
+} from "./merchant-workspace.js";
 
 const storeReference = "018f7f9a-ad3e-7a11-8d01-000000000003";
 const brandReference = "018f7f9a-ad3e-7a11-8d01-000000000002";
@@ -185,6 +189,16 @@ describe("Merchant workspace client boundary", () => {
   it("treats closed authentication denial as signed out and leaks no error body", async () => {
     const request = vi.fn(async () => new Response('{"error":"provider-detail"}', { status: 403 }));
     await expect(createMerchantWorkspaceClient(request).bootstrap()).resolves.toBeNull();
+  });
+
+  it("a Store or merchant BOP paused or closed is said as such, not as signed out", async () => {
+    const request = vi.fn(async () =>
+      Response.json({ error: "organization_not_active" }, { status: 403 }),
+    );
+    await expect(createMerchantWorkspaceClient(request).bootstrap()).rejects.toBeInstanceOf(
+      MerchantOrganizationNotActive,
+    );
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("a busy session is asked again, never read as signed out; other outages still fail", async () => {

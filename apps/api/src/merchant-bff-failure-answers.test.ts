@@ -279,10 +279,21 @@ describe("the session read", () => {
     expect(app.reported).toEqual([]);
   });
 
-  it("an archived Store answers 403 and logs nothing", async () => {
-    const app = await session(new Error("MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED"));
-    expect((await app.get("/session")).status).toBe(403);
-    expect(app.reported).toEqual([]);
+  it("an archived Store answers 403 that says so, and logs nothing", async () => {
+    for (const error of [
+      new Error("MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED"),
+      withCause(
+        new Error("BROWSER_SESSION_DENIED"),
+        new Error("MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED"),
+      ),
+    ]) {
+      const app = await session(error);
+      const response = await app.get("/session");
+      expect(response.status).toBe(403);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ error: "organization_not_active" });
+      expect(app.reported).toEqual([]);
+    }
   });
 });
 

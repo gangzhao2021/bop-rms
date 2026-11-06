@@ -3712,6 +3712,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sign in again at {at}.": "请在 {at} 重新登录。",
   "Sign in and select a Store to continue.": "请登录并选择门店以继续。",
   "Sign in required": "需要登录",
+  "This store is not open on BOP": "这家店目前在 BOP 上没有开通",
+  "BOP has paused or closed this store or business, so its screens can't open. Contact BOP support to find out why or to reopen it.":
+    "BOP 已暂停或关闭这家店或这个商户，所以页面打不开。请联系 BOP 客服了解原因或重新开通。",
+  "Sign out": "退出登录",
   "Sign in to manage this store's shared tablets and staff PINs.":
     "登录后管理本店的共享平板和员工 PIN。",
   "Sign in to open your Store workspace.": "登录以打开你的门店工作台。",

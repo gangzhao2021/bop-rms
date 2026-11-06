@@ -20,6 +20,7 @@ import {
   sameOriginMutation,
 } from "./merchant-bff-http.js";
 import {
+  failureNamed,
   isDatabaseContention,
   isMerchantRefusal,
   merchantFailureKind,
@@ -225,6 +226,15 @@ export function installMerchantSessionRoutes(
         // `retry_later`): it says at once what happened, with one line in the log per page load.
         if (!isMerchantRefusal(error)) {
           response.status(503).json({ error: "merchant_workspace_unavailable" });
+          return;
+        }
+        // A suspended or archived Brand or Store: a state BOP set, not a sign-in to repeat. The
+        // screen says so and who to call, instead of sending the person back to sign in for ever.
+        if (failureNamed(error, "MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED")) {
+          response
+            .status(403)
+            .set("Cache-Control", NO_STORE)
+            .json({ error: "organization_not_active" });
           return;
         }
         // WP-2423 取舍 15: signed in with no Store workspace may be platform support, who have their
