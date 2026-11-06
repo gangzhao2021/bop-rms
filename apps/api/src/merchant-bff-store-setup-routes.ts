@@ -871,7 +871,7 @@ export function installMerchantStoreSetupRoutes(
     void Promise.resolve()
       .then(() => port.approvers({ sessionCookie }))
       .then((view) => response.set("Cache-Control", NO_STORE).json(view))
-      .catch(() => denied(response));
+      .catch((error: unknown) => failed(response, error));
   });
   router.get("/store/kitchen-setup", safeRead(options), (request, response) => {
     const sessionCookie = cookie(request, "__Host-bop-merchant");

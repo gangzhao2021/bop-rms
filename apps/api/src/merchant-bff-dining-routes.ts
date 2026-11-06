@@ -783,12 +783,14 @@ export function installMerchantDiningRoutes(
           failed(response, error);
           return;
         }
+        if (error.code === "Denied") {
+          denied(response);
+          return;
+        }
         noteFailure(response, error);
         if (error.code === "Changed")
           response.status(409).json({ error: "guest_table_start_changed" });
-        else if (error.code === "Unavailable")
-          response.status(503).json({ error: "guest_table_start_unavailable" });
-        else denied(response);
+        else response.status(503).json({ error: "guest_table_start_unavailable" });
       });
   });
 

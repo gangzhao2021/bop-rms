@@ -405,8 +405,8 @@ export function createPersistentMerchantOrderingEnding(options: {
     let board: unknown;
     try {
       board = await options.readBoard();
-    } catch {
-      return unavailable();
+    } catch (error) {
+      return keepingCause(unavailable)(error);
     }
     return projectOrderingEndingNotice(board, persistence.now());
   };

@@ -7,6 +7,7 @@ import {
   exactHeader,
   failed,
   NO_STORE,
+  noteFailure,
   rawHeaderValues,
   safeRead,
   sameOriginMutation,
@@ -133,12 +134,13 @@ export function installMerchantOperationsRoutes(
       .then((notice) => response.set("Cache-Control", NO_STORE).json(notice))
       .catch((error: unknown) => {
         // A board that cannot be read is no refusal: the screen keeps what it last knew.
-        if (error instanceof Error && error.message === "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE")
+        if (error instanceof Error && error.message === "MERCHANT_OPERATIONS_ALERTS_UNAVAILABLE") {
+          noteFailure(response, error);
           response
             .status(503)
             .set("Cache-Control", NO_STORE)
             .json({ error: "ordering_ending_unavailable" });
-        else denied(response);
+        } else failed(response, error);
       });
   });
 

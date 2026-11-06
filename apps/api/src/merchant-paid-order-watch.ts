@@ -19,6 +19,7 @@ import { readOrderAutoAcceptedPickupRefund } from "./order-auto-accepted-pickup-
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
+import { keepingCause, onlyRefusal } from "./merchant-failure.js";
 
 /** One automatically accepted batch the kitchen has not touched. Never a Customer's details. */
 export interface PaidOrderWatchItem {
@@ -215,7 +216,7 @@ export function createMerchantPaidOrderKeep(options: {
                 input.sessionCookie,
                 "order.accept",
                 authenticated.sessionReference,
-              ).catch(() => fail("PAID_ORDER_KEEP_DENIED"));
+              ).catch(onlyRefusal(() => fail("PAID_ORDER_KEEP_DENIED")));
               if ((await current.allowed()) !== true) return fail("PAID_ORDER_KEEP_DENIED");
               return current;
             },
@@ -250,7 +251,7 @@ export function createMerchantPaidOrderKeep(options: {
       // Being changed by someone else right now: staff look again.
       if (code === "40P01" || code === "40001" || code === "55P03")
         return fail("PAID_ORDER_KEEP_NOT_KEEPABLE");
-      return fail("PAID_ORDER_KEEP_UNAVAILABLE");
+      return keepingCause(() => fail("PAID_ORDER_KEEP_UNAVAILABLE"))(error);
     }
   };
 }
@@ -301,7 +302,7 @@ export function createMerchantPaidOrderAutoAcceptOff(options: {
                 input.sessionCookie,
                 "store.service.pause",
                 authenticated.sessionReference,
-              ).catch(() => fail("PAID_ORDER_AUTO_ACCEPT_DENIED"));
+              ).catch(onlyRefusal(() => fail("PAID_ORDER_AUTO_ACCEPT_DENIED")));
               if ((await current.allowed()) !== true) return fail("PAID_ORDER_AUTO_ACCEPT_DENIED");
               return current;
             },
@@ -334,7 +335,7 @@ export function createMerchantPaidOrderAutoAcceptOff(options: {
       if (error instanceof PaidOrderAutoAcceptOffError) throw error;
       if (error instanceof OrderAutoAcceptanceSettingConflictError)
         return fail("PAID_ORDER_AUTO_ACCEPT_CHANGED");
-      return fail("PAID_ORDER_AUTO_ACCEPT_UNAVAILABLE");
+      return keepingCause(() => fail("PAID_ORDER_AUTO_ACCEPT_UNAVAILABLE"))(error);
     }
   };
 }

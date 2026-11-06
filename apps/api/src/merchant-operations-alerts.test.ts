@@ -267,6 +267,8 @@ describe("a merchant's projection of its own board", () => {
       "updates.retrying",
       "receipts.template",
       "pricing.tax_configuration",
+      "orders.workflow",
+      "orders.unpaid_rounds",
       "orders.held_stock",
       "pickup.capacity_horizon",
       "reconciliation.differences",
