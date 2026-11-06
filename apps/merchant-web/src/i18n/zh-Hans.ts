@@ -5787,8 +5787,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{stableCode}: {length} price{value}{value2}, fixed for good once published.":
     "{stableCode}：{length} 个价格{value2}，发布后永久固定。",
   "{started} already being made": "{started} 项已在制作",
-  "{startsAt} to {endsAt} (store time). A sale counts on the business day it was paid and a refund on the day the money went back, the same as the day-end settlement. Orders cancelled before payment are not sales.":
-    "{startsAt} 至 {endsAt}（门店时间）。销售计入付款的营业日，退款计入退款当天，与日结相同。付款前取消的订单不算销售。",
+  "{startsAt} to {endsAt} (store time). A sale counts on the business day it was paid and a refund on the day the money went back, the same as the day-end settlement. Orders cancelled before payment are not sales. Net sales after refunds takes off every refund, partial ones included. Comps, discounts and points are shown before tax.":
+    "{startsAt} 至 {endsAt}（门店时间）。销售计入付款的营业日，退款计入退款当天，与日结相同。付款前取消的订单不算销售。退款后净销售扣除所有退款（含部分退款）。免单、折扣和积分抵扣按税前金额显示。",
   "{state} · submitted draft {draftRevision}. {value}":
     "{state} · 已提交草稿 {draftRevision}。{value}",
   "{status} · as of {value}": "{status} · 截至 {value}",
@@ -6389,8 +6389,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Comps and discounts by a manager": "店长免单/折让",
   "Comps and discounts": "免单/折让",
   "Taken off bills": "从账单减掉",
-  "Decided today by a manager, with a reason, before the table paid. Not collected, so not in the takings above.":
-    "今天由店长在付款前决定并写明原因。没有收这笔钱，所以不在上面的收款里。",
+  "Decided today by a manager, with a reason, before the table paid. Not collected, so not in the takings above. This amount includes the tax taken off; Reports show comps before tax. Points guests used are not comps and are not included.":
+    "今天由店长在付款前决定并写明原因。没有收这笔钱，所以不在上面的收款里。此金额含减免的税；报表显示税前金额。客人用积分抵扣的不算免单，不含在内。",
   "Comps and discounts by a manager · {dishes}": "店长免单/折让 · {dishes}",
   Comps: "免单/折让",
   "Comp or discount dishes before the table pays": "付款前给菜免单或折让",
@@ -8347,6 +8347,36 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这个时间早于本桌最后一轮在系统里点单的时间（{at}）。刷卡机的时钟可能差几分钟：确认前请核对单据上的时间。",
   "Paid at": "付款时间",
   "Orders cancelled and refunded in full · {orders}": "已取消并全额退款的订单 · {orders}",
+  "Orders cancelled or rejected and refunded in full · {orders}":
+    "已取消或拒单并全额退款的订单 · {orders}",
+  "({amount} with tax)": "（含税 {amount}）",
+  "Points used · {dishes}": "积分抵扣 · {dishes}",
+  "Tax after refunds": "退款后税额",
+  "sold out": "售罄",
+  "store mistake": "门店失误",
+  "duplicate order": "重复下单",
+  "guest asked": "客人要求",
+  refunded: "已退款",
+  "refund in progress": "退款处理中",
+  "Guest cancelled": "客人取消",
+  "Cancelled by staff": "员工取消",
+  "Not accepted in time": "未及时接单",
+  "refunded automatically": "已自动退款",
+  "Paid after the order had closed": "订单关闭后才付款",
+  "{time} by {person}": "{time} 经办 {person}",
+  "Can still be refunded": "还可退",
+  "Hand over {cash} (rounded to 5¢)": "交给客人 {cash}（按 5 分取整）",
+  "incl. tax": "（含税）",
+  "by {person}, {time}": "{person} {time}",
+  "Merged into another table · paid there": "已并入另一桌 · 在那里付清",
+  "Merged into another table · on that bill": "已并入另一桌 · 记在那张账单上",
+  "Merged into {table} · paid there": "已并入 {table} · 在那里付清",
+  "Merged into {table} · on that bill": "已并入 {table} · 记在那张账单上",
+  "Paid {amount} here": "此处已付 {amount}",
+  "Orders cancelled or rejected and refunded in full": "已取消或拒单并全额退款的订单",
+  "The day-end settlement counts these payments and their refunds": "日结仍计入这些付款及其退款",
+  "Card machine: this system recorded {amount} on the card machine today (tables and counter, tips included, refunds taken off). Your batch also holds card sales rung up on your own register, so it can be higher.":
+    "刷卡机：本系统今天记录刷卡 {amount}（桌台和柜台，含小费，已扣退款）。刷卡机批次还包括你自己收银机刷的卡，可能更高。",
   "The settlement's figures also include {orders} ({amount}) taken and given back the same day, which this report lists apart instead of as sales and refunds.":
     "日结的数字里还包括当天收款又全额退回的 {orders}（{amount}），本报表把它们单独列出，不算作销售和退款。",
   "Waiting for your OK · not on the bill": "等你确认 · 未计入账单",

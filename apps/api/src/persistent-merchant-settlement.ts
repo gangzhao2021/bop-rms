@@ -495,11 +495,14 @@ export function createPersistentMerchantSettlement(options: {
       comps: (tx, scope, window) =>
         optional(async () => {
           if (!(await guard(scope)(tx))) return null;
-          const decided = await listStorePriceReductionsDecided(
-            tx,
-            { brandReference: scope.brandReference, storeReference: scope.storeReference },
-            window,
-          );
+          // v15 M130: a member's points are not a manager's comp (Reports list them apart too).
+          const decided = (
+            await listStorePriceReductionsDecided(
+              tx,
+              { brandReference: scope.brandReference, storeReference: scope.storeReference },
+              window,
+            )
+          ).filter((record) => record.reasonCode !== "POINTS_REDEMPTION");
           if (!(await guard(scope)(tx))) return null;
           return {
             count: decided.length,

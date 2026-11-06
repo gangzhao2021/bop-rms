@@ -921,8 +921,10 @@ it("reports a business day's sales, items, hours and tips, matches the settlemen
       // muffin order refunded on the machine leaves the sales, the taken and the refunds, and is
       // listed as cancelled and refunded in full; what stays in the till and the match with the
       // day-end settlement are unchanged. Every Store follows this one rule.
+      // v15 M45: the same for an order the Store rejected before accepting it (100 such orders on
+      // v15, e.g. sold out) and refunded in full: recorded here as that rejection.
       await admin.query(
-        "INSERT INTO rms_ordering.order_termination_record (termination_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,terminated_order_version,expected_source_checkpoint,previous_phase,phase,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,terminated_at) VALUES ($1,$2,$3,$4,$5,$6,2,3,$7,'Accepted','Cancelled','User',$8,'StaffCancellation','ordering.order.cancel','STORE_ERROR',$9,$10,$11,$12)",
+        "INSERT INTO rms_ordering.order_termination_record (termination_id,operation_id,brand_id,store_id,order_id,order_batch_id,expected_order_version,terminated_order_version,expected_source_checkpoint,previous_phase,phase,actor_type,actor_id,purpose_code,permission_code,reason_code,workflow_version_id,transition_id,source_digest,terminated_at) VALUES ($1,$2,$3,$4,$5,$6,1,2,$7,'Submitted','Rejected','User',$8,'StoreRejection','ordering.order.reject','SOLD_OUT',$9,$10,$11,$12)",
         [
           id(0x4700),
           id(0x4701),

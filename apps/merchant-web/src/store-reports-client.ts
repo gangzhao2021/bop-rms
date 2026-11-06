@@ -39,6 +39,11 @@ export interface StoreReportSummary {
   /** WP-2423 item 8 ① segment 2: comps and discounts a manager decided, on their own line. */
   readonly compCount: number;
   readonly compsMinor: string;
+  /** v15 M149: the comps and discounts with the tax they took off (comps are shown before tax). */
+  readonly compsWithTaxMinor: string;
+  /** v15 M130: members' points used on dishes, a line of its own (not in comps). */
+  readonly pointsCount: number;
+  readonly pointsUsedMinor: string;
   readonly netSalesMinor: string;
   readonly serviceChargesMinor: string;
   readonly taxMinor: string;
@@ -62,6 +67,8 @@ export interface StoreReportSummary {
     readonly notItemizedMinor: string;
   };
   readonly netSalesAfterRefundsMinor: string;
+  /** v15 M45 (Owner rule 6): tax charged less the tax refunds gave back. */
+  readonly taxAfterRefundsMinor: string;
   readonly netCollectedMinor: string;
   /** v15 2026-11-01: orders refunded in full the day they were paid (not in the sums above). */
   readonly cancelledInFullCount: number;
@@ -73,6 +80,7 @@ export interface StoreReportItemRow {
   readonly grossSalesMinor: string;
   readonly discountsMinor: string;
   readonly compsMinor: string;
+  readonly pointsUsedMinor: string;
   readonly netSalesMinor: string;
   readonly refundedQuantity: number;
   readonly refundsMinor: string;
@@ -145,6 +153,9 @@ const summaryKeys = [
   "discountsMinor",
   "compCount",
   "compsMinor",
+  "compsWithTaxMinor",
+  "pointsCount",
+  "pointsUsedMinor",
   "netSalesMinor",
   "serviceChargesMinor",
   "taxMinor",
@@ -160,6 +171,7 @@ const summaryKeys = [
   "refundsMinor",
   "refunds",
   "netSalesAfterRefundsMinor",
+  "taxAfterRefundsMinor",
   "netCollectedMinor",
   "cancelledInFullCount",
   "cancelledInFullMinor",
@@ -179,6 +191,9 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
     discountsMinor: minor(value.discountsMinor),
     compCount: count(value.compCount),
     compsMinor: minor(value.compsMinor),
+    compsWithTaxMinor: minor(value.compsWithTaxMinor),
+    pointsCount: count(value.pointsCount),
+    pointsUsedMinor: minor(value.pointsUsedMinor),
     netSalesMinor: signed(value.netSalesMinor),
     serviceChargesMinor: minor(value.serviceChargesMinor),
     taxMinor: minor(value.taxMinor),
@@ -203,6 +218,7 @@ function summary(value: Record<string, unknown>): StoreReportSummary {
       notItemizedMinor: minor(refunds.notItemizedMinor),
     }),
     netSalesAfterRefundsMinor: signed(value.netSalesAfterRefundsMinor),
+    taxAfterRefundsMinor: signed(value.taxAfterRefundsMinor),
     netCollectedMinor: signed(value.netCollectedMinor),
     cancelledInFullCount: count(value.cancelledInFullCount),
     cancelledInFullMinor: minor(value.cancelledInFullMinor),
@@ -217,6 +233,7 @@ const itemRow = (value: unknown): StoreReportItemRow => {
     "grossSalesMinor",
     "discountsMinor",
     "compsMinor",
+    "pointsUsedMinor",
     "netSalesMinor",
     "refundedQuantity",
     "refundsMinor",
@@ -228,6 +245,7 @@ const itemRow = (value: unknown): StoreReportItemRow => {
     grossSalesMinor: minor(row.grossSalesMinor),
     discountsMinor: minor(row.discountsMinor),
     compsMinor: minor(row.compsMinor),
+    pointsUsedMinor: minor(row.pointsUsedMinor),
     netSalesMinor: signed(row.netSalesMinor),
     refundedQuantity: count(row.refundedQuantity),
     refundsMinor: minor(row.refundsMinor),

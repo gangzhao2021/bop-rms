@@ -389,7 +389,7 @@ export function SettlementReport({
           </ul>
           <p className="bop-muted">
             {t(
-              "Decided today by a manager, with a reason, before the table paid. Not collected, so not in the takings above.",
+              "Decided today by a manager, with a reason, before the table paid. Not collected, so not in the takings above. This amount includes the tax taken off; Reports show comps before tax. Points guests used are not comps and are not included.",
             )}
           </p>
         </section>

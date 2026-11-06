@@ -141,7 +141,7 @@ describe("WP-2423 Q14 store reports page", () => {
     expect(closed).toContain(
       "Matches the day-end settlement: $50.97 collected, $19.22 refunded. The settlement&#x27;s figures also include 3 orders ($43.96) taken and given back the same day, which this report lists apart instead of as sales and refunds.",
     );
-    expect(closed).toContain("Orders cancelled and refunded in full · 3 orders");
+    expect(closed).toContain("Orders cancelled or rejected and refunded in full · 3 orders");
     expect(closed).toContain("$43.96");
     // With today open, the closed days' sentence says the same.
     const withToday = render({ ...fixture, summary });
@@ -158,7 +158,7 @@ describe("WP-2423 Q14 store reports page", () => {
       "Matches the day-end settlement: $50.97 collected, $19.22 refunded.</p>",
     );
     expect(none).not.toContain("taken and given back");
-    expect(none).not.toContain("Orders cancelled and refunded in full");
+    expect(none).not.toContain("refunded in full ·");
   });
   it("says when the totals differ from the settlement and when refunds await confirmation", () => {
     const fixture = storeReportsViewFixture();

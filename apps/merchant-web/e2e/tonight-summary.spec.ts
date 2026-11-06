@@ -90,7 +90,8 @@ test("@production tonight's summary adds up, checks the card machine and drawer,
   );
   await expect(takings).toContainText("Total taken$503.05");
   await expect(takings).toContainText("Net taken$491.05");
-  await expect(takings).toContainText("The batch total should be $219.50");
+  await expect(takings).toContainText("this system recorded $219.50 on the card machine today");
+  await expect(takings).not.toContainText("should be");
   await expect(takings).toContainText(
     "The cash drawer also holds cash taken on your own register.",
   );

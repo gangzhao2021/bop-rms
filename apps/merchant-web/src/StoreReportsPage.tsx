@@ -117,7 +117,18 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
       t("Comps and discounts by a manager · {dishes}", {
         dishes: countOf(summary.compCount, "dish"),
       }),
-      "−" + money(summary.compsMinor),
+      // v15 M149: before tax, like every sales line; with its tax said beside it.
+      "−" +
+        money(summary.compsMinor) +
+        (summary.compsWithTaxMinor === summary.compsMinor
+          ? ""
+          : " " + t("({amount} with tax)", { amount: money(summary.compsWithTaxMinor) })),
+    ]);
+  // v15 M130: a member's points are the guest's own balance, not a manager's comp.
+  if (summary.pointsCount > 0 || summary.pointsUsedMinor !== "0")
+    lines.push([
+      t("Points used · {dishes}", { dishes: countOf(summary.pointsCount, "dish") }),
+      "−" + money(summary.pointsUsedMinor),
     ]);
   lines.push([t("Net sales"), money(summary.netSalesMinor), true]);
   if (summary.serviceChargesMinor !== "0")
@@ -153,14 +164,16 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
       lines.push([t("  not split by item"), money(summary.refunds.notItemizedMinor)]);
   }
   lines.push([t("Net collected"), money(summary.netCollectedMinor), true]);
-  // A refund by amount (a table's cash or phone payment) has no dishes to take off net sales.
+  // v15 M45 (Owner rule 6): the headline is net sales after every refund, partial ones included;
+  // a refund by amount gives back its share of each dish's sales and tax.
   if (BigInt(summary.refunds.notItemizedMinor) > 0n)
     lines.push([t("  refunds not split by item are not taken off the next line"), ""]);
-  lines.push([t("Net sales after refunds"), money(summary.netSalesAfterRefundsMinor)]);
+  lines.push([t("Net sales after refunds"), money(summary.netSalesAfterRefundsMinor), true]);
+  lines.push([t("Tax after refunds"), money(summary.taxAfterRefundsMinor)]);
   // WP-2423 (v15 fabf0261): taken and given back the same day, so neither a sale nor a refund here.
   if (summary.cancelledInFullCount > 0)
     lines.push([
-      t("Orders cancelled and refunded in full · {orders}", {
+      t("Orders cancelled or rejected and refunded in full · {orders}", {
         orders: countOf(summary.cancelledInFullCount, "order"),
       }),
       money(summary.cancelledInFullMinor),
@@ -276,7 +289,7 @@ export function StoreReports({
         )}
         <p className="bop-muted">
           {t(
-            "{startsAt} to {endsAt} (store time). A sale counts on the business day it was paid and a refund on the day the money went back, the same as the day-end settlement. Orders cancelled before payment are not sales.",
+            "{startsAt} to {endsAt} (store time). A sale counts on the business day it was paid and a refund on the day the money went back, the same as the day-end settlement. Orders cancelled before payment are not sales. Net sales after refunds takes off every refund, partial ones included. Comps, discounts and points are shown before tax.",
             {
               startsAt: storeTime(view.startsAt, view.timeZone, true),
               endsAt: storeTime(view.endsAt, view.timeZone, true),
@@ -458,6 +471,7 @@ export function StoreReports({
             t("Gross sales"),
             t("Discounts"),
             t("Comps"),
+            t("Points"),
             t("Net sales"),
             t("Refunded"),
             t("Refunds"),
@@ -470,6 +484,7 @@ export function StoreReports({
             money(row.grossSalesMinor),
             money(row.discountsMinor),
             money(row.compsMinor),
+            money(row.pointsUsedMinor),
             money(row.netSalesMinor),
             row.refundedQuantity,
             money(row.refundsMinor),

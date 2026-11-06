@@ -47,7 +47,11 @@ export function tonightProblems(summary: TonightSummary): readonly string[] {
   const rows: readonly StoreReportSummary[] = [s, ...summary.report.byChannel];
   for (const row of rows) {
     check(
-      n(row.grossSalesMinor) - n(row.discountsMinor) - n(row.compsMinor) === n(row.netSalesMinor),
+      n(row.grossSalesMinor) -
+        n(row.discountsMinor) -
+        n(row.compsMinor) -
+        n(row.pointsUsedMinor) ===
+        n(row.netSalesMinor),
       "net sales",
     );
     check(
@@ -70,6 +74,7 @@ export function tonightProblems(summary: TonightSummary): readonly string[] {
   for (const key of [
     "grossSalesMinor",
     "compsMinor",
+    "pointsUsedMinor",
     "netSalesMinor",
     "taxMinor",
     "tipsMinor",
@@ -204,18 +209,21 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
         <dl>
           <Row label={t("Gross sales")} value={money(s.grossSalesMinor)} />
           <Row
-            label={
-              BigInt(summary.report.pointsUsedMinor) > 0n
-                ? t("Comps, discounts and points used")
-                : t("Comps and discounts by a manager")
+            label={t("Comps and discounts by a manager")}
+            detail={
+              countOf(s.compCount, "dish") +
+              (s.compsWithTaxMinor === s.compsMinor
+                ? ""
+                : " · " + t("({amount} with tax)", { amount: money(s.compsWithTaxMinor) }))
             }
-            detail={countOf(s.compCount, "dish")}
             value={minus(s.compsMinor)}
           />
-          {BigInt(summary.report.pointsUsedMinor) > 0n ? (
+          {/* v15 M130: a guest's points are their own balance, not a manager's comp. */}
+          {s.pointsUsedMinor !== "0" ? (
             <Row
-              label={t("Of that, points guests used")}
-              value={money(summary.report.pointsUsedMinor)}
+              label={t("Points used")}
+              detail={countOf(s.pointsCount, "dish")}
+              value={minus(s.pointsUsedMinor)}
             />
           ) : null}
           {s.discountsMinor !== "0" ? (
@@ -288,13 +296,17 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
             value={minus(s.refundsMinor)}
           />
           <Row label={t("Net taken")} value={money(s.netCollectedMinor)} strong />
+          {/* v15 M45 (Owner rule 6): the sales and tax that stay once every refund is taken off. */}
+          <Row label={t("Net sales after refunds")} value={money(s.netSalesAfterRefundsMinor)} />
+          <Row label={t("Tax after refunds")} value={money(s.taxAfterRefundsMinor)} />
         </dl>
         <ul className="tonight__checks">
           {machine !== null ? (
             // Owner addition (b): reconcile with the card machine's own batch.
             <li>
+              {/* v15 M57: the machine also takes sales rung up on the Store's own register. */}
               {t(
-                "Card machine: when you close, run its batch (settlement). The batch total should be {amount} (tips included, refunds taken off). If it differs, check each table's card payment.",
+                "Card machine: this system recorded {amount} on the card machine today (tables and counter, tips included, refunds taken off). Your batch also holds card sales rung up on your own register, so it can be higher.",
                 { amount: money(machineNet) },
               )}
             </li>
@@ -383,8 +395,14 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
           />
           {s.cancelledInFullCount > 0 ? (
             <Row
-              label={t("Orders cancelled and refunded in full")}
-              detail={countOf(s.cancelledInFullCount, "order") + " · " + t("taken and given back")}
+              label={t("Orders cancelled or rejected and refunded in full")}
+              detail={
+                countOf(s.cancelledInFullCount, "order") +
+                " · " +
+                t("taken and given back") +
+                " · " +
+                t("The day-end settlement counts these payments and their refunds")
+              }
               value={money(s.cancelledInFullMinor)}
             />
           ) : null}

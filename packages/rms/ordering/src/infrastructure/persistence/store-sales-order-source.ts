@@ -4,7 +4,10 @@ import {
   decodeConfiguredOrderItemSnapshot,
   decodeOrderItemSnapshot,
 } from "../../domain/order-item-snapshot-codec.js";
-import { listOrderPriceReductions } from "./order-item-price-reduction-store.js";
+import {
+  listOrderPriceReductions,
+  orderPointsRedemptionReason,
+} from "./order-item-price-reduction-store.js";
 import { listOrdersTaxRoundingLines } from "./order-tax-rounding-store.js";
 import { createPostgresPayLaterItemCancellationStore } from "./pay-later-item-cancellation-store.js";
 
@@ -24,6 +27,15 @@ export interface StoreSalesOrderItem {
    * after it; `subtotalMinor` and `discountMinor` stay as sold.
    */
   readonly compMinor: bigint;
+  /** v15 M130: the tax that comp or discount took off (0 when none). */
+  readonly compTaxMinor: bigint;
+  /**
+   * v15 M130: what a member's points paid of the net (`POINTS_REDEMPTION`, 0 when none). Points are
+   * not a manager's comp: they are the guest's own balance, so they are a line of their own.
+   */
+  readonly pointsMinor: bigint;
+  /** The tax the points redemption took off (0 when none). */
+  readonly pointsTaxMinor: bigint;
   readonly taxMinor: bigint;
   readonly feeMinor: bigint;
   readonly totalMinor: bigint;
@@ -37,7 +49,7 @@ export interface StoreSalesOrder {
   readonly businessDate: string;
   /**
    * v15 2026-11-01: the order was cancelled — by staff after it was accepted, or closed by the Store
-   * (absent: it was not cancelled).
+   * — or (v15 M45) rejected by the Store before it was accepted (absent: neither).
    */
   readonly cancelled?: true;
   readonly batches: readonly {
@@ -86,7 +98,7 @@ export function createPostgresStoreSalesOrderSource(options: {
         [brand, store],
       );
       const headers = await tx.query(
-        "SELECT h.order_id::text AS order_id,h.order_type,h.source_channel,h.business_date::text AS business_date,EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t WHERE t.brand_id=h.brand_id AND t.store_id=h.store_id AND t.order_id=h.order_id AND t.phase='Cancelled') OR EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=h.brand_id AND c.store_id=h.store_id AND c.order_id=h.order_id) AS cancelled FROM rms_ordering.order_header h WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=ANY($3::uuid[])",
+        "SELECT h.order_id::text AS order_id,h.order_type,h.source_channel,h.business_date::text AS business_date,EXISTS (SELECT 1 FROM rms_ordering.order_termination_record t WHERE t.brand_id=h.brand_id AND t.store_id=h.store_id AND t.order_id=h.order_id AND t.phase IN ('Cancelled','Rejected')) OR EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=h.brand_id AND c.store_id=h.store_id AND c.order_id=h.order_id) AS cancelled FROM rms_ordering.order_header h WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_id=ANY($3::uuid[])",
         [brand, store, chunk],
       );
       const items = await tx.query(
@@ -149,6 +161,7 @@ export function createPostgresStoreSalesOrderSource(options: {
         if (removed.has(String(snapshot.orderItemReference))) continue;
         const off = reductions.get(String(snapshot.orderItemReference)) ?? null;
         const taxOff = off?.taxMinor ?? 0n;
+        const points = off?.reasonCode === orderPointsRedemptionReason;
         // The tax taken off is spread over the tax lines in proportion; the last line takes the
         // remainder, so they still add up to the tax charged.
         let spread = 0n;
@@ -177,7 +190,10 @@ export function createPostgresStoreSalesOrderSource(options: {
             name,
             subtotalMinor: pricing.subtotal.amountMinor,
             discountMinor: pricing.discount.amountMinor,
-            compMinor: off?.netMinor ?? 0n,
+            compMinor: off !== null && !points ? off.netMinor : 0n,
+            compTaxMinor: off !== null && !points ? off.taxMinor : 0n,
+            pointsMinor: off !== null && points ? off.netMinor : 0n,
+            pointsTaxMinor: off !== null && points ? off.taxMinor : 0n,
             taxMinor: pricing.tax.amountMinor - taxOff,
             feeMinor: pricing.fee.amountMinor - (off?.feeMinor ?? 0n),
             totalMinor: pricing.total.amountMinor - (off?.totalMinor ?? 0n),

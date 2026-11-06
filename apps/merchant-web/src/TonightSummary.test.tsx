@@ -162,7 +162,8 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
       "$503.05",
       "$491.05",
       // (b) the card machine's batch should match what it took, refunds off.
-      "The batch total should be $219.50",
+      "this system recorded $219.50 on the card machine today",
+      "so it can be higher",
       // (c) the drawer also holds the merchant's own register cash.
       "The cash drawer also holds cash taken on your own register.",
       // Open tables and the write-off.

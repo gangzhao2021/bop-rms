@@ -52,8 +52,6 @@ export interface StoreSalesReportInput {
     readonly orderReference: string;
     readonly orderBatchReference: string;
     readonly decidedAt: string;
-    /** WP-2423 取舍 18: the part of it that was a guest's points. */
-    readonly pointsNetMinor?: bigint;
   }[];
   readonly mayExport: boolean;
   readonly generatedAt: string;
@@ -81,6 +79,11 @@ interface Totals {
   /** WP-2423 item 8 ① segment 2: comps and discounts a manager took off before the table paid. */
   compMinor: bigint;
   compCount: number;
+  /** v15 M149: the tax those comps and discounts took off (shown as "with tax"). */
+  compTaxMinor: bigint;
+  /** v15 M130: what members' points paid of the dishes (its own line, never in comps). */
+  pointsMinor: bigint;
+  pointsCount: number;
   serviceChargeMinor: bigint;
   taxMinor: bigint;
   taxes: Map<string, bigint>;
@@ -115,6 +118,9 @@ const totals = (): Totals => ({
   discountMinor: 0n,
   compMinor: 0n,
   compCount: 0,
+  compTaxMinor: 0n,
+  pointsMinor: 0n,
+  pointsCount: 0,
   serviceChargeMinor: 0n,
   taxMinor: 0n,
   taxes: new Map(),
@@ -139,6 +145,7 @@ interface ItemTotals {
   grossMinor: bigint;
   discountMinor: bigint;
   compMinor: bigint;
+  pointsMinor: bigint;
   refundedQuantity: number;
   refundedNetMinor: bigint;
 }
@@ -367,6 +374,8 @@ function computeSales(
     grossMinor: bigint;
     discountMinor: bigint;
     compMinor: bigint;
+    compTaxMinor: bigint;
+    pointsMinor: bigint;
     feeMinor: bigint;
     taxMinor: bigint;
     taxes: Map<string, bigint>;
@@ -417,6 +426,14 @@ function computeSales(
       sum((item) => item.compMinor),
       weights,
     );
+    const compTax = allocate(
+      sum((item) => item.compTaxMinor),
+      weights,
+    );
+    const pointsOff = allocate(
+      sum((item) => item.pointsMinor),
+      weights,
+    );
     const fee = allocate(
       sum((item) => item.feeMinor),
       weights,
@@ -440,14 +457,17 @@ function computeSales(
     ordered.forEach((line, index) => {
       const d = discount[index] ?? fail(),
         c = comp[index] ?? fail(),
+        p = pointsOff[index] ?? fail(),
         f = fee[index] ?? fail(),
         t = tax[index] ?? fail();
       lineShares.set(line, {
         // What the line paid is its net sales, service charges and tax: gross is the rest, so
         // each line adds up and the shares of gross still sum to the round's gross.
-        grossMinor: line.orderAllocationMinor + d + c - f - t,
+        grossMinor: line.orderAllocationMinor + d + c + p - f - t,
         discountMinor: d,
         compMinor: c,
+        compTaxMinor: compTax[index] ?? fail(),
+        pointsMinor: p,
         feeMinor: f,
         taxMinor: t,
         taxes: new Map(codeShares.map(([code, shares]) => [code, shares[index] ?? fail()])),
@@ -481,7 +501,12 @@ function computeSales(
       t.grossMinor += share.grossMinor;
       t.discountMinor += share.discountMinor;
       t.compMinor += share.compMinor;
-      if (share.primary) t.compCount += items.filter((item) => item.compMinor > 0n).length;
+      t.compTaxMinor += share.compTaxMinor;
+      t.pointsMinor += share.pointsMinor;
+      if (share.primary) {
+        t.compCount += items.filter((item) => item.compMinor > 0n).length;
+        t.pointsCount += items.filter((item) => item.pointsMinor > 0n).length;
+      }
       t.serviceChargeMinor += share.feeMinor;
       t.taxMinor += share.taxMinor;
       for (const [code, amount] of share.taxes) add(t.taxes, code, amount);
@@ -501,7 +526,7 @@ function computeSales(
     h.tipMinor += payment.tipMinor;
     h.collectedMinor += payment.totalMinor + payment.roundingMinor;
     if (share === null) continue;
-    h.netSalesMinor += share.grossMinor - share.discountMinor - share.compMinor;
+    h.netSalesMinor += share.grossMinor - share.discountMinor - share.compMinor - share.pointsMinor;
     h.taxMinor += share.taxMinor;
     if (!share.primary) continue;
     for (const item of items) {
@@ -512,6 +537,7 @@ function computeSales(
         grossMinor: 0n,
         discountMinor: 0n,
         compMinor: 0n,
+        pointsMinor: 0n,
         refundedQuantity: 0,
         refundedNetMinor: 0n,
       };
@@ -520,6 +546,7 @@ function computeSales(
       row.grossMinor += item.subtotalMinor;
       row.discountMinor += item.discountMinor;
       row.compMinor += item.compMinor;
+      row.pointsMinor += item.pointsMinor;
     }
   }
   // Rounds comped in full: sold at their price, all of it comped, nothing collected (no payment
@@ -528,9 +555,6 @@ function computeSales(
     [...input.payments, ...input.refundedPayments].map((payment) => payment.orderBatchReference),
   );
   const compedRounds = new Map<string, { orderReference: string; decidedAt: string }>();
-  // v15 2026-11-02: the rounds whose comps are in the comps line (paid, or comped in full); a round
-  // written off unpaid sold nothing, so points used on it are not "of that".
-  const countedRounds = new Set(paidBatches);
   for (const reduction of input.priceReductions ?? []) {
     const prior = compedRounds.get(reduction.orderBatchReference);
     if (prior === undefined || reduction.decidedAt > prior.decidedAt)
@@ -552,7 +576,6 @@ function computeSales(
       continue;
     const day = dayOf(round.decidedAt);
     if (day === null) continue;
-    countedRounds.add(orderBatchReference);
     const f = facts.get(day.businessDate) ?? fail();
     for (const t of [f.all, f.kinds.get(kindOf(order)) ?? fail()]) {
       t.orders.add(round.orderReference);
@@ -560,7 +583,10 @@ function computeSales(
         t.grossMinor += item.subtotalMinor;
         t.discountMinor += item.discountMinor;
         t.compMinor += item.compMinor;
+        t.compTaxMinor += item.compTaxMinor;
+        t.pointsMinor += item.pointsMinor;
         if (item.compMinor > 0n) t.compCount++;
+        if (item.pointsMinor > 0n) t.pointsCount++;
         t.serviceChargeMinor += item.feeMinor;
         t.taxMinor += item.taxMinor;
       }
@@ -573,6 +599,7 @@ function computeSales(
         grossMinor: 0n,
         discountMinor: 0n,
         compMinor: 0n,
+        pointsMinor: 0n,
         refundedQuantity: 0,
         refundedNetMinor: 0n,
       };
@@ -581,6 +608,7 @@ function computeSales(
       row.grossMinor += item.subtotalMinor;
       row.discountMinor += item.discountMinor;
       row.compMinor += item.compMinor;
+      row.pointsMinor += item.pointsMinor;
     }
   }
 
@@ -626,7 +654,7 @@ function computeSales(
         const share: (typeof shares)[number] = [
           item,
           item.quantity - before.units,
-          item.subtotalMinor - item.discountMinor - item.compMinor - before.net,
+          item.subtotalMinor - item.discountMinor - item.compMinor - item.pointsMinor - before.net,
           item.taxMinor - before.tax,
           item.feeMinor - before.fee,
           0n,
@@ -638,6 +666,29 @@ function computeSales(
       if (items.length > 0 && remaining + tipLeft === refund.amountMinor) {
         shares.push(...pending);
         shares.push([null, 0, 0n, 0n, 0n, tipLeft]);
+      } else if (
+        items.length > 0 &&
+        refund.amountMinor > 0n &&
+        refund.amountMinor < remaining + tipLeft
+      ) {
+        // v15 M162: an amount refunded off part of a bill ("Store mistake, $10 back") gives back
+        // its proportion of what is left of each dish's sales, tax and service charge and of the
+        // tip (largest remainder; the ETA s. 232 price-reduction treatment), so the refunded tax is
+        // reported and net sales after refunds subtract it. No dish counts as returned.
+        const parts = pending.flatMap((share) => [share[2], share[3], share[4]]);
+        const weights = [...parts, tipLeft].map((value) => (value > 0n ? value : 0n));
+        const split = allocate(refund.amountMinor, weights);
+        pending.forEach((share, index) => {
+          shares.push([
+            share[0],
+            0,
+            split[index * 3] ?? fail(),
+            split[index * 3 + 1] ?? fail(),
+            split[index * 3 + 2] ?? fail(),
+            0n,
+          ]);
+        });
+        shares.push([null, 0, 0n, 0n, 0n, split.at(-1) ?? fail()]);
       } else unallocated = refund.amountMinor;
     }
     for (const [item, units, net, tax, fee] of shares) {
@@ -686,6 +737,7 @@ function computeSales(
         grossMinor: 0n,
         discountMinor: 0n,
         compMinor: 0n,
+        pointsMinor: 0n,
         refundedQuantity: 0,
         refundedNetMinor: 0n,
       };
@@ -700,6 +752,7 @@ function computeSales(
     target.paymentCount += source.paymentCount;
     target.writeOffCount += source.writeOffCount;
     target.compCount += source.compCount;
+    target.pointsCount += source.pointsCount;
     for (const order of source.orders) target.orders.add(order);
     for (const order of source.cancelledOrders) target.cancelledOrders.add(order);
     target.cancelledMinor += source.cancelledMinor;
@@ -707,6 +760,8 @@ function computeSales(
       "grossMinor",
       "discountMinor",
       "compMinor",
+      "compTaxMinor",
+      "pointsMinor",
       "serviceChargeMinor",
       "taxMinor",
       "tipMinor",
@@ -746,6 +801,7 @@ function computeSales(
         grossMinor: 0n,
         discountMinor: 0n,
         compMinor: 0n,
+        pointsMinor: 0n,
         refundedQuantity: 0,
         refundedNetMinor: 0n,
       };
@@ -754,6 +810,7 @@ function computeSales(
       target.grossMinor += row.grossMinor;
       target.discountMinor += row.discountMinor;
       target.compMinor += row.compMinor;
+      target.pointsMinor += row.pointsMinor;
       target.refundedQuantity += row.refundedQuantity;
       target.refundedNetMinor += row.refundedNetMinor;
     }
@@ -806,7 +863,7 @@ function computeSales(
     input.settlement.cashRefunded.amountMinor;
 
   const summary = (t: Totals) => {
-    const netSales = t.grossMinor - t.discountMinor - t.compMinor;
+    const netSales = t.grossMinor - t.discountMinor - t.compMinor - t.pointsMinor;
     return Object.freeze({
       paymentCount: t.paymentCount,
       orderCount: t.orders.size,
@@ -815,6 +872,11 @@ function computeSales(
       // WP-2423 item 8 ① segment 2: its own line, never folded into discounts or hidden.
       compCount: t.compCount,
       compsMinor: s(t.compMinor),
+      // v15 M149: what the comps and discounts took off with their tax (comps are before tax).
+      compsWithTaxMinor: s(t.compMinor + t.compTaxMinor),
+      // v15 M130: members' points, on their own line (never "comps by a manager").
+      pointsCount: t.pointsCount,
+      pointsUsedMinor: s(t.pointsMinor),
       netSalesMinor: s(netSales),
       serviceChargesMinor: s(t.serviceChargeMinor),
       taxMinor: s(t.taxMinor),
@@ -842,6 +904,8 @@ function computeSales(
         notItemizedMinor: s(t.refundedUnallocatedMinor),
       }),
       netSalesAfterRefundsMinor: s(netSales - t.refundedNetMinor),
+      // v15 M45 (Owner rule 6): the tax still owed once refunds gave theirs back.
+      taxAfterRefundsMinor: s(t.taxMinor - t.refundedTaxMinor),
       netCollectedMinor: s(t.collectedMinor - t.refundedMinor),
       // Taken and given back the same day: not in the sales, taken or refunds above.
       cancelledInFullCount: t.cancelledOrders.size,
@@ -854,7 +918,8 @@ function computeSales(
     if (
       t.grossMinor -
         t.discountMinor -
-        t.compMinor +
+        t.compMinor -
+        t.pointsMinor +
         t.serviceChargeMinor +
         t.taxMinor +
         t.tipMinor +
@@ -867,13 +932,13 @@ function computeSales(
     const startHour = localHour(first.startsAt, input.timeZone);
     return [...map].sort(([a], [b]) => ((a - startHour + 24) % 24) - ((b - startHour + 24) % 24));
   };
+  const itemNet = (row: ItemTotals) =>
+    row.grossMinor - row.discountMinor - row.compMinor - row.pointsMinor;
   const itemRows = (map: Map<string, ItemTotals>) =>
     [...map.values()]
       .sort((a, b) =>
-        b.grossMinor - b.discountMinor - b.compMinor !==
-        a.grossMinor - a.discountMinor - a.compMinor
-          ? b.grossMinor - b.discountMinor - b.compMinor >
-            a.grossMinor - a.discountMinor - a.compMinor
+        itemNet(b) !== itemNet(a)
+          ? itemNet(b) > itemNet(a)
             ? 1
             : -1
           : a.name.localeCompare(b.name),
@@ -885,12 +950,11 @@ function computeSales(
           grossSalesMinor: s(row.grossMinor),
           discountsMinor: s(row.discountMinor),
           compsMinor: s(row.compMinor),
-          netSalesMinor: s(row.grossMinor - row.discountMinor - row.compMinor),
+          pointsUsedMinor: s(row.pointsMinor),
+          netSalesMinor: s(itemNet(row)),
           refundedQuantity: row.refundedQuantity,
           refundsMinor: s(row.refundedNetMinor),
-          netAfterRefundsMinor: s(
-            row.grossMinor - row.discountMinor - row.compMinor - row.refundedNetMinor,
-          ),
+          netAfterRefundsMinor: s(itemNet(row) - row.refundedNetMinor),
         }),
       );
   const hourRows = (map: Map<number, HourTotals>) =>
@@ -916,11 +980,8 @@ function computeSales(
     });
   const days = [...facts.values()];
   return Object.freeze({
-    // WP-2423 取舍 18: how much of what came off was guests' points (in the comps line).
-    pointsUsedMinor: (input.priceReductions ?? [])
-      .filter((reduction) => countedRounds.has(reduction.orderBatchReference))
-      .reduce((sum, reduction) => sum + (reduction.pointsNetMinor ?? 0n), 0n)
-      .toString(),
+    // WP-2423 取舍 18, v15 M130: guests' points, now a line of their own (summary.pointsUsedMinor).
+    pointsUsedMinor: s(range.all.pointsMinor),
     screenId: "RPT-OPS-DASHBOARD" as const,
     queryName: "store_sales_reports_v1" as const,
     storeLabel: input.storeLabel,
@@ -1053,6 +1114,17 @@ export function storeSalesReportCsv(
       "cancelled_refunded_in_full_orders",
       "cancelled_refunded_in_full_amount",
       "currency",
+      // v15 M130/M45/M149/M162: appended after the columns accountants already import, so none
+      // of them moves. comps_and_discounts_by_manager no longer includes points (points_used
+      // does); net_sales is unchanged (it always took both off).
+      "points_used",
+      "points_count",
+      "comps_and_discounts_with_tax",
+      "refunded_sales",
+      "refunded_tax",
+      "refunded_tips",
+      "net_sales_after_refunds",
+      "tax_after_refunds",
     ];
     return csv([
       header,
@@ -1091,6 +1163,14 @@ export function storeSalesReportCsv(
           sum.cancelledInFullCount,
           money(sum.cancelledInFullMinor),
           view.currencyCode,
+          money(sum.pointsUsedMinor),
+          sum.pointsCount,
+          money(sum.compsWithTaxMinor),
+          money(sum.refunds.salesMinor),
+          money(sum.refunds.taxMinor),
+          money(sum.refunds.tipsMinor),
+          money(sum.netSalesAfterRefundsMinor),
+          money(sum.taxAfterRefundsMinor),
         ];
       }),
       // WP-2423 M160: a range asked from before the Store's records says where they begin, after
@@ -1112,6 +1192,8 @@ export function storeSalesReportCsv(
         "refunds",
         "net_after_refunds",
         "currency",
+        // v15 M130: appended; comps_and_discounts_by_manager no longer includes points.
+        "points_used",
       ],
       ...view.days.flatMap((day) =>
         day.items.map((row) => [
@@ -1126,6 +1208,7 @@ export function storeSalesReportCsv(
           money(row.refundsMinor),
           money(row.netAfterRefundsMinor),
           view.currencyCode,
+          money(row.pointsUsedMinor),
         ]),
       ),
     ]);

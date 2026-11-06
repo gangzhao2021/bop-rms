@@ -379,8 +379,6 @@ export async function loadStoreSalesReportSources(
       orderReference: record.orderReference,
       orderBatchReference: record.orderBatchReference,
       decidedAt: record.decidedAt,
-      // WP-2423 取舍 18: points are part of what came off; the report says how much.
-      pointsNetMinor: record.reasonCode === "POINTS_REDEMPTION" ? record.netMinor : 0n,
     }),
   );
   const orders = await createPostgresStoreSalesOrderSource({
