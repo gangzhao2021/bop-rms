@@ -187,6 +187,41 @@ function runBoundarySmoke(samples) {
   );
 }
 
+/**
+ * WP-2423: every PostgreSQL acceptance config runs in the root `test:database` chain exactly once
+ * and every chained config exists, so a new or stale acceptance can't sit outside the gate
+ * (60 configs had, one of them failing unseen).
+ */
+async function validateDatabaseConfigChain() {
+  const manifest = JSON.parse(await read("package.json"));
+  const chain = String(manifest.scripts?.["test:database"] ?? "")
+    .split("&&")
+    .map((step) => step.trim());
+  const chained = chain.map((step) => {
+    const match =
+      /^vitest run --config (packages\/database\/vitest\.[a-z0-9-]+\.config\.ts)$/u.exec(step);
+    if (!match) fail(`test:database: unexpected step ${JSON.stringify(step)}`);
+    return match[1];
+  });
+  const configs = [];
+  for (const name of await readdir(path.join(root, "packages/database"))) {
+    if (!/^vitest/iu.test(name)) continue;
+    // Any other spelling (underscore, dot, upper case, .mts/.mjs/.js) would sit outside the chain.
+    if (!/^vitest\.[a-z0-9-]+\.config\.ts$/u.test(name))
+      fail(`test:database: packages/database/${name} is not named vitest.<name>.config.ts`);
+    configs.push(`packages/database/${name}`);
+  }
+  const seen = new Set();
+  for (const config of chained) {
+    if (seen.has(config)) fail(`test:database: ${config} is chained twice`);
+    seen.add(config);
+    if (!configs.includes(config)) fail(`test:database: ${config} does not exist`);
+  }
+  for (const config of configs)
+    if (!seen.has(config)) fail(`test:database: ${config} is not in the chain`);
+  return chained.length;
+}
+
 async function main() {
   const adrFiles = (await readdir(path.join(root, "docs/adr"))).filter((file) =>
     /^ADR-\d{4}-.+\.md$/.test(file),
@@ -230,8 +265,9 @@ async function main() {
     skill: skillTexts.get("bop-work-package"),
     module: moduleTemplate,
   });
+  const databaseConfigs = await validateDatabaseConfigChain();
   process.stdout.write(
-    `repository guidance valid: ${materialized.length} ADRs, ${expectedSkills.length} skills, templates, and boundary smoke scenarios\n`,
+    `repository guidance valid: ${materialized.length} ADRs, ${expectedSkills.length} skills, templates, boundary smoke scenarios and ${databaseConfigs} chained database configs\n`,
   );
 }
 
