@@ -2251,6 +2251,8 @@ it("staff cancel a paid order or batch before the kitchen starts it, atomically,
             orderNumber: leftHeader.order_number,
             orderType: "DineIn",
             diningSessionReference: left.session,
+            // WP-2423 M04: its waiting round is not accepted (the kitchen search says so).
+            accepted: false,
           },
         ],
       );
