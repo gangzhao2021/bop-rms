@@ -365,7 +365,9 @@ it.each([false, true])(
           assert.equal((await send()).status, 503);
           assert.deepEqual(await counts(), { quotes: 1, requests: 1, attachments: 0, audits: 1 });
           assert.equal(candidateCalls, 1);
-          assert.equal(entry.catalogReads(), 0);
+          // Pricing reads only which menu is in force (WP-2423 DEC-MERCHANT-LOCK-SCOPE: an open cart
+          // is carried across a listing); nothing is captured from the Catalog before attaching.
+          assert.equal(entry.catalogReads(), 1);
           assert.equal((await send()).status, 503);
           assert.deepEqual(await counts(), { quotes: 1, requests: 1, attachments: 1, audits: 2 });
           const httpQuote = await send();
@@ -383,7 +385,8 @@ it.each([false, true])(
           assert.deepEqual(recovered[0].attachment, original);
           assert.deepEqual(recovered[1].attachment, original);
           assert.equal(candidateCalls, 1);
-          assert.ok(entry.catalogReads() > 0);
+          // The second attempt read the menu in force again and captured the Catalog to attach.
+          assert.ok(entry.catalogReads() > 2);
           const persisted = await requests.resolve({
             operationReference: command.operationReference,
             guestSessionReference: guest.sessionReference,
