@@ -35,6 +35,25 @@ export class MerchantDiningTeaChargeError extends Error {
     this.name = "MerchantDiningTeaChargeError";
   }
 }
+export type TeaChargeProblem =
+  "NeedsManager" | "CheckingOut" | "AlreadyServed" | "Changed" | "Unavailable";
+/** M29: what a refused step means for staff, never "the system is busy" for a real refusal. */
+export function teaStepProblem(error: unknown): TeaChargeProblem {
+  const code = String((error as { code?: unknown } | null)?.code ?? "");
+  if (/PERMISSION_DENIED/u.test(code)) return "NeedsManager";
+  if (
+    code === "UNPAID_ITEM_REMOVAL_ALREADY_PAID" ||
+    code === "STAFF_ROUND_TABLE_CHECKOUT_IN_PROGRESS"
+  )
+    return "CheckingOut";
+  if (
+    code === "UNPAID_ITEM_REMOVAL_NOT_REMOVABLE" ||
+    code === "UNPAID_ITEM_REMOVAL_PREPARATION_STARTED"
+  )
+    return "AlreadyServed";
+  if (code === "UNPAID_ITEM_REMOVAL_VERSION_CONFLICT") return "Changed";
+  return "Unavailable";
+}
 const fail = (code: MerchantDiningTeaChargeErrorCode): never => {
   throw new MerchantDiningTeaChargeError(code);
 };
@@ -69,7 +88,12 @@ export interface DiningTeaChargeView {
   /** The latest tea count version (what a new count is set against). */
   readonly overrideVersion: number;
   /** Why it didn't match, when a step was refused. */
-  readonly problem: "NeedsManager" | "Unavailable" | null;
+  /**
+   * Why the charge could not be brought to the guests (M29): a manager must take tea off; the
+   * table is paying; the tea was already served (comp it instead); someone else changed the count;
+   * or the system did not answer. Null when it matches or nothing was tried.
+   */
+  readonly problem: TeaChargeProblem | null;
   /**
    * The item the Store charges per head, in the staff member's language: a hotpot's sauce is not
    * tea. null: the Store has none, or its name can't be read.
@@ -382,9 +406,7 @@ export function createMerchantDiningTeaCharge(options: {
           await run();
           return true;
         } catch (error) {
-          problem = /PERMISSION_DENIED/u.test(String((error as { code?: unknown })?.code))
-            ? "NeedsManager"
-            : "Unavailable";
+          problem = teaStepProblem(error);
           return false;
         }
       };
@@ -436,7 +458,18 @@ export function createMerchantDiningTeaCharge(options: {
             },
           }),
         );
-      return viewOf(await readCurrent(input.sessionCookie, command.session), problem);
+      // M28: the change is two steps (take off, then add). Read what the bill holds now: a change
+      // that took tea off but could not add it back must never pass silently as done.
+      const after = await readCurrent(input.sessionCookie, command.session);
+      const nowCharged = after.open.reduce((sum, item) => sum + item.quantity, 0);
+      if (
+        problem === null &&
+        after.expected !== null &&
+        !after.paid &&
+        nowCharged !== after.expected
+      )
+        problem = "Unavailable";
+      return viewOf(after, problem);
     } catch (error) {
       if (error instanceof MerchantDiningTeaChargeError) throw error;
       throw withCause(new MerchantDiningTeaChargeError("DINING_TEA_CHARGE_UNAVAILABLE"), error);

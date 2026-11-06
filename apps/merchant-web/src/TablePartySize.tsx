@@ -130,7 +130,8 @@ export interface TableTeaView {
     "Charged" | "NoTeaCharge" | "PaysEachRound" | "NoPartySize" | "Paid" | "Mismatch";
   readonly charged: number;
   readonly expected: number | null;
-  readonly problem: "NeedsManager" | "Unavailable" | null;
+  readonly problem:
+    "NeedsManager" | "CheckingOut" | "AlreadyServed" | "Changed" | "Unavailable" | null;
   /** The guests counted (the party size), when the server says. */
   readonly guests?: number | null;
   /** A tea count staff set for other than the guests, and why. */
@@ -182,7 +183,10 @@ export function createTableTeaClient(fetcher: typeof fetch = fetch): TableTeaCli
       !statuses.includes(String(raw.status)) ||
       !Number.isSafeInteger(raw.charged) ||
       (raw.expected !== null && !Number.isSafeInteger(raw.expected)) ||
-      (raw.problem !== null && raw.problem !== "NeedsManager" && raw.problem !== "Unavailable")
+      (raw.problem !== null &&
+        !["NeedsManager", "CheckingOut", "AlreadyServed", "Changed", "Unavailable"].includes(
+          String(raw.problem),
+        ))
     )
       throw new TablePartySizeError("Unavailable");
     return raw as unknown as TableTeaView;
@@ -231,6 +235,23 @@ function needsManagerLabel(tea: TableTeaView | null): string {
     : t(
         "Fewer guests than per-head charges on the bill: a manager takes the extra off (it is recorded who and why).",
       );
+}
+/**
+ * M29: why the charge could not be matched, in staff words, for a refusal that is not "a manager
+ * takes it off" or a busy system. Null for those (said by their own lines).
+ */
+export function teaRefusalText(tea: TableTeaView | null): string | null {
+  if (tea === null || tea.status !== "Mismatch") return null;
+  const item = teaItemName(tea);
+  if (tea.problem === "CheckingOut")
+    return t("The bill is being paid, so {item} can't change now.", { item });
+  if (tea.problem === "AlreadyServed")
+    return t("{item} is already served for {count} guests. To charge fewer, comp the extra.", {
+      item,
+      count: String(tea.charged),
+    });
+  if (tea.problem === "Changed") return t("Someone else changed the guest count. Check it again.");
+  return null;
 }
 // A read that fails is tried again quietly, sooner at first (a busy moment passes).
 const teaReadRetryMs = (attempt: number) => (attempt < 6 ? 5_000 : 15_000);
@@ -402,6 +423,8 @@ export function TableTeaCheck({
         </p>
       ) : tea?.problem === "NeedsManager" ? (
         <p role="alert">{needsManagerLabel(tea)}</p>
+      ) : teaRefusalText(tea) !== null ? (
+        <p role="alert">{teaRefusalText(tea)}</p>
       ) : null}
     </section>
   );
@@ -740,6 +763,8 @@ export function TablePartySize({
       ) : null}
       {teaSyncing !== null ? null : tea?.status === "Mismatch" && tea.problem === "NeedsManager" ? (
         <p role="alert">{needsManagerLabel(tea)}</p>
+      ) : teaRefusalText(tea) !== null ? (
+        <p role="alert">{teaRefusalText(tea)}</p>
       ) : teaUnconfirmed !== null ? (
         <p role="alert">
           {teaNotConfirmed(tea, teaUnconfirmed)}{" "}

@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   TablePartySize,
   TablePartySizeError,
+  teaRefusalText,
   type TablePartySizeClient,
   type TableTeaClient,
+  type TableTeaView,
 } from "./TablePartySize.js";
 import { buttonNamed, click, deferred, mount, settle, typeInto } from "./dom-test-kit.fixture.js";
 
@@ -85,4 +87,27 @@ it("WP-2423 live minor 0: a sync that fails says so once it answers", async () =
   await settle();
   expect(container.textContent).not.toContain("Updating");
   expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/isn't confirmed/u);
+});
+
+describe("M29: a refused tea change says why, never that the system is busy", () => {
+  const view = (problem: TableTeaView["problem"]): TableTeaView => ({
+    status: "Mismatch",
+    charged: 8,
+    expected: 7,
+    problem,
+    itemName: "Tea",
+  });
+  it("names checking out, served tea and a changed count", () => {
+    expect(teaRefusalText(view("CheckingOut"))).toBe(
+      "The bill is being paid, so Tea can't change now.",
+    );
+    expect(teaRefusalText(view("AlreadyServed"))).toBe(
+      "Tea is already served for 8 guests. To charge fewer, comp the extra.",
+    );
+    expect(teaRefusalText(view("Changed"))).toBe(
+      "Someone else changed the guest count. Check it again.",
+    );
+    expect(teaRefusalText(view("Unavailable"))).toBeNull();
+    expect(teaRefusalText({ ...view("CheckingOut"), status: "Charged" })).toBeNull();
+  });
 });
