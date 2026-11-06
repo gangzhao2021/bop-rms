@@ -13,6 +13,7 @@ import { loadPilotHosting } from "./pilot-hosting.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 import { loadAdmittedServedStores } from "./pilot-admitted-stores.mjs";
+import { loadServedStoreDirectories as configuredStoreDirectories } from "./pilot-served-stores.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 export function parsePilotHttpsArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
@@ -141,8 +142,8 @@ export async function startConfiguredPilotHttps(
   return startServer({
     ...customer,
     additionalStores,
-    // M02: several Stores configured, even when one of them could not be loaded.
-    multiStore: admitted.length > 0,
+    // M02: several Stores in stores.json, even when one of them was refused or could not load.
+    multiStore: (await configuredStoreDirectories(directory)).length > 0,
     createInternalMerchant: merchant,
     loadInternalPickupQr: qr.loadInternalPickupQr,
     diningEntries,
