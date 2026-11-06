@@ -593,6 +593,114 @@ test("@production staff moving the table while the round is sent says so, with t
   expect(intentCalls).toHaveLength(1);
 });
 
+test("@production after a table move the guest checks out again at once, with the dishes still in the cart", async ({
+  page,
+}) => {
+  // WP-2423 table-move-send (v15 fabf0261, 2026-11-06): the first payment try after the move used
+  // to answer 503 until the checkout lapsed. Now it answers once that the table changed; the guest
+  // goes back and a second continue opens a payment at the new table (no rescan, no retry loop).
+  const { intentCalls } = await checkout(page, {
+    channel: "DineIn",
+    intents: refused(409, "payment_table_moved"),
+  });
+  // Checking out again is a new checkout (the server answers a new checkout session for it, made
+  // at the table the party sits at now); its payment starts.
+  const again = id(20);
+  const againView = {
+    schemaVersion: 1,
+    session: {
+      checkoutSessionReference: again,
+      cartReference: id(1),
+      cartVersion: 3,
+      quoteReference: id(6),
+      quoteVersion: 1,
+      createdAt: new Date().toISOString(),
+    },
+  };
+  let sessions = 0;
+  await page.route("**/api/v1/carts/*/checkout-sessions", (route) => {
+    sessions += 1;
+    return sessions === 1 ? route.fallback() : route.fulfill({ status: 201, json: againView });
+  });
+  await page.route(`**/api/v1/checkout-sessions/${again}`, (route) =>
+    route.fulfill({ status: 200, json: againView }),
+  );
+  const againCalls: unknown[] = [];
+  await page.route(`**/api/v1/checkout-sessions/${again}/payment-intents`, (route) => {
+    againCalls.push(route.request().postDataJSON());
+    return route.fulfill({
+      status: 201,
+      json: {
+        schemaVersion: 1,
+        payment: {
+          checkoutSessionReference: again,
+          paymentIntentReference: id(21),
+          orderReference: id(12),
+          creationStatus: "Created",
+          total: { amountMinor: "2260", currency: "CAD" },
+        },
+      },
+    });
+  });
+  await page.route(`**/api/v1/checkout-sessions/${again}/payment-handoff`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { "cache-control": "no-store" },
+      json: { schemaVersion: 1, clientSecret: "pi_SyntheticAgain_secret_SyntheticOnly" },
+    }),
+  );
+  await goToPayment(page);
+  const main = page.getByRole("main");
+  await expect(main.getByRole("heading", { name: "Your table was changed" })).toBeVisible();
+  // One answer, no automatic retries while the guest reads it.
+  await page.waitForTimeout(1500);
+  expect(intentCalls).toHaveLength(1);
+  await main.getByRole("link", { name: /^Back to (your cart|checkout)$/u }).click();
+  await expect(page.getByText("Synthetic noodles").first()).toBeVisible();
+  const proceed = page.getByRole("button", { name: /Continue to payment/u });
+  await expect(proceed).toBeEnabled();
+  await proceed.click();
+  await expect(page).toHaveURL(/\/checkout\/payment$/u);
+  await expect(page.getByText("Synthetic secure card component")).toBeVisible();
+  expect(sessions).toBe(2);
+  expect(intentCalls).toHaveLength(1);
+  expect(againCalls).toHaveLength(1);
+});
+
+test("@production the table move reads in Chinese, with no call for staff and no sideways scroll", async ({
+  page,
+}) => {
+  const { intentCalls } = await checkout(page, {
+    channel: "DineIn",
+    intents: refused(409, "payment_table_moved"),
+  });
+  await page.goto("/#qr=aaa.bbb.ccc");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Synthetic Store", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "切换到中文" }).click();
+  await page.evaluate(() => {
+    history.pushState(null, "", "/checkout");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  const proceed = page.getByRole("button", { name: /去付款/u });
+  await expect(proceed).toBeEnabled();
+  await proceed.click();
+  const main = page.getByRole("main");
+  await expect(main.getByRole("heading", { name: "你们换了桌" })).toBeVisible();
+  await expect(main).toContainText("这次没有扣款");
+  await expect(main.getByRole("link", { name: /^返回(结账|购物车)$/u })).toBeVisible();
+  await expect(main).not.toContainText("请找店员");
+  await expect(main).not.toContainText("暂时无法开始付款");
+  await expectNoInternalText(page);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true);
+  expect(intentCalls).toHaveLength(1);
+});
+
 test("@production a table that turns out to pay at the end goes back to its cart", async ({
   page,
 }) => {
