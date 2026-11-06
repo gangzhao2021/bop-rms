@@ -1609,9 +1609,10 @@ export function StaffOrderEntryPage({
                         name={rule.bindingReference}
                         checked={picked.includes(option.optionReference)}
                         disabled={
-                          !single &&
-                          !picked.includes(option.optionReference) &&
-                          total >= rule.maximumSelections
+                          (option.offeredNow === false && !picked.includes(option.optionReference)) ||
+                          (!single &&
+                            !picked.includes(option.optionReference) &&
+                            total >= rule.maximumSelections)
                         }
                         onChange={(event) => {
                           const checked = event.currentTarget.checked;
@@ -1629,7 +1630,11 @@ export function StaffOrderEntryPage({
                         }}
                       />
                       <span>{option.name}</span>
-                      {option.priceMinor !== null && option.priceMinor !== "0" ? (
+                      {option.offeredNow === false ? (
+                        <span className="counter-order__option-price">
+                          {t("Not available now")}
+                        </span>
+                      ) : option.priceMinor !== null && option.priceMinor !== "0" ? (
                         <span className="counter-order__option-price">
                           +{cad(option.priceMinor)}
                         </span>

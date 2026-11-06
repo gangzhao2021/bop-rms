@@ -3749,6 +3749,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Skip to main content": "跳到主要内容",
   "Slip reference (optional)": "签购单参考号（可选）",
   Sold: "售出",
+  "Not available now": "现在不供应",
   "Sold out": "售罄",
   "Sold out for the rest of today": "今天余下时间售罄",
   "Sold out to guests (stock)": "对顾客售罄（库存）",

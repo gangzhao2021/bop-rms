@@ -134,6 +134,21 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     );
   });
 
+  it("WP-2423 (cart-unsellable-dishes): a default choice not offered now is read, marked and never pre-chosen", () => {
+    const response = counterMenuResponse();
+    const whole = response.menu.menu.sections[0]?.sellables[0]?.optionRules[0]?.options[0];
+    if (!whole) throw new Error("fixture");
+    Object.assign(whole, { offeredNow: false });
+    const item = parseCounterMenu(response).sections[0]?.items[0];
+    expect(item?.rules[0]?.options.map((option) => option.offeredNow)).toEqual([false, undefined]);
+    expect(item?.rules[0]?.options[0]?.selectedByDefault).toBe(false);
+    // Only `false` is a mark: a dish sent any other way is not read (left out).
+    Object.assign(whole, { offeredNow: true });
+    expect(parseCounterMenu(response).sections[0]?.items.map((i) => i.name)).not.toContain(
+      "Flat White",
+    );
+  });
+
   it("estimates a line from the menu and requires each required choice", () => {
     const item = parseCounterMenu(counterMenuResponse()).sections[0]?.items[0];
     if (!item) throw new Error("fixture");
