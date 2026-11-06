@@ -1048,7 +1048,7 @@ const listingRecords = async (admin, brand) =>
     )
   ).rows[0];
 
-it("a default no longer offered is named on Save dish and on List it; offering it again lists", async () => {
+it("a default no longer offered is kept on Save dish and named on List it; offering it again lists", async () => {
   await withIsolatedDatabase({ caseId: "wp2423_bdefault", timeoutMs: 600_000 }, async (context) => {
     const admin = new Client(context.clientConfig);
     await admin.connect();
@@ -1062,21 +1062,24 @@ it("a default no longer offered is named on Save dish and on List it; offering i
       assert.equal((await f.listAll()).status, "Listed");
       // 2. The hot machine is down: Option sets, "Offer Hot" unticked, saved.
       const hotOff = await saveGroup(f, serve, "One", { minimum: 1 }, (o) => o.name !== "Hot");
-      // 3. Save dish (a new description) names the dish and the group; nothing about sections.
+      // 3. WP-2423 (cart-unsellable-dishes): Save dish (a new description) is saved while Hot is
+      // off, and the dish still starts with Hot (it is back tomorrow); it is never lost.
       const again = {
         productReference: dish.productReference,
         name: "Soy milk (TEST)",
         nameZh: "",
         description: "Fresh soy milk (TEST)",
       };
-      await assert.rejects(f.saveDish({ ...again, choiceGroups: groups }), (error) => {
-        assert.equal(error.name, "MerchantProductError");
-        assert.equal(error.code, "ChoiceGroup");
-        assert.equal(error.problem.reason, "ChoiceGroupDefault");
-        assert.equal(error.problem.optionName, "Serve (TEST)");
-        assert.equal(error.problem.productName, "Soy milk (TEST)");
-        return true;
-      });
+      await f.saveDish({ ...again, choiceGroups: groups });
+      assert.deepEqual(
+        (
+          await admin.query(
+            "SELECT o.stable_code FROM rms_catalog.product_option_binding b JOIN rms_catalog.product_option_binding_option x USING (binding_id) JOIN rms_catalog.option o ON o.option_id=x.option_id WHERE b.product_id=$1 AND x.default_quantity IS NOT NULL",
+            [dish.productReference],
+          )
+        ).rows.map((row) => row.stable_code),
+        ["HOT"],
+      );
       // 4. List it says the same, and lists nothing: no publication, no record at all.
       // Something new to list: another dish.
       await f.saveDish({ name: "Warm water (TEST)", nameZh: "", priceMinor: "100" });
