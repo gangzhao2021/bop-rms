@@ -7,6 +7,14 @@ import {
 } from "@bop/projection";
 import { keepingCause } from "./merchant-failure.js";
 
+/** v15 M44: why the case's Order ended, in Ordering's terms (no identities). */
+export type MerchantExceptionOrderCause =
+  | { readonly kind: "StoreRejected"; readonly reasonCode: string }
+  | { readonly kind: "NotAcceptedInTime" }
+  | { readonly kind: "PaymentWindowExpired" }
+  | { readonly kind: "StaffCancelled"; readonly reasonCode: string }
+  | { readonly kind: "GuestCancelled" }
+  | { readonly kind: "Other" };
 export interface MerchantExceptionScope {
   readonly tenantReference: string;
   readonly brandReference: string;
@@ -80,6 +88,15 @@ export function createMerchantOrderExceptionRead(options: {
     scope: MerchantExceptionScope,
     orderReferences: readonly string[],
   ): Promise<ReadonlyMap<string, string>>;
+  /**
+   * v15 M44: why each linked Order ended (Ordering's own record), so a case says "Rejected · sold
+   * out · refunded" instead of its kind. A missing entry keeps the kind as the title.
+   */
+  orderCauses?(
+    tx: ConsumerTransaction,
+    scope: MerchantExceptionScope,
+    orderReferences: readonly string[],
+  ): Promise<ReadonlyMap<string, MerchantExceptionOrderCause>>;
   /**
    * WP-2423: what each Payment reconciliation difference is about; a missing entry shows the
    * card without it. Never fails the page: an unreadable detail is answered as `Unavailable`.
@@ -181,6 +198,12 @@ export function createMerchantOrderExceptionRead(options: {
           options.orderNumbers && linked.length > 0
             ? await options.orderNumbers(tx, scope, linked)
             : new Map<string, string>();
+        const causes =
+          options.orderCauses && linked.length > 0
+            ? await options
+                .orderCauses(tx, scope, linked)
+                .catch(() => new Map<string, MerchantExceptionOrderCause>())
+            : new Map<string, MerchantExceptionOrderCause>();
         const reconciliationSources = items.filter(
           (source) =>
             source.kind === "PaymentReconciliationDifference" && source.sourceOwner === "Payment",
@@ -227,6 +250,9 @@ export function createMerchantOrderExceptionRead(options: {
                     ? ("Assigned" as const)
                     : ("Unassigned" as const),
                 sourceFinal: row.sourceStatus === "Final",
+                ...(row.orderReference !== null && causes.has(row.orderReference)
+                  ? { cause: causes.get(row.orderReference) }
+                  : {}),
                 ...(row.kind === "PaymentReconciliationDifference" &&
                 row.sourceOwner === "Payment" &&
                 details.has(row.sourceReference)

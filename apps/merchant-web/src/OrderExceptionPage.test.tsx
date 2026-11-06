@@ -7,6 +7,7 @@ import { findInternalText } from "../e2e/internal-text-patterns.js";
 import { exceptionOpenForText, isExceptionOverdue } from "./order-exception-view.js";
 import { summarizeExceptions } from "./StoreOverview.js";
 import {
+  causeTitle,
   OrderExceptionLoadFailed,
   OrderExceptionPage,
   OrderExceptionScreen,
@@ -574,4 +575,36 @@ it("WP-2423: a staff member without access is told so, with no retry; an outage 
   );
   expect(outage).toContain("Exceptions unavailable");
   expect(outage).toContain("Retry loading exceptions");
+});
+
+describe("v15 M44: a paid order that will not be made is named by why it ended", () => {
+  const item = (cause: unknown, compensationStatus = "Completed") =>
+    ({ kind: "PaidWithoutFulfillableOrder", compensationStatus, cause }) as never;
+  it("says the cause and whether the money went back", () => {
+    expect(causeTitle(item({ kind: "StoreRejected", reasonCode: "SOLD_OUT" }))).toBe(
+      "Rejected · sold out · refunded",
+    );
+    expect(causeTitle(item({ kind: "GuestCancelled" }))).toBe("Guest cancelled · refunded");
+    expect(causeTitle(item({ kind: "NotAcceptedInTime" }))).toBe(
+      "Not accepted in time · refunded automatically",
+    );
+    expect(causeTitle(item({ kind: "PaymentWindowExpired" }, "Pending"))).toBe(
+      "Paid after the order had closed · refund in progress",
+    );
+    // Not known: the kind stays the title.
+    expect(causeTitle(item(undefined))).toBeNull();
+    expect(causeTitle(item({ kind: "Other" }))).toBeNull();
+  });
+  it("reads the cause strictly from the server", () => {
+    const view = fixture() as { items: Record<string, unknown>[] };
+    const first = view.items[0] as Record<string, unknown>;
+    first.kind = "PaidWithoutFulfillableOrder";
+    first.cause = { kind: "StoreRejected", reasonCode: "SOLD_OUT" };
+    expect(parseOrderExceptionView(view).items[0]?.cause).toEqual({
+      kind: "StoreRejected",
+      reasonCode: "SOLD_OUT",
+    });
+    first.cause = { kind: "StoreRejected", reasonCode: "SOLD_OUT", actor: "x" };
+    expect(() => parseOrderExceptionView(view)).toThrow();
+  });
 });

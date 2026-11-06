@@ -70,7 +70,39 @@ function exceptionTitle(item: OrderExceptionItem): string {
     if (item.orderReference === null && detail?.type === "UnmatchedCharge")
       return t("Charge that matches no order");
   }
-  return exceptionKindLabel[item.kind];
+  return causeTitle(item) ?? exceptionKindLabel[item.kind];
+}
+const stopReasonText: Readonly<Record<string, string>> = {
+  SOLD_OUT: t("sold out"),
+  STORE_ERROR: t("store mistake"),
+  DUPLICATE_ORDER: t("duplicate order"),
+  CUSTOMER_REQUEST: t("guest asked"),
+};
+/**
+ * v15 M44: a paid order that will not be made is named by why it ended and whether the money went
+ * back ("Rejected · sold out · refunded"), not by the kind of case.
+ */
+export function causeTitle(item: OrderExceptionItem): string | null {
+  const cause = item.cause;
+  if (item.kind !== "PaidWithoutFulfillableOrder" || cause === undefined) return null;
+  const refunded = item.compensationStatus === "Completed";
+  const back = refunded ? t("refunded") : t("refund in progress");
+  const reason = (code: string) =>
+    stopReasonText[code] === undefined ? "" : " · " + (stopReasonText[code] as string);
+  switch (cause.kind) {
+    case "GuestCancelled":
+      return t("Guest cancelled") + " · " + back;
+    case "StoreRejected":
+      return t("Rejected") + reason(cause.reasonCode) + " · " + back;
+    case "StaffCancelled":
+      return t("Cancelled by staff") + reason(cause.reasonCode) + " · " + back;
+    case "NotAcceptedInTime":
+      return t("Not accepted in time") + " · " + (refunded ? t("refunded automatically") : back);
+    case "PaymentWindowExpired":
+      return t("Paid after the order had closed") + " · " + back;
+    default:
+      return null;
+  }
 }
 const exceptionTone = (item: OrderExceptionItem) =>
   item.status === "Resolved"
@@ -662,7 +694,7 @@ function OrderExceptionCard({
       {header(
         unmatched && detail?.type === "UnmatchedCharge"
           ? t("Charge that matches no order")
-          : exceptionKindLabel[item.kind],
+          : (causeTitle(item) ?? exceptionKindLabel[item.kind]),
       )}
       <dl className="order-panel__facts">
         <div>

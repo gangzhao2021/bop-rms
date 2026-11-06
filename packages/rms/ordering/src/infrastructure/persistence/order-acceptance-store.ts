@@ -244,3 +244,56 @@ export function createPostgresOrderAcceptanceStore(options: {
     },
   });
 }
+
+/**
+ * v15 M44: why each of these Orders ended without being made, in words staff read on an exception
+ * ("Rejected · sold out · refunded"), from the Order's own termination record. Absent: the Order
+ * was not terminated. No actor, guest or staff identity leaves Ordering here.
+ */
+export type OrderTerminationCause =
+  | { readonly kind: "StoreRejected"; readonly reasonCode: string }
+  | { readonly kind: "NotAcceptedInTime" }
+  | { readonly kind: "PaymentWindowExpired" }
+  | { readonly kind: "StaffCancelled"; readonly reasonCode: string }
+  | { readonly kind: "GuestCancelled" }
+  | { readonly kind: "Other" };
+export async function listOrderTerminationCauses(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<ReadonlyMap<string, OrderTerminationCause>> {
+  if (orderReferences.length === 0) return new Map();
+  if (orderReferences.length > 200) return fail();
+  const brand = String(parseOrderingReference(scope.brandReference)),
+    store = String(parseOrderingReference(scope.storeReference));
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const rows = (
+    await transaction.query(
+      "SELECT t.order_id::text AS order_ref,t.phase,t.actor_type,t.purpose_code,t.reason_code," +
+        "EXISTS (SELECT 1 FROM rms_ordering.order_cancellation_request_version r WHERE r.brand_id=t.brand_id AND r.store_id=t.store_id AND r.execution_id=t.termination_id AND r.requested_by_actor_type='GuestSession') AS by_guest " +
+        "FROM rms_ordering.order_termination_record t WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_id=ANY($3::uuid[])",
+      [brand, store, orderReferences.map((value) => String(parseOrderingReference(value)))],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  const causes = new Map<string, OrderTerminationCause>();
+  for (const row of rows) {
+    const reasonCode = String(row.reason_code);
+    const cause: OrderTerminationCause =
+      row.phase === "Rejected"
+        ? { kind: "StoreRejected", reasonCode }
+        : reasonCode === "ACCEPTANCE_WINDOW_EXPIRED"
+          ? { kind: "NotAcceptedInTime" }
+          : reasonCode === "PAYMENT_WINDOW_EXPIRED"
+            ? { kind: "PaymentWindowExpired" }
+            : row.actor_type === "User" && row.purpose_code === "StaffOrderCancellation"
+              ? { kind: "StaffCancelled", reasonCode }
+              : row.by_guest === true
+                ? { kind: "GuestCancelled" }
+                : { kind: "Other" };
+    causes.set(String(parseOrderingReference(row.order_ref)), Object.freeze(cause));
+  }
+  return causes;
+}

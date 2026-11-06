@@ -21,6 +21,8 @@ export interface OrderExceptionItem {
   readonly sourceFinal: boolean;
   /** WP-2423: what a payment reconciliation difference is about (absent from older servers). */
   readonly reconciliation?: OrderExceptionReconciliation;
+  /** v15 M44: why its Order ended (absent: not known; the kind is the title). */
+  readonly cause?: OrderExceptionCause;
 }
 /** WP-2423: a business day's totals, one payment, or a charge that matches no order. */
 export type OrderExceptionReconciliation =
@@ -93,6 +95,37 @@ export function exceptionOpenForText(item: OrderExceptionItem, projectedAt: stri
 const REF = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const SAFE = /^[^\p{Cc}\p{Cf}]{1,100}$/u;
+/** v15 M44: why the case's Order ended (absent: not known, the kind is the title). */
+export type OrderExceptionCause =
+  | { readonly kind: "StoreRejected"; readonly reasonCode: string }
+  | { readonly kind: "NotAcceptedInTime" }
+  | { readonly kind: "PaymentWindowExpired" }
+  | { readonly kind: "StaffCancelled"; readonly reasonCode: string }
+  | { readonly kind: "GuestCancelled" }
+  | { readonly kind: "Other" };
+function orderCause(value: unknown): OrderExceptionCause {
+  const kind =
+    value !== null && typeof value === "object" ? (value as { kind?: unknown }).kind : undefined;
+  if (kind === "StoreRejected" || kind === "StaffCancelled") {
+    const raw = exact(value, ["kind", "reasonCode"]);
+    if (
+      typeof raw.reasonCode !== "string" ||
+      !/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/u.test(raw.reasonCode)
+    )
+      throw new Error("ORDER_EXCEPTION_INVALID");
+    return Object.freeze({ kind, reasonCode: raw.reasonCode });
+  }
+  if (
+    kind === "NotAcceptedInTime" ||
+    kind === "PaymentWindowExpired" ||
+    kind === "GuestCancelled" ||
+    kind === "Other"
+  ) {
+    exact(value, ["kind"]);
+    return Object.freeze({ kind });
+  }
+  throw new Error("ORDER_EXCEPTION_INVALID");
+}
 function exact(value: unknown, keys: readonly string[]) {
   if (
     value === null ||
@@ -200,8 +233,10 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
     input.items.map((value) => {
       const hasDetail =
         value !== null && typeof value === "object" && Object.hasOwn(value, "reconciliation");
+      const hasCause = value !== null && typeof value === "object" && Object.hasOwn(value, "cause");
       const row = exact(value, [
         ...(hasDetail ? ["reconciliation"] : []),
+        ...(hasCause ? ["cause"] : []),
         "exceptionReference",
         "orderReference",
         "orderNumber",
@@ -250,6 +285,7 @@ export function parseOrderExceptionView(value: unknown): OrderExceptionView {
         createdAt: instant(row.createdAt),
         dueAt: instant(row.dueAt),
         ...(hasDetail ? { reconciliation: reconciliation(row.reconciliation) } : {}),
+        ...(hasCause ? { cause: orderCause(row.cause) } : {}),
       }) as unknown as OrderExceptionItem;
     }),
   );

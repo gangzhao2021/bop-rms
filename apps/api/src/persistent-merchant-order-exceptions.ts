@@ -4,7 +4,7 @@ import {
   type PaymentReconciliationExceptionDetail,
 } from "@rms/payment";
 import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
-import { listStoreOrderNumbers } from "@rms/ordering";
+import { listOrderTerminationCauses, listStoreOrderNumbers } from "@rms/ordering";
 import type { ConsumerTransaction } from "@bop/eventing";
 import {
   createPostgresOrderExceptionSourceStore,
@@ -17,6 +17,7 @@ import {
 } from "./merchant-transaction-authorization.js";
 import {
   createMerchantOrderExceptionRead,
+  type MerchantExceptionOrderCause,
   type MerchantExceptionReconciliationDetail,
   type MerchantExceptionScope,
 } from "./merchant-order-exception-read.js";
@@ -146,6 +147,18 @@ export function createPersistentMerchantOrderExceptions(options: {
           ))
             numbers.set(order, number);
         return numbers;
+      },
+      orderCauses: async (tx, scope, orderReferences) => {
+        if (!matches(await authorize(tx), scope)) return unavailable();
+        const causes = new Map<string, MerchantExceptionOrderCause>();
+        for (let start = 0; start < orderReferences.length; start += 100)
+          for (const [order, cause] of await listOrderTerminationCauses(
+            tx,
+            scope,
+            orderReferences.slice(start, start + 100),
+          ))
+            causes.set(order, cause);
+        return causes;
       },
       sources: (scope) =>
         createPostgresOrderExceptionSourceStore({
