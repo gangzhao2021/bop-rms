@@ -109,15 +109,8 @@ export async function proveProductEditorAllergenRegistry({
       throw error;
     }
   };
-  await assert.rejects(
-    run(request, async () => undefined),
-    { code: "CATALOG_DEPENDENCY_UNAVAILABLE" },
-  );
-  await client.query("RESET ROLE");
-  await client.query(
-    `GRANT UPDATE ON rms_catalog.allergen_registry_version,rms_catalog.allergen_registry_entry TO ${role}`,
-  );
-  await client.query(`SET ROLE ${role}`);
+  // DEC-MERCHANT-LOCK-SCOPE: the read holds the Brand's registry fence shared instead of row locks,
+  // so it needs no UPDATE grant; a writer still waits for it (the probe below).
   await run(request, async (snapshot) => {
     assert.equal(snapshot.registryVersionReference, registry);
     assert.equal(snapshot.vocabularyIntegrity, "Registered");
@@ -131,10 +124,18 @@ export async function proveProductEditorAllergenRegistry({
     await probe.connect();
     try {
       await probe.query("SET statement_timeout='250ms'");
+      // A writer of this Brand's registry, as the real ones run: scoped, so its row is found and
+      // its write takes the Brand's fence (DEC-MERCHANT-LOCK-SCOPE), which the read holds shared.
+      await probe.query(
+        "SELECT set_config('bop.tenant_id',$1,false),set_config('bop.brand_id',$2,false),set_config('bop.store_id','',false)",
+        [request.tenantReference, brand],
+      );
+      // Any write of this Brand's registry rows takes the fence before RLS or constraints are
+      // checked; this one would fail later (a second MILK row), but it never gets that far.
       await assert.rejects(
         probe.query(
-          "UPDATE rms_catalog.allergen_registry_entry SET localized_names_json=$1 WHERE registry_version_id=$2 AND brand_id=$3 AND allergen_id=$4",
-          [{ "en-CA": "Changed" }, registry, brand, allergen],
+          "INSERT INTO rms_catalog.allergen_registry_entry (registry_version_id,brand_id,allergen_id) VALUES ($1,$2,$3)",
+          [registry, brand, allergen],
         ),
         { code: "57014" },
       );
