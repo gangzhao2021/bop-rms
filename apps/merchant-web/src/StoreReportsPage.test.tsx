@@ -122,6 +122,44 @@ describe("WP-2423 Q14 store reports page", () => {
     expect(closed).toContain("Matches the day-end settlement: $50.97 collected, $19.22 refunded.");
     expect(closed).not.toContain("when the day closes");
   });
+  // WP-2423 (v15 fabf0261, Tea 11-05): the settlement's figures include the orders taken and given
+  // back the same day, which the report lists apart; the gap is said, never left unexplained.
+  it("names the orders taken and given back the same day beside the settlement's figures", () => {
+    const fixture = storeReportsViewFixture();
+    const days = fixture.days as readonly Record<string, unknown>[];
+    const summary = {
+      ...(fixture.summary as Record<string, unknown>),
+      cancelledInFullCount: 3,
+      cancelledInFullMinor: "4396",
+    };
+    const closed = render({
+      ...fixture,
+      summary,
+      includesOpenDay: false,
+      days: days.map((day) => ({ ...day, status: "Closed" })),
+    });
+    expect(closed).toContain(
+      "Matches the day-end settlement: $50.97 collected, $19.22 refunded. The settlement&#x27;s figures also include 3 orders ($43.96) taken and given back the same day, which this report lists apart instead of as sales and refunds.",
+    );
+    expect(closed).toContain("Orders cancelled and refunded in full · 3 orders");
+    expect(closed).toContain("$43.96");
+    // With today open, the closed days' sentence says the same.
+    const withToday = render({ ...fixture, summary });
+    expect(withToday).toContain(
+      "Closed days match the day-end settlement. Today is checked against it when the day closes. The settlement&#x27;s figures also include 3 orders ($43.96)",
+    );
+    // None: the sentences are as before.
+    const none = render({
+      ...fixture,
+      includesOpenDay: false,
+      days: days.map((day) => ({ ...day, status: "Closed" })),
+    });
+    expect(none).toContain(
+      "Matches the day-end settlement: $50.97 collected, $19.22 refunded.</p>",
+    );
+    expect(none).not.toContain("taken and given back");
+    expect(none).not.toContain("Orders cancelled and refunded in full");
+  });
   it("says when the totals differ from the settlement and when refunds await confirmation", () => {
     const fixture = storeReportsViewFixture();
     const html = render({

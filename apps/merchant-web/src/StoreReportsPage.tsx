@@ -157,6 +157,14 @@ function SummaryLines({ summary }: { readonly summary: StoreReportSummary }) {
   if (BigInt(summary.refunds.notItemizedMinor) > 0n)
     lines.push([t("  refunds not split by item are not taken off the next line"), ""]);
   lines.push([t("Net sales after refunds"), money(summary.netSalesAfterRefundsMinor)]);
+  // WP-2423 (v15 fabf0261): taken and given back the same day, so neither a sale nor a refund here.
+  if (summary.cancelledInFullCount > 0)
+    lines.push([
+      t("Orders cancelled and refunded in full · {orders}", {
+        orders: countOf(summary.cancelledInFullCount, "order"),
+      }),
+      money(summary.cancelledInFullMinor),
+    ]);
   return (
     <dl className="store-reports__lines">
       {lines.map(([term, value, strong]) => (
@@ -208,6 +216,25 @@ function ReportSection({
       {description === undefined ? null : <p className="bop-muted">{description}</p>}
       {children}
     </section>
+  );
+}
+
+/**
+ * WP-2423 (v15 fabf0261, Tea 11-05): the day-end settlement counts an order taken and given back
+ * the same day in its collected and refunded figures; this report lists it apart. Said beside the
+ * "matches" sentence, so a gap between the two figures is never left unexplained.
+ */
+function cancelledInFullNote(summary: StoreReportSummary): string {
+  if (summary.cancelledInFullCount === 0) return "";
+  return (
+    " " +
+    t(
+      "The settlement's figures also include {orders} ({amount}) taken and given back the same day, which this report lists apart instead of as sales and refunds.",
+      {
+        orders: countOf(summary.cancelledInFullCount, "order"),
+        amount: money(summary.cancelledInFullMinor),
+      },
+    )
   );
 }
 
@@ -264,6 +291,7 @@ export function StoreReports({
                   "Closed days match the day-end settlement. Today is checked against it when the day closes.",
                 )
               : t("Checked against the day-end settlement when the day closes.")}
+            {cancelledInFullNote(s)}
           </p>
         ) : r.matchesSettlement ? (
           <p role="status" className="store-reports__match">
@@ -274,6 +302,7 @@ export function StoreReports({
                 settlementRefundedMinor: money(r.settlementRefundedMinor),
               },
             )}
+            {cancelledInFullNote(s)}
           </p>
         ) : (
           <p role="alert" className="command-error">
