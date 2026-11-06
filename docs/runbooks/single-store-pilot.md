@@ -3425,6 +3425,26 @@ through reads "The automatic refund didn't go through" (自动退款没有完成
   with its safe `code`, `failures` and `stuckWaits` (a count, never which order). The failing order
   is retried on its own every 5 s, doubling to 30 s, while every other paid order of the Store
   carries on. Fix the cause; no restart is needed.
+- Pilot operator: `dining-exception-worker:memberPoints` attention (Table service follow-ups,
+  member points after refunds and expiry; `stores/<name>:dining-exception-worker` with
+  `attention: ["memberPoints"]` for a Store after the first) means member points at that Store
+  are not following refunds or expiring. Guests still order, pay and earn, and earned points show
+  and can be spent; only taking points back after a refund, returning points spent on a refunded
+  bill, and expiry wait. Its health file is `dining-exception-member-points.health.json`.
+  `store-workers.log` (or `dining-exception-worker.log` for the installation's own Store) has one
+  `MEMBER_POINTS_SWEEP_UNAVAILABLE` line per failed sweep with its `code`, `rule` and `store`:
+  - `code` `TENANT_DATABASE_ACQUIRE_FAILED` (database or network down): retried every minute by
+    itself, raised once it lasts two minutes. Nothing to do once the database is back.
+  - `rule` `OnlineCapturesDisagree` (health code `MEMBER_POINTS_LEDGER_MISMATCH`, raised at once,
+    retried every five minutes) at a Store opened by `directory` before 2026-11-06: its
+    dining-exception worker names the installation Store's Provider account. Run
+    `NODE_ENV=development node tooling/environment/pilot-internal-test-store-open.mjs worker-account <runtime>/stores/<name>`
+    (prints `Aligned` or `AlreadyAligned`; refuses if the Store's own files disagree), then restart
+    in an update window. Another rule, or this one at a Store already aligned, means the payment
+    records disagree: keep the line and raise it; do not enter points by hand.
+    Once fixed, the next sweep catches up by itself with every refund since its last success (at
+    most two weeks back; a restart looks back two weeks). Nothing is entered by hand. The same holds
+    after a network, database or host outage.
 
 #### Retrying waiting updates now (WP-2423)
 
