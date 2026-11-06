@@ -578,7 +578,12 @@ export function CheckoutPage({
         <PageHeading title={checkoutText.pageTitle} />
         <section role="status" className="checkout-attention">
           <p>
-            {checkoutText.tableCartSent(tableChange.roundNumber, tableChange.byThisPhone, payLater)}
+            {checkoutText.tableCartSent(
+              tableChange.roundNumber,
+              tableChange.byThisPhone,
+              payLater,
+              tableChange.paymentState,
+            )}
           </p>
           {tableChange.cartHasDishes ? <p>{checkoutText.tableCartSentMore}</p> : null}
           <div className="cart-state__actions">

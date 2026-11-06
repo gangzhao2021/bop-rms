@@ -93,6 +93,8 @@ export interface CustomerCartView {
       readonly sentAt: string;
       readonly sentByThisPhone: boolean;
       readonly cartItemReferences: readonly string[];
+      /** WP-2423 M38: where the round's payment stands. */
+      readonly paymentState: "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
     }[];
     /** WP-2423 shared-table-checkout (c): dishes staff took out of this table's cart lately. */
     readonly staffRemoved?: readonly {
@@ -605,8 +607,13 @@ function recentRoundsView(
         "sentAt",
         "sentByThisPhone",
         "cartItemReferences",
+        "paymentState",
       ]);
       if (
+        (raw.paymentState !== "AwaitingPayment" &&
+          raw.paymentState !== "Paid" &&
+          raw.paymentState !== "PayLater" &&
+          raw.paymentState !== "Cancelled") ||
         typeof raw.sentByThisPhone !== "boolean" ||
         !Array.isArray(raw.cartItemReferences) ||
         raw.cartItemReferences.length > 100
@@ -619,6 +626,7 @@ function recentRoundsView(
         cartItemReferences: Object.freeze(
           raw.cartItemReferences.map((reference: unknown) => scalar(reference, uuidV7)),
         ),
+        paymentState: raw.paymentState,
       });
     }),
   );

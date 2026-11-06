@@ -224,12 +224,14 @@ describe("safe shared Dining Cart display", () => {
         sentAt: "2026-09-08T12:00:30.000Z",
         guestSessionReference: id(41),
         cartItemReferences: [id(50)],
+        paymentState: "AwaitingPayment" as const,
       },
       {
         roundNumber: 1,
         sentAt: "2026-09-08T11:59:30.000Z",
         guestSessionReference: id(5),
         cartItemReferences: [id(51), id(52)],
+        paymentState: "Paid" as const,
       },
     ]);
     const base = fixture();
@@ -246,12 +248,14 @@ describe("safe shared Dining Cart display", () => {
         sentAt: "2026-09-08T12:00:30.000Z",
         sentByThisPhone: false,
         cartItemReferences: [id(50)],
+        paymentState: "AwaitingPayment",
       },
       {
         roundNumber: 1,
         sentAt: "2026-09-08T11:59:30.000Z",
         sentByThisPhone: true,
         cartItemReferences: [id(51), id(52)],
+        paymentState: "Paid",
       },
     ]);
     expect(recent).toHaveBeenCalledWith({ cartReference: id(4), observedAt: at });
@@ -267,6 +271,24 @@ describe("safe shared Dining Cart display", () => {
       },
     });
     expect((await failing.read(request))?.cart).not.toHaveProperty("recentRounds");
+    // M38: a round without a known payment state is not shown as paid: the rounds are absent.
+    const unknownState = createCustomerDiningCartViewQuery({
+      reads: { read: base.read },
+      stores: { getPublicStore: async () => profile() },
+      catalog: { describeMany: base.describeMany },
+      rounds: {
+        recent: async () => [
+          {
+            roundNumber: 1,
+            sentAt: "2026-09-08T11:59:30.000Z",
+            guestSessionReference: id(5),
+            cartItemReferences: [id(51)],
+            paymentState: "Settled" as never,
+          },
+        ],
+      },
+    });
+    expect((await unknownState.read(request))?.cart).not.toHaveProperty("recentRounds");
   });
   it("WP-2423 same-table-ordering: a round this phone paid from an earlier session is still its own", async () => {
     const base = fixture();
@@ -283,6 +305,7 @@ describe("safe shared Dining Cart display", () => {
             guestSessionReference: id(40),
             participantReference: id(31),
             cartItemReferences: [id(50)],
+            paymentState: "Paid" as const,
           },
           // Another phone, whatever session it used.
           {
@@ -291,6 +314,7 @@ describe("safe shared Dining Cart display", () => {
             guestSessionReference: id(5),
             participantReference: id(42),
             cartItemReferences: [id(51)],
+            paymentState: "Paid" as const,
           },
         ],
       },

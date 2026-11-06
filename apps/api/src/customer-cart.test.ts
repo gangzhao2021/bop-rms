@@ -365,6 +365,7 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
         sentAt: "2026-08-02T20:00:00.000Z",
         sentByThisPhone: false,
         cartItemReferences: [id(2)],
+        paymentState: "AwaitingPayment" as const,
       },
     ];
     port.result = {
@@ -379,6 +380,11 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
       {
         orderType: "DineIn" as const,
         recentRounds: [{ ...recentRounds[0], cartItemReferences: ["not-a-reference"] }],
+      },
+      // M38: a round with no known payment state is never passed on (as if paid).
+      {
+        orderType: "DineIn" as const,
+        recentRounds: [{ ...recentRounds[0], paymentState: "Settled" }],
       },
     ]) {
       port.result = { status: "Found", view: view(overrides as never) };

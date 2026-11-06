@@ -874,7 +874,7 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(page({ status: "ready", cart: tableCart() })).not.toContain("cart-remove-unavailable");
   });
 
-  it("WP-2423 same-table-ordering: a line from a phone that left the table can be removed by anyone", () => {
+  it("WP-2423 same-table-ordering: a line from a phone that left the table can be changed or removed by anyone", () => {
     const item = tableCart().cart.items[0];
     if (item === undefined) throw new Error("synthetic item missing");
     const html = page({
@@ -884,14 +884,15 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
       }),
     });
     expect(html).toContain(
-      "Added by a phone that has left this table. Anyone at the table can remove it.",
+      "Added by a phone that has left this table. Anyone at the table can change or remove it.",
     );
     expect(html).not.toContain("Only they can change this item.");
     expect(html).not.toContain("ADDER_LEFT_TABLE");
     expect(html).not.toContain("Please check this item with staff");
-    // Remove is enabled; changing it stays the adder's; ordering is not held by it.
+    // M36: Remove and the quantity controls are enabled; ordering is not held by it.
     expect(html).toMatch(/aria-describedby="cart-item-ownership-[^"]+">Remove/u);
-    expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+    expect(html).not.toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+    expect(html).toContain('aria-label="Increase Synthetic tea quantity"');
     expect(html).not.toContain("cart-remove-unavailable");
   });
 

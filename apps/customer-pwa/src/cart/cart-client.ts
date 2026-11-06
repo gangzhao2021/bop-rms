@@ -201,6 +201,15 @@ function recentRounds(value: unknown): readonly CartRecentRound[] {
       const raw = record(candidate);
       if (typeof raw.sentByThisPhone !== "boolean" || !Array.isArray(raw.cartItemReferences))
         throw new CartClientError("cart_service_unavailable");
+      const paymentState = raw.paymentState ?? null;
+      if (
+        paymentState !== null &&
+        paymentState !== "AwaitingPayment" &&
+        paymentState !== "Paid" &&
+        paymentState !== "PayLater" &&
+        paymentState !== "Cancelled"
+      )
+        throw new CartClientError("cart_service_unavailable");
       return Object.freeze({
         roundNumber: integer(raw.roundNumber),
         sentAt: string(raw.sentAt, canonicalInstant),
@@ -208,6 +217,7 @@ function recentRounds(value: unknown): readonly CartRecentRound[] {
         cartItemReferences: Object.freeze(
           raw.cartItemReferences.map((reference: unknown) => string(reference, uuidV7)),
         ),
+        paymentState,
       });
     }),
   );

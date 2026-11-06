@@ -8,6 +8,7 @@ import {
 import {
   getGuestTableStarter,
   isGuestTableQuestion,
+  isUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate } from "react-router";
@@ -126,7 +127,8 @@ function CartItem({
   const foreign = item.warnings.includes("OTHER_PARTICIPANT_ITEM");
   // WP-2423 (guest-cart-503): a line that can't be sold now may be removed by anyone at the table.
   const unsellable = cartLineUnsellable(item);
-  // WP-2423 (same-table-ordering): the phone that added it has left the table; anyone may remove it.
+  // WP-2423 (same-table-ordering, M36): the phone that added it has left the table; anyone may
+  // change or remove it.
   const stranded = item.warnings.includes("ADDER_LEFT_TABLE");
   const ownershipDescription = `cart-item-ownership-${item.cartItemReference}`;
   const configuration = describeConfiguration(item);
@@ -186,7 +188,7 @@ function CartItem({
         <button
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={readOnly || foreign || pending || item.quantity <= 1}
+          disabled={readOnly || (foreign && !stranded) || pending || item.quantity <= 1}
           aria-label={cartText.line.decreaseLabel(item.displayName)}
           onClick={() => void updateQuantity(item.quantity - 1)}
         >
@@ -198,7 +200,7 @@ function CartItem({
         <button
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={readOnly || foreign || pending || item.quantity >= 100}
+          disabled={readOnly || (foreign && !stranded) || pending || item.quantity >= 100}
           aria-label={cartText.line.increaseLabel(item.displayName)}
           onClick={() => void updateQuantity(item.quantity + 1)}
         >
@@ -219,9 +221,15 @@ function CartItem({
 }
 
 /** WP-2423 (same-table-ordering): the newest round from this cart, when another phone sent it. */
-export const tableRoundSentByOther = (cart: CartView): number | null => {
+export const tableRoundSentByOther = (cart: CartView): number | null =>
+  tableRoundByOther(cart)?.roundNumber ?? null;
+/**
+ * WP-2423 M38: that round, to say where its payment stands. The server lists a round still being
+ * paid first, so it is the one shown while it is open.
+ */
+const tableRoundByOther = (cart: CartView) => {
   const latest = cart.cart.recentRounds?.[0];
-  return latest === undefined || latest.sentByThisPhone ? null : latest.roundNumber;
+  return latest === undefined || latest.sentByThisPhone ? null : latest;
 };
 
 /**
@@ -418,6 +426,9 @@ function ErrorState({
         ) : null}
         {state.status === "not-seated" && (isGuestTableQuestion() || getGuestTableStarter()) ? (
           <Link to="/">{failure.goToStart}</Link>
+        ) : state.status === "not-seated" && !isUnseatedTableScan() ? (
+          // WP-2423 M115: an open table this phone hasn't joined: the table's page joins it.
+          <Link to="/">{failure.joinThisTable}</Link>
         ) : null}
       </div>
     </StateMessage>
@@ -644,7 +655,10 @@ function CartContent({
       // WP-2423 (same-table-ordering): another phone's round took this cart's dishes.
       <StateMessage heading={commonText.emptyCartHeading}>
         <p role="status">
-          {cartText.line.roundSentByTable(tableRoundSentByOther(state.cart) ?? 1)}
+          {cartText.line.roundSentByTable(
+            tableRoundSentByOther(state.cart) ?? 1,
+            tableRoundByOther(state.cart)?.paymentState ?? null,
+          )}
         </p>
         <div className="cart-state__actions">
           <Link className="cart-primary-link" to="/dine-in/session">
@@ -799,7 +813,10 @@ function CartContent({
       ) : null}
       {tableRoundSentByOther(cart) === null ? null : (
         <p className="cart-stale" role="status">
-          {cartText.line.roundSentByTable(tableRoundSentByOther(cart) ?? 1)}
+          {cartText.line.roundSentByTable(
+            tableRoundSentByOther(cart) ?? 1,
+            tableRoundByOther(cart)?.paymentState ?? null,
+          )}
         </p>
       )}
       {staffRemovedDishes(cart).map((dish, index) => (

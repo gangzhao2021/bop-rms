@@ -57,7 +57,13 @@ export interface CartRecentRound {
   readonly sentAt: string;
   readonly sentByThisPhone: boolean;
   readonly cartItemReferences: readonly string[];
+  /**
+   * WP-2423 M38: where the round's payment stands; null from a server that does not say yet
+   * (then the round is described without claiming it was paid).
+   */
+  readonly paymentState: CartRoundPaymentState | null;
 }
+export type CartRoundPaymentState = "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
 
 /** WP-2423 M03: an order the guest already placed from this cart (its store number for display). */
 export interface CartPlacedOrder {

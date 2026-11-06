@@ -36,7 +36,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{dish} now ×{quantity}": "{dish} 改为 ×{quantity}",
   "; ": "；",
   "Place order again": "再次下单",
-  "This round hasn't been placed yet. Tap Place order again; it won't be ordered twice.":
+  "Join this table first": "请先加入这一桌",
+  "Join this table to order and see what your table has ordered.":
+    "加入这一桌就能点单，也能看到这桌点了什么。",
+  "Join this table first, then add the dish.": "请先加入这一桌，再加这道菜。",
+  "We couldn’t join you to this table just now. Try again, or ask staff. Your choices are kept here.":
+    "暂时无法加入这一桌。请再试一次，或询问店员。你的选择会保留在这里。",
+  "You’re paying for round {round}. It goes to the kitchen once it’s paid.":
+    "你正在为第 {round} 轮付款，付款后才会送到厨房。",
+  "Someone at your table is paying for round {round} now. Your dishes are in it.":
+    "同桌有人正在为第 {round} 轮付款，你的菜也在里面。",
+  "Round {round} wasn’t paid, so it wasn’t sent to the kitchen. Add the dishes again to order them.":
+    "第 {round} 轮没有付款，所以没有送到厨房。要点这些菜，请重新加入购物车。",
+  "This round hasn’t been placed yet. Tap Place order again; it won’t be ordered twice.":
     "这一轮还没下单。请再按一次“再次下单”，不会重复下单。",
   "{dish} ×{quantity}": "{dish} ×{quantity}",
   ", ": "、",
@@ -53,8 +65,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn’t add you to the table just now. Please try again.":
     "暂时没能加入这一桌，请再试一次。",
   "If it still doesn’t work, ask staff for help.": "如果还是不行，请找店员帮忙。",
-  "Added by a phone that has left this table. Anyone at the table can remove it.":
-    "由已离开这桌的手机添加，同桌任何人都可以删除。",
+  "Added by a phone that has left this table. Anyone at the table can change or remove it.":
+    "由已离开这桌的手机添加，同桌任何人都可以修改或删除。",
   "Added by another guest. Only they can change this item.":
     "由同桌其他客人添加，只有对方可以修改这件商品。",
   "Added to your cart.": "已加入购物车。",

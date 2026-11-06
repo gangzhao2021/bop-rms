@@ -1,4 +1,4 @@
-import type { CartView } from "./types.js";
+import type { CartRoundPaymentState, CartView } from "./types.js";
 
 /**
  * WP-2423 (same-table-ordering): what happened to a table cart since this phone loaded it, from
@@ -28,6 +28,8 @@ export type TableCartChange =
       readonly kind: "sent";
       readonly roundNumber: number;
       readonly byThisPhone: boolean;
+      /** WP-2423 M38: where that round's payment stands (null: not said). */
+      readonly paymentState: CartRoundPaymentState | null;
       /** Dishes are in the cart again (added after that round). */
       readonly cartHasDishes: boolean;
     };
@@ -58,6 +60,7 @@ export function tableCartChange(loaded: CartView, current: CartView | null): Tab
         kind: "sent",
         roundNumber: round.roundNumber,
         byThisPhone: round.sentByThisPhone,
+        paymentState: round.paymentState,
         cartHasDishes: (current?.cart.items.length ?? 0) > 0,
       });
   }

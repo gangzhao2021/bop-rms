@@ -83,8 +83,9 @@ export interface CustomerCartDisplayView {
     } | null;
     /**
      * WP-2423 (same-table-ordering): a table Cart's rounds sent in the last 15 minutes (newest
-     * first): the round's number at the table, when, whether this phone paid it, and which Cart
-     * lines it took, so another phone can tell "sent by someone at your table" from "changed".
+     * first; a round still awaiting payment first, whatever its age): the round's number at the
+     * table, when, whether this phone paid it, which Cart lines it took and where its payment
+     * stands, so another phone can tell "being paid" / "sent" / "not ordered" from "changed".
      * Absent for a pickup Cart, and when it can't be read.
      */
     readonly recentRounds?: readonly CustomerCartRecentRound[];
@@ -114,7 +115,16 @@ export interface CustomerCartRecentRound {
   readonly sentAt: string;
   readonly sentByThisPhone: boolean;
   readonly cartItemReferences: readonly string[];
+  /** WP-2423 M38: where the round's payment stands, so no phone calls an unpaid round paid. */
+  readonly paymentState: CustomerCartRoundPaymentState;
 }
+export type CustomerCartRoundPaymentState = "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
+const roundPaymentStates: ReadonlySet<string> = new Set([
+  "AwaitingPayment",
+  "Paid",
+  "PayLater",
+  "Cancelled",
+]);
 /** WP-2423 (same-table-ordering): Ordering's own rounds sent from a table Cart. */
 export interface CustomerCartRecentRoundsPort {
   recent(input: { readonly cartReference: string; readonly observedAt: string }): Promise<
@@ -125,6 +135,7 @@ export interface CustomerCartRecentRoundsPort {
       /** The table participant who paid it, when Ordering recorded it; else null or absent. */
       readonly participantReference?: string | null;
       readonly cartItemReferences: readonly string[];
+      readonly paymentState: CustomerCartRoundPaymentState;
     }[]
   >;
 }
@@ -449,7 +460,8 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
                   if (
                     !Number.isSafeInteger(round.roundNumber) ||
                     round.roundNumber < 1 ||
-                    !Array.isArray(round.cartItemReferences)
+                    !Array.isArray(round.cartItemReferences) ||
+                    !roundPaymentStates.has(round.paymentState)
                   )
                     throw new Error("bad round");
                   return Object.freeze({
@@ -469,6 +481,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
                         String(parseOrderingReference(reference)),
                       ),
                     ),
+                    paymentState: round.paymentState,
                   });
                 }),
               );

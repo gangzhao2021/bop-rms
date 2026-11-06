@@ -569,7 +569,19 @@ export async function readLatestCartOrder(
  * which Cart lines it took — so every phone can say "these dishes were sent by someone at your
  * table", whatever was added to the Cart since. At most 5, newest first. Read on the caller's
  * transaction with local Brand/Store context set.
+ *
+ * WP-2423 M38: with where its payment stands, from Ordering's own records — Cancelled (closed
+ * unpaid, or paid with nothing it could still make), PayLater (sent to the kitchen to be paid at
+ * the end), Paid, else AwaitingPayment. A round still awaiting payment is included whatever its
+ * age and comes first, so a table with many rounds never loses sight of the one being paid.
  */
+export type RecentCartRoundPaymentState = "AwaitingPayment" | "Paid" | "PayLater" | "Cancelled";
+const recentCartRoundPaymentStates: readonly RecentCartRoundPaymentState[] = Object.freeze([
+  "AwaitingPayment",
+  "Paid",
+  "PayLater",
+  "Cancelled",
+]);
 export interface RecentCartRound {
   readonly roundNumber: number;
   readonly sentAt: string;
@@ -580,6 +592,7 @@ export interface RecentCartRound {
    */
   readonly participantReference: string | null;
   readonly cartItemReferences: readonly string[];
+  readonly paymentState: RecentCartRoundPaymentState;
 }
 export async function readRecentCartRounds(
   transaction: OrderCreationQueryTransaction,
@@ -602,19 +615,38 @@ export async function readRecentCartRounds(
        COALESCE((SELECT array_agg(i.source_cart_line_id::text ORDER BY i.source_cart_line_id)
            FILTER (WHERE i.source_cart_line_id IS NOT NULL)
          FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2
-           AND i.order_batch_id=r.order_batch_id), '{}') AS "cartItemReferences"
-     FROM (SELECT b.order_batch_id,b.submitted_at,b.source_cart_id,s.guest_session_id,
-             row_number() OVER (PARTITION BY b.order_id ORDER BY b.submitted_at,b.order_batch_id)
-               AS round_number
-           FROM rms_ordering.order_batch b
-           JOIN rms_ordering.order_submission_record s ON s.submission_id=b.submission_id
-             AND s.brand_id=$1 AND s.store_id=$2
-           WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id IN (
-             SELECT o.order_id FROM rms_ordering.order_batch o
-             WHERE o.brand_id=$1 AND o.store_id=$2 AND o.source_cart_id=$3)) r
-     WHERE r.source_cart_id=$3 AND r.submitted_at > $4::timestamptz - interval '15 minutes'
-       AND r.submitted_at <= $4::timestamptz
-     ORDER BY r.submitted_at DESC, r.order_batch_id DESC LIMIT 5`,
+           AND i.order_batch_id=r.order_batch_id), '{}') AS "cartItemReferences",
+       r.payment_state AS "paymentState"
+     FROM (SELECT q.*, CASE
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_batch_checkout_cancellation x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
+               THEN 'Cancelled'
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_pay_later_confirmation x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
+               THEN 'PayLater'
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id
+                 AND x.disposition='PaidWithoutFulfillableOrder') THEN 'Cancelled'
+             WHEN EXISTS (SELECT 1 FROM rms_ordering.order_payment_acceptance_wait x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
+               OR EXISTS (SELECT 1 FROM rms_ordering.order_payment_disposition_record x
+               WHERE x.brand_id=$1 AND x.store_id=$2 AND x.order_batch_id=q.order_batch_id)
+               THEN 'Paid'
+             ELSE 'AwaitingPayment' END AS payment_state
+           FROM (SELECT b.order_batch_id,b.submitted_at,b.source_cart_id,s.guest_session_id,
+                   row_number() OVER (PARTITION BY b.order_id ORDER BY b.submitted_at,b.order_batch_id)
+                     AS round_number
+                 FROM rms_ordering.order_batch b
+                 JOIN rms_ordering.order_submission_record s ON s.submission_id=b.submission_id
+                   AND s.brand_id=$1 AND s.store_id=$2
+                 WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id IN (
+                   SELECT o.order_id FROM rms_ordering.order_batch o
+                   WHERE o.brand_id=$1 AND o.store_id=$2 AND o.source_cart_id=$3)) q
+           WHERE q.source_cart_id=$3 AND q.submitted_at <= $4::timestamptz) r
+     WHERE r.submitted_at > $4::timestamptz - interval '15 minutes'
+       OR r.payment_state='AwaitingPayment'
+     ORDER BY (r.payment_state='AwaitingPayment') DESC, r.submitted_at DESC, r.order_batch_id DESC
+     LIMIT 5`,
     [brand, store, cart, observedAt],
   );
   const rows =
@@ -628,8 +660,10 @@ export async function readRecentCartRounds(
         "guestSessionReference",
         "participantReference",
         "cartItemReferences",
+        "paymentState",
       ]);
       if (
+        !recentCartRoundPaymentStates.includes(raw.paymentState as RecentCartRoundPaymentState) ||
         typeof raw.roundNumber !== "number" ||
         !Number.isSafeInteger(raw.roundNumber) ||
         raw.roundNumber < 1 ||
@@ -648,6 +682,7 @@ export async function readRecentCartRounds(
         cartItemReferences: Object.freeze(
           raw.cartItemReferences.map((reference: unknown) => parseOrderingReference(reference)),
         ),
+        paymentState: raw.paymentState as RecentCartRoundPaymentState,
       });
     }),
   );

@@ -1,9 +1,11 @@
 import {
   getGuestTableStarter,
   isGuestTableQuestion,
+  isUnseatedTableScan,
 } from "../session/customer-transaction-context.js";
 import { saidTable, t } from "../i18n/i18n.js";
 import type { CartState } from "../cart/cart-state.js";
+import type { CartRoundPaymentState } from "../cart/types.js";
 import {
   getParticipationEnded,
   getTablePaymentTiming,
@@ -105,6 +107,29 @@ export function tableCartAddedDishes(
       t("{dish} ×{quantity}", { dish: line.displayName, quantity: String(line.quantity) }),
     )
     .join(t(", "));
+}
+
+/** WP-2423 M38: a pay-first round whose payment is still open. */
+function roundBeingPaid(round: number, byThisPhone: boolean): string {
+  return byThisPhone
+    ? t("You’re paying for round {round}. It goes to the kitchen once it’s paid.", {
+        round: String(round),
+      })
+    : t("Someone at your table is paying for round {round} now. Your dishes are in it.", {
+        round: String(round),
+      });
+}
+/**
+ * WP-2423 M38: a round closed unpaid (or with nothing left it could make). Its dishes do not come
+ * back to the cart by themselves, so the guest is told to add them again.
+ */
+function roundNotOrdered(round: number): string {
+  return t(
+    "Round {round} wasn’t paid, so it wasn’t sent to the kitchen. Add the dishes again to order them.",
+    {
+      round: String(round),
+    },
+  );
 }
 
 type TableCartDishes = readonly { readonly displayName: string; readonly quantity: number }[];
@@ -419,11 +444,18 @@ export const cartText = Object.freeze({
     },
     /** WP-2423 (same-table-ordering): the phone that added it can no longer act at the table. */
     get addedByPhoneThatLeft() {
-      return t("Added by a phone that has left this table. Anyone at the table can remove it.");
+      return t(
+        "Added by a phone that has left this table. Anyone at the table can change or remove it.",
+      );
     },
     /** WP-2423 (same-table-ordering): another phone sent a round from this cart lately. */
-    roundSentByTable: (round: number) =>
-      t("Round {round} was sent by someone at your table.", { round: String(round) }),
+    /** M38: with where that round's payment stands (null: not said). */
+    roundSentByTable: (round: number, paymentState: CartRoundPaymentState | null = null) =>
+      paymentState === "AwaitingPayment"
+        ? roundBeingPaid(round, false)
+        : paymentState === "Cancelled"
+          ? roundNotOrdered(round)
+          : t("Round {round} was sent by someone at your table.", { round: String(round) }),
     /** WP-2423 shared-table-checkout (c): staff took a dish out of the table's cart. */
     staffRemoved: (dish: string) => t("Staff removed {dish} from the cart.", { dish }),
     /** The same, for a dish on no current menu (it has no name to show). */
@@ -493,10 +525,17 @@ export const cartText = Object.freeze({
               t("Nothing in your cart yet"),
               t("First tell us if you’re with the people at this table."),
             ] as const)
-          : ([
-              t("You can order once staff seat you"),
-              t("You can order once staff seat you. Ask a staff member, then scan again."),
-            ] as const);
+          : !isUnseatedTableScan()
+            ? // M115: an open table this phone hasn't joined (after a reload or a deep link too):
+              // the table's page lets it join; nobody needs to seat it.
+              ([
+                t("Join this table first"),
+                t("Join this table to order and see what your table has ordered."),
+              ] as const)
+            : ([
+                t("You can order once staff seat you"),
+                t("You can order once staff seat you. Ask a staff member, then scan again."),
+              ] as const);
     },
     get goToStart() {
       return t("Go to the start");
@@ -506,6 +545,9 @@ export const cartText = Object.freeze({
     },
     get yourTable() {
       return t("Your table");
+    },
+    get joinThisTable() {
+      return t("Join this table");
     },
     get tableCheckingOut() {
       return [
@@ -728,8 +770,9 @@ export const checkoutText = Object.freeze({
   get cartChanged() {
     return t("Your cart changed. Refresh to price the current cart.");
   },
-  /** WP-2423 (same-table-ordering): another phone at the table changed the cart meanwhile. */
-  /** `changes`: what changed, as `tableCartChangedDishes` words it ("" when nothing can be named). */
+  /**
+   * WP-2423 (same-table-ordering): another phone at the table changed the cart meanwhile.
+   * `changes`: what changed, as `tableCartChangedDishes` words it ("" when nothing can be named). */
   tableCartChangedBy: (changes: string) =>
     changes === ""
       ? t("Someone at your table changed the cart.")
@@ -737,17 +780,29 @@ export const checkoutText = Object.freeze({
   get checkOutWithNewTotal() {
     return t("Check out with the new total");
   },
-  /** WP-2423 (same-table-ordering): these dishes left in a round someone at the table sent. */
-  tableCartSent: (round: number, byThisPhone: boolean, payLater: boolean) =>
-    byThisPhone
-      ? t("You already sent these dishes (round {round}).", { round: String(round) })
-      : payLater
-        ? t("These dishes were sent to the kitchen by someone at your table (round {round}).", {
-            round: String(round),
-          })
-        : t("These dishes were paid and sent by someone at your table (round {round}).", {
-            round: String(round),
-          }),
+  /**
+   * WP-2423 (same-table-ordering): these dishes left in a round someone at the table sent.
+   * M38: a round still being paid, or closed unpaid, is never called paid and sent.
+   */
+  tableCartSent: (
+    round: number,
+    byThisPhone: boolean,
+    payLater: boolean,
+    paymentState: CartRoundPaymentState | null = null,
+  ) =>
+    paymentState === "AwaitingPayment"
+      ? roundBeingPaid(round, byThisPhone)
+      : paymentState === "Cancelled"
+        ? roundNotOrdered(round)
+        : byThisPhone
+          ? t("You already sent these dishes (round {round}).", { round: String(round) })
+          : payLater
+            ? t("These dishes were sent to the kitchen by someone at your table (round {round}).", {
+                round: String(round),
+              })
+            : t("These dishes were paid and sent by someone at your table (round {round}).", {
+                round: String(round),
+              }),
   get tableCartSentMore() {
     return t("Dishes added since then are still in the cart.");
   },
@@ -857,7 +912,7 @@ export const checkoutText = Object.freeze({
   },
   get roundNotPlacedYet() {
     return t(
-      "This round hasn't been placed yet. Tap Place order again; it won't be ordered twice.",
+      "This round hasn’t been placed yet. Tap Place order again; it won’t be ordered twice.",
     );
   },
   get backToYourTable() {

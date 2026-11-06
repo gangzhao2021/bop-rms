@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tableCartChange } from "./table-cart-change.js";
 import type { CartItemView, CartView } from "./types.js";
-import { tableCartChangedDishes, checkoutText } from "../journey/messages.js";
+import { cartText, tableCartChangedDishes, checkoutText } from "../journey/messages.js";
 
 const id = (n: number) => `01902423-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const line = (n: number, displayName: string, quantity = 1): CartItemView =>
@@ -97,6 +97,7 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
           sentAt: "2026-11-06T16:00:00.000Z",
           sentByThisPhone: false,
           cartItemReferences: [id(10), id(13)],
+          paymentState: "Paid",
         },
       ],
     );
@@ -104,6 +105,7 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
       kind: "sent",
       roundNumber: 2,
       byThisPhone: false,
+      paymentState: "Paid",
       cartHasDishes: true,
     });
     expect(checkoutText.tableCartSent(2, false, false)).toBe(
@@ -120,10 +122,46 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
         sentAt: "2026-11-06T16:00:00.000Z",
         sentByThisPhone: false,
         cartItemReferences: [id(99)],
+        paymentState: null,
       },
     ];
     expect(tableCartChange(view(3, [mine]), view(4, [], rounds)).kind).toBe("changed");
     expect(tableCartChange(view(3, [mine]), view(4, [])).kind).toBe("changed");
     expect(tableCartChange(view(3, [mine]), null).kind).toBe("changed");
+  });
+  it("M38: a round still being paid, or closed unpaid, is never called paid and sent", () => {
+    const awaiting = view(
+      6,
+      [],
+      [
+        {
+          roundNumber: 1,
+          sentAt: "2026-11-06T16:00:00.000Z",
+          sentByThisPhone: false,
+          cartItemReferences: [id(10)],
+          paymentState: "AwaitingPayment",
+        },
+      ],
+    );
+    const change = tableCartChange(view(3, [mine]), awaiting);
+    expect(change).toMatchObject({ kind: "sent", paymentState: "AwaitingPayment" });
+    expect(checkoutText.tableCartSent(1, false, false, "AwaitingPayment")).toBe(
+      "Someone at your table is paying for round 1 now. Your dishes are in it.",
+    );
+    expect(checkoutText.tableCartSent(1, true, false, "AwaitingPayment")).toBe(
+      "You’re paying for round 1. It goes to the kitchen once it’s paid.",
+    );
+    // Closed unpaid (deadline or staff): the dishes did not come back, so nothing says they did.
+    const cancelled = checkoutText.tableCartSent(1, false, false, "Cancelled");
+    expect(cancelled).toBe(
+      "Round 1 wasn’t paid, so it wasn’t sent to the kitchen. Add the dishes again to order them.",
+    );
+    expect(cancelled).not.toMatch(/back in the cart/u);
+    expect(cartText.line.roundSentByTable(1, "AwaitingPayment")).toBe(
+      "Someone at your table is paying for round 1 now. Your dishes are in it.",
+    );
+    expect(cartText.line.roundSentByTable(1, "Paid")).toBe(
+      "Round 1 was sent by someone at your table.",
+    );
   });
 });
