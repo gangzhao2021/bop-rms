@@ -812,8 +812,9 @@ function CartContent({
  */
 export const cartPollIntervalMs = tableCartPollIntervalMs;
 /**
- * Whether the open table cart re-reads now: only on screen, with the cart shown as it stands, and
- * never while a change or a round is on its way (the cart holds still for those).
+ * Whether the open table cart re-reads now: only on screen, with the cart shown as it stands or
+ * stuck after a failed read or a lost network (reading is how those recover, never a dead end),
+ * and never while a change or a round is on its way (the cart holds still for those).
  */
 export function cartPollShouldRead(
   visibility: DocumentVisibilityState,
@@ -822,7 +823,9 @@ export function cartPollShouldRead(
 ): boolean {
   return (
     visibility === "visible" &&
-    cart.status === "ready" &&
+    (cart.status === "ready" ||
+      cart.status === "offline-readonly" ||
+      ("fromRead" in cart && cart.fromRead === true)) &&
     round.status !== "sending" &&
     !(round.status === "unconfirmed" && round.mayBePlaced)
   );
@@ -932,12 +935,13 @@ export function CartPage({
       online: () => typeof navigator === "undefined" || navigator.onLine !== false,
     });
     const wake = () => poll.wake();
+    const reconnected = () => poll.wake("reconnected");
     document.addEventListener("visibilitychange", wake);
-    window.addEventListener("online", wake);
+    window.addEventListener("online", reconnected);
     return () => {
       poll.stop();
       document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("online", wake);
+      window.removeEventListener("online", reconnected);
     };
   }, [dineIn, controller, round]);
   // Leaving forgets a stop; a send that may have happened stays, to be finished when the guest is back.

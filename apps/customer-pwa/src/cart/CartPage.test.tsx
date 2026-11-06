@@ -879,6 +879,31 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     ).toBe(false);
   });
 
+  it("WP-2423 same-table-ordering: a cart stuck after a failed read or a lost network reads again by itself", () => {
+    const failedRead = {
+      status: "unavailable",
+      cart: tableCart(),
+      issueCodes: [],
+      retryAfterSeconds: null,
+      canRetrySameOperation: false,
+      fromRead: true,
+    } as const;
+    const offline = { status: "offline-readonly", cart: tableCart() } as const;
+    expect(cartPollShouldRead("visible", { status: "idle" }, failedRead)).toBe(true);
+    expect(cartPollShouldRead("visible", { status: "idle" }, offline)).toBe(true);
+    // A guest's own change that failed is theirs to retry or dismiss; never read over it.
+    const failedChange: CartState = {
+      status: "unavailable",
+      cart: tableCart(),
+      issueCodes: [],
+      retryAfterSeconds: null,
+      canRetrySameOperation: false,
+    };
+    expect(cartPollShouldRead("visible", { status: "idle" }, failedChange)).toBe(false);
+    expect(cartPollShouldRead("visible", { status: "sending" }, failedRead)).toBe(false);
+    expect(cartPollShouldRead("hidden", { status: "idle" }, offline)).toBe(false);
+  });
+
   it("another guest placing an order never reads as paying, in either language", () => {
     const busy: SendRoundState = {
       status: "busy",

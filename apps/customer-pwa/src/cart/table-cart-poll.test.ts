@@ -95,11 +95,31 @@ describe("WP-2423 same-table-ordering: the table cart keeps up with the other ph
     expect(tableCartPollDelay(99)).toBe(tableCartPollMaxDelayMs);
   });
 
+  it("the network coming back reads at once, even after failures, without a burst", async () => {
+    let ok = false;
+    const h = harness({ ok: () => ok });
+    await h.fire();
+    await h.fire();
+    expect(h.timers.map((timer) => timer.ms)).toEqual([16_000]);
+    ok = true;
+    h.poll.wake("reconnected");
+    // One read, one turn later (the page hears of the network first), replacing the long wait.
+    expect(h.timers.map((timer) => timer.ms)).toEqual([0]);
+    await h.fire();
+    expect(h.read).toHaveBeenCalledTimes(3);
+    expect(h.timers.map((timer) => timer.ms)).toEqual([4_000]);
+    h.poll.wake("reconnected");
+    h.poll.wake("reconnected");
+    expect(h.timers.map((timer) => timer.ms)).toEqual([0]);
+  });
+
   it("stops for good", async () => {
     const h = harness();
     h.poll.stop();
     expect(h.timers).toEqual([]);
     h.poll.wake();
+    h.poll.wake("reconnected");
+    expect(h.timers).toEqual([]);
     expect(h.read).not.toHaveBeenCalled();
   });
 });

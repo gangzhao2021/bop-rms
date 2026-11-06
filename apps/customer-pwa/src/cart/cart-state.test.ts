@@ -217,6 +217,28 @@ describe("WP-1205 in-memory Cart state", () => {
     }
   });
 
+  it("WP-2423 same-table-ordering: a read that failed is marked so, and the next read recovers", async () => {
+    const f = fixture();
+    await f.controller.load();
+    f.failLoad(new CartClientError("cart_service_unavailable"));
+    await f.controller.load();
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable", fromRead: true });
+    f.failLoad(null);
+    await f.controller.refresh();
+    expect(f.controller.getState()).toMatchObject({ status: "ready" });
+    // The network went away and came back: still shown read-only until the next read.
+    f.controller.setOnline(false);
+    expect(f.controller.getState()).toMatchObject({ status: "offline-readonly" });
+    f.controller.setOnline(true);
+    expect(await f.controller.refresh()).toBe(true);
+    expect(f.controller.getState()).toMatchObject({ status: "ready" });
+    // A failed change of the guest's own is not a read failure.
+    f.failRemove(new CartClientError("cart_service_unavailable"));
+    await f.controller.removeItem(id(2));
+    expect(f.controller.getState()).toMatchObject({ status: "unavailable" });
+    expect(f.controller.getState()).not.toHaveProperty("fromRead");
+  });
+
   it("WP-2423 item 6: with nothing on screen yet a quiet read is a load", async () => {
     const f = fixture();
     f.failLoad(new CartClientError("cart_service_unavailable"));

@@ -269,12 +269,13 @@ export function CheckoutPage({
       online: () => typeof navigator === "undefined" || navigator.onLine !== false,
     });
     const wake = () => poll.wake();
+    const reconnected = () => poll.wake("reconnected");
     document.addEventListener("visibilitychange", wake);
-    window.addEventListener("online", wake);
+    window.addEventListener("online", reconnected);
     return () => {
       poll.stop();
       document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("online", wake);
+      window.removeEventListener("online", reconnected);
     };
   }, [dineIn]);
   // A refused start or details save because the cart moved: say what happened at the table.

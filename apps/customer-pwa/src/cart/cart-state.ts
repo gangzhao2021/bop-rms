@@ -28,6 +28,11 @@ export type CartState =
       readonly canRetrySameOperation: boolean;
       /** WP-2423: the line whose asked quantity the store can't make, and how many it can. */
       readonly shortItem?: { readonly cartItemReference: string; readonly available: number };
+      /**
+       * WP-2423 (same-table-ordering): a read of the cart failed (no change of the guest's was
+       * involved), so reading again later is how it recovers.
+       */
+      readonly fromRead?: true;
     }
   | { readonly status: "command-pending"; readonly cart: CartView };
 
@@ -120,7 +125,7 @@ export function createCartStateController({
       if (revision !== readRevision) return true;
       if (!online) publish({ status: "offline-readonly", cart: priorCart });
       else if (pending !== null) mapError(new CartClientError("network_unknown"), priorCart, true);
-      else if (!keep || quietlyShown(error)) mapError(error, priorCart, false);
+      else if (!keep || quietlyShown(error)) mapError(error, priorCart, false, null, true);
       return false;
     }
   };
@@ -140,6 +145,7 @@ export function createCartStateController({
     cart: CartView | null,
     operationCanRetry: boolean,
     cartItemReference: string | null = null,
+    fromRead = false,
   ) => {
     const parsed =
       error instanceof CartClientError ? error : new CartClientError("cart_service_unavailable");
@@ -183,6 +189,7 @@ export function createCartStateController({
       parsed.available !== null
         ? { shortItem: { cartItemReference, available: parsed.available } }
         : {}),
+      ...(fromRead ? { fromRead: true as const } : {}),
     });
   };
 

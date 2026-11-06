@@ -59,8 +59,19 @@ export function startTableCartPoll(options: TableCartPollOptions) {
   };
   schedule(tableCartPollIntervalMs);
   return Object.freeze({
-    /** The page came back on screen or online: read now (after a failure, keep the wait). */
-    wake() {
+    /**
+     * The page came back on screen: read now (after a failure, keep the wait). The network came
+     * back (`reconnected`): the failures were the network's, so read right away from any state.
+     * The read waits one turn, so the page has heard of the network first.
+     */
+    wake(reason: "shown" | "reconnected" = "shown") {
+      if (!stopped && reason === "reconnected") {
+        failures = 0;
+        if (timer !== null) clearTimer(timer);
+        timer = null;
+        schedule(0);
+        return;
+      }
       if (stopped || failures > 0) {
         if (!stopped && timer === null) schedule(tableCartPollDelay(failures));
         return;
