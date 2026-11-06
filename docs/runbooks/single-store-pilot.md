@@ -369,6 +369,47 @@ exists or matches. Check `missingDays`, `reviewDays` and each day's outcome. A f
 read emits a generic error and no partial success report. Missing results must be
 investigated against the daily worker health; this command does not start work.
 
+### Rolling out Store-first-day settlement coverage (v15, 2026-11-06)
+
+What changes: every Store's daily settlement worker settles from that Store's own first business
+day. No file is written for this: nothing is created or changed in the runtime root or in any
+`stores/*` directory, and the optional `settlement` command is not needed. Existing
+`daily-settlement-coverage.json` files (the runtime root and `stores/demo-2`) stay as they are; a
+recorded start that is later than the Store's first day no longer limits coverage.
+
+Rollout is an ordinary image deploy (Planned updates): build `bop-rms-pilot:local` from the
+revision, open the window, `docker compose -f compose.pilot.yaml up -d pilot ops` (the supervisor
+in `pilot` restarts every Store's settlement worker), wait for `/ready`, `/`, `/app` and `/menu`,
+end the window. No migration and no grant change.
+
+Expected first cycles (first business days read on v15 data, 2026-11-06, read-only):
+
+| Store directory                                                      | First business day | Before                             | After rollout                    |
+| -------------------------------------------------------------------- | ------------------ | ---------------------------------- | -------------------------------- |
+| runtime root (installation Store)                                    | 2026-09-19         | settled from 2026-09-20 (recorded) | 2026-09-19 is compared too       |
+| `stores/demo-2`                                                      | 2026-10-30         | settled from 2026-10-31 (recorded) | 2026-10-30 is compared too       |
+| `stores/demo-3`                                                      | 2026-11-01         | never settled                      | every closed day from 2026-11-01 |
+| `stores/merchant-2`, `stores/dessert`, `stores/hotpot`, `stores/tea` | 2026-11-04         | never settled                      | every closed day from 2026-11-04 |
+
+The worker walks at most 32 steps per cycle, so a Store with many days catches up over a few
+cycles (minutes). To confirm, run the status command for each Store directory in the ops
+container from the main checkout (same `PILOT_*` variables as the deploy):
+
+```bash
+for d in "" /stores/demo-2 /stores/demo-3 /stores/merchant-2 /stores/dessert /stores/hotpot /stores/tea; do
+  docker compose -f compose.pilot.yaml exec -T ops node --import ./tooling/environment/register-workspace-typescript.mjs \
+    tooling/environment/pilot-daily-settlement-status-cli.mjs ".local/pilot-v15$d"
+done
+```
+
+Each line must show `firstCoveredBusinessDate` equal to the Store's first business day above and,
+once the worker has caught up, every listed day `"state":"Recorded"` with `missingDays: 0` (the
+runtime root lists only its newest 31 days, so its `coverageScanComplete` stays false). A Store
+that still shows `Missing` days after several cycles, or `DAILY_SETTLEMENT_STATUS_UNAVAILABLE`,
+needs the settlement worker's health file and service log; Home shows `settlement.not_run` for a
+closed day not settled 6 hours on. Rollback is the previous image (Planned updates); it writes
+nothing to undo, and results already recorded stay recorded (append-only).
+
 Batches572–573 read persisted results for2026-09-20 and2026-09-21: both Matched,
 with no missing day within the configured complete-day coverage. Today, initial
 partial-day history, independent exceptions and real Provider settlement remain
