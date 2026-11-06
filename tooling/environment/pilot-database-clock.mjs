@@ -82,6 +82,20 @@ export async function alignProcessClockToDatabase(
   await synchronizeProcessClock(query, report).catch(() => undefined);
 }
 
+/**
+ * WP-2423 M15: whether an instant is not after the database's now, read on the same transaction.
+ * The application clock is only a lower bound of the database's, so an instant the database just
+ * stamped can be a millisecond or two after `Date.now()`; comparing it with the application clock
+ * refused live approvals at random. The database clock is the one time authority.
+ */
+export async function notAfterDatabaseNow(tx, at) {
+  const result = await tx.query(
+    "SELECT $1::timestamptz <= date_trunc('milliseconds', clock_timestamp()) AS ok",
+    [at],
+  );
+  return result.rows[0]?.ok === true;
+}
+
 /** Tests only: back to this host's clock. */
 export function resetProcessClockForTest() {
   if (timer !== null) clearInterval(timer);

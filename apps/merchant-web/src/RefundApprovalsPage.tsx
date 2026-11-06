@@ -270,9 +270,17 @@ function ApprovalCard({
                       )
                     : code === "Denied"
                       ? t("Your session has ended. Sign in again, then decline.")
-                      : t(
-                          "Result unknown. Decline again with the same reason — it is recorded once.",
-                        ),
+                      : code === "Refused"
+                        ? t(
+                            "This decline was refused just now. Nothing was declined. Sign out and in, then try again; if it is still refused, ask the owner to check your role.",
+                          )
+                        : code === "Unavailable"
+                          ? t(
+                              "Couldn't decline just now. Nothing was declined. Press Decline again.",
+                            )
+                          : t(
+                              "Result unknown. Decline again with the same reason — it is recorded once.",
+                            ),
       });
     } finally {
       pending.current = null;
@@ -312,7 +320,7 @@ function ApprovalCard({
       const party = error instanceof RefundApprovalClientError ? error.party : null;
       setOutcome({
         kind: "Failed",
-        retry: code === "OutcomeUnknown",
+        retry: code === "OutcomeUnknown" || code === "Unavailable",
         message:
           code === "NeedsReverification"
             ? party === "Requester"
@@ -347,9 +355,17 @@ function ApprovalCard({
                         )
                       : code === "Denied"
                         ? t("Your session has ended. Sign in again, then approve.")
-                        : t(
-                            "Result unknown. Approve again to retry the same approval — it will not refund twice.",
-                          ),
+                        : code === "Refused"
+                          ? t(
+                              "This approval was refused just now. Nothing was approved and nothing was sent. Sign out and in, then try again; if it is still refused, ask the owner to check your role.",
+                            )
+                          : code === "Unavailable"
+                            ? t(
+                                "Couldn't approve just now. Nothing was approved or sent, and the guest has not been refunded. Press Approve and refund again.",
+                              )
+                            : t(
+                                "Result unknown. Approve again to retry the same approval — it will not refund twice.",
+                              ),
       });
     } finally {
       pending.current = null;

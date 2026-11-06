@@ -5415,6 +5415,14 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your session ended or does not allow this. Sign in again, then verify.":
     "你的登录已结束或不允许此操作。请重新登录后验证。",
   "Your session has ended. Sign in again, then approve.": "你的登录已结束。请重新登录后批准。",
+  "This approval was refused just now. Nothing was approved and nothing was sent. Sign out and in, then try again; if it is still refused, ask the owner to check your role.":
+    "这次批准被拒绝了，没有批准也没有发出。请退出再登录后重试；仍被拒绝请让店主检查你的角色。",
+  "Couldn't approve just now. Nothing was approved or sent, and the guest has not been refunded. Press Approve and refund again.":
+    "刚才没能批准。没有批准，也没有发出，顾客还没收到退款。请再按一次“批准并退款”。",
+  "This decline was refused just now. Nothing was declined. Sign out and in, then try again; if it is still refused, ask the owner to check your role.":
+    "这次拒绝没有成功，退款没有被拒绝。请退出再登录后重试；仍不成功请让店主检查你的角色。",
+  "Couldn't decline just now. Nothing was declined. Press Decline again.":
+    "刚才没能拒绝，退款没有被拒绝。请再按一次“拒绝”。",
   "Your session has ended. Sign in again, then decline.": "你的登录已结束。请重新登录后拒绝。",
   "Your sign-in has ended or doesn't allow this. Sign in again, then add your name.":
     "你的登录已结束或不允许此操作。请重新登录后添加名字。",

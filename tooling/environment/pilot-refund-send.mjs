@@ -1,6 +1,7 @@
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 import { createMerchantOrdinaryRefundSendCommand } from "../../apps/api/dist/merchant-ordinary-refund-send-command.js";
 import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
+import { notAfterDatabaseNow } from "./pilot-database-clock.mjs";
 import { pilotProviderEnvironment } from "./pilot-environment.mjs";
 /** Internal authenticated send only; construction never calls the Provider. */
 export function createInternalRefundSend({
@@ -32,7 +33,7 @@ export function createInternalRefundSend({
         if (scope[key] !== expected[key]) deny();
       const current = async (tx, at) => {
         if (
-          parseCanonicalInstant(at) > parseCanonicalInstant(resources.now()) ||
+          !(await notAfterDatabaseNow(tx, parseCanonicalInstant(at))) ||
           resources.now() >= resources.publicProfile.binding.validUntil
         )
           deny();

@@ -185,8 +185,11 @@ import {
   createRefundReceiptIssuance,
   hasDigitalReceipt,
 } from "../../apps/api/dist/refund-receipt-issuance.js";
-import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
-import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
+import {
+  createInternalRefundWorkforceContext,
+  refundAuthorityCurrent,
+} from "./pilot-refund-workforce.mjs";
+import { notAfterDatabaseNow } from "./pilot-database-clock.mjs";
 import { matchesPilotEnvironment, pilotProviderEnvironment } from "./pilot-environment.mjs";
 export async function createInternalMerchant(
   servedResources,
@@ -668,7 +671,7 @@ export async function createInternalMerchant(
             ...selected,
             ...persistence.publication,
             timeZone: resources.operating.timeZone,
-            authorize: async (_tx, at) => at <= resources.now(),
+            authorize: (tx, at) => notAfterDatabaseNow(tx, at),
           }),
           provider: cancellationRefundProvider,
           // WP-2423 (v15 3cd0f8dd M4): a confirmed item-cancellation refund gives the order's
@@ -695,7 +698,7 @@ export async function createInternalMerchant(
     ...selected,
     ...persistence.publication,
     timeZone: resources.operating.timeZone,
-    authorize: async (_tx, at) => at <= resources.now(),
+    authorize: (tx, at) => notAfterDatabaseNow(tx, at),
   });
   const ordinaryRefundRequest = createMerchantOrdinaryRefundRequest({
     persistence,
@@ -785,10 +788,7 @@ export async function createInternalMerchant(
     if (context.actor.actorReference !== scope.actorReference || !(await authority.authorize()))
       deny();
     const bound = await refundConfiguration(tx, scope);
-    const current = async (t, at) =>
-      t === tx &&
-      parseCanonicalInstant(at) <= parseCanonicalInstant(resources.now()) &&
-      (await authority.authorize());
+    const current = refundAuthorityCurrent(tx, () => authority.authorize());
     return {
       providerAccountReference: bound.providerAccountReference,
       environment: bound.environment,

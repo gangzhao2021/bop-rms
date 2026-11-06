@@ -1,6 +1,8 @@
-import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
 import { createMerchantOrdinaryRefundCommand } from "../../apps/api/dist/merchant-ordinary-refund-command.js";
-import { createInternalRefundWorkforceContext } from "./pilot-refund-workforce.mjs";
+import {
+  createInternalRefundWorkforceContext,
+  refundAuthorityCurrent,
+} from "./pilot-refund-workforce.mjs";
 /** Uses actual command fences and existing owner MFA; creates no role or MFA facts. */
 export function createInternalRefundPreparation({
   resources,
@@ -36,10 +38,7 @@ export function createInternalRefundPreparation({
       )
         deny();
       const bound = await resolveRefundConfiguration(tx, scope);
-      const current = async (t, at) =>
-        t === tx &&
-        parseCanonicalInstant(at) <= parseCanonicalInstant(resources.now()) &&
-        (await authority.authorize());
+      const current = refundAuthorityCurrent(tx, () => authority.authorize());
       return {
         providerAccountReference: bound.providerAccountReference,
         environment: bound.environment,

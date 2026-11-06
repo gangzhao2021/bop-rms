@@ -160,8 +160,26 @@ it("WP-2423 Q5: approval outcomes keep the same approval reference for a retry",
   const reverify = await client.approve(command, csrf).catch((e: unknown) => e);
   expect(reverify).toBeInstanceOf(RefundApprovalClientError);
   expect(reverify).toMatchObject({ code: "NeedsReverification", party: "Requester" });
-  for (const code of ["SamePerson", "Changed", "Denied", "OutcomeUnknown"])
+  // WP-2423 M15: a plain 403 is a refusal of this approval, not an ended session; 503 is retryable.
+  for (const code of ["SamePerson", "Changed", "Refused", "Unavailable"])
     await expect(client.approve(command, csrf)).rejects.toMatchObject({ code });
+});
+
+it("WP-2423 M15: only a 401 reads as an ended session", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(json({ error: "session_required" }, 401))
+    .mockResolvedValueOnce(json({ error: "request_denied" }, 403))
+    .mockResolvedValueOnce(json({ error: "retry_later" }, 503));
+  const client = createRefundApprovalClient(fetcher);
+  const decline = {
+    orderReference: id(1),
+    requestReference: id(2),
+    operationReference: id(8),
+    reasonCode: "NOT_ELIGIBLE" as const,
+  };
+  for (const code of ["Denied", "Refused", "Unavailable"])
+    await expect(client.decline(decline, csrf)).rejects.toMatchObject({ code });
 });
 
 it("WP-2423 Q5: shows reasons and amounts in staff language", () => {
@@ -255,7 +273,7 @@ it("WP-2423 Q5: reads the server's own verification and names role refusals apar
   await expect(client.stepUpStatus()).resolves.toBeNull();
   await expect(client.stepUpStatus()).rejects.toMatchObject({ code: "Denied" });
   const command = { orderReference: id(1), requestReference: id(2), approvalReference: id(4) };
-  for (const code of ["NotPermitted", "RequesterNotEligible", "Denied"])
+  for (const code of ["NotPermitted", "RequesterNotEligible", "Refused"])
     await expect(client.approve(command, csrf)).rejects.toMatchObject({ code });
 });
 
@@ -297,7 +315,7 @@ it("WP-2423: approve and decline refused on a PIN sign-in ask to confirm it is t
   await expect(client.approve(approval, csrf)).rejects.toMatchObject({
     code: "FullSignInRequired",
   });
-  await expect(client.approve(approval, csrf)).rejects.toMatchObject({ code: "Denied" });
+  await expect(client.approve(approval, csrf)).rejects.toMatchObject({ code: "Refused" });
   const decline = {
     orderReference: id(1),
     requestReference: id(2),
@@ -307,7 +325,7 @@ it("WP-2423: approve and decline refused on a PIN sign-in ask to confirm it is t
   await expect(client.decline(decline, csrf)).rejects.toMatchObject({
     code: "FullSignInRequired",
   });
-  await expect(client.decline(decline, csrf)).rejects.toMatchObject({ code: "Denied" });
+  await expect(client.decline(decline, csrf)).rejects.toMatchObject({ code: "Refused" });
 });
 
 it("WP-2423: an approval refused on a PIN sign-in shows the verification step", () => {

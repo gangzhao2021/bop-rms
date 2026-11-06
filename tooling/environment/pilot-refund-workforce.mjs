@@ -1,5 +1,15 @@
 import { createTenantContext } from "../../packages/bop/tenant/src/index.ts";
 import { parseCanonicalInstant } from "../../packages/bop/identity/src/index.ts";
+import { notAfterDatabaseNow } from "./pilot-database-clock.mjs";
+
+/**
+ * WP-2423 M15: the `current` check refund authority is resolved under: the same transaction, an
+ * instant not after the database's now (never the application clock, which trails it), and the
+ * session's authority still in effect.
+ */
+export function refundAuthorityCurrent(tx, authorize) {
+  return async (t, at) => t === tx && (await notAfterDatabaseNow(t, at)) && (await authorize());
+}
 
 const refundPermissions = ["payment.refund.request", "payment.refund.approve"];
 /**

@@ -55,7 +55,10 @@ export class StepUpError extends Error {
   }
 }
 export type ApprovalFailure =
+  /** The session has ended (401): sign in again. */
   | "Denied"
+  /** WP-2423 M15: this approval or decline was refused (403) on a live session. */
+  | "Refused"
   | "SamePerson"
   | "NeedsReverification"
   | "Changed"
@@ -540,6 +543,10 @@ function refusal(status: number, data: unknown): never {
   if (status === 409 && error === "sole_operator_not_in_effect")
     throw new RefundApprovalClientError("SoleOperatorNotInEffect");
   if (status === 409) throw new RefundApprovalClientError("Changed");
-  if (status === 401 || status === 403) throw new RefundApprovalClientError("Denied");
+  // WP-2423 M15: only a 401 means the session has ended; a 403 on a live session is a refusal of
+  // this approval, and a 503 is a failure nothing was recorded for (the same press is retried).
+  if (status === 401) throw new RefundApprovalClientError("Denied");
+  if (status === 403) throw new RefundApprovalClientError("Refused");
+  if (status === 503) throw new RefundApprovalClientError("Unavailable");
   throw new RefundApprovalClientError("OutcomeUnknown");
 }
