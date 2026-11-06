@@ -456,14 +456,20 @@ export async function keepOrderAutoAcceptedPickup(
   ]);
   const accepted = (
     await tx.query(
-      "SELECT d.acceptance_id::text AS acceptance,d.item_count::int AS item_count,d.setting_version::int AS setting_version FROM rms_ordering.order_auto_acceptance_decision d " +
+      "SELECT d.acceptance_id::text AS acceptance,d.item_count::int AS item_count,d.setting_version::int AS setting_version,h.order_type FROM rms_ordering.order_auto_acceptance_decision d " +
         "JOIN rms_ordering.order_acceptance_record a ON a.acceptance_id=d.acceptance_id JOIN rms_ordering.order_header h ON h.brand_id=a.brand_id AND h.store_id=a.store_id AND h.order_id=a.order_id " +
         "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=$3 AND d.order_batch_id=$4 AND d.outcome='Accepted' " +
         stillOpen,
       [brand, store, order, batch],
     )
   ).rows[0] as
-    { acceptance: string; item_count: number | null; setting_version: number } | undefined;
+    | {
+        acceptance: string;
+        item_count: number | null;
+        setting_version: number;
+        order_type: "Pickup" | "DineIn";
+      }
+    | undefined;
   if (accepted === undefined) throw new OrderAutoAcceptedKeepError();
   const inserted = await tx.query(
     "INSERT INTO rms_ordering.order_auto_acceptance_decision (decision_id,brand_id,store_id,order_id,order_batch_id,outcome,reason_code,item_count,setting_version,acceptance_id,actor_id,decided_at) VALUES ($1,$2,$3,$4,$5,'Kept',NULL,$6,$7,$8,$9,$10) ON CONFLICT (brand_id,store_id,order_batch_id) WHERE outcome='Kept' DO NOTHING",
@@ -488,7 +494,11 @@ export async function keepOrderAutoAcceptedPickup(
       brandId: brand,
       storeId: store,
       actor: { type: "User", reference: actor },
-      actionCode: "ORDER_AUTOMATIC_REFUND_STOPPED",
+      // Only a pickup is ever refunded automatically; a table round only leaves the warnings.
+      actionCode:
+        accepted.order_type === "Pickup"
+          ? "ORDER_AUTOMATIC_REFUND_STOPPED"
+          : "ORDER_KITCHEN_WARNING_CLEARED_BY_HAND",
       targetType: "Order",
       targetId: order,
       correlationId: String(parseOrderingReference(input.decisionReference)),
@@ -504,10 +514,15 @@ export async function keepOrderAutoAcceptedPickup(
   return "Kept";
 }
 
-/** What a closing manager should see named: a person's refund, the System's, a person's keep. */
+/**
+ * What a closing manager should see named: a person's refund, the System's, a pickup a person said
+ * they made by hand (its automatic refund stopped), a table round made by hand (no refund involved).
+ */
 export interface OrderAutoAcceptanceEvent {
-  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand";
+  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand" | "RoundMadeByHand";
   readonly orderNumber: string;
+  /** The table round, for RoundMadeByHand only (one Order has several); else null. */
+  readonly roundSequence: number | null;
   /** Null for the System. */
   readonly actorReference: string | null;
   readonly reasonCode: string | null;
@@ -523,14 +538,16 @@ export async function listStoreOrderAutoAcceptanceEvents(
   const { brand, store } = await scoped(tx, scope);
   const rows = (
     await tx.query(
-      "SELECT kind,order_number,actor,reason_code," +
+      "SELECT kind,order_number,round_sequence,actor,reason_code," +
         asInstant("at") +
         " AS at FROM (" +
-        "SELECT CASE WHEN t.actor_type='System' THEN 'AutomaticRefund' ELSE 'CantMake' END AS kind,h.order_number,CASE WHEN t.actor_type='System' THEN NULL ELSE c.actor_id::text END AS actor,c.reason_code,c.cancelled_at AS at " +
+        "SELECT CASE WHEN t.actor_type='System' THEN 'AutomaticRefund' ELSE 'CantMake' END AS kind,h.order_number,NULL::int AS round_sequence,CASE WHEN t.actor_type='System' THEN NULL ELSE c.actor_id::text END AS actor,c.reason_code,c.cancelled_at AS at " +
         "FROM rms_ordering.order_staff_cancellation c JOIN rms_ordering.order_header h ON h.brand_id=c.brand_id AND h.store_id=c.store_id AND h.order_id=c.order_id " +
         "LEFT JOIN rms_ordering.order_termination_record t ON t.brand_id=c.brand_id AND t.store_id=c.store_id AND t.termination_id=c.cancellation_id " +
         "WHERE c.brand_id=$1 AND c.store_id=$2 AND c.cancelled_at>=$3::timestamptz AND c.cancelled_at<$4::timestamptz AND (c.permission_code='ordering.order.accept' OR t.actor_type='System') " +
-        "UNION ALL SELECT 'KeptByHand',h.order_number,d.actor_id::text,NULL,d.decided_at " +
+        "UNION ALL SELECT CASE WHEN h.order_type='Pickup' THEN 'KeptByHand' ELSE 'RoundMadeByHand' END,h.order_number," +
+        "CASE WHEN h.order_type='Pickup' THEN NULL ELSE coalesce((SELECT r.batch_sequence FROM rms_ordering.additional_dining_batch_record r WHERE r.brand_id=d.brand_id AND r.store_id=d.store_id AND r.order_id=d.order_id AND r.order_batch_id=d.order_batch_id),1) END," +
+        "d.actor_id::text,NULL,d.decided_at " +
         "FROM rms_ordering.order_auto_acceptance_decision d JOIN rms_ordering.order_header h ON h.brand_id=d.brand_id AND h.store_id=d.store_id AND h.order_id=d.order_id " +
         "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.outcome='Kept' AND d.decided_at>=$3::timestamptz AND d.decided_at<$4::timestamptz" +
         ") events ORDER BY at LIMIT 100",
@@ -539,6 +556,7 @@ export async function listStoreOrderAutoAcceptanceEvents(
   ).rows as readonly {
     kind: OrderAutoAcceptanceEvent["kind"];
     order_number: unknown;
+    round_sequence: number | null;
     actor: string | null;
     reason_code: string | null;
     at: unknown;
@@ -548,6 +566,7 @@ export async function listStoreOrderAutoAcceptanceEvents(
       Object.freeze({
         kind: row.kind,
         orderNumber: String(row.order_number),
+        roundSequence: row.kind === "RoundMadeByHand" ? Number(row.round_sequence) : null,
         actorReference: row.actor,
         reasonCode: row.reason_code,
         at: instant(row.at),

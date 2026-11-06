@@ -301,9 +301,16 @@ it("on a real ticket: the System close says System, Can't make it says who, and 
 
     // A person's Can't make it on a real ticket says who, from where.
     const staff = await world.session([], "01a6aa21");
-    const { refuse } = cantMakeFor(world, staff);
+    const { refuse, preview } = cantMakeFor(world, staff);
     const givenTicket = await seedKitchenTicket(given);
-    assert.equal((await refuse(given)).status, "Cancelled");
+    const offered = await preview(given);
+    // The answer says what goes back, and that it is still on its way (staff repeat it).
+    const answer = await refuse(given);
+    assert.equal(answer.status, "Cancelled");
+    assert.equal(answer.refundMethod, "Online");
+    assert.equal(answer.refundStatus, "Pending");
+    assert.equal(answer.refundAmountMinor, offered.refundMinor);
+    assert.notEqual(answer.refundAmountMinor, "0");
     assert.deepEqual(
       await query(
         "SELECT actor_type,actor_reference,source_channel FROM platform_audit.audit_record WHERE action_code='KITCHEN_WORK_CANCELLED' AND target_id=$1",
@@ -357,7 +364,11 @@ it("nothing left to refund: Can't make it and the System close still end it, and
         (item) => item.orderReference === handGiven.orderReference,
       );
       assert.equal(row.batches[0].canCantMake, true);
-      assert.equal((await refuse(handGiven)).status, "Cancelled");
+      const answer = await refuse(handGiven);
+      assert.equal(answer.status, "Cancelled");
+      // Nothing more goes back: the answer says it was already refunded.
+      assert.equal(answer.refundMethod, "CardMachine");
+      assert.equal(answer.refundStatus, "Refunded");
       assert.equal(
         (await cancellationOf(world, handGiven))[0].refund_disposition,
         "AlreadyRefunded",
@@ -583,6 +594,36 @@ it("a table round made on paper is said Making it by hand too, and leaves the ki
       assert.equal(row.batches[0].canKeep, false);
       // Money never moves for it.
       assert.deepEqual(await cancellationOf(world, round), []);
+      // Never refunded automatically, so no record says a refund was stopped.
+      assert.deepEqual(
+        await query(
+          "SELECT action_code,actor_reference,reason_code FROM platform_audit.audit_record WHERE action_code IN ('ORDER_AUTOMATIC_REFUND_STOPPED','ORDER_KITCHEN_WARNING_CLEARED_BY_HAND') AND target_id=$1",
+          [round.orderReference],
+        ),
+        [
+          {
+            action_code: "ORDER_KITCHEN_WARNING_CLEARED_BY_HAND",
+            actor_reference: staff.actor,
+            reason_code: "STAFF_MAKING_BY_HAND",
+          },
+        ],
+      );
+      // Tonight's summary names the round, not a stopped refund.
+      const facts = await world.worker().run((tx) =>
+        readTonightFacts(tx, {
+          scope: world.ownerScope,
+          window: {
+            startsAt: world.time(-world.minutes(600)),
+            endsAt: world.time(world.minutes(600)),
+          },
+          observedAt: world.now(),
+          authorize: async () => true,
+        }),
+      );
+      assert.deepEqual(
+        facts.paidOrderEvents.map((event) => [event.kind, event.roundSequence]),
+        [["RoundMadeByHand", 1]],
+      );
     },
   );
 });

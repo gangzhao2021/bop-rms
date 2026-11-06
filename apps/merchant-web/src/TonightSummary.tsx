@@ -100,6 +100,11 @@ export function tonightPaidOrderEventText(event: TonightPaidOrderEvent): string 
       return t("Order {orderNumber} · made by hand · not refunded automatically", {
         orderNumber: event.orderNumber,
       });
+    case "RoundMadeByHand":
+      return t("Order {orderNumber} · round {sequence} · made by hand", {
+        orderNumber: event.orderNumber,
+        sequence: event.roundSequence ?? 1,
+      });
   }
 }
 

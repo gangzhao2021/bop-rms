@@ -31,10 +31,24 @@ export function MakingByHandAction({
   readonly order: Order;
   readonly batch: Batch;
   readonly csrf: string;
-  readonly onSettled: () => void;
+  /** Done carries the confirmation; the order card keeps showing it after the reread. */
+  readonly onSettled: (done: string | null) => void;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const [state, setState] = useState<State>("Idle");
+  const message: Partial<Record<State, string>> = {
+    Done:
+      order.orderType === "Pickup"
+        ? t(
+            "Noted. It won't be refunded automatically. If you can't make it after all, tap Can't make it.",
+          )
+        : t(
+            "Noted. It no longer shows as waiting for the kitchen. If you can't make it after all, tap Can't make it.",
+          ),
+    Changed: t("This order just changed. Check it again."),
+    Failed: t("Not saved. Check the connection and try again."),
+    Denied: t("You can't do this. Ask a manager."),
+  };
   const submit = async () => {
     if (state === "Pending") return;
     setState("Pending");
@@ -56,20 +70,8 @@ export function MakingByHandAction({
       next = "Failed";
     }
     setState(next);
-    if (next === "Done" || next === "Changed") onSettled();
-  };
-  const message: Partial<Record<State, string>> = {
-    Done:
-      order.orderType === "Pickup"
-        ? t(
-            "Noted. It won't be refunded automatically. If you can't make it after all, tap Can't make it.",
-          )
-        : t(
-            "Noted. It no longer shows as waiting for the kitchen. If you can't make it after all, tap Can't make it.",
-          ),
-    Changed: t("This order just changed. Check it again."),
-    Failed: t("Not saved. Check the connection and try again."),
-    Denied: t("You can't do this. Ask a manager."),
+    if (next === "Done" || next === "Changed")
+      onSettled(next === "Done" ? (message.Done ?? null) : null);
   };
   return (
     <div className="card-actions order-keep-action">
@@ -81,9 +83,7 @@ export function MakingByHandAction({
       >
         {state === "Pending" ? t("Saving…") : t("Making it by hand")}
       </button>
-      {state === "Done" ? (
-        <p role="status">{message.Done}</p>
-      ) : state === "Idle" || state === "Pending" ? null : (
+      {state === "Idle" || state === "Pending" || state === "Done" ? null : (
         <p role="alert">{message[state]}</p>
       )}
     </div>

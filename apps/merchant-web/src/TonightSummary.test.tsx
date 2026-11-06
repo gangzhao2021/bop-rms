@@ -36,6 +36,14 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT: decisions nobody senior was asked about, n
       reasonCode: null,
       at: "2026-10-28T00:30:00.000Z",
     },
+    {
+      kind: "RoundMadeByHand",
+      orderNumber: "24",
+      roundSequence: 2,
+      staffName: "Mei",
+      reasonCode: null,
+      at: "2026-10-28T00:40:00.000Z",
+    },
   ];
   it("lists each in staff words, with who and why, never a code", () => {
     const html = render({ ...tonightSummaryFixture(), paidOrderEvents: events });
@@ -43,6 +51,10 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT: decisions nobody senior was asked about, n
     expect(html).toContain("Mei · Sold out");
     expect(html).toContain("Order 22 · refunded automatically · the kitchen never started it");
     expect(html).toContain("Order 23 · made by hand · not refunded automatically");
+    // A table round is never refunded automatically: its line says which round, and no refund.
+    expect(html).toContain("Order 24 · round 2 · made by hand");
+    expect(html).not.toMatch(/Order 24[^<]*refund/u);
+    expect(html).not.toContain("RoundMadeByHand");
     expect(html).not.toContain("SOLD_OUT");
     expect(html).not.toContain("STORE_ERROR");
     expect(html).not.toContain("KeptByHand");
@@ -58,6 +70,15 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT: decisions nobody senior was asked about, n
         paidOrderEvents: [{ ...events[0], kind: "Deleted" }],
       }),
     ).toThrow();
+    // Only a table round names its round, and always does.
+    for (const wrong of [
+      { ...events[0], roundSequence: 1 },
+      { ...events[3], roundSequence: undefined },
+      { ...events[3], roundSequence: 0 },
+    ])
+      expect(() =>
+        parseTonightSummary({ ...tonightSummaryFixture(), paidOrderEvents: [wrong] }),
+      ).toThrow();
   });
 });
 

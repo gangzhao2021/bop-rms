@@ -1245,6 +1245,15 @@ const databaseAccessManifestInput = {
       source: "packages/rms/ordering/src/infrastructure/persistence/order-auto-acceptance-store.ts",
     },
     {
+      id: "order-auto-acceptance.read.additional_dining_batch_record",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_ordering", table: "additional_dining_batch_record" },
+      principal: { kind: "module", id: "@rms/ordering" },
+      readPattern: "owner-repository",
+      source: "packages/rms/ordering/src/infrastructure/persistence/order-auto-acceptance-store.ts",
+    },
+    {
       id: "order-auto-acceptance.write.order_auto_acceptance_decision",
       operation: "write",
       mechanism: "repository",

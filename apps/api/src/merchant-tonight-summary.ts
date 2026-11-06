@@ -25,8 +25,10 @@ export interface TonightOpenTable {
  * a "Can't make it" refund, an automatic refund, a pickup someone said they made by hand.
  */
 export interface TonightPaidOrderEvent {
-  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand";
+  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand" | "RoundMadeByHand";
   readonly orderNumber: string;
+  /** RoundMadeByHand only: which table round (the key is left out otherwise). */
+  readonly roundSequence?: number;
   /** Null for the System, or a person no longer on the staff list. */
   readonly staffName: string | null;
   readonly reasonCode: string | null;
@@ -126,6 +128,7 @@ export async function readTonightFacts(
               Object.freeze({
                 kind: event.kind,
                 orderNumber: event.orderNumber,
+                ...(event.roundSequence === null ? {} : { roundSequence: event.roundSequence }),
                 staffName:
                   event.actorReference === null ? null : (names.get(event.actorReference) ?? null),
                 reasonCode: event.reasonCode,

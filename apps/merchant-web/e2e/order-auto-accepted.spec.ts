@@ -179,6 +179,7 @@ test("@production Orders: sent by itself, why one is not, Can't make it and the 
   };
   await page.route("**/merchant/orders", (route) => route.fulfill({ headers, json: current }));
   // What Can't make it would give back, read as its dialog opens.
+  let refundMinor = "1450";
   await page.route("**/merchant/orders/cant-make/preview", (route) =>
     route.fulfill({
       headers,
@@ -187,7 +188,7 @@ test("@production Orders: sent by itself, why one is not, Can't make it and the 
         orderBatchReference: id(71),
         refundMethod: "Online",
         paidMinor: "1450",
-        refundMinor: "1450",
+        refundMinor,
         currencyCode: "CAD",
       },
     }),
@@ -215,7 +216,7 @@ test("@production Orders: sent by itself, why one is not, Can't make it and the 
         cancelledAt: ago(0),
         refundStatus: "Pending",
         refundMethod: "Online",
-        refundAmountMinor: null,
+        refundAmountMinor: "1450",
       },
     });
   });
@@ -250,9 +251,19 @@ test("@production Orders: sent by itself, why one is not, Can't make it and the 
   await page.setViewportSize({ width: 1440, height: 900 });
   await expectNoInternalText(page);
 
-  // Can't make it: a reason, one confirmation, the same operation a retry would send.
+  // Already refunded in full elsewhere: the dialog says no money moves, in every line.
+  refundMinor = "0";
   await orderPanel(page).getByRole("button", { name: "Can't make it · refund" }).click();
   const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("nothing more will be refunded");
+  await expect(dialog).toContainText("They are told why. Your name is recorded.");
+  await expect(dialog).not.toContainText("The money goes back");
+  await expect(dialog.getByRole("button", { name: "Cancel without a refund" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Keep the order" }).click();
+  refundMinor = "1450";
+
+  // Can't make it: a reason, one confirmation, the same operation a retry would send.
+  await orderPanel(page).getByRole("button", { name: "Can't make it · refund" }).click();
   await expect(dialog).toContainText("The customer is refunded in full, $14.50 including tip.");
   await expect(dialog).toContainText("The money goes back to the card they paid with");
   await expect(dialog.getByRole("button", { name: "Refund", exact: true })).toBeDisabled();
@@ -261,6 +272,12 @@ test("@production Orders: sent by itself, why one is not, Can't make it and the 
   await expect(
     orderPanel(page).getByRole("button", { name: "Can't make it · refund" }),
   ).toBeHidden();
+  // After the reread, the order still says what goes back, and that it is on its way.
+  await expect(
+    orderPanel(page).getByText(
+      "Cancelled. Refund pending: $14.50 to the card they paid with. The guest is told, and the items go back to stock.",
+    ),
+  ).toBeVisible();
   expect(refusals).toEqual([
     expect.objectContaining({
       orderReference: id(21),
@@ -379,6 +396,12 @@ test("@production Orders: a pickup that never reached the kitchen is made by han
     orderPanel(page).getByText("Accepted automatically · being made by hand"),
   ).toBeVisible();
   await expect(orderPanel(page).getByRole("button", { name: "Making it by hand" })).toBeHidden();
+  // The confirmation outlives the reread that removed the button.
+  await expect(
+    orderPanel(page).getByText(
+      "Noted. It won't be refunded automatically. If you can't make it after all, tap Can't make it.",
+    ),
+  ).toBeVisible();
   // Still possible to give it back after all.
   await expect(
     orderPanel(page).getByRole("button", { name: "Can't make it · refund" }),

@@ -2571,8 +2571,21 @@ export function CurrentOrderQueuePage({
     state.view.items.some((order) => order.listedBusinessDate === businessDay)
       ? businessDay
       : null;
+  /**
+   * DEC-PAID-ORDER-AUTO-ACCEPT: what Can't make it refunded, or that Making it by hand was noted,
+   * kept on the order after the reread removes the button that said it (staff repeat it to the
+   * guest), by batch.
+   */
+  const [actionDone, setActionDone] = useState<Readonly<Record<string, string>>>({});
+  const settledWith = (orderBatchReference: string) => (done: string | null) => {
+    if (done !== null) setActionDone((current) => ({ ...current, [orderBatchReference]: done }));
+    reload(after);
+  };
   // A confirmation belongs to the page it was given on.
-  useEffect(() => setReleased(null), [after]);
+  useEffect(() => {
+    setReleased(null);
+    setActionDone({});
+  }, [after]);
   // WP-2423: opened list orders and the refund totals read for them outlive a refresh.
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   const expanded = useMemo(() => ({ opened, setOpened }), [opened]);
@@ -3283,6 +3296,11 @@ export function CurrentOrderQueuePage({
             }
             action={(order, batch) => (
               <>
+                {actionDone[batch.orderBatchReference] !== undefined ? (
+                  <p role="status" className="order-action-done">
+                    {actionDone[batch.orderBatchReference]}
+                  </p>
+                ) : null}
                 {
                   // WP-2423 (2026-10-16): an ended earlier-day Order still holding stock.
                   order.heldStock !== null &&
@@ -3445,7 +3463,7 @@ export function CurrentOrderQueuePage({
                           batch={batch}
                           csrf={csrf}
                           fetcher={fetcher}
-                          onSettled={() => reload(after)}
+                          onSettled={settledWith(batch.orderBatchReference)}
                         />
                       ) : null}
                       {batch.canCantMake ? (
@@ -3455,7 +3473,7 @@ export function CurrentOrderQueuePage({
                           batch={batch}
                           csrf={csrf}
                           fetcher={fetcher}
-                          onSettled={() => reload(after)}
+                          onSettled={settledWith(batch.orderBatchReference)}
                         />
                       ) : batch.canCancel ? (
                         <StaffOrderCancelAction

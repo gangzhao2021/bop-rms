@@ -63,7 +63,11 @@ export interface StaffOrderCancellationResult {
   readonly refundStatus: StaffOrderRefundStatus;
   /** WP-2423 Q7: a payment taken on the Store's card machine is refunded on that machine by staff. */
   readonly refundMethod: "Online" | "CardMachine";
-  /** CardMachine: the amount staff refund (pending) or refunded on the machine. */
+  /**
+   * CardMachine: the amount staff refund (pending) or refunded on the machine. Online: Can't make it's
+   * first answer says what is left of the payment that it refunds ("0" when nothing was left);
+   * otherwise, and on a replay, null.
+   */
   readonly refundAmountMinor: string | null;
 }
 
@@ -297,6 +301,8 @@ export async function cancelPaidBatch(
     permissionCode?: "ordering.order.accept";
     /** Only a batch the System accepted ("Can't make it", the System close). */
     autoAcceptedOnly?: boolean;
+    /** What is left of the payment this cancellation gives back, read under the Order's fence. */
+    onRefundDecided?: (remainingMinor: bigint) => void;
     /** The System closed it: the actor is the reserved System actor and the audit says System. */
     bySystem?: boolean;
   },
@@ -341,6 +347,7 @@ export async function cancelPaidBatch(
     return fail("ORDER_CANCELLATION_NOT_CANCELLABLE");
   const refundDisposition: "Refund" | "AlreadyRefunded" =
     position?.remainingMinor === 0n ? "AlreadyRefunded" : "Refund";
+  if (position !== null) input.onRefundDecided?.(position.remainingMinor);
   if (input.autoAcceptedOnly === true) {
     const refusal = await autoAcceptedOnlyRefusal(tx, selected, plan);
     if (refusal !== null) return fail(refusal);
@@ -363,8 +370,7 @@ export async function cancelPaidBatch(
     nextReference: options.nextReference,
     ...(input.bySystem === true ? { bySystem: true } : {}),
   });
-  if (kitchen.status === "AlreadyCancelled")
-    return fail("ORDER_CANCELLATION_UNAVAILABLE");
+  if (kitchen.status === "AlreadyCancelled") return fail("ORDER_CANCELLATION_UNAVAILABLE");
   const created = await ordering.commit(tx, {
     plan,
     cancellationReference,
@@ -401,12 +407,7 @@ export async function cancelPaidBatch(
   };
   // WP-2423 Q6 step 2a: once lines of this Batch were cancelled (and their stock released),
   // the remaining lines are released line by line.
-  const lines = await readStaffBatchLineSources(
-    tx,
-    selected,
-    orderReference,
-    orderBatchReference,
-  );
+  const lines = await readStaffBatchLineSources(tx, selected, orderReference, orderBatchReference);
   const inventory = lines.some((line) => line.itemCancelled)
     ? await releaser.releaseLines(tx, {
         ...request,
@@ -415,8 +416,7 @@ export async function cancelPaidBatch(
           .map((line) => String(line.sourceCartLineReference)),
       })
     : await releaser.release(tx, request);
-  if (inventory.status === "NotReleasable")
-    return fail("ORDER_CANCELLATION_STOCK_NOT_RELEASABLE");
+  if (inventory.status === "NotReleasable") return fail("ORDER_CANCELLATION_STOCK_NOT_RELEASABLE");
   return record;
 }
 
@@ -546,6 +546,9 @@ export function createMerchantOrderStaffCancellation(options: {
               storeReference: selected.storeReference,
               authorize: owned,
             });
+            // What this cancellation gives back online, decided before the commit (the refund
+            // itself follows); a replay does not know it here.
+            let decidedMinor: bigint | null = null;
             const replied = async (
               status: "Cancelled" | "AlreadyCancelled",
               record: StaffOrderCancellationRecord,
@@ -564,7 +567,11 @@ export function createMerchantOrderStaffCancellation(options: {
                 cancelledAt: String(record.cancelledAt),
                 refundStatus,
                 refundMethod: card === null ? ("Online" as const) : ("CardMachine" as const),
-                refundAmountMinor: card?.amountMinor ?? null,
+                refundAmountMinor:
+                  card?.amountMinor ??
+                  (status === "Cancelled" && decidedMinor !== null
+                    ? decidedMinor.toString()
+                    : null),
               });
             };
             // Replay of the same staff command: the original outcome, nothing written.
@@ -594,6 +601,14 @@ export function createMerchantOrderStaffCancellation(options: {
               reasonCode,
               ...(options.autoAcceptedOnly === true
                 ? { permissionCode: "ordering.order.accept" as const, autoAcceptedOnly: true }
+                : {}),
+              // Can't make it tells staff what goes back (they repeat it to the guest).
+              ...(options.autoAcceptedOnly === true
+                ? {
+                    onRefundDecided: (remainingMinor: bigint) => {
+                      decidedMinor = remainingMinor;
+                    },
+                  }
                 : {}),
             });
             return replied("Cancelled", record);

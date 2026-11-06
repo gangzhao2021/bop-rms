@@ -364,8 +364,10 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
  * asked: a "Can't make it" refund, an automatic refund, a pickup someone made by hand.
  */
 export interface TonightPaidOrderEvent {
-  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand";
+  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand" | "RoundMadeByHand";
   readonly orderNumber: string;
+  /** RoundMadeByHand: which table round; null otherwise. */
+  readonly roundSequence: number | null;
   /** Null for the System, or a person no longer on the staff list. */
   readonly staffName: string | null;
   readonly reasonCode: string | null;
@@ -405,10 +407,35 @@ export function parseTonightSummary(value: unknown): TonightSummary {
   ]);
   const paidOrderEvents = withEvents
     ? list(raw.paidOrderEvents, 100, (entry) => {
-        const event = exact(entry, ["kind", "orderNumber", "staffName", "reasonCode", "at"]);
+        const round =
+          entry !== null && typeof entry === "object" && Object.hasOwn(entry, "roundSequence");
+        const event = exact(entry, [
+          "kind",
+          "orderNumber",
+          ...(round ? ["roundSequence"] : []),
+          "staffName",
+          "reasonCode",
+          "at",
+        ]);
+        const kind = oneOf(event.kind, [
+          "CantMake",
+          "AutomaticRefund",
+          "KeptByHand",
+          "RoundMadeByHand",
+        ] as const);
+        // A table round names its round; nothing else carries one.
+        if (
+          (kind === "RoundMadeByHand") !== round ||
+          (round &&
+            (typeof event.roundSequence !== "number" ||
+              !Number.isInteger(event.roundSequence) ||
+              event.roundSequence < 1))
+        )
+          return fail();
         return Object.freeze({
-          kind: oneOf(event.kind, ["CantMake", "AutomaticRefund", "KeptByHand"] as const),
+          kind,
           orderNumber: text(event.orderNumber, 20),
+          roundSequence: round ? (event.roundSequence as number) : null,
           staffName: event.staffName === null ? null : text(event.staffName, 200),
           reasonCode: event.reasonCode === null ? null : text(event.reasonCode, 80),
           at: instant(event.at),

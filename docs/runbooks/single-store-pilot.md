@@ -525,9 +525,10 @@ what staff do when something fails is different:
 - **"did not reach the kitchen":** the order was accepted but its ticket never arrived. Make it from
   the order details on Orders and tap "Making it by hand" (pickups and table rounds), or tap "Can't
   make it · refund", then tell the operator.
-- **What the guest is told after "Can't make it":** the amount the screen shows. It is what was left
-  of the payment, so less than they paid if a dish was taken off earlier, and nothing if it was
-  already refunded in full.
+- **What the guest is told after "Can't make it":** the amount the order shows afterwards. It is what
+  was left of the payment, so less than they paid if a dish was taken off earlier, and nothing if it
+  was already refunded in full. "Refund pending" means it is on its way to their card, not yet
+  confirmed: say it will reach their card, never that it already has.
 - **At closing:** the closing reminder counts paid orders the kitchen has not started for 5 minutes
   or more (not ones just sent or being made by hand); tonight's summary names every "Can't make it" refund, every automatic refund and
   every "Making it by hand", with who did it.

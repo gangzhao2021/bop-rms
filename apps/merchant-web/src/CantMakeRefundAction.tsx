@@ -16,31 +16,100 @@ type Order = CurrentOrderQueue["items"][number];
 type Batch = Order["batches"][number];
 type State = "Idle" | "Pending" | "Done" | "Started" | "Changed" | "Failed" | "Denied" | "Unknown";
 
+/** What the server answered to Can't make it: what goes back, and whether it has gone yet. */
+export interface CantMakeResult {
+  readonly status: "Cancelled" | "AlreadyCancelled";
+  readonly refundStatus: "Pending" | "Refunded";
+  readonly refundMethod: "Online" | "CardMachine";
+  /** What this cancellation gives back; null when the server could not say (a replay). */
+  readonly refundAmountMinor: string | null;
+}
+
+/** The 200 answer, or null when it can't be read (then the dialog's preview is all there is). */
+export function parseCantMakeResult(value: unknown): CantMakeResult | null {
+  if (value === null || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const amount = raw.refundAmountMinor;
+  if (
+    (raw.status !== "Cancelled" && raw.status !== "AlreadyCancelled") ||
+    (raw.refundStatus !== "Pending" && raw.refundStatus !== "Refunded") ||
+    (raw.refundMethod !== "Online" && raw.refundMethod !== "CardMachine") ||
+    (amount !== null && (typeof amount !== "string" || !/^(?:0|[1-9]\d{0,15})$/u.test(amount)))
+  )
+    return null;
+  return Object.freeze({
+    status: raw.status,
+    refundStatus: raw.refundStatus,
+    refundMethod: raw.refundMethod,
+    refundAmountMinor: amount,
+  });
+}
+
 /**
- * What staff read last, and repeat to the guest: the amount the dialog showed, never "in full" when
- * part of it was given back earlier, and plainly nothing when nothing was left.
+ * What staff read last, and repeat to the guest, from the server's answer: the amount that goes
+ * back, "pending" until the Provider has confirmed it, never "in full" when part was given back
+ * earlier, and plainly nothing when nothing was left. Only when the answer can't be read does it
+ * fall back to the amount the dialog showed, and then it never says the money has gone.
  */
 export function cantMakeDoneText(
+  result: CantMakeResult | null,
   preview: StaffCancelRefundPreview | "Checking" | "Failed",
 ): string {
-  if (typeof preview !== "object")
-    return t(
-      "Done. What was left of the payment is refunded. The guest is told, and the items go back to stock.",
-    );
-  const amount = orderMoney({ amountMinor: preview.refundMinor, currencyCode: "CAD" });
-  if (preview.refundMinor === "0")
+  const shown = typeof preview === "object" ? preview : null;
+  const method = result?.refundMethod ?? shown?.refundMethod ?? "Online";
+  // A first answer that is already "Refunded" means nothing was left to give back.
+  const nothingLeft =
+    result !== null
+      ? result.status === "Cancelled" &&
+        (result.refundAmountMinor === "0" || result.refundStatus === "Refunded")
+      : shown?.refundMinor === "0";
+  if (nothingLeft)
     return t(
       "Cancelled. It was already refunded in full, so nothing more was refunded. The guest is told.",
     );
-  if (preview.refundMethod === "CardMachine")
-    return t("Cancelled. Refund {amount} on the card machine. The guest is told.", { amount });
-  return BigInt(preview.refundMinor) >= BigInt(preview.paidMinor)
+  const amountMinor =
+    result !== null && (result.refundAmountMinor !== null || method === "CardMachine")
+      ? result.refundAmountMinor
+      : (shown?.refundMinor ?? null);
+  const amount = amountMinor === null ? null : orderMoney({ amountMinor, currencyCode: "CAD" });
+  if (method === "CardMachine") {
+    if (result?.refundStatus === "Refunded")
+      return amount === null
+        ? t("Cancelled. It was refunded on the card machine. The guest is told.")
+        : t("Cancelled. {amount} was refunded on the card machine. The guest is told.", {
+            amount,
+          });
+    return amount === null
+      ? t("Cancelled. Refund what was left of the payment on the card machine. The guest is told.")
+      : t("Cancelled. Refund {amount} on the card machine. The guest is told.", { amount });
+  }
+  if (amount === null)
+    return result?.refundStatus === "Refunded"
+      ? t(
+          "Cancelled. What was left of the payment was refunded to the card they paid with. The guest is told, and the items go back to stock.",
+        )
+      : t(
+          "Cancelled. Refund pending: what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.",
+        );
+  const partial =
+    shown !== null && amountMinor !== null && BigInt(amountMinor) < BigInt(shown.paidMinor);
+  if (result?.refundStatus === "Refunded")
+    return partial
+      ? t(
+          "Cancelled. Refunded {amount}, what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.",
+          { amount },
+        )
+      : t(
+          "Cancelled. Refunded {amount} to the card they paid with. The guest is told, and the items go back to stock.",
+          { amount },
+        );
+  return partial
     ? t(
-        "Refunded {amount} in full to the card they paid with. The guest is told, and the items go back to stock.",
+        "Cancelled. Refund pending: {amount}, what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.",
         { amount },
       )
     : t(
-        "Refunded {amount}, what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.",
+        "Cancelled. Refund pending: {amount} to the card they paid with. The guest is told, and the items go back to stock.",
         { amount },
       );
 }
@@ -61,7 +130,8 @@ export function CantMakeRefundAction({
   readonly order: Order;
   readonly batch: Batch;
   readonly csrf: string;
-  readonly onSettled: () => void;
+  /** Done carries what to tell the guest; the order card keeps showing it after the reread. */
+  readonly onSettled: (done: string) => void;
   readonly fetcher?: typeof fetch | undefined;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -115,6 +185,7 @@ export function CantMakeRefundAction({
     }
     setState("Pending");
     let next: State;
+    let result: CantMakeResult | null = null;
     try {
       const response = await fetcher("/merchant/orders/cant-make", {
         method: "POST",
@@ -131,10 +202,11 @@ export function CantMakeRefundAction({
         }),
       });
       let error: string | null = null;
+      const body = (await response.json().catch(() => null)) as unknown;
       if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
-        error = typeof body?.error === "string" ? body.error : null;
-      }
+        const refusal = body as { error?: unknown } | null;
+        error = typeof refusal?.error === "string" ? refusal.error : null;
+      } else result = parseCantMakeResult(body);
       const outcome = staffCancelOutcome(response.status, error);
       next =
         outcome === "Cancelled"
@@ -156,11 +228,10 @@ export function CantMakeRefundAction({
     setState(next);
     if (next === "Done") {
       dialog.current?.close();
-      onSettled();
+      onSettled(cantMakeDoneText(result, preview));
     }
   };
   const message: Partial<Record<State, string>> = {
-    Done: cantMakeDoneText(preview),
     Started: t("The kitchen has started it, so it can't be undone here. Ask a manager."),
     Changed: t("This order just changed. Check it again."),
     Failed: t("Not done. Check the connection and try again."),
@@ -180,14 +251,15 @@ export function CantMakeRefundAction({
       >
         {t("Can't make it · refund")}
       </button>
-      {state === "Done" ? <p role="status">{message.Done}</p> : null}
       <dialog ref={dialog} className="order-cancel-dialog">
         <h2>{t("Can't make order {orderNumber}", { orderNumber: order.orderNumber })}</h2>
         <p>{staffCancelRefundText(pickup, preview)}</p>
         <p>
-          {t(
-            "The money goes back to the card they paid with, and they are told why. Your name is recorded.",
-          )}
+          {nothingToRefund
+            ? t("They are told why. Your name is recorded.")
+            : t(
+                "The money goes back to the card they paid with, and they are told why. Your name is recorded.",
+              )}
         </p>
         <form
           onSubmit={(event) => {
@@ -218,7 +290,9 @@ export function CantMakeRefundAction({
               disabled={state === "Pending" || (reason === "" && intent.current === null)}
             >
               {state === "Pending"
-                ? t("Refunding…")
+                ? nothingToRefund
+                  ? t("Cancelling…")
+                  : t("Refunding…")
                 : nothingToRefund
                   ? t("Cancel without a refund")
                   : t("Refund")}

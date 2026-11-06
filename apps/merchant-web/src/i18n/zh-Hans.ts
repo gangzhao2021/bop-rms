@@ -7542,16 +7542,29 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Yes, turn off": "确定关闭",
   "Keep it on": "继续开着",
   "Someone else changed this just now. Check it again.": "刚才有人改过了，请再看一下。",
-  "Done. What was left of the payment is refunded. The guest is told, and the items go back to stock.":
-    "办好了。付款剩下的部分已退回。客人会收到通知，菜品库存已退回。",
   "Cancelled. It was already refunded in full, so nothing more was refunded. The guest is told.":
     "已取消。之前已经全额退过款，这次没有再退钱。客人会收到通知。",
   "Cancelled. Refund {amount} on the card machine. The guest is told.":
     "已取消。请在刷卡机上退 {amount}。客人会收到通知。",
-  "Refunded {amount} in full to the card they paid with. The guest is told, and the items go back to stock.":
-    "已全额退款 {amount} 到客人付款的卡上。客人会收到通知，菜品库存已退回。",
-  "Refunded {amount}, what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.":
-    "已把付款剩下的 {amount} 退到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "Cancelled. It was refunded on the card machine. The guest is told.":
+    "已取消。已在刷卡机上退款。客人会收到通知。",
+  "Cancelled. {amount} was refunded on the card machine. The guest is told.":
+    "已取消。已在刷卡机上退了 {amount}。客人会收到通知。",
+  "Cancelled. Refund what was left of the payment on the card machine. The guest is told.":
+    "已取消。请在刷卡机上退还付款剩下的部分。客人会收到通知。",
+  "Cancelled. What was left of the payment was refunded to the card they paid with. The guest is told, and the items go back to stock.":
+    "已取消。付款剩下的部分已退到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "Cancelled. Refund pending: what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.":
+    "已取消。退款处理中：付款剩下的部分会退到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "Cancelled. Refunded {amount}, what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.":
+    "已取消。已把付款剩下的 {amount} 退到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "Cancelled. Refunded {amount} to the card they paid with. The guest is told, and the items go back to stock.":
+    "已取消。已退 {amount} 到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "Cancelled. Refund pending: {amount}, what was left of the payment, to the card they paid with. The guest is told, and the items go back to stock.":
+    "已取消。退款处理中：付款剩下的 {amount} 会退到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "Cancelled. Refund pending: {amount} to the card they paid with. The guest is told, and the items go back to stock.":
+    "已取消。退款处理中：{amount} 会退到客人付款的卡上。客人会收到通知，菜品库存已退回。",
+  "They are told why. Your name is recorded.": "会告诉客人原因。会记下你的名字。",
   "Cancel without a refund": "取消，不退钱",
   "The kitchen has started it, so it can't be undone here. Ask a manager.":
     "后厨已经开始做了，这里不能退。请找经理。",
@@ -7620,6 +7633,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{orderNumber} 号 · 后厨一直没开始，已自动退款",
   "Order {orderNumber} · made by hand · not refunded automatically":
     "{orderNumber} 号 · 手工做 · 不自动退款",
+  "Order {orderNumber} · round {sequence} · made by hand":
+    "{orderNumber} 号 · 第 {sequence} 轮 · 手工做",
   "Paid orders sent straight to the kitchen": "直接进后厨的已付款订单",
   "No kitchen screen has been open for {minutes} min and 1 paid order was sent there · open the kitchen screen":
     "后厨屏幕已经 {minutes} 分钟没开，有 1 张已付款的单送了过去 · 打开后厨屏幕",
