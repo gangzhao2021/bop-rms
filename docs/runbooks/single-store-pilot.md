@@ -3418,8 +3418,15 @@ through reads "The automatic refund didn't go through" (自动退款没有完成
   same phone at the new table, for the same amount (table-move-payment, 2026-11-06). A guest who
   was sending a round at the moment of the move is told "Your table was changed … you haven't
   been charged" and checks out again on the same phone; nothing was sent or charged for the first
-  try. A payment confirm that lands while a move is being recorded asks the phone to try again by
-  itself; it is never told the payment is not theirs.
+  try. This holds for a guest who was already on the payment page, and at a pay-later table
+  (table-move-send, 2026-11-06): if a guest says payment didn't start right after you moved them,
+  nothing was charged; ask them to tap `Back to checkout` (返回结账) on the same phone. Other guests
+  at the new table can check out straight away. Not handled yet (WP-2423 remaining item 17): if the
+  move lands in the second between a first round being placed and its payment starting, the phone
+  keeps saying payment can't start and the order has no payment (check it on `Orders`); ask the
+  guest to order the round again at the new table and have a manager cancel the unpaid round. A
+  payment confirm that lands while a move is being recorded asks the phone to try again by itself;
+  it is never told the payment is not theirs.
 - Pilot operator: the business worker's health is `paymentWait` `attention_required` while any paid
   wait keeps failing; `business-worker.log` has one `INTERNAL_PAYMENT_WAIT_FAILED` line per attempt
   with its safe `code`, `failures` and `stuckWaits` (a count, never which order). The failing order
