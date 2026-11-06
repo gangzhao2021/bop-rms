@@ -494,7 +494,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "可以先看看菜单，恢复点单后就能下单。",
   "Ordering is unavailable": "暂时无法点单",
   Other: "其他",
-  "Outcome not confirmed": "结果未确认",
   "Page not found": "找不到页面",
   Paid: "已付款",
   "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.":
@@ -663,6 +662,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Retry pricing": "重新计价",
   "Retry saving details": "重新保存信息",
   "Retry the same operation": "重试同一操作",
+  "Try this again": "再试一次",
+  "We couldn’t confirm this change": "还没确认这次修改",
+  "The network or the store’s system was busy. Trying again won’t change it twice.":
+    "可能是网络或店里系统忙。再试一次不会重复修改。",
   "Return to checkout. This clean route does not accept callback claims from the URL.":
     "返回结账。此页面不接受网址中的回调结果。",
   "Return to entry": "返回入口",
@@ -780,7 +783,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "这个代码无效。请检查后重试，或向店员或邀请你的人要一个新的。",
   "The Provider IDR and public Guest Payment adapter are not available.":
     "第三方付款接口暂不可用。",
-  "The connection dropped before we could confirm your change.": "在确认你的修改前网络中断了。",
   "The connection dropped before we could confirm. Retry to check.":
     "在确认前网络中断了，请重试以查看结果。",
   "The current published menu has no matching items.": "当前发布的菜单中没有匹配的商品。",

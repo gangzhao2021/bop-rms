@@ -531,8 +531,8 @@ export const cartText = Object.freeze({
     },
     get commandFailed() {
       return [
-        t("Outcome not confirmed"),
-        t("The connection dropped before we could confirm your change."),
+        t("We couldn’t confirm this change"),
+        t("The network or the store’s system was busy. Trying again won’t change it twice."),
       ] as const;
     },
     get unavailable() {
@@ -545,7 +545,7 @@ export const cartText = Object.freeze({
       return t("Not enough left");
     },
     get retrySameOperation() {
-      return t("Retry the same operation");
+      return t("Try this again");
     },
     get refreshCart() {
       return t("Refresh cart");

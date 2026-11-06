@@ -241,7 +241,7 @@ describe("CUST-CART page contract", () => {
     ["rate-limited", "Please wait"],
     ["expired", "Cart expired"],
     ["abandoned", "Cart closed"],
-    ["command-failed", "Outcome not confirmed"],
+    ["command-failed", "We couldn’t confirm this change"],
     ["unavailable", "We couldn’t load your cart"],
   ] as const)("renders the %s state", (status, message) => {
     const state: CartState =
@@ -270,8 +270,8 @@ it("disables superseding Cart changes while retaining explicit retry", () => {
     retryAfterSeconds: null,
     canRetrySameOperation: true,
   });
-  expect(html).toContain("Outcome not confirmed");
-  expect(html).toContain("Retry the same operation");
+  expect(html).toContain("We couldn’t confirm this change");
+  expect(html).toContain("Try this again");
   expect(html).toContain('disabled="" aria-label="Decrease Synthetic tea quantity"');
   expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
   expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Remove<\/button>/u);
@@ -383,7 +383,7 @@ it.each(["command-pending", "offline-readonly", "command-failed"] as const)(
       canRetrySameOperation: true,
     });
     expect(html).not.toContain("Your cart is empty");
-    if (status === "command-failed") expect(html).toContain("Outcome not confirmed");
+    if (status === "command-failed") expect(html).toContain("We couldn’t confirm this change");
     if (status === "offline-readonly") expect(html).toContain("You’re offline");
   },
 );
@@ -463,8 +463,8 @@ it("shows rescan/staff guidance without retry for a known replacement refusal", 
     </MemoryRouter>,
   );
   expect(html).toContain("Scan the table QR code again or ask staff for help.");
-  expect(html).not.toContain("Retry the same operation");
-  expect(html).not.toContain("Outcome not confirmed");
+  expect(html).not.toContain("Try this again");
+  expect(html).not.toContain("We couldn’t confirm this change");
   expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Start an empty cart/);
 });
 
