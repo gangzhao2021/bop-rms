@@ -90,6 +90,7 @@ export function createDiningServeClient(fetcher: typeof fetch = fetch) {
             if (controller.signal.aborted) throw new DiningServeClientError("OutcomeUnknown");
             if (response.status === 401 || response.status === 403)
               throw new DiningServeClientError("PermissionDenied");
+            // M147: served on another screen or changed since read: not a refusal.
             if (response.status === 409) throw new DiningServeClientError("Conflict");
             if (
               !response.ok ||

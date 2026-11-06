@@ -50,3 +50,13 @@ it("treats mismatched success version as unknown and permission denial as denied
   await expect(op.execute("A".repeat(43))).rejects.toMatchObject({ code: "OutcomeUnknown" });
   await expect(op.execute("A".repeat(43))).rejects.toMatchObject({ code: "PermissionDenied" });
 });
+it("M147: a dish served on another screen, or changed, is a conflict, never a refusal", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
+    new Response(JSON.stringify({ error: "changed" }), {
+      status: 409,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    }),
+  );
+  const operation = createDiningServeClient(fetcher).prepare(command());
+  await expect(operation.execute("A".repeat(43))).rejects.toMatchObject({ code: "Conflict" });
+});

@@ -493,3 +493,15 @@ it("a table paid-at well before its last round was ordered is a 409 the page rea
   expect(await response.json()).toEqual({ error: "taken_before_ordered" });
   expect(refused.reported).toEqual([]);
 });
+
+describe("M147: a stale serve answers 409, never a refusal", () => {
+  it("DINING_SERVE_COMMAND_CHANGED", async () => {
+    const app = await serve(
+      option("diningServe", rejecting(new Error("DINING_SERVE_COMMAND_CHANGED"))) as never,
+    );
+    const response = await app.post("/dining/serve");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "changed" });
+    expect(app.reported).toEqual([]);
+  });
+});

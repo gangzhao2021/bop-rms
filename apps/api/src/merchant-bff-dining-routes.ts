@@ -13,6 +13,8 @@ import {
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
 import { tableClosePlanResponse } from "./merchant-dining-table-close-plan-response.js";
 import { DiningServeReadyError } from "./merchant-dining-serve-ready-command.js";
+import { diningServeChangedCode } from "./merchant-dining-serve-command.js";
+import { merchantFailureCode } from "./merchant-failure.js";
 import { DiningClosingError } from "@rms/dining";
 import { DiningCheckoutAlreadyPaidError } from "./merchant-dining-closing-command.js";
 import type { Response, Router } from "express";
@@ -1103,7 +1105,14 @@ export function installMerchantDiningRoutes(
           itemServiceVersion: result.itemServiceVersion,
         }),
       )
-      .catch((error: unknown) => failed(response, error));
+      .catch((error: unknown) => {
+        // M147: served on another screen, or changed since read — 409, never "no permission".
+        if (merchantFailureCode(error) === diningServeChangedCode) {
+          response.status(409).set("Cache-Control", NO_STORE).json({ error: "changed" });
+          return;
+        }
+        failed(response, error);
+      });
   });
 
   // WP-2423: "Serve all ready items" for a round or a table. 200 reports every line (served,

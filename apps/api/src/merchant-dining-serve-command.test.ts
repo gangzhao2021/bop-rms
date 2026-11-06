@@ -222,3 +222,26 @@ it("WP-2423: a permission withdrawn during the serve refuses it before commit", 
   // Thrown inside the transaction callback, so the serve record does not commit.
   expect(f.inside.thrown).toBe(true);
 });
+it("M147: a dish another screen already served, or one that changed, is stale, never a refusal", async () => {
+  const f = setup();
+  // Served elsewhere: the Order's version moved on.
+  m.load.mockResolvedValue({ ...current(), orderVersion: 6 });
+  await expect(f.execute(f.input)).rejects.toThrow("DINING_SERVE_COMMAND_CHANGED");
+  m.load.mockResolvedValue({
+    ...current(),
+    items: [{ ...current().items[0], phase: "Cancelled" }],
+  });
+  await expect(f.execute(f.input)).rejects.toThrow("DINING_SERVE_COMMAND_CHANGED");
+  m.load.mockResolvedValue(current());
+  m.table.mockResolvedValue({
+    diningSessionReference: id(6),
+    tableReference: id(7),
+    sessionVersion: 3,
+    tableAssignmentVersion: 3,
+  });
+  await expect(f.execute(f.input)).rejects.toThrow("DINING_SERVE_COMMAND_CHANGED");
+  expect(m.commit).not.toHaveBeenCalled();
+  // A real refusal keeps its meaning.
+  f.allowed.mockResolvedValue(false);
+  await expect(f.execute(f.input)).rejects.toThrow("DINING_SERVE_COMMAND_DENIED");
+});

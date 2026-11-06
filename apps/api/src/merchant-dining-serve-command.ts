@@ -17,6 +17,15 @@ import type { MerchantBffService } from "./merchant-bff.js";
 const fail = (): never => {
   throw new Error("DINING_SERVE_COMMAND_DENIED");
 };
+/**
+ * M147: the dish was served on another screen, or the order or table moved since this screen read
+ * it (serving moves the Order's version). Nothing was refused: the route answers 409 and the screen
+ * reads again.
+ */
+export const diningServeChangedCode = "DINING_SERVE_COMMAND_CHANGED";
+const stale = (): never => {
+  throw new Error(diningServeChangedCode);
+};
 const version = (value: unknown, min = 1) => {
   if (
     typeof value !== "number" ||
@@ -178,13 +187,9 @@ export function createMerchantDiningServeCommand(options: {
           const item = current?.items.find(
             (item) => String(item.orderItemReference) === command.orderItemReference,
           );
-          if (
-            !current ||
-            current.orderVersion !== command.expectedOrderVersion ||
-            !item ||
-            item.phase !== "Ready"
-          )
-            return fail();
+          if (!current || !item) return fail();
+          if (current.orderVersion !== command.expectedOrderVersion || item.phase !== "Ready")
+            return stale();
           const table = await createMerchantDiningTableContext({
             scope,
             authorize: guard,
@@ -195,7 +200,7 @@ export function createMerchantDiningServeCommand(options: {
             table.sessionVersion !== command.expectedSessionVersion ||
             table.tableAssignmentVersion !== command.expectedTableAssignmentVersion
           )
-            return fail();
+            return stale();
           const record = parseDiningItemServiceRecord({
             ...scope,
             serviceReference: options.reference(),

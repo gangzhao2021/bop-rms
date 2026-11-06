@@ -277,10 +277,13 @@ export function DiningRoundsProvider({
     }
   };
   const refusedServe = (error: unknown) =>
-    (error instanceof DiningServeClientError || error instanceof DiningServeReadyClientError) &&
-    error.code === "PermissionDenied"
-      ? t("Nothing was marked served. Your access may have changed.")
-      : t("Nothing was marked served. This table has changed; check it and try again.");
+    error instanceof DiningServeClientError && error.code === "Conflict"
+      ? // M147: another screen served it first, or it changed; the list is read again.
+        t("Already served on another screen, or the dish changed. Updated, check it again.")
+      : (error instanceof DiningServeClientError || error instanceof DiningServeReadyClientError) &&
+          error.code === "PermissionDenied"
+        ? t("Nothing was marked served. Your access may have changed.")
+        : t("Nothing was marked served. This table has changed; check it and try again.");
   const progress: DiningRoundsProgress = {
     view,
     unavailable,
