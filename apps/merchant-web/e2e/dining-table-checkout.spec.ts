@@ -64,7 +64,7 @@ const unpaidBill = (phase: "Active" | "Closing", version: number) => ({
 async function floor(
   page: Page,
   state: { phase: "Active" | "Closing"; version: number },
-  options: { canWriteOff?: boolean } = {},
+  options: { canWriteOff?: boolean; timeZone?: string } = {},
 ) {
   const scope = {
     brandLabel: "Synthetic Brand",
@@ -79,7 +79,8 @@ async function floor(
         csrf,
         workspace: {
           screenId: "HOME-OVERVIEW",
-          selectedScope: scope,
+          selectedScope:
+            options.timeZone === undefined ? scope : { ...scope, timeZone: options.timeZone },
           authorizedStores: [scope],
           businessDate: "2026-10-15",
           storeStatus: "Open",
@@ -460,6 +461,116 @@ test("@production a store with tips off takes the table's payment with no tip", 
   await expect(
     checkout.getByRole("button", { name: "Paid on card machine · $33.93" }),
   ).toBeEnabled();
+  await expectNoInternalText(page, ["Temporarily unavailable"]);
+});
+
+// WP-2423 (v15 fabf0261, Hotpot PC 9): a table paid on paper is entered with its slip's time. A
+// date other than today and a time a little before the last round was ordered are warned about
+// (a card machine's clock drifts); a time well before it is refused by the server, and staff
+// correct it in the paid-at field, where the refusal is said.
+test("@production a table's paper paid-at is checked against when it ordered, and corrected where it is refused", async ({
+  page,
+}) => {
+  const state: { phase: "Active" | "Closing"; version: number } = {
+    phase: "Closing",
+    version: 7,
+  };
+  await floor(page, state, { timeZone: "America/Toronto" });
+  await page.route("**/merchant/dining/table-close-plan", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(3),
+        diningSessionReference: id(2),
+        orderVersion: 4,
+        observedAt: "2026-10-15T19:00:00.000Z",
+        rounds: [],
+        closeBlockers: ["ORDER_BALANCE_UNPAID"],
+        totals: { onlineMinor: "0", cardMachineMinor: "0" },
+      },
+    }),
+  );
+  const minute = 60_000;
+  const lastRoundAt = Date.now() - 20 * minute;
+  const bill = unpaidBill("Closing", 7);
+  const liveBill = {
+    ...bill,
+    rounds: [
+      { ...bill.rounds[0], liveOrderedAt: new Date(Date.now() - 50 * minute).toISOString() },
+      { ...bill.rounds[1], liveOrderedAt: new Date(lastRoundAt).toISOString() },
+    ],
+  };
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: liveBill }),
+  );
+  const sent: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/table-settle", (route) => {
+    sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ headers, status: 409, json: { error: "taken_before_ordered" } });
+  });
+  const storeLocal = (at: number) => {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Toronto",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      })
+        .formatToParts(new Date(at))
+        .map((part) => [part.type, part.value]),
+    );
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  };
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T2", exact: true }).click();
+  const checkout = page.getByRole("region", { name: "Checkout" });
+  await checkout.getByRole("radio", { name: "No tip" }).check();
+  await checkout.getByRole("radio", { name: "Card machine" }).check();
+  await checkout
+    .getByRole("checkbox", { name: "Paid while the system was down (enter it from paper now)" })
+    .check();
+  const paidAt = checkout.getByLabel("Paid at (store time)");
+  // A slip from yesterday: the date is asked to be checked (it counts on the day it was paid).
+  await paidAt.fill(storeLocal(Date.now() - 26 * 60 * minute));
+  await expect(checkout.getByRole("note").filter({ hasText: "is not today" })).toBeVisible();
+  // A typo well before the table ordered: the server refuses it, and the field says so.
+  await checkout.getByRole("button", { name: /^Paid on card machine · /u }).click();
+  const confirm = checkout.getByRole("alertdialog", { name: "Confirm the payment" });
+  await expect(confirm).toContainText("Paid at");
+  await expect(confirm).toContainText("is not today");
+  await confirm.getByRole("button", { name: /^Confirm /u }).click();
+  expect(sent[0]).toMatchObject({ recordedAfterOutage: true, takenAt: expect.any(String) });
+  const refusal = checkout
+    .getByRole("alert")
+    .filter({ hasText: "before this table's last round was ordered in the system" });
+  await expect(refusal).toBeVisible();
+  await expect(paidAt).toBeFocused();
+  await expect(paidAt).toHaveAttribute("aria-invalid", "true");
+  await expect(paidAt).toHaveAttribute("aria-describedby", "table-checkout-paid-at-refused");
+  // Corrected to the slip's time, a few minutes before the last round by the machine's clock:
+  // warned about, not refused here, and the refusal is gone.
+  await paidAt.fill(storeLocal(lastRoundAt - 5 * minute));
+  await expect(paidAt).toHaveAttribute("aria-invalid", "false");
+  await expect(refusal).toHaveCount(0);
+  await checkout.getByRole("button", { name: /^Paid on card machine · /u }).click();
+  await expect(confirm).toContainText(
+    "This is before this table's last round was ordered in the system",
+  );
+  await expect(confirm).not.toContainText("is not today");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/dining-table-paper-paid-at-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });
 

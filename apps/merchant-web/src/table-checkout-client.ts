@@ -10,6 +10,8 @@ export type TableCheckoutErrorCode =
   | "TipChoicesChanged"
   /** WP-2423 M160: the paid-at time is before the Store started recording sales here. */
   | "TakenBeforeRecords"
+  /** WP-2423 (v15 fabf0261): a paper paid-at well before the last round it pays was ordered. */
+  | "TakenBeforeOrdered"
   | "PermissionDenied"
   | "NotStarted"
   | "NotPayLater"
@@ -71,6 +73,11 @@ export interface TableBill {
     readonly orderedBy: number | null;
     /** WP-2423 item 8 ⑨: the table the round came from when merged in (null: this table). */
     readonly fromTableLabel: string | null;
+    /**
+     * WP-2423 (v15 fabf0261): when the round was sent in the system, or null for one taken on paper
+     * during an outage (absent or null from an older server).
+     */
+    readonly liveOrderedAt?: string | null;
   }[];
   readonly owed: {
     readonly subtotalMinor: string;
@@ -245,6 +252,13 @@ export function parseTableBill(value: unknown): TableBill {
               : typeof round.fromTableLabel === "string" &&
                   /^[^\p{Cc}\p{Cf}<>{}$]{1,40}$/u.test(round.fromTableLabel)
                 ? round.fromTableLabel
+                : invalid(),
+          liveOrderedAt:
+            round.liveOrderedAt === undefined || round.liveOrderedAt === null
+              ? null
+              : typeof round.liveOrderedAt === "string" &&
+                  Number.isFinite(Date.parse(round.liveOrderedAt))
+                ? new Date(Date.parse(round.liveOrderedAt)).toISOString()
                 : invalid(),
         });
       }),
@@ -424,6 +438,7 @@ const codes: Readonly<Record<string, TableCheckoutErrorCode>> = {
   tips_off: "TipsOff",
   tip_choices_changed: "TipChoicesChanged",
   taken_before_records: "TakenBeforeRecords",
+  taken_before_ordered: "TakenBeforeOrdered",
   idempotency_conflict: "BillChanged",
   not_ready: "NotReady",
   not_at_checkout: "NotStarted",

@@ -7,7 +7,8 @@ import {
   DiningSessionCloseClientError,
 } from "./dining-session-close-client.js";
 import { createDiningProgressClient } from "./dining-progress-client.js";
-import { paidAtInstant } from "./counter-payment.js";
+import { paidAtDayNote, paidAtInstant } from "./counter-payment.js";
+import { storeTime } from "./StoreTime.js";
 import {
   cashTotalMinor,
   createTableCheckoutClient,
@@ -81,6 +82,10 @@ function errorText(error: unknown): string {
     case "TakenBeforeRecords":
       return t(
         "That paid-at time is before this store started recording sales in the system. Check when it was paid and enter it again.",
+      );
+    case "TakenBeforeOrdered":
+      return t(
+        "That paid-at time is more than 30 minutes before this table's last round was ordered in the system. A table pays after it orders: check the time on the paper slip and enter it again.",
       );
     case "TenderShort":
       return t("The cash received is less than the cash total.");
@@ -165,6 +170,15 @@ export function TableCheckout({
   const [part, setPart] = useState<number | null>(null);
   const [paidAt, setPaidAt] = useState("");
   const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
+  // WP-2423 (v15 fabf0261): the server refused the paid-at itself; staff correct it in its field.
+  const [paidAtRefused, setPaidAtRefused] = useState(false);
+  const [focusPaidAt, setFocusPaidAt] = useState(0);
+  const paidAtInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusPaidAt === 0) return;
+    paidAtInput.current?.focus();
+    paidAtInput.current?.select?.();
+  }, [focusPaidAt]);
   // One operation per intent: a lost answer is resent with the same one.
   const operation = useRef<{ key: string; reference: string } | null>(null);
   const beginOperation = useRef<string | null>(null);
@@ -209,6 +223,35 @@ export function TableCheckout({
   }, [paidNow, bill, onChanged]);
 
   const selected = bill?.split?.parts.find((entry) => entry.partNumber === part) ?? null;
+  // WP-2423 (v15 fabf0261): when the last round this payment covers was sent in the system (rounds
+  // taken on paper aside). A paper paid-at a little before it is warned about (a card machine's
+  // clock drifts, a written time is approximate); the server refuses one well before it.
+  const lastLiveOrderedAt = (() => {
+    if (bill === null) return null;
+    const covered = bill.rounds.filter((round) =>
+      selected === null
+        ? !round.paid && round.totalMinor !== "0"
+        : selected.roundNumbers.includes(round.roundNumber),
+    );
+    const times = covered
+      .map((round) => round.liveOrderedAt ?? null)
+      .filter((at): at is string => at !== null)
+      .map((at) => Date.parse(at));
+    return times.length === 0 ? null : new Date(Math.max(...times)).toISOString();
+  })();
+  const paidBeforeOrdered =
+    paperInstant !== null &&
+    lastLiveOrderedAt !== null &&
+    Date.parse(paperInstant) < Date.parse(lastLiveOrderedAt);
+  const paidAtNotes = [
+    paidBeforeOrdered && lastLiveOrderedAt !== null
+      ? t(
+          "This is before this table's last round was ordered in the system ({at}). A card machine's clock can be a few minutes off: check the time on the slip before you confirm.",
+          { at: storeTime(lastLiveOrderedAt, timeZone, true) },
+        )
+      : null,
+    paidAtDayNote(paperInstant, Date.now(), timeZone),
+  ].filter((note): note is string => note !== null);
   // A part's own share before tax (its tip) and its amount; otherwise what the table owes.
   const subtotal = selected
     ? BigInt(selected.subtotalMinor)
@@ -388,6 +431,7 @@ export function TableCheckout({
         partNumber: bill.split === null ? null : part,
       });
       operation.current = null;
+      setPaidAtRefused(false);
       setPart(null);
       setTip(null);
       setReceived("");
@@ -409,6 +453,11 @@ export function TableCheckout({
     } catch (error) {
       if (!outcomeUnknown(error)) operation.current = null;
       setProblem(errorText(error));
+      const timeRefused =
+        error instanceof TableCheckoutError &&
+        (error.code === "TakenBeforeRecords" || error.code === "TakenBeforeOrdered");
+      setPaidAtRefused(timeRefused);
+      if (timeRefused) setFocusPaidAt((value) => value + 1);
       if (
         error instanceof TableCheckoutError &&
         (error.code === "BillChanged" ||
@@ -746,16 +795,43 @@ export function TableCheckout({
                       <label className="table-checkout__field">
                         {t("Paid at (store time)")}
                         <input
+                          ref={paidAtInput}
                           type="datetime-local"
                           value={paidAt}
-                          aria-invalid={paperInstant === null}
-                          onChange={(event) => setPaidAt(event.currentTarget.value)}
+                          aria-invalid={paperInstant === null || paidAtRefused}
+                          aria-describedby={
+                            paidAtRefused ? "table-checkout-paid-at-refused" : undefined
+                          }
+                          onChange={(event) => {
+                            setPaidAt(event.currentTarget.value);
+                            if (paidAtRefused) {
+                              setPaidAtRefused(false);
+                              setProblem(null);
+                            }
+                          }}
                         />
                         <small>
                           {t("Within the last 3 days. It counts on the day it was paid.")}
                         </small>
                       </label>
                     ) : null}
+                    {paper && paidAtRefused && problem ? (
+                      <p id="table-checkout-paid-at-refused" role="alert">
+                        {problem}
+                      </p>
+                    ) : null}
+                    {paper
+                      ? paidAtNotes.map((note) => (
+                          <p
+                            key={note}
+                            className="table-checkout__hint"
+                            data-tier="warning"
+                            role="note"
+                          >
+                            {note}
+                          </p>
+                        ))
+                      : null}
                   </fieldset>
                   {reviewing && canPay && due !== null && tipMinor !== null ? (
                     // Money is confirmed (Owner decision 2): the amounts once more, then record.
@@ -778,6 +854,12 @@ export function TableCheckout({
                           <dt>{t("Tip")}</dt>
                           <dd>{cad(tipMinor)}</dd>
                         </div>
+                        {paper && paperInstant !== null ? (
+                          <div>
+                            <dt>{t("Paid at")}</dt>
+                            <dd>{storeTime(paperInstant, timeZone, true)}</dd>
+                          </div>
+                        ) : null}
                         {method === "Cash" && cashDue !== null && change !== null ? (
                           <>
                             <div className="table-checkout__total">
@@ -800,6 +882,13 @@ export function TableCheckout({
                           </div>
                         )}
                       </dl>
+                      {paper
+                        ? paidAtNotes.map((note) => (
+                            <p key={note} data-tier="warning" role="note">
+                              {note}
+                            </p>
+                          ))
+                        : null}
                       <p>
                         {method === "Cash"
                           ? t("Count the cash first. Once recorded, only a manager can refund it.")
@@ -924,7 +1013,7 @@ export function TableCheckout({
           <small>{t("The table can order again; checkout is started again later.")}</small>
         </p>
       ) : null}
-      {problem ? <p role="alert">{problem}</p> : null}
+      {problem && !(paper && paidAtRefused) ? <p role="alert">{problem}</p> : null}
     </section>
   );
 }
