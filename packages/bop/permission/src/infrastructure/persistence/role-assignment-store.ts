@@ -278,9 +278,15 @@ export async function decideRoleAssignment(
      * `confirm` is the caller's sole-operator gate (setting On, the requester the only holder of
      * staff role approval at this scope, second factor at most 15 minutes old); it runs after the
      * subject's lock and the Brand's permission policy fence are held, so a concurrent grant of
-     * approval rights to someone else either commits first and is seen, or waits.
+     * approval rights to someone else either commits first and is seen, or waits. It is given the
+     * change's subject: the person the role is for never counts as another approver, since they
+     * can never approve their own role.
      */
-    readonly soleOperator?: { confirm(): Promise<{ readonly actorMfaAt: string }> };
+    readonly soleOperator?: {
+      confirm(change: {
+        readonly subjectReference: string;
+      }): Promise<{ readonly actorMfaAt: string }>;
+    };
   },
   /** Membership owner's confirmation that the subject is still an Active member (of the Store). */
   confirmMember: (member: {
@@ -340,7 +346,8 @@ export async function decideRoleAssignment(
     await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
       "PermissionPolicyFence:" + input.brandReference,
     ]);
-    actorMfaAt = (await input.soleOperator.confirm()).actorMfaAt;
+    actorMfaAt = (await input.soleOperator.confirm({ subjectReference: String(change.actor) }))
+      .actorMfaAt;
     await tx.query(scopeSql, [input.brandReference, input.storeReference]);
   }
   let policyVersion: number | null = null;
@@ -637,3 +644,48 @@ export async function brandActionHolders(
   if (rows.length > 1000) throw new Error("BRAND_ACTION_HOLDERS_UNAVAILABLE");
   return Object.freeze([...new Set(rows.map((row) => String(row.actor)))].sort());
 }
+
+/**
+ * WP-2423 M07 (DEC-SOLE-OPERATOR-APPROVAL): every Actor who could hold `action` at a Store: an
+ * Active role assignment at the Brand or this Store whose role (Brand or this Store) has an Active
+ * grant for it there, or an Active Allow override at the Brand or this Store, each in its effective
+ * window at `at`. This is the only evidence permission evaluation allows on (ExplicitAllow,
+ * RolePermission), read with the policy packet's own scope filters, so it is a superset of who
+ * holds the action: Deny overrides are not applied, and evaluation stays the judge. Bounded; more
+ * than 1000 candidates is refused.
+ */
+export async function storeActionCandidates(
+  tx: RoleAssignmentTransaction,
+  input: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly action: string;
+    readonly at: string;
+  },
+): Promise<readonly string[]> {
+  await tx.query(scopeSql, [input.brandReference, input.storeReference]);
+  const rows = (
+    await tx.query(storeActionCandidatesSql, [
+      input.brandReference,
+      input.storeReference,
+      input.action,
+      input.at,
+    ])
+  ).rows;
+  if (rows.length > 1000) throw new Error("STORE_ACTION_CANDIDATES_UNAVAILABLE");
+  return Object.freeze([...new Set(rows.map((row) => String(row.actor)))].sort());
+}
+const inWindow = (alias: string) =>
+  `${alias}.lifecycle='Active' AND ${alias}.effective_from<=$4::timestamptz AND (${alias}.effective_until IS NULL OR ${alias}.effective_until>$4::timestamptz)`;
+const brandOrStore = (alias: string) => `(${alias}.store_id IS NULL OR ${alias}.store_id=$2::uuid)`;
+const storeActionCandidatesSql = `SELECT DISTINCT a.actor_id::text actor
+       FROM bop_permission.role_assignment a
+       JOIN bop_permission.role r ON r.role_id=a.role_id AND r.brand_id=a.brand_id AND ${brandOrStore("r")} AND ${inWindow("r")}
+       JOIN bop_permission.permission_grant g ON g.role_id=r.role_id AND g.brand_id=r.brand_id AND ${brandOrStore("g")} AND ${inWindow("g")}
+       JOIN bop_permission.permission_definition d ON d.permission_id=g.permission_id AND d.lifecycle='Active' AND d.action_code=$3
+       WHERE a.brand_id=$1 AND ${brandOrStore("a")} AND ${inWindow("a")}
+       UNION
+       SELECT DISTINCT o.actor_id::text actor FROM bop_permission.permission_override o
+       JOIN bop_permission.permission_definition d ON d.permission_id=o.permission_id AND d.lifecycle='Active' AND d.action_code=$3
+       WHERE o.brand_id=$1 AND ${brandOrStore("o")} AND o.effect='Allow' AND ${inWindow("o")}
+       LIMIT 1001`;
