@@ -21,6 +21,7 @@
       owed: "待收",
       settled: "已付清",
       round: "第 {n} 轮",
+      taxRounding: "税额取整",
       table: "桌台 ",
       note: "断网后新点的菜不在这里，要加上纸单。",
     },
@@ -41,6 +42,7 @@
       owed: "To pay",
       settled: "Paid",
       round: "Round {n}",
+      taxRounding: "Tax rounding",
       table: "Table ",
       note: "Rounds taken since then aren't here: add the paper slips.",
     },
@@ -111,6 +113,17 @@
           el("dd", money(item.subtotalMinor), row);
         });
       });
+      // DEC-TAX-WHOLE-RECEIPT: each round as ordered, and the bill's one rounding line.
+      if (
+        !table.settled &&
+        typeof table.taxRoundingMinor === "string" &&
+        /^-?[1-9][0-9]{0,15}$/.test(table.taxRoundingMinor)
+      ) {
+        var rounding = el("dl", null, details);
+        var row = el("div", null, rounding);
+        el("dt", w.taxRounding, row);
+        el("dd", money(table.taxRoundingMinor), row);
+      }
     });
   }
   window.addEventListener("online", function () {

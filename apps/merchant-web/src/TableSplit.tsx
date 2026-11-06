@@ -336,6 +336,8 @@ export function TableSplitControls({
                   {round.fromTableLabel === null
                     ? null
                     : t("· from table {table}", { table: saidTable(round.fromTableLabel) }) + " "}
+                  {/* DEC-TAX-WHOLE-RECEIPT: with its share of the bill's tax rounding, so the
+                      parts add up to the bill (checkout lists rounds as ordered). */}
                   · {cad(round.totalMinor)}
                 </span>
                 <label>

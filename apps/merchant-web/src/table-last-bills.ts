@@ -12,6 +12,11 @@ const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 export interface LastTableBill {
   readonly label: string;
   readonly owedMinor: string;
+  /**
+   * DEC-TAX-WHOLE-RECEIPT: the tax rounding in what is owed (the unpaid rounds' shares), shown as
+   * one line as at checkout; each round is as ordered. Absent in a value saved by an older page.
+   */
+  readonly taxRoundingMinor?: string;
   readonly settled: boolean;
   readonly rounds: readonly {
     readonly number: number;
@@ -28,10 +33,14 @@ export function lastTableBill(label: string, bill: TableBill): LastTableBill {
   return Object.freeze({
     label,
     owedMinor: bill.owed.totalMinor,
+    taxRoundingMinor: bill.rounds
+      .filter((round) => !round.paid)
+      .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n)
+      .toString(),
     settled: bill.settlement !== null,
     rounds: bill.rounds.map((round) => ({
       number: round.roundNumber,
-      totalMinor: round.totalMinor,
+      totalMinor: (BigInt(round.totalMinor) - BigInt(round.taxRoundingMinor)).toString(),
       items: round.items.map((item) => ({
         name: item.displayName,
         subtotalMinor: item.subtotalMinor,

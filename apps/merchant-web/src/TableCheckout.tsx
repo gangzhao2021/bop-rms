@@ -30,6 +30,10 @@ const owedTaxRounding = (bill: TableBill) =>
     .filter((round) => !round.paid)
     .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
 
+/** A round as it was ordered: its total without its share of the bill's tax rounding. */
+export const roundAsOrderedMinor = (round: TableBill["rounds"][number]) =>
+  (BigInt(round.totalMinor) - BigInt(round.taxRoundingMinor)).toString();
+
 export function dollarsToMinor(value: string): bigint | null {
   const match = /^(0|[1-9][0-9]{0,6})(?:\.([0-9]{1,2}))?$/u.exec(value.trim());
   if (!match) return null;
@@ -483,7 +487,9 @@ export function TableCheckout({
             {bill.rounds.map((round) => (
               <li key={round.roundNumber}>
                 <span>{t("Round {number}", { number: String(round.roundNumber) })}</span>
-                <span>{cad(round.totalMinor)}</span>
+                {/* DEC-TAX-WHOLE-RECEIPT: each round as it was ordered (as Orders and the guest
+                    show it); the bill's rounding is its one "Tax rounding" line below. */}
+                <span>{cad(roundAsOrderedMinor(round))}</span>
                 <ul>
                   {round.items.map((item, index) => (
                     <li key={index}>

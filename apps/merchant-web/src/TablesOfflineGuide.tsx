@@ -84,6 +84,17 @@ export function TablesOfflineGuide() {
                   ))}
                 </dl>
               ))}
+              {/* DEC-TAX-WHOLE-RECEIPT: the bill's one rounding line, as at checkout. */}
+              {table.settled ||
+              table.taxRoundingMinor === undefined ||
+              table.taxRoundingMinor === "0" ? null : (
+                <dl className="table-checkout__totals">
+                  <div>
+                    <dt>{t("Tax rounding")}</dt>
+                    <dd>{cad(table.taxRoundingMinor)}</dd>
+                  </div>
+                </dl>
+              )}
             </details>
           ))}
         </div>

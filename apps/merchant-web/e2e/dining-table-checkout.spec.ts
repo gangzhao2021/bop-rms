@@ -696,6 +696,10 @@ test("@production DEC-TAX-WHOLE-RECEIPT: the bill shows its tax rounding on its 
   await page.getByRole("button", { name: "Select T2", exact: true }).click();
   const checkout = page.getByRole("region", { name: "Checkout" });
   await expect(checkout).toContainText("Tax$3.90");
+  // Each round as it was ordered (as Orders and the guest show it); the rounding is one line.
+  await expect(checkout.locator(".table-checkout__rounds > li").nth(1)).toContainText(
+    "Round 2$11.30",
+  );
   await expect(checkout).toContainText("Tax rounding−$0.01");
   await expect(checkout).toContainText("Total with tax$33.92");
   await checkout.getByRole("radio", { name: "Card machine" }).check();
