@@ -72,6 +72,10 @@ export async function createInternalWorker(resources, observers = {}, options = 
         JSON.stringify({
           event: "INTERNAL_PAYMENT_WAIT_FAILED",
           code: /^[A-Z0-9_]{1,80}$/.test(String(error?.code)) ? error.code : undefined,
+          // WP-2423 table-move-payment: the owner failure it wraps, a code only.
+          cause: /^[A-Z0-9_]{1,80}$/.test(String(error?.cause?.code))
+            ? error.cause.code
+            : undefined,
           name: /^[A-Za-z]{1,64}$/.test(String(error?.name)) ? error.name : undefined,
           failures,
           stuckWaits,

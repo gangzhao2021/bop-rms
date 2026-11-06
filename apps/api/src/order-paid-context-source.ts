@@ -15,8 +15,17 @@ import {
 } from "@rms/ordering";
 import { createOrderCapturedPaymentSource } from "./order-captured-payment-source.js";
 
-const unavailable = (): never => {
-  throw new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
+/**
+ * WP-2423 table-move-payment (v15 2026-11-06): the owner failure behind "unavailable" rides along
+ * as the error's `cause`, so the operator's log line names its code (codes only, never text or
+ * references; tooling/environment/pilot-unexpected.mjs). The answer to the caller is unchanged.
+ */
+const unavailable = (cause?: unknown): never => {
+  if (cause instanceof OrderPaymentOutcomeError) throw cause;
+  const error = new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
+  if (cause !== undefined)
+    Object.defineProperty(error, "cause", { value: cause, enumerable: false, configurable: true });
+  throw error;
 };
 
 /** Internal original Order/Payment/acceptance history; current fulfillment must still be established. */
@@ -211,8 +220,8 @@ export function createOrderPaidContextSource(
           },
         );
         return result ?? unavailable();
-      } catch {
-        return unavailable();
+      } catch (error) {
+        return unavailable(error);
       }
     },
   });
