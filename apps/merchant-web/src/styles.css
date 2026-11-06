@@ -8345,6 +8345,14 @@ body:has(.product-complete-draft) .bop-shell__header,
   display: grid;
   gap: 4px;
 }
+/* WP-2423 M61: who is signed in on this screen, above "Switch staff". */
+.staff-identity {
+  margin: 0 0 8px;
+  color: var(--bop-color-text-default);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 .staff-session__switch button {
   padding: 6px 12px;
   border: 1px solid var(--bop-color-border-default);

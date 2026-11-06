@@ -8829,4 +8829,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: ask a manager to cancel it; otherwise it is released at its time and its items go back to stock.":
     "在刷卡机上逐单收款，并在时间结束前在这里录入。客人不付款的，请经理取消；否则到时自动释放，菜品退回库存。",
   "Cancelled before payment by staff · {reason}": "付款前由员工取消 · {reason}",
+  "Name not added yet": "尚未填写姓名",
+  "{name} · signed in with PIN": "{name} · 已用 PIN 登录",
+  "{name} · signed in": "{name} · 已登录",
+  "Signed in on this screen": "当前登录的人",
 });

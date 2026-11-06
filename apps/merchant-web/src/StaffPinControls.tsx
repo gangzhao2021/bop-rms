@@ -94,6 +94,12 @@ function defaultClient(csrf: string): StaffPinClient {
   return client;
 }
 
+/** The shared PIN status of this sign-in (how it was started), as the footer reads it. */
+export function usePinStatusSnapshot(csrf: string, client?: StaffPinClient): PinStatusSnapshot {
+  const store = storeFor(client ?? defaultClient(csrf));
+  return useSyncExternalStore(store.subscribe, store.get, store.get);
+}
+
 export function pinStateText(pin: PinRecord, timeZone: string | undefined): string {
   if (pin.state === "NotSet")
     return t("Set a PIN to switch quickly on this store's shared tablets.");

@@ -31,6 +31,7 @@ import {
   StaffSwitchButton,
 } from "./StaffSession.js";
 import { OwnNamePrompt } from "./OwnNamePrompt.js";
+import { StaffIdentityLine } from "./StaffIdentityLine.js";
 import { StaffPinControls } from "./StaffPinControls.js";
 import { StaffSwitchPage } from "./StaffSwitchPage.js";
 import { StaffSignInPage } from "./StaffSignInPage.js";
@@ -833,6 +834,10 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
         footer={
           demo === null ? (
             <>
+              <StaffIdentityLine
+                csrf={state.csrf}
+                storeReference={state.workspace.selectedScope.storeReference}
+              />
               <StaffSwitchButton />
               <StaffPinControls
                 csrf={state.csrf}
