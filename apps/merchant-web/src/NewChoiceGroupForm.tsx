@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { composingEnter } from "./form-enter.js";
 import { newOperationReference } from "./operation-reference.js";
 import { choiceRule } from "./store-option-set-page.js";
+import type { TypedChoice } from "./dish-editor-source.js";
 import { MenuPageError, type MenuClient, type NewChoiceGroupCommand } from "./store-menu-pages.js";
 import { dollarsToMinor } from "./store-price-pages.js";
 
@@ -84,10 +85,8 @@ export function NewChoiceGroupForm({
   onClose,
 }: {
   readonly client: MenuClient;
-  readonly onCreated: (
-    optionSetReference: string | null,
-    extras: ReadonlyMap<string, string>,
-  ) => void;
+  /** The group made, and each choice as typed (in order) with its extra. */
+  readonly onCreated: (optionSetReference: string | null, typed: readonly TypedChoice[]) => void;
   readonly onClose: () => void;
 }) {
   const [name, setName] = useState("");
@@ -163,7 +162,7 @@ export function NewChoiceGroupForm({
       setOperation(null);
       onCreated(
         result?.optionSet?.optionSetReference ?? null,
-        new Map(named.map((row) => [row.name.trim(), row.extra ?? "0.00"])),
+        named.map((row) => ({ name: row.name, nameZh: row.nameZh, extra: row.extra ?? "0.00" })),
       );
     } catch (error) {
       if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);

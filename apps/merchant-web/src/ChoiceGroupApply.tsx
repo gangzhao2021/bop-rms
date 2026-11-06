@@ -69,8 +69,13 @@ export function ChoiceGroupApply({
   readonly thisDishName: string;
   /** The form can be saved: the run saves this dish first. */
   readonly thisDishReady: boolean;
-  /** Saves the dish on screen; false when there was nothing to save. */
-  readonly saveThisDish: () => Promise<boolean>;
+  /**
+   * Saves the dish on screen, adding these allergens to what it declares (when it declares its
+   * own). "Waiting": saved, and its allergens are still to be declared.
+   */
+  readonly saveThisDish: (
+    additions: ReadonlyMap<string, AllergenClassification>,
+  ) => Promise<"Unchanged" | "Saved" | "Waiting">;
   readonly onRunning: (running: boolean) => void;
   readonly onFinished: (message: string) => void;
   readonly onClose: () => void;
@@ -89,7 +94,7 @@ export function ChoiceGroupApply({
   // Across "Try again": each stopped dish's command, the dishes done, and this dish once saved.
   const memory = useRef(new Map<string, SaveDishCommand>());
   const outcome = useRef({ applied: [] as MenuDish[], waiting: [] as MenuDish[] });
-  const thisDish = useRef({ done: false, saved: false });
+  const thisDish = useRef({ done: false, saved: false, waiting: false });
   const open = useRef(true);
   useEffect(() => {
     open.current = true;
@@ -185,7 +190,14 @@ export function ChoiceGroupApply({
     try {
       if (!thisDish.current.done) {
         setProgress({ done: 0, total: toRun.length + 1 });
-        thisDish.current.saved = await saveThisDish();
+        // This dish offers every choice the run adds, so it gains their allergens too.
+        const additions = new Map<string, AllergenClassification>();
+        for (const option of extras.keys())
+          for (const [allergen, classification] of answerMap.get(option) ?? [])
+            if (additions.get(allergen) !== "Contains") additions.set(allergen, classification);
+        const saved = await saveThisDish(additions);
+        thisDish.current.saved = saved !== "Unchanged";
+        thisDish.current.waiting = saved === "Waiting";
         thisDish.current.done = true;
       }
     } catch (error) {
@@ -245,14 +257,21 @@ export function ChoiceGroupApply({
       return;
     }
     if (!open.current) return;
-    const applied = outcome.current.applied.length + (thisDish.current.saved ? 1 : 0);
+    // A dish left waiting for its allergens is named, not counted as done.
+    const applied =
+      outcome.current.applied.length +
+      (thisDish.current.saved && !thisDish.current.waiting ? 1 : 0);
+    const waiting = [
+      ...(thisDish.current.waiting ? [thisDishName] : []),
+      ...outcome.current.waiting.map(dishLabel),
+    ];
     onFinished(
       [
         t("Applied to {dishes}. Guests see it when the menu is listed.", {
           dishes: countOf(applied, "dish"),
         }),
-        outcome.current.waiting.length > 0
-          ? t("Still waiting for allergens: {items}.", { items: names(outcome.current.waiting) })
+        waiting.length > 0
+          ? t("Still waiting for allergens: {items}.", { items: waiting.join(t(", ")) })
           : "",
         recipeDishes.length > 0
           ? t("Allergens come from a recipe, so they did not change: {items}.", {

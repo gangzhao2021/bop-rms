@@ -8,7 +8,9 @@ import {
   copiedChoices,
   dishEditorSource,
   groupStart,
+  typedExtras,
   type DishEditorSource,
+  type TypedChoice,
 } from "./dish-editor-source.js";
 import { applyDishMarks, noDishMarks, readDishMarks, type DishMarks } from "./dish-marks.js";
 import { DishAlcoholMark } from "./DishAlcoholMark.js";
@@ -160,10 +162,7 @@ export function DishEditor({
     setProblem(null);
   };
   /** After a group is made here: read the groups again (what staff typed stays) and choose it. */
-  const groupMade = async (
-    optionSetReference: string | null,
-    typed: ReadonlyMap<string, string>,
-  ) => {
+  const groupMade = async (optionSetReference: string | null, typed: readonly TypedChoice[]) => {
     setMakingGroup(false);
     if (client.loadDish === undefined) return;
     try {
@@ -174,7 +173,10 @@ export function DishEditor({
       const group = found.groups.find((g) => g.optionSetReference === optionSetReference);
       if (group !== undefined)
         setChosen((current) =>
-          new Map(current).set(group.optionSetReference, groupStart(group, found.usual, typed)),
+          new Map(current).set(
+            group.optionSetReference,
+            groupStart(group, found.usual, typedExtras(group, typed)),
+          ),
         );
     } catch {
       setProblem(t("The dish could not be read. Check the connection and try again."));
@@ -182,6 +184,9 @@ export function DishEditor({
   };
   // One reference per intended save, kept until it is answered (a retry continues it).
   const [operation, setOperation] = useState<string | null>(null);
+  // Once a save sent the price, the price read earlier is no longer what the dish has: a save that
+  // stopped part-way may have set it, so a price put back is sent too, not taken as unchanged.
+  const priceSent = useRef(false);
   useEffect(() => {
     let active = true;
     if (client.loadDish === undefined) return;
@@ -213,6 +218,9 @@ export function DishEditor({
   }, [client, readReference]);
   // Arrived from a group's new choice (item 3 F): tick it, once, and open the panel.
   const openedApply = useRef(false);
+  // The new choice whose extra takes focus once it is on the form.
+  const focusExtra = useRef<string | null>(null);
+  const formElement = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (source === null || openApply === null || openedApply.current) return;
     openedApply.current = true;
@@ -230,7 +238,22 @@ export function DishEditor({
       return new Map(current).set(group.optionSetReference, options);
     });
     setApplying(group.optionSetReference);
+    // The new choice's extra is what to look at first, with "Use on other dishes" under it.
+    focusExtra.current =
+      group.options.find(
+        (option) => option.offered && openApply.optionReferences.includes(option.optionReference),
+      )?.optionReference ?? null;
   }, [source, openApply]);
+  useEffect(() => {
+    if (focusExtra.current === null) return;
+    const extra = formElement.current?.querySelector<HTMLInputElement>(
+      `input[data-extra="${focusExtra.current}"]`,
+    );
+    if (extra === null || extra === undefined) return;
+    focusExtra.current = null;
+    extra.scrollIntoView({ block: "center" });
+    extra.focus({ preventScroll: true });
+  });
   const label =
     dish === null ? t("New dish") : dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
   const recipeAllergens = dish?.allergens.source === "Recipe";
@@ -253,8 +276,10 @@ export function DishEditor({
     choicePrices.some(
       (g) => g.options.length === 0 || g.options.some((o) => o.amountMinor === null),
     );
-  // What "Save dish" records (all but its operation reference).
-  const dishContent = (): Omit<SaveDishCommand, "operationReference"> => ({
+  // What "Save dish" records (all but its operation reference), with these allergen values.
+  const dishContent = (
+    allergenValues: ReadonlyMap<string, AllergenAnswer> = allergens,
+  ): Omit<SaveDishCommand, "operationReference"> => ({
     action: "SaveDish",
     menuReference,
     productReference,
@@ -267,7 +292,9 @@ export function DishEditor({
     // Only when it was edited. At a Store with its own price, sending the shown price back would
     // open a price draft for the whole Brand, and a price read minutes ago could undo a newer one.
     priceMinor:
-      dish !== null && priceMinor === dollarsToMinor(readPrice) ? null : (priceMinor ?? "0"),
+      dish !== null && !priceSent.current && priceMinor === dollarsToMinor(readPrice)
+        ? null
+        : (priceMinor ?? "0"),
     choiceGroups: choicePrices.map((g) => ({
       optionSetReference: g.optionSetReference,
       options: g.options.map((o) => ({
@@ -283,7 +310,7 @@ export function DishEditor({
           : "NoIngredients"
         : !allergensChecked
           ? null
-          : [...allergens]
+          : [...allergenValues]
               .filter((entry): entry is [string, AllergenClassification] => entry[1] !== "None")
               .map(([allergenReference, classification]) => ({
                 allergenReference,
@@ -322,20 +349,24 @@ export function DishEditor({
         </button>
       </div>
     );
-  const sendDish = async (): Promise<
+  const sendDish = async (
+    allergenValues?: ReadonlyMap<string, AllergenAnswer>,
+  ): Promise<
     | "Unchanged"
     | {
         readonly productReference: string | null;
         readonly choicesWaiting: boolean;
         readonly name: string;
-        readonly declared: boolean;
+        /** Saved with no allergens declared (it cannot be listed until they are). */
+        readonly undeclared: boolean;
       }
   > => {
-    const content = dishContent();
+    const content = dishContent(allergenValues);
     if (client.oneStore === undefined) throw new MenuPageError("Unavailable");
     if (loaded.current !== null && JSON.stringify(content) === loaded.current) return "Unchanged";
     const reference = operation ?? newOperationReference();
     setOperation(reference);
+    if (content.priceMinor !== null) priceSent.current = true;
     const result = (await client.oneStore({ ...content, operationReference: reference })) as {
       productReference?: unknown;
       choicesWaiting?: unknown;
@@ -348,7 +379,10 @@ export function DishEditor({
         typeof result?.productReference === "string" ? result.productReference : productReference,
       choicesWaiting: result?.choicesWaiting === true,
       name: content.name,
-      declared: content.allergens !== null,
+      undeclared:
+        content.allergens === null &&
+        !recipeAllergens &&
+        dish?.allergens.source !== "StaffDeclared",
     };
   };
   const saveFailed = (error: unknown) => {
@@ -366,11 +400,11 @@ export function DishEditor({
   };
   // The result of a save in the owner's words, including a mark that could not be set.
   const savedText = (
-    result: { name: string; choicesWaiting: boolean },
+    result: { name: string; choicesWaiting: boolean; undeclared: boolean },
     notSet: readonly string[],
   ) =>
     [
-      result.choicesWaiting
+      result.choicesWaiting || result.undeclared
         ? t("{item} saved. Declare its allergens, then list it.", { item: result.name })
         : t("{item} saved. Guests see it when the menu is listed.", { item: result.name }),
       notSet.length > 0
@@ -414,7 +448,7 @@ export function DishEditor({
       const notSet = await marksOf(result.productReference);
       const count = {
         dishes: added.dishes + 1,
-        needAllergens: added.needAllergens + (result.declared && !result.choicesWaiting ? 0 : 1),
+        needAllergens: added.needAllergens + (result.undeclared || result.choicesWaiting ? 1 : 0),
       };
       setAdded(count);
       setNote(
@@ -472,7 +506,26 @@ export function DishEditor({
   // Item 3 B: a new dish starts from another. Its allergens are copied but not confirmed.
   const copyFrom = async (product: string) => {
     setCopiedFrom(product);
-    if (product === "" || client.loadDish === undefined) return;
+    if (product === "") {
+      // Start empty: what a copy brought goes; what was typed (names, price) stays.
+      setChosen(new Map());
+      setAllergens(new Map());
+      setAllergensChecked(false);
+      setCharge(false);
+      setMarks(noDishMarks);
+      setCarried(false);
+      setOpenGroups(new Set());
+      setAllergensOpen(false);
+      setMarksOpen(false);
+      setNote(null);
+      setForm((current) => ({
+        ...current,
+        tax: source?.taxClasses[0]?.taxClassificationReference ?? current.tax,
+        section: sectionCode,
+      }));
+      return;
+    }
+    if (client.loadDish === undefined) return;
     const target = sections
       .flatMap((row) => row.dishes)
       .find((row) => row.productReference === product);
@@ -521,10 +574,23 @@ export function DishEditor({
       setCopying(false);
     }
   };
-  // Item 3 F: the run saves the dish on screen first. The panel shows any failure.
-  const saveThisDish = async () => {
+  // Item 3 F: the run saves the dish on screen first, with the allergens the owner gave for the
+  // choices it adds (as every other dish that declares its own). The panel shows any failure.
+  const saveThisDish = async (
+    additions: ReadonlyMap<string, AllergenClassification>,
+  ): Promise<"Unchanged" | "Saved" | "Waiting"> => {
+    let values: ReadonlyMap<string, AllergenAnswer> | undefined;
+    if (additions.size > 0 && allergensChecked && !charge && !recipeAllergens) {
+      const merged = new Map(allergens);
+      for (const [allergen, classification] of additions)
+        if (merged.get(allergen) !== "Contains") merged.set(allergen, classification);
+      values = merged;
+      setAllergens(merged);
+    }
     try {
-      return (await sendDish()) !== "Unchanged";
+      const result = await sendDish(values);
+      if (result === "Unchanged") return "Unchanged";
+      return result.undeclared || result.choicesWaiting ? "Waiting" : "Saved";
     } catch (error) {
       if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
       throw error;
@@ -582,6 +648,7 @@ export function DishEditor({
   const foldMarks = carried && dish === null && !marksOpen;
   return (
     <form
+      ref={formElement}
       className="dish-editor"
       aria-label={label}
       onKeyDown={onEnter}
@@ -783,7 +850,7 @@ export function DishEditor({
                               <span>{t("Extra ($) for {choice}", { choice: option.name })}</span>
                               <input
                                 inputMode="decimal"
-                                data-extra
+                                data-extra={option.optionReference}
                                 value={options.get(option.optionReference) ?? ""}
                                 onChange={(event) =>
                                   setChosen((current) => {

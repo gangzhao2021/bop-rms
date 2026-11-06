@@ -1176,17 +1176,23 @@ test("@production a new choice on a group leads to the first dish using it, tick
   page,
 }) => {
   const f = await setUp(page);
+  // On a phone the page is long: the prompt and the new extra must still be where the owner is.
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/app/commerce/option-sets/" + toppings);
   await page.getByRole("button", { name: "Add option" }).click();
   await page.getByRole("textbox", { name: "Option 4 name" }).fill("Coconut jelly");
   await page.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.getByText("Coconut jelly is not on any dish yet.")).toBeVisible();
+  await expect(page.getByText("Coconut jelly is not on any dish yet.")).toBeInViewport();
   await expectNoInternalText(page);
   await page.getByRole("link", { name: "Add it to dishes" }).click();
   const form = page.getByRole("form", { name: "Milk tea (TEST) 奶茶" });
   await expect(form.getByRole("checkbox", { name: "Coconut jelly" })).toBeChecked();
-  await expect(form.getByLabel("Extra ($) for Coconut jelly")).toHaveValue("0.00");
+  const extra = form.getByLabel("Extra ($) for Coconut jelly");
+  await expect(extra).toHaveValue("0.00");
+  await expect(extra).toBeFocused();
+  await expect(extra).toBeInViewport();
   await expect(form.getByRole("group", { name: "Use Toppings on other dishes" })).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 900 });
   // Nothing identifying the group travels in the address, and a reload does not open it again.
   expect(new URL(page.url()).pathname).toBe("/app/commerce/menus");
   expect(new URL(page.url()).search).toBe("");
@@ -1227,6 +1233,8 @@ test("@production a listing stopped by a dish with no allergens points to those 
         optionName: null,
         quantity: null,
         ingredientName: null,
+        // The listing names the Store as it does for a recipe assigned elsewhere.
+        storeName: "Synthetic Store",
       },
     },
   });
@@ -1235,6 +1243,7 @@ test("@production a listing stopped by a dish with no allergens points to those 
   const refusal = page.getByText("Coffee (TEST) has no allergens declared.", { exact: false });
   await expect(refusal).toBeVisible();
   await expect(page.getByText("as a charge", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("assign its recipe", { exact: false })).toHaveCount(0);
   await page.getByRole("button", { name: "Show dishes without allergens" }).click();
   await expect(page.locator(".one-menu__dish .one-menu__name")).toHaveText(["Coffee (TEST)"]);
   // A save part-way through a listing says to list it again.
@@ -1245,4 +1254,100 @@ test("@production a listing stopped by a dish with no allergens points to those 
       "Listing stopped part-way. List it again to finish; it carries on from where it stopped.",
     ),
   ).toBeVisible();
+});
+
+test("@production Start empty after a copy takes away what the copy brought and keeps what was typed", async ({
+  page,
+}) => {
+  const f = await setUp(page);
+  const source = f.dishes[0] as Dish;
+  f.alcohol.add(source.product);
+  const form = await openNewDish(page);
+  await form.getByLabel("English name").fill("Plain tea (TEST)");
+  const sameAs = form.getByLabel("Same as");
+  await sameAs.selectOption({ label: "Milk tea (TEST) 奶茶" });
+  await expect(form.getByText("Copied from Milk tea (TEST)", { exact: false })).toBeVisible();
+  await expect(form.getByText("Alcohol: Contains alcohol")).toBeVisible();
+  await sameAs.selectOption({ label: "Start empty" });
+  await expect(form.getByText("Copied from Milk tea (TEST)", { exact: false })).toHaveCount(0);
+  await expect(form.locator(".dish-editor__group .dish-editor__carried")).toHaveCount(0);
+  await expect(form.getByRole("checkbox", { name: "Toppings", exact: true })).not.toBeChecked();
+  await expect(form.getByRole("checkbox", { name: "Size", exact: true })).not.toBeChecked();
+  await expect(form.getByRole("checkbox", { name: /Contains alcohol/u })).not.toBeChecked();
+  await expect(form.getByLabel("English name")).toHaveValue("Plain tea (TEST)");
+  await form.getByLabel("Price ($)").fill("3.50");
+  await form.getByRole("button", { name: "Save dish" }).click();
+  await expect(page.getByText("Plain tea (TEST) saved.", { exact: false })).toBeVisible();
+  expect(lastCommand(f)).toMatchObject({ choiceGroups: [], allergens: null, priceMinor: "350" });
+  expect(f.alcoholCommands).toEqual([]);
+});
+
+test("@production the dish on screen gains the allergens given for a choice it passes on", async ({
+  page,
+}) => {
+  const f = await setUp(page);
+  const fruitTea = f.dishes[2] as Dish;
+  await page.goto("/app/commerce/menus");
+  await page.getByRole("button", { name: "Edit Fruit tea (TEST) 果茶" }).click();
+  const form = page.getByRole("form", { name: "Fruit tea (TEST) 果茶" });
+  await expect(form.getByLabel("English name")).toHaveValue("Fruit tea (TEST)");
+  await form.getByRole("checkbox", { name: "Cheese foam" }).check();
+  await form.getByLabel("Extra ($) for Cheese foam").fill("1.50");
+  await form.getByRole("button", { name: "Use Toppings on other dishes" }).click();
+  const panel = form.getByRole("group", { name: "Use Toppings on other dishes" });
+  await panel.getByRole("checkbox", { name: "Milk tea (TEST) 奶茶" }).check();
+  const question = panel.getByRole("group", {
+    name: "Does Cheese foam contain anything on your allergen list?",
+  });
+  await question.getByRole("radio", { name: "Yes" }).check();
+  await question.getByRole("radiogroup", { name: "Milk 牛奶" }).getByLabel("Contains").check();
+  await panel.getByRole("button", { name: /Apply to/u }).click();
+  await expect(page.getByText("Applied to 2 dishes.", { exact: false })).toBeVisible();
+  // Fruit tea now offers cheese foam, so it declares milk too, keeping what it had.
+  expect(f.dishCommands[0]).toMatchObject({
+    productReference: fruitTea.product,
+    allergens: [
+      { allergenReference: soy, classification: "CrossContactPossible" },
+      { allergenReference: milk, classification: "Contains" },
+    ],
+  });
+});
+
+test("@production a price put back after a save stopped part-way is sent, not taken as unchanged", async ({
+  page,
+}) => {
+  const f = await setUp(page);
+  const milkTea = f.dishes[0] as Dish;
+  await page.goto("/app/commerce/menus");
+  await page.getByRole("button", { name: "Edit Milk tea (TEST) 奶茶" }).click();
+  const form = page.getByRole("form", { name: "Milk tea (TEST) 奶茶" });
+  await expect(form.getByLabel("English name")).toHaveValue("Milk tea (TEST)");
+  await form.getByLabel("Price ($)").fill("6.00");
+  f.failSaves.push({
+    status: 409,
+    json: { error: "StoppedPartWay", part: "OneStoreDish", productReference: milkTea.product },
+  });
+  await form.getByRole("button", { name: "Save dish" }).click();
+  await expect(form.getByRole("alert")).toContainText("Saving stopped part-way");
+  expect(lastCommand(f).priceMinor).toBe("600");
+  // The stopped save may already have set 6.00, so 5.50 put back is sent.
+  await form.getByLabel("Price ($)").fill("5.50");
+  await form.getByRole("button", { name: "Save dish" }).click();
+  await expect(page.getByText("Milk tea (TEST) saved.", { exact: false })).toBeVisible();
+  expect(f.dishCommands).toHaveLength(2);
+  expect(lastCommand(f).priceMinor).toBe("550");
+});
+
+test("@production a dish saved without its allergens is told to declare them before listing", async ({
+  page,
+}) => {
+  const f = await setUp(page);
+  const form = await openNewDish(page);
+  await form.getByLabel("English name").fill("Steamed rice (TEST)");
+  await form.getByLabel("Price ($)").fill("3.00");
+  await form.getByRole("button", { name: "Save dish" }).click();
+  await expect(
+    page.getByText("Steamed rice (TEST) saved. Declare its allergens, then list it."),
+  ).toBeVisible();
+  expect(lastCommand(f)).toMatchObject({ allergens: null, choiceGroups: [] });
 });

@@ -80,7 +80,10 @@ export function dishEditorSource(
   };
 }
 
-/** A group's choices as a dish starts with them: each offered one at its usual extra. */
+/**
+ * A group's choices as a dish starts with them: each offered one at the extra typed for it, else at
+ * its usual extra. `typed` is keyed by option reference.
+ */
 export function groupStart(
   group: ProductOptionSetChoice,
   usual: ReadonlyMap<string, string>,
@@ -89,8 +92,40 @@ export function groupStart(
   return new Map(
     group.options
       .filter((o) => o.offered)
-      .map((o) => [o.optionReference, typed.get(o.name) ?? usual.get(o.optionReference) ?? "0.00"]),
+      .map((o) => [
+        o.optionReference,
+        typed.get(o.optionReference) ?? usual.get(o.optionReference) ?? "0.00",
+      ]),
   );
+}
+
+/** A choice as typed in "New choice group": its English and Chinese names and its extra. */
+export interface TypedChoice {
+  readonly name: string;
+  readonly nameZh: string;
+  readonly extra: string;
+}
+
+/**
+ * The extras typed in "New choice group", by the option each became. The group keeps the order the
+ * choices were typed in, so they are matched by position; the name staff see (English or Chinese,
+ * whichever the staff language shows) must be one of the two typed, or that choice starts from its
+ * usual extra instead.
+ */
+export function typedExtras(
+  group: ProductOptionSetChoice,
+  typed: readonly TypedChoice[],
+): ReadonlyMap<string, string> {
+  const extras = new Map<string, string>();
+  if (group.options.length !== typed.length) return extras;
+  group.options.forEach((option, index) => {
+    const row = typed[index];
+    if (row === undefined) return;
+    const shown = option.name.trim();
+    if (shown === row.name.trim() || (row.nameZh.trim() !== "" && shown === row.nameZh.trim()))
+      extras.set(option.optionReference, row.extra);
+  });
+  return extras;
 }
 
 /**

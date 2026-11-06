@@ -411,10 +411,22 @@ export function OneStoreMenuPage({
         setListingSince(null);
         writeListingMarker(menuReference, null);
       }
+      // WP-2423 item 3: no recipe for a dish on this menu that declares nothing either: the owner
+      // declares its allergens here (the refusal names a Store for a recipe assigned elsewhere).
+      const undeclared =
+        error instanceof MenuPageError &&
+        error.problem?.missing === "Recipe" &&
+        rows.some((row) =>
+          row.dishes.some(
+            (dish) => dish.name === error.problem?.productName && dish.allergens.source === "None",
+          ),
+        );
       setProblem(
         error instanceof MenuPageError
           ? error.problem !== null
-            ? menuReviewProblemText(error.problem)
+            ? menuReviewProblemText(
+                undeclared ? { ...error.problem, storeName: null } : error.problem,
+              )
             : error.code === "StoppedPartWay"
               ? t(
                   "Listing stopped part-way. List it again to finish; it carries on from where it stopped.",
@@ -426,9 +438,10 @@ export function OneStoreMenuPage({
         menuReviewProblemFixHref(error instanceof MenuPageError ? error.problem : null),
       );
       setProblemNeedsAllergens(
-        error instanceof MenuPageError &&
-          error.problem?.missing === "Recipe" &&
-          !error.problem.storeName,
+        undeclared ||
+          (error instanceof MenuPageError &&
+            error.problem?.missing === "Recipe" &&
+            !error.problem.storeName),
       );
       reload();
     } finally {

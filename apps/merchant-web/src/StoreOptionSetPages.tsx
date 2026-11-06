@@ -2,7 +2,7 @@ import { t } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { SourceTime } from "./StoreTime.js";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
 import type { MenuApplyIntent } from "./OneStoreMenuPage.js";
@@ -198,6 +198,11 @@ function OptionSetEditor({
   const [message, setMessage] = useState<{ tone: "error" | "neutral"; text: string } | null>(null);
   // WP-2423 item 3 F: a new choice reaches no dish by itself: say so, and lead to where it is added.
   const [newChoices, setNewChoices] = useState<MenuApplyIntent["applyChoice"] | null>(null);
+  // The prompt is brought into view once shown (the "Saved." panel above it moves the page).
+  const newChoicesPrompt = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (newChoices !== null) newChoicesPrompt.current?.scrollIntoView({ block: "nearest" });
+  }, [newChoices, message]);
   const [busy, setBusy] = useState(false);
   const [latest, setLatest] = useState<OptionSetRow | null>(null);
   const shown = (view: OptionSetListView | OptionSetEditView) =>
@@ -284,20 +289,23 @@ function OptionSetEditor({
       }
       setMessage({ tone: "neutral", text: t("Saved.") });
       if (result.optionSet) setLatest(result.optionSet);
+      // The choices this save made: the ones it did not send a reference for (whatever language
+      // the staff read their names in).
+      const sent = new Set(
+        command.action === "Save" ? command.options.map((option) => option.optionReference) : [],
+      );
       const added =
-        command.action === "Save"
-          ? command.options
-              .filter((option) => option.optionReference === null && option.offered)
-              .map((option) => option.name)
+        command.action === "Save" && result.optionSet
+          ? result.optionSet.options.filter(
+              (option) => option.offered && !sent.has(option.optionReference),
+            )
           : [];
       setNewChoices(
         added.length > 0 && result.optionSet
           ? {
               optionSetReference: result.optionSet.optionSetReference,
-              optionReferences: result.optionSet.options
-                .filter((option) => added.includes(option.name))
-                .map((option) => option.optionReference),
-              names: added,
+              optionReferences: added.map((option) => option.optionReference),
+              names: added.map((option) => option.name),
             }
           : null,
       );
@@ -383,14 +391,6 @@ function OptionSetEditor({
           status
         >
           <p>{message.text}</p>
-          {newChoices !== null && message.tone === "neutral" ? (
-            <p>
-              {t("{choice} is not on any dish yet.", { choice: newChoices.names.join(t(", ")) })}{" "}
-              <Link to="/app/commerce/menus" state={{ applyChoice: newChoices }}>
-                {t("Add it to dishes")}
-              </Link>
-            </p>
-          ) : null}
         </StatePanel>
       ) : null}
       <form
@@ -607,6 +607,15 @@ function OptionSetEditor({
                 ? t("Save changes")
                 : t("Create option set")}
           </button>
+        ) : null}
+        {/* Beside the button just pressed, where the owner is looking (the page may be long). */}
+        {newChoices !== null && message?.tone === "neutral" ? (
+          <p role="status" ref={newChoicesPrompt}>
+            {t("{choice} is not on any dish yet.", { choice: newChoices.names.join(t(", ")) })}{" "}
+            <Link to="/app/commerce/menus" state={{ applyChoice: newChoices }}>
+              {t("Add it to dishes")}
+            </Link>
+          </p>
         ) : null}
       </form>
       {set && mayEdit ? (
