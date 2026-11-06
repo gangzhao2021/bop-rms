@@ -280,7 +280,9 @@ export function createMerchantPaidOrderAcceptance(
             correlationReference: String(committed.record.operationReference),
             retentionPolicyCode,
             retentionPolicyVersion,
-            ...(options.sourceChannel === undefined ? {} : { sourceChannel: options.sourceChannel }),
+            ...(options.sourceChannel === undefined
+              ? {}
+              : { sourceChannel: options.sourceChannel }),
           },
         );
       }

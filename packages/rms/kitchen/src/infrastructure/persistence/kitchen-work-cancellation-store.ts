@@ -681,7 +681,8 @@ export function createPostgresKitchenBatchCancellation(options: {
         reasonCode: kitchenWorkCancellationReasonCode,
         correlationId: input.orderCancellationReference,
         occurredAt: input.cancelledAt,
-        sourceChannel: raw.bySystem === true ? "EVENT_CONSUMER" : kitchenWorkCancellationSourceChannel,
+        sourceChannel:
+          raw.bySystem === true ? "EVENT_CONSUMER" : kitchenWorkCancellationSourceChannel,
         dataClassification: "Confidential",
         retentionPolicyCode: kitchenWorkLifecycleAuditRetentionPolicyCode,
         retentionPolicyVersion: kitchenWorkLifecycleAuditRetentionPolicyVersion,

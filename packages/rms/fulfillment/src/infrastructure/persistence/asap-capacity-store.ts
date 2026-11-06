@@ -230,9 +230,8 @@ export function createPostgresAsapCapacityStore(
             (record.state === "Consumed" ? "ORDER_ACCEPTED" : "AUTHORIZED_CHECKOUT_CAPACITY") ||
           audit.occurredAt !== at ||
           // A staff Accept, or the worker's automatic acceptance (DEC-PAID-ORDER-AUTO-ACCEPT).
-          !(record.state === "Consumed"
-            ? ["MERCHANT_WEB", "EVENT_CONSUMER"]
-            : ["CUSTOMER_PWA"]
+          !(
+            record.state === "Consumed" ? ["MERCHANT_WEB", "EVENT_CONSUMER"] : ["CUSTOMER_PWA"]
           ).includes(audit.sourceChannel) ||
           audit.dataClassification !== "Restricted"
         )

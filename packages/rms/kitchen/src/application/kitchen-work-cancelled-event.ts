@@ -135,8 +135,7 @@ export function parseKitchenWorkCancelledEnvelope(value: unknown): KitchenWorkCa
       "replayMetadata",
     ]);
     // A person, or the System when it closed an automatically accepted pickup nobody touched.
-    const bySystem =
-      (raw.actor as { type?: unknown } | null | undefined)?.type === "System";
+    const bySystem = (raw.actor as { type?: unknown } | null | undefined)?.type === "System";
     const actor = exact(raw.actor, bySystem ? ["type"] : ["type", "actorId"]);
     const replayMetadata = exact(raw.replayMetadata, ["replaySafe"]);
     if (
