@@ -10,8 +10,10 @@ import {
   repeatLimit,
   staffChoiceText,
   StaffOrderEntryPage,
+  TableCartOfferActions,
   paymentWindowNotice,
 } from "./StaffOrderEntryPage.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   CounterOrderClientError,
   createCounterOrderClient,
@@ -465,7 +467,15 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     };
     const responses: [number, unknown][] = [
       [200, placed],
-      [409, { error: "table_cart_has_items", items: [{ name: "Iced latte", quantity: 2 }] }],
+      [
+        409,
+        {
+          error: "table_cart_has_items",
+          items: [
+            { cartItemReference: id(60), name: "Iced latte", quantity: 2, standing: "Available" },
+          ],
+        },
+      ],
       [409, { error: "table_checkout_in_progress" }],
       [409, { error: "table_unavailable" }],
       [409, { error: "store_not_taking_dine_in_orders" }],
@@ -507,7 +517,15 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     );
     await expect(client.placeTableRound(command)).rejects.toMatchObject({
       code: "TableCartHasItems",
-      pendingItems: [{ name: "Iced latte", quantity: 2 }],
+      pendingItems: [
+        {
+          cartItemReference: id(60),
+          name: "Iced latte",
+          quantity: 2,
+          standing: "Available",
+          available: null,
+        },
+      ],
     });
     await expect(client.placeTableRound(command)).rejects.toMatchObject({
       code: "TableCheckoutInProgress",
@@ -534,6 +552,128 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     const { tableLabel: _label, ...counter } = placed;
     void _label;
     expect(parsePlacedCounterOrder(counter).tableLabel).toBeNull();
+  });
+
+  // WP-2423 (staff-round-soldout, v15 8911a4c1 M06): a guest's item in the table's cart sold out.
+  it("marks a guest's sold-out item and offers to remove it and send the rest", async () => {
+    const plum = {
+      cartItemReference: id(61),
+      name: "Plum juice",
+      quantity: 1,
+      standing: "Unavailable",
+    };
+    const noodles = {
+      cartItemReference: id(62),
+      name: "Hand-pulled noodles",
+      quantity: 2,
+      standing: "Available",
+    };
+    const responses: [number, unknown][] = [
+      [
+        409,
+        {
+          error: "table_cart_has_items",
+          items: [plum, noodles, { name: "No reference", quantity: 1 }],
+          cartVersion: 6,
+          guestsCanSend: true,
+        },
+      ],
+      [409, { error: "item_unavailable", lineIndex: 0, sharedStock: false, optionsChanged: true }],
+    ];
+    const sent: string[] = [];
+    const fetcher = vi.fn(async (...args: [string, { body: string }]) => {
+      sent.push(args[1].body);
+      const [status, body] = responses.shift() ?? [500, {}];
+      return new Response(JSON.stringify(body), { status });
+    });
+    const client = createCounterOrderClient("a".repeat(43), fetcher as unknown as typeof fetch);
+    const command = {
+      operationReference: id(30),
+      tableReference: id(40),
+      lines: [{ sellableReference: id(5), quantity: 1, optionSelections: [], note: null }],
+      tip: { kind: "None" } as const,
+      recordedAfterOutage: false,
+      includeTableCart: { expectedCartVersion: 6, removeUnavailable: [id(61)] },
+    };
+    const refused = (await client.placeTableRound(command).catch((error: unknown) => error)) as
+      CounterOrderClientError | undefined;
+    expect(JSON.parse(sent[0] ?? "{}").includeTableCart).toEqual({
+      expectedCartVersion: 6,
+      removeUnavailable: [id(61)],
+    });
+    expect(refused).toMatchObject({
+      code: "TableCartHasItems",
+      pendingItems: [
+        { ...plum, available: null },
+        { ...noodles, available: null },
+      ],
+      tableCart: { cartVersion: 6, guestsCanSend: true },
+    });
+    if (refused === undefined) throw new Error("refused");
+    expect(placeErrorText(refused, [])).toBe(
+      "Guests at this table have items in their shared cart that haven't been sent. Plum juice can't be served now. Remove it from their order, or ask the guests to change their order on their phone.",
+    );
+    const offer = (items: typeof refused.pendingItems) =>
+      renderToStaticMarkup(
+        <TableCartOfferActions offer={{ items }} disabled={false} onSend={() => undefined} />,
+      );
+    const mixed = offer(refused.pendingItems);
+    expect(mixed).toContain("Sold out or off the menu now");
+    expect(mixed).toContain("Remove Plum juice and add the rest to this round");
+    expect(mixed).not.toContain("Add them to this round");
+    expect(offer([refused.pendingItems[0] as never])).toContain(
+      "Remove Plum juice and send this round",
+    );
+    expect(offer([refused.pendingItems[1] as never])).toContain("Add them to this round");
+    // Too few left: the guests change it; staff get no add or remove button.
+    const short = { ...noodles, standing: "Short" as const, available: 1 };
+    expect(offer([short])).toContain("Only 1 left");
+    expect(offer([short])).not.toContain("<button");
+    const shortRefusal = new CounterOrderClientError("TableCartHasItems", null, null, [short]);
+    shortRefusal.tableCart = { cartVersion: 7, guestsCanSend: true };
+    expect(placeErrorText(shortRefusal, [])).toBe(
+      "Hand-pulled noodles has only 1 left. Ask the guests to lower it on their phone, then send again. Nothing was sent or charged.",
+    );
+    const none = new CounterOrderClientError("TableCartHasItems", null, null, [
+      { ...short, available: 0 },
+    ]);
+    none.tableCart = { cartVersion: 7, guestsCanSend: true };
+    expect(placeErrorText(none, [])).toBe(
+      "Hand-pulled noodles has none left. Ask the guests to remove it on their phone, or mark it sold out, then send again. Nothing was sent or charged.",
+    );
+    // After last orders, two items off: staff remove them to send.
+    const late = new CounterOrderClientError("TableCartHasItems", null, null, [
+      { ...plum, standing: "Unavailable", available: null },
+      { ...noodles, standing: "OptionsChanged", available: null },
+    ]);
+    late.tableCart = { cartVersion: 8, guestsCanSend: false };
+    expect(placeErrorText(late, [])).toBe(
+      "Guests at this table have items in their shared cart that haven't been sent. Plum juice, Hand-pulled noodles can't be served now, and guests can no longer send after last orders. Remove them from their order to send this round.",
+    );
+    // The counter's or round's own dish whose choices changed.
+    const changed = (await client.placeTableRound(command).catch((error: unknown) => error)) as
+      CounterOrderClientError | undefined;
+    expect(changed).toMatchObject({ code: "ItemUnavailable", lineIndex: 0, optionsChanged: true });
+    if (changed === undefined) throw new Error("changed");
+    expect(
+      placeErrorText(changed, [
+        { item: { name: "Milk tea" }, quantity: 1, options: [], note: null } as never,
+      ]),
+    ).toBe(
+      "Milk tea's choices changed on the menu. Remove it, add it again with the new choices, then send. Nothing was sent or charged.",
+    );
+    // In Chinese, names joined the Chinese way, no codes.
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(placeErrorText(late, [])).toBe(
+        "这桌客人的共用购物车里还有没送出的菜。Plum juice、Hand-pulled noodles 现在不供应，过了最后点单时间客人已经不能自己送出。把它们从他们的点单里删掉，就能送出这一轮。",
+      );
+      const zh = offer(refused.pendingItems);
+      expect(zh).toContain("现在不供应");
+      expect(zh).toContain("删掉Plum juice，其余加进这一轮");
+    } finally {
+      setLanguageForTest("en");
+    }
   });
 
   it("loads the dine-in menu for a table opened from the Tables page", () => {

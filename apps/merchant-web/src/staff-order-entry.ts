@@ -7,6 +7,20 @@ import { t } from "./i18n/i18n.js";
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const minorPattern = /^(0|[1-9][0-9]{0,15})$/u;
 
+/**
+ * WP-2423 (staff-round-soldout): an item guests left unsent in the table's shared cart, and
+ * whether it can be sent now. `Unavailable` (sold out or off the menu) and `OptionsChanged` (its
+ * choices no longer fit the menu) staff may remove; `Short` (only `available` left) only the
+ * guests change on their phone.
+ */
+export interface TableCartItem {
+  readonly cartItemReference: string;
+  readonly name: string;
+  readonly quantity: number;
+  readonly standing: "Available" | "Unavailable" | "OptionsChanged" | "Short";
+  readonly available: number | null;
+}
+
 export class CounterOrderClientError extends Error {
   /**
    * WP-2423 item 8 ⑦ (v15 finding t): TableCartHasItems, the version of the table's cart those
@@ -15,6 +29,8 @@ export class CounterOrderClientError extends Error {
   tableCart: { readonly cartVersion: number; readonly guestsCanSend: boolean } | null = null;
   /** WP-2423 M03 AlreadyOrdered: the store's number of the order that holds these dishes. */
   placedOrderNumber: string | null = null;
+  /** WP-2423 (staff-round-soldout) ItemUnavailable: the dish is sold, its choices changed. */
+  optionsChanged = false;
   constructor(
     readonly code:
       | "PermissionDenied"
@@ -57,7 +73,7 @@ export class CounterOrderClientError extends Error {
     /** AmountChanged: the amount to charge now. */
     readonly totalMinor: string | null = null,
     /** TableCartHasItems: what guests put in the table's shared cart and haven't sent. */
-    readonly pendingItems: readonly { readonly name: string; readonly quantity: number }[] = [],
+    readonly pendingItems: readonly TableCartItem[] = [],
     /** ItemShort: how many of the item the store's stock covers now. */
     readonly available: number | null = null,
     /**
@@ -92,9 +108,60 @@ function itemRefusal(body: Record<string, unknown>): CounterOrderClientError | n
     available > 0
   )
     return new CounterOrderClientError("ItemShort", line, null, [], available, sharedStock);
-  if (body.error === "item_unavailable")
-    return new CounterOrderClientError("ItemUnavailable", line, null, [], null, sharedStock);
+  if (body.error === "item_unavailable") {
+    const refused = new CounterOrderClientError(
+      "ItemUnavailable",
+      line,
+      null,
+      [],
+      null,
+      sharedStock,
+    );
+    refused.optionsChanged = body.optionsChanged === true;
+    return refused;
+  }
   return null;
+}
+const standings: readonly TableCartItem["standing"][] = [
+  "Available",
+  "Unavailable",
+  "OptionsChanged",
+  "Short",
+];
+/** One of the guests' unsent items as the server named it; none for anything malformed. */
+function tableCartItem(item: unknown): TableCartItem[] {
+  const entry = item as {
+    cartItemReference?: unknown;
+    name?: unknown;
+    quantity?: unknown;
+    standing?: unknown;
+    available?: unknown;
+  } | null;
+  if (
+    typeof entry?.name !== "string" ||
+    entry.name.length === 0 ||
+    entry.name.length > 200 ||
+    !Number.isSafeInteger(entry.quantity) ||
+    typeof entry.cartItemReference !== "string" ||
+    !reference.test(entry.cartItemReference)
+  )
+    return [];
+  const standing = standings.find((candidate) => candidate === entry.standing) ?? "Available";
+  const available =
+    typeof entry.available === "number" &&
+    Number.isSafeInteger(entry.available) &&
+    entry.available >= 0
+      ? entry.available
+      : null;
+  return [
+    {
+      cartItemReference: entry.cartItemReference,
+      name: entry.name,
+      quantity: entry.quantity as number,
+      standing: standing === "Short" && available === null ? "Available" : standing,
+      available: standing === "Short" ? available : null,
+    },
+  ];
 }
 function record(value: unknown, keys: readonly string[], optional: readonly string[] = []) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return invalid();
@@ -506,8 +573,14 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       readonly lines: readonly TableRoundLine[];
       readonly tip: CounterTip;
       readonly recordedAfterOutage: boolean;
-      /** WP-2423 item 8 ⑦: add the guests' unsent items, as shown (that cart version). */
-      readonly includeTableCart?: { readonly expectedCartVersion: number };
+      /**
+       * WP-2423 item 8 ⑦: add the guests' unsent items, as shown (that cart version); WP-2423
+       * (staff-round-soldout): first removing those staff were shown as not sellable now.
+       */
+      readonly includeTableCart?: {
+        readonly expectedCartVersion: number;
+        readonly removeUnavailable?: readonly string[];
+      };
     }): Promise<PlacedCounterOrder> {
       const response = await post("/merchant/dining/staff-rounds", command);
       if (response.ok) return parsePlacedCounterOrder(await response.json(), true);
@@ -522,17 +595,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
           "TableCartHasItems",
           null,
           null,
-          Array.isArray(body.items)
-            ? body.items.flatMap((item: unknown) => {
-                const entry = item as { name?: unknown; quantity?: unknown } | null;
-                return typeof entry?.name === "string" &&
-                  entry.name.length > 0 &&
-                  entry.name.length <= 200 &&
-                  Number.isSafeInteger(entry.quantity)
-                  ? [{ name: entry.name, quantity: entry.quantity as number }]
-                  : [];
-              })
-            : [],
+          Array.isArray(body.items) ? body.items.flatMap(tableCartItem) : [],
         );
         if (
           Number.isSafeInteger(body.cartVersion) &&

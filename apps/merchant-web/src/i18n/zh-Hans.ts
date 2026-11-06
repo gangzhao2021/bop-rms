@@ -6959,6 +6959,30 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Guests at this table have items in their shared cart that haven't been sent{value}, and guests can no longer send them after last orders. Add them to this round to order them.":
     "这桌客人的共用购物车里还有没送出的菜{value}，过了最后点单时间客人已经不能自己送出。把它们加进这一轮即可下单。",
   "Add them to this round": "加进这一轮",
+  "{name} has only {count} left. Ask the guests to lower it on their phone, then send again. Nothing was sent or charged.":
+    "{name} 只剩 {count} 份。请客人在手机上减少数量后再送出。没有送出，也没有收费。",
+  "{name} has none left. Ask the guests to remove it on their phone, or mark it sold out, then send again. Nothing was sent or charged.":
+    "{name} 已经没有了。请客人在手机上删掉它，或者把它标为售罄，再送出。没有送出，也没有收费。",
+  "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now. Remove it from their order, or ask the guests to change their order on their phone.":
+    "这桌客人的共用购物车里还有没送出的菜。{names} 现在不供应。可以把它从他们的点单里删掉，或者请客人在手机上修改。",
+  "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now, and guests can no longer send after last orders. Remove it from their order to send this round.":
+    "这桌客人的共用购物车里还有没送出的菜。{names} 现在不供应，过了最后点单时间客人已经不能自己送出。把它从他们的点单里删掉，就能送出这一轮。",
+  "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now. Remove them from their order, or ask the guests to change their order on their phone.":
+    "这桌客人的共用购物车里还有没送出的菜。{names} 现在不供应。可以把它们从他们的点单里删掉，或者请客人在手机上修改。",
+  "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now, and guests can no longer send after last orders. Remove them from their order to send this round.":
+    "这桌客人的共用购物车里还有没送出的菜。{names} 现在不供应，过了最后点单时间客人已经不能自己送出。把它们从他们的点单里删掉，就能送出这一轮。",
+  "{name}'s choices changed on the menu. Remove it, add it again with the new choices, then send. Nothing was sent or charged.":
+    "{name} 的可选项在菜单上改了。请删掉后按新的选项重新加，再送出。没有送出，也没有收费。",
+  "Sold out or off the menu now": "现在不供应",
+  "Choices changed on the menu": "可选项已变，需要重新选",
+  "Only {count} left": "只剩 {count} 份",
+  "None left": "已经没有了",
+  "Guests' items not sent yet": "客人还没送出的菜",
+  "{quantity} × {name}": "{quantity} × {name}",
+  "Remove {names} and send this round": "删掉{names}，送出这一轮",
+  "Remove {names} and add the rest to this round": "删掉{names}，其余加进这一轮",
+  "Tell the guests: {names} isn't available now, so it was taken off their order.":
+    "请告诉客人：{names} 现在不供应，已从他们的点单里删掉。",
   "A charge, no stock ingredients": "收费项目，不用库存原料",
   "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.":
     "已声明为不用库存原料的收费项目（如茶位）：不计库存、不扣库存，客人看到的过敏原为无。",

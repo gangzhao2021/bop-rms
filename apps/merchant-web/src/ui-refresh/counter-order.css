@@ -636,3 +636,26 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* WP-2423 (staff-round-soldout): the guests' unsent items under the refusal, one plain row each
+   (hairlines, no boxes); an item that can't be sent carries its mark on the right. */
+.counter-order__table-cart {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.counter-order__table-cart li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--bop-color-row-divider);
+  font-size: 14px;
+}
+.counter-order__table-cart li:last-child {
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.counter-order__table-cart .order-accept-by {
+  margin-top: 0;
+}

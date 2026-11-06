@@ -1,4 +1,4 @@
-import { t, saidTable } from "./i18n/i18n.js";
+import { t, saidTable, listSeparator } from "./i18n/i18n.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,6 +31,7 @@ import {
   type CounterMenuRule,
   type CounterTip,
   type PlacedCounterOrder,
+  type TableCartItem,
 } from "./staff-order-entry.js";
 
 export { paidAtInstant, payErrorText, paymentUrgentMinutes, paymentWindowNotice };
@@ -158,6 +159,27 @@ const menuError: Record<string, [string, string]> = {
   ],
 };
 
+/** WP-2423 (staff-round-soldout): the guests' items staff may take off (can't be served now). */
+export function tableCartUnsellable(items: readonly TableCartItem[]): readonly TableCartItem[] {
+  return items.filter(
+    (item) => item.standing === "Unavailable" || item.standing === "OptionsChanged",
+  );
+}
+/** The items' menu names as staff read them ("Plum juice, Noodles" / "酸梅汤、面"). */
+export function tableCartNames(items: readonly TableCartItem[]): string {
+  return items.map((item) => item.name).join(listSeparator());
+}
+/** WP-2423 (staff-round-soldout): what a guest's item is marked with, or null when it can be sent. */
+export function tableCartMark(item: TableCartItem): string | null {
+  if (item.standing === "Unavailable") return t("Sold out or off the menu now");
+  if (item.standing === "OptionsChanged") return t("Choices changed on the menu");
+  if (item.standing === "Short")
+    return (item.available ?? 0) > 0
+      ? t("Only {count} left", { count: item.available ?? 0 })
+      : t("None left");
+  return null;
+}
+
 export function placeErrorText(
   error: CounterOrderClientError,
   lines: readonly Line[],
@@ -170,6 +192,43 @@ export function placeErrorText(
         error.pendingItems.length > 0
           ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(", ")})`
           : "";
+      // WP-2423 (staff-round-soldout): too few left of a guest's item: only the guests change it
+      // (or, with none left, staff mark it sold out, and can then remove it).
+      const short = error.pendingItems.find((item) => item.standing === "Short");
+      if (error.tableCart !== null && short !== undefined)
+        return (short.available ?? 0) > 0
+          ? t(
+              "{name} has only {count} left. Ask the guests to lower it on their phone, then send again. Nothing was sent or charged.",
+              { name: short.name, count: short.available ?? 0 },
+            )
+          : t(
+              "{name} has none left. Ask the guests to remove it on their phone, or mark it sold out, then send again. Nothing was sent or charged.",
+              { name: short.name },
+            );
+      // WP-2423 (staff-round-soldout): a guest's item can't be served now; staff remove it.
+      const unsellable = tableCartUnsellable(error.pendingItems);
+      if (error.tableCart !== null && unsellable.length > 0) {
+        const names = tableCartNames(unsellable);
+        if (unsellable.length === 1)
+          return error.tableCart.guestsCanSend
+            ? t(
+                "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now. Remove it from their order, or ask the guests to change their order on their phone.",
+                { names },
+              )
+            : t(
+                "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now, and guests can no longer send after last orders. Remove it from their order to send this round.",
+                { names },
+              );
+        return error.tableCart.guestsCanSend
+          ? t(
+              "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now. Remove them from their order, or ask the guests to change their order on their phone.",
+              { names },
+            )
+          : t(
+              "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now, and guests can no longer send after last orders. Remove them from their order to send this round.",
+              { names },
+            );
+      }
       // WP-2423 item 8 ⑦ (v15 finding t): staff add them to this round; asking the guests only
       // while they can still send (not after last orders).
       if (error.tableCart !== null)
@@ -208,6 +267,12 @@ export function placeErrorText(
       );
     case "ItemUnavailable": {
       const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
+      // WP-2423 (staff-round-soldout): the dish is sold, the choices made for it no longer fit.
+      if (line && error.optionsChanged)
+        return t(
+          "{name}'s choices changed on the menu. Remove it, add it again with the new choices, then send. Nothing was sent or charged.",
+          { name: line.item.name },
+        );
       // WP-2423: each item could be made on its own, but not together (they share an ingredient).
       if (line && error.sharedStock)
         return t(
@@ -330,6 +395,65 @@ export const MENU_REFRESH_MS = 30_000;
  * The order uses the same menu, sold-out state, prices and tax as the customer app; the store's
  * own card machine takes the payment (no cash) and staff record it here.
  */
+/**
+ * WP-2423 (staff-round-soldout): the guests' unsent items, each marked when it can't be sent, and
+ * what staff can do with them: add them to this round, or first take off the ones that can't be
+ * served (the server removes only those, and only while they still can't be sold). An item with
+ * too few left is the guests' to change, so it offers nothing.
+ */
+export function TableCartOfferActions({
+  offer,
+  disabled,
+  onSend,
+}: {
+  readonly offer: { readonly items: readonly TableCartItem[] };
+  readonly disabled: boolean;
+  readonly onSend: (removeUnavailable: readonly TableCartItem[]) => void;
+}) {
+  const unsellable = tableCartUnsellable(offer.items);
+  const short = offer.items.some((item) => item.standing === "Short");
+  const names = tableCartNames(unsellable);
+  return (
+    <>
+      {offer.items.length > 0 ? (
+        <ul className="counter-order__table-cart" aria-label={t("Guests' items not sent yet")}>
+          {offer.items.map((item) => {
+            const mark = tableCartMark(item);
+            return (
+              <li key={item.cartItemReference}>
+                <span>
+                  {t("{quantity} × {name}", { quantity: item.quantity, name: item.name })}
+                </span>
+                {mark !== null ? (
+                  <span className="order-accept-by" data-tier="warning">
+                    {mark}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {short ? null : (
+        <p>
+          <button
+            type="button"
+            className="counter-order__primary"
+            disabled={disabled}
+            onClick={() => onSend(unsellable)}
+          >
+            {unsellable.length === 0
+              ? t("Add them to this round")
+              : unsellable.length === offer.items.length
+                ? t("Remove {names} and send this round", { names })
+                : t("Remove {names} and add the rest to this round", { names })}
+          </button>
+        </p>
+      )}
+    </>
+  );
+}
+
 export function StaffOrderEntryPage({
   storeLabel,
   storeReference = storeLabel,
@@ -392,7 +516,12 @@ export function StaffOrderEntryPage({
   const [problem, setProblem] = useState<string | null>(null);
   const [problemNeedsTableCode, setProblemNeedsTableCode] = useState(false);
   // WP-2423 item 8 ⑦: the guests' unsent items the server named, to add to this round.
-  const [tableCartOffer, setTableCartOffer] = useState<number | null>(null);
+  const [tableCartOffer, setTableCartOffer] = useState<{
+    readonly cartVersion: number;
+    readonly items: readonly TableCartItem[];
+  } | null>(null);
+  // WP-2423 (staff-round-soldout): the guests' items taken off with the round sent, to tell them.
+  const [removedNote, setRemovedNote] = useState<string | null>(null);
   const [paidNote, setPaidNote] = useState<string | null>(null);
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
@@ -616,7 +745,12 @@ export function StaffOrderEntryPage({
     tipChoice() !== null &&
     (!paper || tablePaysLater || paperInstant !== null);
 
-  const send = async (includeTableCart: number | null = null) => {
+  const send = async (
+    includeTableCart: {
+      readonly expectedCartVersion: number;
+      readonly removeUnavailable: readonly TableCartItem[];
+    } | null = null,
+  ) => {
     const chosenTip = tipChoice();
     if (!canSend || chosenTip === null) return;
     placeOperation.current ??= serviceOperationReference();
@@ -624,6 +758,7 @@ export function StaffOrderEntryPage({
     setProblem(null);
     setProblemNeedsTableCode(false);
     setTableCartOffer(null);
+    setRemovedNote(null);
     try {
       const chosen = lines.map((line) => ({
         sellableReference: line.item.sellableReference,
@@ -643,7 +778,18 @@ export function StaffOrderEntryPage({
               recordedAfterOutage: paper,
               ...(includeTableCart === null
                 ? {}
-                : { includeTableCart: { expectedCartVersion: includeTableCart } }),
+                : {
+                    includeTableCart: {
+                      expectedCartVersion: includeTableCart.expectedCartVersion,
+                      ...(includeTableCart.removeUnavailable.length === 0
+                        ? {}
+                        : {
+                            removeUnavailable: includeTableCart.removeUnavailable.map(
+                              (item) => item.cartItemReference,
+                            ),
+                          }),
+                    },
+                  }),
             })
           : await client.placeOrder({
               operationReference: placeOperation.current,
@@ -652,6 +798,12 @@ export function StaffOrderEntryPage({
               recordedAfterOutage: paper,
             });
       setPlaced(order);
+      if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
+        setRemovedNote(
+          t("Tell the guests: {names} isn't available now, so it was taken off their order.", {
+            names: tableCartNames(includeTableCart.removeUnavailable),
+          }),
+        );
       recordOrdered(
         storeReference,
         lines.map((line) => [line.item.sellableReference, line.quantity]),
@@ -682,7 +834,7 @@ export function StaffOrderEntryPage({
       setProblemNeedsTableCode(failure.code === "TableHasNoQr");
       setTableCartOffer(
         failure.code === "TableCartHasItems" && failure.tableCart !== null
-          ? failure.tableCart.cartVersion
+          ? { cartVersion: failure.tableCart.cartVersion, items: failure.pendingItems }
           : null,
       );
       if (
@@ -763,6 +915,7 @@ export function StaffOrderEntryPage({
     setProblem(null);
     setProblemNeedsTableCode(false);
     setPaidNote(null);
+    setRemovedNote(null);
     setPaidAtRefused(false);
     placeOperation.current = null;
     payOperation.current = null;
@@ -1295,16 +1448,13 @@ export function StaffOrderEntryPage({
             ) : null}
             {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
             {problem !== null && ordering && tableCartOffer !== null ? (
-              <p>
-                <button
-                  type="button"
-                  className="counter-order__primary"
-                  disabled={!canSend}
-                  onClick={() => void send(tableCartOffer)}
-                >
-                  {t("Add them to this round")}
-                </button>
-              </p>
+              <TableCartOfferActions
+                offer={tableCartOffer}
+                disabled={!canSend}
+                onSend={(removeUnavailable) =>
+                  void send({ expectedCartVersion: tableCartOffer.cartVersion, removeUnavailable })
+                }
+              />
             ) : null}
             {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
               <p>
@@ -1362,6 +1512,11 @@ export function StaffOrderEntryPage({
                 value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
               })}
             </h2>
+            {removedNote !== null ? (
+              <p className="order-accept-by" data-tier="warning" role="note">
+                {removedNote}
+              </p>
+            ) : null}
             <dl>
               <div>
                 <dt>{t("Order")}</dt>
@@ -1411,6 +1566,11 @@ export function StaffOrderEntryPage({
                     totalMinor: cad(placed.totalMinor),
                   })}
             </h2>
+            {removedNote !== null ? (
+              <p className="order-accept-by" data-tier="warning" role="note">
+                {removedNote}
+              </p>
+            ) : null}
             <dl>
               <div>
                 <dt>{t("Order")}</dt>
