@@ -348,7 +348,10 @@ describe("Kitchen staff batch cancellation (WP-2423 Q6)", () => {
   });
 
   it("WP-2423 item 8a: lists batches the kitchen had nothing to prepare for, bounded to 100", async () => {
-    const query = vi.fn(async () => ({ rows: [{ order_batch_id: batch }], rowCount: 1 }));
+    const query = vi.fn(async (sql: string) => ({
+      rows: sql.includes("all_not_prepared") ? [{ order_batch_id: batch }] : [],
+      rowCount: 1,
+    }));
     const transaction = { query } as unknown as ConsumerTransaction;
     const scope = { brandReference: brand, storeReference: store };
     expect([
