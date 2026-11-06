@@ -646,13 +646,32 @@ export function createMemberPointsStore(options: {
         readonly earnReference: string;
         readonly orderReference: string;
         readonly points: number;
+        /**
+         * What the caller saw already taken back. Given, the reversal posts only what is still
+         * missing once the account is held, so two runs reading at once never take points twice.
+         */
+        readonly seenReversedPoints?: number;
       },
-    ) {
+    ): Promise<number> {
       const held = await lockAccount(tx, input.accountReference);
+      const points =
+        input.seenReversedPoints === undefined
+          ? input.points
+          : input.points -
+            (minor(
+              (
+                await tx.query(
+                  "SELECT COALESCE(sum(points),0) AS n FROM rms_loyalty.loyalty_points_transaction WHERE brand_id=$1 AND type='Reverse' AND original_transaction_id=$2",
+                  [brand, input.earnReference],
+                )
+              ).rows[0]?.n ?? 0,
+            ) -
+              input.seenReversedPoints);
+      if (points <= 0) return 0;
       const rule = await currentRule(tx);
       await post(tx, held, {
         type: "Reverse",
-        points: input.points,
+        points,
         sourceType: "Refund",
         sourceReference: input.earnReference,
         orderReference: input.orderReference,
@@ -662,6 +681,7 @@ export function createMemberPointsStore(options: {
         idempotencyReference: options.nextReference(),
         activity: false,
       });
+      return points;
     },
 
     /** Give back points spent on a bill that was refunded or never paid. */
@@ -673,13 +693,29 @@ export function createMemberPointsStore(options: {
         readonly orderReference: string;
         readonly points: number;
         readonly reasonCode: "ORDER_REFUNDED" | "BILL_WRITTEN_OFF";
+        /** As for `reverseEarned`: what the caller saw already given back. */
+        readonly seenReturnedPoints?: number;
       },
-    ) {
+    ): Promise<number> {
       const held = await lockAccount(tx, input.accountReference);
+      const points =
+        input.seenReturnedPoints === undefined
+          ? input.points
+          : input.points -
+            (minor(
+              (
+                await tx.query(
+                  "SELECT COALESCE(sum(points),0) AS n FROM rms_loyalty.loyalty_points_transaction WHERE brand_id=$1 AND type='Return' AND original_transaction_id=$2",
+                  [brand, input.redemptionReference],
+                )
+              ).rows[0]?.n ?? 0,
+            ) -
+              input.seenReturnedPoints);
+      if (points <= 0) return 0;
       const rule = await currentRule(tx);
       await post(tx, held, {
         type: "Return",
-        points: input.points,
+        points,
         sourceType: "Refund",
         sourceReference: input.redemptionReference,
         orderReference: input.orderReference,
@@ -689,6 +725,7 @@ export function createMemberPointsStore(options: {
         idempotencyReference: options.nextReference(),
         activity: false,
       });
+      return points;
     },
 
     /** Orders of this Store with redemptions or earnings since this time, for the sweep. */

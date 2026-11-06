@@ -238,6 +238,11 @@ it("each paid part of a split bill earns on its own, once, and answers for its o
 it("points spent on a table that never paid come back", () => journey("MemberPointsWrittenOff"));
 it("a member's points are added without asking only when this phone certainly paid", () =>
   journey("MemberPointsOnline"));
+// v15 M60: a receipt refunded in part before the guest claims offers what is left; the claim
+// records the earning and the refunded share in one transaction, racing the background sweep
+// without taking the share twice; a later full refund takes back the rest.
+it("a claim after a partial refund earns what is left, once, even while the sweep runs", () =>
+  journey("MemberPointsRefunded"));
 // v15 2026-11-06 (points-sweep): a Store's points sweep reads its ledger under the Store's own
 // Provider account, and catches up with refunds made while it could not run.
 it("the points sweep settles a table's refund only under the Store's own account, and catches up after days of failures", () =>
@@ -1079,29 +1084,31 @@ async function journey(journeyEnding) {
                       ? "wp2423_plmembon"
                       : ending === "MemberPointsStoreAccount"
                         ? "wp2423_plmembac"
-                        : ending === "MemberPointsPickup"
-                          ? "wp2423_plmembpk"
-                          : ending === "MemberPoints"
-                            ? "wp2423_plmember"
-                            : ending === "MemberPointsSplit"
-                              ? "wp2423_plmembsp"
-                              : ending === "MemberPointsWrittenOff"
-                                ? "wp2423_plmembwo"
-                                : ending === "PaidSplit"
-                                  ? "wp2423_plsplit"
-                                  : ending === "SplitWrittenOff"
-                                    ? "wp2423_plsplwo"
-                                    : ending === "Held"
-                                      ? "wp2423_plheld"
-                                      : ending === "HeldAtCheckout"
-                                        ? "wp2423_plheldco"
-                                        : ending === "TipsOff"
-                                          ? "wp2423_pltips"
-                                          : ending === "Moved"
-                                            ? "wp2423_plmove"
-                                            : ending === "Merged"
-                                              ? "wp2423_plmerge"
-                                              : "wp2423_plon",
+                        : ending === "MemberPointsRefunded"
+                          ? "wp2423_plmembrf"
+                          : ending === "MemberPointsPickup"
+                            ? "wp2423_plmembpk"
+                            : ending === "MemberPoints"
+                              ? "wp2423_plmember"
+                              : ending === "MemberPointsSplit"
+                                ? "wp2423_plmembsp"
+                                : ending === "MemberPointsWrittenOff"
+                                  ? "wp2423_plmembwo"
+                                  : ending === "PaidSplit"
+                                    ? "wp2423_plsplit"
+                                    : ending === "SplitWrittenOff"
+                                      ? "wp2423_plsplwo"
+                                      : ending === "Held"
+                                        ? "wp2423_plheld"
+                                        : ending === "HeldAtCheckout"
+                                          ? "wp2423_plheldco"
+                                          : ending === "TipsOff"
+                                            ? "wp2423_pltips"
+                                            : ending === "Moved"
+                                              ? "wp2423_plmove"
+                                              : ending === "Merged"
+                                                ? "wp2423_plmerge"
+                                                : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -5843,7 +5850,11 @@ async function journey(journeyEnding) {
           assert.equal((await port.state(guest())).offered, true);
           assert.equal((await port.state(guest())).claim, null, "nothing paid yet");
 
-          if (ending === "MemberPointsOnline" || ending === "MemberPointsStoreAccount") {
+          if (
+            ending === "MemberPointsOnline" ||
+            ending === "MemberPointsStoreAccount" ||
+            ending === "MemberPointsRefunded"
+          ) {
             const storeAccount = ending === "MemberPointsStoreAccount";
             const token = await join("+16135550171");
             // The bill's money: dishes earn, whichever phone is asking.
@@ -5869,6 +5880,66 @@ async function journey(journeyEnding) {
             intents.get(paying.attempt.providerIntentReference).status = "Captured";
             await payments.refresh(payer);
             const dishes = BigInt(open.owed.subtotalMinor);
+            if (ending === "MemberPointsRefunded") {
+              const gross = Number((dishes * 3n) / 100n);
+              const [paidTotal] = await rows(
+                "SELECT total_minor::text AS total FROM rms_payment.dining_table_settlement WHERE order_id=$1",
+                [orderReference],
+              );
+              const refundOnline = (amountMinor, providerReference) =>
+                createMerchantDiningTableOnlineRefund({
+                  persistence: persistenceOf(manager),
+                  authentication: manager.authentication,
+                  provider: {
+                    refundPayment: async (request) =>
+                      refundAnswer(request, "succeeded", providerReference),
+                  },
+                  nextReference: fresh,
+                })({
+                  ...as(manager),
+                  command: {
+                    orderReference,
+                    operationReference: fresh(),
+                    amountMinor,
+                    reasonCode: "FOOD_ISSUE",
+                  },
+                });
+              await refundOnline("1000", "re_TESTMEMBERFIRST0001");
+              const back = Number((BigInt(gross) * 1000n) / BigInt(paidTotal.total));
+              assert.ok(back > 0, "the refund takes some points back");
+              // Offered what is left, and said so; never the points the sweep would take back.
+              assert.deepEqual((await port.state(guest(token))).claim.parts, [
+                { partNumber: null, points: gross - back, certain: true, afterRefund: true },
+              ]);
+              const before = await pointsOf(token);
+              // The claim and the background sweep at the same moment: the share goes once.
+              const [claimed] = await Promise.all([
+                port.claim(guest(token), null),
+                sweep.settlePoints(),
+              ]);
+              assert.equal(claimed.earnedPoints, gross - back);
+              assert.equal(await pointsOf(token), before + gross - back);
+              assert.equal(await sweep.settlePoints(), 0, "the claim already took the share back");
+              const history = await rows(
+                "SELECT type,points::int AS points,reason_code FROM rms_loyalty.loyalty_points_transaction WHERE order_id=$1 AND type IN ('Earn','Reverse') ORDER BY occurred_at,type",
+                [orderReference],
+              );
+              assert.deepEqual(
+                history.map((row) => [row.type, row.points]),
+                [
+                  ["Earn", gross],
+                  ["Reverse", back],
+                ],
+              );
+              assert.equal((await port.state(guest(token))).claim, null, "claimed once");
+              // The rest refunded: everything earned goes back, once, whoever runs.
+              await refundOnline(String(BigInt(paidTotal.total) - 1000n), "re_TESTMEMBERFIRST0002");
+              await Promise.all([sweep.settlePoints(), sweep.settlePoints()]);
+              assert.equal(await pointsOf(token), before);
+              assert.equal(await sweep.settlePoints(), 0);
+              await reportAddsUp();
+              return;
+            }
             assert.deepEqual((await port.state(guest(token))).claim.parts, [
               { partNumber: null, points: Number((dishes * 3n) / 100n), certain: true },
             ]);

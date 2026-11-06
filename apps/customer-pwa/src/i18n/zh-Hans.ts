@@ -1486,6 +1486,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Join now": "现在加入",
   "Add {points} points for this order": "给这单加 {points} 分",
   "Join and earn {points} points on this order": "加入会员，这单可以积 {points} 分",
+  "Add {points} points for this order (after the refund)": "给这单加 {points} 分（已扣除退款部分）",
+  "Join and earn {points} points on this order (after the refund)":
+    "加入会员，这单可积 {points} 分（已扣除退款部分）",
   "Which part did you pay?": "您付的是哪一份？",
   "Part {number} · {points} points": "第 {number} 份 · {points} 分",
   "Add my points": "加上我的积分",

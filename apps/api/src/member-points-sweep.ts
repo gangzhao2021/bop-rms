@@ -3,7 +3,6 @@ import {
   createMemberPointsStore,
   memberExpiryStep,
   memberPointsExpireAt,
-  pointsForRefundedShare,
   type MemberPhoneProtector,
 } from "@rms/customer-loyalty";
 import {
@@ -11,6 +10,10 @@ import {
   createPostgresStoreSalesPaymentLedger,
 } from "@rms/payment";
 import { memberExpiryText, type MemberMessagePort } from "./customer-member.js";
+import {
+  createMemberPointsOrderSettler,
+  ledgerOrderPaidMinor,
+} from "./member-points-refund-share.js";
 import { storeOffersPoints } from "./merchant-store-features.js";
 
 /**
@@ -58,69 +61,11 @@ export function createMemberPointsSweep(options: {
     authorize: async () => true,
   });
 
-  const settleOrder = async (
-    tx: ConsumerTransaction,
-    order: string,
-    refunds: readonly { paymentIntentReference: string; amountMinor: bigint }[],
-    paidMinor: bigint,
-  ) => {
-    const activity = await points.orderActivity(tx as never, order);
-    if (activity.earned.length === 0 && activity.spent.length === 0) return 0;
-    const refundedMinor = refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n);
-    const records = await settlements.listByOrders(tx as never, [order]);
-    // A table's payments say what was paid; its ledger lines leave the cash rounding apart, and a
-    // full refund must read as full.
-    const billPaid =
-      records.length > 0 ? records.reduce((sum, record) => sum + record.totalMinor, 0n) : paidMinor;
-    let changed = 0;
-    for (const earn of activity.earned) {
-      if (!earn.open) continue;
-      // A paid part answers for its own refunds; a whole bill for all of them.
-      const settlement = records.find(
-        (record) => record.settlementReference === earn.sourceReference,
-      );
-      const own =
-        settlement === undefined
-          ? []
-          : refunds.filter(
-              (refund) =>
-                refund.paymentIntentReference.startsWith(settlement.settlementReference + ":") ||
-                refund.paymentIntentReference === settlement.onlinePaymentReference,
-            );
-      const direct = settlement !== undefined && (own.length > 0 || activity.earned.length > 1);
-      const refunded = direct ? own.reduce((sum, r) => sum + r.amountMinor, 0n) : refundedMinor;
-      const paid = direct ? (settlement as (typeof records)[number]).totalMinor : billPaid;
-      const owed = pointsForRefundedShare(earn.points, refunded, paid) - earn.reversedPoints;
-      if (owed <= 0) continue;
-      await points.reverseEarned(tx as never, {
-        accountReference: earn.accountReference,
-        earnReference: earn.transactionReference,
-        orderReference: order,
-        points: owed,
-      });
-      changed += 1;
-    }
-    const writtenOff =
-      records.length === 0 &&
-      (await settlements.listWriteOffsByOrders(tx as never, [order])).length > 0;
-    for (const spent of activity.spent) {
-      if (!spent.open) continue;
-      const share = writtenOff
-        ? spent.points
-        : pointsForRefundedShare(spent.points, refundedMinor, billPaid);
-      const owed = share - spent.returnedPoints;
-      if (owed <= 0) continue;
-      await points.returnRedeemed(tx as never, {
-        accountReference: spent.accountReference,
-        redemptionReference: spent.redemptionReference,
-        orderReference: order,
-        points: owed,
-        reasonCode: writtenOff ? "BILL_WRITTEN_OFF" : "ORDER_REFUNDED",
-      });
-      changed += 1;
-    }
-    return changed;
-  };
+  // v15 (M60): the one rule, shared with a claim made after a refund.
+  const settleOrder = createMemberPointsOrderSettler({
+    points,
+    settlements,
+  });
 
   // When this process's last sweep of refunds succeeded (its clock), or null before the first.
   let settledAt: number | null = null;
@@ -146,19 +91,7 @@ export function createMemberPointsSweep(options: {
         ]);
         let changed = 0;
         for (const order of orders) {
-          const paidMinor = [...ledger.payments, ...ledger.refundedPayments]
-            .filter((payment, index, all) => {
-              if (payment.orderReference !== order) return false;
-              // A payment seen in both lists counts once.
-              return (
-                all.findIndex(
-                  (other) =>
-                    other.paymentIntentReference === payment.paymentIntentReference &&
-                    other.orderBatchReference === payment.orderBatchReference,
-                ) === index
-              );
-            })
-            .reduce((sum, payment) => sum + payment.totalMinor, 0n);
+          const paidMinor = ledgerOrderPaidMinor(ledger, order);
           changed += await settleOrder(
             tx,
             order,

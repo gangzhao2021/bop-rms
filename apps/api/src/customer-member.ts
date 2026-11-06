@@ -28,6 +28,11 @@ import {
 import type { createCustomerOrderStatusRead } from "./customer-order-status-read.js";
 import { readDiningTableBill } from "./merchant-dining-table-checkout.js";
 import { storeOffersPoints } from "./merchant-store-features.js";
+import {
+  createMemberPointsOrderSettler,
+  ledgerOrderPaidMinor,
+  refundedPointsTargets,
+} from "./member-points-refund-share.js";
 
 /**
  * WP-2423 取舍 18 DEC-MEMBER-POINTS: a guest's side of the Brand's points. Ordering never needs any
@@ -102,6 +107,11 @@ interface ClaimSource {
   /** This phone certainly paid it: a signed-in member's points are added without asking. */
   readonly certain: boolean;
 }
+/** A source with what its refunds already take back of what it earns (M60). */
+interface OfferedSource extends ClaimSource {
+  readonly points: number;
+  readonly refundedPoints: number;
+}
 
 export function createCustomerMember(options: {
   readonly access: StatusReadOptions;
@@ -125,6 +135,28 @@ export function createCustomerMember(options: {
   });
   const run = <T>(work: (tx: ConsumerTransaction) => Promise<T>): Promise<T> =>
     options.access.transactions.run(work as never) as Promise<T>;
+  const settlementStore = createPostgresDiningTableSettlementStore({
+    scope,
+    authorize: async () => true,
+  });
+  const settleOrder = createMemberPointsOrderSettler({ points, settlements: settlementStore });
+  /** The Store's payments and refunds of the last two days: a guest's visit lives at most one. */
+  const recentLedger = (tx: ConsumerTransaction) => {
+    const endsAt = new Date(Date.parse(now()) + 1000).toISOString();
+    return createPostgresStoreSalesPaymentLedger({
+      scope: {
+        ...scope,
+        providerAccountReference: options.providerAccountReference,
+        environment: options.environment,
+      },
+      authorize: async () => true,
+    })(tx, {
+      startsAt: new Date(Date.parse(now()) - 2 * 86_400_000).toISOString(),
+      endsAt,
+      observedAt: endsAt,
+    });
+  };
+  type RecentLedger = Awaited<ReturnType<typeof recentLedger>>;
 
   /** This browser's guest visit, current or just ended (a receipt outlives the table). */
   const visit = async (tx: ConsumerTransaction, credentials: MemberCredentials) => {
@@ -183,10 +215,6 @@ export function createCustomerMember(options: {
     const bill = await billOf(tx, diningSessionReference);
     const order = bill.orderReference;
     if (order === null) return [];
-    const settlementStore = createPostgresDiningTableSettlementStore({
-      scope,
-      authorize: async () => true,
-    });
     const online = await settlementStore.listOnlinePaymentsByOrders(tx as never, [order]);
     const paidOnThisPhone = (settlement: { readonly onlinePaymentReference: string | null }) =>
       settlement.onlinePaymentReference !== null &&
@@ -240,29 +268,14 @@ export function createCustomerMember(options: {
     tx: ConsumerTransaction,
     guest: { readonly sessionReference?: unknown },
     orderReference: string,
+    ledger: RecentLedger,
   ): Promise<readonly ClaimSource[]> => {
     const owner = await loadOrderGuestSession(tx as never, scope, orderReference);
     if (owner === null || String(owner) !== String(guest.sessionReference)) return [];
     // A table that pays at the end earns on its settlement, once; the same dishes can't also earn
     // here through the Order's own receipt.
-    const settled = await createPostgresDiningTableSettlementStore({
-      scope,
-      authorize: async () => true,
-    }).listByOrders(tx as never, [orderReference]);
+    const settled = await settlementStore.listByOrders(tx as never, [orderReference]);
     if (settled.length > 0) return [];
-    const endsAt = new Date(Date.parse(now()) + 1000).toISOString();
-    const ledger = await createPostgresStoreSalesPaymentLedger({
-      scope: {
-        ...scope,
-        providerAccountReference: options.providerAccountReference,
-        environment: options.environment,
-      },
-      authorize: async () => true,
-    })(tx, {
-      startsAt: new Date(Date.parse(now()) - 2 * 86_400_000).toISOString(),
-      endsAt,
-      observedAt: endsAt,
-    });
     const paid = new Set(
       ledger.payments
         .filter((payment) => payment.orderReference === orderReference && !payment.splitPart)
@@ -278,6 +291,11 @@ export function createCustomerMember(options: {
       certain: true,
     }));
   };
+  /**
+   * What this guest could still claim, each with what its refunds already take back (v15 M60): the
+   * same rule the background sweep applies, so a fully refunded receipt offers nothing and a partly
+   * refunded one offers what is left.
+   */
   const unclaimed = async (
     tx: ConsumerTransaction,
     guest: {
@@ -287,24 +305,53 @@ export function createCustomerMember(options: {
     },
     rule: MemberPointsRule,
     orderReference: string | null = null,
-  ) => {
+  ): Promise<{
+    readonly sources: readonly OfferedSource[];
+    readonly ledger: RecentLedger | null;
+  }> => {
     const session = orderReference === null ? await billSessionOf(tx, guest) : null;
-    if (session === null && orderReference === null) return [];
+    if (session === null && orderReference === null) return { sources: [], ledger: null };
+    const ledger = await recentLedger(tx);
     const sources =
       orderReference !== null
-        ? await orderSources(tx, guest, orderReference)
+        ? await orderSources(tx, guest, orderReference, ledger)
         : await claimSources(tx, session as string, guest);
     const earned = await points.earnedSources(
       tx as never,
       sources.map((source) => source.sourceReference),
     );
-    return sources.filter(
+    const open = sources.filter(
       (source) =>
         !earned.has(source.sourceReference) &&
         pointsForPaidDishes(source.paidDishesMinor, rule) > 0,
     );
+    const order = open[0]?.orderReference;
+    if (order === undefined) return { sources: [], ledger };
+    const already = await points.orderActivity(tx as never, order);
+    const offered = open.map((source) => ({
+      sourceReference: source.sourceReference,
+      points: pointsForPaidDishes(source.paidDishesMinor, rule),
+    }));
+    const targets = refundedPointsTargets({
+      earned: [...already.earned, ...offered],
+      settlements: await settlementStore.listByOrders(tx as never, [order]),
+      refunds: ledger.refunds.filter((refund) => refund.orderReference === order),
+      paidMinor: ledgerOrderPaidMinor(ledger, order),
+    }).slice(already.earned.length);
+    return {
+      ledger,
+      sources: open
+        .map((source, index) =>
+          Object.freeze({
+            ...source,
+            points: offered[index]?.points ?? 0,
+            refundedPoints: targets[index] ?? 0,
+          }),
+        )
+        .filter((source) => source.points - source.refundedPoints > 0),
+    };
   };
-  const claimView = (sources: readonly ClaimSource[], rule: MemberPointsRule, until: string) =>
+  const claimView = (sources: readonly OfferedSource[], until: string) =>
     sources.length === 0
       ? null
       : Object.freeze({
@@ -312,8 +359,10 @@ export function createCustomerMember(options: {
           parts: sources.map((source) =>
             Object.freeze({
               partNumber: source.partNumber,
-              points: pointsForPaidDishes(source.paidDishesMinor, rule),
+              points: source.points - source.refundedPoints,
               certain: source.certain,
+              // Said to the guest: these points are what is left after a refund.
+              ...(source.refundedPoints > 0 ? { afterRefund: true } : {}),
             }),
           ),
         });
@@ -325,7 +374,7 @@ export function createCustomerMember(options: {
     partNumber: number | null,
     orderReference: string | null = null,
   ): Promise<number> => {
-    const sources = await unclaimed(tx, guest, rule, orderReference);
+    const { sources, ledger } = await unclaimed(tx, guest, rule, orderReference);
     // A table's split parts are the guest's to name; an Order's paid rounds all belong to it.
     const chosen =
       orderReference !== null
@@ -335,7 +384,7 @@ export function createCustomerMember(options: {
             ? sources
             : []
           : sources.filter((entry) => entry.partNumber === partNumber);
-    if (chosen.length === 0) return fail("MEMBER_NOTHING_TO_CLAIM");
+    if (chosen.length === 0 || ledger === null) return fail("MEMBER_NOTHING_TO_CLAIM");
     let earned = 0;
     for (const source of chosen)
       earned += (
@@ -347,7 +396,18 @@ export function createCustomerMember(options: {
           rule,
         })
       ).points;
-    return earned;
+    // Earned on what was paid, and the refunded share taken back at once in this transaction,
+    // as the sweep would (append-only: "+35 paid dishes, -13 order refunded"). The sweep then
+    // finds nothing owed.
+    const order = (chosen[0] as OfferedSource).orderReference;
+    if (chosen.some((source) => source.refundedPoints > 0))
+      await settleOrder(
+        tx,
+        order,
+        ledger.refunds.filter((refund) => refund.orderReference === order),
+        ledgerOrderPaidMinor(ledger, order),
+      );
+    return earned - chosen.reduce((sum, source) => sum + source.refundedPoints, 0);
   };
   const translated = async <T>(work: () => Promise<T>): Promise<T> => {
     try {
@@ -389,8 +449,7 @@ export function createCustomerMember(options: {
             rule: ruleView(rule),
             messagesAvailable: options.messages !== null,
             claim: claimView(
-              await unclaimed(tx, guest, rule, orderReference),
-              rule,
+              (await unclaimed(tx, guest, rule, orderReference)).sources,
               String((guest as { absoluteExpiresAt: unknown }).absoluteExpiresAt),
             ),
           });

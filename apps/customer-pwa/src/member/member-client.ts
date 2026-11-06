@@ -59,6 +59,8 @@ export interface MemberState {
       readonly points: number;
       /** This phone certainly paid it: a signed-in member's points are added without asking. */
       readonly certain?: boolean;
+      /** A refund on this order already took its share off these points. */
+      readonly afterRefund?: boolean;
     }[];
   };
 }

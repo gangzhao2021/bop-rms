@@ -107,6 +107,8 @@ export function MemberJoinPanel({
   const several = claim.parts.length > 1;
   const chosen = several ? claim.parts.find((entry) => entry.partNumber === part) : claim.parts[0];
   const points = chosen?.points ?? Math.max(...claim.parts.map((entry) => entry.points));
+  // v15 M60: a refund on this order already takes its share off these points.
+  const afterRefund = (chosen ?? claim.parts[0])?.afterRefund === true;
   const partNumber = several ? part : (claim.parts[0]?.partNumber ?? null);
   const add = async () => {
     setBusy(true);
@@ -123,9 +125,15 @@ export function MemberJoinPanel({
     <section className="member-panel" aria-labelledby="member-panel-title">
       {addedNote}
       <h2 id="member-panel-title">
-        {state.signedIn
-          ? t("Add {points} points for this order", { points: String(points) })
-          : t("Join and earn {points} points on this order", { points: String(points) })}
+        {afterRefund
+          ? state.signedIn
+            ? t("Add {points} points for this order (after the refund)", { points: String(points) })
+            : t("Join and earn {points} points on this order (after the refund)", {
+                points: String(points),
+              })
+          : state.signedIn
+            ? t("Add {points} points for this order", { points: String(points) })
+            : t("Join and earn {points} points on this order", { points: String(points) })}
       </h2>
       <p>{scanToOrderOnlyText()}</p>
       {several ? (
