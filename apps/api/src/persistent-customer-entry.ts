@@ -7,6 +7,7 @@ import {
 } from "@rms/dining";
 import {
   createCustomerEntryComposition,
+  CustomerEntryServiceUnavailableError,
   type CustomerEntryCompositionOptions,
   type CustomerEntryOperatingReader,
 } from "./customer-entry-composition.js";
@@ -205,6 +206,7 @@ export function createPersistentCustomerEntryComposition(
       // WP-2423 (burst 2026-11-02): the database, not the code: a retry, not "can't be used".
       const failed = (error as { code?: unknown } | null)?.code;
       if (typeof failed === "string" && failed.startsWith("TENANT_DATABASE_")) throw error;
+      if (error instanceof CustomerEntryServiceUnavailableError) throw error;
       const retiredCode = retired as RetiredTableQrError | null;
       if (retiredCode !== null)
         return {

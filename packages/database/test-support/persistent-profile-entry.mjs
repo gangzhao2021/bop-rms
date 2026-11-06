@@ -503,6 +503,25 @@ export async function exercisePersistentProfileEntry({
     assert.deepEqual(await count(), saved);
     registrationAllowed = true;
     if (!currentClock) {
+      // WP-2423: a database fault in Entry's operating read (here the guest-intake read losing its
+      // grant, as on v15 before 2026-11-06) is an outage: retry, not "this code can't be used".
+      const admissionsBeforeFault = admissionAttempts;
+      await admin.query("REVOKE SELECT ON bop_tenant.brand_guest_intake FROM " + role);
+      try {
+        const fault = await request();
+        assert.equal(fault.status, 503);
+        assert.deepEqual(await fault.json(), {
+          schemaVersion: 1,
+          code: "entry_service_unavailable",
+          messageKey: "customer.entry.service_unavailable",
+          recovery: { action: "RetryOrAskStaff", storeSelection: "Hidden" },
+        });
+        assert.equal(fault.headers.getSetCookie().length, 0, "no visit is started");
+      } finally {
+        await admin.query("GRANT SELECT ON bop_tenant.brand_guest_intake TO " + role);
+      }
+      assert.equal(admissionAttempts, admissionsBeforeFault);
+      assert.deepEqual(await count(), saved);
       const admissionsBeforeClosure = admissionAttempts;
       currentTime = "2026-01-15T13:00:00.000Z"; // Published 08:00 Toronto closing boundary.
       const closed = await request();

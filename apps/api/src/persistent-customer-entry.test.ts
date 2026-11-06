@@ -5,6 +5,7 @@ import {
   createPersistentCustomerEntryComposition,
 } from "./persistent-customer-entry.js";
 import { guestServiceModes } from "./merchant-store-features.js";
+import { CustomerEntryServiceUnavailableError } from "./customer-entry-composition.js";
 const owner = vi.hoisted(() => ({
   profile: vi.fn(),
   session: vi.fn(),
@@ -98,6 +99,26 @@ it("rolls back failed admission and withholds credentials when commit fails", as
   failed.failCommit();
   expect(await failed.service.establish(failed.f.input())).toEqual({ status: "EntryUnavailable" });
   expect(failed.events).toEqual(["begin", "sources", "rollback"]);
+});
+it("WP-2423: an operating read the database couldn't answer is rolled back and stays an outage", async () => {
+  const x = setup();
+  const outage = new CustomerEntryServiceUnavailableError();
+  x.sources.mockImplementationOnce(async () => {
+    x.events.push("sources");
+    return {
+      qr: x.f.options.qr,
+      operatingReader: {
+        readCurrent: async () => {
+          throw outage;
+        },
+      },
+      admission: x.f.options.admission,
+      binding: x.f.options.session.binding,
+    } as never;
+  });
+  await expect(x.service.establish(x.f.input())).rejects.toBe(outage);
+  expect(x.events).toEqual(["begin", "sources", "rollback"]);
+  expect(x.f.create).not.toHaveBeenCalled();
 });
 it("rejects foreign QR scope and invalid clocks without issuing a session", async () => {
   const x = setup();

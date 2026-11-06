@@ -102,6 +102,19 @@ export interface CustomerEntryTableReader {
 
 const unavailable = Object.freeze({ status: "EntryUnavailable" } as const);
 
+/**
+ * WP-2423: the database could not answer a read Entry needs (a lost connection, a timeout, a missing
+ * grant). It is an outage, so the guest is asked to retry (503), never told the code is unusable.
+ * The failure that caused it is kept, non-enumerable, for the request log's safe failure code only.
+ */
+export class CustomerEntryServiceUnavailableError extends Error {
+  readonly code = "CUSTOMER_ENTRY_SERVICE_UNAVAILABLE";
+  constructor() {
+    super("CUSTOMER_ENTRY_SERVICE_UNAVAILABLE");
+    this.name = "CustomerEntryServiceUnavailableError";
+  }
+}
+
 export function createCustomerEntryComposition(
   options:
     | CustomerEntryCompositionOptions
@@ -354,7 +367,8 @@ export function createCustomerEntryComposition(
           csrfCredential: session.csrfCredential,
           cookie: session.cookie,
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof CustomerEntryServiceUnavailableError) throw error;
         return unavailable;
       }
     },

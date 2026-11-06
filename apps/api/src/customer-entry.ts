@@ -1,4 +1,6 @@
 import { trustedClientAddress } from "./client-address.js";
+import { customerFailureCode } from "./customer-failure-diagnostic.js";
+import { markRequestFailure } from "./request-correlation.js";
 import {
   serializeGuestSessionCookie,
   type GuestRawCredential,
@@ -862,7 +864,9 @@ export class CustomerEntryHandler {
           ...(result.tableOpen === undefined ? {} : { tableOpen: result.tableOpen }),
           csrfToken: result.csrfCredential,
         });
-      } catch {
+      } catch (error) {
+        // Only the safe failure code (and SQLSTATE) reaches the request log: no token, no reference.
+        markRequestFailure(request, customerFailureCode(error));
         sendError(response, "entry_service_unavailable");
       }
     };

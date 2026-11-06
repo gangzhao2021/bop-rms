@@ -4,7 +4,10 @@ import { GuestSessionService, parseGuestAdmissionEvidence } from "@bop/identity"
 import { parseQrTableContextEvidence } from "@rms/dining";
 import { parseStoreOperatingStatusResolutionEvidence } from "@rms/store";
 import { CustomerEntryHandler } from "./customer-entry.js";
-import { createCustomerEntryComposition } from "./customer-entry-composition.js";
+import {
+  createCustomerEntryComposition,
+  CustomerEntryServiceUnavailableError,
+} from "./customer-entry-composition.js";
 import { createApiRuntimeLogger, createApiServerRuntime } from "./server.js";
 import {
   fixture,
@@ -410,6 +413,26 @@ it.each(["closed", "paused", "mode", "scope", "time", "missing"])(
     expect(f.create).not.toHaveBeenCalled();
   },
 );
+
+it("WP-2423: an operating read the database couldn't answer stays an outage, before admission", async () => {
+  const f = fixture();
+  const outage = new CustomerEntryServiceUnavailableError();
+  await expect(
+    createCustomerEntryComposition({
+      qr: f.options.qr,
+      profile: f.options.profile,
+      admission: f.options.admission,
+      session: f.options.session,
+      operatingReader: {
+        readCurrent: async () => {
+          throw outage;
+        },
+      },
+    }).establish(f.input()),
+  ).rejects.toBe(outage);
+  expect(f.admission).not.toHaveBeenCalled();
+  expect(f.create).not.toHaveBeenCalled();
+});
 
 it("WP-2423 item 8 ⑦ 1b: tells a guest at a pickup code that the Store takes dine-in only", async () => {
   const pickupFixture = () => {
