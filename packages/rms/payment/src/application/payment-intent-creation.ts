@@ -70,6 +70,11 @@ export const paymentIntentCreationErrorCodes = [
   "PAYMENT_INTENT_RETRY_LIMIT_REACHED",
   /** WP-2423 Q20: an attempt of this payment succeeded; nothing is left to pay. */
   "PAYMENT_INTENT_ALREADY_PAID",
+  /**
+   * WP-2423 M132: the tip is more than the amount it is a tip on (the order, round or bill being
+   * paid). The guest's page refuses it first; this is the backstop, the same ceiling as the counter.
+   */
+  "PAYMENT_INTENT_TIP_TOO_LARGE",
 ] as const;
 export type PaymentIntentCreationErrorCode = (typeof paymentIntentCreationErrorCodes)[number];
 

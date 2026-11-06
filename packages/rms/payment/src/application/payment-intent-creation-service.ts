@@ -455,6 +455,9 @@ export function createPaymentIntentCreationService(ports: PaymentIntentCreationP
         requestedAt,
       });
       evaluatedAt = requireCurrentPreparation(ports, preparation, evaluatedAt);
+      // WP-2423 M132: never a tip larger than what it is a tip on; nothing is created or charged.
+      if (preparation.tip.amountMinor > preparation.orderAllocation.amountMinor)
+        return fail("PAYMENT_INTENT_TIP_TOO_LARGE");
       const paymentIntentReference = reference(ports, "PaymentIntent");
       const paymentAttemptReference = reference(ports, "PaymentAttempt");
       let providerIdempotencyKey;

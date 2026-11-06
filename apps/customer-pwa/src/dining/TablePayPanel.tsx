@@ -4,6 +4,7 @@ import { MemberPointsAtTable } from "../member/MemberPointsAtTable.js";
 import { v7 as uuidv7 } from "uuid";
 import { t } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
+import { customTipCheck } from "../checkout/checkout-decisions.js";
 import { formatMoney } from "../journey/format.js";
 import { SlowWaitNote } from "../journey/SlowWaitNote.js";
 import { paymentConfiguration } from "../payment/payment-configuration.js";
@@ -141,6 +142,8 @@ export function TablePayPanel({
   const [tip, setTip] = useState<TipChoice | null>(null);
   // WP-2423 item 8 ⑦: the amount typed for "Other amount" (never kept across a reload).
   const [typed, setTyped] = useState("");
+  /** WP-2423 M132: the large typed tip the guest confirmed (its amount). */
+  const [confirmedTip, setConfirmedTip] = useState<string | null>(null);
   // WP-2423 item 8 ④: the part of a split bill this guest pays (null: the next one to pay).
   const [part, setPart] = useState<number | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -234,11 +237,17 @@ export function TablePayPanel({
   // A typed tip is whole cents, and never more than the bill before tax (the server agrees).
   const typedMinor = chosenTip === OTHER ? parseTipAmount(typed.trim()) : null;
   const typedTooHigh = typedMinor !== null && BigInt(typedMinor) > BigInt(subtotal);
+  // WP-2423 M132: a typed tip above 30 % of the bill before tax is confirmed before paying.
+  const largeTip =
+    chosenTip === OTHER &&
+    typedMinor !== null &&
+    !typedTooHigh &&
+    customTipCheck(typedMinor, subtotal) === "confirm";
   const chosenTipMinor =
     chosenTip === null
       ? null
       : chosenTip === OTHER
-        ? typedMinor === null || typedTooHigh
+        ? typedMinor === null || typedTooHigh || (largeTip && confirmedTip !== typedMinor)
           ? null
           : typedMinor
         : tipMinor(chosenTip, subtotal);
@@ -569,6 +578,32 @@ export function TablePayPanel({
                     aria-invalid={typed.trim() !== "" && chosenTipMinor === null}
                     aria-describedby="table-tip-amount-help"
                   />
+                  {largeTip && typedMinor !== null ? (
+                    <div role="alert" className="checkout-tip__confirm">
+                      <p>
+                        {t("Tip {tip} on a {subtotal} order?", {
+                          tip: money(typedMinor),
+                          subtotal: money(subtotal),
+                        })}
+                      </p>
+                      <button
+                        type="button"
+                        aria-pressed={confirmedTip === typedMinor}
+                        onClick={() => setConfirmedTip(typedMinor)}
+                      >
+                        {t("Yes, tip {tip}", { tip: money(typedMinor) })}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmedTip(null);
+                          document.getElementById("table-tip-amount")?.focus();
+                        }}
+                      >
+                        {t("Change tip")}
+                      </button>
+                    </div>
+                  ) : null}
                   <p id="table-tip-amount-help">
                     {typedTooHigh
                       ? t("A tip can be at most the bill before tax ({amount}).", {

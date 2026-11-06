@@ -551,3 +551,32 @@ describe("current authorization around durable payment effects", () => {
     },
   );
 });
+
+describe("WP-2423 M132: a tip is never more than what it is a tip on", () => {
+  it("refuses a tip above the order (round or bill) being paid, before any claim or Provider call", async () => {
+    const test = harness({
+      prepared: preparation({
+        orderAllocation: { amountMinor: 650n, currencyCode: "CAD" },
+        tip: { amountMinor: 50_000n, currencyCode: "CAD" },
+        total: { amountMinor: 50_650n, currencyCode: "CAD" },
+      }),
+    });
+    await expect(
+      createPaymentIntentCreationService(test.ports).create(command()),
+    ).rejects.toMatchObject({ code: "PAYMENT_INTENT_TIP_TOO_LARGE" });
+    expect(test.calls).not.toContain("claim");
+    expect(test.providerCalls()).toBe(0);
+  });
+  it("accepts a tip as large as the order itself", async () => {
+    const test = harness({
+      prepared: preparation({
+        orderAllocation: { amountMinor: 650n, currencyCode: "CAD" },
+        tip: { amountMinor: 650n, currencyCode: "CAD" },
+        total: { amountMinor: 1_300n, currencyCode: "CAD" },
+      }),
+    });
+    await expect(
+      createPaymentIntentCreationService(test.ports).create(command()),
+    ).resolves.toMatchObject({ status: "Created" });
+  });
+});

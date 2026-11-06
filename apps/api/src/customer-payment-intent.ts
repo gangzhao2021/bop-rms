@@ -315,6 +315,7 @@ function failure(error: unknown) {
         PAYMENT_INTENT_RETRY_NOT_ALLOWED: 409,
         PAYMENT_INTENT_RETRY_LIMIT_REACHED: 409,
         PAYMENT_INTENT_ALREADY_PAID: 409,
+        PAYMENT_INTENT_TIP_TOO_LARGE: 400,
       } as const
     )[error.code];
   return 503;
