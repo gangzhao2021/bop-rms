@@ -264,6 +264,7 @@ function parseError(
   status: number,
   value: unknown,
   retryAfter: string | null,
+  replay: boolean,
 ): CustomerEntryScreenState {
   if (
     status === 409 &&
@@ -327,7 +328,9 @@ function parseError(
     return Object.freeze({ kind: "PickupNotOffered", storeDisplayName: store.storeDisplayName });
   }
   // M02: a replay with no waiting scan here (or none any merchant owns): the guest is asked to scan.
+  // A fresh scan that reaches no Store is an outage to try again, never "scan the code".
   if (
+    replay &&
     status === 404 &&
     value !== null &&
     typeof value === "object" &&
@@ -556,7 +559,7 @@ export function createCustomerEntryClient(
         setCustomerCsrfCredential(context.csrfToken);
         return Object.freeze({ kind: "Established", context });
       }
-      const error = parseError(status, body, retryAfter);
+      const error = parseError(status, body, retryAfter, replay);
       retryUntil =
         error.kind === "RateLimited" ? performance.now() + error.retryAfterSeconds * 1000 : null;
       return error;

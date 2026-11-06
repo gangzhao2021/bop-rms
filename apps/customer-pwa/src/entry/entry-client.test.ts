@@ -774,4 +774,28 @@ describe("M02 replay of a waiting scan", () => {
     expect(await plain.start()).toEqual({ kind: "Missing" });
     expect(silent).not.toHaveBeenCalled();
   });
+  it("a fresh scan that reaches no Store, or a Store not served now, is an outage to retry, never 'scan the code'", async () => {
+    const fresh = (fetch: typeof globalThis.fetch) =>
+      createCustomerEntryClient(boundary(fetch), "aaa.bbb.ccc").start();
+    const bodies: unknown[] = [];
+    const notFound = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return response(404, { code: "CUSTOMER_STORE_NOT_FOUND" });
+    });
+    expect(await fresh(notFound as unknown as typeof globalThis.fetch)).toEqual({
+      kind: "CommandFailed",
+    });
+    expect(bodies).toEqual([{ qrToken: "aaa.bbb.ccc" }]);
+    vi.useFakeTimers();
+    try {
+      const down = vi.fn(async () => response(503, { code: "CUSTOMER_STORE_UNAVAILABLE" }));
+      const answer = fresh(down as unknown as typeof globalThis.fetch);
+      await vi.runAllTimersAsync();
+      expect((await answer).kind).toBe("CommandFailed");
+      // Asked again for about half a minute before the guest is told.
+      expect(down).toHaveBeenCalledTimes(13);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
