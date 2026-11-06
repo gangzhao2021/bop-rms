@@ -492,3 +492,84 @@ test("@production WP-2423 Settlement is hidden from staff without the settlement
   expect(reads).toBeGreaterThan(0);
   await expectNoInternalText(page);
 });
+
+// WP-2423 (settlement-coverage): a closed day the day-end check has not run for, decided by the
+// server. BOP is named as told only when the server says the alert reached it; within 6 h the
+// ordinary "not settled yet" line stays. Readable at 1440, 1024 and 390, in English and Chinese.
+test("@production WP-2423 Settlement says plainly when a closed day has not been compared yet", async ({
+  page,
+}) => {
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: { ...scope, timeZone: "America/Toronto" },
+          authorizedStores: [scope],
+          businessDate: "2026-09-22",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "PAY-RECONCILIATION",
+              label: "Settlement",
+              href: "/app/operations/payment-reconciliation",
+              permission: "payment.settlement.read",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  let dayEndCheck: unknown = { state: "NotRun", closedForMs: 13 * 3600_000, supportAlerted: false };
+  await page.route("**/merchant/settlement*", (route) => {
+    const base = closedView("2026-09-21");
+    return route.fulfill({
+      headers,
+      json: {
+        ...base,
+        reconciliation: { ...base.reconciliation, settlement: null },
+        dayEndCheck,
+      },
+    });
+  });
+  const line = page.locator('[data-reconciled="not-run"]');
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/app/operations/payment-reconciliation?businessDate=2026-09-21");
+    await expect(line).toHaveText(
+      "Not compared with the payment provider yet. This business day closed 13 hours ago and its day-end check has not run. It runs by itself once it is fixed; the figures above are not affected.",
+    );
+    await expect(page.getByText("has been told")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+      `no horizontal scroll at ${width}`,
+    ).toBe(true);
+    await expectNoInternalText(page);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  dayEndCheck = { state: "NotRun", closedForMs: 13 * 3600_000, supportAlerted: true };
+  await page.reload();
+  await expect(line).toContainText(
+    "BOP support has been told; the figures above are not affected.",
+  );
+  dayEndCheck = { state: "Waiting", closedForMs: 3600_000, supportAlerted: false };
+  await page.reload();
+  await expect(
+    page.getByText("Not settled yet. The settlement run for this day has not completed."),
+  ).toBeVisible();
+  await expect(line).toHaveCount(0);
+  dayEndCheck = { state: "NotRun", closedForMs: 13 * 3600_000, supportAlerted: true };
+  await page.evaluate(() => window.localStorage.setItem("bop.merchant.language", "zh-Hans"));
+  await page.reload();
+  await expect(line).toHaveText(
+    "还没有和支付方核对。这个营业日已结束 13小时，日结核对还没有运行。已通知 BOP 技术支持；上面的数字不受影响。",
+  );
+  await expectNoInternalText(page);
+});

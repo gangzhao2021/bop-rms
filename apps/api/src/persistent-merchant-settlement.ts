@@ -67,6 +67,16 @@ export function createPersistentMerchantSettlement(options: {
     window: MerchantSettlementWindow,
   ): Promise<readonly string[]>;
   /**
+   * WP-2423 (settlement-coverage): whether BOP's support channels carry this Store's "day-end
+   * check has not run" alert now (the monitor's board); without it the page never says BOP was told.
+   */
+  dayEndCheckAlerted?(): Promise<boolean>;
+  /**
+   * WP-2423 (settlement-coverage): where this Store's day-end checks start (a real Pilot Store's
+   * issued record), null from its first business day; without it every closed day is covered.
+   */
+  dayEndCheckCoveredFrom?(scope: MerchantSettlementScope): Promise<string | null>;
+  /**
    * Waits before each rerun of a read that lost a lock wait (lock timeout, deadlock or
    * serialization failure). The read writes nothing, so rerunning it is safe.
    */
@@ -297,6 +307,12 @@ export function createPersistentMerchantSettlement(options: {
       authorize: async (tx) => authorize(tx),
       storeLabel: async (tx) => storeOf(tx).displayName,
       now: () => persistence.now(),
+      ...(options.dayEndCheckAlerted === undefined
+        ? {}
+        : { dayEndCheckAlerted: options.dayEndCheckAlerted }),
+      ...(options.dayEndCheckCoveredFrom === undefined
+        ? {}
+        : { dayEndCheckCoveredFrom: options.dayEndCheckCoveredFrom }),
       // WP-2423 M160: every Store's own first business day (when its records begin), from the
       // Store's business-day owner under this transaction's authorization — not an installation
       // file that names one Store.

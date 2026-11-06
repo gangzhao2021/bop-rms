@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ read: vi.fn(), window: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), window: vi.fn(), first: vi.fn() }));
 // Controlled owner reads. The closed-day source is modelled over the same reads at the
 // day's start and last instant; its SQL change-point enumeration is covered by the
 // database acceptance suite (store-historical-publication-acceptance).
@@ -8,6 +8,7 @@ vi.mock("../../packages/rms/store/src/index.ts", async (original) => {
   return {
     ...store,
     createPostgresStoreBusinessDateConfigurationSource: () => mocks.read,
+    readStoreFirstConfigurationGoverningFrom: (...args) => mocks.first(...args),
     createPostgresStoreClosedBusinessDateWindowSource: () =>
       mocks.window.mockImplementation(async (tx, input) => {
         const anchor = await mocks.read(tx, input.anchorAt);
@@ -191,4 +192,71 @@ it("gives a day's bounds without verifying every version that governed it", asyn
   });
   f.active.mockResolvedValue(false);
   await expect(days.bounds()).rejects.toThrow("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
+});
+
+// WP-2423 (settlement-coverage): the Store's own first business day, never the latest closed one.
+it.each([
+  // Opened mid-day on a Wednesday; three days have closed since.
+  [
+    "2026-11-05T01:13:00.000Z",
+    "2026-11-07T12:00:00.000Z",
+    "2026-11-04",
+    "2026-11-04T09:00:00.000Z",
+    "2026-11-05T09:00:00.000Z",
+  ],
+  // demo-3: opened Sun Nov 1 (the clocks went back at 02:00, inside business day Oct 31), so its
+  // first day starts 04:00 EST.
+  [
+    "2026-11-01T18:37:00.000Z",
+    "2026-11-05T12:00:00.000Z",
+    "2026-11-01",
+    "2026-11-01T09:00:00.000Z",
+    "2026-11-02T09:00:00.000Z",
+  ],
+  // Opened inside the DST fall-back business day (25 h: 04:00 EDT to 04:00 EST).
+  [
+    "2026-10-31T20:15:00.000Z",
+    "2026-11-03T12:00:00.000Z",
+    "2026-10-31",
+    "2026-10-31T08:00:00.000Z",
+    "2026-11-01T09:00:00.000Z",
+  ],
+])(
+  "first() is the day the Store opened in (%s), read late at %s",
+  async (opening, now, businessDate, startsAt, endsAt) => {
+    const f = fixture();
+    f.resources.now = () => now;
+    mocks.first.mockReset().mockResolvedValue(opening);
+    const days = createInternalSettlementDays({ resources: f.resources, active: f.active });
+    expect(await days.first()).toMatchObject({ businessDate, startsAt, endsAt });
+    expect(mocks.first).toHaveBeenCalledWith(f.tx, f.resources.scope);
+    // The window was verified for that day, anchored inside it.
+    expect(mocks.window.mock.calls.at(-1)[1]).toMatchObject({
+      businessDate,
+      anchorAt: new Date(Date.parse(endsAt) - 1).toISOString(),
+      observedAt: now,
+    });
+  },
+);
+it("first() is null while nothing governs or the first day is still open", async () => {
+  const f = fixture();
+  const days = createInternalSettlementDays({ resources: f.resources, active: f.active });
+  mocks.first.mockReset().mockResolvedValue(null);
+  expect(await days.first()).toBeNull();
+  // now is 2026-09-22T04:30Z: a Store opened at 2026-09-21T20:00Z is in its first day until 08:00Z.
+  mocks.first.mockResolvedValue("2026-09-21T20:00:00.000Z");
+  expect(await days.first()).toBeNull();
+  mocks.first.mockResolvedValue("2026-09-23T20:00:00.000Z");
+  expect(await days.first()).toBeNull();
+  expect(mocks.window).not.toHaveBeenCalled();
+});
+it("first() never answers for a refused or failed read", async () => {
+  const f = fixture();
+  const days = createInternalSettlementDays({ resources: f.resources, active: f.active });
+  const refused = new Error("STORE_BUSINESS_DATE_UNAVAILABLE");
+  mocks.first.mockReset().mockRejectedValue(refused);
+  await expect(days.first()).rejects.toBe(refused);
+  f.active.mockResolvedValue(false);
+  mocks.first.mockResolvedValue(null);
+  await expect(days.first()).rejects.toThrow("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
 });

@@ -39,9 +39,11 @@ import {
  *               absent, missing tables added, no record removed); the directory given is the
  *               Store's (`…/stores/<name>`). `directory` runs it; this repairs a directory
  *               written before it did;
- *   settlement — once the Store's first business day has closed, its day-end settlement
- *               coverage (that day), read as the services do; its settlement worker starts at the
- *               next restart. The directory given is the Store's (`…/stores/<name>`);
+ *   settlement — optional: once the Store's first business day has closed, an explicit record
+ *               of where its day-end settlement starts (that first day, never the latest closed
+ *               day, read as the services do). The settlement worker starts without it, from the
+ *               same first day; a rerun answers AlreadyRecorded, a different record is refused and
+ *               nothing is written. The directory given is the Store's (`…/stores/<name>`);
  *   worker-account — v15 2026-11-06: a Store directory written before its dining-exception
  *               worker got the Store's own Provider account (it named the installation Store's, so
  *               its points sweep saw none of the Store's captures). Rewrites only that file's
@@ -563,7 +565,6 @@ async function settlement(options) {
   const { resolveOperatingConfiguration, createBindingAuthorization } =
     await import("./pilot-operating-source.mjs");
   const codes = await import("./pilot-store-publication-codes.mjs");
-  const { writeFile } = await import("node:fs/promises");
   const read = async (name) => JSON.parse(await readFile(join(options.directory, name), "utf8"));
   const installation = await read("installation.json"),
     profile = await read("internal-test-profile.json"),
@@ -621,38 +622,66 @@ async function settlement(options) {
         }
       },
     };
-    let window;
-    try {
-      window = await createInternalSettlementDays({
-        resources: { scope, operating, transactions, now: () => new Date().toISOString() },
-        active: async () => true,
-      }).window();
-    } catch {
-      unavailable("no-closed-business-day");
-    }
-    const coverage = {
-      schemaVersion: 1,
-      environment: "InternalTest",
-      database: installation.database,
-      scope: customer.scope,
-      firstWindow: {
-        businessDate: window.businessDate,
-        startsAt: window.startsAt,
-        endsAt: window.endsAt,
-        configurationReference: String(window.configurationReference),
-        configurationVersion: window.configurationVersion,
-        contentDigest: window.contentDigest,
+    return await recordSettlementCoverage({
+      directory: options.directory,
+      first: () =>
+        createInternalSettlementDays({
+          resources: { scope, operating, transactions, now: () => new Date().toISOString() },
+          active: async () => true,
+        }).first(),
+      base: {
+        schemaVersion: 1,
+        environment: "InternalTest",
+        database: installation.database,
+        scope: customer.scope,
       },
-    };
-    await writeFile(
-      join(options.directory, "daily-settlement-coverage.json"),
-      JSON.stringify(coverage, null, 2) + "\n",
-      { mode: 0o600, flag: "wx" },
-    ).catch(() => unavailable("coverage-already-recorded"));
-    return Object.freeze({ status: "Recorded", firstBusinessDate: window.businessDate });
+    });
   } finally {
     await client.end().catch(() => undefined);
   }
+}
+
+/**
+ * WP-2423 (settlement-coverage): writes the record of the Store's first business day (0600, never
+ * over another file). Rerun-safe: the same record answers AlreadyRecorded; a different one is
+ * refused and left as it is.
+ */
+export async function recordSettlementCoverage({ directory, first, base }) {
+  const { coverageWindowOf, sameCoverageWindow } =
+    await import("./pilot-daily-settlement-coverage.mjs");
+  const { writeFile } = await import("node:fs/promises");
+  let window;
+  try {
+    window = await first();
+  } catch {
+    unavailable("settlement-window-unavailable");
+  }
+  if (window === null) unavailable("no-closed-business-day");
+  const coverage = { ...base, firstWindow: coverageWindowOf(window) };
+  const file = join(directory, "daily-settlement-coverage.json");
+  const answer = (status) =>
+    Object.freeze({ status, firstBusinessDate: coverage.firstWindow.businessDate });
+  try {
+    await writeFile(file, JSON.stringify(coverage, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+    return answer("Recorded");
+  } catch (error) {
+    if (error?.code !== "EEXIST") unavailable("coverage-unwritable");
+  }
+  let recorded;
+  try {
+    recorded = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    unavailable("coverage-differs");
+  }
+  const same =
+    JSON.stringify({ ...recorded, firstWindow: undefined }) ===
+      JSON.stringify({ ...coverage, firstWindow: undefined }) &&
+    recorded?.firstWindow !== null &&
+    typeof recorded?.firstWindow === "object" &&
+    Object.keys(recorded.firstWindow).length === 6 &&
+    sameCoverageWindow(recorded.firstWindow, coverage.firstWindow);
+  if (!same) unavailable("coverage-differs");
+  return answer("AlreadyRecorded");
 }
 
 const SCOPE_KEYS = ["tenantReference", "brandReference", "storeReference"];

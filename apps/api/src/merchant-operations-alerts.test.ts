@@ -246,6 +246,9 @@ describe("a merchant's projection of its own board", () => {
       "stores.attention",
     ])
       expect(view.active.map((item) => item.key)).not.toContain(dropped);
+    // WP-2423 (settlement-coverage): a closed day not compared with the provider is the merchant's
+    // to know, so the Home never says all is good while it is so.
+    expect(view.active.map((item) => item.key)).toContain("settlement.not_run");
     expect(view.recentlyCleared.map((item) => item.key)).toEqual(["payment.updates"]);
     expect(view.outbound).toEqual({ email: false, webhooks: 0, heartbeat: false });
     expect(view.lastSuccessfulBackupAt).toBe(null);
@@ -273,6 +276,8 @@ describe("a merchant's projection of its own board", () => {
       "pickup.capacity_horizon",
       "reconciliation.differences",
       "settlement.exceptions",
+      // WP-2423 (settlement-coverage): a closed day not compared yet; the Home never says all good.
+      "settlement.not_run",
       "ordering.ending",
     ];
     const bopOnly = [
@@ -707,4 +712,58 @@ describe("WP-2423 Q13 persistent operations alerts read", () => {
     );
     expect(readBoard).not.toHaveBeenCalled();
   });
+});
+
+// WP-2423 (settlement-coverage): the Settlement page says BOP was told only when it was.
+it("an alert reaches BOP only when raised, reported and sent through a working channel", async () => {
+  const { isOperationsAlertSentToSupport } = await import("./merchant-operations-alerts.js");
+  const now = "2026-11-06T12:00:00.000Z";
+  const entry = (key: string) => ({
+    key,
+    severity: "warning",
+    raisedAt: "2026-11-06T09:00:00.000Z",
+    lastSeenAt: "2026-11-06T11:59:00.000Z",
+    title: "Day-end check with the payment provider has not run",
+    summary: "1 closed business day has not been compared with the payment provider.",
+    action: "Nothing to change in the store.",
+    runbook: "alert-settlement-not-run",
+  });
+  const board = (change: Record<string, unknown> = {}) => ({
+    schemaVersion: 1,
+    observedAt: "2026-11-06T11:59:00.000Z",
+    active: [entry("settlement.not_run")],
+    recentlyCleared: [],
+    outboundChannels: { email: true, webhooks: 0, heartbeat: false },
+    lastSuccessfulBackupAt: null,
+    ...change,
+  });
+  expect(isOperationsAlertSentToSupport(board(), now, "settlement.not_run")).toBe(true);
+  // v15 today: email and webhooks off.
+  expect(
+    isOperationsAlertSentToSupport(
+      board({ outboundChannels: { email: false, webhooks: 0, heartbeat: false } }),
+      now,
+      "settlement.not_run",
+    ),
+  ).toBe(false);
+  expect(isOperationsAlertSentToSupport(board({ active: [] }), now, "settlement.not_run")).toBe(
+    false,
+  );
+  expect(
+    isOperationsAlertSentToSupport(
+      board({ active: [entry("settlement.not_run"), entry("channel.delivery")] }),
+      now,
+      "settlement.not_run",
+    ),
+  ).toBe(false);
+  // The monitor stopped writing: nobody is being told.
+  expect(
+    isOperationsAlertSentToSupport(
+      board({ observedAt: "2026-11-06T11:00:00.000Z" }),
+      now,
+      "settlement.not_run",
+    ),
+  ).toBe(false);
+  expect(isOperationsAlertSentToSupport(null, now, "settlement.not_run")).toBe(false);
+  expect(isOperationsAlertSentToSupport({ bad: true }, now, "settlement.not_run")).toBe(false);
 });

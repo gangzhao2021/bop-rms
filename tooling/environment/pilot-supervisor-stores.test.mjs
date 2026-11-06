@@ -47,17 +47,18 @@ it("DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the other Stores run in one process,
   expect(created[0].services).toContain("store-workers");
   expect(created[0].services).toContain("api");
   expect(new Set(read)).toEqual(new Set([42]));
-  // Each Store on its own; one Store needing a person never hides another. Settlement is listed
-  // once it has run.
+  // Each Store on its own; one Store needing a person never hides another. A service with no health
+  // yet is listed as starting, never dropped.
   expect(services).toContainEqual({ service: "stores/demo-2:business-worker", state: "running" });
   expect(services).toContainEqual({
     service: "stores/demo-3:business-worker",
     state: "running",
     attention: ["events"],
   });
-  expect(services.map((entry) => entry.service)).not.toContain(
-    "stores/demo-2:daily-settlement-worker",
-  );
+  expect(services).toContainEqual({
+    service: "stores/demo-2:daily-settlement-worker",
+    state: "starting",
+  });
   // The Store list is read once per supervisor run.
   await sweep.sweep({});
   expect(created).toHaveLength(1);
@@ -144,4 +145,47 @@ it("WP-2423: a Store over the connection budget is reported, and its workers are
   expect(created).toEqual([".local/pilot-v15"]);
   expect(services).toContainEqual({ service: "stores/demo-2:business-worker", state: "running" });
   expect(services).toContainEqual({ service: "stores/demo-3", state: "attention_required" });
+});
+
+// WP-2423 (settlement-coverage): a Store worker that never starts, or never writes health, is
+// "starting" for 5 minutes after the shared process is first seen, then needs a person.
+it("a Store service with no health is starting for 5 minutes, then needs a person", async () => {
+  let clock = 0,
+    pid = 42,
+    written = false;
+  const sweep = createPilotInstallationSweep({
+    runtimeDirectory: ".local/pilot-v15",
+    createSweep: () => ({
+      sweep: async () => [{ service: "store-workers", state: "running", pid }],
+    }),
+    root: () => "/app",
+    listStores: async () => ["stores/tea"],
+    admit: async (relatives) => ({ admitted: relatives, refused: [] }),
+    now: () => clock,
+    readHealth: async (_directory, service) =>
+      service === "daily-settlement-worker" && !written ? null : {},
+  });
+  const settlement = async () =>
+    (await sweep.sweep({})).find((entry) => entry.service === "stores/tea:daily-settlement-worker");
+  expect(await settlement()).toEqual({
+    service: "stores/tea:daily-settlement-worker",
+    state: "starting",
+  });
+  clock = 4 * 60_000;
+  expect((await settlement()).state).toBe("starting");
+  clock = 5 * 60_000;
+  expect(await settlement()).toEqual({
+    service: "stores/tea:daily-settlement-worker",
+    state: "attention_required",
+    health: "missing",
+  });
+  // A restarted shared process starts its own count again.
+  pid = 43;
+  expect((await settlement()).state).toBe("starting");
+  written = true;
+  expect((await settlement()).state).toBe("running");
+  // A one-sweep gap later shows as starting, not dropped.
+  written = false;
+  clock = 20 * 60_000;
+  expect((await settlement()).state).toBe("starting");
 });

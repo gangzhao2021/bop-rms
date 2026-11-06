@@ -131,3 +131,41 @@ it("WP-2423 M160: a Store's settlement days begin at its own first day, not at t
     /firstBusinessDate: async \(tx, scope\) => \{\s*await authorize\(tx\);\s*return days\(tx, scope\)\.firstBusinessDate\(tx\);/u,
   );
 });
+
+it("WP-2423 (settlement-coverage): Settlement says BOP was told only from this Store's own board", async () => {
+  const pilot = await readFile(new URL("./pilot-merchant.mjs", import.meta.url), "utf8");
+  const call = pilot.slice(pilot.indexOf("createPilotMerchantSettlement({"));
+  expect(call.slice(0, call.indexOf("refundConfiguration,") + 120)).toContain(
+    "...(readOperationsAlertBoard === undefined ? {} : { readOperationsAlertBoard })",
+  );
+  const settlement = await readFile(
+    new URL("./pilot-merchant-settlement.mjs", import.meta.url),
+    "utf8",
+  );
+  expect(settlement).toContain(
+    "isOperationsAlertSentToSupport(\n              await readOperationsAlertBoard(),",
+  );
+  expect(settlement).toContain('"settlement.not_run"');
+});
+
+it("WP-2423 (settlement-coverage): Settlement learns where this Store's day-end checks start", async () => {
+  const pilot = await readFile(new URL("./pilot-merchant.mjs", import.meta.url), "utf8");
+  const call = pilot.slice(pilot.indexOf("createPilotMerchantSettlement({"));
+  expect(call.slice(0, call.indexOf("INTERNAL_OPERATIONS_ALERTS_UNAVAILABLE"))).toContain(
+    "...(dayEndCheckCoveredFrom === undefined ? {} : { dayEndCheckCoveredFrom })",
+  );
+  const settlement = await readFile(
+    new URL("./pilot-merchant-settlement.mjs", import.meta.url),
+    "utf8",
+  );
+  expect(settlement).toContain(
+    "...(dayEndCheckCoveredFrom === undefined ? {} : { dayEndCheckCoveredFrom })",
+  );
+  const composition = await readFile(
+    new URL("./pilot-merchant-composition.mjs", import.meta.url),
+    "utf8",
+  );
+  expect(composition).toContain(
+    "dayEndCheckCoveredFrom: createDayEndCheckCoveredFrom({ installation })",
+  );
+});

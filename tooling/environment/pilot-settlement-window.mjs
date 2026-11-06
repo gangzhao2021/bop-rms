@@ -2,7 +2,9 @@ import {
   createPostgresStoreBusinessDateConfigurationSource,
   createPostgresStoreClosedBusinessDateWindowSource,
   createPostgresAsPublishedStorePublicationProof,
+  readStoreFirstConfigurationGoverningFrom,
   resolveStoreBusinessDate,
+  resolveStoreBusinessDay,
 } from "../../packages/rms/store/src/index.ts";
 
 /** Fully closed Store day before an owner boundary, defaulting to the latest closed day. */
@@ -15,6 +17,11 @@ export function createInternalClosedSettlementWindow({ resources, active }) {
  * its bounds (the configurations in force at the day's start and at its end). Discovery walks
  * days by their bounds, so one day whose window cannot be verified is reported and retried on
  * its own while earlier and later days are still found and settled.
+ *
+ * `first()` is the Store's own first business day (WP-2423 M160: the day its first published
+ * configuration began to govern in), as a verified closed window carrying `opensAt`, or null while
+ * no configuration governs yet or that day has not closed. Never the latest closed day: a late
+ * caller still gets the first day, so no day with payments is left out of the day-end settlement.
  */
 export function createInternalSettlementDays({ resources, active }) {
   const { scope, operating, transactions } = resources;
@@ -98,5 +105,20 @@ export function createInternalSettlementDays({ resources, active }) {
         return window;
       });
     };
-  return Object.freeze({ window: day(true), bounds: day(false) });
+  const window = day(true);
+  const first = async () => {
+    if ((await active()) !== true) throw Error("SIMULATION_SETTLEMENT_WINDOW_UNAVAILABLE");
+    const observedAt = resources.now();
+    const endingAt = await transactions.run(async (tx) => {
+      const opening = await readStoreFirstConfigurationGoverningFrom(tx, scope);
+      if (opening === null || opening > observedAt) return null;
+      const firstDay = resolveStoreBusinessDay({
+        occurredAt: opening,
+        configuration: await read(tx, opening),
+      });
+      return firstDay.endsAt > observedAt ? null : firstDay.endsAt;
+    });
+    return endingAt === null ? null : window({ endingAt });
+  };
+  return Object.freeze({ window, bounds: day(false), first });
 }

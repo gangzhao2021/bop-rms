@@ -712,7 +712,8 @@ export async function seedJourneyStorePublication({
     effectiveFrom: at,
     effectiveUntil: null,
     supersedesConfigurationReference: null,
-    reasonCode: "PILOT_CONFIGURATION",
+    // The published content and its row say the same reason (the content source compares them).
+    reasonCode,
     authoredByReference: id(10),
     approvedByReference: id(11),
     approvalEvidenceReference: id(12),

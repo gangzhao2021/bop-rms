@@ -15,6 +15,10 @@ import {
   readBusinessSignals,
 } from "./pilot-ops-observe.mjs";
 import { createPilotSupervisorHealthWriter } from "./pilot-supervisor.mjs";
+const CLEAN_SETTLEMENT = Object.freeze({
+  settlementExceptions: { count: 0, oldestAgeMs: 0 },
+  settlementNotRun: { count: 0, oldestAgeMs: 0 },
+});
 
 const T0 = Date.parse("2026-10-15T03:00:00.000Z");
 const MIN = 60_000;
@@ -266,7 +270,7 @@ describe("WP-2423 Q13 monitor cycle", () => {
       summary: () => ({
         unchecked: [],
         checksFailing: [],
-        settlementNotCovered: [],
+        settlementNotRun: [],
         setupEnding: [],
       }),
       pending: () => [],
@@ -506,7 +510,10 @@ describe("WP-2423 Q13 observations", () => {
       // No pickup time check composed: not checked.
       pickupCapacity: null,
       reconciliationDifferences: { count: 2, oldestAgeMs: 24 * 3600_000 },
-      settlementExceptions: { count: 2, oldestAgeMs: 32 * 3600_000 },
+      // WP-2423: a recorded difference is the merchant's to review; a day with no run 6 h after
+      // it closed is "not run" (BOP's to fix), never a settlement problem staff could resolve.
+      settlementExceptions: { count: 1, oldestAgeMs: 32 * 3600_000 },
+      settlementNotRun: { count: 1, oldestAgeMs: 8 * 3600_000 },
     });
     // The outbox is read in the Store scope only (Brand-wide events are visible there too).
     expect(queries.filter(([sql]) => sql.includes("outbox_event"))).toEqual([
@@ -525,12 +532,12 @@ describe("WP-2423 Q13 observations", () => {
       transactions: empty,
       database: { transactions: () => empty },
     };
-    const read = (readWorkflowReadiness, settlementExceptions) =>
+    const read = (readWorkflowReadiness, settlement) =>
       readBusinessSignals({
         resources,
         installation: {},
         now,
-        settlementExceptions,
+        settlement,
         dependencies: {
           createReconciliationExceptions: () => async () => ({
             items: [],
@@ -540,7 +547,7 @@ describe("WP-2423 Q13 observations", () => {
           readWorkflowReadiness,
         },
       });
-    const clean = { count: 0, oldestAgeMs: 0 };
+    const clean = CLEAN_SETTLEMENT;
     const orderTypes = ["DineIn"];
     for (const settlement of [clean, null]) {
       expect(
@@ -617,7 +624,7 @@ describe("WP-2423 Q13 observations", () => {
         resources,
         installation: {},
         now,
-        settlementExceptions: { count: 0, oldestAgeMs: 0 },
+        settlement: CLEAN_SETTLEMENT,
         dependencies: {
           createReconciliationExceptions: () => async () => ({
             items: [],
@@ -659,7 +666,7 @@ describe("WP-2423 Q13 observations", () => {
         resources,
         installation: {},
         now,
-        settlementExceptions: { count: 0, oldestAgeMs: 0 },
+        settlement: CLEAN_SETTLEMENT,
         dependencies: {
           createReconciliationExceptions: () => async () => ({
             items: [],
@@ -689,7 +696,7 @@ describe("WP-2423 Q13 observations", () => {
         resources,
         installation: {},
         now,
-        settlementExceptions: { count: 0, oldestAgeMs: 0 },
+        settlement: CLEAN_SETTLEMENT,
         dependencies: {
           createReconciliationExceptions: () => async () => ({
             items: [],
@@ -759,7 +766,7 @@ describe("WP-2423 Q13 observations", () => {
     expect(report).toHaveBeenCalledTimes(2);
     expect(report.mock.calls[0][0].message).toBe("LOCAL_DATABASE_UNAVAILABLE");
   });
-  it("DEC-PILOT-ALERTS-BACKUP correction 2: waits on a Store's readiness checks until its Owner has published, and reads no settlement it does not have", async () => {
+  it("DEC-PILOT-ALERTS-BACKUP correction 2: waits on a Store's readiness checks until its Owner has published", async () => {
     const now = Date.parse("2026-10-15T16:00:00.000Z");
     const resources = {
       scope: { brandReference: "b", storeReference: "s" },
@@ -785,11 +792,8 @@ describe("WP-2423 Q13 observations", () => {
           readQuoteTaxConfiguration: readiness,
           readPickupCapacityHorizon: async () => ({ coveredMs: 0 }),
           readHeldStockOrders: async () => ({ openCount: 1, endedCount: 0, oldestAt: null }),
-          readSettlementStatus: async () => {
-            throw Error("DAILY_SETTLEMENT_COVERAGE_MISSING");
-          },
-          isSettlementCovered: async () => false,
-          readClosedBusinessDay: async () => true,
+          // WP-2423: a Store not opened yet has no closed day; its settlement read lists none.
+          readSettlementStatus: async () => ({ days: [] }),
           ...change,
         },
       });
@@ -805,9 +809,8 @@ describe("WP-2423 Q13 observations", () => {
       pickupCapacity: null,
       // No order can hold stock before opening; earlier days' holds are read once it opens.
       heldStock: null,
-      settlementExceptions: null,
-      settlementCovered: false,
-      closedBusinessDay: false,
+      settlementExceptions: { count: 0, oldestAgeMs: 0 },
+      settlementNotRun: { count: 0, oldestAgeMs: 0 },
     });
     expect(readiness).not.toHaveBeenCalled();
     // The gate itself could not be read: not checked is not fine, and not a guess that it failed.
@@ -821,40 +824,34 @@ describe("WP-2423 Q13 observations", () => {
       quoteTax: "unreadable",
       pickupCapacity: "unreadable",
       heldStock: "unreadable",
-      // Nor a guess that no day has closed: that would clear what BOP was told.
-      closedBusinessDay: "unreadable",
     });
-    // The closed-day read itself refused: unreadable as well (named "closedDay" on a Store's board).
+    // The settlement read itself refused: both settlement fields unreadable (named "settlement").
     const reportCheck = vi.fn();
     const refusedDay = Object.assign(Error("permission denied"), { code: "42501" });
     expect(
-      (
-        await readBusinessSignals({
-          resources,
-          installation: {},
-          now,
-          reportCheck,
-          dependencies: {
-            createReconciliationExceptions: () => async () => ({
-              items: [],
-              nextAfterExceptionReference: null,
-            }),
-            readOwnerPublishedSetup: async () => true,
-            isSettlementCovered: async () => false,
-            readClosedBusinessDay: async () => {
-              throw refusedDay;
-            },
+      await readBusinessSignals({
+        resources,
+        installation: {},
+        now,
+        reportCheck,
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          readOwnerPublishedSetup: async () => true,
+          readSettlementStatus: async () => {
+            throw refusedDay;
           },
-        })
-      ).closedBusinessDay,
-    ).toBe("unreadable");
-    expect(reportCheck.mock.calls).toEqual([["closedDay", refusedDay]]);
+        },
+      }),
+    ).toMatchObject({ settlementExceptions: "unreadable", settlementNotRun: "unreadable" });
+    expect(reportCheck.mock.calls).toEqual([["settlement", refusedDay]]);
     const after = await read({ readOwnerPublishedSetup: async () => true });
     expect(after).toMatchObject({
       heldStock: { count: 1 },
       receiptTemplate: { ready: false, reason: "TemplateNotProven" },
       pickupCapacity: { coveredMs: 0 },
-      closedBusinessDay: true,
     });
     // A Store that does not offer pickup: not checked rather than unreadable.
     expect(
@@ -865,10 +862,15 @@ describe("WP-2423 Q13 observations", () => {
         })
       ).pickupCapacity,
     ).toBe(null);
-    // Covered: its settlement is read, and a failure there is a failed read, not a clean one.
+    // At the root (no reportCheck) a settlement read that fails fails the read, never a clean one.
     await expect(
-      read({ readOwnerPublishedSetup: async () => true, isSettlementCovered: async () => true }),
-    ).rejects.toThrow("DAILY_SETTLEMENT_COVERAGE_MISSING");
+      read({
+        readOwnerPublishedSetup: async () => true,
+        readSettlementStatus: async () => {
+          throw Error("DAILY_SETTLEMENT_STATUS_UNAVAILABLE");
+        },
+      }),
+    ).rejects.toThrow("DAILY_SETTLEMENT_STATUS_UNAVAILABLE");
   });
   it("gives a Store's connections back when it is no longer served", async () => {
     const close = vi.fn(async () => undefined);
@@ -960,6 +962,64 @@ describe("WP-2423 Q13 observations", () => {
     expect(counts).toEqual({ settlement: 2, exceptions: 4 });
     await observe(T0 + 6 * MIN);
     expect(counts).toEqual({ settlement: 3, exceptions: 5 });
+  });
+  it("WP-2423: an observer reusing a clean-exceptions scan still raises a day not run, every minute", async () => {
+    let reads = 0,
+      run = false;
+    const resources = {
+      scope: { brandReference: "b", storeReference: "s" },
+      transactions: { run: async (work) => work({ query: async () => ({ rows: [] }) }) },
+      database: {
+        transactions: () => ({
+          run: async (work) => work({ query: async () => ({ rows: [] }) }),
+        }),
+      },
+    };
+    const observe = createBusinessObserver({
+      runtimeDirectory: ".local/pilot-test",
+      load: async () => ({
+        resources,
+        installation: {},
+        dependencies: {
+          createReconciliationExceptions: () => async () => ({
+            items: [],
+            nextAfterExceptionReference: null,
+          }),
+          readSettlementStatus: async () => {
+            reads++;
+            return {
+              days: [
+                {
+                  state: run ? "Recorded" : "Missing",
+                  endsAt: new Date(T0 - 13 * 3600_000).toISOString(),
+                  outcome: run ? "Matched" : null,
+                },
+                {
+                  state: "Recorded",
+                  endsAt: new Date(T0 - 37 * 3600_000).toISOString(),
+                  outcome: "Matched",
+                },
+              ],
+            };
+          },
+        },
+      }),
+    });
+    for (let minute = 0; minute <= 6; minute++)
+      expect(await observe(T0 + minute * MIN)).toMatchObject({
+        settlementExceptions: { count: 0 },
+        settlementNotRun: { count: 1, oldestAgeMs: 13 * 3600_000 + minute * MIN },
+      });
+    // Not clean, so rescanned every minute: it clears as soon as the run is recorded.
+    expect(reads).toBe(7);
+    run = true;
+    expect(await observe(T0 + 7 * MIN)).toMatchObject({ settlementNotRun: { count: 0 } });
+    // Both clean: the scan waits 5 minutes again, keeping both fields.
+    expect(await observe(T0 + 8 * MIN)).toMatchObject({
+      settlementExceptions: { count: 0 },
+      settlementNotRun: { count: 0 },
+    });
+    expect(reads).toBe(8);
   });
 });
 

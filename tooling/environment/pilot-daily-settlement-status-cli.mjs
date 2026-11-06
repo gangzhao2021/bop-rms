@@ -7,6 +7,7 @@ import { createInternalSettlementDays } from "./pilot-settlement-window.mjs";
 import { createPostgresPaymentReconciliationRunSource } from "../../packages/rms/payment/src/index.ts";
 import { parsePilotRuntimeDirectory } from "./pilot-service.mjs";
 import { readPilotDailySettlementStatus } from "./pilot-daily-settlement-status.mjs";
+import { resolveDailySettlementCoverage } from "./pilot-daily-settlement-coverage.mjs";
 import { isPilotRuntime, matchesPilotEnvironment } from "./pilot-environment.mjs";
 let resources;
 try {
@@ -29,14 +30,26 @@ try {
     authorize: active,
   });
   const days = createInternalSettlementDays({ resources, active });
-  const result = await readPilotDailySettlementStatus({
-    coverage: await installation.loadDailySettlementCoverage(),
-    scope: resources.scope,
-    now: resources.now,
-    readWindow: days.window,
-    readBounds: days.bounds,
-    readRun: (q) => resources.transactions.run((tx) => read(tx, q)),
-  });
+  // WP-2423: a Store without a recorded start is covered from its own first business day.
+  const coverage = await resolveDailySettlementCoverage({ installation, days });
+  const result =
+    coverage.kind === "NotYet"
+      ? {
+          scope: "InternalTestClosedDays",
+          firstCoveredBusinessDate: null,
+          coverageScanComplete: true,
+          missingDays: 0,
+          reviewDays: 0,
+          days: [],
+        }
+      : await readPilotDailySettlementStatus({
+          coverage,
+          scope: resources.scope,
+          now: resources.now,
+          readWindow: days.window,
+          readBounds: days.bounds,
+          readRun: (q) => resources.transactions.run((tx) => read(tx, q)),
+        });
   console.log(JSON.stringify(result));
 } catch {
   console.error("DAILY_SETTLEMENT_STATUS_UNAVAILABLE");

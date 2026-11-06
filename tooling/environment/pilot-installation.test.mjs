@@ -694,8 +694,15 @@ it("binds daily coverage to the installation and owner window authority", async 
       contentDigest: "sha256:" + "a".repeat(64),
     },
   };
-  await save("daily-settlement-coverage.json", coverage);
   const i = await loadPilotInstallation(directory);
+  // WP-2423: no record is an answer for the recorded read only; the issue/backup read still fails.
+  expect(await i.loadRecordedDailySettlementCoverage()).toBeNull();
+  await expect(i.loadDailySettlementCoverage()).rejects.toThrow();
+  await save("daily-settlement-coverage.json", coverage);
+  expect(await i.loadRecordedDailySettlementCoverage()).toEqual({
+    scope,
+    firstWindow: coverage.firstWindow,
+  });
   expect(await i.loadDailySettlementCoverage()).toEqual({
     scope,
     firstWindow: coverage.firstWindow,
@@ -710,6 +717,7 @@ it("binds daily coverage to the installation and owner window authority", async 
   ]) {
     await save("daily-settlement-coverage.json", { ...coverage, ...patch });
     await expect(i.loadDailySettlementCoverage()).rejects.toThrow();
+    await expect(i.loadRecordedDailySettlementCoverage()).rejects.toThrow();
   }
 });
 

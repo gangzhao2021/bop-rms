@@ -31,8 +31,6 @@ const fact = (change = {}) => ({
   dead: 0,
   differences: 0,
   opened: true,
-  covered: true,
-  closedDay: false,
   receipt: { ready: true },
   quoteTax: { ready: true },
   ...change,
@@ -86,8 +84,6 @@ function businessOf(facts, closes) {
           return { days: answer(current().days ?? []) };
         },
         readOwnerPublishedSetup: async () => answer(current().opened),
-        isSettlementCovered: async () => answer(current().covered),
-        readClosedBusinessDay: async () => answer(current().closedDay),
         readReceiptTemplate: async () => answer(current().receipt),
         readQuoteTaxConfiguration: async () => answer(current().quoteTax),
         readHeldStockOrders: async () =>
@@ -310,31 +306,37 @@ describe("a new Store must not cry wolf", () => {
     await cycle(0);
     expect((await boardOf(directory, "hotpot")).active).toEqual([]);
   });
-  it("a Store with no settlement coverage is not unreadable, and only BOP is told, once a day has closed", async () => {
-    const facts = { tea: fact({ covered: false, closedDay: false }) };
+  // WP-2423 (settlement-coverage): a Store is covered from its own first business day, with no
+  // file to record. A closed day with no run 6 h after it ended is told to the merchant and BOP.
+  it("a closed day not run is told to the Store and BOP once 6 h have passed, and clears when it runs", async () => {
+    const closedAt = (hours) => new Date(T0 - hours * 3600_000).toISOString();
+    const facts = {
+      tea: fact({ days: [{ state: "Missing", endsAt: closedAt(5), outcome: null }] }),
+    };
     const { directory, cycle, monitors, logs } = await monitorsFor(facts);
     for (const minute of [0, 1, 6]) await cycle(minute);
-    // Not "some checks could not run": there is nothing to check yet.
+    // Within 6 h the run normally lands: nothing to say, and not "some checks could not run".
     expect((await boardOf(directory, "tea")).active).toEqual([]);
-    expect(monitors.summary(T0 + 6 * MIN).settlementNotCovered).toEqual([]);
-    facts.tea.closedDay = true;
-    await cycle(7);
+    expect(monitors.summary(T0 + 6 * MIN).settlementNotRun).toEqual([]);
+    facts.tea.days = [{ state: "Missing", endsAt: closedAt(7), outcome: null }];
+    // The scan was clean and is reused for 5 minutes; after it a scan finds the day not run.
+    for (const minute of [7, 8, 11, 12]) await cycle(minute);
     const board = await boardOf(directory, "tea");
-    expect(keysOf(board)).toEqual(["settlement.not_covered"]);
-    expect(monitors.summary(T0 + 7 * MIN).settlementNotCovered).toEqual(["tea"]);
+    expect(keysOf(board)).toEqual(["settlement.not_run"]);
+    expect(monitors.summary(T0 + 12 * MIN).settlementNotRun).toEqual(["tea"]);
     expect(monitors.pending().map((item) => [item.key, item.store])).toEqual([
-      ["settlement.not_covered", "tea"],
+      ["settlement.not_run", "tea"],
     ]);
-    expect(logs).toContainEqual({ event: "store_settlement_not_covered", store: "tea" });
-    // Coverage recorded: it clears, and settlement problems are read from then on.
-    Object.assign(facts.tea, {
-      covered: true,
-      days: [
-        { state: "Recorded", endsAt: new Date(T0 - 60 * MIN).toISOString(), outcome: "Difference" },
-      ],
-    });
-    for (const minute of [8, 10]) await cycle(minute);
-    expect(keysOf(await boardOf(directory, "tea"))).toEqual(["settlement.exceptions"]);
+    expect(logs).toContainEqual({ event: "store_settlement_not_run", store: "tea" });
+    // It stays raised on every minute's read (no flapping), never cleared while still not run.
+    for (const minute of [13, 14, 15, 18, 19]) await cycle(minute);
+    expect(keysOf(await boardOf(directory, "tea"))).toEqual(["settlement.not_run"]);
+    expect(logs.filter((entry) => entry.event === "alert_cleared")).toEqual([]);
+    // The worker settles the day: the alert clears.
+    facts.tea.days = [{ state: "Recorded", endsAt: closedAt(7), outcome: "Matched" }];
+    for (const minute of [20, 21, 23, 25]) await cycle(minute);
+    expect((await boardOf(directory, "tea")).active).toEqual([]);
+    expect(monitors.summary(T0 + 25 * MIN).settlementNotRun).toEqual([]);
   });
   it("a settings read held up by another merchant's listing raises nothing on a Store board", async () => {
     const held = { ready: false, reason: "StoreConfigurationUnavailable" };
@@ -544,47 +546,28 @@ describe("one part of a Store's read failing leaves the rest standing", () => {
     for (const minute of [8, 9, 11, 13]) await cycle(minute);
     expect((await boardOf(directory, "tea")).active).toEqual([]);
   });
-  it("no coverage already told to BOP is not forgotten while coverage cannot be read", async () => {
-    const facts = { tea: fact({ covered: false, closedDay: true, dead: 1 }) };
-    const { directory, cycle, logs } = await monitorsFor(facts);
-    await cycle(0);
-    expect(keysOf(await boardOf(directory, "tea"))).toEqual([
-      "payment.updates",
-      "settlement.not_covered",
-    ]);
-    facts.tea.covered = refused();
-    for (const minute of [1, 3, 5, 6]) await cycle(minute);
-    expect(keysOf(await boardOf(directory, "tea"))).toEqual([
-      "monitor.source",
-      "payment.updates",
-      "settlement.not_covered",
-    ]);
-    expect(failedChecks(logs).map((entry) => entry.check)).toEqual(["settlement"]);
-  });
-  it("a closed business day that cannot be read is not 'none yet': BOP still hears there is no settlement", async () => {
+  it("a day not run already told is not forgotten while the settlement scan cannot run", async () => {
     const error = refused();
-    const facts = { tea: fact({ covered: false, closedDay: true }) };
+    const days = [{ state: "Missing", endsAt: new Date(T0 - 8 * 3600_000).toISOString() }];
+    const facts = { tea: fact({ days, dead: 1 }) };
     const { directory, cycle, logs, report } = await monitorsFor(facts);
     await cycle(0);
-    expect(keysOf(await boardOf(directory, "tea"))).toEqual(["settlement.not_covered"]);
-    facts.tea.closedDay = error;
+    expect(keysOf(await boardOf(directory, "tea"))).toEqual([
+      "payment.updates",
+      "settlement.not_run",
+    ]);
+    facts.tea.days = error;
     for (const minute of [1, 3, 5, 6]) await cycle(minute);
     const board = await boardOf(directory, "tea");
-    expect(keysOf(board)).toEqual(["monitor.source", "settlement.not_covered"]);
+    expect(keysOf(board)).toEqual(["monitor.source", "payment.updates", "settlement.not_run"]);
     expect(board.active.find((item) => item.key === "monitor.source").summary).toContain(
-      "the check for closed business days",
+      "the day-end settlement check",
     );
-    expect(failedChecks(logs)).toEqual([
-      { event: "store_check_failed", store: "tea", check: "closedDay" },
-    ]);
+    expect(failedChecks(logs).map((entry) => entry.check)).toEqual(["settlement"]);
     expect(report).toHaveBeenCalledWith("PILOT_OPS_STORE_READ_UNAVAILABLE", error, {
       store: "stores/tea",
-      step: "closedDay",
+      step: "settlement",
     });
-    // Read again: once there is an answer, the board says only what it says.
-    facts.tea.closedDay = false;
-    for (const minute of [7, 8, 10, 12]) await cycle(minute);
-    expect((await boardOf(directory, "tea")).active).toEqual([]);
   });
   it("a payment difference already raised stays while its read cannot run, and the rest still rises", async () => {
     const error = refused();
@@ -1017,7 +1000,9 @@ describe("BOP hears one clear message", () => {
   it("names what only BOP can act on, on the root board", async () => {
     const facts = {
       tea: fact(),
-      hotpot: fact({ covered: false, closedDay: true }),
+      hotpot: fact({
+        days: [{ state: "Missing", endsAt: new Date(T0 - 9 * 3600_000).toISOString() }],
+      }),
       dessert: fact({ loadFails: true }),
     };
     const { directory, monitors } = await monitorsFor(facts, {
@@ -1044,7 +1029,9 @@ describe("BOP hears one clear message", () => {
     expect(row.severity).toBe("warning");
     expect(row.summary).toContain("Some checks could not run: dessert.");
     expect(row.summary).toContain("Background work needs a person: hotpot.");
-    expect(row.summary).toContain("Closed business days with no day-end settlement: hotpot.");
+    expect(row.summary).toContain(
+      "Closed business days whose day-end settlement has not run: hotpot.",
+    );
     expect(row.summary).toContain("Ordering setup ending soon: hotpot, dessert.");
     expect(row.summary).toContain("No support number to call: tea, hotpot, dessert.");
     expect(row.summary.length).toBeLessThanOrEqual(600);
@@ -1052,7 +1039,7 @@ describe("BOP hears one clear message", () => {
     for (const step of [
       "find out why the checks named here are not running",
       "restart the background work named here",
-      "record the first closed business day",
+      "check the day-end settlement worker of those Stores",
       "renew those named as ending soon",
       "set the support number",
     ])
@@ -1064,7 +1051,7 @@ describe("BOP hears one clear message", () => {
     expect(keysOf(hotpot)).toEqual([
       "installation.validity",
       "service.attention",
-      "settlement.not_covered",
+      "settlement.not_run",
     ]);
   });
   it("names no missing support number once one is set, and none for a site with no other Store", async () => {

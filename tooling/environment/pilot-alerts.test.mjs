@@ -30,6 +30,7 @@ const healthy = (now = T0) => ({
     retryingUpdates: { count: 0, oldestAgeMs: 0 },
     reconciliationDifferences: { count: 0, oldestAgeMs: 0 },
     settlementExceptions: { count: 0, oldestAgeMs: 0 },
+    settlementNotRun: { count: 0, oldestAgeMs: 0 },
   },
   backup: { lastSuccessAt: new Date(now - 3 * 3600_000).toISOString() },
   certificate: { validTo: new Date(now + 30 * 86400_000).toISOString() },
@@ -813,7 +814,7 @@ describe("what the root says about the other Stores", () => {
           unchecked: [],
           checksFailing: [],
           background: [],
-          settlementNotCovered: [],
+          settlementNotRun: [],
           setupEnding: [],
           noSupportNumber: [],
           ...stores,
@@ -986,7 +987,7 @@ describe("WP-2423 Q13 messages are plain language and carry no private data", ()
       // The most the other Stores' summary can name: the board's limit still holds.
       stores: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
       checksFailing: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
-      settlementNotCovered: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
+      settlementNotRun: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
       setupEnding: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
       background: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
       noSupportNumber: Array.from({ length: 99 }, (_, i) => `store-${"x".repeat(50)}-${i}`),
@@ -1373,7 +1374,7 @@ describe("a Store's own conditions", () => {
           "payment.updates",
           "reconciliation.differences",
           "settlement.exceptions",
-          "settlement.not_covered",
+          "settlement.not_run",
         ].map((key) => [
           key,
           { raisedAt, severity: "warning", params: { count: 1, oldestAgeMs: MIN } },
@@ -1384,34 +1385,50 @@ describe("a Store's own conditions", () => {
       evaluateStoreConditions(
         store({ previous, business: { ...healthy().business, ...business } }),
       );
-    const scan = held({ settlementExceptions: "unreadable" });
-    expect(keys(scan)).toEqual([
-      "monitor.source",
-      "settlement.exceptions",
-      "settlement.not_covered",
-    ]);
+    const scan = held({ settlementExceptions: "unreadable", settlementNotRun: "unreadable" });
+    expect(keys(scan)).toEqual(["monitor.source", "settlement.exceptions", "settlement.not_run"]);
     expect(scan.get("monitor.source").params.sources).toEqual(["the day-end settlement check"]);
     const differences = held({ reconciliationDifferences: "unreadable" });
     expect(keys(differences)).toEqual(["monitor.source", "reconciliation.differences"]);
     expect(differences.get("monitor.source").params.sources).toEqual([
       "the check for payment differences",
     ]);
-    // A closed day that could not be read is not "none yet": no settlement stays told to BOP.
-    const closedDay = held({
-      settlementExceptions: null,
-      settlementCovered: false,
-      closedBusinessDay: "unreadable",
-    });
-    expect(keys(closedDay)).toEqual(["monitor.source", "settlement.not_covered"]);
-    expect(closedDay.get("monitor.source").params.sources).toEqual([
-      "the check for closed business days",
-    ]);
-    const none = held({
-      settlementExceptions: null,
-      settlementCovered: false,
-      closedBusinessDay: false,
-    });
+    // WP-2423: a retired "no coverage" state is never raised again, whatever an older read said.
+    const none = held({ settlementCovered: false, closedBusinessDay: true });
     expect(keys(none)).toEqual([]);
+  });
+  // WP-2423 (settlement-coverage): a closed day whose day-end settlement has not run is its own
+  // alert, on the Store's board (merchant and BOP) and on the root board, never a "problem" staff
+  // could resolve; a recorded difference stays settlement.exceptions.
+  it("a closed day not run raises settlement.not_run, a difference raises settlement.exceptions", () => {
+    const of = (business) =>
+      evaluateStoreConditions(store({ business: { ...healthy().business, ...business } }));
+    const notRun = of({ settlementNotRun: { count: 1, oldestAgeMs: 13 * 3600_000 } });
+    expect(keys(notRun)).toEqual(["settlement.not_run"]);
+    expect(renderAlert("settlement.not_run", notRun.get("settlement.not_run").params)).toEqual({
+      title: "Day-end check with the payment provider has not run",
+      summary:
+        "1 closed business day has not been compared with the payment provider (closed 13 hours ago).",
+      action:
+        "Nothing to change in the store: online payments are taken as usual. The check runs by itself once it is fixed; BOP support can see this.",
+      runbook: "alert-settlement-not-run",
+    });
+    expect(
+      renderAlert("settlement.not_run", { count: 3, oldestAgeMs: 50 * 3600_000 }).summary,
+    ).toMatch(/^3 closed business days have not been compared .*\(the oldest closed .* ago\)\.$/u);
+    expect(
+      storeOutboundNotifications(
+        [{ id: "x", kind: "raised", key: "settlement.not_run", severity: "warning", params: {} }],
+        "tea",
+      ),
+    ).toHaveLength(1);
+    expect(keys(of({ settlementExceptions: { count: 1, oldestAgeMs: 3600_000 } }))).toEqual([
+      "settlement.exceptions",
+    ]);
+    // The installation's own Store says the same on the root board.
+    const root = healthy();
+    root.business.settlementNotRun = { count: 2, oldestAgeMs: 7 * 3600_000 };
+    expect(keys(evaluateAlertConditions(root))).toEqual(["settlement.not_run"]);
   });
   it("background chores the owner cannot fix are BOP's alone, never on the restaurant's Home", () => {
     const flagged = (...attention) =>
@@ -1486,7 +1503,7 @@ describe("a Store's own conditions", () => {
       "pickup.capacity_horizon",
       "reconciliation.differences",
       "settlement.exceptions",
-      "settlement.not_covered",
+      "settlement.not_run",
       "installation.validity",
     ].map((key) => item(key));
     const shared = [
@@ -1530,7 +1547,8 @@ describe("a Store's own conditions", () => {
       "pickup.capacity_horizon": { sent: true, stays: true },
       "reconciliation.differences": { sent: true, stays: true },
       "settlement.exceptions": { sent: true, stays: true },
-      "settlement.not_covered": { sent: true, stays: true },
+      "settlement.not_run": { sent: true, stays: true },
+      "settlement.not_covered": { sent: false, stays: false },
       "stores.unchecked": { sent: false, stays: false },
       "stores.attention": { sent: false, stays: false },
       "backup.failed": { sent: false, stays: false },

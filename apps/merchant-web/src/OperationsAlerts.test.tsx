@@ -156,6 +156,46 @@ describe("WP-2423 Q13 store system alerts on the Home", () => {
       setLanguageForTest("en");
     }
   });
+  // WP-2423 (settlement-coverage): v15 said "Store system: all good" while no day was compared.
+  it("a closed day not compared yet is a row with Settlement, and the line never says all good", () => {
+    const { title, summary, action } = renderAlert("settlement.not_run", {
+      count: 1,
+      oldestAgeMs: 13 * 3600_000,
+    });
+    const read = {
+      kind: "Ready",
+      value: parseOperationsAlertView(
+        view({
+          audience: "Merchant",
+          active: [
+            {
+              key: "settlement.not_run",
+              severity: "warning",
+              title,
+              summary,
+              action,
+              raisedAt: "2026-10-15T11:56:00.000Z",
+            },
+          ],
+        }),
+      ),
+    } as const;
+    const html = rows(read);
+    expect(html).toContain("Day-end check with the payment provider has not run");
+    expect(html).toContain("closed 13 hours ago");
+    expect(html).toContain("Nothing to change in the store");
+    expect(html).toContain('href="/app/operations/payment-reconciliation"');
+    expect(html).not.toContain("BOP support has been told");
+    expect(line(read)).not.toContain("all good");
+    setLanguageForTest("zh-Hans");
+    try {
+      const chinese = rows(read);
+      expect(chinese).toContain("日结还没有和支付方核对");
+      expect(chinese).toContain("店里不用做什么，线上付款照常收。");
+    } finally {
+      setLanguageForTest("en");
+    }
+  });
   it("warns in Needs attention that nothing is being checked when the monitor is silent or not running", () => {
     const silent = { kind: "Ready", value: view({ monitor: "Silent" }) } as const;
     expect(rows(silent)).toContain("The alert monitor stopped reporting at Oct 15, 2026, 8:00 AM");

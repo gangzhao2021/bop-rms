@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   alignDiningExceptionWorkerAccount,
   alignStoreDiningExceptionWorkerAccount,
@@ -254,5 +254,70 @@ it("worker-account: rewrites only the worker file, keeps the old one as a backup
     );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+// WP-2423 (settlement-coverage): the optional record is the Store's first business day, even when
+// it is written days late; a rerun is safe and a different record is never overwritten.
+it("settlement records the Store's first business day, rerun-safe, and never overwrites", async () => {
+  const { recordSettlementCoverage } = await import("./pilot-internal-test-store-open.mjs");
+  const { mkdtemp, readFile: read, stat, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const directory = await mkdtemp(join(tmpdir(), "store-open-settlement-"));
+  const id = (n) => "018f5000-0000-7000-8000-" + String(n).padStart(12, "0");
+  const firstDay = {
+    brandReference: id(2),
+    storeReference: id(3),
+    businessDate: "2026-11-04",
+    startsAt: "2026-11-04T09:00:00.000Z",
+    endsAt: "2026-11-05T09:00:00.000Z",
+    opensAt: "2026-11-05T01:13:00.000Z",
+    configurationReference: id(9),
+    configurationVersion: 1,
+    contentDigest: "sha256:" + "a".repeat(64),
+  };
+  const base = {
+    schemaVersion: 1,
+    environment: "InternalTest",
+    database: "bop_rms_pilot_v15",
+    scope: { tenantReference: id(1), brandReference: id(2), storeReference: id(3) },
+  };
+  const first = vi.fn(async () => firstDay);
+  try {
+    expect(await recordSettlementCoverage({ directory, first, base })).toEqual({
+      status: "Recorded",
+      firstBusinessDate: "2026-11-04",
+    });
+    const file = join(directory, "daily-settlement-coverage.json");
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    const written = JSON.parse(await read(file, "utf8"));
+    expect(written.firstWindow).toEqual({
+      businessDate: "2026-11-04",
+      startsAt: "2026-11-04T09:00:00.000Z",
+      endsAt: "2026-11-05T09:00:00.000Z",
+      configurationReference: id(9),
+      configurationVersion: 1,
+      contentDigest: "sha256:" + "a".repeat(64),
+    });
+    expect(await recordSettlementCoverage({ directory, first, base })).toEqual({
+      status: "AlreadyRecorded",
+      firstBusinessDate: "2026-11-04",
+    });
+    const other = {
+      ...written,
+      firstWindow: { ...written.firstWindow, businessDate: "2026-11-05" },
+    };
+    await writeFile(file, JSON.stringify(other), { mode: 0o600 });
+    await expect(recordSettlementCoverage({ directory, first, base })).rejects.toMatchObject({
+      reason: "coverage-differs",
+    });
+    expect(JSON.parse(await read(file, "utf8"))).toEqual(other);
+    await rm(file);
+    await expect(
+      recordSettlementCoverage({ directory, first: async () => null, base }),
+    ).rejects.toMatchObject({ reason: "no-closed-business-day" });
+    await expect(stat(file)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });

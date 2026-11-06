@@ -228,14 +228,22 @@ export const CONSUMER_RETRYING_SUMMARY =
   "SELECT count(*)::int AS count, min(deadline_at) AS oldest_deadline FROM platform_eventing.consumer_retry_schedule WHERE state IN ('scheduled','claimed') AND (attempt_count >= $1 OR deadline_at <= $2)";
 export const OUTBOX_RETRYING_SUMMARY =
   "SELECT count(*)::int AS count, min(recorded_at) AS oldest FROM platform_eventing.outbox_event WHERE published_at IS NULL AND last_error_code IS NULL AND (attempt_count >= $1 OR available_at <= $2)";
-const settlementMissingGraceMs = 6 * 60 * 60_000;
+/**
+ * WP-2423: a closed business day with no day-end settlement run this long after it ended is "not
+ * run" (the run normally lands within minutes). The merchant Settlement page uses the same grace
+ * (apps/api merchantSettlementNotRunAfterMs; a test keeps them equal).
+ */
+export const SETTLEMENT_MISSING_GRACE_MS = 6 * 60 * 60_000;
+const settlementMissingGraceMs = SETTLEMENT_MISSING_GRACE_MS;
 
 /**
  * Payment and settlement signals for one Store, through the api role and its Brand/Store row
  * security. Stuck updates: dead-lettered events (Store rows and Brand-wide rows);
  * retrying updates: events still being retried for a while (see above); reconciliation
  * differences: owner exception source items not yet closed by a refund; settlement: the daily
- * settlement status (days with differences, and closed days still missing after 6 h).
+ * settlement status — `settlementExceptions`, recorded days whose outcome is not a match (the
+ * merchant reviews them), and `settlementNotRun`, closed days with no run 6 h after they ended
+ * (the worker's to fix, never the merchant's).
  */
 const WORKFLOW_BINDINGS = Object.freeze(["Pickup", "DineIn", "AdditionalRelease", "Cancellation"]);
 /** Only the closed shape goes on; anything else is unreadable, never a guess that all is well. */
@@ -262,7 +270,8 @@ export async function readBusinessSignals({
   installation,
   now,
   dependencies,
-  settlementExceptions = null,
+  // A recent settlement answer to reuse (see createBusinessObserver): both fields, or "unreadable".
+  settlement: reuseSettlement = null,
   // DEC-PILOT-ALERTS-BACKUP correction 2: a Store's owner hears nothing of a check that could not
   // run, so BOP must be able to find out why. Not composed for the installation's own Store.
   reportCheck: reportOnStoreBoard = null,
@@ -449,42 +458,28 @@ export async function readBusinessSignals({
     reconciliationDifferences,
   };
   // WP-2423: a recent clean settlement answer may be reused (see createBusinessObserver).
-  if (settlementExceptions !== null) return { ...signals, settlementExceptions };
+  if (reuseSettlement === "unreadable")
+    return { ...signals, settlementExceptions: "unreadable", settlementNotRun: "unreadable" };
+  if (reuseSettlement !== null) return { ...signals, ...reuseSettlement };
   const settlement = await part("settlement", async () => {
-    // DEC-PILOT-ALERTS-BACKUP correction 2: a Store whose first closed day is not recorded yet has
-    // no settlement to read: not checked, never "all settled", and BOP is told once a day has
-    // closed. Not composed for the installation's own Store, where a missing file stays unreadable.
-    if (
-      typeof dependencies.isSettlementCovered === "function" &&
-      (await dependencies.isSettlementCovered()) === false
-    ) {
-      // A closed day that could not be read is not "none yet": "unreadable" keeps what it said.
-      const closed =
-        opened === true
-          ? await part(
-              "closedDay",
-              async () => (await dependencies.readClosedBusinessDay(resources)) === true,
-            )
-          : opened;
-      return {
-        settlementExceptions: null,
-        settlementCovered: false,
-        closedBusinessDay: closed === true || closed === "unreadable" ? closed : false,
-      };
-    }
+    // WP-2423 (settlement-coverage): every Store is covered from its own first business day (a
+    // Pilot Store from its issued record), so a closed day with no run is a fact, not a missing
+    // file. No closed day yet lists no day: nothing to say.
     const status = await dependencies.readSettlementStatus({ resources, installation });
-    const problems = status.days.filter(
-      (day) =>
-        (day.state === "Recorded" && day.outcome !== "Matched") ||
-        (day.state === "Missing" && now - Date.parse(day.endsAt) > settlementMissingGraceMs),
+    const exceptions = status.days.filter(
+      (day) => day.state === "Recorded" && day.outcome !== "Matched",
     );
-    const settlementOldest = problems.map((day) => day.endsAt).sort()[0] ?? null;
+    const notRun = status.days.filter(
+      (day) => day.state === "Missing" && now - Date.parse(day.endsAt) > settlementMissingGraceMs,
+    );
+    const oldest = (days) => age(days.map((day) => day.endsAt).sort()[0] ?? null);
     return {
-      settlementExceptions: { count: problems.length, oldestAgeMs: age(settlementOldest) },
+      settlementExceptions: { count: exceptions.length, oldestAgeMs: oldest(exceptions) },
+      settlementNotRun: { count: notRun.length, oldestAgeMs: oldest(notRun) },
     };
   });
   return settlement === "unreadable"
-    ? { ...signals, settlementExceptions: "unreadable" }
+    ? { ...signals, settlementExceptions: "unreadable", settlementNotRun: "unreadable" }
     : { ...signals, ...settlement };
 }
 
@@ -520,9 +515,13 @@ export function createBusinessObserver({
       state ??= await load(runtimeDirectory);
       // A scan that could not run waits like a clean one: it is the costliest read here, and
       // running it every minute only to fail again gains nothing. What it last said stays raised.
+      // Both settlement fields are cached together, and reused only while both are clean (or the
+      // scan was unreadable): a day not run must stay raised every minute, never flap.
       const reuse =
         settlement !== null &&
-        (settlement === "unreadable" || settlement.count === 0) &&
+        (settlement === "unreadable" ||
+          (settlement.settlementExceptions?.count === 0 &&
+            settlement.settlementNotRun?.count === 0)) &&
         now - settlementAt < settlementIntervalMs
           ? settlement
           : null;
@@ -530,7 +529,7 @@ export function createBusinessObserver({
       last = await readBusinessSignals({
         ...state,
         now,
-        settlementExceptions: reuse,
+        settlement: reuse,
         ...(reportCheck === null
           ? {}
           : {
@@ -543,7 +542,13 @@ export function createBusinessObserver({
       });
       for (const check of reportedChecks) if (!failing.has(check)) reportedChecks.delete(check);
       if (reuse === null) {
-        settlement = last.settlementExceptions;
+        settlement =
+          last.settlementExceptions === "unreadable" || last.settlementNotRun === "unreadable"
+            ? "unreadable"
+            : {
+                settlementExceptions: last.settlementExceptions,
+                settlementNotRun: last.settlementNotRun,
+              };
         settlementAt = now;
       }
       lastAt = now;
