@@ -145,6 +145,29 @@ describe("WP-2423 item 8 ⑥ one-page menu", () => {
     expect(dish && dishMatches(dish, "  ", new Set())).toBe(true);
   });
 
+  it("WP-2423 (M78): counts a dish guests see sold out from stock as sold out", () => {
+    const short: AvailabilityItem = {
+      skuReference: id(30),
+      skuCode: "S30",
+      productName: "Har gow (TEST)",
+      sizeName: "Har gow (TEST)",
+      status: "Available",
+      soldOutUntil: null,
+      stock: "Short",
+      stockSoldOut: { ingredients: [] },
+    };
+    const rows = menuRows(view(), [...stock, short]);
+    const harGow = rows[0]?.dishes[0];
+    expect([harGow?.name, harGow?.soldOut, harGow?.stockShort]).toEqual([
+      "Har gow (TEST)",
+      false,
+      true,
+    ]);
+    expect(
+      filterRows(rows, "", new Set(["SoldOut"])).flatMap((row) => row.dishes.map((d) => d.name)),
+    ).toEqual(["Har gow (TEST)", "Siu mai (TEST)"]);
+  });
+
   it("saves the order as the draft takes it, and tells a moved order from the read one", () => {
     const rows = menuRows(view(), stock);
     const read = orderKey(rows);

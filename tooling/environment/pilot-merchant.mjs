@@ -1346,6 +1346,8 @@ export async function createInternalMerchant(
     ...(createInternalStaffStockShortage === undefined
       ? {}
       : { stock: await createInternalStaffStockShortage(resources) }),
+    // WP-2423 (M78): an unread stock answer is said on the page and its cause logged here.
+    onUnexpected: (code, error) => reportUnexpected(code, error),
   });
   const storeTax = createMerchantStoreTax({
     persistence,

@@ -30,6 +30,8 @@ export interface MenuSize {
   readonly priceMinor: string | null;
   readonly pendingPriceMinor: string | null;
   readonly soldOut: boolean;
+  /** WP-2423 (M78): offered, but guests see it sold out because stock cannot make one. */
+  readonly stockShort?: boolean;
   readonly hidden: boolean;
   readonly featured: boolean;
 }
@@ -53,6 +55,8 @@ export interface MenuDish {
   /** The dish (product) of the size; null in views without it. */
   readonly productReference: string | null;
   readonly soldOut: boolean;
+  /** WP-2423 (M78): every size is offered but short of stock for guests. */
+  readonly stockShort?: boolean;
   readonly hidden: boolean;
   readonly featured: boolean;
   /** Where its allergens come from: declared by staff here, a real recipe, or not yet. */
@@ -75,7 +79,7 @@ export function menuRows(
   availability: readonly AvailabilityItem[],
 ): readonly MenuSectionRow[] {
   const sellables = new Map(view.sellables.map((sku) => [sku.skuReference, sku]));
-  const status = new Map(availability.map((item) => [item.skuReference, item.status]));
+  const status = new Map(availability.map((item) => [item.skuReference, item]));
   return view.menu.sections.map((section) => ({
     sectionReference: section.sectionReference,
     code: section.code,
@@ -108,6 +112,7 @@ function groupDishes(sizes: readonly MenuDish[]): readonly MenuDish[] {
       ...dish,
       sizes: merged,
       soldOut: merged.every((x) => x.soldOut),
+      stockShort: merged.every((x) => x.stockShort === true),
       hidden: merged.every((x) => x.hidden),
     };
   }
@@ -125,9 +130,14 @@ function groupDishes(sizes: readonly MenuDish[]): readonly MenuDish[] {
 
 function dishOf(
   sku: MenuSellable,
-  status: AvailabilityItem["status"] | undefined,
+  item: AvailabilityItem | undefined,
   featured: boolean,
 ): MenuDish {
+  const status = item?.status;
+  // WP-2423 (M78): offered here but guests see it sold out from stock.
+  const stockShort =
+    (status === "Available" || status === "Varies") &&
+    (item?.stock === "Short" || (item?.stock === undefined && item?.stockSoldOut != null));
   return {
     skuReference: sku.skuReference,
     name: sku.productName,
@@ -144,6 +154,7 @@ function dishOf(
         : sku.pendingBrandPriceMinor,
     productReference: sku.productReference ?? null,
     soldOut: status === "SoldOut",
+    stockShort,
     // Not offered at this Store: guests here do not see it (it stays on the menu).
     hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
     featured,
@@ -158,6 +169,7 @@ function dishOf(
         priceMinor: sku.priceMinor,
         pendingPriceMinor: sku.pendingPriceMinor ?? null,
         soldOut: status === "SoldOut",
+        stockShort,
         hidden: sku.offeredHere === false || status === "NotOffered" || status === "Unavailable",
         featured,
       },
@@ -171,7 +183,7 @@ export function dishesNotOnMenu(
   availability: readonly AvailabilityItem[],
 ): readonly MenuDish[] {
   const placed = new Set(view.menu.sections.flatMap((s) => s.items.map((i) => i.skuReference)));
-  const status = new Map(availability.map((item) => [item.skuReference, item.status]));
+  const status = new Map(availability.map((item) => [item.skuReference, item]));
   return groupDishes(
     view.sellables
       .filter((sku) => sku.active && !placed.has(sku.skuReference))
@@ -191,7 +203,8 @@ export function dishMatches(
   if (query !== "" && !fold(dish.name).includes(query) && !fold(dish.nameZh).includes(query))
     return false;
   // A dish shows under a filter when any of its sizes is sold out, unpriced or hidden.
-  if (filters.has("SoldOut") && !dish.sizes.some((x) => x.soldOut)) return false;
+  if (filters.has("SoldOut") && !dish.sizes.some((x) => x.soldOut || x.stockShort === true))
+    return false;
   if (filters.has("NoPrice") && !dish.sizes.some((x) => x.priceMinor === null)) return false;
   if (filters.has("Hidden") && !dish.sizes.some((x) => x.hidden)) return false;
   if (filters.has("MissingName") && dish.name.trim() !== "" && dish.nameZh.trim() !== "")

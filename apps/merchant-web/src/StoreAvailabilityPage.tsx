@@ -391,6 +391,14 @@ export function StoreAvailabilityPage({
           <p>{message.text}</p>
         </StatePanel>
       ) : null}
+      {view.stockCheck === "NotChecked" ? (
+        // WP-2423 (M78): an unread stock answer is said, never shown as "Available".
+        <p className="availability-note" role="status">
+          {t(
+            "Stock couldn't be checked just now, so items short of stock aren't marked. Refresh to try again.",
+          )}
+        </p>
+      ) : null}
       {items.length === 0 ? (
         <StatePanel heading={t("No items")} status>
           <p>
@@ -428,7 +436,9 @@ export function StoreAvailabilityPage({
                       : item.stockSoldOut != null &&
                           (item.status === "Available" || item.status === "Varies")
                         ? t("Sold out to guests (stock)")
-                        : statusText[item.status]}
+                        : item.status === "Available" && view.stockCheck === "NotChecked"
+                          ? t("Offered")
+                          : statusText[item.status]}
                     {item.stockSoldOut != null &&
                     (item.status === "Available" || item.status === "Varies") ? (
                       <p className="availability-note">

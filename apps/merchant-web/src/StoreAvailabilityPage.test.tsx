@@ -193,6 +193,11 @@ describe("WP-2423 (2026-10-16) why guests see an offered item sold out from stoc
         items: [{ ...view.items[0], stockSoldOut: { ingredients: [{ ...milk, onHand: 2.8 }] } }],
       }),
     ).toThrow();
+    // WP-2423 (M78): an unread stock answer is carried to the page, never dropped.
+    expect(parseStoreAvailabilityView({ ...view, stockCheck: "NotChecked" }).stockCheck).toBe(
+      "NotChecked",
+    );
+    expect(() => parseStoreAvailabilityView({ ...view, stockCheck: "Maybe" })).toThrow();
   });
 });
 

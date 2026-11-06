@@ -238,6 +238,8 @@ export interface StaffStockShortage {
    * Store's stock site (a new Store before its first delivery). Absent when stock was.
    */
   readonly noStockReceived?: true;
+  /** WP-2423 (M78): this item's stock could not be read (not the same as "no recipe stock"). */
+  readonly failed?: true;
 }
 export type RecipeStockShortageView = Awaited<
   ReturnType<ReturnType<typeof createCustomerRecipeInventoryObservation>["observe"]>
@@ -347,7 +349,10 @@ export function createStaffStockShortageSource(options: {
           );
         } catch {
           // Unknown stock: no reason is shown (the menu never sells out an item from it either).
-          result.set(sellableReference, Object.freeze({ status: "Indeterminate", shortages: [] }));
+          result.set(
+            sellableReference,
+            Object.freeze({ status: "Indeterminate", shortages: [], failed: true as const }),
+          );
         }
       }
       return result;

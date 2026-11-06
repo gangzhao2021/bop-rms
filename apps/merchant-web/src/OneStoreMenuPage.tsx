@@ -791,7 +791,13 @@ export function OneStoreMenuPage({
                   ) : null}
                 </span>
                 <span className="one-menu__size-state">
-                  {size.hidden ? t("Hidden") : size.soldOut ? t("Sold out today") : ""}
+                  {size.hidden
+                    ? t("Hidden")
+                    : size.soldOut
+                      ? t("Sold out today")
+                      : size.stockShort === true
+                        ? t("Sold out to guests (stock)")
+                        : ""}
                 </span>
                 {soldOutButton(size, sizeLabel, true)}
               </li>
@@ -815,7 +821,13 @@ export function OneStoreMenuPage({
               }))(comboOf(dish.skuReference))}
       </span>
       <span className="one-menu__state">
-        {dish.hidden ? t("Hidden") : dish.soldOut ? t("Sold out today") : ""}
+        {dish.hidden
+          ? t("Hidden")
+          : dish.soldOut
+            ? t("Sold out today")
+            : dish.stockShort === true
+              ? t("Sold out to guests (stock)")
+              : ""}
       </span>
       <span className="one-menu__actions">
         {dishActions(dish)}

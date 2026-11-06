@@ -8911,4 +8911,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Missing or stolen": "丢失或被盗",
   "Kept in another place": "放在别处",
   "Reason not known": "原因不明",
+  // WP-2423 sold-out-and-allergen-safety
+  "Stock couldn't be checked just now, so items short of stock aren't marked. Refresh to try again.":
+    "现在查不到库存，缺料售罄的菜没有标出来。请刷新再试。",
 });

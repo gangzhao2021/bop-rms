@@ -24,6 +24,11 @@ export interface AvailabilityItem {
    * (absent from an older server, null when stock covers it or is unknown).
    */
   readonly stockSoldOut?: StockSoldOut | null;
+  /**
+   * WP-2423 (M78): what the stock read says — "Short" (guests see it sold out), "Enough", or
+   * "Unknown" (no recipe stock, or not read). Absent from an older server.
+   */
+  readonly stock?: "Short" | "Enough" | "Unknown";
 }
 export interface StockShortIngredient {
   readonly name: string;
@@ -158,6 +163,8 @@ export interface StoreAvailabilityView {
     /** WP-2423 Q17: false for floor staff, who mark items sold out for today only. */
     readonly mayMarkUntilBack?: boolean;
   };
+  /** WP-2423 (M78): "NotChecked" when stock could not be read, so short items are not marked. */
+  readonly stockCheck?: "Checked" | "NotChecked";
   readonly items: readonly AvailabilityItem[];
 }
 export type AvailabilityCommand =
@@ -183,6 +190,7 @@ export function parseStoreAvailabilityView(value: unknown): StoreAvailabilityVie
     r === null ||
     typeof r !== "object" ||
     r.screenId !== "CAT-AVAILABILITY" ||
+    (r.stockCheck !== undefined && r.stockCheck !== "Checked" && r.stockCheck !== "NotChecked") ||
     !Array.isArray(r.items) ||
     !r.items.every(
       (item: unknown) =>

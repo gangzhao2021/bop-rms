@@ -15,6 +15,7 @@ import {
   createCustomerInventoryEvidence,
   createStaffStockShortageSource,
 } from "../../../apps/api/src/customer-menu-inventory-evidence.ts";
+import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
 const { Client } = pg;
 const id = (n) => "01902402-0000-7000-8000-" + n.toString(16).padStart(12, "0");
 const at = "2026-08-02T16:00:00.000Z";
@@ -240,6 +241,76 @@ it("shows an item sold out while its ingredient stock cannot make one, and avail
         assert.ok(reason.shortages[0].name.length > 0);
       }
       assert.equal(await cart(), "Rejected");
+
+      // WP-2423 (M78): the Item availability page, composed as the pilot merchant runtime composes
+      // it — authorized reads in a command-mode transaction (READ COMMITTED, read-write) and the
+      // stock read in the snapshot — says the item is short of stock, never "Available".
+      const commandRunner = {
+        async run(action) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          active++;
+          try {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL ROLE " + role);
+            await client.query(
+              "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+              [scope.brandReference, scope.storeReference],
+            );
+            const result = await action({ query: (sql, values) => client.query(sql, [...values]) });
+            await client.query("COMMIT");
+            return result;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+            active--;
+          }
+        },
+      };
+      const allow = { effect: "Allow" };
+      const staffScope = {
+        tenantReference: inventoryScope.tenantReference,
+        context: { brand: { brandReference: scope.brandReference } },
+        storeContext: {},
+        selectedStoreReference: scope.storeReference,
+        selectedStoreTimeZone: "America/Toronto",
+        actorReference: id(3),
+        authorizeAction: async () => allow,
+        authorizeStoreAction: async () => allow,
+      };
+      const reported = [];
+      const availabilityPage = (transactions) =>
+        createMerchantAvailability({
+          persistence: { transactions, now: () => now },
+          authentication: { authorize: async () => ({ sessionReference: id(70) }) },
+          references: { next: () => id(71) },
+          locale: "en-CA",
+          resolveScope: async () => staffScope,
+          stock: staffStock,
+          onUnexpected: (code) => reported.push(code),
+        }).query({ sessionCookie: "synthetic", csrf: "synthetic" });
+      {
+        const page = await availabilityPage({
+          run: commandRunner.run,
+          runSnapshot: readRunner.run,
+        });
+        const item = page.items.find((entry) => entry.skuReference === id(13));
+        assert.notEqual(item.stockSoldOut, null, "short of stock, never shown as Available");
+        assert.equal(item.stockSoldOut.ingredients.length, 1);
+        assert.equal(page.stockCheck, "Checked");
+        assert.equal(item.stock, "Short");
+        assert.equal(item.stockSoldOut.ingredients[0].available, "0");
+        assert.deepEqual(reported, []);
+        // A composition without the snapshot cannot read stock: the page says so and logs it,
+        // and never says stock covers the item.
+        const unread = await availabilityPage({ run: commandRunner.run });
+        assert.equal(unread.stockCheck, "NotChecked");
+        const unreadItem = unread.items.find((entry) => entry.skuReference === id(13));
+        assert.equal(unreadItem.stock, "Unknown");
+        assert.deepEqual(reported, ["MERCHANT_AVAILABILITY_STOCK_UNREAD"]);
+      }
       assert.deepEqual(
         await port.loadEvidence({
           ...scope,

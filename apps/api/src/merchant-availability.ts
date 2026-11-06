@@ -27,7 +27,7 @@ import { createMerchantStoreBusinessDay } from "./merchant-store-business-day.js
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
-import { withOptionalRead } from "./merchant-round-business-date.js";
+import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
 import type {
   createStaffStockShortageSource,
   StaffStockShortage,
@@ -203,6 +203,20 @@ export function stockSoldOutView(found: StaffStockShortage | undefined) {
   });
 }
 
+/**
+ * WP-2423 (M78): what the stock read says about one item for staff. "Short": guests see it sold out
+ * from stock. "Enough": stock covers one. "Unknown": it has no recipe stock to check, or its stock
+ * could not be read.
+ */
+export function stockAnswer(found: StaffStockShortage | undefined): "Short" | "Enough" | "Unknown" {
+  if (found === undefined || found.failed === true) return "Unknown";
+  return found.status === "Unavailable"
+    ? "Short"
+    : found.status === "Available"
+      ? "Enough"
+      : "Unknown";
+}
+
 export function createMerchantAvailability(options: {
   persistence: PersistentMerchantBffOptions;
   authentication: Pick<MerchantBffService, "authorize">;
@@ -215,6 +229,8 @@ export function createMerchantAvailability(options: {
    * the page shows the availability rules only.
    */
   stock?: Pick<ReturnType<typeof createStaffStockShortageSource>, "explain">;
+  /** A read that failed for an unexpected reason (code only; no names or references). */
+  onUnexpected?: (code: string, error: unknown) => void;
 }) {
   const resolveScope = options.resolveScope ?? createMerchantBrandScope(options.persistence);
   type Tx = Parameters<Parameters<typeof options.persistence.transactions.run>[0]>[0];
@@ -282,7 +298,7 @@ export function createMerchantAvailability(options: {
 
   const query = async (input: { sessionCookie: unknown; csrf: unknown }) => {
     const current = await session(input);
-    return retryTransactionConflict(() =>
+    const read = await retryTransactionConflict(() =>
       options.persistence.transactions.run((tx) =>
         withRememberedBrandAuthorization(tx, async () => {
           const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
@@ -295,59 +311,90 @@ export function createMerchantAvailability(options: {
               itemAvailability(rules, s.owner, sku.skuReference, at),
             ]),
           );
-          // WP-2423 (2026-10-16): items the rules offer but guests see as sold out from stock. Read
-          // last in a savepoint, so an unreadable stock answer never blanks the page.
-          const stockSource = options.stock;
-          const stock =
-            stockSource === undefined
-              ? new Map<string, StaffStockShortage>()
-              : await withOptionalRead(
-                  tx as never,
-                  () =>
-                    stockSource.explain(tx as never, {
-                      brandReference: s.owner.brandReference,
-                      storeReference: s.owner.storeReference,
-                      observedAt: at,
-                      sellableReferences: skus
-                        .filter((sku) => {
-                          const status = statuses.get(sku.skuReference)?.status;
-                          return status === "Available" || status === "Varies";
-                        })
-                        .map((sku) => String(sku.skuReference)),
-                    }),
-                  new Map<string, StaffStockShortage>() as ReadonlyMap<string, StaffStockShortage>,
-                );
-          return {
-            screenId: "CAT-AVAILABILITY" as const,
-            sourceAsOf: at,
-            viewer: s.actor,
-            timeZone: s.timeZone,
-            permissions: s.permissions,
-            items: skus
-              .map((sku) => ({
-                skuReference: sku.skuReference,
-                skuCode: sku.skuCode,
-                productName: name(sku.productLocalizedNames, sku.skuCode),
-                sizeName: name(sku.localizedNames, sku.skuCode),
-                ...(statuses.get(sku.skuReference) ??
-                  itemAvailability(rules, s.owner, sku.skuReference, at)),
-                // WP-2423 item 8 ⑥ (v15 finding d): ever offered at this store — false for a
-                // size no one has decided here yet; a hidden size keeps its stopped offer.
-                decidedHere: rules.some(
-                  (rule) =>
-                    rule.sellableReference === sku.skuReference &&
-                    rule.reasonCode === offeredReason,
-                ),
-                stockSoldOut: stockSoldOutView(stock.get(String(sku.skuReference))),
-              }))
-              .sort(
-                (a, b) =>
-                  a.productName.localeCompare(b.productName) || a.skuCode.localeCompare(b.skuCode),
-              ),
-          };
+          return { s, at, skus, rules, statuses };
         }),
       ),
     );
+    const { s, at, skus, rules, statuses } = read;
+    // WP-2423 (M78, 2026-11-06): what guests see from stock is read the way the guest menu reads
+    // it — one Repeatable Read, read-only snapshot scoped to the Store the caller was just
+    // authorized for. The stock read refuses any other transaction, so reading it inside the
+    // command-mode transaction above failed every time and the page showed items short of stock
+    // as "Available". A failed read is now said on the page (stockCheck "NotChecked") and
+    // reported, never shown as stock that covers the item.
+    const stockSource = options.stock;
+    let stockCheck: "Checked" | "NotChecked" = "Checked";
+    let stock: ReadonlyMap<string, StaffStockShortage> = new Map();
+    if (stockSource !== undefined) {
+      const sellableReferences = skus
+        .filter((sku) => {
+          const status = statuses.get(sku.skuReference)?.status;
+          return status === "Available" || status === "Varies";
+        })
+        .map((sku) => String(sku.skuReference));
+      try {
+        stock =
+          sellableReferences.length === 0
+            ? new Map()
+            : await runMerchantSnapshotRead(options.persistence.transactions, async (tx) => {
+                await tx.query(
+                  "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+                  [s.owner.brandReference, s.owner.storeReference],
+                );
+                return stockSource.explain(tx as never, {
+                  brandReference: s.owner.brandReference,
+                  storeReference: s.owner.storeReference,
+                  observedAt: at,
+                  sellableReferences,
+                });
+              });
+        if (sellableReferences.some((reference) => stock.get(reference)?.failed === true))
+          stockCheck = "NotChecked";
+      } catch (error) {
+        stockCheck = "NotChecked";
+        stock = new Map();
+        options.onUnexpected?.("MERCHANT_AVAILABILITY_STOCK_UNREAD", error);
+      }
+      if (stockCheck === "NotChecked" && stock.size > 0)
+        options.onUnexpected?.(
+          "MERCHANT_AVAILABILITY_STOCK_UNREAD",
+          new Error("STOCK_ITEM_UNREAD"),
+        );
+    }
+    return {
+      screenId: "CAT-AVAILABILITY" as const,
+      sourceAsOf: at,
+      viewer: s.actor,
+      timeZone: s.timeZone,
+      permissions: s.permissions,
+      ...(stockSource === undefined ? {} : { stockCheck }),
+      items: skus
+        .map((sku) => {
+          const found = stock.get(String(sku.skuReference));
+          const status =
+            statuses.get(sku.skuReference) ??
+            itemAvailability(rules, s.owner, sku.skuReference, at);
+          return {
+            skuReference: sku.skuReference,
+            skuCode: sku.skuCode,
+            productName: name(sku.productLocalizedNames, sku.skuCode),
+            sizeName: name(sku.localizedNames, sku.skuCode),
+            ...status,
+            // WP-2423 item 8 ⑥ (v15 finding d): ever offered at this store — false for a
+            // size no one has decided here yet; a hidden size keeps its stopped offer.
+            decidedHere: rules.some(
+              (rule) =>
+                rule.sellableReference === sku.skuReference && rule.reasonCode === offeredReason,
+            ),
+            stockSoldOut: stockSoldOutView(found),
+            ...(stockSource === undefined ? {} : { stock: stockAnswer(found) }),
+          };
+        })
+        .sort(
+          (a, b) =>
+            a.productName.localeCompare(b.productName) || a.skuCode.localeCompare(b.skuCode),
+        ),
+    };
   };
 
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
