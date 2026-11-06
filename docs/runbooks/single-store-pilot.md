@@ -684,6 +684,12 @@ what staff do when something fails is different:
 - **Kitchen**: works from paper tickets while the Kitchen board is down.
 - **Pilot operator**: the person who runs the pilot host (today the Owner's machine; P4 cloud host
   later). Restarts services; not on the shop floor.
+- **Role changes (WP-2423 role presets)**: a turned-on role change applies to signed-in staff at
+  their next action the server checks; a refund or comp the server already accepted stays done,
+  one sent after the change is checked against the new role (a removed power is refused with "no
+  access", nothing half-done). Do not edit, approve or turn on a role during an outage: staff keep
+  the role they have, and the owner makes the change on `Roles` once screens load again (a change
+  left waiting is still there; send or withdraw it then).
 
 ### Who to call (Owner input, not yet provided)
 
