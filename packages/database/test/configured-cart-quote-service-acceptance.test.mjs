@@ -545,7 +545,13 @@ it.each([false, true])(
             code: "ORDER_SUBMISSION_SOURCE_UNAVAILABLE",
           });
           const withheld = { ...command, operationReference: id(903) };
-          await assert.rejects(service.attach(withheld), { code: "CART_DEPENDENCY_UNAVAILABLE" });
+          // WP-2423 guest-cart-503: an archived dish is a stable "no longer sold": the guest's line is
+          // named (remove it), never a busy wait. Nothing is attached.
+          await assert.rejects(service.attach(withheld), {
+            code: "CART_ITEM_UNAVAILABLE",
+            cartItemReference: cart.items[0].cartItemReference,
+            reason: "Unavailable",
+          });
           assert.equal(await attachments.resolveOperation(withheld.operationReference), null);
           assert.deepEqual(await counts(), { quotes: 3, requests: 3, attachments: 2, audits: 5 });
           await admin.query("UPDATE rms_catalog.sku SET lifecycle='Active' WHERE sku_id=$1", [
@@ -555,6 +561,78 @@ it.each([false, true])(
           assert.equal((await service.attach(withheld)).status, "Attached");
           assert.equal(candidateCalls, beforeRecovery);
           assert.deepEqual(await counts(), { quotes: 3, requests: 3, attachments: 3, audits: 6 });
+          // WP-2423 guest-cart-503 (M06): staff mark the dish sold out. The guest is told which dish
+          // at once (409, the line named, no Retry-After), and nothing is attached or changed.
+          const cartVersion = async () =>
+            (
+              await admin.query(
+                "SELECT aggregate_version FROM rms_ordering.cart WHERE cart_id=$1",
+                [cart.cartReference],
+              )
+            ).rows[0].aggregate_version;
+          const soldOutRule = id(980001);
+          await admin.query(
+            "INSERT INTO rms_catalog.availability_rule (availability_rule_id,brand_id,internal_code,aggregate_version,lifecycle,sku_id,store_id,channel_codes_json,order_type_codes_json,effective_from,effective_until,decision,priority,reason_code,created_at,created_by_actor_id,updated_at) VALUES ($1,$2,'SOLD_OUT_TODAY',1,'Active',$3,$4,'[]'::jsonb,'[]'::jsonb,$5,NULL,'Unavailable',1000,'SOLD_OUT_TODAY',$5,$6,$5)",
+            [
+              soldOutRule,
+              scope.brandReference,
+              cart.items[0].sellableReference,
+              scope.storeReference,
+              f.observedAt,
+              id(980002),
+            ],
+          );
+          const before = { ...(await counts()), version: await cartVersion() };
+          const soldOut = await send(id(906));
+          assert.equal(soldOut.status, 409);
+          assert.deepEqual(soldOut.body.error, {
+            code: "quote_item_unavailable",
+            messageKey: "customer.quote.item_unavailable",
+            line: { cartItemReference: cart.items[0].cartItemReference },
+          });
+          // Asking again with the same key gives the same named answer (no background retry).
+          assert.deepEqual(await send(id(906)), soldOut);
+          const afterSoldOut = await counts();
+          assert.equal(afterSoldOut.attachments, before.attachments);
+          assert.equal(await cartVersion(), before.version);
+          await admin.query(
+            "DELETE FROM rms_catalog.availability_rule WHERE availability_rule_id=$1",
+            [soldOutRule],
+          );
+          // Mid-listing: the published menu is being rebuilt after the instant read. The dish is
+          // still sold, so the guest is asked to wait (503 Retry-After), never told to remove it.
+          const rebuilt = (
+            await admin.query(
+              "SELECT generation_id,last_rebuilt_at FROM rms_catalog.published_menu_projection_generation WHERE brand_id=$1 AND freshness_status='Fresh'",
+              [scope.brandReference],
+            )
+          ).rows;
+          assert.equal(rebuilt.length, 1);
+          await admin.query(
+            "UPDATE rms_catalog.published_menu_projection_generation SET last_rebuilt_at=$2 WHERE generation_id=$1",
+            [rebuilt[0].generation_id, new Date(Date.parse(currentAt) + 60_000).toISOString()],
+          );
+          const listing = await send(id(907));
+          assert.equal(listing.status, 503);
+          assert.equal(listing.body.error.code, "quote_service_unavailable");
+          assert.equal((await counts()).attachments, before.attachments);
+          await admin.query(
+            "UPDATE rms_catalog.published_menu_projection_generation SET last_rebuilt_at=$2 WHERE generation_id=$1",
+            [rebuilt[0].generation_id, rebuilt[0].last_rebuilt_at],
+          );
+          // Back on sale: the same cart prices and attaches.
+          const resold = await send(id(908));
+          assert.equal(resold.status, 201);
+          assert.equal((await counts()).attachments, before.attachments + 1);
+          // The refused taps each left one priced, append-only, self-expiring quote request.
+          const after = await counts();
+          const shifted = (expected) =>
+            Object.fromEntries(
+              Object.entries(expected).map(([key, value]) => [
+                key,
+                value + after[key] - before[key],
+              ]),
+            );
           const shortQuote = {
             ...quote,
             quoteReference: id(904),
@@ -572,7 +650,10 @@ it.each([false, true])(
           assert.equal(expired.status, 410);
           assert.equal(expired.body.error.code, "quote_operation_expired");
           assert.deepEqual(await send(id(904)), expired);
-          assert.deepEqual(await counts(), { quotes: 4, requests: 4, attachments: 3, audits: 8 });
+          assert.deepEqual(
+            await counts(),
+            shifted({ quotes: 4, requests: 4, attachments: 3, audits: 8 }),
+          );
           const beforeExpiry = {
             candidateCalls,
             catalogReads: entry.catalogReads(),
@@ -611,7 +692,10 @@ it.each([false, true])(
           assert.equal((await send()).status, 404);
           assert.equal((await send(id(904))).status, 404);
           await assert.rejects(service.attach(command), { code: "CART_PERMISSION_DENIED" });
-          assert.deepEqual(await counts(), { quotes: 4, requests: 4, attachments: 3, audits: 8 });
+          assert.deepEqual(
+            await counts(),
+            shifted({ quotes: 4, requests: 4, attachments: 3, audits: 8 }),
+          );
           assert.equal(active, 0);
         } finally {
           if (runtime) await runtime.shutdown("SIGTERM");

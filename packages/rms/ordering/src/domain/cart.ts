@@ -82,6 +82,8 @@ export const cartErrorCodes = [
   "CART_ITEM_NOT_FOUND",
   "CART_ITEM_LIMIT_REACHED",
   "CART_SELECTION_INVALID",
+  /** WP-2423 (guest-cart-503): one named line cannot be sold now; remove it (never retried). */
+  "CART_ITEM_UNAVAILABLE",
   "CART_QUOTE_INVALID",
   "CART_QUOTE_EXPIRED",
   "CART_LIFECYCLE_UNAVAILABLE",
@@ -132,6 +134,67 @@ export class CartCheckoutInProgressError extends CartError {
   constructor(heldUntil: string) {
     super("CART_CHECKOUT_IN_PROGRESS");
     this.heldUntil = heldUntil;
+  }
+}
+
+/**
+ * WP-2423 (guest-cart-503): why a named line cannot be sold now, from a stable Catalog fact only.
+ * `Unavailable`: sold out, out of stock, hidden or no longer on the menu. `OptionsChanged`: the dish
+ * is sold but its chosen options no longer fit. `SetupIncomplete`: the merchant's menu setup is
+ * missing a fact the order needs (for example the tax class); staff must fix the menu.
+ */
+export type CartItemUnavailableReason = "Unavailable" | "OptionsChanged" | "SetupIncomplete";
+export const cartItemUnavailableReasons: readonly CartItemUnavailableReason[] = Object.freeze([
+  "Unavailable",
+  "OptionsChanged",
+  "SetupIncomplete",
+]);
+
+/** WP-2423 (guest-cart-503): the guest's own cart line that cannot be sold now. */
+export class CartItemUnavailableError extends CartError {
+  readonly cartItemReference: OrderingReference;
+  readonly reason: CartItemUnavailableReason;
+  constructor(cartItemReference: OrderingReference, reason: CartItemUnavailableReason) {
+    super("CART_ITEM_UNAVAILABLE");
+    this.name = "CartItemUnavailableError";
+    this.cartItemReference = cartItemReference;
+    this.reason = reason;
+  }
+}
+
+/**
+ * The CartError an edge maps, also when the deployed entry loads this package as a second copy
+ * (then `instanceof` fails, as customer-dining-cart-composition notes): matched by name and a known
+ * code. Anything else is null.
+ */
+export function readCartError(error: unknown): CartError | null {
+  if (error instanceof CartError) return error;
+  if (!(error instanceof Error)) return null;
+  const code = (error as { code?: unknown }).code;
+  if (
+    (error.name !== "CartError" &&
+      error.name !== "CartItemUnavailableError" &&
+      error.name !== "CartCheckoutInProgressError") ||
+    typeof code !== "string" ||
+    !(cartErrorCodes as readonly string[]).includes(code)
+  )
+    return null;
+  return error as CartError;
+}
+
+/** The unavailable line of a CartItemUnavailableError (either copy), or null. */
+export function readCartItemUnavailable(
+  error: unknown,
+): { cartItemReference: OrderingReference; reason: CartItemUnavailableReason } | null {
+  const found = readCartError(error);
+  if (found === null || found.code !== "CART_ITEM_UNAVAILABLE") return null;
+  const raw = found as Partial<CartItemUnavailableError>;
+  try {
+    const reason = raw.reason;
+    if (reason === undefined || !cartItemUnavailableReasons.includes(reason)) return null;
+    return { cartItemReference: parseOrderingReference(raw.cartItemReference), reason };
+  } catch {
+    return null;
   }
 }
 

@@ -277,6 +277,25 @@ describe("WP-1103/1104 Customer Quote API", () => {
     });
   });
 
+  it.each([
+    ["Unavailable", "quote_item_unavailable", "customer.quote.item_unavailable"],
+    ["OptionsChanged", "quote_item_options_changed", "customer.quote.item_options_changed"],
+  ] as const)(
+    "WP-2423 guest-cart-503: names the %s line with nothing to wait for",
+    async (reason, code, messageKey) => {
+      const service = new Port();
+      const port = await listen(service);
+      const cartItemReference = "0190a7c3-0000-7000-8000-000000000301";
+      service.result = { status: "ItemUnavailable", cartItemReference, reason };
+      const response = await post(port);
+      expect(response.status).toBe(409);
+      expect(response.headers.get("retry-after")).toBeNull();
+      expect(await response.json()).toEqual({
+        schemaVersion: 1,
+        error: { code, messageKey, line: { cartItemReference } },
+      });
+    },
+  );
   it("fails closed on thrown or declared service unavailability", async () => {
     const service = new Port();
     const port = await listen(service);

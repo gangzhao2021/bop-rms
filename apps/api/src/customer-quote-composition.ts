@@ -24,6 +24,8 @@ import {
   createPostgresCartQuoteStore,
   createPostgresPickupCartBindingReader,
   parseOrderingReference,
+  readCartError,
+  readCartItemUnavailable,
   type CartQueryTransactionRunner,
   type PickupCartQuoteOptions,
   type CartQuoteAttachment,
@@ -44,6 +46,7 @@ import {
   type PriceQuoteQueryTransactionRunner,
 } from "@rms/pricing";
 import type { CustomerQuotePort, QuoteCartCommand, QuoteCartResult } from "./customer-quote.js";
+import { logGuestFailure } from "./guest-failure-log.js";
 
 type AttachmentEntry = ReturnType<typeof createPickupCartQuoteService>;
 const unavailable = Object.freeze({ status: "Unavailable" } as const);
@@ -133,10 +136,23 @@ function matchesQuote(
     ),
   );
 }
-function initialFailure(error: unknown): QuoteCartResult {
-  if (error instanceof CartCheckoutInProgressError)
-    return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
-  if (!(error instanceof CartError)) return unavailable;
+function initialFailure(raw: unknown): QuoteCartResult {
+  if (raw instanceof CartCheckoutInProgressError)
+    return { status: "CheckoutInProgress", heldUntil: raw.heldUntil };
+  // WP-2423 (guest-cart-503): by name as well, since the entry can load Ordering as two copies.
+  const line = readCartItemUnavailable(raw);
+  if (line !== null) {
+    // A dish the merchant's setup leaves unsellable: staff must fix the menu (no IDs logged).
+    if (line.reason === "SetupIncomplete")
+      logGuestFailure("CUSTOMER_QUOTE_LINE_SETUP_INCOMPLETE", raw);
+    return {
+      status: "ItemUnavailable",
+      cartItemReference: line.cartItemReference,
+      reason: line.reason === "OptionsChanged" ? "OptionsChanged" : "Unavailable",
+    };
+  }
+  const error = readCartError(raw);
+  if (error === null) return unavailable;
   switch (error.code) {
     case "CART_PERMISSION_DENIED":
     case "CART_UNAVAILABLE":

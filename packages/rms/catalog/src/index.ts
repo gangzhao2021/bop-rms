@@ -69,6 +69,7 @@ export {
   createPostgresCurrentSelectionFactsStore,
   createPostgresCatalogSelectionService,
   createPostgresCatalogOrderSnapshotSource,
+  type CatalogLineStanding,
 } from "./infrastructure/persistence/current-selection-facts-store.js";
 
 export { createPostgresMenuPricingFactsSource } from "./infrastructure/persistence/menu-pricing-facts-source.js";

@@ -10,6 +10,9 @@ import {
   parseCatalogReference,
   parseCatalogCode,
   parseCatalogInstant,
+  type CatalogCode,
+  type CatalogInstant,
+  type CatalogReference,
 } from "../../contracts/product.js";
 import type { CurrentSelectionSourcePorts } from "../../application/current-selection-source.js";
 import type { AvailabilityQueryTransactionRunner } from "./availability-query-store.js";
@@ -17,6 +20,153 @@ import { createPostgresCurrentMenuReleaseStore } from "./current-menu-release-st
 import { createPostgresPublishedMenuQueryStore } from "./published-menu-query-store.js";
 import { createPostgresCurrentSkuStore } from "./current-sku-store.js";
 import { createPostgresCurrentOptionBindingsStore } from "./current-option-bindings-store.js";
+
+/**
+ * WP-2423 (guest-cart-503): one cart line's standing now. Only `Available` sells; `Indeterminate`
+ * may change by itself (retry); the others are stable until staff change the menu or stock.
+ */
+export type CatalogLineStanding =
+  | "Available"
+  | "Unavailable"
+  | "NotOnMenu"
+  | "OptionsChanged"
+  | "SetupIncomplete"
+  | "Indeterminate";
+type FactsTransaction = Parameters<Parameters<AvailabilityQueryTransactionRunner["run"]>[0]>[0];
+interface FactsRequest {
+  readonly brandReference: CatalogReference;
+  readonly storeReference: CatalogReference;
+  readonly sellableReference: CatalogReference;
+  readonly menuReference: CatalogReference;
+  readonly channelCode: CatalogCode;
+  readonly orderTypeCode: CatalogCode;
+  readonly observedAt: CatalogInstant;
+}
+/**
+ * WP-2423 (guest-cart-503): why a dish has no current facts. `NotOnMenu` only when the current
+ * release and its Fresh published menu agree and the dish is not in it, or its product can no longer
+ * be sold; anything that can change by itself (a listing in progress, a projection not yet rebuilt,
+ * release and published rows that disagree) is `Indeterminate`.
+ */
+type FactsAbsence = "NotOnMenu" | "Indeterminate";
+type MenuMemo = Map<string, Promise<unknown>>;
+
+async function classifiedFacts(
+  tx: FactsTransaction,
+  fixed: Readonly<{ brandReference: CatalogReference; storeReference: CatalogReference }>,
+  request: FactsRequest,
+  memo?: MenuMemo,
+) {
+  const brand = fixed.brandReference,
+    store = fixed.storeReference;
+  const shared: AvailabilityQueryTransactionRunner = { run: (action) => action(tx) };
+  // One read per menu in a batch (same transaction, same instant): the release and its projection.
+  const menuKey = [
+    request.menuReference,
+    request.channelCode,
+    request.orderTypeCode,
+    request.observedAt,
+  ].join("|");
+  const loadMenu = async () => {
+    const release = await createPostgresCurrentMenuReleaseStore(shared, fixed).load({
+      menuReference: request.menuReference,
+      channelCode: request.channelCode,
+      orderTypeCode: request.orderTypeCode,
+      observedAt: request.observedAt,
+    });
+    if (release === null) return null;
+    const projections = await createPostgresPublishedMenuQueryStore(shared, fixed).loadCandidates({
+      ...fixed,
+      channelCode: request.channelCode,
+      orderTypeCode: request.orderTypeCode,
+      requestedAt: request.observedAt,
+    });
+    return { release, projections };
+  };
+  let menuRead = memo?.get(menuKey) as ReturnType<typeof loadMenu> | undefined;
+  if (menuRead === undefined) {
+    menuRead = loadMenu();
+    memo?.set(menuKey, menuRead);
+  }
+  const menu = await menuRead;
+  if (menu === null) return "Indeterminate" as FactsAbsence;
+  const { release, projections } = menu;
+  const candidates = projections.filter((p) => p.snapshot.menuReference === request.menuReference);
+  if (candidates.length !== 1) return "Indeterminate" as FactsAbsence;
+  const projection = candidates[0];
+  if (!projection) return "Indeterminate" as FactsAbsence;
+  const p = projection.snapshot;
+  if (
+    projection.freshnessStatus !== "Fresh" ||
+    projection.lastRebuiltAt > request.observedAt ||
+    p.menuVersionReference !== release.menuVersionReference ||
+    p.releaseReference !== release.releaseReference ||
+    p.snapshotDigest !== release.snapshotDigest ||
+    p.effectiveFrom !== release.effectiveFrom ||
+    p.effectiveUntil !== release.effectiveUntil ||
+    !p.storeReferences.includes(store) ||
+    !p.channelCodes.includes(request.channelCode) ||
+    !p.orderTypeCodes.includes(request.orderTypeCode)
+  )
+    return "Indeterminate" as FactsAbsence;
+  const sellables = p.sections
+    .flatMap((section) => section.sellables)
+    .filter((s) => s.sellableReference === request.sellableReference);
+  if (sellables.length === 0) return "NotOnMenu" as FactsAbsence;
+  if (new Set(sellables.map((s) => s.productVersionReference)).size !== 1)
+    return "Indeterminate" as FactsAbsence;
+  const published = sellables[0];
+  if (!published) return "Indeterminate" as FactsAbsence;
+  const sku = await createPostgresCurrentSkuStore(shared, { brandReference: brand }).load({
+    sellableReference: request.sellableReference,
+    productVersionReference: published.productVersionReference,
+    observedAt: request.observedAt,
+  });
+  if (sku === null) return "Indeterminate" as FactsAbsence;
+  if (!sku.catalogEligible) return "NotOnMenu" as FactsAbsence;
+  const options = await createPostgresCurrentOptionBindingsStore(shared, {
+    brandReference: brand,
+  }).load({
+    sellableReference: sku.sellableReference,
+    productVersionReference: sku.productVersionReference,
+    channelCode: request.channelCode,
+    observedAt: request.observedAt,
+  });
+  if (options === null || options.productReference !== sku.productReference)
+    return "Indeterminate" as FactsAbsence;
+  return Object.freeze({
+    brandReference: brand,
+    storeReference: store,
+    sellableReference: sku.sellableReference,
+    observedAt: request.observedAt,
+    release,
+    published: Object.freeze({
+      menuReference: p.menuReference,
+      menuVersionReference: p.menuVersionReference,
+      releaseReference: p.releaseReference,
+      snapshotDigest: p.snapshotDigest,
+      sellableReference: published.sellableReference,
+      productVersionReference: published.productVersionReference,
+      localizedNames: published.localizedNames,
+      optionRules: published.optionRules,
+    }),
+    sku,
+    bindings: options.bindings,
+  });
+}
+
+async function assertCoherentReadOnly(tx: FactsTransaction) {
+  const settings = await tx.query(
+    "SELECT current_setting('transaction_isolation') AS isolation, current_setting('transaction_read_only') AS read_only",
+    [],
+  );
+  const rows = Object.getOwnPropertyDescriptor(settings, "rows")?.value as unknown;
+  if (!Array.isArray(rows) || rows.length !== 1) throw new Error("invalid transaction");
+  const isolation = Object.getOwnPropertyDescriptor(rows[0], "isolation")?.value as unknown;
+  const readonly = Object.getOwnPropertyDescriptor(rows[0], "read_only")?.value as unknown;
+  if ((isolation !== "repeatable read" && isolation !== "serializable") || readonly !== "on")
+    throw new Error("coherent read-only transaction required");
+}
 
 /** One Catalog snapshot. Runner owns a dedicated read-only Repeatable Read transaction. */
 export function createPostgresCurrentSelectionFactsStore(
@@ -39,101 +189,13 @@ export function createPostgresCurrentSelectionFactsStore(
           observedAt: parseCatalogInstant(input.observedAt),
         });
         return await runner.run(async (tx) => {
-          const settings = await tx.query(
-            "SELECT current_setting('transaction_isolation') AS isolation, current_setting('transaction_read_only') AS read_only",
-            [],
+          await assertCoherentReadOnly(tx);
+          const found = await classifiedFacts(
+            tx,
+            { brandReference: brand, storeReference: store },
+            request,
           );
-          const rows = Object.getOwnPropertyDescriptor(settings, "rows")?.value as unknown;
-          if (!Array.isArray(rows) || rows.length !== 1) throw new Error("invalid transaction");
-          const isolation = Object.getOwnPropertyDescriptor(rows[0], "isolation")?.value as unknown;
-          const readonly = Object.getOwnPropertyDescriptor(rows[0], "read_only")?.value as unknown;
-          if (
-            (isolation !== "repeatable read" && isolation !== "serializable") ||
-            readonly !== "on"
-          )
-            throw new Error("coherent read-only transaction required");
-          const shared: AvailabilityQueryTransactionRunner = { run: (action) => action(tx) };
-          const fixed = { brandReference: brand, storeReference: store };
-          const release = await createPostgresCurrentMenuReleaseStore(shared, fixed).load({
-            menuReference: request.menuReference,
-            channelCode: request.channelCode,
-            orderTypeCode: request.orderTypeCode,
-            observedAt: request.observedAt,
-          });
-          if (release === null) return null;
-          const projections = await createPostgresPublishedMenuQueryStore(
-            shared,
-            fixed,
-          ).loadCandidates({
-            ...fixed,
-            channelCode: request.channelCode,
-            orderTypeCode: request.orderTypeCode,
-            requestedAt: request.observedAt,
-          });
-          const candidates = projections.filter(
-            (p) => p.snapshot.menuReference === request.menuReference,
-          );
-          if (candidates.length !== 1) return null;
-          const projection = candidates[0];
-          if (!projection) return null;
-          const p = projection.snapshot;
-          if (
-            projection.freshnessStatus !== "Fresh" ||
-            projection.lastRebuiltAt > request.observedAt ||
-            p.menuVersionReference !== release.menuVersionReference ||
-            p.releaseReference !== release.releaseReference ||
-            p.snapshotDigest !== release.snapshotDigest ||
-            p.effectiveFrom !== release.effectiveFrom ||
-            p.effectiveUntil !== release.effectiveUntil ||
-            !p.storeReferences.includes(store) ||
-            !p.channelCodes.includes(request.channelCode) ||
-            !p.orderTypeCodes.includes(request.orderTypeCode)
-          )
-            return null;
-          const sellables = p.sections
-            .flatMap((section) => section.sellables)
-            .filter((s) => s.sellableReference === request.sellableReference);
-          if (
-            sellables.length === 0 ||
-            new Set(sellables.map((s) => s.productVersionReference)).size !== 1
-          )
-            return null;
-          const published = sellables[0];
-          if (!published) return null;
-          const sku = await createPostgresCurrentSkuStore(shared, { brandReference: brand }).load({
-            sellableReference: request.sellableReference,
-            productVersionReference: published.productVersionReference,
-            observedAt: request.observedAt,
-          });
-          if (sku === null || !sku.catalogEligible) return null;
-          const options = await createPostgresCurrentOptionBindingsStore(shared, {
-            brandReference: brand,
-          }).load({
-            sellableReference: sku.sellableReference,
-            productVersionReference: sku.productVersionReference,
-            channelCode: request.channelCode,
-            observedAt: request.observedAt,
-          });
-          if (options === null || options.productReference !== sku.productReference) return null;
-          return Object.freeze({
-            brandReference: brand,
-            storeReference: store,
-            sellableReference: sku.sellableReference,
-            observedAt: request.observedAt,
-            release,
-            published: Object.freeze({
-              menuReference: p.menuReference,
-              menuVersionReference: p.menuVersionReference,
-              releaseReference: p.releaseReference,
-              snapshotDigest: p.snapshotDigest,
-              sellableReference: published.sellableReference,
-              productVersionReference: published.productVersionReference,
-              localizedNames: published.localizedNames,
-              optionRules: published.optionRules,
-            }),
-            sku,
-            bindings: options.bindings,
-          });
+          return typeof found === "string" ? null : found;
         });
       } catch {
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
@@ -261,6 +323,110 @@ export function createPostgresCatalogOrderSnapshotSource(
             ...snapshot,
             snapshotDigest: parsePublishingDigest(references.hash(JSON.stringify(snapshot))),
           });
+        });
+      } catch {
+        throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
+      }
+    },
+    /**
+     * WP-2423 (guest-cart-503): why each line can or cannot be sold now, in one read-only
+     * transaction for the whole cart (the menu is read once). Only a stable fact refuses a line:
+     * an availability rule, stock or kill switch that says Unavailable, a dish the current coherent
+     * menu does not list, a product no longer sold, options that no longer fit, or a dish whose tax
+     * class the merchant has not set. A listing in progress, a projection not yet rebuilt, release
+     * and published rows that disagree, or an instant that passed during the read are
+     * `Indeterminate`: the caller answers "try again", never "remove it".
+     */
+    async explainMany(
+      inputs: readonly ValidateCatalogSelectionInput[],
+    ): Promise<readonly CatalogLineStanding[]> {
+      try {
+        if (!Array.isArray(inputs) || inputs.length > 100) throw new Error("invalid lines");
+        const channelCode = parseCatalogCode(fixed.channelCode),
+          orderTypeCode = parseCatalogCode(fixed.orderTypeCode),
+          menuReference = parseCatalogReference(fixed.menuReference),
+          brand = parseCatalogReference(ownerScope.brandReference),
+          store = parseCatalogReference(ownerScope.storeReference);
+        return await runner.run(async (tx) => {
+          await assertCoherentReadOnly(tx);
+          const shared: AvailabilityQueryTransactionRunner = { run: (work) => work(tx) };
+          const memo: MenuMemo = new Map();
+          const availability = createCurrentAvailabilityQueryService(
+            {
+              rules: createPostgresAvailabilityQueryStore(shared, ownerScope),
+              killSwitch: safety.killSwitch,
+              inventory: safety.inventory,
+              clock: safety.clock,
+            },
+            ownerScope,
+          );
+          const standings: CatalogLineStanding[] = [];
+          // Sequential: one transaction client is never used concurrently.
+          for (const input of inputs) {
+            if (
+              input.brandReference !== fixed.brandReference ||
+              input.storeReference !== fixed.storeReference ||
+              input.sourceChannel !== fixed.sourceChannel ||
+              input.orderType !== fixed.orderType
+            ) {
+              standings.push("Indeterminate");
+              continue;
+            }
+            const sellableReference = parseCatalogReference(input.sellableReference);
+            const observedAt = parseCatalogInstant(input.observedAt);
+            const available = await availability.resolveCurrent({
+              brandReference: ownerScope.brandReference,
+              storeReference: ownerScope.storeReference,
+              sellableReference,
+              channelCode,
+              orderTypeCode,
+              observedAt,
+            });
+            if (available.status === "Unavailable") {
+              standings.push("Unavailable");
+              continue;
+            }
+            if (available.status !== "Available") {
+              standings.push("Indeterminate");
+              continue;
+            }
+            const facts = await classifiedFacts(
+              tx,
+              { brandReference: brand, storeReference: store },
+              {
+                brandReference: brand,
+                storeReference: store,
+                sellableReference,
+                menuReference,
+                channelCode,
+                orderTypeCode,
+                observedAt,
+              },
+              memo,
+            );
+            if (typeof facts === "string") {
+              standings.push(facts);
+              continue;
+            }
+            if (facts.sku.taxClassificationReference === null) {
+              standings.push("SetupIncomplete");
+              continue;
+            }
+            const selection = await createCatalogSelectionValidationService({
+              snapshots: createCurrentCatalogSelectionSource(
+                { facts: { load: async () => facts }, availability, clock: safety.clock },
+                fixed,
+              ),
+            }).validateSelection(input);
+            standings.push(
+              selection.status === "Accepted"
+                ? "Available"
+                : selection.reason === "SELLABLE_UNAVAILABLE"
+                  ? "Indeterminate"
+                  : "OptionsChanged",
+            );
+          }
+          return Object.freeze(standings);
         });
       } catch {
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");

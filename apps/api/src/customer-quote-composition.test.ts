@@ -134,6 +134,53 @@ describe("authorized Quote HTTP bridge", () => {
     expect(await f.port.quoteCart(f.input)).toEqual({ status });
     expect(f.resolve).not.toHaveBeenCalled();
   });
+  it.each([
+    ["Unavailable", "Unavailable"],
+    ["OptionsChanged", "OptionsChanged"],
+    ["SetupIncomplete", "Unavailable"],
+  ] as const)(
+    "WP-2423 guest-cart-503: names a %s line, never Unavailable",
+    async (reason, said) => {
+      const f = fixture();
+      f.attach.mockRejectedValue(new Ordering.CartItemUnavailableError(id(301) as never, reason));
+      expect(await f.port.quoteCart(f.input)).toEqual({
+        status: "ItemUnavailable",
+        cartItemReference: id(301),
+        reason: said,
+      });
+      expect(f.resolve).not.toHaveBeenCalled();
+    },
+  );
+  it("WP-2423 guest-cart-503: maps the error from a second copy of Ordering by name", async () => {
+    const f = fixture();
+    // Not instanceof this copy's CartError: as the pilot entry can load the package twice.
+    class CartItemUnavailableError extends Error {
+      readonly code = "CART_ITEM_UNAVAILABLE";
+      readonly cartItemReference = id(302);
+      readonly reason = "Unavailable";
+      constructor() {
+        super("cart is unavailable");
+        this.name = "CartItemUnavailableError";
+      }
+    }
+    class CartError extends Error {
+      readonly code = "CART_TABLE_CHECKING_OUT";
+      constructor() {
+        super("cart is unavailable");
+        this.name = "CartError";
+      }
+    }
+    f.attach.mockRejectedValueOnce(new CartItemUnavailableError());
+    expect(await f.port.quoteCart(f.input)).toEqual({
+      status: "ItemUnavailable",
+      cartItemReference: id(302),
+      reason: "Unavailable",
+    });
+    f.attach.mockRejectedValueOnce(new CartError());
+    expect(await f.port.quoteCart(f.input)).toEqual({ status: "TableCheckingOut" });
+    f.attach.mockRejectedValueOnce({ name: "CartError", code: "CART_TABLE_CHECKING_OUT" });
+    expect(await f.port.quoteCart(f.input)).toEqual({ status: "Unavailable" });
+  });
   it.each([null, "corrupt", "failure"])("preserves uncertainty for %s history", async (kind) => {
     const f = fixture();
     if (kind === "failure") f.resolve.mockRejectedValue(new Error("synthetic private cause"));

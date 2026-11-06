@@ -13,6 +13,8 @@ import {
 } from "@rms/pricing";
 import {
   CartError,
+  CartItemUnavailableError,
+  type CartItemUnavailableReason,
   parseCartAggregate,
   parseOrderingReference,
   parseOrderingInstant,
@@ -49,7 +51,15 @@ export interface ConfiguredCartQuotePorts {
       },
     ): Promise<ConfiguredPriceQuoteSnapshot>;
   };
-  readonly catalog: { capture(input: ValidateCatalogSelectionInput): Promise<unknown> };
+  readonly catalog: {
+    capture(input: ValidateCatalogSelectionInput): Promise<unknown>;
+    /**
+     * WP-2423 (guest-cart-503): each line's standing now (Catalog `CatalogLineStanding`). A line
+     * capture refuses is named to the guest only when this says so from a stable fact; any other
+     * answer (or none) stays "try again".
+     */
+    explainMany?(inputs: readonly ValidateCatalogSelectionInput[]): Promise<readonly unknown[]>;
+  };
   /**
    * WP-2423 DEC-MERCHANT-LOCK-SCOPE: an owner lists with the tables full. A line added before that
    * still holds the old menu version, so every price and send was refused until the guest edited
@@ -85,6 +95,14 @@ export interface ConfiguredCartQuotePorts {
 const fail = (): never => {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
 };
+/** WP-2423 (guest-cart-503): a stable Catalog standing as the guest's reason, or null (retry). */
+export function cartItemUnavailableReason(standing: unknown): CartItemUnavailableReason | null {
+  return standing === "Unavailable" || standing === "NotOnMenu"
+    ? "Unavailable"
+    : standing === "OptionsChanged" || standing === "SetupIncomplete"
+      ? standing
+      : null;
+}
 const denied = (): never => {
   throw new CartError("CART_PERMISSION_DENIED");
 };
@@ -164,6 +182,33 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
           return { session, audit: found.audit, at };
         }
         const first = await authorize();
+        const selectionOf = (item: CartAggregate["items"][number], at: string) => ({
+          brandReference: cart.brandReference as never,
+          storeReference: cart.storeReference as never,
+          sourceChannel: cart.sourceChannel,
+          orderType: cart.orderType,
+          sellableReference: item.sellableReference as never,
+          optionSelections: item.optionSelections as never,
+          observedAt: at as never,
+        });
+        /** Names the line only on a stable Catalog fact; anything else is "try again" (503). */
+        async function refuse(item: CartAggregate["items"][number]): Promise<never> {
+          const explain = ports.catalog.explainMany;
+          if (explain === undefined) return fail();
+          let standings: readonly unknown[];
+          try {
+            standings = await explain([selectionOf(item, now())]);
+          } catch {
+            return fail();
+          }
+          const reason =
+            Array.isArray(standings) && standings.length === 1
+              ? cartItemUnavailableReason(standings[0])
+              : null;
+          if (reason === null) return fail();
+          await authorize();
+          throw new CartItemUnavailableError(item.cartItemReference, reason);
+        }
         function owned(value: unknown, previous?: CartAggregate) {
           if (value === null) throw new CartError("CART_UNAVAILABLE");
           const cart = parseCartAggregate(value);
@@ -261,10 +306,10 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
           );
           if (version !== null && carried.length > 0) {
             const lines = [];
-            for (const item of carried)
-              lines.push({
-                cartItemReference: item.cartItemReference,
-                evidence: await validatedCatalogEvidence(
+            for (const item of carried) {
+              let replaced: CatalogSelectionEvidence;
+              try {
+                replaced = await validatedCatalogEvidence(
                   evidence,
                   cart,
                   item.sellableReference,
@@ -272,8 +317,15 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
                   observedAt,
                   item.quantity,
                   parseOrderingReference(first.session.sessionReference),
-                ),
-              });
+                );
+              } catch (error) {
+                // Not sold as carried over: name it only when Catalog says so for a stable reason.
+                if (error instanceof CartError && error.code === "CART_SELECTION_INVALID")
+                  return await refuse(item);
+                throw error;
+              }
+              lines.push({ cartItemReference: item.cartItemReference, evidence: replaced });
+            }
             await authorize();
             await evidence.replace({ cartReference, expectedCartVersion, lines });
             cart = owned(await ports.repository.loadCart(cartReference));
@@ -311,17 +363,10 @@ export function createConfiguredCartQuoteService(ports: ConfiguredCartQuotePorts
         await authorize();
         const catalogLines = [];
         for (const item of cart.items) {
-          const snapshot = parseOrderCatalogLineSnapshot(
-            await ports.catalog.capture({
-              brandReference: cart.brandReference as never,
-              storeReference: cart.storeReference as never,
-              sourceChannel: cart.sourceChannel,
-              orderType: cart.orderType,
-              sellableReference: item.sellableReference as never,
-              optionSelections: item.optionSelections as never,
-              observedAt: now() as never,
-            }),
-          );
+          const captured = await ports.catalog.capture(selectionOf(item, now()));
+          // Capture refuses a line it cannot sell now, and also one caught mid-listing.
+          if (captured === null) return await refuse(item);
+          const snapshot = parseOrderCatalogLineSnapshot(captured);
           catalogLines.push({ cartItemReference: item.cartItemReference, snapshot });
           await authorize();
         }

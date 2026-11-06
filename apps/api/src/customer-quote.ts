@@ -59,6 +59,15 @@ export type QuoteCartResult =
   | { readonly status: "CheckoutInProgress"; readonly heldUntil: string }
   /** DEC-DINE-IN-PAY-LATER: staff started the table's checkout; no more rounds from a phone. */
   | { readonly status: "TableCheckingOut" }
+  /**
+   * WP-2423 (guest-cart-503): this guest's cart line cannot be sold now (stable Catalog fact); the
+   * guest removes it. `OptionsChanged`: the dish is sold, its chosen options no longer fit.
+   */
+  | {
+      readonly status: "ItemUnavailable";
+      readonly cartItemReference: string;
+      readonly reason: "Unavailable" | "OptionsChanged";
+    }
   | { readonly status: "Unavailable" };
 
 export interface CustomerQuotePort {
@@ -73,6 +82,8 @@ type ErrorCode =
   | "quote_configuration_invalid"
   | "cart_checkout_in_progress"
   | "cart_table_checking_out"
+  | "quote_item_unavailable"
+  | "quote_item_options_changed"
   | "quote_service_unavailable";
 
 const errors = Object.freeze({
@@ -83,6 +94,8 @@ const errors = Object.freeze({
   quote_configuration_invalid: { status: 422, messageKey: "customer.quote.configuration_invalid" },
   cart_checkout_in_progress: { status: 409, messageKey: "customer.cart.checkout_in_progress" },
   cart_table_checking_out: { status: 409, messageKey: "customer.cart.table_checking_out" },
+  quote_item_unavailable: { status: 409, messageKey: "customer.quote.item_unavailable" },
+  quote_item_options_changed: { status: 409, messageKey: "customer.quote.item_options_changed" },
   quote_service_unavailable: { status: 503, messageKey: "customer.quote.service_unavailable" },
 } as const);
 
@@ -301,6 +314,26 @@ export class CustomerQuoteHandler {
           String(checkoutHoldRetrySeconds(result.heldUntil, this.#now())),
         );
         sendError(response, "cart_checkout_in_progress");
+        return;
+      }
+      if (result.status === "ItemUnavailable") {
+        // No Retry-After: asking again gives the same answer until the guest removes the line.
+        const code =
+          result.reason === "OptionsChanged"
+            ? "quote_item_options_changed"
+            : "quote_item_unavailable";
+        if (!uuidV7.test(result.cartItemReference)) {
+          sendError(response, "quote_service_unavailable");
+          return;
+        }
+        response.status(409).json({
+          schemaVersion: 1,
+          error: {
+            code,
+            messageKey: errors[code].messageKey,
+            line: { cartItemReference: result.cartItemReference },
+          },
+        });
         return;
       }
       const mapping = {

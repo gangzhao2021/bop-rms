@@ -8,7 +8,11 @@ import {
 import type { CartQuoteAttachment } from "../domain/cart-quote-attachment.js";
 import { fixture, id } from "./configured-cart-quote.fixture.js";
 
-function setup(dining = false, evidence?: ConfiguredCartQuotePorts["evidence"]) {
+function setup(
+  dining = false,
+  evidence?: ConfiguredCartQuotePorts["evidence"],
+  explainMany?: NonNullable<ConfiguredCartQuotePorts["catalog"]["explainMany"]>,
+) {
   const f = fixture(dining);
   const snapshot = f.catalogLines[0]?.snapshot;
   if (snapshot === undefined) throw new Error("synthetic Catalog fixture missing");
@@ -79,7 +83,7 @@ function setup(dining = false, evidence?: ConfiguredCartQuotePorts["evidence"]) 
   const service = createConfiguredCartQuoteService({
     authorization: { authorize },
     pricing: { quoteCart },
-    catalog: { capture },
+    catalog: explainMany === undefined ? { capture } : { capture, explainMany },
     references: {
       hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
       equals: (left, right) => left === right,
@@ -371,19 +375,59 @@ describe("WP-2423: a cart priced after the owner listed", () => {
     const replaced = replace.mock.invocationCallOrder[0] ?? 0;
     expect(s.quoteCart.mock.invocationCallOrder[0] ?? 0).toBeGreaterThan(replaced);
   });
-  it("says so when a line can no longer be sold, and changes nothing", async () => {
+  it("names a carried-over line Catalog says is no longer sold, and changes nothing", async () => {
     const replace = vi.fn(async () => undefined);
-    const s = setup(false, {
-      currentMenuVersion: async () => id(97),
-      validateSelection: async () =>
-        ({ status: "Rejected", reason: "SELLABLE_UNAVAILABLE" }) as never,
-      replace,
-    });
+    const explainMany = vi.fn(async () => ["NotOnMenu"]);
+    const s = setup(
+      false,
+      {
+        currentMenuVersion: async () => id(97),
+        validateSelection: async () =>
+          ({ status: "Rejected", reason: "SELLABLE_UNAVAILABLE" }) as never,
+        replace,
+      },
+      explainMany,
+    );
     await expect(s.service.attach(s.command)).rejects.toMatchObject({
-      code: "CART_SELECTION_INVALID",
+      name: "CartItemUnavailableError",
+      code: "CART_ITEM_UNAVAILABLE",
+      cartItemReference: s.f.cart.items[0]?.cartItemReference,
+      reason: "Unavailable",
     });
+    expect(explainMany).toHaveBeenCalledOnce();
     expect(replace).not.toHaveBeenCalled();
     expect(s.attach).not.toHaveBeenCalled();
+  });
+  it("says options changed for a carried-over line whose options no longer fit", async () => {
+    const s = setup(
+      false,
+      {
+        currentMenuVersion: async () => id(97),
+        validateSelection: async () =>
+          ({ status: "Rejected", reason: "RULE_UNSATISFIED" }) as never,
+        replace: vi.fn(async () => undefined),
+      },
+      async () => ["OptionsChanged"],
+    );
+    await expect(s.service.attach(s.command)).rejects.toMatchObject({
+      code: "CART_ITEM_UNAVAILABLE",
+      reason: "OptionsChanged",
+    });
+  });
+  it("asks to retry, never to remove, when a carried-over line is refused mid-listing", async () => {
+    const s = setup(
+      false,
+      {
+        currentMenuVersion: async () => id(97),
+        validateSelection: async () =>
+          ({ status: "Rejected", reason: "SELLABLE_UNAVAILABLE" }) as never,
+        replace: vi.fn(async () => undefined),
+      },
+      async () => ["Indeterminate"],
+    );
+    await expect(s.service.attach(s.command)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
   });
   it("does not touch the cart when no menu is in force", async () => {
     const replace = vi.fn(async () => undefined);
@@ -394,5 +438,53 @@ describe("WP-2423: a cart priced after the owner listed", () => {
     });
     await s.service.attach(s.command).catch(() => undefined);
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("WP-2423 guest-cart-503: a line capture refuses", () => {
+  it.each([
+    ["Unavailable", "Unavailable"],
+    ["NotOnMenu", "Unavailable"],
+    ["OptionsChanged", "OptionsChanged"],
+    ["SetupIncomplete", "SetupIncomplete"],
+  ])("names the line when Catalog says %s, before any write", async (standing, reason) => {
+    const explainMany = vi.fn(async () => [standing]);
+    const s = setup(false, undefined, explainMany);
+    s.capture.mockResolvedValueOnce(null);
+    await expect(s.service.attach(s.command)).rejects.toMatchObject({
+      name: "CartItemUnavailableError",
+      code: "CART_ITEM_UNAVAILABLE",
+      cartItemReference: s.f.cart.items[0]?.cartItemReference,
+      reason,
+    });
+    expect(explainMany).toHaveBeenCalledWith([
+      expect.objectContaining({ sellableReference: s.f.cart.items[0]?.sellableReference }),
+    ]);
+    expect(s.attach).not.toHaveBeenCalled();
+  });
+  it.each([["Indeterminate"], ["Available"], ["Something else"]])(
+    "keeps a mid-listing refusal (%s) as try again, never remove it",
+    async (standing) => {
+      const s = setup(false, undefined, async () => [standing]);
+      s.capture.mockResolvedValueOnce(null);
+      await expect(s.service.attach(s.command)).rejects.toMatchObject({
+        code: "CART_DEPENDENCY_UNAVAILABLE",
+      });
+      expect(s.attach).not.toHaveBeenCalled();
+    },
+  );
+  it("keeps try again when Catalog cannot explain, or fails", async () => {
+    const plain = setup(false);
+    plain.capture.mockResolvedValueOnce(null);
+    await expect(plain.service.attach(plain.command)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    const failing = setup(false, undefined, async () => {
+      throw new Error("synthetic catalog outage");
+    });
+    failing.capture.mockResolvedValueOnce(null);
+    await expect(failing.service.attach(failing.command)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
   });
 });
