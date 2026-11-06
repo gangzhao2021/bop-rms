@@ -254,6 +254,13 @@ it("a store with tips off takes no tip from staff or guests; the table pays and 
 // may not take dishes off leaves it for a manager; none before a party size.
 it("the per-head tea charge follows a pay-later table's party size until it pays", () =>
   realTeaRounds());
+// WP-2423 (v15 fabf0261, Hotpot PC 9): the most common outage. A table orders live rounds, the
+// network drops, a later round is taken on paper and the bill is paid on paper, and everything is
+// entered afterwards. The paid-at is after the last live round and before the paper round was
+// entered: recorded. A paid-at well before the last live round is a mistyped time: refused, and
+// nothing is written.
+it("a table paid on paper after an outage pays after its live rounds; well before them is refused", () =>
+  paperPaidAfterLiveRounds());
 // WP-2423 item 8 ⑧ (Owner decision 3): staff move the party to another free table with a code;
 // everything the party has goes with it, once (two staff at once: one move wins), the old table
 // is marked for cleaning, the kitchen names the table it came from, the old table's phones no
@@ -847,6 +854,180 @@ async function realTeaRounds() {
       const afterPaid = await sync(server);
       assert.deepEqual([afterPaid.status, afterPaid.charged], ["Paid", 3]);
       assert.equal((await staffEntries()).length, 8, "a paid table's party change sends no round");
+    } finally {
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+}
+
+async function paperPaidAfterLiveRounds() {
+  await withIsolatedDatabase({ caseId: "wp2423_plpaper" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_plp");
+    let store = null;
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api });
+      const { reference: fresh, soup } = store;
+      const rows = async (sql, values = []) => (await admin.query(sql, values)).rows;
+      const server = await store.staff(id(0x710), [
+        "ordering.order.create_staff",
+        "dining.operate",
+        "dining.session.close",
+      ]);
+      const as = (who) => ({ sessionCookie: who.sessionCookie, csrf: who.csrf });
+      const seated = await store.seatTable(server);
+      assert.equal(seated.status, "Issued");
+      const sessionReference = String(seated.session.diningSessionReference);
+      const { staffDiningRound } = await store.counterFor(server);
+      const round = async (recordedAfterOutage) => {
+        const placed = await staffDiningRound({
+          ...as(server),
+          command: {
+            operationReference: fresh(),
+            tableReference: store.tableReference,
+            lines: [
+              {
+                sellableReference: soup.skuReference,
+                quantity: 1,
+                optionSelections: [],
+                note: null,
+              },
+            ],
+            tip: { kind: "None" },
+            recordedAfterOutage,
+          },
+        });
+        assert.deepEqual([placed.status, placed.payLater], ["Placed", true]);
+        return placed.orderBatchReference;
+      };
+      // Two rounds ordered live in the system.
+      const live = [await round(false), await round(false)];
+      // TEST-only seed of time: the live rounds were sent two hours ago (the records are
+      // append-only; the owner moves them back once, with triggers off, so the gaps below are
+      // real minutes rather than a test's seconds).
+      const seedTime = async (statement, values = []) => {
+        await admin.query("SET session_replication_role = replica");
+        try {
+          await admin.query(statement, values);
+        } finally {
+          await admin.query("SET session_replication_role = origin");
+        }
+      };
+      await seedTime(
+        "UPDATE rms_ordering.order_pay_later_confirmation SET confirmed_at=confirmed_at-interval '2 hours' WHERE order_batch_id=ANY($1::uuid[])",
+        [live],
+      );
+      const [{ at: lastLiveAt }] = await rows(
+        "SELECT max(confirmed_at) AS at FROM rms_ordering.order_pay_later_confirmation WHERE order_batch_id=ANY($1::uuid[])",
+        [live],
+      );
+      const lastLive = lastLiveAt.getTime();
+      // The network dropped: the next round was taken on paper and is entered now.
+      const paper = await round(true);
+      const bill = () =>
+        createMerchantDiningTableBillRead({
+          persistence: store.persistenceOf(server),
+          authentication: server.authentication,
+        })({ ...as(server), query: { diningSessionReference: sessionReference } });
+      const before = await bill();
+      assert.deepEqual(
+        before.rounds.map((entry) => [
+          entry.orderBatchReference,
+          entry.orderedBy,
+          entry.liveOrderedAt === null ? null : Date.parse(entry.liveOrderedAt) <= lastLive,
+        ]),
+        [
+          [live[0], null, true],
+          [live[1], null, true],
+          [paper, null, null],
+        ],
+      );
+      const { sessionVersion } = before;
+      assert.equal(
+        (
+          await createMerchantDiningClosingCommand({
+            exceptionTaskPolicy: { synthetic: "test-only exception task policy" },
+            persistence: store.persistenceOf(server),
+            authentication: server.authentication,
+            providerAccountReference: id(0x1),
+            environment: "Test",
+            newReference: fresh,
+            retentionPolicyCode: "AUDIT_DEFAULT",
+            retentionPolicyVersion: 1,
+          })({
+            ...as(server),
+            command: {
+              action: "Begin",
+              diningSessionReference: sessionReference,
+              operationReference: fresh(),
+              expectedSessionVersion: sessionVersion,
+            },
+          })
+        ).phase,
+        "Closing",
+      );
+      // TEST-only seed of time, likewise: the Store started recording three hours ago.
+      await seedTime(
+        "UPDATE rms_store.store_configuration_publication_content SET recorded_at=recorded_at-interval '3 hours'",
+      );
+      await seedTime(
+        "UPDATE rms_store.store_configuration_version SET effective_from=effective_from-interval '3 hours',created_at=created_at-interval '3 hours',updated_at=updated_at-interval '3 hours'",
+      );
+      const settle = createMerchantDiningTableSettle({
+        persistence: store.persistenceOf(server),
+        authentication: server.authentication,
+        environment: "Test",
+        nextReference: fresh,
+      });
+      const paidOnPaper = (takenAt) =>
+        settle({
+          ...as(server),
+          command: {
+            operationReference: fresh(),
+            diningSessionReference: sessionReference,
+            method: "Cash",
+            tip: { kind: "None" },
+            tenderedMinor: "100000",
+            slipReference: null,
+            recordedAfterOutage: true,
+            takenAt: new Date(takenAt).toISOString(),
+          },
+        });
+      const written = async () =>
+        (
+          await rows(
+            "SELECT (SELECT count(*)::int FROM rms_payment.dining_table_settlement) AS settlements,(SELECT count(*)::int FROM rms_payment.dining_table_settlement_round) AS lines,(SELECT count(*)::int FROM rms_ordering.order_tax_rounding_adjustment) AS rounding,(SELECT count(*)::int FROM platform_audit.audit_record) AS audit",
+          )
+        )[0];
+      const nothing = await written();
+      // 31 minutes before the last live round: refused. The bill's tax rounding the command
+      // records before a payment is in the same transaction and rolls back with the refusal.
+      await assert.rejects(paidOnPaper(lastLive - minutes(31)), {
+        code: "TABLE_CHECKOUT_TAKEN_BEFORE_ORDERED",
+      });
+      assert.deepEqual(await written(), nothing);
+      // After the last live round, but before the paper round was entered (more than the
+      // tolerance before it): the paper round's own record time is no bound. Recorded.
+      const paidAt = lastLive + minutes(30);
+      const paid = await paidOnPaper(paidAt);
+      assert.equal(paid.status, "Recorded");
+      assert.equal(paid.bill.settlement.recordedAfterOutage, true);
+      assert.equal(paid.bill.owed.totalMinor, "0");
+      assert.deepEqual(
+        await rows(
+          "SELECT recording_reason,taken_at FROM rms_payment.dining_table_settlement WHERE dining_session_id=$1",
+          [sessionReference],
+        ),
+        [{ recording_reason: "RecordedAfterOutage", taken_at: new Date(paidAt) }],
+      );
     } finally {
       vi.unstubAllEnvs();
       if (store !== null) await store.close();
@@ -2154,6 +2335,47 @@ async function journey(journeyEnding) {
           // ── The table checks out and splits "each pays own rounds": T-M's phone pays its own
           // round on the phone (the guests' real payment entry), staff take the rest in cash.
           assert.equal((await closing(server, "Begin")).phase, "Closing");
+          // WP-2423 (v15 fabf0261): a merged bill's rounds come from both Orders, and the last
+          // round sent in the system may be the merged table's. TEST-only seed of time: the host's
+          // second round was sent a second after its first, 38 minutes ago (append-only; moved
+          // once by the owner with triggers off). T-M's round was sent just now. A paper paid-at
+          // 35 minutes ago is after the host's rounds but well before T-M's: refused, nothing
+          // written (so a check over the host's Order alone would wrongly take it).
+          const [{ at: hostFirstAt }] = await rows(
+            "SELECT confirmed_at AS at FROM rms_ordering.order_pay_later_confirmation WHERE order_batch_id=$1",
+            [R1.batch.orderBatchReference],
+          );
+          await admin.query("SET session_replication_role = replica");
+          try {
+            await admin.query(
+              "UPDATE rms_ordering.order_pay_later_confirmation SET confirmed_at=$2::timestamptz+interval '1 second' WHERE order_batch_id=$1",
+              [R2.batch.orderBatchReference, hostFirstAt],
+            );
+          } finally {
+            await admin.query("SET session_replication_role = origin");
+          }
+          const [{ at: mSentAt }] = await rows(
+            "SELECT confirmed_at AS at FROM rms_ordering.order_pay_later_confirmation WHERE order_batch_id=$1",
+            [M.batch.orderBatchReference],
+          );
+          assert.ok(mSentAt.getTime() - hostFirstAt.getTime() > minutes(35));
+          const mergedPaidBefore = await rows(
+            "SELECT (SELECT count(*)::int FROM rms_payment.dining_table_settlement) AS settlements,(SELECT count(*)::int FROM rms_ordering.order_tax_rounding_adjustment) AS rounding",
+          );
+          await assert.rejects(
+            settleWith(server, {
+              tip: { kind: "None" },
+              recordedAfterOutage: true,
+              takenAt: new Date(mSentAt.getTime() - minutes(35)).toISOString(),
+            }),
+            { code: "TABLE_CHECKOUT_TAKEN_BEFORE_ORDERED" },
+          );
+          assert.deepEqual(
+            await rows(
+              "SELECT (SELECT count(*)::int FROM rms_payment.dining_table_settlement) AS settlements,(SELECT count(*)::int FROM rms_ordering.order_tax_rounding_adjustment) AS rounding",
+            ),
+            mergedPaidBefore,
+          );
           // As the Tables page proposes it: one part per phone that ordered (staff rounds in 1).
           const toSplit = await bill();
           const phones = [...new Set(toSplit.rounds.map((round) => round.orderedBy ?? 0))].sort(
@@ -6253,8 +6475,43 @@ async function journey(journeyEnding) {
           return;
         }
         if (ending === "TipsOff") await tipsOffRefusals();
+        // WP-2423 (v15 fabf0261, Hotpot PC 9): a table pays after it orders. R1 was sent from a
+        // guest's phone (R2 came off the bill, so this payment does not cover it). A paper paid-at
+        // more than 30 minutes before R1 was sent is a mistyped time: refused, and nothing is
+        // written. A card machine's clock a few minutes off is an honest slip: within the 30
+        // minutes it is recorded (below, for the store with tips off, as paid on paper).
+        const [{ at: r1SentAt }] = await rows(
+          "SELECT confirmed_at AS at FROM rms_ordering.order_pay_later_confirmation WHERE order_batch_id=$1",
+          [R1.batch.orderBatchReference],
+        );
+        const liveRounds = (await bill()).rounds.map((round) => [
+          round.orderedBy,
+          round.liveOrderedAt,
+        ]);
+        assert.deepEqual(liveRounds[0], [1, r1SentAt.toISOString()]);
+        const writtenNow = async () =>
+          (
+            await rows(
+              "SELECT (SELECT count(*)::int FROM rms_payment.dining_table_settlement) AS settlements,(SELECT count(*)::int FROM rms_ordering.order_tax_rounding_adjustment) AS rounding,(SELECT count(*)::int FROM platform_audit.audit_record) AS audit",
+            )
+          )[0];
+        const unpaid = await writtenNow();
+        await assert.rejects(
+          settleWith(server, {
+            recordedAfterOutage: true,
+            takenAt: new Date(r1SentAt.getTime() - minutes(31)).toISOString(),
+            ...(ending === "TipsOff" ? { tip: { kind: "None" } } : {}),
+          }),
+          { code: "TABLE_CHECKOUT_TAKEN_BEFORE_ORDERED" },
+        );
+        assert.deepEqual(await writtenNow(), unpaid);
+        const paperPaidAt =
+          ending === "TipsOff" ? new Date(r1SentAt.getTime() - minutes(10)).toISOString() : null;
         const operation = fresh();
-        const paid = await settleWith(server, { operationReference: operation });
+        const paid = await settleWith(server, {
+          operationReference: operation,
+          ...(paperPaidAt === null ? {} : { recordedAfterOutage: true, takenAt: paperPaidAt }),
+        });
         assert.equal(paid.status, "Recorded");
         // Paid in full while round 1's dishes are still to come: serve them, then close.
         const afterPaying = await closePlan();
@@ -6276,8 +6533,16 @@ async function journey(journeyEnding) {
           tenderedMinor: "100000",
           changeMinor: (100000n - due - rounding).toString(),
           recordedAt: paid.bill.settlement.recordedAt,
-          recordedAfterOutage: false,
+          recordedAfterOutage: paperPaidAt !== null,
         });
+        if (paperPaidAt !== null)
+          assert.deepEqual(
+            await rows(
+              "SELECT recording_reason,taken_at FROM rms_payment.dining_table_settlement WHERE order_id=$1",
+              [orderReference],
+            ),
+            [{ recording_reason: "RecordedAfterOutage", taken_at: new Date(paperPaidAt) }],
+          );
         assert.deepEqual(
           paid.bill.rounds.map((round) => round.paid),
           // The round taken off the bill is never a payment line.
@@ -6327,7 +6592,12 @@ async function journey(journeyEnding) {
         );
         // The same command again returns that payment; another payment of the table is refused.
         assert.equal(
-          (await settleWith(server, { operationReference: operation })).status,
+          (
+            await settleWith(server, {
+              operationReference: operation,
+              ...(paperPaidAt === null ? {} : { recordedAfterOutage: true, takenAt: paperPaidAt }),
+            })
+          ).status,
           "AlreadyRecorded",
         );
         await assert.rejects(settleWith(server, { method: "CardMachine", tenderedMinor: null }), {

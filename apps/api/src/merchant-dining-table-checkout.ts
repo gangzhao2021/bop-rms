@@ -84,6 +84,12 @@ export const diningTableCheckoutErrorCodes = [
    * the system (its first configuration governed). Nothing was recorded; the slip time is checked.
    */
   "TABLE_CHECKOUT_TAKEN_BEFORE_RECORDS",
+  /**
+   * WP-2423 (v15 fabf0261, Hotpot PC 9): a paid-at time entered after an outage that is well
+   * before (more than `paidAtBeforeOrderedToleranceMs`) the last round it pays was ordered in the
+   * system. A table pays after it orders; nothing was recorded, the slip time is checked.
+   */
+  "TABLE_CHECKOUT_TAKEN_BEFORE_ORDERED",
   "TABLE_CHECKOUT_UNAVAILABLE",
 ] as const;
 export type DiningTableCheckoutErrorCode = (typeof diningTableCheckoutErrorCodes)[number];
@@ -97,6 +103,15 @@ const fail = (code: DiningTableCheckoutErrorCode): never => {
   throw new DiningTableCheckoutError(code);
 };
 const sha256 = (value: string) => "sha256:" + createHash("sha256").update(value).digest("hex");
+
+/**
+ * WP-2423 (v15 fabf0261): how far a paper paid-at may be before the last round it pays was ordered
+ * in the system. A card machine's clock drifts and a handwritten time is approximate ("about
+ * 22:00"), so a small gap is an honest slip time and only warned about on screen; a larger one is a
+ * typing mistake (PC 9 was 27 hours early) and refused. Test-environment default (WP-2423 item 15),
+ * to be confirmed with real stores' slips.
+ */
+export const paidAtBeforeOrderedToleranceMs = 30 * 60_000;
 
 export type DiningTableTip =
   | { readonly kind: "None" }
@@ -165,6 +180,12 @@ export interface DiningTableBill {
     readonly orderedBy: number | null;
     /** WP-2423 item 8 ⑨: the table the round came from when it was merged in (null: this one). */
     readonly fromTableLabel: string | null;
+    /**
+     * WP-2423 (v15 fabf0261): when the round was sent in the system as it happened, or null for a
+     * round staff took on paper during an outage and entered afterwards (its record is later than
+     * when it was ordered). A payment of the round is not taken well before this time.
+     */
+    readonly liveOrderedAt: string | null;
   }[];
   /**
    * WP-2423 DEC-TAX-WHOLE-RECEIPT: the bill's tax rounding (whole-bill tax minus what the rounds
@@ -467,14 +488,10 @@ export async function readDiningTableBill(
       phoneOf.set(String(phone.participantReference), offset + phone.phoneNumber);
   }
   // Rounds staff entered for the table (DEC-STAFF-DINE-IN-ROUND) were sent by no phone.
-  const staffRounds = new Set(
-    (
-      await createPostgresStaffDiningRoundEntryStore({
-        ...owner,
-        authorize: allowed,
-      }).listByOrders(tx, billOrders)
-    ).keys(),
-  );
+  const staffRounds = await createPostgresStaffDiningRoundEntryStore({
+    ...owner,
+    authorize: allowed,
+  }).listByOrders(tx, billOrders);
   // WP-2423 item 8 ⑨: the table each merged Order came from.
   const fromTableOf = new Map<string, string>();
   if (billOrders.length > 1) {
@@ -568,6 +585,11 @@ export async function readDiningTableBill(
       paid,
       orderedBy: orderedByOf(batch),
       fromTableLabel: fromTableOf.get(String(confirmation.orderReference)) ?? null,
+      // A round taken on paper during an outage was confirmed when it was entered afterwards.
+      liveOrderedAt:
+        staffRounds.get(batch)?.entry.recordedAfterOutage === true
+          ? null
+          : new Date(Date.parse(String(confirmation.confirmedAt))).toISOString(),
     });
   });
   // WP-2423 按菜分单: the dishes of the rounds still owing, as they stand now.
@@ -1166,6 +1188,25 @@ export function createMerchantDiningTableSettle(options: {
             const sequenceOf = new Map(
               bill.rounds.map((round) => [round.orderBatchReference, round] as const),
             );
+            // A table pays after it orders: a paper paid-at well before the last round this
+            // payment covers was sent in the system (rounds taken on paper during the outage
+            // aside) is a mistyped time. Refused before anything is recorded; the bill's tax
+            // rounding written above is in this transaction and rolls back with the refusal.
+            if (command.takenAt !== null) {
+              const covered =
+                planPart === null
+                  ? owed
+                  : planPart.slices.map((slice) => sequenceOf.get(slice.orderBatchReference));
+              const lastLive = covered.reduce<number | null>((latest, round) => {
+                const at = round?.liveOrderedAt ?? null;
+                return at === null ? latest : Math.max(latest ?? 0, Date.parse(at));
+              }, null);
+              if (
+                lastLive !== null &&
+                Date.parse(command.takenAt) < lastLive - paidAtBeforeOrderedToleranceMs
+              )
+                return fail("TABLE_CHECKOUT_TAKEN_BEFORE_ORDERED");
+            }
             // Only a tip the Store offers (for a payment taken during an outage: offered then).
             const refused = tipRefusal(
               await readStoreTipChoices(tx, scope, command.takenAt),

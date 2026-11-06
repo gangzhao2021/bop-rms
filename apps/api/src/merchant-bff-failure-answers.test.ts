@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMerchantBffRouter, type MerchantBffRouterOptions } from "./merchant-bff.js";
 import { withCause } from "./merchant-failure.js";
 import { MerchantMenuError } from "./merchant-menus.js";
+import { DiningTableCheckoutError } from "./merchant-dining-table-checkout.js";
 
 /**
  * WP-2423 item 10: a failure is a permission refusal only when the error says so. These run through
@@ -477,4 +478,18 @@ describe("each route tells a refusal from a failure", () => {
     expect((await failing.post("/logout")).status).toBe(503);
     expect(failing.reported.map(([route]) => route)).toEqual(["/protected", "/logout"]);
   });
+});
+
+// WP-2423 (v15 fabf0261): a paper paid-at well before the table's last live round is a refusal
+// the page explains, never a fault in the operator's log.
+it("a table paid-at well before its last round was ordered is a 409 the page reads", async () => {
+  const refused = await serve({
+    diningTableSettle: rejecting(
+      new DiningTableCheckoutError("TABLE_CHECKOUT_TAKEN_BEFORE_ORDERED"),
+    ),
+  } as never);
+  const response = await refused.post("/dining/table-settle");
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ error: "taken_before_ordered" });
+  expect(refused.reported).toEqual([]);
 });
