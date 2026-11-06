@@ -170,6 +170,11 @@ function menuStopText(reason: string | undefined, item: string): string {
       return t(
         "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.",
       );
+    case "ChoiceGroup":
+      return t(
+        "{item}: one of its choices no longer fits its choice group (an option was removed, or a default is no longer offered). Open the dish, check its choices, save it, then list the menu again.",
+        { item: item },
+      );
     default:
       return t(
         "The menu could not be listed this time. Try again in a minute; if it stops again, tell BOP support what time it happened.",

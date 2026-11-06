@@ -140,6 +140,9 @@ const namedStopReasons: ReadonlySet<string> = new Set([
   "NoDraft",
   "NotAuthorized",
   "NoConfiguration",
+  // A dish's choice group no longer fits it (an option archived, a default no longer offered):
+  // the Owner fixes it on the dish. Trying again never would.
+  "ChoiceGroup",
 ]);
 export function menuStopReason(reason: string): string {
   const last = reason.split(":").at(-1) ?? "";
@@ -1545,17 +1548,33 @@ export function createMerchantMenus(options: {
           return fail("NotRevisable");
         if (error.code === "CATALOG_LIFECYCLE_CONFLICT" && body.action === "DiscardDraft")
           return fail("NotDiscardable");
+        // WP-2423 item 14: a product's choice group binding names the rule it breaks, and the
+        // item: the dish is named and the Owner told to fix it there.
+        if (
+          error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" &&
+          body.action === "Submit" &&
+          typeof (error as { rule?: unknown }).rule === "string"
+        ) {
+          const sku = (error as { sellableReference?: unknown }).sellableReference;
+          const at =
+            typeof sku !== "string"
+              ? null
+              : await describeGap(input.sessionCookie, current.sessionReference, {
+                  skuReference: sku,
+                  storeReference: "",
+                  missing: "Recipe",
+                  optionReference: null,
+                  quantity: null,
+                  ingredientReference: null,
+                }).catch(() => null);
+          throw stoppedError("ChoiceGroup", error, {
+            productName: at?.productName ?? null,
+            sizeName: at?.sizeName ?? null,
+          });
+        }
         // v15 2026-10-29: the review stopped on something it could not read; say where.
         if (error.code === "CATALOG_DEPENDENCY_UNAVAILABLE" && body.action === "Submit")
-          return stopped(
-            "Submit:Unavailable@" +
-              throwSite(error) +
-              // A product's choice group binding names the rule it breaks.
-              (typeof (error as { rule?: unknown }).rule === "string"
-                ? ":" + String((error as { rule?: unknown }).rule)
-                : ""),
-            error,
-          );
+          return stopped("Submit:Unavailable@" + throwSite(error), error);
         if (error.code === "CATALOG_PERMISSION_DENIED" && body.action === "Approve")
           return fail("ApprovalRequired");
         return fail(catalogErrors[error.code] ?? "Invalid");

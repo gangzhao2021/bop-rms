@@ -288,6 +288,10 @@ describe("WP-2423 menu page helpers", () => {
     expect(stoppedAt("NoConfiguration")).toBe(
       "This menu has no dishes ready to list yet. Add a dish, answer its allergens, then list the menu.",
     );
+    // A choice group that no longer fits a dish is the Owner's to fix: named, never "try again".
+    expect(stoppedAt("ChoiceGroup")).toBe(
+      "二人套餐: one of its choices no longer fits its choice group (an option was removed, or a default is no longer offered). Open the dish, check its choices, save it, then list the menu again.",
+    );
     const fallback =
       "The menu could not be listed this time. Try again in a minute; if it stops again, tell BOP support what time it happened.";
     for (const reason of [
@@ -308,6 +312,7 @@ describe("WP-2423 menu page helpers", () => {
       "NoDraft",
       "NotAuthorized",
       "NoConfiguration",
+      "ChoiceGroup",
       "Submit:Unavailable@merchant-menus.ts:123",
     ]) {
       const text = stoppedAt(reason);

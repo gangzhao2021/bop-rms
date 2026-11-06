@@ -511,7 +511,12 @@ it("reads complete current option bindings with exact SKU/channel applicability 
       await admin.query("UPDATE rms_catalog.option SET lifecycle='Archived' WHERE option_id=$1", [
         id(5),
       ]);
-      await assert.rejects(store.load(input), { code: "CATALOG_DEPENDENCY_UNAVAILABLE" });
+      // WP-2423 item 14: the rule broken and the item it is on, so the listing names the dish.
+      await assert.rejects(store.load(input), {
+        code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+        rule: "EnabledOptionArchived",
+        sellableReference: id(12),
+      });
       assert.equal(active, 0);
     } finally {
       assert.equal(active, 0);

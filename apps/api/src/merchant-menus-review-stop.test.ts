@@ -33,6 +33,7 @@ it("sends only a named reason to the page", () => {
     "NoDraft",
     "NotAuthorized",
     "NoConfiguration",
+    "ChoiceGroup",
   ]) {
     expect(menuStopReason(reason)).toBe(reason);
     expect(menuStopReason("Submit:" + reason)).toBe(reason);

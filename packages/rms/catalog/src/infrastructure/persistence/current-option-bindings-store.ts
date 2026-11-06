@@ -121,6 +121,8 @@ export function createPostgresCurrentOptionBindingsStore(
       readonly channelCode: string;
       readonly observedAt: string;
     }) {
+      // The item whose binding broke a rule: named, so staff are told which dish to fix.
+      let named: string | null = null;
       try {
         const raw = closed(value, [
           "sellableReference",
@@ -132,6 +134,7 @@ export function createPostgresCurrentOptionBindingsStore(
           version = parseCatalogReference(raw.productVersionReference),
           channel = parseCatalogCode(raw.channelCode),
           at = parseCatalogInstant(raw.observedAt);
+        named = sku;
         return await runner.run(async (tx) => {
           await tx.query(
             "SELECT set_config('bop.brand_id', $1, true), set_config('bop.store_id', $2, true)",
@@ -198,7 +201,8 @@ export function createPostgresCurrentOptionBindingsStore(
         });
       } catch (error) {
         // v15 2026-10-29: a binding that no longer fits its option set says which rule it breaks.
-        if (error instanceof OptionBindingRuleError) throw new OptionBindingSourceError(error.rule);
+        if (error instanceof OptionBindingRuleError)
+          throw new OptionBindingSourceError(error.rule, named);
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
       }
     },
@@ -207,7 +211,11 @@ export function createPostgresCurrentOptionBindingsStore(
 
 /** A current product binding that breaks a rule of its current option set (named). */
 export class OptionBindingSourceError extends CatalogError {
-  constructor(readonly rule: OptionBindingRule) {
+  constructor(
+    readonly rule: OptionBindingRule,
+    /** The sellable whose binding it is (WP-2423 item 14): the page names its dish. */
+    readonly sellableReference: string | null = null,
+  ) {
     super("CATALOG_DEPENDENCY_UNAVAILABLE");
     this.name = "OptionBindingSourceError";
   }
