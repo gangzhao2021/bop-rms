@@ -428,38 +428,62 @@ const notMadeSql = `(EXISTS (SELECT 1 FROM rms_ordering.order_termination_record
    WHERE t.brand_id=$1 AND t.store_id=$2 AND t.order_id=s.order_id)
  OR EXISTS (SELECT 1 FROM rms_ordering.order_payment_failure_record f
    WHERE f.brand_id=$1 AND f.store_id=$2 AND f.order_id=s.order_id AND f.reason='Cancelled'))`;
-function cartOrderedRows(result: unknown): CartOrderedRecord | null {
+type CartOrderedCandidate = Omit<CartOrderedRecord, "notMade">;
+function cartOrderedCandidates(result: unknown, limit: number): CartOrderedCandidate[] {
   if (result === null || typeof result !== "object") return unavailable();
   const d = Object.getOwnPropertyDescriptor(result, "rows");
   if (!d?.enumerable || !("value" in d)) return unavailable();
   const rows = capture(d.value);
-  if (!Array.isArray(rows) || rows.length > 1) return unavailable();
-  if (rows.length === 0) return null;
-  const row = exact(rows[0], [
-    "submission_id",
-    "order_id",
-    "order_number",
-    "guest_session_id",
-    "source_cart_version",
-    "not_made",
-  ]);
-  if (
-    typeof row.not_made !== "boolean" ||
-    typeof row.order_number !== "string" ||
-    !/^[1-9][0-9]{0,18}$/u.test(row.order_number) ||
-    !Number.isSafeInteger(row.source_cart_version) ||
-    (row.source_cart_version as number) < 1
-  )
-    return unavailable();
-  return Object.freeze({
-    submissionReference: parseOrderingReference(row.submission_id),
-    orderReference: parseOrderingReference(row.order_id),
-    orderNumber: row.order_number,
-    guestSessionReference: parseOrderingReference(row.guest_session_id),
-    sourceCartVersion: row.source_cart_version as number,
-    notMade: row.not_made,
+  if (!Array.isArray(rows) || rows.length > limit) return unavailable();
+  return rows.map((value) => {
+    const row = exact(value, [
+      "submission_id",
+      "order_id",
+      "order_number",
+      "guest_session_id",
+      "source_cart_version",
+    ]);
+    if (
+      typeof row.order_number !== "string" ||
+      !/^[1-9][0-9]{0,18}$/u.test(row.order_number) ||
+      !Number.isSafeInteger(row.source_cart_version) ||
+      (row.source_cart_version as number) < 1
+    )
+      return unavailable();
+    return {
+      submissionReference: parseOrderingReference(row.submission_id),
+      orderReference: parseOrderingReference(row.order_id),
+      orderNumber: row.order_number,
+      guestSessionReference: parseOrderingReference(row.guest_session_id),
+      sourceCartVersion: row.source_cart_version as number,
+    };
   });
 }
+/**
+ * Which of these Orders will not be made. Read only once an Order was found (so an ordinary new
+ * Order never reads termination or payment-failure records).
+ */
+async function readNotMade(
+  transaction: OrderCreationQueryTransaction,
+  brand: string,
+  store: string,
+  orders: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const result = await transaction.query(
+    `SELECT s.order_id FROM unnest($3::uuid[]) AS s(order_id) WHERE ${notMadeSql}`,
+    [brand, store, orders],
+  );
+  if (result === null || typeof result !== "object") return unavailable();
+  const d = Object.getOwnPropertyDescriptor(result, "rows");
+  if (!d?.enumerable || !("value" in d)) return unavailable();
+  const rows = capture(d.value);
+  if (!Array.isArray(rows) || rows.length > orders.length) return unavailable();
+  return new Set(rows.map((row) => parseOrderingReference(exact(row, ["order_id"]).order_id)));
+}
+const record = (candidate: CartOrderedCandidate, notMade: boolean): CartOrderedRecord =>
+  Object.freeze({ ...candidate, notMade });
+/** At most this many Orders hold one legacy Cart's lines; more is not a real Cart. */
+const candidateLimit = 20;
 /**
  * WP-2423 M03: the Order already made from this exact Cart version, or from a line the Cart still
  * holds (a Cart filled before pickup Carts were emptied on ordering) unless that Order will not be
@@ -475,27 +499,41 @@ export async function readCartVersionOrder(
     store = parseOrderingReference(scope.storeReference),
     cart = parseOrderingReference(value.cartReference);
   if (!Number.isSafeInteger(value.cartVersion) || value.cartVersion < 1) return unavailable();
-  return cartOrderedRows(
+  const candidates = cartOrderedCandidates(
     await transaction.query(
-      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version,
-         ${notMadeSql} AS not_made
+      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version
        FROM rms_ordering.order_submission_record s
        JOIN rms_ordering.order_header h ON h.order_id=s.order_id AND h.brand_id=$1 AND h.store_id=$2
        WHERE s.brand_id=$1 AND s.store_id=$2 AND s.source_cart_id=$3
-         AND (s.source_cart_version=$4 OR (EXISTS (
+         AND (s.source_cart_version=$4 OR EXISTS (
            SELECT 1 FROM rms_ordering.order_item i
            JOIN rms_ordering.cart_line l ON l.cart_line_id=i.source_cart_line_id AND l.brand_id=$1
              AND l.store_id=$2 AND l.cart_id=$3
-           WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=s.order_id)
-           AND NOT ${notMadeSql}))
-       ORDER BY s.created_at DESC, s.submission_id DESC LIMIT 1`,
+           WHERE i.brand_id=$1 AND i.store_id=$2 AND i.order_id=s.order_id))
+       ORDER BY (s.source_cart_version=$4) DESC, s.created_at DESC, s.submission_id DESC
+       LIMIT ${candidateLimit}`,
       [brand, store, cart, value.cartVersion],
     ),
+    candidateLimit,
   );
+  if (candidates.length === 0) return null;
+  const notMade = await readNotMade(
+    transaction,
+    brand,
+    store,
+    candidates.map((candidate) => candidate.orderReference),
+  );
+  // The exact version is always ordered; a line held only by an Order that won't be made is free.
+  const found = candidates.find(
+    (candidate) =>
+      candidate.sourceCartVersion === value.cartVersion || !notMade.has(candidate.orderReference),
+  );
+  return found === undefined ? null : record(found, notMade.has(found.orderReference));
 }
 /**
  * WP-2423 M03: the guest's latest Order from this Cart while nothing was put in the Cart after it
- * (no Cart item operation at a later version), so an emptied Cart can say "already ordered".
+ * (no Cart item operation at a later version), so an emptied Cart can say "already ordered" (or,
+ * when it won't be made, offer its dishes back).
  */
 export async function readLatestCartOrder(
   transaction: OrderCreationQueryTransaction,
@@ -506,10 +544,9 @@ export async function readLatestCartOrder(
     store = parseOrderingReference(scope.storeReference),
     cart = parseOrderingReference(value.cartReference),
     guest = parseOrderingReference(value.guestSessionReference);
-  return cartOrderedRows(
+  const [found] = cartOrderedCandidates(
     await transaction.query(
-      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version,
-         ${notMadeSql} AS not_made
+      `SELECT s.submission_id,s.order_id,h.order_number,s.guest_session_id,s.source_cart_version
        FROM (SELECT * FROM rms_ordering.order_submission_record
              WHERE brand_id=$1 AND store_id=$2 AND source_cart_id=$3
              ORDER BY source_cart_version DESC, created_at DESC LIMIT 1) s
@@ -520,7 +557,11 @@ export async function readLatestCartOrder(
            AND o.result_aggregate_version>s.source_cart_version)`,
       [brand, store, cart, guest],
     ),
+    1,
   );
+  if (found === undefined) return null;
+  const notMade = await readNotMade(transaction, brand, store, [found.orderReference]);
+  return record(found, notMade.has(found.orderReference));
 }
 /** WP-2423 M03: one ordered dish as the guest chose it, to put back in the Cart. */
 export interface RestorableOrderLine {

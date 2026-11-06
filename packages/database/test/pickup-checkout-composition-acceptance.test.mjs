@@ -283,6 +283,12 @@ it.each([
         );
         // WP-2423 M03: the Order empties its pickup Cart (as for a table), as the pilot API may.
         await admin.query("GRANT DELETE ON rms_ordering.cart_line TO " + roles[1]);
+        // WP-2423 M03: whether an Order holding a Cart's dishes won't be made (closed, cancelled or
+        // its payment closed unpaid), as the pilot API may read (pilot ACL: SELECT for api).
+        await admin.query(
+          "GRANT SELECT ON rms_ordering.order_termination_record,rms_ordering.order_payment_failure_record TO " +
+            roles[1],
+        );
         await admin.query(
           "GRANT SELECT,INSERT ON rms_ordering.cart_quote_attachment,rms_ordering.cart_quote_attachment_line TO " +
             roles[1],

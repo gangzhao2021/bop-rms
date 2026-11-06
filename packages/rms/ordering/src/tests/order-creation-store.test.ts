@@ -236,7 +236,6 @@ describe("WP-2352 atomic Order write boundary", () => {
                 order_number,
                 guest_session_id,
                 source_cart_version,
-                not_made: false,
               }),
             ),
           };
