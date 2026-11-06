@@ -7224,6 +7224,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Remove {names} and add the rest to this round": "删掉{names}，其余加进这一轮",
   "Tell the guests: {names} isn't available now, so it was taken off their order.":
     "请告诉客人：{names} 现在不供应，已从他们的点单里删掉。",
+  "Tell the guests: {names} aren't available now, so they were taken off their order.":
+    "请告诉客人：{names} 现在不供应，已从他们的点单里删掉。",
   "A charge, no stock ingredients": "收费项目，不用库存原料",
   "Declared a charge that uses no stock ingredients (such as tea): it never counts or deducts stock, and guests see no allergens for it.":
     "已声明为不用库存原料的收费项目（如茶位）：不计库存、不扣库存，客人看到的过敏原为无。",

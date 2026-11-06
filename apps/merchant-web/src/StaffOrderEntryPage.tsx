@@ -245,6 +245,16 @@ export function tableCartUnsellable(items: readonly TableCartItem[]): readonly T
 export function tableCartNames(items: readonly TableCartItem[]): string {
   return items.map((item) => item.name).join(listSeparator());
 }
+/** WP-2423 M06: what staff tell the guests after their unavailable dishes left the round. */
+export function tableCartRemovedNote(items: readonly TableCartItem[]): string | null {
+  if (items.length === 0) return null;
+  const names = tableCartNames(items);
+  return items.length === 1
+    ? t("Tell the guests: {names} isn't available now, so it was taken off their order.", { names })
+    : t("Tell the guests: {names} aren't available now, so they were taken off their order.", {
+        names,
+      });
+}
 /** WP-2423 (staff-round-soldout): what a guest's item is marked with, or null when it can be sent. */
 export function tableCartMark(item: TableCartItem): string | null {
   if (item.standing === "Unavailable") return t("Sold out or off the menu now");
@@ -896,11 +906,7 @@ export function StaffOrderEntryPage({
             });
       setPlaced(order);
       if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
-        setRemovedNote(
-          t("Tell the guests: {names} isn't available now, so it was taken off their order.", {
-            names: tableCartNames(includeTableCart.removeUnavailable),
-          }),
-        );
+        setRemovedNote(tableCartRemovedNote(includeTableCart.removeUnavailable));
       recordOrdered(
         storeReference,
         lines.map((line) => [line.item.sellableReference, line.quantity]),

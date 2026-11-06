@@ -12,6 +12,7 @@ import {
   staffChoiceText,
   StaffOrderEntryPage,
   TableCartOfferActions,
+  tableCartRemovedNote,
   paymentWindowNotice,
   rebindLines,
   withdrawnOptions,
@@ -880,5 +881,31 @@ describe("the counter menu with a listed combo (WP-2423 item 8 ⑥ part 4)", () 
       "Chow mein (TEST)",
       "Combo for two (TEST)",
     ]);
+  });
+});
+
+describe("WP-2423 M06: the note after guest dishes were taken off a round", () => {
+  const item = (n: number, name: string) =>
+    ({
+      cartItemReference: id(n),
+      name,
+      quantity: 1,
+      standing: "Unavailable",
+      available: null,
+    }) as const;
+  it("is singular for one dish and plural for several", () => {
+    setLanguageForTest("en");
+    expect(tableCartRemovedNote([item(1, "Plum juice")])).toBe(
+      "Tell the guests: Plum juice isn't available now, so it was taken off their order.",
+    );
+    expect(tableCartRemovedNote([item(1, "Plum juice"), item(2, "Soup")])).toBe(
+      "Tell the guests: Plum juice, Soup aren't available now, so they were taken off their order.",
+    );
+    expect(tableCartRemovedNote([])).toBeNull();
+    setLanguageForTest("zh-Hans");
+    expect(tableCartRemovedNote([item(1, "酸梅汤"), item(2, "汤")])).toBe(
+      "请告诉客人：酸梅汤、汤 现在不供应，已从他们的点单里删掉。",
+    );
+    setLanguageForTest("en");
   });
 });

@@ -1,3 +1,4 @@
+import { withStaffContentLocale } from "./staff-content-locale.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   createStaffTableAbandonment,
@@ -363,6 +364,17 @@ describe("staff table guest pipeline", () => {
         { cartItemReference: id(62), name: "Milk tea", quantity: 1, standing: "OptionsChanged" },
       ],
     });
+    // M35: names come in the staff member's chosen language, not the Store's.
+    expect((options.cart.createCart.mock.calls.at(-1) as unknown[] | undefined)?.[1]).toBeNull();
+    await withStaffContentLocale("zh-Hans", () =>
+      pipeline.selectCart(credentials, {
+        operationReference: id(45),
+        requestedAt: "2026-10-15T18:00:00.000Z",
+      }),
+    );
+    expect((options.cart.createCart.mock.calls.at(-1) as unknown[] | undefined)?.[1]).toBe(
+      "zh-Hans",
+    );
     options.cart.createCart.mockResolvedValueOnce({ status: "CheckoutInProgress" } as never);
     expect(
       await pipeline.selectCart(credentials, {

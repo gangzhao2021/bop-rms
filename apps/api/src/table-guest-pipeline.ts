@@ -8,6 +8,7 @@ import type { CustomerQuotePort } from "./customer-quote.js";
 import { createGuestOrderSteps } from "./counter-guest-pipeline.js";
 import type { CounterGuestCredentials } from "./merchant-counter-order.js";
 import type { StaffTableGuestPipeline } from "./merchant-staff-dining-round.js";
+import { staffContentLocale } from "./staff-content-locale.js";
 
 interface Staff {
   readonly sessionCookie: unknown;
@@ -329,12 +330,17 @@ export function createStaffTableGuestPipeline(options: {
       });
     },
     async selectCart(credentials, input) {
-      const result = await options.cart.createCart({
-        guestCredential: credentials.sessionCredential,
-        csrfCredential: credentials.csrfCredential,
-        operationReference: input.operationReference,
-        requestedAt: input.requestedAt,
-      });
+      // WP-2423 M35: the lines are named in the staff member's chosen language (the Store's own
+      // when none), as every other staff screen names Store content.
+      const result = await options.cart.createCart(
+        {
+          guestCredential: credentials.sessionCredential,
+          csrfCredential: credentials.csrfCredential,
+          operationReference: input.operationReference,
+          requestedAt: input.requestedAt,
+        },
+        staffContentLocale(),
+      );
       if (result.status === "CheckoutInProgress" || result.status === "OrderProcessing")
         return Object.freeze({ status: "CheckoutInProgress" as const });
       if (
