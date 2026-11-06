@@ -1,6 +1,11 @@
 import { Buffer } from "node:buffer";
 import { expect, it, vi } from "vitest";
-import { createCustomerStoreRouting } from "./pilot-customer-store-routing.mjs";
+import {
+  createCustomerStoreRouting,
+  outageScanCookie,
+  routingFailureAnswer,
+} from "./pilot-customer-store-routing.mjs";
+import { forgetScan, rememberScan } from "../../apps/api/src/customer-entry.ts";
 
 const ref = (n) => "018f4f8a-9c2d-7a11-8d01-" + String(n).padStart(12, "0");
 const store = (n, tenant, sessions = []) => ({
@@ -185,4 +190,67 @@ it("M02: with only one Store of several served, a scan or replay of another is s
   const alone = createCustomerStoreRouting({ stores: [a], createSessions: () => ({ resolve }) });
   expect(await alone(resume(down))).toBe(a);
   expect(await alone(entry(ref(103)))).toBe(a);
+});
+
+// WP-2423 live minor 25: a fresh scan answered "Store unavailable" keeps its code for a reload.
+/** A code framed as a Store's entry accepts it (compact JWS, 64-byte signature); unsigned here. */
+const framed = (publicStoreReference) =>
+  Buffer.from(JSON.stringify({ alg: "EdDSA", typ: "JWT" })).toString("base64url") +
+  "." +
+  Buffer.from(JSON.stringify({ publicStoreReference })).toString("base64url") +
+  "." +
+  Buffer.alloc(64, 7).toString("base64url");
+/** The cookie a Store's own entry sets for a scan that starts no visit (customer-entry.ts). */
+const storeScanCookie = (code) =>
+  `__Secure-bop-scan=${code}; Max-Age=1800; Path=/bff/customer/entry; Secure; HttpOnly; SameSite=Strict`;
+const scan = (qrToken) => ({
+  method: "POST",
+  url: "/bff/customer/entry",
+  body: Buffer.from(JSON.stringify({ qrToken, intent: "Join" })),
+});
+const unavailable = new Error("CUSTOMER_STORE_UNAVAILABLE");
+
+it("live minor 25: a fresh scan of a Store not served now keeps its code, exactly as the Store would", async () => {
+  const code = framed(ref(103));
+  const storeOf = routing([store(1, 1), store(2, 2)]);
+  await expect(storeOf(scan(code))).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
+  const answer = routingFailureAnswer(unavailable, scan(code));
+  expect(answer).toEqual({ code: "CUSTOMER_STORE_UNAVAILABLE", setCookie: storeScanCookie(code) });
+  // Exactly what the Store's own entry sets (no Domain): once the Store is back, its answer to
+  // the replay replaces it (another scan that starts no visit) or clears it (a visit started).
+  expect(answer.setCookie).toBe(rememberScan(code));
+  expect(answer.setCookie).not.toMatch(/domain=/iu);
+  const attributes = (cookie) =>
+    cookie.split("; ").filter((part) => !/^(?:__Secure-bop-scan|Max-Age)=/u.test(part));
+  expect(attributes(forgetScan)).toEqual(attributes(answer.setCookie));
+  expect(forgetScan.split("=")[0]).toBe(answer.setCookie.split("=")[0]);
+  // The replay of that cookie goes to the same Store, still unavailable while it is down.
+  await expect(storeOf(resume("__Secure-bop-scan=" + code))).rejects.toThrow(
+    "CUSTOMER_STORE_UNAVAILABLE",
+  );
+});
+
+it("live minor 25: nothing else sets the cookie — a replay, a malformed code, another failure, one Store", async () => {
+  const code = framed(ref(103));
+  // A replay already carries it.
+  expect(
+    routingFailureAnswer(unavailable, resume("__Secure-bop-scan=" + code)).setCookie,
+  ).toBeNull();
+  // A code a Store's entry would refuse as malformed (unframed, too long, not a string).
+  for (const qrToken of [token(ref(103)), "a.b", code + "x".repeat(2048), 5])
+    expect(outageScanCookie(Buffer.from(JSON.stringify({ qrToken })))).toBeNull();
+  expect(outageScanCookie(Buffer.from("not json"))).toBeNull();
+  expect(outageScanCookie(undefined)).toBeNull();
+  // The internal API down is not a Store outage: nothing is set.
+  expect(routingFailureAnswer(new Error("database down"), scan(code))).toEqual({
+    code: "INTERNAL_API_UNAVAILABLE",
+    setCookie: null,
+  });
+  // A request that is not the entry sets nothing either.
+  expect(
+    routingFailureAnswer(unavailable, { method: "GET", url: "/bff/customer/session" }).setCookie,
+  ).toBeNull();
+  // A single-Store installation never answers "Store unavailable": its own Store answers.
+  const only = store(1, 1);
+  expect(await routing([only])(scan(code))).toBe(only);
 });

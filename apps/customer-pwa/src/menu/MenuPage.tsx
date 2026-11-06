@@ -143,10 +143,31 @@ function useClient(
   }, [client, context]);
 }
 
+/**
+ * WP-2423 live minor 26: once per page load, a menu opened with no Store known (a reload of the
+ * menu reached from "Look at the menu first" at a table not open, where no visit exists yet) goes
+ * to the entry page, which replays this browser's waiting scan and shows that table's page again;
+ * with no waiting scan the entry page asks for a scan, as this page would. Never twice, so a menu
+ * that still knows no Store after that says so instead of going round.
+ */
+let entryReplayTried = false;
+export function resetEntryReplayForTest(): void {
+  entryReplayTried = false;
+}
+function useEntryReplay(missing: boolean): void {
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!missing || entryReplayTried) return;
+    entryReplayTried = true;
+    void navigate("/", { replace: true });
+  }, [missing, navigate]);
+}
+
 function useMenuLoad(
   client: CustomerMenuClient | null,
   input: Readonly<{ searchTerm?: string; sectionReference?: string }> | null = {},
 ) {
+  useEntryReplay(client === null);
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<ScreenState>(() =>
     client === null

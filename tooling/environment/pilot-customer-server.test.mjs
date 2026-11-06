@@ -276,6 +276,7 @@ test("v15 2026-10-31: a served Store that cannot start is logged and skipped; th
               resolve({
                 status: response.statusCode,
                 cache: response.headers["cache-control"],
+                setCookie: response.headers["set-cookie"],
                 text,
               }),
             );
@@ -298,7 +299,28 @@ test("v15 2026-10-31: a served Store that cannot start is logged and skipped; th
       expect(answer.status, JSON.stringify(payload)).toBe(503);
       expect(answer.cache).toBe("no-store");
       expect(JSON.parse(answer.text)).toEqual({ code: "CUSTOMER_STORE_UNAVAILABLE" });
+      // Neither an unframed code nor a replay is given a waiting-scan cookie here.
+      expect(answer.setCookie).toBeUndefined();
     }
+    // WP-2423 live minor 25: a fresh scan framed as a Store's entry accepts it keeps its code
+    // for a reload during the outage, with exactly the cookie that Store's entry sets.
+    const framedCode =
+      Buffer.from(JSON.stringify({ alg: "EdDSA" })).toString("base64url") +
+      "." +
+      Buffer.from(
+        JSON.stringify({ publicStoreReference: "0190aa21-0000-7000-8000-000000000006" }),
+      ).toString("base64url") +
+      "." +
+      Buffer.alloc(64, 9).toString("base64url");
+    const kept = await enter({ qrToken: framedCode });
+    expect(kept.status).toBe(503);
+    expect(JSON.parse(kept.text)).toEqual({ code: "CUSTOMER_STORE_UNAVAILABLE" });
+    expect(kept.setCookie).toEqual([
+      `__Secure-bop-scan=${framedCode}; Max-Age=1800; Path=/bff/customer/entry; Secure; HttpOnly; SameSite=Strict`,
+    ]);
+    const replayed = await enter({ resume: true }, "__Secure-bop-scan=" + framedCode);
+    expect(replayed.status).toBe(503);
+    expect(replayed.setCookie).toBeUndefined();
     // Each failed Store is logged with its code; the one whose resources opened has them closed.
     expect(
       logged.mock.calls

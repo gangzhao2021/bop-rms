@@ -11,6 +11,7 @@ import {
   bodyRoutedLimit,
   createCustomerStoreRouting,
   isBodyRouted,
+  routingFailureAnswer,
 } from "./pilot-customer-store-routing.mjs";
 import { servedScopeOf } from "./pilot-served-stores.mjs";
 import {
@@ -511,15 +512,11 @@ export async function startInternalCustomerServer({
           if (store === null) return storeNotFound(res);
           port = store.port;
         } catch (error) {
-          return res
-            .status(503)
-            .set("Cache-Control", "no-store")
-            .json({
-              code:
-                error?.message === "CUSTOMER_STORE_UNAVAILABLE"
-                  ? "CUSTOMER_STORE_UNAVAILABLE"
-                  : "INTERNAL_API_UNAVAILABLE",
-            });
+          const failure = routingFailureAnswer(error, { method: req.method, url: req.url, body });
+          res.status(503).set("Cache-Control", "no-store");
+          // WP-2423 live minor 25: a fresh scan of a Store not served now keeps its code.
+          if (failure.setCookie !== null) res.append("Set-Cookie", failure.setCookie);
+          return res.json({ code: failure.code });
         }
       }
       const upstream = request(

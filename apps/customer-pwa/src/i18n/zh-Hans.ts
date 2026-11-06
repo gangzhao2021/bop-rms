@@ -287,7 +287,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Add a dish from the menu and this table starts for you.": "从菜单加一道菜，就会开始用这张桌。",
   "Add a dish from the menu to start.": "从菜单加一道菜就可以开始。",
   "Ready · collect order {number} at the counter": "做好了 · 请到柜台取 {number} 号",
-  "This table isn’t open yet": "这桌还没开台",
+  "This table at {storeDisplayName} isn’t open yet": "{storeDisplayName} 的这桌还没开台",
   "Ask staff to seat you. This page continues by itself once the table is open.":
     "请让店员带位，开台后这里会自动继续。",
   "We’ve been seated": "我们已入座",

@@ -120,7 +120,9 @@ test.describe("@production CUST-ENTRY table not open", () => {
   }) => {
     await scanNotOpenTable(page);
     const main = page.getByRole("main");
-    await expect(main.getByRole("heading", { name: "This table isn’t open yet" })).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
+    ).toBeVisible();
     // M02: the page continues by itself once staff open the table (entry-stays-at-store.spec).
     await expect(main).toContainText(
       "Ask staff to seat you. This page continues by itself once the table is open.",
@@ -212,7 +214,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
     await expect(receipt).toContainText("Total paid$5.10");
     await expect(receipt).toContainText("Paid byCash");
     await expect(main).toContainText("New party? Ask staff to seat you, then scan again.");
-    await expect(main).not.toContainText("This table isn’t open yet");
+    await expect(main).not.toContainText(/This table at .+ isn’t open yet/u);
     expect(order).toEqual(["restore", "entry", "receipt"]);
     await expectNoInternalText(page);
     await page.screenshot({ path: "test-results/customer-settled-rescan-390.png", fullPage: true });

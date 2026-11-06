@@ -86,6 +86,51 @@ function scanCookiePublicStore(header) {
 }
 
 /**
+ * WP-2423 live minor 25: the waiting-scan cookie for a fresh scan answered "Store unavailable".
+ * The app has already taken the code out of the address, and only a Store that answers sets this
+ * cookie, so without it a reload during the outage had nothing to replay and asked the guest to
+ * scan again. Exactly the cookie a Store's own entry sets (same name, attributes and lifetime, no
+ * Domain), so the Store's own answer replaces or clears it once it is back. Only a code framed as
+ * the Store's entry accepts it (at most 2048 characters, compact JWS framing with a 64-byte
+ * signature); it is the guest's own code, unverified here and verified by the Store's runtime on
+ * replay, and never logged. A replay (`{resume:true}`) or anything else sets nothing.
+ */
+const SCAN_COOKIE_ATTRIBUTES =
+  "Max-Age=1800; Path=/bff/customer/entry; Secure; HttpOnly; SameSite=Strict";
+const COMPACT_SEGMENT = /^[A-Za-z0-9_-]+$/u;
+function compactFraming(value) {
+  const parts = value.split(".");
+  if (parts.length !== 3 || parts.some((part) => !COMPACT_SEGMENT.test(part))) return false;
+  const bytes = Buffer.from(parts[2], "base64url");
+  return bytes.length === 64 && bytes.toString("base64url") === parts[2];
+}
+export function outageScanCookie(body) {
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(body ?? "").toString("utf8"));
+  } catch {
+    return null;
+  }
+  const token = parsed?.qrToken;
+  if (parsed?.resume === true || typeof token !== "string" || token.length > 2048) return null;
+  return compactFraming(token) ? SCAN_COOKIE + "=" + token + "; " + SCAN_COOKIE_ATTRIBUTES : null;
+}
+
+/**
+ * What the installation answers when routing a request failed: a scan or replay of a Store not
+ * served now is a retryable outage (a fresh scan keeps its code, `outageScanCookie`); anything
+ * else is the internal API being unavailable, with nothing set.
+ */
+export function routingFailureAnswer(error, { method, url, body }) {
+  if (error?.message !== "CUSTOMER_STORE_UNAVAILABLE")
+    return { code: "INTERNAL_API_UNAVAILABLE", setCookie: null };
+  return {
+    code: "CUSTOMER_STORE_UNAVAILABLE",
+    setCookie: isBodyRouted(method, url) ? outageScanCookie(body) : null,
+  };
+}
+
+/**
  * `stores`: the installation's Stores, its own first: { storeReference, brandReference,
  * tenantReference, publicStoreReference, target, transactions, hashSession(cookie) → hex selector }.
  */

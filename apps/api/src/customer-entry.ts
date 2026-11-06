@@ -250,9 +250,10 @@ function validCompactFraming(value: string): boolean {
 export const scanCookieName = "__Secure-bop-scan";
 const scanCookieAttributes = `Path=${entryRoute}; Secure; HttpOnly; SameSite=Strict`;
 export const scanCookieMaxAgeSeconds = 1800;
-const rememberScan = (qrToken: string) =>
+/** Exported so the installation's Store routing sets exactly this cookie during an outage. */
+export const rememberScan = (qrToken: string) =>
   `${scanCookieName}=${qrToken}; Max-Age=${scanCookieMaxAgeSeconds}; ${scanCookieAttributes}`;
-const forgetScan = `${scanCookieName}=; Max-Age=0; ${scanCookieAttributes}`;
+export const forgetScan = `${scanCookieName}=; Max-Age=0; ${scanCookieAttributes}`;
 
 /** The one well-formed scan cookie this browser sent, or null. */
 export function scannedCode(header: unknown): string | null {

@@ -83,7 +83,8 @@ describe("CUST-ENTRY-CONTEXT", () => {
       },
     };
     const html = render(notOpen);
-    expect(html).toContain("This table isn’t open yet");
+    // WP-2423 live minor 27: the guest is told which restaurant's table it is.
+    expect(html).toContain(`This table at ${context.storeDisplayName} isn’t open yet`);
     expect(html).toContain(
       "Ask staff to seat you. This page continues by itself once the table is open.",
     );
@@ -100,7 +101,7 @@ describe("CUST-ENTRY-CONTEXT", () => {
       expect(settled).toContain("Table DEMO-03 has paid and closed.");
       expect(settled).toContain("Loading receipt");
       expect(settled).toContain("New party? Ask staff to seat you, then scan again.");
-      expect(settled).not.toContain("This table isn’t open yet");
+      expect(settled).not.toContain("isn’t open yet");
     } finally {
       setSettledTable(null);
     }

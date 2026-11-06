@@ -662,7 +662,12 @@ function EntryState({
       <div>
         {settled === null ? (
           <>
-            <StateHeading headingRef={headingRef}>{t("This table isn’t open yet")}</StateHeading>
+            {/* WP-2423 live minor 27: which restaurant's table, as the entry answer names it. */}
+            <StateHeading headingRef={headingRef}>
+              {t("This table at {storeDisplayName} isn’t open yet", {
+                storeDisplayName: state.context.storeDisplayName,
+              })}
+            </StateHeading>
             <p className="entry-context">
               {t("Ask staff to seat you. This page continues by itself once the table is open.")}
             </p>

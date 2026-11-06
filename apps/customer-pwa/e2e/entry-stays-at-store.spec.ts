@@ -222,10 +222,14 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     });
     await page.goto("/#qr=" + laneTable);
     const main = page.getByRole("main");
-    await expect(main.getByRole("heading", { name: "This table isn’t open yet" })).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/$/u);
     await page.reload();
-    await expect(main.getByRole("heading", { name: "This table isn’t open yet" })).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
+    ).toBeVisible();
     await expect(main).toContainText("This page continues by itself once the table is open.");
     await expect(page.getByText("DEMO Café")).toHaveCount(0);
     // Staff seat the party; the page checks again by itself and goes on.
@@ -245,7 +249,9 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     });
     await page.goto("/#qr=" + laneTable);
     const main = page.getByRole("main");
-    await expect(main.getByRole("heading", { name: "This table isn’t open yet" })).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
+    ).toBeVisible();
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(main).toContainText("请让店员带位，开台后这里会自动继续。");
     await page.getByRole("button", { name: "English" }).click();
@@ -330,7 +336,9 @@ test.describe("@production M02 a phone stays at the Store and table it scanned",
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { name: "Scan the location QR code" })).toBeVisible();
     await main.getByRole("link", { name: "Return to entry" }).click();
-    await expect(main.getByRole("heading", { name: "This table isn’t open yet" })).toBeVisible();
+    await expect(
+      main.getByRole("heading", { name: /^This table at .+ isn’t open yet$/u }),
+    ).toBeVisible();
     await expect(page.getByText("DEMO Café")).toHaveCount(0);
     expect(scannedEntries(state)).toEqual([]);
     expect(state.entries).toEqual([{ resume: true }]);
