@@ -241,6 +241,9 @@ function publicSellable(
                 ...(rule.semanticsVersion === 2
                   ? { defaultQuantity: Number(option.defaultQuantity) }
                   : {}),
+                ...(fact?.notOfferedOptions?.has(String(option.optionReference)) === true
+                  ? { offeredNow: false as const }
+                  : {}),
                 incrementalPrice: Object.freeze(
                   optionPrice(fact, rule.bindingReference, option.optionReference),
                 ),

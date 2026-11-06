@@ -357,3 +357,17 @@ it("transmits explicit quantity semantics and defaults without channel internals
   });
   expect(JSON.stringify(body)).not.toContain('"channelCodes"');
 });
+
+it("WP-2423 (cart-unsellable-dishes): sends a choice not offered now as offeredNow false, and nothing for an offered one", async () => {
+  const value = found();
+  if (value.status !== "Found") throw new Error("fixture");
+  const option = value.menu.sections[0]?.sellables[0]?.optionRules[0]?.options[0];
+  if (!option) throw new Error("fixture");
+  Object.assign(option, { offeredNow: false });
+  const catalog = new MutablePort();
+  catalog.result = value;
+  const body = await (await fetch(url(await listen(catalog)))).json();
+  const sent = body.menu.sections[0].sellables[0].optionRules[0].options;
+  expect(sent[0].offeredNow).toBe(false);
+  expect(sent.slice(1).some((o: object) => "offeredNow" in o)).toBe(false);
+});

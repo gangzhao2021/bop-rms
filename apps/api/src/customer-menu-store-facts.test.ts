@@ -139,3 +139,39 @@ it("WP-2423 Q12: expired stock evidence or no stock source leaves availability t
   expect(without.get(id(11))?.availability).toBe("Available");
   expect(without.get(id(13))?.availability).toBe("SoldOut");
 });
+
+it("WP-2423 (cart-unsellable-dishes): a published choice not offered now is marked, read with the Store context restored", async () => {
+  const calls: { sql: string; values: readonly unknown[] }[] = [];
+  const tx = {
+    query: vi.fn(async (sql: string, values: readonly unknown[]) => {
+      calls.push({ sql, values });
+      if (sql.includes("current_setting('bop.store_id'"))
+        return { rows: [{ brand: id(2), store: id(3) }], rowCount: 1 };
+      if (sql.includes("FROM rms_catalog.option "))
+        return { rows: [{ option: id(61) }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    }),
+  };
+  const facts = await createCustomerMenuStoreFacts({
+    transactions: { run: async (work) => work(tx as never) },
+    currencyMetadata: { currencyCode: "CAD", minorUnitExponent: 2 } as never,
+    priceChannelCode: "CUSTOMER_WEB",
+  }).load({
+    brandReference: id(2) as never,
+    storeReference: id(3) as never,
+    channelCode: "CUSTOMER_PWA" as never,
+    orderTypeCode: "PICKUP" as never,
+    requestedAt: at as never,
+    sellableReferences: [id(10) as never],
+    options: [
+      { sellableReference: id(10), bindingReference: id(60), optionReference: id(61) },
+      { sellableReference: id(10), bindingReference: id(60), optionReference: id(62) },
+    ] as never,
+  });
+  expect([...(facts.get(id(10) as never)?.notOfferedOptions ?? [])]).toEqual([id(61)]);
+  const read = calls.findIndex((call) => call.sql.includes("FROM rms_catalog.option "));
+  // Brand-only while reading options (Store-selected Catalog rows are hidden), then restored.
+  expect(calls[read - 1]?.sql).toContain("set_config('bop.store_id',''");
+  expect(calls[read]?.values).toEqual([id(2), [id(61), id(62)]]);
+  expect(calls[read + 1]?.values).toEqual([id(2), id(3)]);
+});

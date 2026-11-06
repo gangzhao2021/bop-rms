@@ -33,8 +33,15 @@ export interface CustomerMenuOptionRuleDto {
     readonly name: string;
     readonly maximumQuantity: number;
     readonly conflictOptionReferences: readonly CatalogReference[];
+    /** The choice the dish is configured to start with (published); see `offeredNow`. */
     readonly selectedByDefault: boolean;
     readonly defaultQuantity?: number;
+    /**
+     * WP-2423 (cart-unsellable-dishes): present (false) only when the Store does not offer this
+     * choice right now (staff unticked it under Option sets). It cannot be chosen and a client
+     * never starts with it, even when it is the configured default; absent: offered.
+     */
+    readonly offeredNow?: false;
     /** What one of this option adds now at the Store (0 is "no charge"); the Quote decides. */
     readonly incrementalPrice:
       | {

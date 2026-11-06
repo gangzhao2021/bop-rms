@@ -685,3 +685,37 @@ it("WP-2423 Q12: an item's default choices follow channel, enabled options, quan
   ]);
   expect(publishedDefaultOptionSelections([], "DINE_IN")).toEqual([]);
 });
+
+it("WP-2423 (cart-unsellable-dishes): a choice the Store does not offer now is sent as not offered, its configured default kept", async () => {
+  const menu = projection();
+  const option = menu.snapshot.sections[0]?.sellables[0]?.optionRules[0]?.options[0];
+  if (option === undefined) throw new Error("fixture");
+  const result = await createCustomerMenuQueryService({
+    stores: {
+      resolvePublic: async () => ({
+        brandReference: id(3) as never,
+        storeReference: id(7) as never,
+        status: "Active",
+      }),
+    },
+    projections: { loadCandidates: async () => [menu] },
+    storeFacts: {
+      load: async () =>
+        new Map([
+          [
+            id(10),
+            {
+              availability: "Available" as const,
+              price: null,
+              notOfferedOptions: new Set([String(option.optionReference)]),
+            },
+          ],
+        ]),
+    },
+  }).getPublishedMenu(input());
+  if (result.status !== "Found") throw new Error("menu");
+  const [off, ...others] = result.menu.sections[0]?.sellables[0]?.optionRules[0]?.options ?? [];
+  expect(off).toMatchObject({ optionReference: option.optionReference, offeredNow: false });
+  expect(off?.selectedByDefault).toBe(option.selectedByDefault);
+  for (const other of others) expect(other).not.toHaveProperty("offeredNow");
+});

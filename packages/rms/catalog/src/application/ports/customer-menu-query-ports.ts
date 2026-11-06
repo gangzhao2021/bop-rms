@@ -28,6 +28,11 @@ export interface CustomerMenuStoreFact {
    * choices all do starts unchosen for guests (Owner 2026-10-28 combo decision 1).
    */
   readonly comboChoices?: ReadonlySet<string>;
+  /**
+   * WP-2423 (cart-unsellable-dishes): the item's published choices the Store does not offer right
+   * now (absent or empty: all offered). The menu still shows them, greyed, never pre-chosen.
+   */
+  readonly notOfferedOptions?: ReadonlySet<string>;
 }
 
 export interface CustomerMenuQueryPorts {

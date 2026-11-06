@@ -84,6 +84,12 @@ export function createCustomerMenuStoreFacts(options: {
         const comboChoices = new Set(
           (await listBundleComboRecords(tx as never, scope)).choices.map((c) => c.optionReference),
         );
+        // WP-2423 (cart-unsellable-dishes): the published choices not offered right now.
+        const notOffered = await notOfferedOptions(
+          tx,
+          scope.brandReference,
+          (input.options ?? []).map((option) => String(option.optionReference)),
+        );
         const facts = new Map<string, CustomerMenuStoreFact>();
         for (const sellable of input.sellableReferences) {
           const own = rules.filter((rule) => rule.sellableReference === sellable);
@@ -171,6 +177,7 @@ export function createCustomerMenuStoreFacts(options: {
             price,
             optionPrices,
             ...(comboChoices.size === 0 ? {} : { comboChoices }),
+            ...(notOffered.size === 0 ? {} : { notOfferedOptions: notOffered }),
           });
         }
         // WP-2423 DEC-ALCOHOL: where and when the dishes that contain alcohol can be ordered.
@@ -228,4 +235,44 @@ export function createCustomerMenuStoreFacts(options: {
       });
     },
   });
+}
+
+/**
+ * WP-2423 (cart-unsellable-dishes): which of these options the Brand does not offer now (staff
+ * unticked them under Option sets, or removed them). Read under the Brand-only context, because
+ * Catalog rows are hidden while a Store is selected (the Store-selected RLS trap); the Store the
+ * menu read selected is restored afterwards, in the same transaction.
+ */
+async function notOfferedOptions(
+  tx: ProductLifecycleTransaction,
+  brandReference: string,
+  optionReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const wanted = [...new Set(optionReferences)];
+  if (wanted.length === 0) return new Set();
+  const query = tx.query.bind(tx) as (
+    sql: string,
+    values: readonly unknown[],
+  ) => Promise<{ rows: readonly Record<string, unknown>[] }>;
+  const before = await query(
+    "SELECT current_setting('bop.brand_id', true) AS brand, current_setting('bop.store_id', true) AS store",
+    [],
+  );
+  const store = before.rows[0]?.store;
+  const brand = before.rows[0]?.brand;
+  await query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
+    brandReference,
+  ]);
+  try {
+    const result = await query(
+      "SELECT option_id::text AS option FROM rms_catalog.option WHERE brand_id=$1 AND option_id = ANY($2::uuid[]) AND lifecycle <> 'Active'",
+      [brandReference, wanted],
+    );
+    return new Set(result.rows.map((row) => String(row.option)));
+  } finally {
+    await query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      typeof brand === "string" ? brand : "",
+      typeof store === "string" ? store : "",
+    ]);
+  }
 }

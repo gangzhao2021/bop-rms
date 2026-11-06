@@ -168,6 +168,7 @@ export function publicFound(value: CustomerMenuFound): CustomerMenuFound {
               ...(rule.semanticsVersion === 2
                 ? { defaultQuantity: Number(option.defaultQuantity) }
                 : {}),
+              ...(option.offeredNow === false ? { offeredNow: false as const } : {}),
               incrementalPrice: { ...option.incrementalPrice },
             })),
           })),
