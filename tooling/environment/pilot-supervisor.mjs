@@ -151,12 +151,14 @@ export function createPilotSupervisorHealthWriter(
     }
   };
 }
+/** WP-2423: how long a Store service may run in the shared process before writing any health. */
+export const HOSTED_STORE_STARTING_MS = 5 * 60_000;
 /**
  * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the installation's own services, then each other Store's
  * workers from its own directory (`stores.json`), each Store's processes started, watched and
- * reported on their own, so one Store's failing worker never stops another's. A Store's day-end
- * settlement worker starts once its first closed business day is recorded
- * (`daily-settlement-coverage.json`). Reported as `stores/<name>:<service>`.
+ * reported on their own, so one Store's failing worker never stops another's. Every Store's
+ * day-end settlement worker runs, waiting by itself until the Store's first business day has
+ * closed. Reported as `stores/<name>:<service>`.
  */
 export function createPilotInstallationSweep({
   runtimeDirectory,
@@ -168,7 +170,13 @@ export function createPilotInstallationSweep({
   // WP-2423 (2026-11-02): which of them fit the database role's connections (a refused Store is
   // reported each sweep, so the operations monitor alerts on it, and its workers aren't started).
   admit = async (relatives) => admitConfiguredStores(runtimeDirectory, relatives),
+  now = () => Date.now(),
+  startingMs = HOSTED_STORE_STARTING_MS,
 }) {
+  // WP-2423 (settlement-coverage): a Store service that has written no health is "starting" for a
+  // few minutes after the shared process is first seen, then needs a person: a worker that never
+  // starts, or never reports, is never dropped from the report.
+  const missingSince = new Map();
   // DEC-MULTI-MERCHANT-ONE-INSTALLATION A5: the Stores after the first run in one process; each is
   // still reported on its own, from its own health files. The Store list is read once per run.
   let prepared = null;
@@ -202,8 +210,20 @@ export function createPilotInstallationSweep({
         for (const service of storeWorkerServices) {
           const directory = path.join(root(), runtimeDirectory, relative);
           const health = await readHealth(directory, service, host.pid);
-          if (health !== null)
-            services.push({ service: relative + ":" + service, state: "running", ...health });
+          const name = relative + ":" + service;
+          if (health !== null) {
+            missingSince.delete(name);
+            services.push({ service: name, state: "running", ...health });
+            continue;
+          }
+          const seen = missingSince.get(name);
+          const since = seen?.pid === host.pid ? seen.since : now();
+          missingSince.set(name, { pid: host.pid, since });
+          services.push(
+            now() - since < startingMs
+              ? { service: name, state: "starting" }
+              : { service: name, state: "attention_required", health: "missing" },
+          );
         }
       }
       for (const relative of refused)
