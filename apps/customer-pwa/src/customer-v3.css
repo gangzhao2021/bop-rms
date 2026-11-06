@@ -356,3 +356,10 @@
   outline: 2px solid var(--bop-color-focus, var(--bop-color-accent));
   outline-offset: -2px;
 }
+
+/* merchant-outage-recovery M68: a slow add says so, quietly, under the button. */
+.slow-wait-notice {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--bop-color-text-muted, #5f5f5f);
+}

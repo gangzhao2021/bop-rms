@@ -7,6 +7,7 @@ import {
 } from "./option-configuration.js";
 import { createBrowserPickupCartClient } from "../cart/pickup-cart-client.js";
 import { CustomerPage } from "../journey/CustomerPage.js";
+import { SlowAddNotice } from "../slow-wait.js";
 import { formatDecimalMoney, formatMoney } from "../journey/format.js";
 import { cartIssueMessage } from "../journey/messages.js";
 import {
@@ -1787,6 +1788,7 @@ export function SellableConfigurator({
             missingComboPart(sellable, current),
           )}
         </button>
+        <SlowAddNotice busy={busy} />
         <p className="configure-actions__total" aria-live="polite">
           {total === null ? (
             t("Price confirmed at checkout")
