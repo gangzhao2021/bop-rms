@@ -2835,6 +2835,8 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_session",
             "dining_participant",
             "dining_checkout_commitment",
+            // WP-2423 M04: a paid round follows its party's recorded Move.
+            "dining_session_move_operation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-checkout-commitment-store.ts";
         const acceptedDiningItemServiceAsset =

@@ -2337,6 +2337,7 @@ describe("Database Schema Ownership Architecture Test", () => {
       "dining_session",
       "dining_participant",
       "dining_checkout_commitment",
+      "dining_session_move_operation",
     ]);
     const asset = join(
       context.moduleRoot,
@@ -2354,6 +2355,7 @@ describe("Database Schema Ownership Architecture Test", () => {
     "dining_session",
     "dining_participant",
     "dining_checkout_commitment",
+    "dining_session_move_operation",
   ])("rejects WP-2402 changed %s admission", async (changed) => {
     const root = await fixture();
     const context = await writeModule(
@@ -2361,9 +2363,13 @@ describe("Database Schema Ownership Architecture Test", () => {
       "RMS",
       changed === "owner" ? "other" : "dining",
       changed === "schema" ? "rms_other" : "rms_dining",
-      ["dining_table", "dining_session", "dining_participant", "dining_checkout_commitment"].filter(
-        (t) => t !== changed,
-      ),
+      [
+        "dining_table",
+        "dining_session",
+        "dining_participant",
+        "dining_checkout_commitment",
+        "dining_session_move_operation",
+      ].filter((t) => t !== changed),
     );
     await writeFile(
       join(

@@ -12,7 +12,11 @@ const unavailable = (): never => {
   throw new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
 };
 
-/** Caller authorizes Order scope and holds its transaction; capacity state is not a release decision. */
+/**
+ * Caller authorizes Order scope and holds its transaction; capacity state is not a release decision.
+ * A dine-in round already paid is read wherever its party sits now (WP-2423 M04: staff moved the
+ * table after the guest paid and before staff accepted it).
+ */
 export async function readOrderPaidCapacity(
   transaction: ConsumerTransaction,
   scopeInput: { tenantReference: string; brandReference: string; storeReference: string },
@@ -54,7 +58,7 @@ export async function readOrderPaidCapacity(
     if (orderType === "DineIn") {
       const result = await createPostgresDiningCheckoutCommitmentStore(bound, scope, {
         now: () => observedAt,
-      }).withCurrentFacts(p.capacityAllocationReference, async (_, facts) => {
+      }).withPaidFacts(p.capacityAllocationReference, async (_, facts) => {
         if (!matches(facts.commitment)) return unavailable();
         return Object.freeze({ owner: "Dining" as const, ...facts });
       });

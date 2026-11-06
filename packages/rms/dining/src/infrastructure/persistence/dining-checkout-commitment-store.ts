@@ -253,6 +253,134 @@ export function createPostgresDiningCheckoutCommitmentStore(
       participant: closed(participants[0], ["participant"]).participant,
     };
   }
+  /**
+   * WP-2423 M04: the Dining context of a round already paid, wherever its party sits now. Staff may
+   * move a party to another table after it paid a round and before that round is accepted; the
+   * round goes with the party. The session's current table is locked before the session (Move's
+   * table-before-session order). A table other than the one the round was paid at is accepted only
+   * when Dining recorded a Move of this session off that table after the round was prepared, and the
+   * session's table assignment moved on since: a party leaves a table only by a recorded Move (a
+   * Merge is refused while a round is paid or being paid).
+   */
+  async function paidCurrent(
+    tx: DiningTableTransaction,
+    record: DiningCheckoutCommitment,
+    at: string,
+  ) {
+    const seen = rows(
+      await tx.query(
+        "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4",
+        [tenant, brand, store, record.diningSessionReference],
+      ),
+    );
+    if (seen.length !== 1) return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    const before = parseDiningSession(closed(seen[0], ["session"]).session);
+    if (
+      before.brandReference !== brand ||
+      before.storeReference !== store ||
+      before.diningSessionReference !== record.diningSessionReference
+    )
+      return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    const tableReference = before.tableReference;
+    const tables = rows(
+      await tx.query(
+        "SELECT table_snapshot AS table FROM rms_dining.dining_table WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE",
+        [tenant, brand, store, tableReference],
+      ),
+    );
+    if (tables.length !== 1) return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    const table = createDiningTable(closed(tables[0], ["table"]).table);
+    if (
+      table.tenantReference !== tenant ||
+      table.brandReference !== brand ||
+      table.storeReference !== store ||
+      table.tableReference !== tableReference ||
+      table.activeDiningSessionReference !== record.diningSessionReference ||
+      table.lifecycle !== "Published" ||
+      table.operationalState !== "Available" ||
+      table.observedAt > at
+    )
+      return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    const sessions = rows(
+      await tx.query(
+        "SELECT session_snapshot AS session FROM rms_dining.dining_session WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 FOR UPDATE",
+        [tenant, brand, store, record.diningSessionReference],
+      ),
+    );
+    const participants = rows(
+      await tx.query(
+        "SELECT participant_snapshot AS participant FROM rms_dining.dining_participant WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND participant_id=$5 FOR UPDATE",
+        [tenant, brand, store, record.diningSessionReference, record.participantReference],
+      ),
+    );
+    if (sessions.length !== 1 || participants.length !== 1)
+      return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    const session = closed(sessions[0], ["session"]).session;
+    // Moved again between the unlocked read and the locks: the caller retries.
+    if (parseDiningSession(session).tableReference !== tableReference)
+      return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    if (tableReference !== record.tableReference) {
+      if (parseDiningSession(session).tableAssignmentVersion <= record.tableAssignmentVersion)
+        return fail("DINING_CHECKOUT_STORE_CONFLICT");
+      const moved = rows(
+        await tx.query(
+          "SELECT 1 AS moved FROM rms_dining.dining_session_move_operation WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND source_table_id=$5 AND occurred_at>=$6::timestamptz LIMIT 1",
+          [
+            tenant,
+            brand,
+            store,
+            record.diningSessionReference,
+            record.tableReference,
+            record.preparedAt,
+          ],
+        ),
+      );
+      if (moved.length !== 1) return fail("DINING_CHECKOUT_STORE_CONFLICT");
+    }
+    return { session, participant: closed(participants[0], ["participant"]).participant };
+  }
+  /** One locked latest commitment and its parsed Dining context (shared by the current reads). */
+  async function withFacts<T>(
+    referenceValue: unknown,
+    locate: typeof current,
+    work: (
+      transaction: DiningTableTransaction,
+      facts: Readonly<{
+        commitment: DiningCheckoutCommitment;
+        session: ReturnType<typeof parseDiningSession>;
+        participant: ReturnType<typeof parseDiningParticipant>;
+      }>,
+    ) => Promise<T>,
+  ): Promise<T | null> {
+    try {
+      const reference = parseDiningReference(referenceValue);
+      return await runner.run(async (tx) => {
+        await setContext(tx);
+        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+          "DiningCheckout:" + tenant + ":" + brand + ":" + store + ":" + reference,
+        ]);
+        const commitment = (await history(tx, reference)).at(-1);
+        if (commitment === undefined) return null;
+        const observedAt = now();
+        const context = await locate(tx, commitment, observedAt);
+        const session = parseDiningSession(context.session);
+        const participant = parseDiningParticipant(context.participant);
+        if (
+          session.brandReference !== brand ||
+          session.storeReference !== store ||
+          session.diningSessionReference !== commitment.diningSessionReference ||
+          participant.diningSessionReference !== session.diningSessionReference ||
+          participant.participantReference !== commitment.participantReference ||
+          session.startedAt > observedAt ||
+          participant.joinedAt > observedAt
+        )
+          return fail("DINING_CHECKOUT_STORE_CONFLICT");
+        return work(tx, Object.freeze({ commitment, session, participant }));
+      });
+    } catch (error) {
+      return normalize(error);
+    }
+  }
   return Object.freeze({
     /** Historical recovery is never current permission to submit or pay. */
     async load(referenceValue: unknown) {
@@ -279,34 +407,25 @@ export function createPostgresDiningCheckoutCommitmentStore(
         }>,
       ) => Promise<T>,
     ): Promise<T | null> {
-      try {
-        const reference = parseDiningReference(referenceValue);
-        return await runner.run(async (tx) => {
-          await setContext(tx);
-          await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
-            "DiningCheckout:" + tenant + ":" + brand + ":" + store + ":" + reference,
-          ]);
-          const commitment = (await history(tx, reference)).at(-1);
-          if (commitment === undefined) return null;
-          const observedAt = now();
-          const context = await current(tx, commitment, observedAt);
-          const session = parseDiningSession(context.session);
-          const participant = parseDiningParticipant(context.participant);
-          if (
-            session.brandReference !== brand ||
-            session.storeReference !== store ||
-            session.diningSessionReference !== commitment.diningSessionReference ||
-            participant.diningSessionReference !== session.diningSessionReference ||
-            participant.participantReference !== commitment.participantReference ||
-            session.startedAt > observedAt ||
-            participant.joinedAt > observedAt
-          )
-            return fail("DINING_CHECKOUT_STORE_CONFLICT");
-          return work(tx, Object.freeze({ commitment, session, participant }));
-        });
-      } catch (error) {
-        return normalize(error);
-      }
+      return withFacts(referenceValue, current, work);
+    },
+    /**
+     * Paid-round history only (WP-2423 M04): the party may have moved to another table since it
+     * paid. Never permission to prepare, seal or start a payment (`withCurrentFacts` and
+     * `withPaymentPending` still hold a round to the table it was sent from).
+     */
+    async withPaidFacts<T>(
+      referenceValue: unknown,
+      work: (
+        transaction: DiningTableTransaction,
+        facts: Readonly<{
+          commitment: DiningCheckoutCommitment;
+          session: ReturnType<typeof parseDiningSession>;
+          participant: ReturnType<typeof parseDiningParticipant>;
+        }>,
+      ) => Promise<T>,
+    ): Promise<T | null> {
+      return withFacts(referenceValue, paidCurrent, work);
     },
     /** Current payment eligibility with commitment and Dining context locked through caller work. */
     async withPaymentPending<T>(
