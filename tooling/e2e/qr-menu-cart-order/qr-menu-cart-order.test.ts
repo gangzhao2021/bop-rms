@@ -103,6 +103,7 @@ function cartView(version: number, withItem: boolean): CustomerCartView {
       version,
       orderType: "Pickup",
       serviceMode: "Pickup",
+      placedOrder: null,
       context: { brandName: "WP 2020 Brand", storeName: "WP 2020 Store" },
       lifecycle: {
         status: "Active",

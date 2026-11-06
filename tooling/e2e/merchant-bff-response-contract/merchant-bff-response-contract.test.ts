@@ -224,6 +224,7 @@ const dineIn = {
   orderReference: id(0x903),
   orderNumber: "T7-12",
   orderType: "DineIn",
+  startedByGuest: true as const,
   sourceChannel: "Qr",
   businessDate: "2026-10-16",
   listedBusinessDate: "2026-10-16",
@@ -270,6 +271,7 @@ const dineIn = {
       acceptanceStatus: "Accepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      kitchenReceivedAt: null,
       // WP-2423 M04: accepted and paid, still on its way to the kitchen.
       kitchenRelease: { state: "Sending" as const, acceptedAt: at(3) },
       automaticRefundLate: false,
@@ -301,6 +303,7 @@ const dineIn = {
       canRequestAcceptance: true,
       // The paid round waiting for staff: Orders and Home warn after 5 and 10 minutes.
       awaitingAcceptanceSince: at(14),
+      kitchenReceivedAt: null,
       kitchenRelease: null,
       automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
@@ -329,6 +332,7 @@ const dineIn = {
       acceptanceStatus: "NotAccepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      kitchenReceivedAt: null,
       kitchenRelease: null,
       automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
@@ -357,6 +361,7 @@ const dineIn = {
       acceptanceStatus: "Cancelled",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      kitchenReceivedAt: null,
       kitchenRelease: null,
       automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
@@ -395,6 +400,7 @@ const heldPickup = {
   orderReference: id(0x902),
   orderNumber: "P-31",
   orderType: "Pickup",
+  startedByGuest: true as const,
   sourceChannel: "Web",
   businessDate: "2026-10-16",
   listedBusinessDate: "2026-10-16",
@@ -444,6 +450,7 @@ const heldPickup = {
       acceptanceStatus: "NotAccepted",
       canRequestAcceptance: true,
       awaitingAcceptanceSince: null,
+      kitchenReceivedAt: null,
       kitchenRelease: null,
       automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
@@ -472,6 +479,7 @@ const earlierCounterPickup = {
   orderReference: id(0x801),
   orderNumber: "C-4",
   orderType: "Pickup",
+  startedByGuest: true as const,
   sourceChannel: "Pos",
   businessDate: "2026-10-15",
   listedBusinessDate: "2026-10-15",
@@ -527,6 +535,7 @@ const earlierCounterPickup = {
       acceptanceStatus: "Accepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      kitchenReceivedAt: null,
       kitchenRelease: null,
       automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
@@ -771,6 +780,7 @@ const kitchenView = {
   ],
   paidOrderWatch: { ...paidOrderWatch, canAcceptOrders: false },
   items: [kitchenItem(1, "Queued"), kitchenItem(2, "Completed")],
+  moreWaitingTickets: 3,
   nextCursor: null,
 } satisfies KitchenList;
 
@@ -782,6 +792,8 @@ const tablesView = {
   canWriteOff: true,
   // WP-2423 M08: "Take order for table" follows the Tables read, not the counter switch.
   canTakeTableRounds: true,
+  // Guests may start free tables by scanning; staff can turn it off; free tables are busy now.
+  guestTableStart: { version: 2, canTurnOff: true, startsBusy: true as const },
   items: [
     {
       tableReference: id(0x501),
@@ -795,6 +807,9 @@ const tablesView = {
       currentDiningSessionReference: id(0x511),
       elapsedMinutes: 30,
       qrCodeValidUntil: at(59),
+      // A guest started this table by scanning; it closes by itself unless staff take it over.
+      guestStart: { closesByItselfAt: at(80), endedLastParty: true as const },
+      blockedSince: at(20),
       paymentTiming: "PayLater",
       staffCall: null,
       heldRounds: [],
