@@ -923,6 +923,15 @@ export function DiningSessionScreen({
           <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
         )}
       </PageHeading>
+      {view?.movedFromTableLabel === undefined || !view.tableLabel ? null : (
+        // WP-2423 table-move-payment: staff moved the party after this phone joined; it follows.
+        <p className="dining-session__moved" role="status">
+          {t(
+            "Staff moved your party from table {from} to table {table}. Keep ordering and paying on this phone.",
+            { from: saidTable(view.movedFromTableLabel), table: saidTable(view.tableLabel) },
+          )}
+        </p>
+      )}
       {placed === null ? null : (
         <p className="dining-session__placed" role="status">
           {placed === "Held" ? t("Order placed. Staff confirm it first.") : t("Order placed.")}

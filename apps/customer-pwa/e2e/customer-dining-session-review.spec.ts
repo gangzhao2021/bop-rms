@@ -107,13 +107,17 @@ async function enterTable(
       },
     }),
   );
-  await page.route("**/api/v1/dine-in/session", (route) => {
-    expect(route.request().method()).toBe("GET");
-    expect(route.request().headers()["x-csrf-token"]).toBe(csrf());
-    expect(new URL(route.request().url()).search).toBe("");
-    const { status, json } = onSession();
-    return route.fulfill({ status, headers: { "cache-control": "no-store" }, json });
-  });
+  await page.route(
+    (url) => url.pathname === "/api/v1/dine-in/session",
+    (route) => {
+      expect(route.request().method()).toBe("GET");
+      expect(route.request().headers()["x-csrf-token"]).toBe(csrf());
+      // Nothing in the URL but the display language a Chinese page asks dish names in.
+      expect(new URL(route.request().url()).search).toMatch(/^(|\?locale=[A-Za-z-]+)$/u);
+      const { status, json } = onSession();
+      return route.fulfill({ status, headers: { "cache-control": "no-store" }, json });
+    },
+  );
   // WP-2423 Q28 DEC-DINING-STAFF-CALL: nobody at this table has asked for staff.
   await page.route("**/api/v1/dine-in/staff-call", (route) =>
     route.fulfill({
@@ -143,8 +147,8 @@ async function enterTable(
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
   await page
-    .getByRole("navigation", { name: "Customer journey" })
-    .getByRole("link", { name: "Your table" })
+    .getByRole("navigation", { name: /^(Customer journey|点单步骤)$/u })
+    .getByRole("link", { name: /^(Your table|你的桌位)$/u })
     .click();
   await expect(page).toHaveURL(/\/dine-in\/session$/u);
 }
@@ -557,6 +561,58 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expectNoInternalText(page);
     await page.setViewportSize({ width: 320, height: 844 });
     await expectNoHorizontalOverflow(page);
+  });
+
+  test("WP-2423 table-move-payment: a moved party's phone keeps its order and says where it sits", async ({
+    page,
+  }) => {
+    // v15 fabf0261 2026-11-06: the phone lost its order after staff moved the table. It now
+    // follows the party (the server side is proven by the database acceptance tests); the table
+    // page says, quietly, where the party sits now. Synthetic TEST data.
+    await enterTable(page, () => ({
+      status: 200,
+      json: { ...session, session: { ...session.session, movedFromTableLabel: "T6" } },
+    }));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Your table · 12" })).toBeVisible();
+    const line = main.getByRole("status").filter({ hasText: "Staff moved your party" });
+    await expect(line).toHaveText(
+      "Staff moved your party from table T6 to table 12. Keep ordering and paying on this phone.",
+    );
+    await expect(main.getByRole("heading", { name: "Round 1 · Ordered by you" })).toBeVisible();
+    await expect(main).not.toContainText("Your table moved");
+    await expect(main.getByRole("alert")).toHaveCount(0);
+    await expectNoInternalText(page);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+      await expectNoHorizontalOverflow(page);
+      await page.screenshot({
+        path: `test-results/customer-dining-moved-${width}.png`,
+        fullPage: true,
+      });
+    }
+  });
+
+  test("WP-2423 table-move-payment: the move line in Chinese", async ({ page }) => {
+    // The guest chose Chinese on an earlier visit (the app's own stored choice).
+    await page.addInitScript(() => localStorage.setItem("bop.customer.language", "zh-Hans"));
+    await enterTable(page, () => ({
+      status: 200,
+      json: { ...session, session: { ...session.session, movedFromTableLabel: "T6" } },
+    }));
+    const main = page.getByRole("main");
+    await expect(main.getByRole("status").filter({ hasText: "店员已把你们" })).toHaveText(
+      "店员已把你们从 T6 桌换到 12 桌，继续用这部手机点餐和付款即可。",
+    );
+    await expectNoInternalText(page);
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+      await expectNoHorizontalOverflow(page);
+      await page.screenshot({
+        path: `test-results/customer-dining-moved-zh-${width}.png`,
+        fullPage: true,
+      });
+    }
   });
 
   test("v15 2026-10-30: the moved party's phone scans its new table's code and joins it again", async ({

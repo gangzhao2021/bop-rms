@@ -94,6 +94,11 @@ export interface CustomerDiningSessionFacts {
   readonly paymentTiming?: "PayFirst" | "PayLater";
   /** DEC-DINING-GUEST-TABLE-START: a guest started this table; nobody brings the dishes over. */
   readonly startedByGuest?: true;
+  /**
+   * WP-2423 table-move-payment: staff moved the party after this phone joined; the label of the
+   * table of the latest move (the phone follows the party). A label only.
+   */
+  readonly movedFromTableLabel?: string;
   readonly order: null | {
     readonly orderNumber: string;
     readonly batches: readonly {
@@ -249,6 +254,8 @@ export interface CustomerDiningSessionView {
   readonly paymentTiming: "PayFirst" | "PayLater";
   /** DEC-DINING-GUEST-TABLE-START: sent only for a table a guest started. */
   readonly startedByGuest?: true;
+  /** WP-2423 table-move-payment: sent only when staff moved the party after this phone joined. */
+  readonly movedFromTableLabel?: string;
   readonly rounds: readonly {
     readonly roundNumber: number;
     /** WP-2423 Q7 slice 2: "Staff" for a round staff entered for the table. */
@@ -358,6 +365,14 @@ const denied = (): never => {
   throw new OrderStatusProjectionError("ORDER_STATUS_PERMISSION_DENIED");
 };
 
+/** WP-2423 table-move-payment: the move line, only for a phone that joined before the move. */
+const movedFrom = (facts: CustomerDiningSessionFacts) =>
+  facts.movedFromTableLabel !== undefined &&
+  facts.movedFromTableLabel !== null &&
+  facts.movedFromTableLabel !== facts.tableLabel
+    ? { movedFromTableLabel: facts.movedFromTableLabel }
+    : {};
+
 /** Pure composition of the owner facts into the customer-safe table view. */
 export function composeCustomerDiningSession(
   facts: CustomerDiningSessionFacts,
@@ -370,6 +385,7 @@ export function composeCustomerDiningSession(
       checkedAt: facts.checkedAt,
       paymentTiming: facts.paymentTiming ?? "PayFirst",
       ...(facts.startedByGuest === true ? { startedByGuest: true as const } : {}),
+      ...movedFrom(facts),
       rounds: Object.freeze([]),
       summary: null,
     });
@@ -581,6 +597,7 @@ export function composeCustomerDiningSession(
     checkedAt: facts.checkedAt,
     paymentTiming: facts.paymentTiming ?? "PayFirst",
     ...(facts.startedByGuest === true ? { startedByGuest: true as const } : {}),
+    ...movedFrom(facts),
     rounds: Object.freeze(rounds),
     summary: Object.freeze({
       // DEC-DINE-IN-PAY-LATER: what the table's one payment added to its dishes, so the guest's
@@ -788,9 +805,18 @@ function postgresDependencies(
         (await listDiningGuestStartedSessions(transaction, options.diningScope, [
           diningSessionReference,
         ]).then((found) => found.has(diningSessionReference)));
+      // WP-2423 table-move-payment: staff moved the party after this phone joined (it follows).
+      const moved =
+        guest.diningParticipantReference === null
+          ? null
+          : await loadDiningParticipantMove(transaction as never, scope, {
+              diningSessionReference,
+              participantReference: String(guest.diningParticipantReference),
+            });
       const timing = {
         ...(paymentTiming === undefined ? {} : { paymentTiming }),
         ...(guestStarted ? { startedByGuest: true as const } : {}),
+        ...(moved === null ? {} : { movedFromTableLabel: moved.fromTableLabel }),
       };
       const orderReference = await createPostgresDiningSessionOrderLookup({
         ...scope,

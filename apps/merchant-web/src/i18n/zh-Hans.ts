@@ -6984,8 +6984,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "being cleaned": "待清洁",
   "not in use": "暂停使用",
   "no table QR code": "没有桌台二维码",
-  "Moved to table {table}. Guests scan the code on table {table} to keep ordering; table {from} is marked for cleaning.":
-    "已换到 {table} 桌。客人扫 {table} 桌的桌台二维码即可继续点单；{from} 桌已标为待清洁。",
+  "Moved to table {table}. Guests' phones move with the party, so nobody needs to scan again; table {from} is marked for cleaning.":
+    "已换到 {table} 桌。客人的手机会跟着这桌一起换过去，不用重新扫码；{from} 桌已标为待清洁。",
   "That table has a party now. Two parties can't share a table; choose a free one.":
     "那张桌现在有客人。不能两桌合用一张桌，请选一张空桌。",
   "That table is not free to use now (being cleaned or not in use).":

@@ -100,6 +100,9 @@ export class CustomerDiningSessionHandler {
           checkedAt: view.checkedAt,
           paymentTiming: view.paymentTiming,
           ...(view.startedByGuest === true ? { startedByGuest: true } : {}),
+          ...(view.movedFromTableLabel === undefined
+            ? {}
+            : { movedFromTableLabel: view.movedFromTableLabel }),
           rounds: view.rounds.map((round) => ({
             roundNumber: round.roundNumber,
             orderedBy: round.orderedBy,

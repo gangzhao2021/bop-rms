@@ -829,10 +829,14 @@ system (staff cannot open this document offline).
   change the tea count on the table with the reason.
 - **Moving a table** (WP-2423 item 8 ⑧): on the table's first slip write "moved from table A to
   table B" and the time, and carry the slips to table B. When screens come back, open table A on
-  `Tables` and use `Move to…` to record it (table A is then marked for cleaning); guests scan
-  table B's code and tap `Join this table` to keep ordering (any phone can; no host is needed,
-  and their order and bill are there). If the host's phone rejoined and needs to be host again,
-  use `Dining host transfer` on the table. A table with a party can't be joined to another yet.
+  `Tables` and use `Move to…` to record it (table A is then marked for cleaning). The guests'
+  phones move with the party (table-move-payment, 2026-11-06): their order, bill and any payment
+  they had started carry on at table B, and the table page says "Staff moved your party from
+  table A to table B". Point a guest to table B's code only when their phone says "Your table
+  moved to table B" (table A's code was replaced or turned off since); scanning it and tapping
+  `Join this table` works for any phone. If the card machine or the network is down at table B,
+  take the round with the counter payment as usual. A table with a party can't be joined to
+  another yet.
 - **Setting up the tea item** (owner, once): on `Menu`, press `New dish`, enter its name and
   price, and under its allergens choose `A fee, not food (tea, corkage, sauce bar): no allergens,
 never goes to the kitchen`; save, and press `List it`. Do not hide it: guests never see the tea
@@ -3365,8 +3369,8 @@ through reads "The automatic refund didn't go through" (自动退款没有完成
   "accepted but hasn't reached the kitchen yet", not "not accepted yet".
 - A table moved after a round was paid keeps that round: staff accept it at the new table as usual
   and the kitchen ticket names the new table. A guest who was still paying when the table moved is
-  charged and sent normally; a payment not yet started for that round must be sent again from the
-  new table.
+  charged and sent normally, and a round sent before the move and not paid yet is paid from the
+  same phone at the new table, for the same amount (table-move-payment, 2026-11-06).
 - Pilot operator: the business worker's health is `paymentWait` `attention_required` while any paid
   wait keeps failing; `business-worker.log` has one `INTERNAL_PAYMENT_WAIT_FAILED` line per attempt
   with its safe `code`, `failures` and `stuckWaits` (a count, never which order). The failing order

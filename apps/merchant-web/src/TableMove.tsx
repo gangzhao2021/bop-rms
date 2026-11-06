@@ -135,7 +135,7 @@ export function TableMove({
       operation.current = null;
       onMoved(
         t(
-          "Moved to table {table}. Guests scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
+          "Moved to table {table}. Guests' phones move with the party, so nobody needs to scan again; table {from} is marked for cleaning.",
           { table: saidTable(moved.tableLabel), from: moved.fromTableLabel },
         ),
         chosen.tableReference,

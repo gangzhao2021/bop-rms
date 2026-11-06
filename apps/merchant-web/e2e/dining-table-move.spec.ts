@@ -163,7 +163,8 @@ test("@production staff move a table's party to a free table with a code", async
   await panel.getByRole("button", { name: "Move to table T7" }).click();
   await expect(
     page.getByText(
-      "Moved to table T7. Guests scan the code on table T7 to keep ordering; table T6 is marked for cleaning.",
+      // WP-2423 table-move-payment: phones follow the party; staff no longer send guests to scan.
+      "Moved to table T7. Guests' phones move with the party, so nobody needs to scan again; table T6 is marked for cleaning.",
     ),
   ).toBeVisible();
   expect(sent).toEqual([

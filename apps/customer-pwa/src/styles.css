@@ -1451,6 +1451,12 @@
   margin: 0;
   font-weight: 600;
 }
+/* WP-2423 table-move-payment: a quiet line, not an alert (nothing for the guest to do). */
+.dining-session__moved {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  overflow-wrap: anywhere;
+}
 
 /* ---------- Checkout ---------- */
 .checkout-progress {

@@ -853,6 +853,13 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
     expect(html).toContain("Ready · collect order 12 at the counter");
     expect(html).not.toContain("on its way to your table");
   });
+  it("WP-2423 table-move-payment: tells a moved party's phone where it sits, quietly", () => {
+    const html = readyRound({ orderNumber: "12", movedFromTableLabel: "T6" });
+    expect(html).toMatch(
+      /<p class="dining-session__moved" role="status">Staff moved your party from table T6 to table [^<]+\. Keep ordering and paying on this phone\.<\/p>/u,
+    );
+    expect(readyRound({ orderNumber: "12" })).not.toContain("Staff moved your party");
+  });
   it("a staff-opened table reads as it always did", () => {
     const html = readyRound({ orderNumber: "12" });
     expect(html).toContain("on its way to your table");

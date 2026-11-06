@@ -126,6 +126,8 @@ export interface DiningSessionView {
   readonly paymentTiming: "PayFirst" | "PayLater";
   /** DEC-DINING-GUEST-TABLE-START: a guest started this table; nobody brings the dishes over. */
   readonly startedByGuest?: true;
+  /** WP-2423 table-move-payment: staff moved the party after this phone joined (a label). */
+  readonly movedFromTableLabel?: string;
   readonly rounds: readonly DiningRound[];
   readonly summary: null | {
     readonly paid: DiningMoney;
@@ -276,10 +278,22 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
     Object.hasOwn(root.session, "startedByGuest")
       ? ["startedByGuest"]
       : []),
+    ...(root.session !== null &&
+    typeof root.session === "object" &&
+    Object.hasOwn(root.session, "movedFromTableLabel")
+      ? ["movedFromTableLabel"]
+      : []),
     "rounds",
     "summary",
   ]);
   if (session.startedByGuest !== undefined && session.startedByGuest !== true) return invalid();
+  if (
+    session.movedFromTableLabel !== undefined &&
+    (typeof session.movedFromTableLabel !== "string" ||
+      session.movedFromTableLabel.length < 1 ||
+      session.movedFromTableLabel.length > 80)
+  )
+    return invalid();
   if (!Array.isArray(session.rounds) || session.rounds.length > 100) return invalid();
   const rounds = session.rounds.map((value: unknown, index): DiningRound => {
     const priced = value !== null && typeof value === "object" && Object.hasOwn(value, "subtotal");
@@ -507,6 +521,9 @@ export function parseDiningSessionView(value: unknown): DiningSessionView {
       ? oneOf(session.paymentTiming, ["PayFirst", "PayLater"] as const)
       : "PayFirst",
     ...(session.startedByGuest === true ? { startedByGuest: true as const } : {}),
+    ...(typeof session.movedFromTableLabel === "string"
+      ? { movedFromTableLabel: session.movedFromTableLabel }
+      : {}),
     rounds: Object.freeze(rounds),
     summary,
   });

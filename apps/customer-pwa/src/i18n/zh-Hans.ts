@@ -1422,6 +1422,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff took off 1 charge. It isn’t charged.": "店员撤下了 1 项收费，不收费。",
   "Staff took off {count} charges. They aren’t charged.": "店员撤下了 {count} 项收费，不收费。",
   "Your table moved to table {table}": "您这桌已换到 {table} 桌",
+  "Staff moved your party from table {from} to table {table}. Keep ordering and paying on this phone.":
+    "店员已把你们从 {from} 桌换到 {table} 桌，继续用这部手机点餐和付款即可。",
   "Your table was merged into table {table}": "你们这桌已并到 {table} 桌",
   "Staff joined your party to table {table}. Everything your table ordered is on that table's bill. Scan the code on table {table} to keep ordering and paying together.":
     "店员已把你们并到 {table} 桌，你们点过的菜都在那桌的账单上。请扫 {table} 桌的桌台二维码继续点餐和一起付款。",

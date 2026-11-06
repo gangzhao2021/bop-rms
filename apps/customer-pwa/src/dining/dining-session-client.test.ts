@@ -322,4 +322,12 @@ describe("DEC-DINING-GUEST-TABLE-START: the table view", () => {
     expect(parseDiningSessionView(session({ startedByGuest: true })).startedByGuest).toBe(true);
     expect(() => parseDiningSessionView(session({ startedByGuest: "yes" }))).toThrow();
   });
+  it("WP-2423 table-move-payment: reads the table a moved party came from, a label only", () => {
+    expect(parseDiningSessionView(session({})).movedFromTableLabel).toBeUndefined();
+    expect(parseDiningSessionView(session({ movedFromTableLabel: "T6" })).movedFromTableLabel).toBe(
+      "T6",
+    );
+    for (const bad of ["", 7, null, "x".repeat(81)])
+      expect(() => parseDiningSessionView(session({ movedFromTableLabel: bad }))).toThrow();
+  });
 });

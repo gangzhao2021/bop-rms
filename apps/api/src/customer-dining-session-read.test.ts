@@ -150,6 +150,23 @@ describe("WP-2423 Q8 composeCustomerDiningSession", () => {
     expect(view.summary?.due).toEqual(cad(3900n + 2303n));
   });
 
+  it("WP-2423 table-move-payment: names the table a moved party came from, never the one it sits at", () => {
+    const base = facts();
+    expect(composeCustomerDiningSession(base).movedFromTableLabel).toBeUndefined();
+    expect(
+      composeCustomerDiningSession({ ...base, movedFromTableLabel: "T6" }).movedFromTableLabel,
+    ).toBe("T6");
+    expect(
+      composeCustomerDiningSession({ ...base, order: null, movedFromTableLabel: "T6" })
+        .movedFromTableLabel,
+    ).toBe("T6");
+    // A to B and back to A never reads "from A to A".
+    expect(
+      composeCustomerDiningSession({ ...base, movedFromTableLabel: base.tableLabel as string })
+        .movedFromTableLabel,
+    ).toBeUndefined();
+  });
+
   it("DEC-DINE-IN-PAY-LATER: a round sent unpaid is in the kitchen, on the bill and never cancelled", () => {
     const view = composeCustomerDiningSession({
       ...facts({
