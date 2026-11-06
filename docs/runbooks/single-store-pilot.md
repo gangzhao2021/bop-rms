@@ -455,7 +455,8 @@ test value so the internal-test store is always "Open" whenever someone tests it
 hours (for example on the "isn't taking orders right now" page while ordering is paused). They are
 not the store's real hours. Before real customers, the Owner sets the real opening hours in
 `Store setup` → hours and publishes them; until then, whether guests can order is controlled only
-with `Hours & ordering` → `Pause service` / `Resume`.
+with `Hours & ordering` → `Pause service` / `Resume` (组织 → 门店 → 营业时间与点单 → 暂停服务 /
+恢复).
 
 ### When you open
 
@@ -463,7 +464,7 @@ with `Hours & ordering` → `Pause service` / `Resume`.
    Manager) must say "Everything is working"; if not, see
    [What each alert means and what to do](#what-each-alert-means-and-what-to-do) or the
    [outage procedure](#store-outage-procedure-wp-2423-q9).
-2. If online ordering was paused at closing: `Hours & ordering` → `Resume`.
+2. If online ordering was paused at closing: `Hours & ordering` → `Resume` (组织 → 门店 → 营业时间与点单 → 恢复).
 3. **Settlement for the last closed day** (Owner, Store Manager): Home shows "Matches the payment
    provider", "N payments to look at" or "Not checked yet". Anything but a match: open
    `Settlement` for that day and follow its "What to do".
@@ -476,13 +477,13 @@ with `Hours & ordering` → `Pause service` / `Resume`.
    `Orders`, which refunds them. Closing the kitchen ticket refunds nothing.
 5. **Tables still open from before**: on `Tables`, a manager or the owner closes each table whose
    guests have left.
-6. Open `Orders` and `Kitchen` (kitchen display) and leave them on for the day; the Orders screen
+6. Open `Orders` (订单) and `Kitchen` (后厨, kitchen display) and leave them on for the day; the Orders screen
    must stay open whenever the store is open (paid pickups have 30 minutes to be accepted).
 
 ### Before you close
 
 1. **Stop new orders**: when you stop taking orders, `Hours & ordering` → `Pause service` → `All
-services` for the hours until opening. Guests who scan then see "isn't taking orders right now".
+services` (组织 → 门店 → 营业时间与点单 → 暂停服务 → 所有服务) for the hours until opening. Guests who scan then see "isn't taking orders right now".
    Tables already seated can still order on their phones: tell them it is last orders.
 2. **Every order made and served or handed over**: `Orders` shows nothing left open. A paid pickup
    still waiting at the end of the day: call the customer if the order shows contact details; if it
@@ -679,8 +680,9 @@ what staff do when something fails is different:
   (`Hours & ordering`, permission `operations.ordering.pause`), record card-machine refunds and see
   `Settlement` and `Exceptions`.
 - **Counter**: Front of House. Takes paper orders and card-machine payments; after recovery enters
-  pickup slips in `Counter order` and dine-in slips on their table in `Tables` →
-  `Take order for table …` (Front of House, Store Manager and Owner have both).
+  pickup slips in `Counter order` (柜台点单) and dine-in slips on their table in `Tables` (桌台) →
+  `Take order for table …` (为桌台 X 点单), ticking `Recorded after an outage (taken on paper)`
+  (停电/断网后补录（纸质记录）). Front of House, Store Manager and Owner have both.
 - **Kitchen**: works from paper tickets while the Kitchen board is down.
 - **Pilot operator**: the person who runs the pilot host (today the Owner's machine; P4 cloud host
   later). Restarts services; not on the shop floor.
@@ -738,7 +740,8 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
    within a few minutes, carry on normally and go to step 5 (check what arrived meanwhile).
 3. **Pause online ordering** if the network does not recover within 5 minutes, the host is down,
    or the kitchen cannot see orders. Incident lead, from any device that has a connection (their
-   phone on mobile data is fine): `Hours & ordering` → `Pause service` → Service `All services`,
+   phone on mobile data is fine): `Hours & ordering` → `Pause service` → Service `All services`
+   (组织 → 门店 → 营业时间与点单 → 暂停服务 → 所有服务),
    `Pause duration (minutes)` long enough to cover the outage (it can be resumed early). New scans
    then show "<Store> isn't taking orders right now … order with a staff member." If the host is down
    the pause cannot be set, and nothing can be ordered online anyway.
@@ -770,11 +773,19 @@ customer menu or `Orders` loads on mobile data, the host is up and only the stor
    "View only on this screen"; press "Start kitchen display here" (it signs that staff member out)
    and choose "Start kitchen display as …" so Finished and Start work on that device. Reload every
    kitchen tablet after a deploy: a page left open keeps the previous steps until it reloads.
-7. **Host down**: call the pilot operator. Operator restarts the pilot (v15:
-   `PILOT_UID=… PILOT_GID=… PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 PILOT_OFFSITE_DIR=<off-site folder> docker compose -f compose.pilot.yaml up -d pilot`,
-   then confirm `/ready` returns 200; details in
-   [Existing runtime configuration and recovery](#existing-runtime-configuration-and-recovery), which
-   still describes the v14 WSL host).
+7. **Host down**: call the pilot operator. Operator restarts the pilot with the steps in
+   [v15 container recovery](#v15-container-recovery).
+
+   **What staff see meanwhile (merchant-outage-recovery):** a screen that was open keeps what it last
+   showed, marked "Orders could not be refreshed. Showing the last update; retrying automatically."
+   (订单暂时无法刷新，显示的是上次的内容，正在自动重试。). A screen opened or reloaded while the
+   system cannot answer says **暂时连不上 / Can't connect right now** and "正在自动重试"; while the
+   pilot service itself is stopped, a reload shows the maintenance page instead. Either way the
+   screen comes back by itself once the system answers: nobody needs to reload. While a screen is
+   reconnecting it cannot warn about paid orders about to be refunded automatically: check `Orders`
+   on a screen that is still connected, or work from paper slips. A device with no network says
+   **这台设备没有联网** and `Accept` (接单) waits for the network; a list that only could not be
+   refreshed still accepts (the server refuses an outdated accept).
 
 #### When guests can't start a phone payment
 
@@ -1220,7 +1231,7 @@ Overall: [ ] pass  [ ] fail      Owner sign-off: ________
 | G8  | No way to notify pickup customers of a delay or an expired order; only contact details shown on the order                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Q10 (notification Provider) |
 | G9  | Staff on a backup device sign in through the internal-test staff page; real named accounts wait for the Cognito gate                                                                                                                                                                                                                                                                                                                                                                                                                                               | Step 9 (external)           |
 | G10 | Real Provider behaviour for payments approved while the host was down (late webhook, capture discovery) is unproven; pilot uses simulated payments                                                                                                                                                                                                                                                                                                                                                                                                                 | P2/B5, Q22 (external)       |
-| G11 | "Existing runtime configuration and recovery" still describes the v14 WSL host, not the v15 container commands                                                                                                                                                                                                                                                                                                                                                                                                                                                     | P4 (runbook drift)          |
+| G11 | Closed (merchant-outage-recovery): [v15 container recovery](#v15-container-recovery) gives the current commands; the v14 section is retitled as history                                                                                                                                                                                                                                                                                                                                                                                                            | P4 (runbook drift)          |
 | G12 | Backup network, backup device, card machine connectivity and contacts are not yet provided                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Owner inputs (external)     |
 | G13 | Taking a guest's unpaid round on the card machine with no retyping: today a manager cancels it and staff enter it again (see "When guests can't start a phone payment"). It touches payment. Trigger: before the first store on a real Provider                                                                                                                                                                                                                                                                                                                    | WP-2423 item 2              |
 | G14 | No staff alert when guests' payment starts keep failing: staff learn it from the guests. The alert board has no key for it. Trigger: before the first store on a real Provider                                                                                                                                                                                                                                                                                                                                                                                     | WP-2423 item 2              |
@@ -1556,7 +1567,27 @@ positive business journeys still require their own acceptance evidence.
 No entry above authorizes production activation. Existing accepted business
 interpretations stay accepted while implementation or acceptance remains open.
 
-## Existing runtime configuration and recovery
+## v15 container recovery
+
+The current pilot runs as containers from `compose.pilot.yaml` (commands as in
+`.claude/skills/pilot-v15-deploy/SKILL.md`). Run them from the repository root on the pilot host.
+
+1. **Status:** `docker compose -f compose.pilot.yaml ps`.
+2. **Restart the pilot service:**
+   `PILOT_UID=… PILOT_GID=… PILOT_RUNTIME_DIRECTORY=.local/pilot-v15 PILOT_OFFSITE_DIR=<off-site folder> docker compose -f compose.pilot.yaml up -d pilot ops`
+   (leaves `front` up, so guests and staff see the maintenance page meanwhile).
+3. **Ready:** `curl -fsS http://localhost:4300/ready` answers 200.
+4. **If it is not ready:** read `.local/pilot-runtime/pilot-v15/api.log` for the real error.
+5. **End a maintenance window** (if one was started):
+   `docker compose -f compose.pilot.yaml exec -T ops node tooling/environment/pilot-ops.mjs maintenance end "$PILOT_RUNTIME_DIRECTORY"`.
+6. **Roll back** to the previous image: `docker tag bop-rms-pilot:pre-<sha> bop-rms-pilot:local`, then
+   `up -d pilot ops` as in step 2.
+
+Staff screens come back by themselves once `/ready` answers (see the outage procedure, step 7).
+
+## History: v12–v14 recovery batches (not current)
+
+Kept as the record of the earlier hosts; use [v15 container recovery](#v15-container-recovery) today.
 
 Batch422 additionally starts the five-service application set against the restored
 421 database using separate protected `.local/pilot-restore421` configuration and
