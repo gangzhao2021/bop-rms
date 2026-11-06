@@ -296,7 +296,7 @@ for (const [name, answer, said] of [
               itemName: "Sauce (TEST)",
             },
           }),
-    "Per-head charge on the bill isn't confirmed: the system is busy.",
+    "Sauce (TEST) on the bill isn't confirmed: the system is busy.",
   ],
   [
     "the charge doesn't match",
@@ -337,3 +337,37 @@ for (const [name, answer, said] of [
     await expectNoInternalText(page, ["Mark unavailable"]);
   });
 }
+
+test("@production a Store without a per-head charge hears nothing about one after a merge", async ({
+  page,
+}) => {
+  // The sync after the merge is busy; the read that follows says the Store charges nothing per head.
+  await stubMerge(page, (route: Route) =>
+    route.request().postDataJSON().action === "Sync"
+      ? route.fulfill({ headers, status: 503, json: { error: "unavailable" } })
+      : route.fulfill({
+          headers,
+          json: {
+            status: "NoTeaCharge",
+            charged: 0,
+            expected: null,
+            guests: 5,
+            override: null,
+            overrideVersion: 0,
+            problem: null,
+            itemName: null,
+          },
+        }),
+  );
+  await page.goto("/operations/dining");
+  await page.getByRole("button", { name: "Select T6", exact: true }).click();
+  await page.locator("details.table-panel__manage").evaluate((node) => {
+    (node as HTMLDetailsElement).open = true;
+  });
+  const panel = page.getByRole("region", { name: "Merge this party into another table" });
+  await panel.getByRole("combobox", { name: "Merge into…" }).selectOption({ label: "T7" });
+  await panel.getByRole("button", { name: "Merge into table T7" }).click();
+  await expect(page.getByText("Merged into table T7: 5 guests.").first()).toBeVisible();
+  await expect(page.getByText("isn't confirmed")).toHaveCount(0);
+  await expect(page.getByText("Per-head charge")).toHaveCount(0);
+});

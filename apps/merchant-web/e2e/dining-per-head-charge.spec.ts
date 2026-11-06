@@ -235,20 +235,139 @@ test("@production a busy read is read once more, and only then said", async ({ p
   expect(reads).toBe(2);
 });
 
-test("@production a read that keeps failing is said, with the way to match", async ({ page }) => {
-  await stubTable(page, { ordered: false, tea: (route) => busy(route) });
-  const alert = page.getByRole("region", { name: "Guests at this table" }).getByRole("alert");
-  await expect(alert).toContainText("Per-head charge on the bill isn't confirmed");
-  await expect(
-    alert.getByRole("button", { name: "Match Per-head charge to the guests" }),
-  ).toBeVisible();
+test("@production a busy read says nothing about a charge it doesn't know, and keeps trying", async ({
+  page,
+}) => {
+  // A Store that never charged per head, at a busy moment, is not warned about a charge it doesn't
+  // have; the read keeps trying quietly, and what it finds is shown once it answers.
+  let reads = 0;
+  let answering = false;
+  await stubTable(page, {
+    ordered: true,
+    tea: (route) => {
+      reads += 1;
+      return answering
+        ? route.fulfill({ headers, json: charge({ status: "Mismatch", charged: 2 }) })
+        : busy(route);
+    },
+  });
+  // Each panel reads, and reads once more at once: all busy, and nothing is said.
+  await expect.poll(() => reads).toBeGreaterThanOrEqual(4);
+  await expect(page.locator(".table-panel__tea-check")).toHaveCount(0);
+  await expect(page.getByText("isn't confirmed")).toHaveCount(0);
+  answering = true;
+  await expect(page.locator(".table-panel__tea-check")).toContainText(
+    "Sauce (TEST) on the bill: 2 · guests: 4",
+    { timeout: 15_000 },
+  );
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("@production a Store without a per-head charge is never told one isn't confirmed", async ({
+  page,
+}) => {
+  let reads = 0;
+  await stubTable(page, {
+    ordered: true,
+    tea: (route) => {
+      reads += 1;
+      return reads <= 4
+        ? busy(route)
+        : route.fulfill({
+            headers,
+            json: charge({ status: "NoTeaCharge", charged: 0, expected: null, itemName: null }),
+          });
+    },
+  });
+  await expect.poll(() => reads, { timeout: 15_000 }).toBeGreaterThanOrEqual(6);
+  await expect(page.locator(".table-panel__tea-check")).toHaveCount(0);
+  await expect(page.getByText("Per-head charge")).toHaveCount(0);
 });
 
 test("@production offline is told apart from a busy system", async ({ page }) => {
-  await stubTable(page, { ordered: false, tea: (route) => route.abort("internetdisconnected") });
-  await expect(
-    page.getByRole("region", { name: "Guests at this table" }).getByRole("alert"),
-  ).toContainText("this device is offline");
+  await stubTable(page, {
+    ordered: true,
+    tea: (route, action) =>
+      action === "Sync"
+        ? route.abort("internetdisconnected")
+        : route.fulfill({ headers, json: charge({ status: "Mismatch", charged: 2 }) }),
+  });
+  const check = page.locator(".table-panel__tea-check");
+  await check.getByRole("button", { name: "Match Sauce (TEST) to the guests" }).click();
+  await expect(check.getByRole("alert")).toContainText(
+    "Sauce (TEST) on the bill isn't confirmed: this device is offline.",
+  );
+});
+
+test("@production a count someone else changed first says so and is read again", async ({
+  page,
+}) => {
+  // Two staff at one table: the second count carries the version the first one replaced.
+  let saved = false;
+  const versions: unknown[] = [];
+  const commands = await stubTable(page, {
+    ordered: false,
+    tea: (route, action) => {
+      if (action === "SetTeaCount") {
+        versions.push(
+          (route.request().postDataJSON() as { expectedVersion: unknown }).expectedVersion,
+        );
+        if (!saved) {
+          saved = true;
+          return route.fulfill({
+            headers,
+            status: 409,
+            json: { error: "dining_tea_charge_changed" },
+          });
+        }
+      }
+      return route.fulfill({
+        headers,
+        json: saved
+          ? charge({
+              charged: 3,
+              expected: 3,
+              override: { teaQuantity: 3, reason: "ChildNotCharged" },
+              overrideVersion: 1,
+            })
+          : charge({}),
+      });
+    },
+  });
+  const guests = page.getByRole("region", { name: "Guests at this table" });
+  await guests.getByRole("textbox", { name: /How many guests/u }).fill("4");
+  await guests.getByRole("button", { name: "Save", exact: true }).click();
+  await guests.getByRole("button", { name: "Change Sauce (TEST) count" }).click();
+  await guests.getByRole("textbox", { name: "Sauce (TEST) to charge" }).fill("2");
+  await guests.getByRole("button", { name: "Save Sauce (TEST) count" }).click();
+  await expect(guests.getByRole("alert")).toContainText(
+    "Someone else changed the per-head count on this table. It has been read again: check it.",
+  );
+  await expect(guests).toContainText("Sauce (TEST) for 3 instead of 4 guests: child not charged");
+  await expect(guests.getByRole("textbox", { name: "Sauce (TEST) to charge" })).toHaveCount(0);
+  await expect(page.getByText("the system is busy")).toHaveCount(0);
+  // The next count carries what is there now.
+  await guests.getByRole("button", { name: "Change Sauce (TEST) count" }).click();
+  await guests.getByRole("textbox", { name: "Sauce (TEST) to charge" }).fill("2");
+  await guests.getByRole("button", { name: "Save Sauce (TEST) count" }).click();
+  await expect(guests.getByRole("textbox", { name: "Sauce (TEST) to charge" })).toHaveCount(0);
+  expect(versions).toEqual([0, 1]);
+  expect(commands.filter((action) => action === "Read").length).toBeGreaterThanOrEqual(2);
+});
+
+test("@production a session that ended says so when Match is pressed", async ({ page }) => {
+  await stubTable(page, {
+    ordered: true,
+    tea: (route, action) =>
+      action === "Sync"
+        ? route.fulfill({ headers, status: 401, json: { error: "denied" } })
+        : route.fulfill({ headers, json: charge({ status: "Mismatch", charged: 2 }) }),
+  });
+  const check = page.locator(".table-panel__tea-check");
+  await check.getByRole("button", { name: "Match Sauce (TEST) to the guests" }).click();
+  await expect(check.getByRole("alert")).toContainText(
+    "This wasn't saved: your access doesn't allow it, or you have been signed out.",
+  );
 });
 
 test("@production a short charge shows directly above the payment and is never added by itself", async ({

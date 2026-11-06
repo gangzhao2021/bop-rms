@@ -674,6 +674,7 @@ async function realTeaRounds() {
         "a count staff set lower is recorded as at the guests' request",
       );
       await assertBill(450n + 650n);
+      // A stale count says so (staff read it again), never "the system is busy".
       await assert.rejects(
         tea(server, {
           action: "SetTeaCount",
@@ -683,6 +684,7 @@ async function realTeaRounds() {
           teaQuantity: 1,
           reason: "Other",
         }),
+        (error) => error?.code === "DINING_TEA_CHARGE_CHANGED",
       );
       // A higher count (one more than guests): the tea follows it, with its own record.
       const higher = await tea(server, {

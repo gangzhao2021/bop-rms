@@ -173,6 +173,8 @@ export function createTableTeaClient(fetcher: typeof fetch = fetch): TableTeaCli
     }
     if (response.status === 401 || response.status === 403) throw new TablePartySizeError("Denied");
     const raw = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    // Someone else set the count first: not a busy system, so staff are told to check it.
+    if (response.status === 409) throw new TablePartySizeError("Changed");
     const statuses = ["Charged", "NoTeaCharge", "PaysEachRound", "NoPartySize", "Paid", "Mismatch"];
     if (
       !response.ok ||
@@ -189,10 +191,16 @@ export function createTableTeaClient(fetcher: typeof fetch = fetch): TableTeaCli
 
 /** Why the charge on the bill isn't known to be right: the request never left, or the system is busy. */
 export type TableTeaFailure = "Offline" | "Unavailable";
-function teaFailureOf(error: unknown): TableTeaFailure | null {
-  if (!(error instanceof TablePartySizeError)) return "Unavailable";
-  if (error.code === "Offline") return "Offline";
-  return error.code === "Unavailable" ? "Unavailable" : null;
+type TeaProblem = TableTeaFailure | "Denied" | "Changed" | "TableClosed";
+function teaProblemOf(error: unknown): TeaProblem {
+  return error instanceof TablePartySizeError ? error.code : "Unavailable";
+}
+/**
+ * The Store charges this table per head (any answer but "no per-head charge"). Only then is a
+ * failure said: a Store that never charges per head is never warned about a charge it doesn't have.
+ */
+export function chargesPerHead(tea: TableTeaView | null): tea is TableTeaView {
+  return tea !== null && tea.status !== "NoTeaCharge";
 }
 /** The per-head item's own name on every line: a hotpot's sauce is not tea. */
 export function teaItemName(tea: TableTeaView | null): string {
@@ -208,10 +216,30 @@ export function teaNotConfirmed(tea: TableTeaView | null, failure: TableTeaFailu
         item: teaItemName(tea),
       });
 }
+/** Inside a sentence the item's own name, or plain words when the server didn't give one. */
+function matchLabel(tea: TableTeaView | null): string {
+  return tea?.itemName
+    ? t("Match {item} to the guests", { item: tea.itemName })
+    : t("Match the per-head charge to the guests");
+}
+function needsManagerLabel(tea: TableTeaView | null): string {
+  return tea?.itemName
+    ? t(
+        "Fewer guests than {item} on the bill: a manager takes the extra off (it is recorded who and why).",
+        { item: tea.itemName },
+      )
+    : t(
+        "Fewer guests than per-head charges on the bill: a manager takes the extra off (it is recorded who and why).",
+      );
+}
+// A read that fails is tried again quietly, sooner at first (a busy moment passes).
+const teaReadRetryMs = (attempt: number) => (attempt < 6 ? 5_000 : 15_000);
 /**
  * The table's per-head charge as staff see it: read when the panel opens (a busy moment is read
- * once more before it is called a problem), and matched to the guests from here. Any failure stays
- * on the screen with the way to match it, whatever was known before.
+ * once more at once, then again every few seconds until it answers), and matched to the guests from
+ * here. A failure is said once the Store is known to charge per head, with the way to match it; a
+ * change that is refused says why, and the charge is read again so the next try carries what is
+ * there now.
  */
 function useTableTea(
   client: TableTeaClient,
@@ -221,46 +249,84 @@ function useTableTea(
   onChanged: (() => void) | undefined,
 ) {
   const [tea, setTea] = useState<TableTeaView | null>(null);
-  const [failure, setFailure] = useState<TableTeaFailure | null>(null);
+  // Where it failed: a read that answers clears its own failure, never a change's (a sync that
+  // didn't go through stays said until one does).
+  const [failure, setFailure] = useState<{
+    kind: TableTeaFailure;
+    from: "Read" | "Change";
+  } | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reread, setReread] = useState(0);
   // One reference per sync until it is answered (a retry repeats its steps, never adds).
   const operation = useRef<string | null>(null);
   useEffect(() => {
     let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const read = () => client(csrf, { action: "Read", diningSessionReference });
-    read()
-      .catch((error: unknown) => {
-        if (teaFailureOf(error) !== "Unavailable") throw error;
-        return read();
-      })
-      .then((value) => {
-        if (!active) return;
-        setTea(value);
-        setFailure(null);
-      })
-      .catch((error: unknown) => {
-        if (active) setFailure(teaFailureOf(error));
-      });
+    const attempt = (count: number) => {
+      read()
+        .catch((error: unknown) => {
+          if (count > 0 || teaProblemOf(error) !== "Unavailable") throw error;
+          return read();
+        })
+        .then((value) => {
+          if (!active) return;
+          setTea(value);
+          setFailure((now) => (now?.from === "Read" ? null : now));
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          const problem = teaProblemOf(error);
+          if (problem !== "Offline" && problem !== "Unavailable") return;
+          setFailure((now) => (now?.from === "Change" ? now : { kind: problem, from: "Read" }));
+          timer = setTimeout(() => attempt(count + 1), teaReadRetryMs(count));
+        });
+    };
+    attempt(0);
     return () => {
       active = false;
+      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [client, csrf, diningSessionReference, revision]);
+  }, [client, csrf, diningSessionReference, revision, reread]);
   const change = async (
     command: (operationReference: string) => Parameters<TableTeaClient>[1],
-  ): Promise<boolean> => {
-    if (busy) return false;
+  ): Promise<"Saved" | "Changed" | "Failed"> => {
+    if (busy) return "Failed";
     operation.current ??= newOperationReference();
     setBusy(true);
+    setRefused(null);
     try {
       const next = await client(csrf, command(operation.current));
       operation.current = null;
       setTea(next);
       setFailure(null);
+      setRefused(null);
       onChanged?.();
-      return true;
+      return "Saved";
     } catch (error) {
-      setFailure(teaFailureOf(error));
-      return false;
+      const problem = teaProblemOf(error);
+      if (problem === "Offline" || problem === "Unavailable") {
+        // The same reference again: a reply lost on the way is not charged twice.
+        setFailure({ kind: problem, from: "Change" });
+        setRefused(null);
+      } else {
+        operation.current = null;
+        setRefused(
+          problem === "Changed"
+            ? t(
+                "Someone else changed the per-head count on this table. It has been read again: check it.",
+              )
+            : problem === "TableClosed"
+              ? t("This table is closed, so the per-head charge can't change.")
+              : t(
+                  "This wasn't saved: your access doesn't allow it, or you have been signed out. Sign in again or ask a manager.",
+                ),
+        );
+      }
+      // Read what is there now, so the next try carries the current count.
+      setReread((value) => value + 1);
+      return problem === "Changed" ? "Changed" : "Failed";
     } finally {
       setBusy(false);
     }
@@ -271,7 +337,12 @@ function useTableTea(
       diningSessionReference,
       operationReference,
     }));
-  return { tea, failure, busy, change, sync };
+  // Said only where the Store is known to charge per head (a busy read of a Store without one stays quiet).
+  const unconfirmed: TableTeaFailure | null = !chargesPerHead(tea)
+    ? null
+    : (failure?.kind ??
+      (tea.status === "Mismatch" && tea.problem === "Unavailable" ? "Unavailable" : null));
+  return { tea, unconfirmed, refused, busy, change, sync };
 }
 
 /**
@@ -297,16 +368,14 @@ export function TableTeaCheck({
   readonly onChanged?: () => void;
 }) {
   const [client] = useState(() => provided ?? createTableTeaClient());
-  const { tea, failure, busy, sync } = useTableTea(
+  const { tea, unconfirmed, refused, busy, sync } = useTableTea(
     client,
     csrf,
     diningSessionReference,
     revision,
     onChanged,
   );
-  const unconfirmed: TableTeaFailure | null =
-    failure ?? (tea?.status === "Mismatch" && tea.problem === "Unavailable" ? "Unavailable" : null);
-  if (unconfirmed === null && tea?.status !== "Mismatch") return null;
+  if (unconfirmed === null && refused === null && tea?.status !== "Mismatch") return null;
   return (
     <section className="table-panel__tea-check" aria-label={teaItemName(tea)}>
       {tea?.status === "Mismatch" ? (
@@ -317,26 +386,22 @@ export function TableTeaCheck({
             expected: tea.expected ?? 0,
           })}{" "}
           <button type="button" disabled={busy || locked} onClick={() => void sync()}>
-            {busy ? t("Saving…") : t("Match {item} to the guests", { item: teaItemName(tea) })}
+            {busy ? t("Saving…") : matchLabel(tea)}
           </button>
         </p>
       ) : null}
+      {refused !== null ? <p role="alert">{refused}</p> : null}
       {unconfirmed !== null ? (
         <p role="alert">
           {teaNotConfirmed(tea, unconfirmed)}{" "}
           {tea?.status === "Mismatch" ? null : (
             <button type="button" disabled={busy || locked} onClick={() => void sync()}>
-              {busy ? t("Saving…") : t("Match {item} to the guests", { item: teaItemName(tea) })}
+              {busy ? t("Saving…") : matchLabel(tea)}
             </button>
           )}
         </p>
       ) : tea?.problem === "NeedsManager" ? (
-        <p role="alert">
-          {t(
-            "Fewer guests than {item} on the bill: a manager takes the extra off (it is recorded who and why).",
-            { item: teaItemName(tea) },
-          )}
-        </p>
+        <p role="alert">{needsManagerLabel(tea)}</p>
       ) : null}
     </section>
   );
@@ -369,7 +434,8 @@ export function TablePartySize({
   const [teaClient] = useState(() => providedTea ?? createTableTeaClient());
   const {
     tea,
-    failure: teaFailure,
+    unconfirmed: teaUnconfirmed,
+    refused: teaRefused,
     busy: teaBusy,
     change: changeTea,
     sync: syncTea,
@@ -385,7 +451,7 @@ export function TablePartySize({
       ? Number(teaCount.quantity.trim())
       : null;
     if (quantity === null) return;
-    const saved = await changeTea((operationReference) => ({
+    const outcome = await changeTea((operationReference) => ({
       action: "SetTeaCount",
       diningSessionReference,
       operationReference,
@@ -393,7 +459,8 @@ export function TablePartySize({
       teaQuantity: quantity,
       reason: teaCount.reason,
     }));
-    if (saved) setTeaCount(null);
+    // Saved, or someone else's count is there now (read again): the form closes on what is current.
+    if (outcome !== "Failed") setTeaCount(null);
   };
   const [view, setView] = useState<{
     askPartySize: boolean;
@@ -573,7 +640,7 @@ export function TablePartySize({
               })}{" "}
           {tea.status === "Mismatch" ? (
             <button type="button" disabled={teaBusy || locked} onClick={() => void syncTea()}>
-              {teaBusy ? t("Saving…") : t("Match {item} to the guests", { item: teaItemName(tea) })}
+              {teaBusy ? t("Saving…") : matchLabel(tea)}
             </button>
           ) : null}
           {tea.override ? (
@@ -604,7 +671,9 @@ export function TablePartySize({
                 })
               }
             >
-              {t("Change {item} count", { item: teaItemName(tea) })}
+              {tea.itemName
+                ? t("Change {item} count", { item: tea.itemName })
+                : t("Change the per-head count")}
             </button>
           ) : null}
         </p>
@@ -646,7 +715,11 @@ export function TablePartySize({
             </select>
           </label>
           <button type="submit" disabled={teaBusy || locked}>
-            {teaBusy ? t("Saving…") : t("Save {item} count", { item: teaItemName(tea) })}
+            {teaBusy
+              ? t("Saving…")
+              : tea.itemName
+                ? t("Save {item} count", { item: tea.itemName })
+                : t("Save the per-head count")}
           </button>
           <button type="button" disabled={teaBusy} onClick={() => setTeaCount(null)}>
             {t("Cancel")}
@@ -654,22 +727,18 @@ export function TablePartySize({
         </form>
       ) : null}
       {tea?.status === "Mismatch" && tea.problem === "NeedsManager" ? (
+        <p role="alert">{needsManagerLabel(tea)}</p>
+      ) : teaUnconfirmed !== null ? (
         <p role="alert">
-          {t(
-            "Fewer guests than {item} on the bill: a manager takes the extra off (it is recorded who and why).",
-            { item: teaItemName(tea) },
-          )}
-        </p>
-      ) : teaFailure !== null || (tea?.status === "Mismatch" && tea.problem === "Unavailable") ? (
-        <p role="alert">
-          {teaNotConfirmed(tea, teaFailure ?? "Unavailable")}{" "}
+          {teaNotConfirmed(tea, teaUnconfirmed)}{" "}
           {tea?.status === "Mismatch" ? null : (
             <button type="button" disabled={teaBusy || locked} onClick={() => void syncTea()}>
-              {teaBusy ? t("Saving…") : t("Match {item} to the guests", { item: teaItemName(tea) })}
+              {teaBusy ? t("Saving…") : matchLabel(tea)}
             </button>
           )}
         </p>
       ) : null}
+      {teaRefused !== null ? <p role="alert">{teaRefused}</p> : null}
     </section>
   );
 }

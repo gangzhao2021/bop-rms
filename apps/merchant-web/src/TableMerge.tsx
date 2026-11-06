@@ -5,6 +5,7 @@ import type { StaffDiningTable } from "./dining-session-client.js";
 import {
   createTableTeaClient,
   TablePartySizeError,
+  chargesPerHead,
   teaNotConfirmed,
   type TableTeaClient,
   type TableTeaFailure,
@@ -186,8 +187,14 @@ export function TableMerge({
       // The tea follows the guests now at the table (the same sync as a party size change). It is
       // money, so a merge is never announced as all done while it is not confirmed; the table the
       // party joined opens with the way to match it, above its payment.
+      // Only a Store that charges per head hears about it: a failed sync is followed by a read, and
+      // said only when that read shows the charge (otherwise the table's own panel reads it again).
       let followed: TableTeaView | null = null;
       let failure: TableTeaFailure | null = null;
+      const failureOf = (error: unknown): TableTeaFailure =>
+        error instanceof TablePartySizeError && error.code === "Offline"
+          ? "Offline"
+          : "Unavailable";
       try {
         followed = await tea(csrf, {
           action: "Sync",
@@ -195,12 +202,14 @@ export function TableMerge({
           operationReference: newOperationReference(),
         });
       } catch (error) {
-        failure =
-          error instanceof TablePartySizeError && error.code === "Offline"
-            ? "Offline"
-            : "Unavailable";
+        failure = failureOf(error);
+        followed = await tea(csrf, {
+          action: "Read",
+          diningSessionReference: merged.diningSessionReference,
+        }).catch(() => null);
       }
       if (failure === null && followed?.status === "Mismatch") failure = "Unavailable";
+      if (!chargesPerHead(followed)) failure = null;
       const announced = t(
         "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
         {

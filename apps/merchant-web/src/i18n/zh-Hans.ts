@@ -6655,6 +6655,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save {item} count": "保存{item}数量",
   "Match {item} to the guests": "按人数调整{item}",
   "Per-head charge": "按人收费项目",
+  "Match the per-head charge to the guests": "按人数调整按人收费",
+  "Change the per-head count": "修改按人收费数量",
+  "Save the per-head count": "保存按人收费数量",
+  "Fewer guests than per-head charges on the bill: a manager takes the extra off (it is recorded who and why).":
+    "人数比账单上的按人收费少：请店长把多的去掉（会记录是谁、为什么）。",
+  "Someone else changed the per-head count on this table. It has been read again: check it.":
+    "别人刚改过这桌的按人收费数量，已重新读取，请核对。",
+  "This table is closed, so the per-head charge can't change.":
+    "这张桌已经关闭，按人收费不能再改。",
+  "This wasn't saved: your access doesn't allow it, or you have been signed out. Sign in again or ask a manager.":
+    "没有保存：你的权限不能做这件事，或者已经退出登录。请重新登录，或找店长。",
   "{item} on the bill isn't confirmed: this device is offline. Match it once it's back.":
     "账单上的{item}未确认：这台设备已离线，恢复后请按人数调整。",
   "{item} on the bill isn't confirmed: the system is busy. Try again in a moment.":

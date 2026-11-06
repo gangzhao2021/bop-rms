@@ -347,7 +347,13 @@ export function installMerchantDiningRoutes(
           return;
         }
         response
-          .status(error.code === "DINING_TEA_CHARGE_INPUT_INVALID" ? 400 : 503)
+          .status(
+            error.code === "DINING_TEA_CHARGE_INPUT_INVALID"
+              ? 400
+              : error.code === "DINING_TEA_CHARGE_CHANGED"
+                ? 409
+                : 503,
+          )
           .set("Cache-Control", NO_STORE)
           .json({ error: error.code.toLowerCase() });
       });

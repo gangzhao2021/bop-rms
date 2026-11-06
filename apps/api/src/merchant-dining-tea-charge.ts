@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import {
   createPostgresDiningSessionReadStore,
+  DiningSessionError,
   diningTeaOverrideReasons,
   loadDiningPartySizes,
   loadDiningTeaChargeSetting,
@@ -24,6 +25,8 @@ import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js"
 export type MerchantDiningTeaChargeErrorCode =
   | "DINING_TEA_CHARGE_INPUT_INVALID"
   | "DINING_TEA_CHARGE_PERMISSION_DENIED"
+  /** The count was changed by someone else first (or the same request said otherwise): read again. */
+  | "DINING_TEA_CHARGE_CHANGED"
   | "DINING_TEA_CHARGE_UNAVAILABLE";
 export class MerchantDiningTeaChargeError extends Error {
   constructor(readonly code: MerchantDiningTeaChargeErrorCode) {
@@ -356,6 +359,12 @@ export function createMerchantDiningTeaCharge(options: {
                   actorReference: String(authority.scope.actorReference),
                   observedAt: new Date(Date.parse(options.now())).toISOString(),
                 },
+              ).catch((error: unknown) =>
+                // A stale count is not a busy system: staff are told to read it again.
+                error instanceof DiningSessionError &&
+                error.code === "DINING_SESSION_IDEMPOTENCY_CONFLICT"
+                  ? fail("DINING_TEA_CHARGE_CHANGED")
+                  : Promise.reject(error),
               ),
           ),
         );
