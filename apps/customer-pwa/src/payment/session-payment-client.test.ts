@@ -247,3 +247,57 @@ it("WP-2423 item 8 ⑤: a round that waits for staff answers Held (202) with why
     code: "unknown",
   });
 });
+
+it("WP-2423 M19: keeps the payment deadline with the server's time, so the phone's clock can't move it", async () => {
+  const payment = {
+    checkoutSessionReference: id(1),
+    paymentIntentReference: id(2),
+    orderReference: id(3),
+    creationStatus: "Created",
+    total: { amountMinor: "2200", currency: "CAD" },
+    payBy: "2026-08-03T15:30:00.000Z",
+  };
+  // The phone runs ten minutes behind the server.
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-03T14:51:00.000Z"));
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { schemaVersion: 1, payment, serverNow: "2026-08-03T15:01:00.000Z" },
+          { status: 201 },
+        ),
+      ),
+  );
+  expect(await createSessionPaymentClient().create(id(1), id(4), "200")).toMatchObject({
+    deadline: { payBy: "2026-08-03T15:30:00.000Z", serverOffsetMs: 600_000 },
+  });
+  const body = {
+    schemaVersion: 1,
+    clientSecret: "pi_SYNTHETIC000001_secret_SYNTHETICONLY",
+    payBy: "2026-08-03T15:10:00.000Z",
+    serverNow: "2026-08-03T15:01:00.000Z",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json(body, { headers: { "cache-control": "no-store" } })),
+  );
+  expect(await createSessionPaymentClient().handoffWithDeadline(id(1))).toEqual({
+    clientSecret: body.clientSecret,
+    deadline: { payBy: "2026-08-03T15:10:00.000Z", serverOffsetMs: 600_000 },
+  });
+  // A deadline without the server's time, or an unreadable one, is not trusted.
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ ...body, payBy: "soon" }, { headers: { "cache-control": "no-store" } }),
+      ),
+  );
+  await expect(createSessionPaymentClient().handoffWithDeadline(id(1))).rejects.toMatchObject({
+    code: "unknown",
+  });
+  vi.restoreAllMocks();
+});

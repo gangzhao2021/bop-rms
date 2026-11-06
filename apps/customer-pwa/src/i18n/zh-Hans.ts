@@ -124,8 +124,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check payment result": "查看付款结果",
   "Check payment status": "查看付款状态",
   "Check the same payment; do not submit another.": "请查看同一笔付款，不要再次提交。",
-  "Check this page, then try again if you need to. Nothing was sent while you were offline.":
-    "请先查看本页，需要时再重试。离线期间没有发送任何内容。",
+  "Check this page before you try again.": "再操作前请先看看本页。",
   "Check your connection and try again. A staff member can also tell you what your table has ordered.":
     "请检查网络后重试。店员也可以告诉你这桌点了什么。",
   "Check your connection, then try again.": "请检查网络后重试。",
@@ -1602,4 +1601,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你这桌有菜品正在等店员确认。请先请店员确认，再付款。",
   "Still adding; the restaurant's system is busy. No need to tap again.":
     "还在加入，餐厅系统有点忙，不用再按。",
+  "Checking your payment — don’t pay again": "正在确认付款，请不要重复付款",
+  "We’re checking with the bank. This page updates by itself.": "正在向银行确认，本页会自动更新。",
+  "Check now": "立即查看",
+  "Time to pay ran out": "付款时间已过",
+  "Your order was cancelled and you haven’t been charged.": "订单已取消，没有扣款。",
+  "Pay by {time}": "请在 {time} 前付款",
+  "About 5 minutes left to pay. After {time} this order is cancelled and you won’t be charged.":
+    "付款时间还剩约 5 分钟。{time} 之后订单会取消，不会扣款。",
 });

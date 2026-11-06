@@ -35,8 +35,9 @@ describe("Customer PWA connectivity banner", () => {
       <ConnectivityBanner controller={controller({ status: "restored" })} />,
     );
     expect(html).toContain("Connection restored");
-    expect(html).toContain("then try again if you need to");
-    expect(html).toContain("Nothing was sent while you were");
+    // WP-2423 M17: a confirm sent just before the drop may have gone through; never claim otherwise.
+    expect(html).toContain("Check this page before you try again.");
+    expect(html).not.toContain("Nothing was sent");
     expect(html).toContain("Dismiss");
   });
 });

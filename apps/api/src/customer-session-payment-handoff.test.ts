@@ -112,10 +112,20 @@ async function fixture() {
 }
 it("binds current session and owner history before and after Provider access", async () => {
   const f = await fixture();
-  expect(Object.keys(await f.service.retrieve(f.input))).toEqual(["clientSecret"]);
+  expect(Object.keys(await f.service.retrieve(f.input))).toEqual(["clientSecret", "payBy"]);
   expect(f.admit).toHaveBeenCalledTimes(2);
   expect(f.allowConfirmation).toHaveBeenCalledTimes(2);
   expect(f.provider.retrieve).toHaveBeenCalledTimes(1);
+});
+it("WP-2423 M19: says the payment window when nothing ends earlier", async () => {
+  const f = await fixture();
+  expect(await f.service.retrieve(f.input)).toMatchObject({ payBy: "2026-08-03T15:30:00.000Z" });
+});
+it("WP-2423 M19: says the earlier Inventory deadline when a stock lot ends before the window", async () => {
+  const f = await fixture();
+  // The stock lot stops at local midnight, twenty minutes before the payment window ends.
+  f.admit.mockResolvedValue({ validUntil: "2026-08-03T15:10:00.000Z" });
+  expect(await f.service.retrieve(f.input)).toMatchObject({ payBy: "2026-08-03T15:10:00.000Z" });
 });
 it.each(["admission", "policy"] as const)(
   "withholds credentials when %s denies",

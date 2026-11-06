@@ -6,6 +6,7 @@ import {
   requestCheckoutMutation,
   type CheckoutMutationOptions,
 } from "../checkout/checkout-client.js";
+import { paymentDeadlineFrom, type PaymentDeadline } from "./payment-deadline.js";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 export interface SessionPaymentView {
   readonly checkoutSessionReference: string;
@@ -13,6 +14,11 @@ export interface SessionPaymentView {
   readonly orderReference: string;
   readonly creationStatus: "Created" | "AlreadyCreated" | "Processing";
   readonly total: Readonly<{ amountMinor: string; currency: "CAD" }>;
+  /**
+   * WP-2423 M19: until when this payment can be finished, on the server's clock. Absent from an
+   * older server, which sends no deadline.
+   */
+  readonly deadline?: PaymentDeadline;
 }
 /** WP-2423 item 2: how long a busy Store is waited for, and until when the guest still wants it. */
 export interface SessionPaymentRequestOptions extends CheckoutMutationOptions {
@@ -199,14 +205,28 @@ export function createSessionPaymentClient() {
     { response, payload }: Awaited<ReturnType<typeof post>>,
   ): SessionPaymentView {
     try {
-      const root = exact(payload, ["schemaVersion", "payment"]);
+      const receivedAt = Date.now();
+      // WP-2423 M19: the deadline and the server's time come together, or (older server) neither.
+      const timed =
+        payload !== null && typeof payload === "object" && Object.hasOwn(payload, "serverNow");
+      const root = exact(payload, ["schemaVersion", "payment", ...(timed ? ["serverNow"] : [])]);
       const raw = exact(root.payment, [
         "checkoutSessionReference",
         "paymentIntentReference",
         "orderReference",
         "creationStatus",
         "total",
+        ...(timed ? ["payBy"] : []),
       ]);
+      const deadline = timed
+        ? paymentDeadlineFrom(
+            typeof raw.payBy === "string" ? raw.payBy : "",
+            typeof root.serverNow === "string" ? root.serverNow : undefined,
+            receivedAt,
+          )
+        : null;
+      if (timed && (deadline === null || !Number.isFinite(Date.parse(String(root.serverNow)))))
+        throw new Error();
       const total = exact(raw.total, ["amountMinor", "currency"]);
       const expected =
         response.status === 201
@@ -234,6 +254,7 @@ export function createSessionPaymentClient() {
           amountMinor: amount(total.amountMinor),
           currency: "CAD" as const,
         }),
+        ...(deadline === null ? {} : { deadline }),
       });
     } catch {
       throw new SessionPaymentClientError("unknown");
@@ -341,22 +362,47 @@ export function createSessionPaymentClient() {
     },
     /** The caller passes this ephemeral value directly to the secure Provider component. */
     async handoff(session: string): Promise<string> {
-      const { response, payload } = await post(session, "payment-handoff", {});
-      try {
-        const raw = exact(payload, ["schemaVersion", "clientSecret"]);
-        if (
-          response.status !== 200 ||
-          response.headers.get("cache-control") !== "no-store" ||
-          raw.schemaVersion !== 1 ||
-          typeof raw.clientSecret !== "string" ||
-          raw.clientSecret.length > 512 ||
-          !/^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/u.test(raw.clientSecret)
-        )
-          throw new Error();
-        return raw.clientSecret;
-      } catch {
-        throw new SessionPaymentClientError("unknown");
-      }
+      return (await handoff(session)).clientSecret;
     },
+    /**
+     * WP-2423 M19: the card hand-off, with the moment the server stops accepting this payment
+     * (an earlier stock cutoff included) when the server says it.
+     */
+    handoffWithDeadline: handoff,
   });
+  async function handoff(
+    session: string,
+  ): Promise<{ readonly clientSecret: string; readonly deadline: PaymentDeadline | null }> {
+    const { response, payload } = await post(session, "payment-handoff", {});
+    try {
+      const receivedAt = Date.now();
+      const timed =
+        payload !== null && typeof payload === "object" && Object.hasOwn(payload, "payBy");
+      const raw = exact(payload, [
+        "schemaVersion",
+        "clientSecret",
+        ...(timed ? ["payBy", "serverNow"] : []),
+      ]);
+      const deadline = timed
+        ? paymentDeadlineFrom(
+            typeof raw.payBy === "string" ? raw.payBy : "",
+            typeof raw.serverNow === "string" ? raw.serverNow : undefined,
+            receivedAt,
+          )
+        : null;
+      if (
+        response.status !== 200 ||
+        response.headers.get("cache-control") !== "no-store" ||
+        raw.schemaVersion !== 1 ||
+        typeof raw.clientSecret !== "string" ||
+        raw.clientSecret.length > 512 ||
+        !/^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/u.test(raw.clientSecret) ||
+        (timed && (deadline === null || !Number.isFinite(Date.parse(String(raw.serverNow)))))
+      )
+        throw new Error();
+      return Object.freeze({ clientSecret: raw.clientSecret, deadline });
+    } catch {
+      throw new SessionPaymentClientError("unknown");
+    }
+  }
 }

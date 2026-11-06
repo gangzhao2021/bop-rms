@@ -41,7 +41,11 @@ export function createCustomerSessionPaymentHandoff(options: CustomerSessionPaym
       const sameSession = (value: unknown) =>
         JSON.stringify(parseCheckoutSession(value)) === JSON.stringify(session);
       const admission = options.currentAdmission(session);
-      return createCustomerPaymentHandoff({
+      // WP-2423 M19: the moment this payment stops being accepted is the earliest owner deadline
+      // the admission answered (an Inventory lot cutoff can end before the payment window), so the
+      // guest is shown that moment and never a later one.
+      let payBy: string | undefined;
+      const handed = await createCustomerPaymentHandoff({
         now: options.access.now,
         provider: options.provider,
         async loadCurrent(operationReference, observedAt) {
@@ -96,9 +100,18 @@ export function createCustomerSessionPaymentHandoff(options: CustomerSessionPaym
             String(completedAt) >= String(p.capacityExpiresAt)
           )
             return null;
+          const effective =
+            ownerDeadline < String(p.capacityExpiresAt)
+              ? ownerDeadline
+              : String(p.capacityExpiresAt);
+          if (payBy === undefined || effective < payBy) payBy = effective;
           return record;
         },
       }).retrieve(session.paymentOperationReference);
+      return Object.freeze({
+        clientSecret: handed.clientSecret,
+        ...(payBy === undefined ? {} : { payBy }),
+      });
     },
   });
 }

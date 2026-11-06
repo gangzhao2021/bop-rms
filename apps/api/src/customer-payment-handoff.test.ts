@@ -63,6 +63,25 @@ it("returns only ephemeral credential with no-store and no-referrer", async () =
     clientSecret: "pi_SYNTHETIC000001_secret_SYNTHETICONLY",
   });
 });
+it("WP-2423 M19: passes the deadline on with the server's time, so a phone's clock can't move it", async () => {
+  const f = await setup();
+  f.retrieve.mockResolvedValue({
+    clientSecret: "pi_SYNTHETIC000001_secret_SYNTHETICONLY",
+    payBy: "2026-08-03T15:10:00.000Z",
+  });
+  const body = (await (await f.send()).json()) as Record<string, unknown>;
+  expect(body).toMatchObject({
+    schemaVersion: 1,
+    clientSecret: "pi_SYNTHETIC000001_secret_SYNTHETICONLY",
+    payBy: "2026-08-03T15:10:00.000Z",
+  });
+  expect(Number.isFinite(Date.parse(String(body.serverNow)))).toBe(true);
+  f.retrieve.mockResolvedValue({
+    clientSecret: "pi_SYNTHETIC000001_secret_SYNTHETICONLY",
+    payBy: "not a time",
+  });
+  expect((await f.send()).status).toBe(503);
+});
 it("rejects cross-site, missing CSRF, duplicate cookie and extra body fields before owner access", async () => {
   const f = await setup();
   for (const headers of [

@@ -105,6 +105,7 @@ async function setup(enabled = true) {
             customerPaymentIntent: new CustomerPaymentIntentHandler({
               port: { create, retry, resume, sendToKitchen },
               allowedOrigin: "https://customer.example",
+              now: () => "2026-08-03T15:01:00.000Z",
             }),
           }
         : {},
@@ -163,7 +164,10 @@ it.each([
       orderReference: refs.order,
       creationStatus: status,
       total: { amountMinor: "2200", currency: "CAD" },
+      // WP-2423 M19: until when this payment can be finished, with the server's time.
+      payBy: "2026-08-03T15:30:00.000Z",
     },
+    serverNow: "2026-08-03T15:01:00.000Z",
   });
   expect(f.create).toHaveBeenCalledWith({
     sessionCredential: "s".repeat(43),

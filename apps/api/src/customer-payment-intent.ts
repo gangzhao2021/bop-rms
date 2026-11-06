@@ -360,9 +360,15 @@ function retryRejection(error: unknown): ExplicitRejection | undefined {
 export class CustomerPaymentIntentHandler {
   readonly #port: CustomerPaymentIntentPort;
   readonly #origin: string;
-  constructor(options: { port: CustomerPaymentIntentPort; allowedOrigin: string }) {
+  readonly #now: () => string;
+  constructor(options: {
+    port: CustomerPaymentIntentPort;
+    allowedOrigin: string;
+    now?: () => string;
+  }) {
     this.#port = options.port;
     this.#origin = new URL(options.allowedOrigin).origin;
+    this.#now = options.now ?? (() => new Date().toISOString());
   }
   handler(): RequestHandler {
     return async (request, response) => {
@@ -499,7 +505,12 @@ export class CustomerPaymentIntentHandler {
               orderReference: prepared.orderReference,
               creationStatus: envelope.status,
               total: { amountMinor: prepared.total.amountMinor.toString(), currency: "CAD" },
+              // WP-2423 M19: the payment window's end. The card hand-off answers the effective
+              // deadline (an earlier stock cutoff included), which the page uses when it is sooner.
+              payBy: String(prepared.capacityExpiresAt),
             },
+            // The guest's phone clock may be off: its deadline timers run from the server's time.
+            serverNow: this.#now(),
           });
       } catch {
         reject(response, 503);

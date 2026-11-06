@@ -35,12 +35,15 @@ function reject(response: Response, status: number) {
 export class CustomerPaymentHandoffHandler {
   readonly #origin: string;
   readonly #port: { retrieve(input: CustomerPaymentHandoffInput): Promise<unknown> };
+  readonly #now: () => string;
   constructor(options: {
     allowedOrigin: string;
     port: { retrieve(input: CustomerPaymentHandoffInput): Promise<unknown> };
+    now?: () => string;
   }) {
     this.#origin = new URL(options.allowedOrigin).origin;
     this.#port = options.port;
+    this.#now = options.now ?? (() => new Date().toISOString());
   }
   handler(): RequestHandler {
     return async (request, response) => {
@@ -81,14 +84,33 @@ export class CustomerPaymentHandoffHandler {
         return;
       }
       try {
-        const result = readClosedRecord(await this.#port.retrieve(input), ["clientSecret"]);
+        const handed = await this.#port.retrieve(input);
+        // WP-2423 M19: the earliest moment this payment is still accepted, when the port knows it.
+        const withDeadline =
+          handed !== null && typeof handed === "object" && Object.hasOwn(handed, "payBy");
+        const result = readClosedRecord(
+          handed,
+          withDeadline ? ["clientSecret", "payBy"] : ["clientSecret"],
+        );
         if (
           typeof result.clientSecret !== "string" ||
           result.clientSecret.length > 512 ||
-          !/^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/u.test(result.clientSecret)
+          !/^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/u.test(result.clientSecret) ||
+          (withDeadline &&
+            (typeof result.payBy !== "string" || !Number.isFinite(Date.parse(result.payBy))))
         )
           throw new Error();
-        response.status(200).json({ schemaVersion: 1, clientSecret: result.clientSecret });
+        response.status(200).json({
+          schemaVersion: 1,
+          clientSecret: result.clientSecret,
+          ...(withDeadline
+            ? {
+                payBy: new Date(Date.parse(result.payBy as string)).toISOString(),
+                // The guest's phone clock may be off: its timers run from the server's time.
+                serverNow: this.#now(),
+              }
+            : {}),
+        });
       } catch (error) {
         const status =
           error instanceof GuestSessionError

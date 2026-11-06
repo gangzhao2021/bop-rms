@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkoutLoadFailureState,
   paymentStartFailureState,
+  resolveUnknownPayment,
   SessionPaymentPage,
 } from "./SessionPaymentPage.js";
 import { checkoutReturnFor } from "./checkout-return.js";
@@ -61,8 +62,9 @@ describe("WP-2423 item 2: what a failed payment start may say", () => {
     ["table_moved", "table_moved"],
     // Who knows what the result page knows: never a claim about money.
     ["already_paid", "unknown"],
-    ["window_ended", "unknown"],
     ["retry_pending", "unknown"],
+    // WP-2423 M19: no card was offered, so the window ending is said plainly, with a way back.
+    ["window_ended", "window_ended"],
   ] as const)("before any card was offered, %s shows %s", (code, expected) => {
     expect(paymentStartFailureState(failure(code), false)).toBe(expected);
   });
@@ -114,5 +116,33 @@ describe("WP-2423 item 2: going back after a payment didn't start", () => {
     expect(checkoutReturnFor(true, cart([]))).toBe("table-saved");
     expect(checkoutReturnFor(true, null)).toBe("table-saved");
     expect(checkoutReturnFor(true, "unread")).toBe("table");
+  });
+});
+
+describe("WP-2423 M17: an unclear payment is read before anything is offered", () => {
+  const intent = "01909999-0000-7000-8000-000000000002";
+  it("a captured card shows as paid, never as 'continue to payment'", () => {
+    expect(resolveUnknownPayment({ status: "Succeeded", paymentIntentReference: intent })).toBe(
+      "paid",
+    );
+  });
+  it("a payment that exists (declined or still open) goes to its result, which offers the same attempt", () => {
+    expect(resolveUnknownPayment({ status: "Failed", paymentIntentReference: intent })).toBe(
+      "result",
+    );
+    expect(resolveUnknownPayment({ status: "Pending", paymentIntentReference: intent })).toBe(
+      "result",
+    );
+  });
+  it("only a confirmed 'no payment exists' may continue to payment", () => {
+    expect(resolveUnknownPayment({ status: "Pending", paymentIntentReference: null })).toBe(
+      "not_started",
+    );
+  });
+  it("an unreadable or unknown result keeps checking and offers nothing", () => {
+    expect(resolveUnknownPayment(null)).toBe("checking");
+    expect(resolveUnknownPayment({ status: "Unknown", paymentIntentReference: intent })).toBe(
+      "checking",
+    );
   });
 });
