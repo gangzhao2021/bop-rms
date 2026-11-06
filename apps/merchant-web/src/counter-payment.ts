@@ -1,6 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
-import { storeLocalInstant, storeTime } from "./StoreTime.js";
+import { storeDate, storeLocalInputValue, storeLocalInstant, storeTime } from "./StoreTime.js";
 import type { CounterOrderClientError } from "./staff-order-entry.js";
 import type { CurrentOrderQueue } from "./current-order-queue-client.js";
 
@@ -60,6 +60,34 @@ export function paidAtInstant(
   const time = (local === null ? new Date(value) : new Date(local)).getTime();
   if (!Number.isFinite(time) || time > now || now - time > 72 * 60 * 60 * 1000) return null;
   return new Date(Math.floor(time / 1000) * 1000).toISOString();
+}
+
+/**
+ * WP-2423 (v15 fabf0261): a refusal about the paid-at time itself (staff correct the time where they
+ * typed it, then record again).
+ */
+export function paidAtRefusal(error: CounterOrderClientError): boolean {
+  return error.code === "TakenBeforeRecords";
+}
+
+/**
+ * WP-2423 (v15 fabf0261, Hotpot PC 9): a paper paid-at on another day than today where the Store
+ * is: staff are asked to check the slip's date, since the payment counts on the day it was paid (a
+ * typed date is the easiest mistake to miss). Null when it is today, or the time is not complete.
+ */
+export function paidAtDayNote(
+  instant: string | null,
+  now = Date.now(),
+  timeZone?: string | undefined,
+): string | null {
+  if (instant === null) return null;
+  const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const day = (at: string) => storeLocalInputValue(at, zone).slice(0, 10);
+  if (day(instant) === day(new Date(now).toISOString())) return null;
+  return t(
+    "{date} is not today. Check the date on the paper slip: the payment counts on the day it was paid.",
+    { date: storeDate(instant, zone) },
+  );
 }
 
 /** WP-2423 item 5: minutes before the payment time ends when staff are warned urgently. */

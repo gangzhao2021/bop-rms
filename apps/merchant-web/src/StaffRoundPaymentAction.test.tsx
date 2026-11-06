@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { cardMachinePaymentText, cardMachineRoundsText } from "./CurrentOrderQueuePage.js";
-import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
+import { StaffRoundPaymentAction, chargeFirstText } from "./StaffRoundPaymentAction.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 
 type Order = Parameters<typeof cardMachineRoundsText>[0];
 const order = (amounts: (string | null)[]) =>
@@ -106,4 +107,23 @@ it("v15 751dd768 ①: a counter order sent but not recorded as paid is charged f
   );
   expect(html).toContain("Record card-machine payment</button>");
   expect(html).not.toMatch(/round|0198a7c0|undefined|null/u);
+});
+
+// WP-2423 (v15 fabf0261 F3): the charge sentence is whole in each language; the Chinese counter
+// form never shows the English word for what is charged.
+it("says what the kitchen starts in the staff member's language, for an order or a round", () => {
+  try {
+    expect(chargeFirstText("1130", "order")).toBe(
+      "Charge $11.30 on the card machine first, then record it here. The kitchen starts this order once it is recorded.",
+    );
+    expect(chargeFirstText("1130", "round")).toContain(
+      "The kitchen starts this round once it is recorded.",
+    );
+    setLanguageForTest("zh-Hans");
+    expect(chargeFirstText("1130", "order")).toContain("记录后后厨才开始制作这一单。");
+    expect(chargeFirstText("1130", "round")).toContain("记录后后厨才开始制作这一轮。");
+    expect(chargeFirstText("1130", "order")).not.toMatch(/order|round|\{subject\}/u);
+  } finally {
+    setLanguageForTest("en");
+  }
 });

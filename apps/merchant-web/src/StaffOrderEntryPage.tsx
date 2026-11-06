@@ -13,7 +13,9 @@ import { WorkspacePage } from "./WorkspacePage.js";
 import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
 import { loadOftenOrdered, recordOrdered } from "./counter-often-ordered.js";
 import {
+  paidAtDayNote,
   paidAtInstant,
+  paidAtRefusal,
   payErrorText,
   paidNoteText,
   paymentUrgentMinutes,
@@ -395,7 +397,15 @@ export function StaffOrderEntryPage({
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
   const placeOperation = useRef<string | null>(null);
-  const payOperation = useRef<string | null>(null);
+  // One operation per payment as staff entered it (as at table checkout): a retry after no answer
+  // with the same details is the same command (never counted twice); a corrected paid-at or slip is
+  // a new one, not a conflict with the first.
+  const payOperation = useRef<{ key: string; reference: string } | null>(null);
+  // WP-2423 (v15 fabf0261): the server refused the paid-at itself; staff correct it in the charge
+  // step, where it is shown, and record again.
+  const [paidAtRefused, setPaidAtRefused] = useState(false);
+  const [focusPaidAt, setFocusPaidAt] = useState(0);
+  const chargePaidAt = useRef<HTMLInputElement>(null);
   const chargeHeading = useRef<HTMLHeadingElement>(null);
   const ticketHeading = useRef<HTMLHeadingElement>(null);
   const chooseHeading = useRef<HTMLHeadingElement>(null);
@@ -459,6 +469,12 @@ export function StaffOrderEntryPage({
   useEffect(() => {
     if (phase === "Charge" || phase === "Sent") chargeHeading.current?.focus();
   }, [phase]);
+  // After the charge heading takes focus on returning to Charge: a refused paid-at takes it instead.
+  useEffect(() => {
+    if (focusPaidAt === 0) return;
+    chargePaidAt.current?.focus();
+    chargePaidAt.current?.select?.();
+  }, [focusPaidAt]);
   // The item's options open over the menu (a sheet on a phone), so the order stays where it is.
   const choosingItem = choosing?.item.sellableReference ?? null;
   useEffect(() => {
@@ -683,19 +699,28 @@ export function StaffOrderEntryPage({
   const recordPayment = async (expectedTotalMinor: string) => {
     if (placed === null || phase !== "Charge" || !validSlipReference(slip.trim())) return;
     if (placed.recordedAfterOutage && paperInstant === null) return;
-    payOperation.current ??= serviceOperationReference();
+    const takenAt = placed.recordedAfterOutage ? paperInstant : null;
+    const intent = JSON.stringify([
+      placed.orderBatchReference,
+      expectedTotalMinor,
+      slip.trim(),
+      takenAt,
+    ]);
+    if (payOperation.current?.key !== intent)
+      payOperation.current = { key: intent, reference: serviceOperationReference() };
     setPhase("Recording");
     setProblem(null);
     setProblemNeedsTableCode(false);
+    setPaidAtRefused(false);
     let recorded;
     try {
       recorded = await client.recordPayment({
-        operationReference: payOperation.current,
+        operationReference: payOperation.current.reference,
         orderReference: placed.orderReference,
         orderBatchReference: placed.orderBatchReference,
         expectedTotalMinor,
         slipReference: slip.trim() === "" ? null : slip.trim(),
-        takenAt: placed.recordedAfterOutage ? paperInstant : null,
+        takenAt,
       });
     } catch (error) {
       const failure =
@@ -707,6 +732,10 @@ export function StaffOrderEntryPage({
         setPlaced({ ...placed, totalMinor: failure.totalMinor });
       setProblem(payErrorText(failure));
       setPhase("Charge");
+      if (placed.recordedAfterOutage && paidAtRefusal(failure)) {
+        setPaidAtRefused(true);
+        setFocusPaidAt((value) => value + 1);
+      }
       return;
     }
     refreshMenu();
@@ -734,6 +763,7 @@ export function StaffOrderEntryPage({
     setProblem(null);
     setProblemNeedsTableCode(false);
     setPaidNote(null);
+    setPaidAtRefused(false);
     placeOperation.current = null;
     payOperation.current = null;
     setPhase("Building");
@@ -1224,7 +1254,8 @@ export function StaffOrderEntryPage({
                 />
                 {t("Recorded after an outage (taken on paper)")}
               </label>
-              {paper && !tablePaysLater ? (
+              {/* Once sent, the paid-at is shown and corrected in the charge step below. */}
+              {paper && !tablePaysLater && ordering ? (
                 <label>
                   {t("Paid at (store time, from the paper order)")}
                   <input
@@ -1239,11 +1270,19 @@ export function StaffOrderEntryPage({
                   />
                 </label>
               ) : null}
-              {paper && !tablePaysLater ? (
+              {paper && !tablePaysLater && ordering ? (
                 <p id="counter-paper-hint" className="field-hint">
                   {t(
                     "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.",
                   )}
+                </p>
+              ) : null}
+              {paper &&
+              !tablePaysLater &&
+              ordering &&
+              paidAtDayNote(paperInstant, Date.now(), timeZone) ? (
+                <p className="order-accept-by" data-tier="warning" role="note">
+                  {paidAtDayNote(paperInstant, Date.now(), timeZone)}
                 </p>
               ) : null}
             </fieldset>
@@ -1434,16 +1473,47 @@ export function StaffOrderEntryPage({
                     )}
                   </p>
                   {placed.recordedAfterOutage ? (
-                    <p role="note">
-                      {t("Paper order paid at {value}.", {
-                        value:
-                          paperInstant === null
-                            ? t("— set the time above")
-                            : storeTime(paperInstant, timeZone, true),
-                      })}
-                    </p>
+                    <>
+                      <label>
+                        {t("Paid at (store time, from the paper order)")}
+                        <input
+                          ref={chargePaidAt}
+                          type="datetime-local"
+                          value={paidAt}
+                          disabled={phase === "Recording"}
+                          aria-invalid={paperInstant === null || paidAtRefused}
+                          aria-describedby={
+                            paidAtRefused
+                              ? "counter-charge-paid-at-refused counter-charge-paid-at-hint"
+                              : "counter-charge-paid-at-hint"
+                          }
+                          onChange={(event) => {
+                            setPaidAt(event.currentTarget.value);
+                            if (paidAtRefused) {
+                              setPaidAtRefused(false);
+                              setProblem(null);
+                            }
+                          }}
+                        />
+                      </label>
+                      {paidAtRefused && problem !== null ? (
+                        <p id="counter-charge-paid-at-refused" role="alert">
+                          {problem}
+                        </p>
+                      ) : null}
+                      <p id="counter-charge-paid-at-hint" className="field-hint">
+                        {t(
+                          "Within the last 3 days. If the time was wrong, correct it here and record again.",
+                        )}
+                      </p>
+                      {paidAtDayNote(paperInstant, now, timeZone) !== null ? (
+                        <p className="order-accept-by" data-tier="warning" role="note">
+                          {paidAtDayNote(paperInstant, now, timeZone)}
+                        </p>
+                      ) : null}
+                    </>
                   ) : null}
-                  {problem !== null ? <p role="alert">{problem}</p> : null}
+                  {problem !== null && !paidAtRefused ? <p role="alert">{problem}</p> : null}
                   <div className="card-actions">
                     <button
                       type="submit"

@@ -1,5 +1,5 @@
 import { t } from "./i18n/i18n.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -8,9 +8,31 @@ import {
   createCounterOrderClient,
   type RecordedCardPayment,
 } from "./staff-order-entry.js";
-import { paidAtInstant, payErrorText, paymentWindowNotice } from "./counter-payment.js";
+import {
+  paidAtDayNote,
+  paidAtInstant,
+  paidAtRefusal,
+  payErrorText,
+  paymentWindowNotice,
+} from "./counter-payment.js";
 
 const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
+
+/**
+ * WP-2423 (v15 fabf0261 F3): what staff do first, a whole sentence for an order or a round (the
+ * Chinese text never takes the English word for what is charged).
+ */
+export function chargeFirstText(amountMinor: string, subject: "round" | "order"): string {
+  return subject === "order"
+    ? t(
+        "Charge {amount} on the card machine first, then record it here. The kitchen starts this order once it is recorded.",
+        { amount: cad(amountMinor) },
+      )
+    : t(
+        "Charge {amount} on the card machine first, then record it here. The kitchen starts this round once it is recorded.",
+        { amount: cad(amountMinor) },
+      );
+}
 
 /**
  * WP-2423 D5 (DEC-STAFF-DINE-IN-ROUND decision 4): a round staff entered for a table and not yet
@@ -66,9 +88,22 @@ export function StaffRoundPaymentAction({
   const [reading, setReading] = useState<"Idle" | "Reading" | "Failed" | "NotDue">("Idle");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const operation = useRef<string | null>(null);
+  // WP-2423 (v15 fabf0261): the server refused the paid-at itself; staff correct it in its field.
+  const [paidAtRefused, setPaidAtRefused] = useState(false);
+  const [focusPaidAt, setFocusPaidAt] = useState(0);
+  const paidAtInput = useRef<HTMLInputElement>(null);
+  const refusalId = useId();
+  // One operation per payment as staff entered it (as at table checkout): a retry after no answer
+  // with the same details is the same command (never counted twice), and a corrected paid-at or
+  // slip is a new one rather than a conflict with the first.
+  const operation = useRef<{ key: string; reference: string } | null>(null);
   const read = useRef<AbortController | null>(null);
   useEffect(() => () => read.current?.abort(), []);
+  useEffect(() => {
+    if (focusPaidAt === 0) return;
+    paidAtInput.current?.focus();
+    paidAtInput.current?.select?.();
+  }, [focusPaidAt]);
   const paperInstant = recordedAfterOutage ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
   const readAmount = () => {
     if (loadAmountDue === undefined) return;
@@ -144,12 +179,15 @@ export function StaffRoundPaymentAction({
   const record = async () => {
     if (busy || amount === null || !validSlipReference(slip.trim())) return;
     if (recordedAfterOutage && paperInstant === null) return;
-    operation.current ??= serviceOperationReference();
+    const intent = JSON.stringify([orderBatchReference, amount, slip.trim(), paperInstant]);
+    if (operation.current?.key !== intent)
+      operation.current = { key: intent, reference: serviceOperationReference() };
     setBusy(true);
     setMessage(null);
+    setPaidAtRefused(false);
     try {
       const result = await createCounterOrderClient(csrf, fetcher ?? fetch).recordPayment({
-        operationReference: operation.current,
+        operationReference: operation.current.reference,
         orderReference,
         orderBatchReference,
         expectedTotalMinor: amount,
@@ -171,6 +209,10 @@ export function StaffRoundPaymentAction({
       if (failure.code === "AmountChanged" && failure.totalMinor !== null)
         setAmount(failure.totalMinor);
       setMessage(payErrorText(failure));
+      if (recordedAfterOutage && paidAtRefusal(failure)) {
+        setPaidAtRefused(true);
+        setFocusPaidAt((value) => value + 1);
+      }
     } finally {
       setBusy(false);
     }
@@ -184,12 +226,7 @@ export function StaffRoundPaymentAction({
         void record();
       }}
     >
-      <p>
-        {t(
-          "Charge {amount} on the card machine first, then record it here. The kitchen starts this {subject} once it is recorded.",
-          { amount: cad(amount), subject: subject },
-        )}
-      </p>
+      <p>{chargeFirstText(amount, subject)}</p>
       {payBy !== null
         ? (() => {
             const notice = paymentWindowNotice({
@@ -220,16 +257,37 @@ export function StaffRoundPaymentAction({
         />
       </label>
       {recordedAfterOutage ? (
-        <label>
-          {t("Paid at (store time)")}
-          <input
-            type="datetime-local"
-            value={paidAt}
-            onChange={(event) => setPaidAt(event.currentTarget.value)}
-          />
-        </label>
+        <>
+          <label>
+            {t("Paid at (store time)")}
+            <input
+              ref={paidAtInput}
+              type="datetime-local"
+              value={paidAt}
+              aria-invalid={paperInstant === null || paidAtRefused}
+              aria-describedby={paidAtRefused ? refusalId : undefined}
+              onChange={(event) => {
+                setPaidAt(event.currentTarget.value);
+                if (paidAtRefused) {
+                  setPaidAtRefused(false);
+                  setMessage(null);
+                }
+              }}
+            />
+          </label>
+          {paidAtRefused && message !== null ? (
+            <p id={refusalId} role="alert">
+              {message}
+            </p>
+          ) : null}
+          {paidAtDayNote(paperInstant, Date.now(), timeZone) !== null ? (
+            <p className="order-accept-by" data-tier="warning" role="note">
+              {paidAtDayNote(paperInstant, Date.now(), timeZone)}
+            </p>
+          ) : null}
+        </>
       ) : null}
-      {message !== null ? <p role="status">{message}</p> : null}
+      {message !== null && !paidAtRefused ? <p role="status">{message}</p> : null}
       <div className="card-actions">
         <button
           type="submit"

@@ -353,6 +353,148 @@ test("@production staff take a counter pickup order, charge it on the card machi
   expect(accepted).toHaveLength(0);
 });
 
+// WP-2423 (v15 fabf0261 F1): the server refuses a paper order's paid-at (here: before the store
+// started recording sales). The time is corrected in the charge step, where it is shown, and
+// recorded as a new payment; a retry after no answer with the same time is the same payment.
+for (const language of ["en", "zh-Hans"] as const)
+  test(`@production a refused paper paid-at is corrected in the charge step and recorded (${language})`, async ({
+    page,
+  }) => {
+    if (language === "zh-Hans")
+      await page.addInitScript(() => {
+        window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+      });
+    const zh = language === "zh-Hans";
+    await signIn(page);
+    await page.route("**/merchant/counter/menu", (route) => route.fulfill({ headers, json: menu }));
+    await page.route("**/merchant/counter/orders", (route) =>
+      route.fulfill({
+        headers,
+        json: {
+          status: "Placed",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          orderNumber: "12",
+          orderVersion: 1,
+          orderMinor: "593",
+          tipMinor: "79",
+          totalMinor: "672",
+          payBy: new Date(Date.now() + 30 * 60_000).toISOString(),
+          recordedAfterOutage: true,
+        },
+      }),
+    );
+    const payments: Record<string, unknown>[] = [];
+    await page.route("**/merchant/orders/card-machine-payment", (route) => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      payments.push(body);
+      if (payments.length === 1)
+        return route.fulfill({ status: 409, headers, json: { error: "taken_before_records" } });
+      if (payments.length === 2) return route.abort("connectionreset");
+      return route.fulfill({
+        headers,
+        json: {
+          status: "Recorded",
+          orderReference: id(20),
+          orderBatchReference: id(21),
+          amountMinor: "672",
+          recordingReason: "RecordedAfterOutage",
+          takenAt: body.takenAt,
+          recordedAt: new Date().toISOString(),
+          acceptance: "Accepted",
+        },
+      });
+    });
+    // Store time (America/Toronto) as the paid-at field takes it, whatever the device's zone.
+    const storeLocal = (at: number) => {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/Toronto",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        })
+          .formatToParts(new Date(at))
+          .map((part) => [part.type, part.value]),
+      );
+      return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+    };
+    const paidAtLabel = zh
+      ? "付款时间（门店时间，以纸质订单为准）"
+      : "Paid at (store time, from the paper order)";
+    await page.goto("/operations/order-entry");
+    await page.getByRole("button", { name: zh ? "添加Flat White" : "Add Flat White" }).click();
+    await page.getByRole("button", { name: zh ? "加入订单" : "Add to order" }).click();
+    await page
+      .getByRole("checkbox", {
+        name: zh ? "停电/断网后补录（纸质记录）" : "Recorded after an outage (taken on paper)",
+      })
+      .check();
+    await page.getByLabel(paidAtLabel).fill(storeLocal(Date.now() - 2 * 60 * 60_000));
+    await page.getByRole("button", { name: zh ? "发送订单" : "Send order" }).click();
+    const pay = page.getByRole("button", {
+      name: zh ? "已用刷卡机付款 · $6.72" : "Paid on card machine · $6.72",
+    });
+    await expect(pay).toBeVisible();
+    // Sent: the one paid-at field is the charge step's, holding the time from the paper order.
+    await expect(page.getByLabel(paidAtLabel)).toHaveCount(1);
+    await pay.click();
+    const refusal = page.getByRole("alert").filter({
+      hasText: zh
+        ? "早于本店开始在系统里记录销售的时间"
+        : "before this store started recording sales",
+    });
+    await expect(refusal).toBeVisible();
+    const chargePaidAt = page.getByLabel(paidAtLabel);
+    await expect(chargePaidAt).toBeEnabled();
+    await expect(chargePaidAt).toBeFocused();
+    await expect(chargePaidAt).toHaveAttribute("aria-invalid", "true");
+    await expect(page.locator("body")).toContainText(
+      zh
+        ? "时间填错了就在这里改正，然后再记录一次。"
+        : "If the time was wrong, correct it here and record again.",
+    );
+    if (zh)
+      await expect(page.locator("main")).not.toContainText(
+        /taken_before|TakenBefore|order\b|round\b|undefined|null/u,
+      );
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(chargePaidAt).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/counter-paid-at-refused-${language}-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Corrected: a new payment with the new time.
+    const corrected = storeLocal(Date.now() - 60 * 60_000);
+    await chargePaidAt.fill(corrected);
+    await expect(chargePaidAt).toHaveAttribute("aria-invalid", "false");
+    await pay.click();
+    await expect(page.getByRole("alert")).toBeVisible();
+    // No answer: pressed again with the same time, it is the same payment (never counted twice).
+    await expect(chargePaidAt).toBeEnabled();
+    await pay.click();
+    await expect(
+      page.getByText(zh ? "停电/断网后补录并已接单。" : "Recorded after the outage and accepted.", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    expect(payments).toHaveLength(3);
+    expect(payments[1]?.operationReference).not.toBe(payments[0]?.operationReference);
+    expect(payments[1]?.takenAt).not.toBe(payments[0]?.takenAt);
+    expect(payments[2]?.operationReference).toBe(payments[1]?.operationReference);
+    expect(payments[2]?.takenAt).toBe(payments[1]?.takenAt);
+    await expect(page.locator("body")).not.toContainText(id(20));
+  });
+
 test("@production the order queue shows counter orders and records a card-machine refund", async ({
   page,
 }) => {

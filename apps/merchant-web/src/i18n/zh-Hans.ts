@@ -1037,8 +1037,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Charge that matches no order": "没有对应订单的扣款",
   "Charge the payment provider took that matches no order: {count} · {amountMinor}. Review it in":
     "支付方收取但没有对应订单的款项：{count} · {amountMinor}。请在以下位置核查：",
-  "Charge {amount} on the card machine first, then record it here. The kitchen starts this {subject} once it is recorded.":
-    "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这{subject}。",
+  "Charge {amount} on the card machine first, then record it here. The kitchen starts this order once it is recorded.":
+    "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一单。",
+  "Charge {amount} on the card machine first, then record it here. The kitchen starts this round once it is recorded.":
+    "请先在刷卡机上收款 {amount}，再在此记录。记录后后厨才开始制作这一轮。",
   "Charge {totalMinor} on the card machine": "在刷卡机上收款 {totalMinor}",
   "Charged by the payment provider": "支付方已扣款",
   "Charged twice": "重复扣款",
@@ -2774,7 +2776,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Paid, but not sent to the kitchen yet. Accept it on this order now.":
     "已付款，但尚未发送到后厨。请立即在此订单上接单。",
   "Paper order": "纸质订单",
-  "Paper order paid at {value}.": "纸质订单于 {value} 付款。",
   "Part of the order hasn't been paid. Ask the guest to finish paying on their phone, or cancel the unpaid round on the Orders page.":
     "订单有部分未付款。请顾客在手机上完成付款，或在订单页取消未付款的轮次。",
   "Participant {value} · Joined {value2}": "参与者 {value} · 加入于 {value2}",
@@ -5849,7 +5850,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "· yield": "· 产出",
   "· {value} · accepted value ${value2}": "· {value} · 验收值 ${value2}",
   "· {value} · {value2} · version {version}": "· {value} · {value2} · 版本 {version}",
-  "— set the time above": "— 请在上方设置时间",
   "“Use the live Store’s settings” also replaces the opening hours in this setup with the live Store’s.":
     '"使用当前门店的设置"也会用当前门店的营业时间替换此设置中的营业时间。',
   // Figma v1 (2026-10-25): Home's "Needs attention now".
@@ -8260,4 +8260,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Staff roles waiting for approval": "等待批准的员工角色",
   "Staff roles could not be counted": "无法统计员工角色",
   "{count} waiting; staff roles could not be counted": "{count} 项等待中；无法统计员工角色",
+  // WP-2423 (v15 fabf0261): a paper paid-at corrected where it was refused, and checked for its day.
+  "{date} is not today. Check the date on the paper slip: the payment counts on the day it was paid.":
+    "{date} 不是今天。请核对纸质单据上的日期：这笔付款会记在付款当天。",
+  "Within the last 3 days. If the time was wrong, correct it here and record again.":
+    "须在最近 3 天内。时间填错了就在这里改正，然后再记录一次。",
+  "That paid-at time is more than 30 minutes before this table's last round was ordered in the system. A table pays after it orders: check the time on the paper slip and enter it again.":
+    "这个付款时间比本桌最后一轮在系统里点单的时间早了 30 分钟以上。客人是点完单才付款的：请核对纸质单据上的时间后重新填写。",
+  "This is before this table's last round was ordered in the system ({at}). A card machine's clock can be a few minutes off: check the time on the slip before you confirm.":
+    "这个时间早于本桌最后一轮在系统里点单的时间（{at}）。刷卡机的时钟可能差几分钟：确认前请核对单据上的时间。",
+  "Paid at": "付款时间",
+  "Orders cancelled and refunded in full · {orders}": "已取消并全额退款的订单 · {orders}",
+  "The settlement's figures also include {orders} ({amount}) taken and given back the same day, which this report lists apart instead of as sales and refunds.":
+    "日结的数字里还包括当天收款又全额退回的 {orders}（{amount}），本报表把它们单独列出，不算作销售和退款。",
 });
