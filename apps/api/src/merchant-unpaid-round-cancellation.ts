@@ -2,6 +2,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 import { readClosedRecord } from "@bop/identity";
 import { loadDiningRoundPaymentIdentity, parseOrderingReference } from "@rms/ordering";
 import type { createDiningBatchCancellation } from "./dining-batch-cancellation.js";
+import { fenceTableBill } from "./dining-waiting-rounds.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { MerchantBffService } from "./merchant-bff.js";
@@ -157,18 +158,27 @@ export function createMerchantUnpaidRoundCancellation(options: {
         return fail("UNPAID_ROUND_PAYMENT_IN_PROGRESS");
       if (payment.status === "Unavailable" && !paymentUnconfirmed)
         return fail("UNPAID_ROUND_UNAVAILABLE");
-      const result = await authorized(async ({ transaction, actorReference, allowed }) =>
-        options.cancellation.cancelUnpaidForStaff(transaction, {
-          operationReference,
-          orderReference,
-          orderBatchReference,
-          actorReference,
-          authorize: async () => (await allowed()) === true,
-          ...(paymentUnconfirmed &&
-          (payment.status === "Processing" || payment.status === "Unavailable")
-            ? { paymentUnconfirmed: true }
-            : {}),
-        }),
+      const result = await authorized(
+        async ({ transaction, selected, actorReference, allowed }) => {
+          // The bill's fence first, as payments and the held-round decisions take it: cancelling a
+          // round waiting for staff releases its hold under the same fence, never in another order.
+          await fenceTableBill(
+            transaction,
+            { brandReference: selected.brandReference, storeReference: selected.storeReference },
+            [orderReference],
+          );
+          return options.cancellation.cancelUnpaidForStaff(transaction, {
+            operationReference,
+            orderReference,
+            orderBatchReference,
+            actorReference,
+            authorize: async () => (await allowed()) === true,
+            ...(paymentUnconfirmed &&
+            (payment.status === "Processing" || payment.status === "Unavailable")
+              ? { paymentUnconfirmed: true }
+              : {}),
+          });
+        },
       );
       if (result.status === "NotEligible")
         return fail(

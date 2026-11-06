@@ -10,6 +10,7 @@ import {
   listStoreDiningBatchPaymentDeadlines,
   createPostgresOrderBatchCheckoutCancellationReader,
   createPostgresOrderBatchCheckoutCancellationStore,
+  createPostgresOrderRoundStaffHoldStore,
   parseOrderBatchCheckoutCancellation,
   parseOrderBatchCheckoutExpiry,
   parseOrderingReference,
@@ -308,6 +309,27 @@ export function createDiningBatchCancellation(
           unconfirmed = true;
         }
       }
+      // WP-2423 item 8 ⑤: a round waiting for staff is cancelled by this staff member's decision,
+      // so its hold is released (Cancelled, in their name) in the same transaction; it never stays
+      // "waiting" after it was cancelled, which would stop the table from paying. The held-round
+      // Cancel released it already; the Store's automatic cancellation never reaches a held round.
+      const holds = createPostgresOrderRoundStaffHoldStore({
+        brandReference: scope.brandReference,
+        storeReference: scope.storeReference,
+        authorize: async (tx) => allowed(tx),
+      });
+      const hold = await holds.load({ transaction, orderReference, orderBatchReference });
+      if (hold !== null && hold.release?.outcome === "Confirmed") return refuse("NotCancellable");
+      if (hold !== null && hold.release === null)
+        await holds.release({
+          transaction,
+          operationReference,
+          orderReference,
+          orderBatchReference,
+          outcome: "Cancelled",
+          actorReference,
+          observedAt: started,
+        });
       return await write(transaction, {
         operationReference,
         evidence,

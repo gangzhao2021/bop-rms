@@ -1284,7 +1284,10 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
       );
 
       // ── WP-2423 item 8 ⑤ decision 7: the round waiting for staff was never cancelled by time
-      // (the dispatcher ran past its deadline above), and staff cancel it only with its release.
+      // (the dispatcher ran past its deadline above). A manager's "Cancel this unpaid round"
+      // (an Orders page loaded before held rounds were told apart, or a direct call) cancels it
+      // with its release, in their name, in one transaction: it no longer waits, so the table's
+      // payment (every check reads these waiting rounds) is not stopped by it.
       const heldCancellations = async () =>
         (
           await one(
@@ -1292,38 +1295,32 @@ it("lets a guest finish an abandoned payment, staff cancel an unpaid round, and 
             [heldRound.refs.batch],
           )
         )[0].n;
+      const waiting = () =>
+        transactions.run((tx) =>
+          holds.listWaiting({ transaction: tx, orderReferences: [heldRound.refs.order] }),
+        );
       assert.equal(await heldCancellations(), 0);
+      assert.deepEqual(
+        (await waiting()).map((hold) => hold.orderBatchReference),
+        [heldRound.refs.batch],
+      );
       // Its payment window ended 15 minutes ago, yet the expiry scan never offers it.
       assert.equal(await candidateOf(heldRound), undefined);
-      await assert.rejects(staffCancel(heldRound, id(0x8f2)));
-      assert.equal(await heldCancellations(), 0);
-      const cancelledHeld = await transactions.run(async (tx) => {
-        await holds.release({
-          transaction: tx,
-          operationReference: id(0x8f3),
-          orderReference: heldRound.refs.order,
-          orderBatchReference: heldRound.refs.batch,
-          outcome: "Cancelled",
-          actorReference: manager,
-          observedAt: now(),
-        });
-        return cancellation.cancelUnpaidForStaff(tx, {
-          operationReference: id(0x8f3),
-          orderReference: heldRound.refs.order,
-          orderBatchReference: heldRound.refs.batch,
-          actorReference: manager,
-          authorize: async () => true,
-        });
-      });
+      const cancelledHeld = await staffCancel(heldRound, id(0x8f2));
       assert.equal(cancelledHeld.status, "Created");
       assert.equal(cancelledHeld.record.reasonCode, "STAFF_CANCELLED_UNPAID");
+      assert.equal(await heldCancellations(), 1);
       assert.deepEqual(
         await one(
-          "SELECT outcome,actor_id FROM rms_ordering.order_round_staff_hold_release WHERE order_batch_id=$1",
+          "SELECT outcome,actor_id,operation_id FROM rms_ordering.order_round_staff_hold_release WHERE order_batch_id=$1",
           [heldRound.refs.batch],
         ),
-        [{ outcome: "Cancelled", actor_id: manager }],
+        [{ outcome: "Cancelled", actor_id: manager, operation_id: id(0x8f2) }],
       );
+      assert.deepEqual(await waiting(), []);
+      // The same command again: the original outcome, nothing more recorded.
+      assert.equal((await staffCancel(heldRound, id(0x8f2))).status, "Existing");
+      assert.equal(await heldCancellations(), 1);
     } finally {
       vi.unstubAllEnvs();
       for (const name of [role, worker]) {
