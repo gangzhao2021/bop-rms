@@ -854,6 +854,12 @@ never goes to the kitchen`; save, and press `List it`. Do not hide it: guests ne
   progress", press `Stop the phone payment` first (a payment the guest did finish is kept).
 - **Guests leave without paying**: the incident lead writes it on the incident sheet; it is recorded
   in recovery step 5 as "Guests left without paying" (manager), never left open or deleted.
+- **A round waiting for staff OK** (WP-2423 item 8 ⑤, added 2026-11-06): a guest round staff had not
+  yet sent to the kitchen is not on the bill. If staff served it or charged for it during the outage
+  (on paper), it is part of the sale: when screens come back, press `Send to kitchen` on it first so
+  it is on the bill. Cancel only a round the guests did not get. Then record the payment after the
+  outage; the amount recorded must equal the bill after those decisions. Checkout refuses any
+  payment, including one entered after an outage, while a round still waits, and says so.
 - **A tablet fails**: carry on from another store tablet or a phone signed in to the merchant
   workspace (PIN switch on shared tablets); nothing is stored only on the failed device.
 
