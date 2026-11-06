@@ -228,7 +228,6 @@ describe("Checkout Session creation", () => {
     "CHECKOUT_CART_NOT_ACTIVE",
     "CHECKOUT_QUOTE_MISSING",
     "CHECKOUT_QUOTE_EXPIRED",
-    "CHECKOUT_REQUOTE_REQUIRED",
   ] as const)(
     "WP-2423 item 6: a cart or quote that moved on (%s) is a fixed answer, not an outage",
     async (code) => {
@@ -243,6 +242,17 @@ describe("Checkout Session creation", () => {
       expect(f.counts().writes).toBe(0);
     },
   );
+  it("WP-2423: a menu listed since the Quote (CHECKOUT_REQUOTE_REQUIRED) is its own fixed answer, so the guest is priced again", async () => {
+    const f = setup();
+    const listed = createCheckoutSessionService({
+      ...f.ports,
+      validate: async () => {
+        throw new CheckoutValidationError("CHECKOUT_REQUOTE_REQUIRED");
+      },
+    });
+    await expect(listed.create(f.input)).rejects.toMatchObject({ code: "REQUOTE_REQUIRED" });
+    expect(f.counts().writes).toBe(0);
+  });
   it("WP-2423 M03: refuses a checkout of dishes already ordered before allocating anything", async () => {
     const f = setup();
     const asked: unknown[] = [];
