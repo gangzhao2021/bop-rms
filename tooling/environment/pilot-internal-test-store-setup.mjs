@@ -10,6 +10,7 @@ import {
   createPostgresStorePublicationMaterializer,
   createStoreConfigurationVersion,
 } from "../../packages/rms/store/src/index.ts";
+import { createMerchantServicePauseProof } from "../../apps/api/dist/merchant-service-pause-proof.js";
 import { readPublishedStoreConfiguration } from "./pilot-store-publication.mjs";
 import {
   storeConfigurationContentHash,
@@ -117,16 +118,33 @@ export function renderStoreSetupRoleSql(role) {
   return statements;
 }
 
-const operatingOf = (scope, timeZone, binding) => ({
-  ...scope,
-  configurationType: "STORE_CONFIGURATION",
-  purposeCode: "STORE_CONFIGURATION",
-  requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
-  requiredValidationCheckCodes: storeConfigurationValidationCheckCodes,
-  setupSnapshotReferences: storeConfigurationSetupSnapshotReferences,
-  authorize: async (_tx, at) => at >= binding.validFrom && at < binding.validUntil,
-  hashContent: storeConfigurationContentHash,
-  timeZone,
+const operatingOf = (scope, timeZone, binding) => {
+  const authorize = async (_tx, at) => at >= binding.validFrom && at < binding.validUntil;
+  return {
+    ...scope,
+    configurationType: "STORE_CONFIGURATION",
+    purposeCode: "STORE_CONFIGURATION",
+    requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+    requiredValidationCheckCodes: storeConfigurationValidationCheckCodes,
+    setupSnapshotReferences: storeConfigurationSetupSnapshotReferences,
+    authorize,
+    hashContent: storeConfigurationContentHash,
+    timeZone,
+    // v15 2026-11-06: staff pause and resume online ordering in the product; the services verify
+    // each recorded pause and resume against its audit (pilot-resources), and so does this read.
+    // Without it a Store with any pause history could never be read here.
+    verifyPauseOperation: createMerchantServicePauseProof({
+      brandReference: scope.brandReference,
+      storeReference: scope.storeReference,
+      authorize,
+    }),
+  };
+};
+/** Publishing's renewal refusals, as fixed reasons (never the message). */
+const liveGateReasons = Object.freeze({
+  INTERNAL_TEST_LIVE_GATE_INPUT_INVALID: "live-gate-input-invalid",
+  INTERNAL_TEST_LIVE_GATE_NOT_SYNTHETIC: "live-gate-not-synthetic",
+  INTERNAL_TEST_LIVE_GATE_CONFLICT: "live-gate-changed-try-again",
 });
 
 /**
@@ -683,6 +701,8 @@ export async function renewInternalTestStore(
         ...(merchant ? { testMerchantOpened: true } : {}),
       },
       (transaction, record) => appendAuditRecordInTransaction(transaction, record),
+    ).catch((error) =>
+      unavailable(liveGateReasons[error?.code] ?? "live-gate-renewal-failed", error),
     );
     // The services read the Store's operating status just after the old expiry, as their role.
     await client.query("SAVEPOINT store_renewal_read_check");
@@ -694,7 +714,7 @@ export async function renewInternalTestStore(
         String(target.time_zone),
         { validFrom: binding.validFrom, validUntil: to },
       ),
-    )(tx, after);
+    )(tx, after).catch((error) => unavailable("store-operating-status-unreadable", error));
     if (status.businessDate.storeReference !== store) unavailable("read-check-failed");
     await client.query("RELEASE SAVEPOINT store_renewal_read_check");
     await client.query(dryRun ? "ROLLBACK" : "COMMIT");

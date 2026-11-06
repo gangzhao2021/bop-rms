@@ -2472,7 +2472,11 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
    `merchant-not-opened-by-test-tooling` or `merchant-owner-not-placed-by-opening`; a Store
    directory that `stores.json` does not serve refuses with `store-not-served`. The files are
    read owner-only and in their exact written form, as the installation's renewal reads its own.
-   A dry run reports the gate and the tax as `DryRun`.
+   A dry run reports the gate and the tax as `DryRun`. The read check verifies the Store's
+   staff pauses and resumes of online ordering against their audit, as the services do; a
+   refusal names its cause (`store-operating-status-unreadable`, `live-gate-not-synthetic`,
+   `live-gate-input-invalid`, `live-gate-changed-try-again`) instead of
+   `database-check-failed`.
 
 ## Platform support staff
 

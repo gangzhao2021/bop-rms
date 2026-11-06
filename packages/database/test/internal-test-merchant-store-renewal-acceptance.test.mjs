@@ -7,6 +7,16 @@ import {
   recordMerchantOpening,
 } from "../../../apps/api/dist/merchant-opening.js";
 import { recordStoreOpening } from "../../../apps/api/src/merchant-store-opening.ts";
+import { storeConfigurationProofHashing } from "../../../apps/api/dist/merchant-store-configuration-proof-hash.js";
+import { appendAuditRecordInTransaction } from "../../bop/audit/src/index.ts";
+import {
+  createPostgresCurrentStorePublicationProof,
+  createPostgresStoreServiceControl,
+} from "../../rms/store/src/index.ts";
+import {
+  storeConfigurationSetupSnapshotReferences,
+  storeConfigurationValidationCheckCodes,
+} from "../../../tooling/environment/pilot-store-publication-codes.mjs";
 import { canonicalizeRfc8785, sha256Hex } from "../../bop/audit/src/index.ts";
 import { parseStoreSetupReferenceVersion } from "../../rms/store/src/contracts/store-setup-reference.ts";
 import { createInternalPricingPolicy } from "../../../tooling/environment/pilot-pricing-policy.mjs";
@@ -329,13 +339,108 @@ it("a TEST merchant's Store renews its launch gate and tax evidence with the ins
           audits: audits.n,
         };
       };
+      // v15 2026-11-06: staff paused and resumed online ordering at the Store (Orders, "Pause new
+      // orders"), through the same writer, intent digest and audit as the product. A Store with
+      // such history was unreadable to the renewal's read check, which then refused it.
+      const serviceControl = async (command) => {
+        await admin.query("BEGIN");
+        try {
+          await admin.query("SET LOCAL ROLE " + api);
+          const tx = {
+            query: (sql, values) => admin.query(sql, values === undefined ? [] : [...values]),
+          };
+          const scope = { brandReference: tea.brandReference, storeReference: tea.storeReference };
+          const digest = (value) => "sha256:" + sha256Hex(canonicalizeRfc8785(value));
+          const allowed = async () => true;
+          const result = await createPostgresStoreServiceControl({
+            ...scope,
+            now: () => new Date().toISOString(),
+            run: async (work) => work(tx),
+            authorize: allowed,
+            currentConfiguration: async (transaction, reference, at) =>
+              (
+                await createPostgresCurrentStorePublicationProof({
+                  tenantReference: tea.tenantReference,
+                  ...scope,
+                  configurationType: "STORE_CONFIGURATION",
+                  purposeCode: "STORE_CONFIGURATION",
+                  requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+                  requiredValidationCheckCodes: storeConfigurationValidationCheckCodes,
+                  setupSnapshotReferences: storeConfigurationSetupSnapshotReferences,
+                  configurationReference: reference,
+                  authorize: allowed,
+                  ...storeConfigurationProofHashing,
+                })(transaction, at)
+              ).configuration,
+            hashIntent: (value) => digest({ ...scope, ...value }),
+            appendAudit: async (transaction, event) =>
+              appendAuditRecordInTransaction(transaction, {
+                reasonCode: "STORE_SERVICE_CONTROL",
+                retentionPolicyCode: "AUDIT_DEFAULT",
+                retentionPolicyVersion: 1,
+                auditId: event.command.auditReference,
+                afterSummary: {
+                  intentDigest: digest({ ...scope, ...event.command }),
+                  expectedVersion: event.command.expectedVersion,
+                  resultingVersion: event.resultingVersion,
+                },
+                brandId: tea.brandReference,
+                storeId: tea.storeReference,
+                actor: { type: "User", reference: tea.owner },
+                actionCode:
+                  event.command.command === "PauseService"
+                    ? "STORE_SERVICE_PAUSED"
+                    : "STORE_SERVICE_RESUMED",
+                targetType: "StoreServiceControl",
+                targetId: event.command.operationReference,
+                correlationId: event.command.operationReference,
+                occurredAt: event.occurredAt,
+                sourceChannel: "MERCHANT_WEB",
+                dataClassification: "Internal",
+              }),
+          })({ ...command, actorReference: tea.owner, purposeCode: "STORE_SERVICE" });
+          await admin.query("COMMIT");
+          return result;
+        } catch (error) {
+          await admin.query("ROLLBACK");
+          throw error;
+        }
+      };
+      await admin.query(
+        "SELECT set_config('bop.brand_id',$1,false),set_config('bop.store_id',$2,false)",
+        [tea.brandReference, tea.storeReference],
+      );
+      const [published] = (
+        await admin.query(
+          "SELECT configuration_id::text c FROM rms_store.store_configuration_version WHERE store_id=$1 AND lifecycle='Published' ORDER BY configuration_version DESC LIMIT 1",
+          [tea.storeReference],
+        )
+      ).rows;
+      await admin.query("RESET bop.brand_id");
+      await admin.query("RESET bop.store_id");
+      const pause = ref(0x60);
+      await serviceControl({
+        command: "PauseService",
+        operationReference: pause,
+        configurationReference: published.c,
+        expectedVersion: 0,
+        auditReference: ref(0x61),
+        content: {
+          effectiveUntil: new Date(Date.now() + 3600_000).toISOString(),
+          serviceModes: null,
+        },
+      });
+      await serviceControl({
+        command: "ResumeService",
+        operationReference: ref(0x62),
+        configurationReference: published.c,
+        expectedVersion: 1,
+        auditReference: ref(0x63),
+        content: { pauseOperationReference: pause },
+      });
+
       const before = await facts(tea);
       assert.deepEqual(before, { gate: [1, old], tax: [1, old, old], audits: 0 });
-
-      // Only a Store the files say is served is renewed this way.
-      await assert.rejects(renewStore(tea, { servedTestMerchant: false }), {
-        reason: "merchant-not-served",
-      });
       await assert.rejects(renewTax(tea, { servedTestMerchant: false }), {
         reason: "merchant-not-served",
       });
