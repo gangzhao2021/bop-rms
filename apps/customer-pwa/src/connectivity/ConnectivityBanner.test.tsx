@@ -30,13 +30,16 @@ describe("Customer PWA connectivity banner", () => {
     expect(html).toContain('aria-live="polite"');
   });
 
-  it("requires explicit review after connection restoration", () => {
+  it("says the page updates by itself and never claims nothing was sent after restoration (M17, M94)", () => {
     const html = renderToStaticMarkup(
       <ConnectivityBanner controller={controller({ status: "restored" })} />,
     );
     expect(html).toContain("Connection restored");
     // WP-2423 M17: a confirm sent just before the drop may have gone through; never claim otherwise.
-    expect(html).toContain("Check this page before you try again.");
+    // M94: the page reads again by itself, so the guest is not asked to re-check or retry.
+    expect(html).toContain("Updating this page");
+    expect(html).toContain("anything that went through");
+    expect(html).not.toContain("try again");
     expect(html).not.toContain("Nothing was sent");
     expect(html).toContain("Dismiss");
   });

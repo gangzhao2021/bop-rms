@@ -152,6 +152,31 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(f.getKeyCount()).toBe(0);
   });
 
+  it("reads a pickup cart again by itself when the phone is back online (M94)", async () => {
+    const f = fixture();
+    await f.controller.load();
+    f.controller.setOnline(false);
+    expect(f.controller.getState()).toMatchObject({ status: "offline-readonly" });
+    f.setCurrent(cart(4));
+    f.controller.setOnline(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.calls.map((call) => call.name)).toEqual(["load", "load"]);
+    expect(f.controller.getState()).toMatchObject({
+      status: "ready",
+      cart: { cart: { version: 4 } },
+    });
+  });
+
+  it("leaves a table cart's reconnect read to the table poll, so it reads once (M94)", async () => {
+    const f = fixture();
+    f.setCurrent({ ...cart(), cart: { ...cart().cart, orderType: "DineIn", serviceMode: "DineIn" } });
+    await f.controller.load();
+    f.controller.setOnline(false);
+    f.controller.setOnline(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.calls.map((call) => call.name)).toEqual(["load"]);
+  });
+
   it("loads server-authoritative ready and empty states", async () => {
     const state = fixture();
     await state.controller.load();
@@ -378,7 +403,8 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(state.controller.getState()).toMatchObject({ status: "offline-readonly" });
     expect(state.calls.map((call) => call.name)).toEqual(["load"]);
     state.controller.setOnline(true);
-    expect(state.calls.map((call) => call.name)).toEqual(["load"]);
+    // Back online the cart is only read again (M94); the removal is never sent.
+    expect(state.calls.map((call) => call.name)).toEqual(["load", "load"]);
   });
 
   it.each([
@@ -558,7 +584,8 @@ describe("retained foreground Cart intent", () => {
     await state.controller.removeItem(id(2));
     state.controller.setOnline(true);
     await state.controller.retry();
-    expect(state.calls).toEqual([{ name: "load" }]);
+    // Back online the cart is only read again (M94); nothing offline is sent.
+    expect(state.calls).toEqual([{ name: "load" }, { name: "load" }]);
     await state.controller.load();
     state.failRemove(new CartClientError("cart_selection_invalid"));
     await state.controller.removeItem(id(2));

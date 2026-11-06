@@ -196,6 +196,23 @@ function useMenuLoad(
       current = false;
     };
   }, [client, input, revision]);
+  // M94: a menu that could not open (offline, being refreshed, unavailable) opens again by itself
+  // when the phone is back online; a menu already shown is not read again.
+  const shownKind = useRef(state.kind);
+  shownKind.current = state.kind;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const online = () => {
+      if (
+        shownKind.current === "Offline" ||
+        shownKind.current === "Stale" ||
+        shownKind.current === "Unavailable"
+      )
+        setRevision((value) => value + 1);
+    };
+    window.addEventListener("online", online);
+    return () => window.removeEventListener("online", online);
+  }, []);
   useEffect(() => {
     // Owner 2026-11-03 walkthrough: moving the focus never moves the guest off where they were.
     if (state.kind !== "Loading") heading.current?.focus({ preventScroll: true });
@@ -767,7 +784,11 @@ function MenuState({
     return (
       <section className="menu-state menu-state--warning" role="alert">
         <Heading headingRef={headingRef}>{t("You’re offline")}</Heading>
-        <p>{t("No cached menu is available. No item or order was submitted.")}</p>
+        <p>
+          {t(
+            "The menu can’t open without a connection. It opens again by itself when you’re back online. Nothing was ordered.",
+          )}
+        </p>
         <Retry onRetry={onRetry} />
       </section>
     );

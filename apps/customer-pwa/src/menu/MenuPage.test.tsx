@@ -317,7 +317,7 @@ describe("WP-1701 Customer Menu screens", () => {
     ["IdleSearch", "Search this menu", "item name"],
     ["Loading", "Loading the current menu", "latest published items"],
     ["PermissionDenied", "This menu can’t be opened", "session can’t access this menu"],
-    ["Offline", "You’re offline", "No cached menu"],
+    ["Offline", "You’re offline", "opens again by itself"],
     ["Stale", "Menu is being refreshed", "out-of-date menu"],
     ["Unavailable", "Menu is unavailable", "No item or order was submitted"],
     ["NotFound", "No menu found", "no matching published items"],

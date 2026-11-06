@@ -48,8 +48,10 @@ export function ConnectivityBanner({
           <div>
             <strong>{t("Connection restored.")}</strong>{" "}
             <span>
-              {/* WP-2423 M17: a payment confirmed just before the drop may have gone through. */}
-              {t("Check this page before you try again.")}
+              {/* WP-2423 M17: a payment confirmed just before the drop may have gone through; M94: the page reads again by itself. */}
+              {t(
+                "Updating this page… It will show anything that went through before the connection dropped.",
+              )}
             </span>
           </div>
           <button type="button" onClick={() => controller.dismissRestored()}>

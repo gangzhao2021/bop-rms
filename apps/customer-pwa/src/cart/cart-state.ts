@@ -324,10 +324,16 @@ export function createCartStateController({
       return begin(() => pending as PendingOperation, true);
     },
     setOnline: (value: boolean) => {
+      const wasOffline = state.status === "offline-readonly";
       online = value;
       if (!value) publish({ status: "offline-readonly", cart: currentCart() });
       else if (pending !== null && commandFlight === null)
         mapError(new CartClientError("network_unknown"), currentCart(), true);
+      // M94: back online a pickup cart is read again once (a read, nothing is resent), so checkout
+      // returns by itself. A table cart is re-read by its own table poll on "online", so it is
+      // not read twice here.
+      else if (wasOffline && pending === null && currentCart()?.cart.orderType !== "DineIn")
+        void read(true);
     },
     subscribe: (listener: () => void) => {
       listeners.add(listener);

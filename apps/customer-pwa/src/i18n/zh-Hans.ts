@@ -124,7 +124,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check payment result": "查看付款结果",
   "Check payment status": "查看付款状态",
   "Check the same payment; do not submit another.": "请查看同一笔付款，不要再次提交。",
-  "Check this page before you try again.": "再操作前请先看看本页。",
+  "Updating this page… It will show anything that went through before the connection dropped.":
+    "正在更新本页…断网前已完成的操作会显示在这里。",
   "Check your connection and try again. A staff member can also tell you what your table has ordered.":
     "请检查网络后重试。店员也可以告诉你这桌点了什么。",
   "Check your connection, then try again.": "请检查网络后重试。",
@@ -366,8 +367,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "No Payment request was sent and no Order was created.": "没有发出付款请求，也没有生成订单。",
   "No allergen-free claim is made. Ask staff before ordering.":
     "不声称任何商品不含过敏原。点单前请先询问店员。",
-  "No cached menu is available. No item or order was submitted.":
-    "没有可用的缓存菜单。没有提交任何商品或订单。",
+  "The menu can’t open without a connection. It opens again by itself when you’re back online. Nothing was ordered.":
+    "没有网络，暂时打不开菜单。网络恢复后会自动重新打开。没有下任何单。",
   "No contact details are required for your dine-in order.": "堂食订单不需要填写联系方式。",
   "No courier, location or proof details are available.": "暂无骑手、位置或送达凭证信息。",
   "No item or order was submitted. Try again or ask staff for help.":
@@ -397,7 +398,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Nothing: "无",
   "Nothing was changed. Try loading it again.": "没有做任何更改，请重新加载。",
   "Offline is read-only. Nothing will replay when the connection returns.":
-    "离线时只能查看，恢复网络后不会自动补发任何操作。",
+    "离线时只能查看，恢复网络后也不会自动提交任何操作。",
   "On hold until paid": "付款前暂缓",
   "One of the choices for this item is no longer available.": "这件商品的某个选项已不再供应。",
   "One of the chosen options is no longer available.": "所选的某个选项已不再供应。",
@@ -1086,10 +1087,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "你已离线，没有生成代码。请恢复网络后重试。",
   "You’re offline.": "你已离线。",
   "You’re offline. Changes and checkout are paused; nothing will replay on reconnect.":
-    "你已离线。修改和结账已暂停，恢复网络后不会自动补发。",
+    "你已离线。修改和结账已暂停，恢复网络后也不会自动提交。",
   "You’re offline. Joining and recovery are paused. Reconnect, then try again.":
     "你已离线。加入和恢复已暂停，请恢复网络后重试。",
-  "You’re offline. Nothing was queued or replayed.": "你已离线，没有排队或补发任何操作。",
+  "You’re offline. Nothing was queued or replayed.": "你已离线，没有提交任何操作。",
   "You’re offline. Reconnect to continue; nothing will be submitted automatically.":
     "你已离线。恢复网络后继续，不会自动提交任何内容。",
   "You’re offline. Your cart can’t be changed until you reconnect.":
