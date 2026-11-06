@@ -44,7 +44,25 @@ it("a listing reviews the menu once per step, and never under the write", async 
       const reviewRead = (statement) =>
         typeof statement.key === "string" && statement.key.startsWith("CatalogOptionContentFence:");
       const sellables = 2;
-      const reviewing = transactions.filter((statements) => statements.some(reviewRead));
+      // A review also reads the allergen evidence; the listing check and Submit's preparation only
+      // count the choice combinations against the review's budget, in short reads of their own.
+      const allergenRead = (statement) =>
+        typeof statement.key === "string" &&
+        statement.key.startsWith("CatalogAllergenEvidenceFence:");
+      const reviewing = transactions.filter(
+        (statements) => statements.some(reviewRead) && statements.some(allergenRead),
+      );
+      const counting = transactions.filter(
+        (statements) => statements.some(reviewRead) && !statements.some(allergenRead),
+      );
+      assert.equal(counting.length, 2, "the listing check and Submit count the combinations");
+      for (const statements of counting)
+        assert.ok(
+          !statements.some((statement) =>
+            statement.text.includes("INSERT INTO bop_publishing.publishing_mutation_record"),
+          ),
+          "counting the combinations writes nothing",
+        );
       assert.deepEqual(
         reviewing.map((statements) => statements.filter(reviewRead).length),
         [sellables, sellables, sellables],
