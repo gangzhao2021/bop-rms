@@ -12,6 +12,7 @@ import type { CheckoutSessionState } from "./session-controller.js";
 export function checkoutSessionAlert(
   state: CheckoutSessionState,
   pageOffline: boolean,
+  payLater = false,
 ): string | null {
   switch (state.status) {
     case "idle":
@@ -32,11 +33,15 @@ export function checkoutSessionAlert(
     case "unknown":
       // WP-2423 item 2: after a card was offered in this tab an earlier checkout may be confirming,
       // so a failure here says nothing about money.
+      // WP-2423 (M101): a pay-later table charges nothing here, so the guest is told the round
+      // is not placed yet and that placing it again cannot order it twice.
       return !state.canRetry
         ? checkoutText.checkoutRefused
         : wasCheckoutCardOffered()
           ? checkoutText.checkoutUnconfirmedAfterCard
-          : checkoutText.checkoutUnconfirmed;
+          : payLater
+            ? checkoutText.roundNotPlacedYet
+            : checkoutText.checkoutUnconfirmed;
     case "conflict":
       // WP-2423 item 6: the cart or its quote moved on: it's the cart that needs looking at.
       return checkoutText.checkoutCartChanged;

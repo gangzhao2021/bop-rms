@@ -462,7 +462,7 @@ export function CheckoutPage({
   const sessionAlert =
     sessionState.status === "store_closed"
       ? refusedText
-      : checkoutSessionAlert(sessionState, state.status === "offline");
+      : checkoutSessionAlert(sessionState, state.status === "offline", payLater);
   const canContinue =
     paymentOpen &&
     !detailsLocked &&
@@ -1087,7 +1087,7 @@ export function CheckoutPage({
               onClick={() => void sessionController.retry()}
               disabled={state.status === "offline"}
             >
-              {checkoutText.retryCheckout}
+              {payLater ? checkoutText.placeOrderAgain : checkoutText.retryCheckout}
             </button>
           ) : (
             <button

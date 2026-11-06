@@ -35,6 +35,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "removed {dishes}": "删了 {dishes}",
   "{dish} now ×{quantity}": "{dish} 改为 ×{quantity}",
   "; ": "；",
+  "Place order again": "再次下单",
+  "This round hasn't been placed yet. Tap Place order again; it won't be ordered twice.":
+    "这一轮还没下单。请再按一次“再次下单”，不会重复下单。",
   "{dish} ×{quantity}": "{dish} ×{quantity}",
   ", ": "、",
   "Check out with the new total": "用新的合计结账",

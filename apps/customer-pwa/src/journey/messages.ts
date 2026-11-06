@@ -852,6 +852,14 @@ export const checkoutText = Object.freeze({
   get retryCheckout() {
     return t("Retry checkout");
   },
+  get placeOrderAgain() {
+    return t("Place order again");
+  },
+  get roundNotPlacedYet() {
+    return t(
+      "This round hasn't been placed yet. Tap Place order again; it won't be ordered twice.",
+    );
+  },
   get backToYourTable() {
     return t("Back to your table");
   },

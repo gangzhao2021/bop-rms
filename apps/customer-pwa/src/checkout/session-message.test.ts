@@ -52,6 +52,17 @@ it("maps a server conflict through the controller to the cart that changed", asy
   expect(checkoutText.checkoutCartChanged).not.toContain("scan");
 });
 
+it("at a pay-later table, says the round is not placed yet and offers Place order again (M101)", () => {
+  expect(checkoutSessionAlert({ status: "unknown", canRetry: true }, false, true)).toBe(
+    "This round hasn't been placed yet. Tap Place order again; it won't be ordered twice.",
+  );
+  expect(checkoutText.placeOrderAgain).toBe("Place order again");
+  // A refusal is still a refusal.
+  expect(checkoutSessionAlert({ status: "unknown", canRetry: false }, false, true)).toBe(
+    checkoutText.checkoutRefused,
+  );
+});
+
 it("WP-2423 item 2: an unconfirmed checkout says this order wasn't charged only before any card", () => {
   const unconfirmed = checkoutSessionAlert({ status: "unknown", canRetry: true }, false);
   expect(unconfirmed).toBe(checkoutText.checkoutUnconfirmed);
