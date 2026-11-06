@@ -115,6 +115,49 @@ describe("WP-2423: order status polling pace", () => {
     expect(delayFor(ready(view("Rejected")))).toBeNull();
   });
 
+  it("WP-2423 M119: a paid order that settled keeps a slow watch, and a refund on its way a faster one", () => {
+    const paidOn = (v: OrderStatusView, extra: object = {}): OrderStatusView => ({
+      ...v,
+      sources: {
+        checkedAt: "2026-08-11T14:06:00.000Z",
+        kitchen: null,
+        payments: [
+          {
+            status: "Succeeded",
+            occurredAt: "2026-08-11T13:56:00.000Z",
+            amount: { amountMinor: 1299n, currencyCode: "CAD" },
+            freshnessStatus: "Fresh",
+          },
+        ],
+        ...extra,
+      },
+    });
+    const collected = paidOn(view("Fulfilled", { collected: true }));
+    // A refund staff start after collection still reaches the open page.
+    let poll = advanceOrderStatusPoll(stoppedOrderStatusPoll, ready(collected));
+    expect(poll.mode).toBe("settled-watch");
+    expect(nextOrderStatusPollDelayMs(poll)).toBe(60_000);
+    for (let read = 1; read < 30; read++) poll = advanceOrderStatusPoll(poll, ready(collected));
+    expect(poll.mode).toBe("settled-watch");
+    poll = advanceOrderStatusPoll(poll, ready(collected));
+    expect(poll.mode).toBe("stopped");
+    // A refund still pending (an item cancelled after payment) is watched until it is final.
+    const refunding = paidOn(view("Cancelled"), {
+      staffCancellations: [
+        {
+          orderBatchReference: id(3),
+          cancelledAt: "2026-08-11T14:05:00.000Z",
+          reason: "SoldOut",
+          refundStatus: "Pending",
+        },
+      ],
+    });
+    expect(delayFor(ready(refunding))).toBe(30_000);
+    // An order never paid (cancelled unpaid) stops; live updates still replace polling.
+    expect(delayFor(ready(view("Cancelled")))).toBeNull();
+    expect(delayFor(ready(collected, "available"))).toBeNull();
+  });
+
   it("checks an accepted order every 3 s while the kitchen makes it (v15 2026-10-16: ready took 13 s)", () => {
     expect(orderPreparingPollIntervalMs).toBe(3_000);
     expect(delayFor(ready(view("Accepted")))).toBe(3_000);
@@ -301,7 +344,8 @@ describe("WP-2423 (v15 2026-10-17): pace from the status body the pilot actually
     ["queued", orderPreparingPollIntervalMs],
     ["preparing", orderPreparingPollIntervalMs],
     ["ready", orderAwaitingCollectionPollIntervalMs],
-    ["collected", null],
+    // WP-2423 M119: collected and paid, it is still read slowly for a while (a later refund).
+    ["collected", 60_000],
   ] as const)("checks a %s pickup after %s ms", async (stage, delay) => {
     expect(delayFor(ready(await decoded(stage)))).toBe(delay);
   });

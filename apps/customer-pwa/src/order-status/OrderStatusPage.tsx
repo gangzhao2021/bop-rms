@@ -137,11 +137,40 @@ export const orderStatusPollErrorCapMs = 60_000;
  * settled or live updates are on.
  */
 export type OrderStatusPollMode =
-  "received" | "awaiting-acceptance" | "preparing" | "awaiting-collection" | "active" | "stopped";
+  | "received"
+  | "awaiting-acceptance"
+  | "preparing"
+  | "awaiting-collection"
+  | "active"
+  /** WP-2423 M119: settled, but a refund is still on its way: the page shows when it lands. */
+  | "watch"
+  /** WP-2423 M119: a paid order just settled: a refund staff start after collection still shows. */
+  | "settled-watch"
+  | "stopped";
 export interface OrderStatusPoll {
   readonly mode: OrderStatusPollMode;
   /** Checks that failed in a row since the last successful read. */
   readonly errors: number;
+  /** WP-2423 M119: reads made since the order settled (settled-watch stops after a limit). */
+  readonly settledReads?: number;
+}
+/** WP-2423 M119: a settled order with a refund on its way is read this often. */
+export const orderRefundWatchPollIntervalMs = 30_000;
+/** WP-2423 M119: a paid order that settled is read this often, this many times. */
+export const orderSettledWatchPollIntervalMs = 60_000;
+export const orderSettledWatchReads = 30;
+/** Longest wait between checks of a settled order after repeated failures. */
+export const orderWatchPollErrorCapMs = 120_000;
+
+/** WP-2423 M119: a refund on this order (store or item cancellation, not accepted) not yet final. */
+export function hasPendingRefund(view: OrderStatusView): boolean {
+  const sources = view.sources;
+  return (
+    (sources?.staffCancellations ?? []).some((entry) => entry.refundStatus === "Pending") ||
+    (sources?.itemCancellations ?? []).some((entry) => entry.refundStatus === "Pending") ||
+    (sources?.storeAcceptance?.state === "NotAccepted" &&
+      sources.storeAcceptance.refundStatus === "Pending")
+  );
 }
 export const stoppedOrderStatusPoll: OrderStatusPoll = Object.freeze({
   mode: "stopped",
@@ -202,29 +231,35 @@ export function advanceOrderStatusPoll(
   switch (state.status) {
     case "received":
       return { mode: "received", errors: 0 };
-    case "ready":
+    case "ready": {
+      if (state.realtime === "available") return { mode: "stopped", errors: 0 };
+      if (isOrderSettled(state.view)) {
+        // WP-2423 M119: a refund on its way keeps being read until it is final; a paid order
+        // that just settled is read slowly for a while (a refund after collection still shows).
+        if (hasPendingRefund(state.view)) return { mode: "watch", errors: 0 };
+        const reads = previous.mode === "settled-watch" ? (previous.settledReads ?? 0) + 1 : 0;
+        return paidTotal(state.view) !== null && reads < orderSettledWatchReads
+          ? { mode: "settled-watch", errors: 0, settledReads: reads }
+          : { mode: "stopped", errors: 0 };
+      }
       return {
-        mode:
-          state.realtime === "available" || isOrderSettled(state.view)
-            ? "stopped"
-            : isAwaitingCollection(state.view)
-              ? "awaiting-collection"
-              : isInPreparation(state.view)
-                ? "preparing"
-                : isAwaitingAcceptance(state.view)
-                  ? "awaiting-acceptance"
-                  : "active",
+        mode: isAwaitingCollection(state.view)
+          ? "awaiting-collection"
+          : isInPreparation(state.view)
+            ? "preparing"
+            : isAwaitingAcceptance(state.view)
+              ? "awaiting-acceptance"
+              : "active",
         errors: 0,
       };
+    }
     // A check in flight keeps the current pace.
     case "loading":
       return previous;
     // A failed check while polling keeps trying, more slowly each time; a failed first load waits
     // for the guest's tap as before.
     case "unavailable":
-      return previous.mode === "stopped"
-        ? previous
-        : { mode: previous.mode, errors: previous.errors + 1 };
+      return previous.mode === "stopped" ? previous : { ...previous, errors: previous.errors + 1 };
     default:
       return stoppedOrderStatusPoll;
   }
@@ -246,10 +281,18 @@ export function nextOrderStatusPollDelayMs(poll: OrderStatusPoll): number | null
             ? orderPreparingPollIntervalMs
             : poll.mode === "active"
               ? orderStatusPollIntervalMs
-              : null;
+              : poll.mode === "watch"
+                ? orderRefundWatchPollIntervalMs
+                : poll.mode === "settled-watch"
+                  ? orderSettledWatchPollIntervalMs
+                  : null;
   if (base === null) return null;
   const cap =
-    base < orderStatusPollIntervalMs ? orderStatusPollIntervalMs : orderStatusPollErrorCapMs;
+    poll.mode === "watch" || poll.mode === "settled-watch"
+      ? orderWatchPollErrorCapMs
+      : base < orderStatusPollIntervalMs
+        ? orderStatusPollIntervalMs
+        : orderStatusPollErrorCapMs;
   return Math.min(base * 2 ** Math.min(poll.errors, 16), cap);
 }
 

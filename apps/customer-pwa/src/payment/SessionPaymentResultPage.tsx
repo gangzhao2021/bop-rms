@@ -317,6 +317,11 @@ export function SessionPaymentResultPage({
         <Link className="payment-result-page__back" to="/menu">
           {t("Back to menu")}
         </Link>
+      ) : !pickup && !unprepared && result !== null ? (
+        // WP-2423 M113: a table's payment has a result; the way on is the table, not checkout.
+        <Link className="payment-result-page__back" to="/dine-in/session">
+          {t("See your table")}
+        </Link>
       ) : (
         <Link
           className={"payment-result-page__back" + (unprepared ? " cart-primary-link" : "")}
