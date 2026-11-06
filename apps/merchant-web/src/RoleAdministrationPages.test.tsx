@@ -65,3 +65,35 @@ it("WP-2423: names a permission by its catalog description, else its group", () 
     "Role administration",
   );
 });
+
+it("WP-2423 M07: a custom role waiting for someone else says what a one-owner store can do instead", () => {
+  const render = (fixture: unknown) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <RoleAdministrationScreen
+          view={parseRoleAdministrationPageView(fixture, "IAM-ROLE-EDITOR")}
+          client={unavailableRoleAdministrationPageClient}
+          csrf="synthetic-csrf"
+          reload={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+  const withRole = (patch: Record<string, unknown>) => {
+    const fixture = structuredClone(roleEditorFixture) as unknown as {
+      roles: Record<string, unknown>[];
+    };
+    fixture.roles = fixture.roles.map((role) => ({ ...role, ...patch }));
+    return fixture;
+  };
+  // The person who submitted it cannot approve it: not a dead end, a way on.
+  const waiting = render(withRole({ status: "InReview", operations: [] }));
+  expect(waiting).toContain("Another administrator must approve this change.");
+  expect(waiting).toContain("even with Sole operator on");
+  expect(waiting).toContain('href="/app/organization/roles"');
+  expect(waiting).toContain('href="/app/organization/users"');
+  // Told before submitting, too.
+  const draft = render(withRole({ status: "Draft", operations: ["SaveDraft", "Submit"] }));
+  expect(draft).toContain("Submitting sends this role to another administrator");
+  // Someone who may approve it sees the Approve button, not the note.
+  expect(render(roleEditorFixture)).not.toContain("even with Sole operator on");
+});

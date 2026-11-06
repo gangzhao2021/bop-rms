@@ -8221,4 +8221,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Loading approvals": "正在载入待批准事项",
   "Checking staff roles waiting for approval…": "正在检查等待批准的员工角色…",
   "No staff role is waiting for your approval.": "没有等待你批准的员工角色。",
+  "Submitting sends this role to another administrator who approves roles.":
+    "提交后，这个角色会交给另一位有角色批准权的管理员批准。",
+  "A custom role cannot be approved by the person who made it, even with Sole operator on. If nobody else at your business approves roles, give staff one of the ready-made roles instead: with Sole operator on, you can approve those on your own on the person's page.":
+    "自定义角色不能由创建者本人批准，即使开启了“独立经营者”也不行。如果你的商家没有其他人能批准角色，请给员工分配一个现成的模板角色：开启“独立经营者”后，你可以在员工页面自行批准。",
+  "See the ready-made roles": "查看现成的模板角色",
+  "Open staff": "打开员工列表",
 });

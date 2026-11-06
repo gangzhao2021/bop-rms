@@ -134,6 +134,32 @@ function PermissionPicker({
     </fieldset>
   );
 }
+/**
+ * WP-2423 M07 (coordinator decision 2026-11-06, Owner may overrule): a custom role always needs a
+ * second person who approves roles; Sole operator does not cover it. A one-owner store is told so
+ * before and after submitting and sent to the ready-made roles, which they can assign and approve
+ * on their own on the person's page once Sole operator is on — never left waiting with no way on.
+ */
+export function CustomRoleApprovalNote({ submitted }: { readonly submitted: boolean }) {
+  return (
+    <div className="role-approval-note">
+      <p>
+        {submitted
+          ? t("Another administrator must approve this change.")
+          : t("Submitting sends this role to another administrator who approves roles.")}
+      </p>
+      <p>
+        {t(
+          "A custom role cannot be approved by the person who made it, even with Sole operator on. If nobody else at your business approves roles, give staff one of the ready-made roles instead: with Sole operator on, you can approve those on your own on the person's page.",
+        )}
+      </p>
+      <p>
+        <Link to="/app/organization/roles">{t("See the ready-made roles")}</Link> ·{" "}
+        <Link to="/app/organization/users">{t("Open staff")}</Link>
+      </p>
+    </div>
+  );
+}
 function Editor({
   view,
   role,
@@ -306,7 +332,9 @@ function Editor({
           </p>
         ) : null}
         {role.status === "InReview" && !role.operations.includes("Approve") ? (
-          <p>{t("Another administrator must approve this change.")}</p>
+          <CustomRoleApprovalNote submitted />
+        ) : role.status === "Draft" && role.operations.includes("Submit") ? (
+          <CustomRoleApprovalNote submitted={false} />
         ) : null}
         <div role="group" aria-label={t("Role actions")}>
           {role.operations
