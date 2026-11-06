@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tableCartChange } from "./table-cart-change.js";
 import type { CartItemView, CartView } from "./types.js";
-import { tableCartAddedDishes, checkoutText } from "../journey/messages.js";
+import { tableCartChangedDishes, checkoutText } from "../journey/messages.js";
 
 const id = (n: number) => `01902423-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const line = (n: number, displayName: string, quantity = 1): CartItemView =>
@@ -56,15 +56,35 @@ describe("WP-2423 same-table-ordering: what happened at the table while this pho
         { displayName: "Dumplings", quantity: 1 },
         { displayName: "Sesame soup", quantity: 1 },
       ],
+      removed: [],
+      reduced: [],
     });
     if (change.kind !== "changed") throw new Error("synthetic");
-    expect(checkoutText.tableCartChangedBy(tableCartAddedDishes(change.added))).toBe(
+    expect(checkoutText.tableCartChangedBy(tableCartChangedDishes(change))).toBe(
       "Someone at your table changed the cart: added Dumplings ×1, Sesame soup ×1.",
     );
-    // A removal only: changed, nothing named.
-    const removed = tableCartChange(view(3, [mine, line(11, "Tea")]), view(4, [mine], []));
-    expect(removed).toEqual({ kind: "changed", added: [] });
     expect(checkoutText.tableCartChangedBy("")).toBe("Someone at your table changed the cart.");
+  });
+  it("names a removed dish and a smaller quantity, and does not repeat an increase (M37)", () => {
+    const change = tableCartChange(
+      view(3, [mine, line(11, "Tea", 2), line(12, "Rice", 3), line(13, "Soup")]),
+      view(6, [line(10, "Dumplings", 4), line(12, "Rice", 1), line(13, "Soup")], []),
+    );
+    expect(change).toEqual({
+      kind: "changed",
+      added: [{ displayName: "Dumplings", quantity: 2 }],
+      removed: [{ displayName: "Tea", quantity: 2 }],
+      reduced: [{ displayName: "Rice", quantity: 1 }],
+    });
+    if (change.kind !== "changed") throw new Error("synthetic");
+    expect(checkoutText.tableCartChangedBy(tableCartChangedDishes(change))).toBe(
+      "Someone at your table changed the cart: added Dumplings ×2; removed Tea ×2; Rice now ×1.",
+    );
+    const removedOnly = tableCartChange(view(3, [mine, line(11, "Tea")]), view(4, [mine], []));
+    if (removedOnly.kind !== "changed") throw new Error("synthetic");
+    expect(checkoutText.tableCartChangedBy(tableCartChangedDishes(removedOnly))).toBe(
+      "Someone at your table changed the cart: removed Tea ×1.",
+    );
   });
   it("says another phone's round took these dishes, even after more dishes were added", () => {
     // Review: the round was followed by an add, so the cart is two versions on.

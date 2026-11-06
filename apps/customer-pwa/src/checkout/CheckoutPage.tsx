@@ -57,7 +57,7 @@ import {
   commonText,
   lineEstimateLabel,
   quoteIssueMessage,
-  tableCartAddedDishes,
+  tableCartChangedDishes,
 } from "../journey/messages.js";
 import {
   createCheckoutClient,
@@ -1005,7 +1005,7 @@ export function CheckoutPage({
           {tableChange?.kind === "changed" ? (
             // WP-2423 (same-table-ordering): beside the action, where the guest is looking.
             <p role="status">
-              {checkoutText.tableCartChangedBy(tableCartAddedDishes(tableChange.added))}
+              {checkoutText.tableCartChangedBy(tableCartChangedDishes(tableChange))}
             </p>
           ) : null}
           {menuUpdated && sessionState.status === "idle" && sendState === "idle" ? (

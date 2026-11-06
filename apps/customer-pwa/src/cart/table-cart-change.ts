@@ -6,11 +6,23 @@ import type { CartView } from "./types.js";
  * left in a round someone at the table paid for (by the round's own record of the cart lines it
  * took, whatever was added after). Never names who.
  */
+export interface TableCartDish {
+  readonly displayName: string;
+  readonly quantity: number;
+}
+
+const nothing: readonly TableCartDish[] = Object.freeze([]);
+
 export type TableCartChange =
   | { readonly kind: "unchanged" }
   | {
       readonly kind: "changed";
-      readonly added: readonly { readonly displayName: string; readonly quantity: number }[];
+      /** New dishes, and the extra of a dish already there. */
+      readonly added: readonly TableCartDish[];
+      /** Dishes no longer in the cart (not taken by a round), with the quantity they had. */
+      readonly removed: readonly TableCartDish[];
+      /** Dishes still there with a smaller quantity: `quantity` is the new one. Increases are in `added`. */
+      readonly reduced: readonly TableCartDish[];
     }
   | {
       readonly kind: "sent";
@@ -22,7 +34,7 @@ export type TableCartChange =
 
 export function tableCartChange(loaded: CartView, current: CartView | null): TableCartChange {
   if (current !== null && current.cart.cartReference !== loaded.cart.cartReference)
-    return Object.freeze({ kind: "changed", added: Object.freeze([]) });
+    return Object.freeze({ kind: "changed", added: nothing, removed: nothing, reduced: nothing });
   if (current !== null && current.cart.version === loaded.cart.version)
     return Object.freeze({ kind: "unchanged" });
   const now = new Map((current?.cart.items ?? []).map((item) => [item.cartItemReference, item]));
@@ -57,5 +69,21 @@ export function tableCartChange(loaded: CartView, current: CartView | null): Tab
     }))
     .filter((line) => line.quantity > 0)
     .map((line) => Object.freeze(line));
-  return Object.freeze({ kind: "changed", added: Object.freeze(added) });
+  // WP-2423 (shared-table-cart-staff-round, M37): name removals and smaller quantities too, so a
+  // guest reads what changed, not only that something did. A line a round took is not "removed".
+  const removed = gone
+    .filter((item) => takenBy(item.cartItemReference) === undefined)
+    .map((item) => Object.freeze({ displayName: item.displayName, quantity: item.quantity }));
+  const reduced = (current?.cart.items ?? [])
+    .filter((item) => {
+      const was = before.get(item.cartItemReference);
+      return was !== undefined && item.quantity < was;
+    })
+    .map((item) => Object.freeze({ displayName: item.displayName, quantity: item.quantity }));
+  return Object.freeze({
+    kind: "changed",
+    added: Object.freeze(added),
+    removed: Object.freeze(removed),
+    reduced: Object.freeze(reduced),
+  });
 }

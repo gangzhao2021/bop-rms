@@ -107,6 +107,29 @@ export function tableCartAddedDishes(
     .join(t(", "));
 }
 
+type TableCartDishes = readonly { readonly displayName: string; readonly quantity: number }[];
+
+/**
+ * WP-2423 (shared-table-cart-staff-round, M37): what someone at the table changed, in one
+ * sentence: added, removed, then smaller quantities ("" when nothing can be named).
+ */
+export function tableCartChangedDishes(change: {
+  readonly added: TableCartDishes;
+  readonly removed: TableCartDishes;
+  readonly reduced: TableCartDishes;
+}): string {
+  const parts: string[] = [];
+  if (change.added.length > 0)
+    parts.push(t("added {dishes}", { dishes: tableCartAddedDishes(change.added) }));
+  if (change.removed.length > 0)
+    parts.push(t("removed {dishes}", { dishes: tableCartAddedDishes(change.removed) }));
+  for (const line of change.reduced)
+    parts.push(
+      t("{dish} now ×{quantity}", { dish: line.displayName, quantity: String(line.quantity) }),
+    );
+  return parts.join(t("; "));
+}
+
 /** Sentence for a cart line warning, or null when the code carries nothing a customer can act on. */
 export function cartItemWarningMessage(code: string): string | null {
   // Both are said by the line's ownership sentence instead.
@@ -706,11 +729,11 @@ export const checkoutText = Object.freeze({
     return t("Your cart changed. Refresh to price the current cart.");
   },
   /** WP-2423 (same-table-ordering): another phone at the table changed the cart meanwhile. */
-  /** `dishes`: what was added, as `tableCartAddedDishes` words it ("" when nothing was). */
-  tableCartChangedBy: (dishes: string) =>
-    dishes === ""
+  /** `changes`: what changed, as `tableCartChangedDishes` words it ("" when nothing can be named). */
+  tableCartChangedBy: (changes: string) =>
+    changes === ""
       ? t("Someone at your table changed the cart.")
-      : t("Someone at your table changed the cart: added {dishes}.", { dishes }),
+      : t("Someone at your table changed the cart: {changes}.", { changes }),
   get checkOutWithNewTotal() {
     return t("Check out with the new total");
   },
