@@ -63,6 +63,16 @@ export interface StoreUpcomingHours {
   }[];
   /** The next start of a period after now, today or within `days`; null when none is published. */
   readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
+  /**
+   * M117: the period the Store is in now, with the local date it began on (yesterday's for an
+   * overnight period after midnight); null when the Store is not in a published period now.
+   */
+  readonly currentPeriod?: {
+    readonly startLocalDate: string;
+    readonly startLocalTime: string;
+    readonly endLocalTime: string;
+    readonly endsNextDay: boolean;
+  } | null;
 }
 
 const DAY = 86_400_000;
@@ -169,6 +179,15 @@ export function describeStoreUpcomingHours(input: StoreUpcomingHoursInput): Stor
     pastLastOrders,
     upcoming,
     nextOpening,
+    currentPeriod:
+      current === undefined
+        ? null
+        : Object.freeze({
+            startLocalDate: startDate,
+            startLocalTime: current.startLocalTime,
+            endLocalTime: current.endLocalTime,
+            endsNextDay: current.endsNextDay,
+          }),
   });
 }
 

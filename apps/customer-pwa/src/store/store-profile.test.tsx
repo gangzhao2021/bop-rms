@@ -9,6 +9,7 @@ import {
 } from "./store-profile-client.js";
 import {
   OrdersStoppedNotice,
+  StoreIdentityCard,
   StoreStatusStrip,
   storeStatusLine,
   todayHoursText,
@@ -202,5 +203,42 @@ describe("WP-2423 item 8 ③ follow-up: after last orders", () => {
     expect(renderToStaticMarkup(<StoreStatusStrip load={loaderOf(true)} />)).toContain(
       `Kitchen stopped taking orders at ${formatStoreLocalTime("17:30:00")}`,
     );
+  });
+});
+
+describe("M117: after midnight in last night's overnight period", () => {
+  const late = () => ({
+    ...body(),
+    store: {
+      ...body().store,
+      hours: {
+        ...body().store.hours,
+        localDate: "2026-12-23",
+        todayHours: [{ startLocalTime: "11:00:00", endLocalTime: "02:00:00", endsNextDay: true }],
+        closesAt: "02:00:00",
+        lastOrdersAt: null,
+        upcoming: [],
+        tonight: { startLocalTime: "11:00:00", endLocalTime: "02:00:00" },
+      },
+    },
+  });
+  it("says open until 2:00 a.m. and tonight's hours, not the new date's", async () => {
+    const profile = parseStoreProfile(late());
+    expect(profile.hours?.tonight).toEqual({ startLocalTime: "11:00:00", endLocalTime: "02:00:00" });
+    expect(storeStatusLine(profile.hours as NonNullable<StoreProfile["hours"]>).detail).toBe(
+      `until ${formatStoreLocalTime("02:00:00")}`,
+    );
+    const html = renderToStaticMarkup(
+      <StoreIdentityCard load={Object.assign(async () => profile, { last: () => profile })} />,
+    );
+    expect(html).toContain("Tonight");
+    expect(html).toContain("(next day)");
+    expect(html).not.toContain(">Today<");
+    expect(() =>
+      parseStoreProfile({
+        ...late(),
+        store: { ...late().store, hours: { ...late().store.hours, tonight: { startLocalTime: "x" } } },
+      }),
+    ).toThrow();
   });
 });

@@ -170,3 +170,49 @@ describe("WP-2423 DEC-CLOSING-SUMMARY: when the Store closes on a business day",
     });
   });
 });
+
+describe("M117: an overnight period after midnight", () => {
+  const late = [1, 2, 3, 4, 5, 6, 7].map((isoWeekday) => ({
+    isoWeekday,
+    intervals: [period("11:00:00", "02:00:00", 0, true)],
+  }));
+  it("names the period begun yesterday as the current one, past midnight", () => {
+    for (const localTime of ["00:00:14", "00:30:00", "01:59:59"])
+      expect(
+        describeStoreUpcomingHours({
+          localDate: "2026-12-23",
+          localTime,
+          weeklySchedule: late,
+          exceptions: [],
+          days: 7,
+        }).currentPeriod,
+      ).toEqual({
+        startLocalDate: "2026-12-22",
+        startLocalTime: "11:00:00",
+        endLocalTime: "02:00:00",
+        endsNextDay: true,
+      });
+  });
+  it("uses the night's own hours when last night was an exception", () => {
+    const result = describeStoreUpcomingHours({
+      localDate: "2026-12-25",
+      localTime: "00:30:00",
+      weeklySchedule: late,
+      exceptions: [
+        {
+          localDate: "2026-12-24",
+          kind: "Override" as const,
+          intervals: [period("17:00:00", "01:00:00", 0, true)],
+        },
+      ],
+      days: 7,
+    });
+    expect(result.currentPeriod).toMatchObject({
+      startLocalDate: "2026-12-24",
+      endLocalTime: "01:00:00",
+    });
+  });
+  it("is null between periods", () => {
+    expect(at("2026-12-22", "15:00:00").currentPeriod).toBeNull();
+  });
+});

@@ -880,6 +880,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Tip amount": "小费金额",
   "To start a new order, scan the QR code at your table or at the counter.":
     "如要开始新订单，请扫描桌上或柜台的二维码。",
+  Tonight: "今晚",
   Today: "今天",
   "Today’s hours: ": "今日营业时间：",
   "Too many tries. Wait a few minutes before trying again, or ask staff for help.":

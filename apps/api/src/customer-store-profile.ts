@@ -62,6 +62,12 @@ export interface CustomerStoreHours {
   readonly ordersStopped: boolean;
   readonly nextOpening: StoreUpcomingHours["nextOpening"];
   readonly upcoming: StoreUpcomingHours["upcoming"];
+  /**
+   * M117: after midnight inside last night's overnight period, that period (it began on the
+   * previous local date), so the page says "open until 2:00 a.m." and tonight's hours, not the new
+   * date's weekday hours; null otherwise.
+   */
+  readonly tonight: { readonly startLocalTime: string; readonly endLocalTime: string } | null;
 }
 
 export interface CustomerStoreProfileView {
@@ -87,8 +93,8 @@ const seconds = (value: string): number => {
 
 /**
  * Today's open period and next opening from the published intervals and the Store's local time.
- * Only what the intervals state is returned: an overnight period carried over from yesterday, or
- * an opening on another day, is left out (null) rather than guessed.
+ * M117: an overnight period carried over from yesterday is the one the Store is in after midnight
+ * (from the upcoming hours, which read yesterday's published period); nothing is guessed.
  */
 export function describeCustomerStoreHours(input: {
   readonly state: "Open" | "Closed" | "TemporarilyClosed";
@@ -125,6 +131,17 @@ export function describeCustomerStoreHours(input: {
       ? seconds(input.localTime)
       : null;
   const ahead = input.upcoming ?? null;
+  // M117: last night's period, still running after midnight (it began on the previous date).
+  const period = ahead?.currentPeriod ?? null;
+  const carriedOver =
+    status === "Open" &&
+    period !== null &&
+    period.endsNextDay &&
+    input.localDate !== null &&
+    input.localDate !== undefined &&
+    period.startLocalDate < input.localDate
+      ? Object.freeze({ startLocalTime: period.startLocalTime, endLocalTime: period.endLocalTime })
+      : null;
   const known = {
     localDate: input.localDate ?? null,
     todayKind: ahead?.todayKind ?? null,
@@ -132,9 +149,16 @@ export function describeCustomerStoreHours(input: {
     ordersStopped: status === "Open" && ahead?.pastLastOrders === true,
     nextOpening: status === "Open" ? null : (ahead?.nextOpening ?? null),
     upcoming: ahead?.upcoming ?? Object.freeze([]),
+    tonight: carriedOver,
   };
   if (now === null)
-    return Object.freeze({ status, todayHours, closesAt: null, opensAt: null, ...known });
+    return Object.freeze({
+      status,
+      todayHours,
+      closesAt: carriedOver?.endLocalTime ?? null,
+      opensAt: null,
+      ...known,
+    });
   const current = todayHours.find(
     (interval) =>
       seconds(interval.startLocalTime) <= now &&
@@ -144,7 +168,10 @@ export function describeCustomerStoreHours(input: {
   return Object.freeze({
     status,
     todayHours,
-    closesAt: status === "Open" && current !== undefined ? current.endLocalTime : null,
+    closesAt:
+      status === "Open"
+        ? (current?.endLocalTime ?? carriedOver?.endLocalTime ?? null)
+        : null,
     opensAt: status === "Closed" && next !== undefined ? next.startLocalTime : null,
     ...known,
   });
@@ -273,6 +300,7 @@ export function customerStoreProfileJson(view: CustomerStoreProfileView) {
               lastOrdersAt: view.hours.lastOrdersAt,
               ordersStopped: view.hours.ordersStopped,
               nextOpening: view.hours.nextOpening,
+              tonight: view.hours.tonight,
               upcoming: view.hours.upcoming.map((day) => ({
                 localDate: day.localDate,
                 kind: day.kind,

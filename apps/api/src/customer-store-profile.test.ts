@@ -35,7 +35,40 @@ describe("WP-2423 today's hours for the store identity", () => {
       ordersStopped: false,
       nextOpening: null,
       upcoming: [],
+      tonight: null,
     });
+  });
+  it("M117: after midnight in last night's 11:00 a.m.–2:00 a.m. period, open until 2:00 a.m.", () => {
+    // The new date's own hours start at 11:00; at 00:14 the Store is still in last night's period.
+    const today = [{ startLocalTime: "11:00:00", endLocalTime: "02:00:00", endsNextDay: true }];
+    for (const localTime of ["00:00:14", "00:30:00"]) {
+      const hours = describeCustomerStoreHours({
+        state: "Open",
+        servesChannel: true,
+        localTime,
+        todayHours: today,
+        localDate: "2026-12-23",
+        upcoming: {
+          todayKind: null,
+          lastOrdersAt: null,
+          lastOrders: null,
+          pastLastOrders: false,
+          nextOpening: null,
+          upcoming: [],
+          currentPeriod: {
+            startLocalDate: "2026-12-22",
+            startLocalTime: "11:00:00",
+            endLocalTime: "02:00:00",
+            endsNextDay: true,
+          },
+        },
+      });
+      expect(hours).toMatchObject({
+        status: "Open",
+        closesAt: "02:00:00",
+        tonight: { startLocalTime: "11:00:00", endLocalTime: "02:00:00" },
+      });
+    }
   });
   it("WP-2423 item 8 ③ decision 16: last orders only while open, the next opening only while not", () => {
     const upcoming = {

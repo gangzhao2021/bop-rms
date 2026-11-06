@@ -6429,6 +6429,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Online (guest's phone)": "线上（客人手机）",
   "Today's summary · {date}": "今天的营业小结 · {date}",
   "Open · as of {time}": "营业中 · 截至 {time}",
+  "Closed · today's books still open (as of {time})": "已打烊 · 今天的账还没结（截至 {time}）",
   "Day closed": "营业日已结束",
   "Business day {startsAt} – {endsAt}": "营业日 {startsAt} – {endsAt}",
   Sales: "营业额",

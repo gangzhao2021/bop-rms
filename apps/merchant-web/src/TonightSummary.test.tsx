@@ -245,3 +245,26 @@ describe("WP-2423 item 8 ② tonight's closing summary", () => {
     expect(inClosingWindow(null, Date.now())).toBe(false);
   });
 });
+
+describe("M117: after the Store closes, before the business day ends", () => {
+  // Generated 2026-10-28 01:42 UTC (21:42 in Toronto).
+  const view = (closesAt: string | null) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <TonightSummaryView
+          summary={parseTonightSummary(tonightSummaryFixture())}
+          closesAt={closesAt}
+        />
+      </MemoryRouter>,
+    );
+  it("says closed with today's books still open once the closing time has passed", () => {
+    const after = view("2026-10-28T01:00:00.000Z");
+    expect(after).toContain("Closed · today&#x27;s books still open");
+    expect(after).not.toContain("Open · as of");
+    expect(after).toContain('data-open="false"');
+  });
+  it("still says open before the closing time, or when the closing time is unknown", () => {
+    for (const closesAt of ["2026-10-28T03:00:00.000Z", null])
+      expect(view(closesAt)).toContain("Open · as of");
+  });
+});

@@ -4,7 +4,7 @@ import { useBrowserOffline } from "./stale-read.js";
 import { countOf, t, saidTable } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { storeTime } from "./StoreTime.js";
-import { businessDateText } from "./StoreBusinessDay.js";
+import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import {
   StoreReportsClientError,
   type StoreReportChannel,
@@ -167,7 +167,17 @@ function Row({
  * payment method took with a card-machine batch check and the table cash this system recorded, the tables
  * still open, and tonight's refunds and cancellations (listed, not sales).
  */
-export function TonightSummaryView({ summary }: { readonly summary: TonightSummary }) {
+export function TonightSummaryView({
+  summary,
+  closesAt = null,
+}: {
+  readonly summary: TonightSummary;
+  /**
+   * M117: when the Store closed (or closes) this business day, from the Store's business day; the
+   * day stays "open" in the books until its boundary, which is not the Store being open.
+   */
+  readonly closesAt?: string | null;
+}) {
   const report = summary.report;
   const s = report.summary;
   const day = report.days[0];
@@ -183,15 +193,27 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
   const c = summary.cancelled;
   // Every payment taken is counted in sales and tax, and the money agrees with the settlement.
   const matches = report.reconciliation.matchesSettlement && s.unmatchedMinor === "0";
+  // M117: past the Store's closing time the business day is still open in the books only.
+  const closedForTheNight =
+    closesAt !== null && Date.parse(report.generatedAt) >= Date.parse(closesAt);
   return (
     <div className="tonight">
       <header className="tonight__head">
         <h2>{t("Today's summary · {date}", { date: businessDateText(report.from) })}</h2>
         <p>
-          <span className="tonight__status" data-open={day?.status === "Open"}>
-            {day?.status === "Open"
-              ? t("Open · as of {time}", { time: storeTime(report.generatedAt, report.timeZone) })
-              : t("Day closed")}
+          <span
+            className="tonight__status"
+            data-open={day?.status === "Open" && !closedForTheNight}
+          >
+            {day?.status !== "Open"
+              ? t("Day closed")
+              : closedForTheNight
+                ? t("Closed · today's books still open (as of {time})", {
+                    time: storeTime(report.generatedAt, report.timeZone),
+                  })
+                : t("Open · as of {time}", {
+                    time: storeTime(report.generatedAt, report.timeZone),
+                  })}
           </span>{" "}
           <span className="tonight__detail">
             {t("Business day from {startsAt}", {
@@ -496,6 +518,7 @@ export function TonightReport({
   readonly revision: number;
 }) {
   const [state, setState] = useState<TonightState>({ kind: "Loading" });
+  const businessDay = useStoreBusinessDay();
   useEffect(() => {
     const controller = new AbortController();
     client
@@ -545,7 +568,7 @@ export function TonightReport({
           timeZone={state.summary.report.timeZone}
         />
       ) : null}
-      <TonightSummaryView summary={state.summary} />
+      <TonightSummaryView summary={state.summary} closesAt={businessDay?.closesAt ?? null} />
     </>
   );
 }

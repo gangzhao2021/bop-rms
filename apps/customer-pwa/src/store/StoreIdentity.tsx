@@ -94,8 +94,13 @@ function StoreDetails({ profile }: { readonly profile: StoreProfile }) {
       {profile.hours === null ? null : (
         <>
           <p className="store-identity__hours">
-            <span>{t("Today")}</span>{" "}
-            {profile.hours.todayKind === null
+            {/* M117: after midnight the Store is still in last night's period: say tonight's. */}
+            <span>{profile.hours.tonight ? t("Tonight") : t("Today")}</span>{" "}
+            {profile.hours.tonight
+              ? `${formatStoreLocalTime(profile.hours.tonight.startLocalTime)}–${formatStoreLocalTime(
+                  profile.hours.tonight.endLocalTime,
+                )}${t(" (next day)")}`
+              : profile.hours.todayKind === null
               ? todayHoursText(profile.hours)
               : `${dayKindLabel(profile.hours.todayKind, profile.hours.todayHours)}${
                   profile.hours.todayHours.length === 0

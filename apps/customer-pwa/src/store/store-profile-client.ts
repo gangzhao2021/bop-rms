@@ -38,6 +38,8 @@ export interface StoreProfile {
     /** Open, but past last orders: guests can't send new orders now (staff still can). */
     readonly ordersStopped: boolean;
     readonly nextOpening: { readonly localDate: string; readonly startLocalTime: string } | null;
+    /** M117: after midnight inside last night's overnight period, that period. */
+    readonly tonight?: { readonly startLocalTime: string; readonly endLocalTime: string } | null;
     readonly upcoming: readonly {
       readonly localDate: string;
       readonly kind: StoreDayKind;
@@ -155,6 +157,9 @@ export function parseStoreProfile(value: unknown): StoreProfile {
       "ordersStopped",
       "nextOpening",
       "upcoming",
+      ...(raw !== null && typeof raw === "object" && Object.hasOwn(raw, "tonight")
+        ? ["tonight"]
+        : []),
     ]);
     if (
       (value.status !== "Open" && value.status !== "Closed" && value.status !== "Paused") ||
@@ -179,6 +184,16 @@ export function parseStoreProfile(value: unknown): StoreProfile {
           startLocalTime: time(entry.startLocalTime),
         });
       }),
+      tonight:
+        value.tonight === undefined
+          ? null
+          : nullable(value.tonight, (period) => {
+              const entry = record(period, ["startLocalTime", "endLocalTime"]);
+              return Object.freeze({
+                startLocalTime: time(entry.startLocalTime),
+                endLocalTime: time(entry.endLocalTime),
+              });
+            }),
       upcoming: Object.freeze(
         value.upcoming.map((day: unknown) => {
           const entry = record(day, ["localDate", "kind", "intervals"]);
