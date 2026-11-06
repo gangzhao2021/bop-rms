@@ -17,6 +17,9 @@ export function createLocalDiningAdmissionDemo() {
     csrfToken: "d".repeat(43),
   });
   let started = false;
+  // WP-2423 (same-table-ordering): a code join's first two answers can't be confirmed (the silent
+  // retry, then the guest's own); a one-tap QR join is confirmed by the silent retry.
+  let unconfirmedResumes = 0;
   const entryClient: CustomerEntryClient = Object.freeze({
     hasEntry: true,
     start: async () => ({ kind: "Established" as const, context }),
@@ -25,8 +28,10 @@ export function createLocalDiningAdmissionDemo() {
   const diningAdmission: DiningAdmissionUi = Object.freeze({
     generateOperationReference: () => operationReference,
     journey: Object.freeze({
-      async start() {
+      async start(value: unknown) {
         started = true;
+        unconfirmedResumes =
+          (value as { joinCredential?: unknown }).joinCredential === null ? 0 : 1;
         throw new Error("synthetic unknown admission");
       },
       async resume(value: unknown) {
@@ -35,6 +40,10 @@ export function createLocalDiningAdmissionDemo() {
           (value as { operationReference?: unknown }).operationReference !== operationReference
         )
           throw new Error("synthetic unavailable admission");
+        if (unconfirmedResumes > 0) {
+          unconfirmedResumes -= 1;
+          throw new Error("synthetic unknown admission");
+        }
         return Object.freeze({ status: "Bound" as const, operationReference });
       },
     }),

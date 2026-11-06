@@ -77,7 +77,7 @@ describe("contextual Dining admission screen", () => {
   it.each([
     ["Invalid", "Enter the six-digit code"],
     ["Joining", "Checking your table connection"],
-    ["Unknown", "Recover this attempt"],
+    ["Unknown", "We couldn’t add you to the table just now. Please try again."],
     ["Bound", "No order has been placed"],
     ["Unavailable", "Ask staff for help"],
   ] as const)("renders explicit %s state", (state, text) => {
@@ -106,8 +106,8 @@ describe("contextual Dining admission screen", () => {
     expect(html).toContain('aria-describedby="dining-admission-help dining-admission-error"');
     expect(html).toContain('role="alert"');
     // A refusal is final: no recovery of the refused attempt is offered.
-    expect(html).not.toContain("Recover this attempt");
-    expect(html).not.toContain("couldn’t confirm");
+    expect(html).not.toContain("Try again</button>");
+    expect(html).not.toContain("couldn’t add you to the table");
     expect(html).not.toMatch(/dining_join|customer\.dining|409|429/u);
   });
   it.each([

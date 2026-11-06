@@ -77,6 +77,11 @@ export interface CustomerDiningJoinCompositionOptions {
     >;
   };
   readonly now: () => unknown;
+  /**
+   * WP-2423 (same-table-ordering): the wait before a QR join tries again after losing a race, so
+   * phones in a second process converge. Default: a jittered 40-160 ms.
+   */
+  readonly retryPause?: () => Promise<void>;
 }
 export interface CustomerDiningJoinRequestContext {
   /** Trusted server port bound to this request's canonical abuse context; never taken from JSON. */
@@ -99,6 +104,10 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
     admission: { consume: async () => null },
     now,
   });
+  const retryPause =
+    options.retryPause ??
+    (() =>
+      new Promise<void>((resolve) => setTimeout(resolve, 40 + Math.floor(Math.random() * 121))));
   const turns = new Map<string, Promise<unknown>>();
   const inTurn = async <T>(key: string, work: () => Promise<T>): Promise<T> => {
     const mine = (turns.get(key) ?? Promise.resolve()).then(work, work);
@@ -229,7 +238,31 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
             requestedAt: now(),
           });
         let result: Awaited<ReturnType<typeof joinWith>> | null = null;
-        if (byQr && qr !== undefined) {
+        // WP-2423 (same-table-ordering): a QR join retried with the same operation after its answer
+        // was lost replays what was recorded (this guest's, by its intent), never a second join or
+        // a fresh code. Its admission is checked against the current table below as any other.
+        const replayed =
+          byQr && qr !== undefined
+            ? await options.dining.store.resolveJoinOperation(
+                parseDiningReference(String(operationReference)),
+              )
+            : null;
+        if (replayed !== null) {
+          const intent = options.dining.credentials.hashOperationIntent(
+            `Join:${initial.sessionReference}:${replayed.capability.capabilityReference}`,
+          );
+          if (
+            replayed.capability.status !== "Consumed" ||
+            !options.dining.credentials.equals(replayed.operationIntentHash, intent as never)
+          )
+            return unavailable();
+          result = Object.freeze({
+            status: "AlreadyApplied",
+            session: replayed.session,
+            participant: replayed.participant,
+            admission: replayed.admission,
+          }) as unknown as Awaited<ReturnType<typeof joinWith>>;
+        } else if (byQr && qr !== undefined) {
           const table = await freshly((instant) => current(initial.sessionReference, instant));
           // Phones of one party scan together, and each QR join replaces the code the last one was
           // issued: one at a time per table, so they don't spend each other's attempts or the
@@ -244,7 +277,10 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
             // with those people's Session still open at this table.
             let mustSeeFree = false;
             const attempts = 6;
+            let lost = false;
             for (let attempt = 0; attempt < attempts; attempt += 1) {
+              if (lost) await retryPause();
+              lost = false;
               // Fresh on every attempt: a start commits with its own instant under the table's
               // lock, and an earlier instant here could precede it.
               const at = now();
@@ -306,6 +342,7 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
                 result = await joinWith(String(issued.joinCredential));
               } catch (error) {
                 if (attempt === attempts - 1) throw error;
+                lost = true;
                 continue;
               }
               if (
@@ -313,6 +350,7 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
                 result.status !== "DiningJoinUnavailable"
               )
                 break;
+              lost = true;
             }
             return null;
           });

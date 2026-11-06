@@ -40,7 +40,14 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
   await expect(field).toBeFocused();
   await field.fill("123456");
   await field.press("Enter");
-  await expect(page.getByRole("button", { name: "Recover this attempt" })).toBeVisible();
+  // WP-2423 (same-table-ordering): an unconfirmed answer is first retried silently (same attempt);
+  // only when that can't be confirmed either is the guest asked, in plain words.
+  await expect(page.getByText("Checking your table connection…")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    "We couldn’t add you to the table just now. Please try again.",
+  );
+  await expect(page.getByRole("alert")).toContainText("ask staff for help");
   await expect(field).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Join this table", exact: true })).toBeFocused();
   expect(page.url()).not.toContain("123456");
@@ -50,7 +57,7 @@ test("@demo Dining admission supports keyboard validation and explicit recovery"
     fullPage: true,
   });
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Recover this attempt" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Try again", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/menu$/u);
   await expect(
@@ -81,10 +88,10 @@ test("@demo Dining admission pauses offline and never resumes on reconnect", asy
   await expect(
     page.getByRole("button", { name: "Join with this code", exact: true }),
   ).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Recover this attempt" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Try again", exact: true })).toHaveCount(0);
   await field.fill("123456");
   await page.getByRole("button", { name: "Join with this code", exact: true }).click();
-  const recover = page.getByRole("button", { name: "Recover this attempt" });
+  const recover = page.getByRole("button", { name: "Try again", exact: true });
   await expect(recover).toBeVisible();
   await context.setOffline(true);
   await expect(recover).toBeDisabled();
@@ -111,8 +118,8 @@ test("@demo Dining admission joins the scanned table with one tap", async ({ pag
     await page.screenshot({ path: info.outputPath(`dining-qr-join-${width}.png`), fullPage: true });
   }
   await page.getByRole("button", { name: "Join this table", exact: true }).click();
-  // The training store never confirms the first answer: the guest recovers it.
-  await page.getByRole("button", { name: "Recover this attempt" }).click();
+  // The training store never confirms the first answer; the silent retry of the same attempt
+  // does (WP-2423 same-table-ordering, sim M88), so the guest never has to press anything.
   // Owner 2026-11-03: joined, the menu opens.
   await expect(page).toHaveURL(/\/menu$/u);
 });

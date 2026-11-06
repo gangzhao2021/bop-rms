@@ -18,6 +18,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Add something from the menu to get started.": "先从菜单中加点东西吧。",
   "Add to cart": "加入购物车",
   "Add to your order": "加入订单",
+  "We couldn’t add you to the table just now. Please try again.":
+    "暂时没能加入这一桌，请再试一次。",
+  "If it still doesn’t work, ask staff for help.": "如果还是不行，请找店员帮忙。",
   "Added by a phone that has left this table. Anyone at the table can remove it.":
     "由已离开这桌的手机添加，同桌任何人都可以删除。",
   "Added by another guest. Only they can change this item.":
@@ -561,7 +564,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Reconnect to refresh.": "恢复网络后刷新。",
   "Reconnect to show your pickup code.": "恢复网络后显示取餐码。",
   Recorded: "已记录",
-  "Recover this attempt": "恢复这次尝试",
   "Refresh after reconnecting": "恢复网络后刷新",
   "Refresh before changing delivery instructions.": "修改配送说明前请先刷新。",
   "Refresh cart": "刷新购物车",
@@ -913,8 +915,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "We couldn’t add this right now. Please try again.": "暂时无法加入，请重试。",
   "We couldn’t confirm checkout. Retry to recover the same checkout.":
     "无法确认结账，请重试以恢复同一次结账。",
-  "We couldn’t confirm the result. Recover this attempt before starting another. If it still cannot be confirmed, ask staff for help.":
-    "无法确认结果。开始新的尝试前请先恢复这一次；如果仍无法确认，请向店员求助。",
   "We couldn’t confirm your details were saved. Retry saving before changing them.":
     "无法确认你的信息已保存，修改前请重新保存。",
   "We couldn’t confirm your prices. Retry to continue without creating a second order.":

@@ -228,6 +228,50 @@ describe("WP-2423 item 8 ⑤ QR join composition", () => {
     });
     expect(always).toHaveBeenCalledTimes(6);
   });
+  it("WP-2423 same-table-ordering: a QR join retried after its answer was lost replays it, never joins twice", async () => {
+    const f = fixture();
+    const issue = vi.fn(async () => ({
+      status: "Issued" as const,
+      diningSessionReference: id(70),
+      joinCredential: f.input.joinCredential as never,
+    }));
+    const composition = createCustomerDiningJoinComposition({ ...f.options, qr: { issue } });
+    const first = await composition.join(qrInput(f), f.request);
+    expect(first).toMatchObject({ status: "Joined" });
+    // The phone retries the same attempt (same operation): the recorded join, no new code.
+    expect(await composition.join(qrInput(f), f.request)).toEqual(first);
+    expect(issue).toHaveBeenCalledTimes(1);
+    expect(f.store.join).toHaveBeenCalledTimes(1);
+    // A record that isn't this guest's attempt is never handed back.
+    const recorded = f.history.get(f.input.operationReference);
+    if (recorded === undefined) throw new Error("synthetic join missing");
+    f.history.set(f.input.operationReference, {
+      ...recorded,
+      operationIntentHash: hash("Join:someone else") as never,
+    });
+    await expect(composition.join(qrInput(f), f.request)).rejects.toMatchObject({
+      code: "GUEST_SESSION_UNAVAILABLE",
+    });
+    expect(issue).toHaveBeenCalledTimes(1);
+  });
+  it("WP-2423 same-table-ordering: waits a moment before trying again after losing a race", async () => {
+    const g = fixture(1);
+    const always = vi.fn(async () => ({
+      status: "Issued" as const,
+      diningSessionReference: id(70),
+      joinCredential: "123456" as never,
+    }));
+    const retryPause = vi.fn(async () => undefined);
+    const stuck = createCustomerDiningJoinComposition({
+      ...g.options,
+      qr: { issue: always },
+      retryPause,
+    });
+    await stuck.join(qrInput(g), g.request);
+    expect(always).toHaveBeenCalledTimes(6);
+    // Between attempts only, never before the first.
+    expect(retryPause).toHaveBeenCalledTimes(5);
+  });
   it("passes a table refusal through without joining, and needs the QR port", async () => {
     const f = fixture();
     const issue = vi.fn(async () => ({ status: "Refused" as const, reason: "Paused" as const }));

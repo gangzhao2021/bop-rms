@@ -87,6 +87,8 @@ export function admissionStateForFailure(error: unknown): "Unknown" | DiningAdmi
 function refused(state: DiningAdmissionUiState): state is DiningAdmissionRefusedState {
   return Object.hasOwn(refusalText, state);
 }
+/** WP-2423 (same-table-ordering): the pause before the one silent retry of an unconfirmed join. */
+export const admissionAutoRetryMs = 600;
 const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const framing = /^(?:[0-9]{6}|[A-Za-z0-9_-]{21}[AQgw])$/u;
 
@@ -144,6 +146,24 @@ export function DiningAdmissionPanel({
   }, [state]);
   const [codeMode, setCodeMode] = useState(false);
   useEffect(() => setCodeMode(false), [service, contextEpoch]);
+  /**
+   * WP-2423 (same-table-ordering): an attempt whose answer can't be confirmed is retried once,
+   * silently, with the same operation (never recorded twice) before the guest is asked to.
+   */
+  const unknownAfter = (resume: boolean, current: number) => {
+    if (resume || generation.current !== current) {
+      setState("Unknown");
+      return;
+    }
+    setState("Joining");
+    setTimeout(() => {
+      if (generation.current !== current) return;
+      busy.current = false;
+      // Offline now: the guest retries once back online (the attempt is kept).
+      if (typeof navigator !== "undefined" && navigator.onLine === false) setState("Unknown");
+      else runCurrent.current(true);
+    }, admissionAutoRetryMs);
+  };
   /** `byQr`: join the scanned table with one tap (no code). */
   const run = (resume: boolean, byQr = false) => {
     if (busy.current || !online || !service || navigator.onLine === false) return;
@@ -197,9 +217,10 @@ export function DiningAdmissionPanel({
               Reflect.ownKeys(descriptors).length === 2 &&
               descriptors.status?.value === "Bound" &&
               descriptors.operationReference?.value === expected;
-            setState(valid && navigator.onLine ? "Bound" : "Unknown");
+            if (valid && navigator.onLine) setState("Bound");
+            else unknownAfter(resume, current);
           } catch {
-            setState("Unknown");
+            unknownAfter(resume, current);
           }
         },
         (error: unknown) => {
@@ -208,7 +229,8 @@ export function DiningAdmissionPanel({
           // A refused attempt is finished; the next submission is a new intent with a new code.
           if (next !== "Unknown") operation.current = null;
           if (next === "QrPaused") setCodeMode(true);
-          setState(next);
+          if (next === "Unknown") unknownAfter(resume, current);
+          else setState(next);
         },
       )
       .finally(() => {
@@ -364,14 +386,11 @@ export function DiningAdmissionView({
       )}
       {state === "Unknown" && (
         <div role="alert">
-          <p>
-            {t(
-              "We couldn’t confirm the result. Recover this attempt before starting another. If it still cannot be confirmed, ask staff for help.",
-            )}
-          </p>
+          <p>{t("We couldn’t add you to the table just now. Please try again.")}</p>
           <button className="entry-action" type="button" disabled={!online} onClick={onResume}>
-            {t("Recover this attempt")}
+            {t("Try again")}
           </button>
+          <p>{t("If it still doesn’t work, ask staff for help.")}</p>
         </div>
       )}
       {state === "Bound" && (
