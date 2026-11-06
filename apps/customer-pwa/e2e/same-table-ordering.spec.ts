@@ -362,7 +362,7 @@ for (const screen of [
       await expect(page.getByRole("link", { name: "See your table" })).toBeVisible();
     });
 
-    test("nothing is read while offline, and the cart keeps up again once refreshed", async ({
+    test("nothing is read while offline, and the cart keeps up again by itself once back online", async ({
       page,
       context,
     }) => {
@@ -376,11 +376,13 @@ for (const screen of [
       await page.waitForTimeout(9_000);
       expect(seen.cartReads).toBe(before);
       await context.setOffline(false);
-      // Back online the guest refreshes (as before); from then on it keeps up by itself again.
-      await page.getByRole("button", { name: "Refresh after reconnecting" }).click();
-      const refreshed = seen.cartReads;
-      expect(refreshed).toBeGreaterThan(before);
-      await expect.poll(() => seen.cartReads, { timeout: 6_000 }).toBeGreaterThan(refreshed);
+      // Back online the cart reads at once by itself (93446b02: no refresh to tap), shows the
+      // dishes again with no reconnect notice left, and from then on keeps up by itself.
+      await expect.poll(() => seen.cartReads, { timeout: 3_000 }).toBeGreaterThan(before);
+      const reconnected = seen.cartReads;
+      await expect(page.getByRole("heading", { name: "Synthetic noodles" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Refresh after reconnecting" })).toHaveCount(0);
+      await expect.poll(() => seen.cartReads, { timeout: 6_000 }).toBeGreaterThan(reconnected);
     });
   });
 }
