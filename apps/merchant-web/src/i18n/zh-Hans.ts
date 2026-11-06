@@ -6732,10 +6732,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Last changed": "上次修改",
   "Counter ordering is turned off for this store, so nothing was sent or charged. The owner can turn it back on in Store features.":
     "本店已关闭柜台点单，没有发送也没有扣款。店主可以在“门店功能”里重新打开。",
-  "Already ordered as order {number}. Nothing was charged again. Open it in Orders.":
-    "已下单，订单 {number}。没有再次扣款。请在“订单”中查看。",
-  "These items are already in an order. Nothing was charged again. Open it in Orders.":
-    "这些菜已经在一笔订单里。没有再次扣款。请在“订单”中查看。",
+  "Already ordered as order {number}. Nothing new was charged. Open it in Orders.":
+    "已下单，订单 {number}。这次没有新的扣款。请在“订单”中查看。",
+  "These items are already in an order. Nothing new was charged. Open it in Orders.":
+    "这些菜已经在一笔订单里。这次没有新的扣款。请在“订单”中查看。",
   "Pickup orders from guests": "客人自取下单",
   "Guests order ahead from the pickup QR code and collect at the counter. Turned off, a guest who scans it is told the store takes dine-in orders only.":
     "客人扫自取二维码提前下单，到柜台取餐。关掉后，扫码的客人会看到本店只做堂食。",

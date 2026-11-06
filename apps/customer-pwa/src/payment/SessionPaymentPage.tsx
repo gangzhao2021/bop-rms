@@ -453,13 +453,10 @@ function PreparedSessionPaymentPage({
           <h2>{t("Already ordered")}</h2>
           <p>
             {placedOrder !== null
-              ? t(
-                  "These dishes were already ordered (order {number}). You won’t be charged again.",
-                  {
-                    number: placedOrder.orderNumber,
-                  },
-                )
-              : t("These dishes were already ordered. You won’t be charged again.")}
+              ? t("These dishes were already ordered (order {number}). Nothing new was charged.", {
+                  number: placedOrder.orderNumber,
+                })
+              : t("These dishes were already ordered. Nothing new was charged.")}
           </p>
           {placedOrder !== null ? (
             <Link className="cart-primary-link" to={"/orders/" + placedOrder.orderReference}>

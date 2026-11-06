@@ -1554,8 +1554,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "菜没能放回。请检查网络后再试。",
   "Putting dishes back…": "正在放回…",
   "Put these dishes back in my cart": "把这些菜放回购物车",
-  "These dishes were already ordered (order {number}). You won’t be charged again.":
-    "这些菜已经下过单（订单 {number}），不会再次扣款。",
-  "These dishes were already ordered. You won’t be charged again.":
-    "这些菜已经下过单，不会再次扣款。",
+  "These dishes were already ordered (order {number}). Nothing new was charged.":
+    "这些菜已经下过单（订单 {number}），这次没有新的扣款。",
+  "These dishes were already ordered. Nothing new was charged.":
+    "这些菜已经下过单，这次没有新的扣款。",
 });

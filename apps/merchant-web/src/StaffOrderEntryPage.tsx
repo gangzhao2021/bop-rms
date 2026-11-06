@@ -298,10 +298,10 @@ export function placeErrorText(
     // WP-2423 M03: these dishes went into an order already; never charge them a second time.
     case "AlreadyOrdered":
       return error.placedOrderNumber !== null
-        ? t("Already ordered as order {number}. Nothing was charged again. Open it in Orders.", {
+        ? t("Already ordered as order {number}. Nothing new was charged. Open it in Orders.", {
             number: error.placedOrderNumber,
           })
-        : t("These items are already in an order. Nothing was charged again. Open it in Orders.");
+        : t("These items are already in an order. Nothing new was charged. Open it in Orders.");
     case "SystemProblem":
       return table !== null
         ? t(

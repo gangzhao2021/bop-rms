@@ -356,10 +356,10 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     const already = await client.placeOrder(command).catch((error: unknown) => error);
     expect(already).toMatchObject({ code: "AlreadyOrdered", placedOrderNumber: "13" });
     expect(placeErrorText(already as CounterOrderClientError, [])).toBe(
-      "Already ordered as order 13. Nothing was charged again. Open it in Orders.",
+      "Already ordered as order 13. Nothing new was charged. Open it in Orders.",
     );
     expect(placeErrorText(new CounterOrderClientError("AlreadyOrdered"), [])).toBe(
-      "These items are already in an order. Nothing was charged again. Open it in Orders.",
+      "These items are already in an order. Nothing new was charged. Open it in Orders.",
     );
     await expect(client.placeOrder(command)).rejects.toMatchObject({ code: "OutcomeUnknown" });
     expect(placeErrorText(new CounterOrderClientError("SystemProblem"), [])).toBe(
