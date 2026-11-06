@@ -412,6 +412,8 @@ export interface CounterOrderLine {
   readonly sellableReference: string;
   readonly quantity: number;
   readonly optionSelections: readonly { optionReference: string; quantity: number }[];
+  /** WP-2423 M53: the guest's note for the kitchen on a counter line; absent when none. */
+  readonly customerNote?: string;
 }
 /** WP-2423 Q7 slice 2: a table round's line may carry the guest's note for the kitchen. */
 export interface TableRoundLine extends CounterOrderLine {

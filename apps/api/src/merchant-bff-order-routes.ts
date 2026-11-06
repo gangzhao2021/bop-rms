@@ -1,5 +1,6 @@
 /** Merchant BFF routes: order queue, counter orders, card machine, cancellation, acceptance and close. Registered by createMerchantBffRouter (merchant-bff.ts). */
 import type { MerchantBffRouterOptions } from "./merchant-bff-contract.js";
+import { CounterCancellationError } from "./merchant-counter-order-cancellation.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import {
   cookie,
@@ -341,6 +342,42 @@ export function installMerchantOrderRoutes(
   };
   // WP-2423 Q7: staff take a pickup order at the counter (or a paper order after an outage); the
   // reply is the amount to charge on the Store's card machine.
+  // WP-2423 M127: a manager cancels a counter order nobody paid for (recorded with who and why).
+  router.post("/counter/orders/cancel-unpaid", sameOriginMutation(options), (request, response) => {
+    const auth = mutation(request, response);
+    if (auth === null) return;
+    if (!options.counterOrderCancellation) {
+      response.status(503).json({ error: "counter_cancellation_unavailable" });
+      return;
+    }
+    void options
+      .counterOrderCancellation({ ...auth, command: request.body })
+      .then((result) => {
+        response.set("Cache-Control", NO_STORE);
+        response.json({ status: result.status, cancelledAt: result.cancelledAt });
+      })
+      .catch((error: unknown) => {
+        noteFailure(response, error);
+        if (!(error instanceof CounterCancellationError)) {
+          failed(response, error);
+          return;
+        }
+        const [status, code] = (
+          {
+            COUNTER_CANCEL_INPUT_INVALID: [400, "counter_cancel_input_invalid"],
+            COUNTER_CANCEL_PERMISSION_DENIED: [403, "order_cancellation_permission_denied"],
+            COUNTER_CANCEL_NOT_FOUND: [404, "counter_cancel_not_found"],
+            COUNTER_CANCEL_ALREADY_PAID: [409, "counter_cancel_already_paid"],
+            COUNTER_CANCEL_PAPER_ORDER: [409, "counter_cancel_paper_order"],
+            COUNTER_CANCEL_NOT_CANCELLABLE: [409, "counter_cancel_not_cancellable"],
+            COUNTER_CANCEL_VERSION_CONFLICT: [409, "order_version_conflict"],
+            COUNTER_CANCEL_STOCK_NOT_RELEASABLE: [409, "counter_cancel_stock_not_releasable"],
+            COUNTER_CANCEL_UNAVAILABLE: [503, "counter_cancellation_unavailable"],
+          } as const
+        )[error.code];
+        response.status(status).set("Cache-Control", NO_STORE).json({ error: code });
+      });
+  });
   router.post("/counter/orders", sameOriginMutation(options), (request, response) => {
     const auth = mutation(request, response);
     if (auth === null) return;

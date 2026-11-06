@@ -168,6 +168,25 @@ export function createPostgresCardMachinePaymentStore(options: {
       ]),
     loadByIntent: (tx: AuditTransaction, paymentIntentReference: string) =>
       one(tx, "p.payment_intent_id=$3", [String(parsePaymentReference(paymentIntentReference))]),
+    /**
+     * WP-2423 M127: the batch's payment as recording it would see it, with the same batch lock
+     * recording takes, held to the end of the caller's transaction. A cancellation of the unpaid
+     * order reads this before it commits, so a payment and the cancellation never both succeed.
+     */
+    async lockAndLoadByBatch(
+      tx: AuditTransaction,
+      orderReference: string,
+      orderBatchReference: string,
+    ): Promise<CardMachinePaymentRecord | null> {
+      const order = String(parsePaymentReference(orderReference));
+      const batch = String(parsePaymentReference(orderBatchReference));
+      await allowed(tx, order);
+      await context(tx);
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "CardMachineBatch:" + brand + ":" + store + ":" + batch,
+      ]);
+      return one(tx, "p.order_id=$3 AND p.order_batch_id=$4", [order, batch]);
+    },
     loadByBatch: (tx: AuditTransaction, orderReference: string, orderBatchReference: string) =>
       one(tx, "p.order_id=$3 AND p.order_batch_id=$4", [
         String(parsePaymentReference(orderReference)),

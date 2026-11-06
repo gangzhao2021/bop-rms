@@ -1,6 +1,7 @@
 /** Merchant BFF public contract: the workspace snapshot, navigation, Session service and router options. */
 import type { createMerchantGuestTableStartOff } from "./merchant-dining-guest-table-start.js";
 import type { createMerchantStoreOpening } from "./merchant-store-opening.js";
+import type { createMerchantCounterOrderCancellation } from "./merchant-counter-order-cancellation.js";
 import type {
   createMerchantDiningStaffCallAnswer,
   createMerchantDiningStaffCallCount,
@@ -526,6 +527,8 @@ export interface MerchantBffRouterOptions {
   readonly counterMenu?: ReturnType<typeof createMerchantCounterMenu>;
   /** WP-2423 Q7: staff take a pickup order at the counter or enter a paper order afterwards. */
   readonly counterOrder?: ReturnType<typeof createMerchantCounterOrder>;
+  /** WP-2423 M127: a manager cancels a counter order nobody paid for; its stock goes back. */
+  readonly counterOrderCancellation?: ReturnType<typeof createMerchantCounterOrderCancellation>;
   /** WP-2423 Q7 slice 2: staff enter a dine-in round for a table (or a paper round afterwards). */
   readonly staffDiningRound?: ReturnType<typeof createMerchantStaffDiningRound>;
   /** WP-2423 Q7: staff record a payment the Store's card machine approved (and, D1, the server

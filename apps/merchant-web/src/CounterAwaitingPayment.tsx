@@ -12,6 +12,7 @@ import {
   type CurrentOrderQueue,
 } from "./current-order-queue-client.js";
 import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
+import { CounterCancelAction } from "./CounterCancelAction.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { storeTime } from "./StoreTime.js";
 import { orderMoney } from "./order-money.js";
@@ -36,7 +37,13 @@ export function CounterAwaitingPayment({
   fetcher,
   refreshKey,
   excludeOrderReference,
+  onExcludedCancellable,
 }: {
+  /**
+   * WP-2423 M127: whether the order this page is charging may be cancelled by this staff member
+   * (it is unpaid and they may cancel orders), from the same read.
+   */
+  readonly onExcludedCancellable?: ((cancellable: boolean) => void) | undefined;
   readonly csrf: string;
   readonly timeZone?: string | undefined;
   readonly fetcher?: typeof fetch | undefined;
@@ -102,6 +109,10 @@ export function CounterAwaitingPayment({
       </section>
     );
   const pending = useRef<AbortController | null>(null);
+  const excluded = useRef(excludeOrderReference);
+  excluded.current = excludeOrderReference;
+  const onExcluded = useRef(onExcludedCancellable);
+  onExcluded.current = onExcludedCancellable;
   const live = useStaffSessionLive();
   const read = useCallback(() => {
     pending.current?.abort();
@@ -113,6 +124,12 @@ export function CounterAwaitingPayment({
         if (controller.signal.aborted) return;
         setNow(Date.now());
         setOrders(view.items.filter((order) => counterAwaitingCardMachine(order)));
+        onExcluded.current?.(
+          view.items.some(
+            (order) =>
+              order.orderReference === excluded.current && order.counter?.canCancelUnpaid === true,
+          ),
+        );
         setFailed(false);
       })
       .catch((error: unknown) => {
@@ -162,7 +179,7 @@ export function CounterAwaitingPayment({
         ) : (
           <p className="bop-muted">
             {t(
-              "Charge each on the card machine and record it here before its time ends, or it is released and its items go back to stock.",
+              "Charge each on the card machine and record it here before its time ends. A guest who isn't paying: cancel the order so its items go back to stock.",
             )}
           </p>
         )}
@@ -215,6 +232,20 @@ export function CounterAwaitingPayment({
                     }}
                   />
                 )}
+                {/* WP-2423 M127: a guest who isn't paying: cancel it, so its items go back. */}
+                {batch !== undefined &&
+                order.counter?.canCancelUnpaid === true &&
+                order.currentVersion !== null ? (
+                  <CounterCancelAction
+                    orderReference={order.orderReference}
+                    orderBatchReference={batch.orderBatchReference}
+                    orderNumber={order.orderNumber}
+                    expectedOrderVersion={order.currentVersion}
+                    csrf={csrf}
+                    {...(fetcher === undefined ? {} : { fetcher })}
+                    onCancelled={() => setReads((value) => value + 1)}
+                  />
+                ) : null}
               </li>
             );
           })}

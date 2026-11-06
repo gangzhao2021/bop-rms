@@ -12,6 +12,7 @@ import { serviceOperationReference } from "./service-control-client.js";
 import { storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
+import { CounterCancelAction } from "./CounterCancelAction.js";
 import { loadOftenOrdered, recordOrdered } from "./counter-often-ordered.js";
 import {
   paidAtDayNote,
@@ -587,6 +588,8 @@ export function StaffOrderEntryPage({
   const [paidNote, setPaidNote] = useState<string | null>(null);
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
+  // WP-2423 M127: the order being charged may be cancelled by this staff member (from Orders' read).
+  const [placedCancellable, setPlacedCancellable] = useState(false);
   const placeOperation = useRef<string | null>(null);
   // One operation per payment as staff entered it (as at table checkout): a retry after no answer
   // with the same details is the same command (never counted twice); a corrected paid-at or slip is
@@ -755,8 +758,8 @@ export function StaffOrderEntryPage({
       : t("Sold out");
   const canAdd = (item: CounterMenuItem) => item.available && ordering && item.priceMinor !== null;
   // An item with nothing to choose goes straight onto the order (one more of the same line); one
-  // with options opens its choices first, the usual ones already picked. For a table, a kitchen
-  // note is added with Change on the order line.
+  // with options opens its choices first, the usual ones already picked. A kitchen note is added
+  // with Change on the order line (WP-2423 M53: at the counter too).
   const add = (item: CounterMenuItem) => {
     if (item.rules.length > 0) {
       setChoosing({
@@ -868,7 +871,11 @@ export function StaffOrderEntryPage({
             })
           : await client.placeOrder({
               operationReference: placeOperation.current,
-              lines: chosen,
+              // WP-2423 M53: a line's note goes to the kitchen; a line without one sends none.
+              lines: chosen.map((line, index) => {
+                const note = lines[index]?.note ?? null;
+                return note === null ? line : { ...line, customerNote: note };
+              }),
               tip: chosenTip,
               recordedAfterOutage: paper,
             });
@@ -979,6 +986,22 @@ export function StaffOrderEntryPage({
     );
   };
 
+  // WP-2423 M127: "Back to edit": the unpaid order was cancelled (entered by mistake); the same
+  // lines, notes and tip stay here to change and send again as a new order.
+  const backToEdit = () => {
+    setPlaced(null);
+    setPaidAt("");
+    setSlip("");
+    setProblem(null);
+    setPaidNote(null);
+    setRemovedNote(null);
+    setPaidAtRefused(false);
+    placeOperation.current = null;
+    payOperation.current = null;
+    setPlacedCancellable(false);
+    setAwaitingKey((value) => value + 1);
+    setPhase("Building");
+  };
   const startOver = () => {
     setLines([]);
     setPlaced(null);
@@ -1094,7 +1117,8 @@ export function StaffOrderEntryPage({
               };
             }),
           ),
-          note: tableMode && choosing.note.trim() !== "" ? choosing.note.trim() : null,
+          // WP-2423 M53: a counter line takes the guest's kitchen note too, as a table round does.
+          note: choosing.note.trim() !== "" ? choosing.note.trim() : null,
         };
   const choosingMinor = choosingLine === null ? null : estimatedLineMinor(choosingLine);
   return (
@@ -1128,6 +1152,7 @@ export function StaffOrderEntryPage({
               ? placed.orderReference
               : null
           }
+          onExcludedCancellable={setPlacedCancellable}
         />
       )}
       <div className="counter-order__layout">
@@ -1335,47 +1360,45 @@ export function StaffOrderEntryPage({
                         >
                           +
                         </button>
-                        {line.item.rules.length > 0 ||
-                        tableMode ||
-                        withdrawnOptions(line).length > 0 ? (
-                          <button
-                            type="button"
-                            className="counter-order__change"
-                            disabled={phase !== "Building"}
-                            aria-label={t("Change {name}", { name: line.item.name })}
-                            onClick={() =>
-                              setChoosing({
-                                item: line.item,
-                                choices: Object.fromEntries(
-                                  line.item.rules.map((rule) => [
-                                    rule.bindingReference,
-                                    line.options
-                                      .map((option) => option.optionReference)
-                                      .filter((reference) =>
-                                        rule.options.some(
-                                          (option) => option.optionReference === reference,
-                                        ),
+                        {/* WP-2423 M53: Change also adds a note for the kitchen, at the counter too; it
+                            also re-chooses a withdrawn choice. */}
+                        <button
+                          type="button"
+                          className="counter-order__change"
+                          disabled={phase !== "Building"}
+                          aria-label={t("Change {name}", { name: line.item.name })}
+                          onClick={() =>
+                            setChoosing({
+                              item: line.item,
+                              choices: Object.fromEntries(
+                                line.item.rules.map((rule) => [
+                                  rule.bindingReference,
+                                  line.options
+                                    .map((option) => option.optionReference)
+                                    .filter((reference) =>
+                                      rule.options.some(
+                                        (option) => option.optionReference === reference,
                                       ),
+                                    ),
+                                ]),
+                              ),
+                              counts: {
+                                ...defaultCounts(line.item),
+                                ...Object.fromEntries(
+                                  line.options.map((option) => [
+                                    option.optionReference,
+                                    option.quantity,
                                   ]),
                                 ),
-                                counts: {
-                                  ...defaultCounts(line.item),
-                                  ...Object.fromEntries(
-                                    line.options.map((option) => [
-                                      option.optionReference,
-                                      option.quantity,
-                                    ]),
-                                  ),
-                                },
-                                quantity: line.quantity,
-                                note: line.note ?? "",
-                                editing: line.key,
-                              })
-                            }
-                          >
-                            {t("Change")}
-                          </button>
-                        ) : null}
+                              },
+                              quantity: line.quantity,
+                              note: line.note ?? "",
+                              editing: line.key,
+                            })
+                          }
+                        >
+                          {t("Change")}
+                        </button>
                         <button
                           type="button"
                           className="counter-order__remove"
@@ -1817,11 +1840,39 @@ export function StaffOrderEntryPage({
                         "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.",
                         { payBy: storeTime(placed.payBy ?? "", timeZone) },
                       )
-                    : t(
-                        "Card declined? Try another card. Not paying? Leave it: the order is released at {payBy}.",
-                        { payBy: storeTime(placed.payBy ?? "", timeZone) },
-                      )}
+                    : placedCancellable
+                      ? t(
+                          "Card declined? Try another card. Guest not paying? Cancel the order so its items go back to stock.",
+                        )
+                      : t(
+                          "Card declined? Try another card. Guest not paying? Ask a manager to cancel it; otherwise it is released at {payBy}.",
+                          { payBy: storeTime(placed.payBy ?? "", timeZone) },
+                        )}
                 </p>
+                {!tableMode && placedCancellable && !placed.recordedAfterOutage ? (
+                  <div className="card-actions">
+                    <CounterCancelAction
+                      orderReference={placed.orderReference}
+                      orderBatchReference={placed.orderBatchReference}
+                      orderNumber={placed.orderNumber}
+                      expectedOrderVersion={placed.orderVersion}
+                      csrf={csrf}
+                      {...(fetcher === undefined ? {} : { fetcher })}
+                      onCancelled={startOver}
+                    />
+                    <CounterCancelAction
+                      label={t("Back to edit")}
+                      defaultReason="COUNTER_ENTERED_WRONG"
+                      orderReference={placed.orderReference}
+                      orderBatchReference={placed.orderBatchReference}
+                      orderNumber={placed.orderNumber}
+                      expectedOrderVersion={placed.orderVersion}
+                      csrf={csrf}
+                      {...(fetcher === undefined ? {} : { fetcher })}
+                      onCancelled={backToEdit}
+                    />
+                  </div>
+                ) : null}
               </>
             ) : (
               <>
@@ -1975,19 +2026,16 @@ export function StaffOrderEntryPage({
                 }
               />
             </label>
-            {tableMode ? (
-              <label className="counter-order__note">
-                {t("Note for the kitchen (optional)")}
-                <input
-                  value={choosing.note}
-                  maxLength={140}
-                  autoComplete="off"
-                  onChange={(event) =>
-                    setChoosing({ ...choosing, note: event.currentTarget.value })
-                  }
-                />
-              </label>
-            ) : null}
+            {/* WP-2423 M53: the counter takes the guest's note for the kitchen too. */}
+            <label className="counter-order__note">
+              {t("Note for the kitchen (optional)")}
+              <input
+                value={choosing.note}
+                maxLength={140}
+                autoComplete="off"
+                onChange={(event) => setChoosing({ ...choosing, note: event.currentTarget.value })}
+              />
+            </label>
             <div className="counter-order__choose-actions">
               <button
                 type="submit"

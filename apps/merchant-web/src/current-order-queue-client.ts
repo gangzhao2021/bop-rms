@@ -265,6 +265,19 @@ function parseStaffRound(value: unknown, orderType: unknown) {
     amountDueMinor: due as string | null,
   });
 }
+const counterCancelReasons = [
+  "COUNTER_GUEST_CHANGED_MIND",
+  "COUNTER_ENTERED_WRONG",
+  "COUNTER_GUEST_LEFT_UNPAID",
+] as const;
+export type CounterCancelReason = (typeof counterCancelReasons)[number];
+function counterCancelled(value: unknown) {
+  if (value === null) return null;
+  const raw = exact(value, ["reasonCode", "cancelledAt"]);
+  const reasonCode = counterCancelReasons.find((code) => code === raw.reasonCode);
+  if (reasonCode === undefined) return fail();
+  return Object.freeze({ reasonCode, cancelledAt: instant(raw.cancelledAt) });
+}
 /** WP-2423 Q7: a pickup order staff took at the counter, and its card-machine payment. */
 function parseCounter(value: unknown, sourceChannel: unknown) {
   if (value === null || value === undefined) return null;
@@ -272,12 +285,16 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
   // (older servers send neither, or only the amount).
   const withPayBy = typeof value === "object" && Object.hasOwn(value, "payBy");
   const withDue = typeof value === "object" && Object.hasOwn(value, "amountDueMinor");
+  // WP-2423 M127: absent from an older server (no cancel action then).
+  const withCancel = typeof value === "object" && Object.hasOwn(value, "canCancelUnpaid");
   const raw = exact(value, [
     "recordedAfterOutage",
     "paidOnCardMachine",
     ...(withPayBy ? ["payBy"] : []),
     ...(withDue ? ["amountDueMinor"] : []),
+    ...(withCancel ? ["canCancelUnpaid", "cancelledBeforePayment"] : []),
   ]);
+  if (withCancel && typeof raw.canCancelUnpaid !== "boolean") return fail();
   if (typeof raw.recordedAfterOutage !== "boolean" || sourceChannel !== "Pos") return fail();
   let paid = null;
   if (raw.paidOnCardMachine !== null) {
@@ -323,6 +340,10 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
     payBy,
     /** While unpaid, on the one-order read: what to charge on the card machine (else null). */
     amountDueMinor: due as string | null,
+    /** WP-2423 M127: the caller may cancel this unpaid counter order now. */
+    canCancelUnpaid: withCancel ? raw.canCancelUnpaid === true && payBy !== null : false,
+    /** WP-2423 M127: staff cancelled it before payment: why and when (else null). */
+    cancelledBeforePayment: withCancel ? counterCancelled(raw.cancelledBeforePayment) : null,
   });
 }
 /** WP-2423: the sum of an Order's succeeded online payments, from Payment. */

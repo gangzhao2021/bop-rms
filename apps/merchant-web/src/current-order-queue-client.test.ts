@@ -1066,7 +1066,42 @@ it("v15 751dd768 ①: reads what an unsent counter order still has to be charged
     amountDueMinor: "1130",
     // v15 751dd768: an older server sends no release time.
     payBy: null,
+    canCancelUnpaid: false,
+    cancelledBeforePayment: null,
   });
+  // WP-2423 M127: who may cancel it unpaid, and a cancellation staff made before payment.
+  const payBy = "2099-01-01T00:30:00.000Z";
+  expect(
+    read({
+      recordedAfterOutage: false,
+      paidOnCardMachine: null,
+      payBy,
+      canCancelUnpaid: true,
+      cancelledBeforePayment: null,
+    })?.canCancelUnpaid,
+  ).toBe(true);
+  expect(
+    read({
+      recordedAfterOutage: false,
+      paidOnCardMachine: null,
+      payBy: null,
+      canCancelUnpaid: false,
+      cancelledBeforePayment: {
+        reasonCode: "COUNTER_GUEST_LEFT_UNPAID",
+        cancelledAt: "2026-09-14T00:00:10.000Z",
+      },
+    })?.cancelledBeforePayment,
+  ).toEqual({ reasonCode: "COUNTER_GUEST_LEFT_UNPAID", cancelledAt: "2026-09-14T00:00:10.000Z" });
+  for (const bad of [
+    { canCancelUnpaid: "yes", cancelledBeforePayment: null },
+    {
+      canCancelUnpaid: false,
+      cancelledBeforePayment: { reasonCode: "HID_IT", cancelledAt: payBy },
+    },
+  ])
+    expect(() =>
+      read({ recordedAfterOutage: false, paidOnCardMachine: null, payBy, ...bad }),
+    ).toThrow(CurrentOrderQueueError);
   // An older server, and the list polled by every tablet, leave the amount out.
   expect(read({ recordedAfterOutage: false, paidOnCardMachine: null })?.amountDueMinor).toBeNull();
   const paid = {

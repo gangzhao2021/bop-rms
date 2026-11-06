@@ -12,6 +12,7 @@ import {
   CounterOrderEntryError,
   parseOrderingHash,
   parseOrderingInstant,
+  parseCustomerNote,
   parseOrderingReference,
   type CounterOrderEntryRecord,
   type OrderPaymentPreparationEvidence,
@@ -234,7 +235,7 @@ export interface CounterGuestPipeline {
       readonly sellableReference: string;
       readonly quantity: number;
       readonly optionSelections: readonly { optionReference: string; quantity: number }[];
-      /** The guest's note for the kitchen (dine-in staff rounds); none at the counter. */
+      /** The guest's note for the kitchen (dine-in staff rounds and, WP-2423 M53, the counter). */
       readonly customerNote?: string | null;
       readonly requestedAt: string;
     },
@@ -347,6 +348,8 @@ export interface CounterOrderLine {
   readonly sellableReference: string;
   readonly quantity: number;
   readonly optionSelections: readonly { optionReference: string; quantity: number }[];
+  /** WP-2423 M53: the guest's note for the kitchen on this line; absent when none. */
+  readonly customerNote?: string;
 }
 
 /** The same item with the same options: stock is checked for their combined quantity. */
@@ -388,7 +391,16 @@ function parseLines(value: unknown): readonly CounterOrderLine[] {
     return fail("COUNTER_ORDER_INPUT_INVALID");
   return Object.freeze(
     value.map((item) => {
-      const line = readClosedRecord(item, ["sellableReference", "quantity", "optionSelections"]);
+      // WP-2423 M53: a line may carry the guest's note for the kitchen, as a table round does.
+      const withNote =
+        item !== null && typeof item === "object" && Object.hasOwn(item, "customerNote");
+      const line = readClosedRecord(item, [
+        "sellableReference",
+        "quantity",
+        "optionSelections",
+        ...(withNote ? ["customerNote"] : []),
+      ]);
+      const customerNote = withNote ? parseCustomerNote(line.customerNote) : null;
       if (
         typeof line.sellableReference !== "string" ||
         !uuidV7.test(line.sellableReference) ||
@@ -420,6 +432,8 @@ function parseLines(value: unknown): readonly CounterOrderLine[] {
         sellableReference: line.sellableReference,
         quantity: line.quantity as number,
         optionSelections: Object.freeze(options),
+        // Only a line with a note carries it, so an order without notes keeps its intent.
+        ...(customerNote === null ? {} : { customerNote }),
       });
     }),
   );
@@ -738,6 +752,7 @@ export function createMerchantCounterOrder(options: {
           sellableReference: line.sellableReference,
           quantity: line.quantity,
           optionSelections: line.optionSelections,
+          customerNote: line.customerNote ?? null,
           requestedAt: now(),
         });
         if (added.status !== "Applied") return await notSellable(index);

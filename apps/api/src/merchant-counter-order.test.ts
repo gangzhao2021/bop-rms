@@ -202,6 +202,33 @@ describe("counter order command — WP-2423 Q7", () => {
     ).toMatchObject({ status: "Placed" });
   });
 
+  it("WP-2423 M53: a counter line carries the guest's note for the kitchen; a bad note places nothing", async () => {
+    const { pipeline, send } = setup();
+    expect(
+      await send({
+        lines: [
+          {
+            sellableReference: id(2),
+            quantity: 1,
+            optionSelections: [],
+            customerNote: "  No green onion  ",
+          },
+          { sellableReference: id(3), quantity: 1, optionSelections: [] },
+        ],
+      }),
+    ).toMatchObject({ status: "Placed" });
+    const added = vi.mocked(pipeline.addItem).mock.calls.map((call) => call[1].customerNote);
+    expect(added).toEqual(["No green onion", null]);
+    for (const customerNote of ["", "x".repeat(501), "bell\u0007", 7])
+      await expect(
+        send({
+          operationReference: id(34),
+          lines: [{ sellableReference: id(2), quantity: 1, optionSelections: [], customerNote }],
+        }),
+      ).rejects.toMatchObject({ code: "COUNTER_ORDER_INPUT_INVALID" });
+    expect(pipeline.open).toHaveBeenCalledTimes(1);
+  });
+
   it("WP-2423 item 8 ⑦: takes no new order while counter ordering is turned off; a retry still returns its order", async () => {
     const { pipeline, send } = setup();
     expect(await send()).toMatchObject({ status: "Placed" });

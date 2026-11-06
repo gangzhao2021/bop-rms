@@ -79,6 +79,7 @@ import { useStaffSessionLive } from "./staff-session-reads.js";
 import { browserOffline, useStaleRetry } from "./stale-read.js";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { StaffRoundPaymentAction } from "./StaffRoundPaymentAction.js";
+import { CounterCancelAction, counterCancelReasonText } from "./CounterCancelAction.js";
 import {
   orderChannel,
   orderChannelFilterOptions,
@@ -1734,7 +1735,14 @@ function OrderStatusNotes({
         </span>
       ) : null}
       {cancelledUnpaid(order) ? (
-        <span className="order-staff-cancelled">{t("Cancelled before payment")}</span>
+        <span className="order-staff-cancelled">
+          {/* WP-2423 M127: staff cancelled it before payment, and why (recorded with their name). */}
+          {order.counter?.cancelledBeforePayment
+            ? t("Cancelled before payment by staff · {reason}", {
+                reason: counterCancelReasonText(order.counter.cancelledBeforePayment.reasonCode),
+              })
+            : t("Cancelled before payment")}
+        </span>
       ) : null}
       {order.batches.map((batch) =>
         batch.waitingForStaff !== null ? (
@@ -4031,6 +4039,18 @@ export function CurrentOrderQueuePage({
                         timeZone={timeZone}
                         onRecorded={() => reload(after)}
                       />
+                      {/* WP-2423 M127: a guest who isn't paying: cancel it, items back to stock. */}
+                      {order.counter?.canCancelUnpaid === true && order.currentVersion !== null ? (
+                        <CounterCancelAction
+                          orderReference={order.orderReference}
+                          orderBatchReference={batch.orderBatchReference}
+                          orderNumber={order.orderNumber}
+                          expectedOrderVersion={order.currentVersion}
+                          csrf={csrf}
+                          {...(fetcher === undefined ? {} : { fetcher })}
+                          onCancelled={() => reload(after)}
+                        />
+                      ) : null}
                     </fieldset>
                   ) : // WP-2423 D5: an unpaid round staff entered is recorded as paid here too. The list
                   // leaves its amount out (the one-order read builds it when the form is opened).

@@ -40,6 +40,7 @@ import {
 import { listDiningGuestStartedSessions, listDiningSessionTableLabels } from "@rms/dining";
 import {
   listStorePickupAcceptanceDeadlines,
+  listCounterUnpaidCancellations,
   listStoreUncollectedPickupOrders,
 } from "@rms/fulfillment";
 import {
@@ -510,6 +511,13 @@ export function createPersistentMerchantOrderQueue(options: {
               payBy: string | null;
               /** While unpaid, on the one-order read only: what to charge on the card machine. */
               amountDueMinor: string | null;
+              /**
+               * WP-2423 M127: the caller may cancel it now (unpaid, still payable, not a paper
+               * order; holders of ordering.order.cancel, as for an unpaid table round).
+               */
+              canCancelUnpaid: boolean;
+              /** WP-2423 M127: staff cancelled it before payment (why and when), else null. */
+              cancelledBeforePayment: { reasonCode: string; cancelledAt: string } | null;
             }
           >();
           /**
@@ -685,6 +693,11 @@ export function createPersistentMerchantOrderQueue(options: {
                     scoped,
                     unpaidCounter,
                   );
+            const counterCancelled = await listCounterUnpaidCancellations(
+              businessTransaction,
+              scoped,
+              [...entries.keys()],
+            );
             for (const [order, entry] of entries) {
               const paid = counterPayments.get(order)?.[0];
               if (paid !== undefined) addCardMachineTip(paid.payment);
@@ -723,6 +736,8 @@ export function createPersistentMerchantOrderQueue(options: {
               counter.set(order, {
                 payBy,
                 amountDueMinor,
+                canCancelUnpaid: cancelAllowed && payBy !== null && !entry.recordedAfterOutage,
+                cancelledBeforePayment: counterCancelled.get(order) ?? null,
                 recordedAfterOutage: entry.recordedAfterOutage,
                 paidOnCardMachine:
                   paid === undefined

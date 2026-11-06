@@ -144,6 +144,7 @@ import {
   createMerchantOrderStaffCancellationPreview,
 } from "../../apps/api/dist/merchant-order-staff-cancellation.js";
 import { createMerchantUnpaidRoundCancellation } from "../../apps/api/dist/merchant-unpaid-round-cancellation.js";
+import { createMerchantCounterOrderCancellation } from "../../apps/api/dist/merchant-counter-order-cancellation.js";
 import { createMerchantEndedOrderStockRelease } from "../../apps/api/dist/merchant-stock-holding-orders.js";
 import { createMerchantPickupContactRemoval } from "../../apps/api/dist/merchant-pickup-contact-removal.js";
 import { createMerchantBusinessDayWindows } from "../../apps/api/dist/merchant-business-day-window.js";
@@ -1567,6 +1568,13 @@ export async function createInternalMerchant(
       paidOrderAutoAcceptOff,
       orderStaffCancellationPreview,
       ...(unpaidRoundCancellation === undefined ? {} : { unpaidRoundCancellation }),
+      // WP-2423 M127: a manager cancels a counter order nobody paid for; its stock goes back.
+      counterOrderCancellation: createMerchantCounterOrderCancellation({
+        persistence,
+        authentication: service,
+        installContext: installSelectedContext,
+        nextReference: () => resources.credentials.reference(),
+      }),
       endedOrderStockRelease,
       pickupContactRemoval,
       ...(orderItemStaffCancellation === undefined ? {} : { orderItemStaffCancellation }),

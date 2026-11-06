@@ -255,6 +255,8 @@ test("@production staff take a counter pickup order, charge it on the card machi
   await expect(page.getByRole("button", { name: "Add Butter Croissant" })).toBeDisabled();
   await page.getByRole("button", { name: "Add Flat White" }).click();
   await page.getByRole("radio", { name: /Oat milk/ }).check();
+  // WP-2423 M53: the counter takes the guest's note for the kitchen, as a table round does.
+  await page.getByRole("textbox", { name: "Note for the kitchen (optional)" }).fill("Extra hot");
   await page.getByRole("button", { name: "Add to order" }).click();
   // Owner 2026-10-26: an item with nothing to choose goes straight onto the order.
   await page.getByRole("button", { name: "Add Banana Bread" }).click();
@@ -282,6 +284,7 @@ test("@production staff take a counter pickup order, charge it on the card machi
         sellableReference: id(5),
         quantity: 1,
         optionSelections: [{ optionReference: id(10), quantity: 1 }],
+        customerNote: "Extra hot",
       },
     ],
     tip: { kind: "Percent", percent: 15 },

@@ -15,6 +15,7 @@ import { createCustomerIntactReservationPaymentAction } from "../../../apps/api/
 import { createCustomerInventoryPaymentClaimAdmission } from "../../../apps/api/src/customer-inventory-payment-admission.ts";
 import { createCustomerCapacityPaymentClaimAdmission } from "../../../apps/api/src/customer-capacity-payment-admission.ts";
 import { createMerchantCardMachinePayment } from "../../../apps/api/src/merchant-card-machine-payment.ts";
+import { createMerchantCounterOrderCancellation } from "../../../apps/api/src/merchant-counter-order-cancellation.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { seedMerchantAcceptanceSession } from "./merchant-acceptance-session.mjs";
 
@@ -214,6 +215,60 @@ export async function exerciseCounterCardMachinePayment({
   ).items[0];
   assert.equal(unpaidDetail.counter.amountDueMinor, amounts.total.amountMinor.toString());
   assert.equal(unpaidDetail.counter.payBy, unpaidListed.counter.payBy);
+  // WP-2423 M127: an unpaid counter order is cancelled only by someone who may cancel orders, and
+  // never when it is a paper order (a sale that happened during the outage: it is recorded and
+  // paid). Nothing is written by either refusal.
+  assert.equal(unpaidListed.counter.canCancelUnpaid, false);
+  assert.equal(unpaidListed.counter.cancelledBeforePayment, null);
+  const cancelUnpaid = (session) =>
+    createMerchantCounterOrderCancellation({
+      persistence: { ...session.persistence, now: () => new Date().toISOString() },
+      authentication: session.authentication,
+      installContext: async (tx, selected) => {
+        await tx.query(
+          "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id',$3,true)",
+          [selected.tenantReference, selected.brandReference, selected.storeReference],
+        );
+      },
+      nextReference: next,
+    });
+  const cancelInput = (session) => ({
+    sessionCookie: session.sessionCookie,
+    csrf: session.csrf,
+    command: {
+      operationReference: next(),
+      orderReference,
+      orderBatchReference: String(batch.orderBatchReference),
+      expectedOrderVersion: 1,
+      reasonCode: "COUNTER_GUEST_LEFT_UNPAID",
+    },
+  });
+  const terminations = async () =>
+    (
+      await admin.query(
+        "SELECT count(*)::int AS n FROM rms_ordering.order_termination_record WHERE order_id=$1",
+        [orderReference],
+      )
+    ).rows[0].n;
+  // Front of house (takes and charges counter orders) may not cancel one.
+  await assert.rejects(cancelUnpaid(counterSession)(cancelInput(counterSession)), {
+    code: "COUNTER_CANCEL_PERMISSION_DENIED",
+  });
+  const managerSession = await seedMerchantAcceptanceSession({
+    admin,
+    runner,
+    role,
+    scope,
+    actor: next(),
+    at,
+    extraPermissions: ["ordering.order.create_staff", "ordering.order.cancel"],
+    referencePrefix: "01909a83",
+    sessionReferencePrefix: "01909a84",
+  });
+  await assert.rejects(cancelUnpaid(managerSession)(cancelInput(managerSession)), {
+    code: "COUNTER_CANCEL_PAPER_ORDER",
+  });
+  assert.equal(await terminations(), 0);
   // Staff key the amount the card machine charged; a different amount is refused with the total.
   await assert.rejects(command(payInput({ expectedTotalMinor: "1" })), {
     code: "CARD_MACHINE_AMOUNT_CHANGED",

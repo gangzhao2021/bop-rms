@@ -578,3 +578,307 @@ export function createPostgresPaidAcceptanceLapseClosure(options: {
     },
   });
 }
+
+/**
+ * WP-2423 M127: staff cancel a counter order nobody paid for (the guest changed their mind, it was
+ * entered by mistake, or the guest left without paying), before its payment window ends, so its
+ * items go back to stock at once. Recorded as a User termination naming the staff member and the
+ * reason; never a hidden or deleted sale. Kept with the managers who may cancel orders
+ * (`ordering.order.cancel`, as for an unpaid table round). A paper order entered after an outage
+ * is a sale that already happened: it is recorded and paid, never cancelled here.
+ */
+export const counterUnpaidCancellationPolicy = Object.freeze({
+  purposeCode: "CounterUnpaidCancellation",
+  permissionCode: "ordering.order.cancel",
+  workflowVersionReference: "019a0c00-2423-7490-8000-000000000001",
+  transitionReference: "019a0c00-2423-7490-8000-000000000002",
+} as const);
+export const counterUnpaidCancellationReasons = [
+  "COUNTER_GUEST_CHANGED_MIND",
+  "COUNTER_ENTERED_WRONG",
+  "COUNTER_GUEST_LEFT_UNPAID",
+] as const;
+export type CounterUnpaidCancellationReason = (typeof counterUnpaidCancellationReasons)[number];
+export type CounterUnpaidCancellationResult = Readonly<
+  | { status: "Cancelled" | "AlreadyCancelled"; record: OrderTerminationRecord }
+  | {
+      status: "NotEligible";
+      reason:
+        | "NotCounter"
+        | "PaperOrder"
+        | "Accepted"
+        | "Terminated"
+        | "PaymentRecorded"
+        | "VersionConflict";
+    }
+>;
+
+/**
+ * The counter Order's capacity link (the Payment operation and submission it was placed with), so
+ * the caller can take Payment's and Fulfillment's fences before cancelling. Null when the Order is
+ * not a counter order of this Store. Caller authorizes and owns the transaction.
+ */
+export async function loadCounterOrderCapacityLink(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  identity: { readonly orderReference: string; readonly orderBatchReference: string },
+): Promise<{ readonly link: OrderCapacityLink; readonly recordedAfterOutage: boolean } | null> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    order = parseOrderingReference(identity.orderReference),
+    batch = parseOrderingReference(identity.orderBatchReference);
+  await scoped(transaction, brand, store);
+  const found = await transaction.query(
+    `SELECT l.link_json AS link,e.recorded_after_outage AS paper
+    FROM rms_ordering.order_batch b
+    JOIN rms_ordering.counter_order_entry e ON e.brand_id=b.brand_id AND e.store_id=b.store_id
+      AND e.cart_id=b.source_cart_id
+    JOIN rms_ordering.order_capacity_link l ON l.brand_id=b.brand_id AND l.store_id=b.store_id
+      AND l.order_id=b.order_id AND l.order_batch_id=b.order_batch_id AND l.submission_id=b.submission_id
+    WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id=$3 AND b.order_batch_id=$4 LIMIT 2`,
+    [brand, store, order, batch],
+  );
+  if (found.rows.length > 1) return fail();
+  const row = found.rows[0];
+  if (row === undefined) return null;
+  const link = parseOrderCapacityLink(row.link);
+  if (
+    link.owner !== "Fulfillment" ||
+    link.brandReference !== brand ||
+    link.storeReference !== store ||
+    link.orderReference !== order ||
+    link.orderBatchReference !== batch ||
+    typeof row.paper !== "boolean"
+  )
+    return fail();
+  return Object.freeze({ link, recordedAfterOutage: row.paper });
+}
+
+/**
+ * Cancels one unpaid counter Order for a staff member (append-only termination with Audit naming
+ * them). The caller holds Payment's operation fence, has proved from Payment that nothing was
+ * recorded or charged, and owns the transaction (roll back on any thrown failure). The same
+ * operation again returns AlreadyCancelled and writes nothing.
+ */
+export function createPostgresCounterUnpaidCancellation(options: {
+  brandReference: string;
+  storeReference: string;
+  authorize(
+    transaction: ConsumerTransaction,
+    identity: Readonly<{ orderReference: string; orderBatchReference: string }>,
+  ): Promise<boolean>;
+}) {
+  const brand = parseOrderingReference(options.brandReference),
+    store = parseOrderingReference(options.storeReference);
+  return Object.freeze({
+    async cancel(
+      transaction: ConsumerTransaction,
+      value: unknown,
+    ): Promise<CounterUnpaidCancellationResult> {
+      const raw = readClosedRecord(value, [
+        "orderReference",
+        "orderBatchReference",
+        "operationReference",
+        "expectedOrderVersion",
+        "actorReference",
+        "reasonCode",
+        "cancelledAt",
+        "terminationReference",
+        "auditReference",
+      ]);
+      const identity = Object.freeze({
+        orderReference: parseOrderingReference(raw.orderReference),
+        orderBatchReference: parseOrderingReference(raw.orderBatchReference),
+      });
+      const operationReference = parseOrderingReference(raw.operationReference),
+        actorReference = parseOrderingReference(raw.actorReference),
+        cancelledAt = parseOrderingInstant(raw.cancelledAt),
+        terminationReference = parseOrderingReference(raw.terminationReference),
+        auditReference = parseOrderingReference(raw.auditReference);
+      const reasonCode = counterUnpaidCancellationReasons.find((code) => code === raw.reasonCode);
+      if (
+        reasonCode === undefined ||
+        typeof raw.expectedOrderVersion !== "number" ||
+        !Number.isSafeInteger(raw.expectedOrderVersion) ||
+        raw.expectedOrderVersion < 1
+      )
+        return fail();
+      const allowed = async (tx: ConsumerTransaction) =>
+        tx === transaction && (await options.authorize(tx, identity)) === true;
+      const answer = async (result: CounterUnpaidCancellationResult) => {
+        if (!(await allowed(transaction))) return fail();
+        return Object.freeze(result);
+      };
+      if (!(await allowed(transaction))) return fail();
+      const counter = await loadCounterOrderCapacityLink(
+        transaction,
+        { brandReference: brand, storeReference: store },
+        identity,
+      );
+      if (counter === null) return answer({ status: "NotEligible", reason: "NotCounter" });
+      // A paper order is a sale that happened during the outage: recorded and paid, never cancelled.
+      if (counter.recordedAfterOutage)
+        return answer({ status: "NotEligible", reason: "PaperOrder" });
+      const link = counter.link;
+      // Same Order disposition fence as acceptance, payment outcome and termination.
+      const sole = await createPostgresPickupOrderCompletionLookup({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async (tx) => allowed(tx),
+      }).loadByOrder({ transaction, orderReference: identity.orderReference });
+      if (
+        sole === null ||
+        sole.orderBatchReference !== identity.orderBatchReference ||
+        sole.submissionReference !== link.submissionReference
+      )
+        return fail();
+      const terminal = await transaction.query(
+        "SELECT operation_id::text AS operation FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 LIMIT 2",
+        [brand, store, identity.orderReference],
+      );
+      if (terminal.rows.length > 1) return fail();
+      if (terminal.rows.length === 1) {
+        if (terminal.rows[0]?.operation !== operationReference)
+          return answer({ status: "NotEligible", reason: "Terminated" });
+        const prior = await transaction.query(
+          'SELECT termination_id AS "terminationReference",operation_id AS "operationReference",brand_id AS "brandReference",store_id AS "storeReference",order_id AS "orderReference",order_batch_id AS "orderBatchReference",expected_order_version AS "expectedOrderVersion",terminated_order_version AS "terminatedOrderVersion",expected_source_checkpoint AS "expectedSourceCheckpoint",previous_phase AS "previousPhase",phase,actor_type AS "actorType",actor_id AS "actorReference",purpose_code AS "purposeCode",permission_code AS "permissionCode",reason_code AS "reasonCode",workflow_version_id AS "workflowVersionReference",transition_id AS "transitionReference",source_digest AS "sourceDigest",terminated_at AS "terminatedAt" FROM rms_ordering.order_termination_record WHERE brand_id=$1 AND store_id=$2 AND operation_id=$3',
+          [brand, store, operationReference],
+        );
+        const original = prior.rows[0];
+        const record = parseOrderTerminationRecord({
+          ...original,
+          terminatedAt:
+            original?.terminatedAt instanceof Date
+              ? original.terminatedAt.toISOString()
+              : original?.terminatedAt,
+        });
+        // The same staff command repeats its reason and staff member.
+        if (
+          prior.rows.length !== 1 ||
+          record.actorType !== "User" ||
+          record.actorReference !== actorReference ||
+          record.reasonCode !== reasonCode ||
+          record.purposeCode !== counterUnpaidCancellationPolicy.purposeCode
+        )
+          return fail();
+        return answer({ status: "AlreadyCancelled", record });
+      }
+      const execution = await createPostgresOrderInitialExecutionReader({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async (tx) => allowed(tx),
+      }).loadByBatch({ transaction, ...identity });
+      if (execution.phase !== "Submitted")
+        return answer({ status: "NotEligible", reason: "Accepted" });
+      if (execution.version !== raw.expectedOrderVersion)
+        return answer({ status: "NotEligible", reason: "VersionConflict" });
+      if (execution.checkpoint !== link.submissionReference || cancelledAt < execution.occurredAt)
+        return fail();
+      const paymentRecorded = async (tx: ConsumerTransaction) => {
+        const result = await tx.query(
+          "SELECT (SELECT count(*)::int FROM rms_ordering.order_payment_acceptance_wait WHERE brand_id=$1 AND store_id=$2 AND order_id=$3)+" +
+            "(SELECT count(*)::int FROM rms_ordering.order_payment_disposition_record WHERE brand_id=$1 AND store_id=$2 AND order_id=$3) AS n",
+          [brand, store, identity.orderReference],
+        );
+        const n = result.rows[0]?.n;
+        if (result.rows.length !== 1 || typeof n !== "number") return fail();
+        return n !== 0;
+      };
+      if (await paymentRecorded(transaction))
+        return answer({ status: "NotEligible", reason: "PaymentRecorded" });
+      const policy = counterUnpaidCancellationPolicy;
+      const record = parseOrderTerminationRecord({
+        terminationReference,
+        operationReference,
+        brandReference: brand,
+        storeReference: store,
+        orderReference: identity.orderReference,
+        orderBatchReference: identity.orderBatchReference,
+        expectedOrderVersion: execution.version,
+        terminatedOrderVersion: execution.version + 1,
+        expectedSourceCheckpoint: execution.checkpoint,
+        previousPhase: "Submitted",
+        phase: "Cancelled",
+        actorType: "User",
+        actorReference,
+        purposeCode: policy.purposeCode,
+        permissionCode: policy.permissionCode,
+        reasonCode,
+        workflowVersionReference: policy.workflowVersionReference,
+        transitionReference: policy.transitionReference,
+        sourceDigest: sha256({ kind: "CounterUnpaidCancellation/v1", link, reasonCode }),
+        terminatedAt: cancelledAt,
+      });
+      const result = await createPostgresOrderTerminationStore({
+        brandReference: brand,
+        storeReference: store,
+        authorize: async (tx, candidate) =>
+          candidate.operationReference === operationReference && (await allowed(tx)),
+        validateCurrentSource: async (tx, candidate) =>
+          tx === transaction &&
+          candidate.operationReference === operationReference &&
+          !(await paymentRecorded(tx)),
+        audit: async (candidate) => ({
+          auditId: auditReference,
+          brandId: brand,
+          storeId: store,
+          actor: { type: "User", reference: actorReference },
+          actionCode: "ORDER_TERMINATED",
+          targetType: "Order",
+          targetId: candidate.orderReference,
+          correlationId: candidate.operationReference,
+          reasonCode: candidate.reasonCode,
+          occurredAt: candidate.terminatedAt,
+          sourceChannel: "MERCHANT_WEB",
+          afterSummary: { phase: candidate.phase },
+          dataClassification: "Restricted",
+          retentionPolicyCode: "FINANCIAL_COMPLIANCE",
+          retentionPolicyVersion: 1,
+        }),
+      }).commit({ transaction, record });
+      if (result.status !== "Created" || !(await allowed(transaction))) return fail();
+      return Object.freeze({ status: "Cancelled" as const, record: result.record });
+    },
+  });
+}
+
+/**
+ * WP-2423 M127: the counter orders of these Orders that staff cancelled before payment, with the
+ * reason and when (for Orders: "Cancelled before payment · Guest changed their mind"). Caller
+ * authorizes and owns the transaction.
+ */
+export async function listCounterUnpaidCancellations(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReferences: readonly string[],
+): Promise<
+  ReadonlyMap<
+    string,
+    { readonly reasonCode: CounterUnpaidCancellationReason; readonly cancelledAt: string }
+  >
+> {
+  const result = new Map<
+    string,
+    { readonly reasonCode: CounterUnpaidCancellationReason; readonly cancelledAt: string }
+  >();
+  if (orderReferences.length === 0) return result;
+  if (orderReferences.length > 500) return fail();
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    orders = orderReferences.map((value) => parseOrderingReference(value));
+  await scoped(transaction, brand, store);
+  const found = await transaction.query(
+    "SELECT order_id::text AS order_id,reason_code,to_char(terminated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS at FROM rms_ordering.order_termination_record " +
+      "WHERE brand_id=$1 AND store_id=$2 AND order_id=ANY($3::uuid[]) AND actor_type='User' AND purpose_code=$4",
+    [brand, store, orders, counterUnpaidCancellationPolicy.purposeCode],
+  );
+  for (const row of found.rows) {
+    const reasonCode = counterUnpaidCancellationReasons.find((code) => code === row.reason_code);
+    if (reasonCode === undefined) return fail();
+    result.set(String(parseOrderingReference(row.order_id)), {
+      reasonCode,
+      cancelledAt: parseOrderingInstant(row.at),
+    });
+  }
+  return result;
+}
