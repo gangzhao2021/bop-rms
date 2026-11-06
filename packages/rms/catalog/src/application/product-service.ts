@@ -234,7 +234,8 @@ async function validateOptionBindings(ports: CatalogProductPorts, aggregate: Pro
     }
     if (optionSet.brandReference !== aggregate.brandReference)
       throw new CatalogError("CATALOG_UNAVAILABLE");
-    validateProductOptionBinding(binding, optionSet);
+    // WP-2423 (cart-unsellable-dishes): a default that is off for now stays the dish's default.
+    validateProductOptionBinding(binding, optionSet, "Draft");
   });
 }
 

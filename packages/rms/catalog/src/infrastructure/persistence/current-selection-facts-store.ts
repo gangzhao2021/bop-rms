@@ -2,7 +2,10 @@ import { parsePublishingDigest } from "@bop/publishing";
 import type { ValidateCatalogSelectionInput } from "../../contracts/selection-validation.js";
 import { createPostgresAvailabilityQueryStore } from "./availability-query-store.js";
 import { createCurrentAvailabilityQueryService } from "../../application/current-availability-query-service.js";
-import { createCurrentCatalogSelectionSource } from "../../application/current-selection-source.js";
+import {
+  createCurrentCatalogSelectionSource,
+  publishedSelectionRules,
+} from "../../application/current-selection-source.js";
 import { createCatalogSelectionValidationService } from "../../application/selection-validation-service.js";
 import type { CurrentAvailabilityQueryPorts } from "../../application/ports/current-availability-query-ports.js";
 import {
@@ -19,7 +22,11 @@ import type { AvailabilityQueryTransactionRunner } from "./availability-query-st
 import { createPostgresCurrentMenuReleaseStore } from "./current-menu-release-store.js";
 import { createPostgresPublishedMenuQueryStore } from "./published-menu-query-store.js";
 import { createPostgresCurrentSkuStore } from "./current-sku-store.js";
-import { createPostgresCurrentOptionBindingsStore } from "./current-option-bindings-store.js";
+import {
+  OptionBindingSourceError,
+  createPostgresCurrentOptionBindingsStore,
+} from "./current-option-bindings-store.js";
+import { resolveCurrentCatalogSelectionRules } from "../../application/current-selection-rules.js";
 
 /**
  * WP-2423 (guest-cart-503): one cart line's standing now. Only `Available` sells; `Indeterminate`
@@ -124,8 +131,10 @@ async function classifiedFacts(
   });
   if (sku === null) return "Indeterminate" as FactsAbsence;
   if (!sku.catalogEligible) return "NotOnMenu" as FactsAbsence;
+  // Sale rules: a default guests start with that is off for now does not stop the dish.
   const options = await createPostgresCurrentOptionBindingsStore(shared, {
     brandReference: brand,
+    rules: "Sale",
   }).load({
     sellableReference: sku.sellableReference,
     productVersionReference: sku.productVersionReference,
@@ -401,29 +410,54 @@ export function createPostgresCatalogLineStandingSource(
               continue;
             }
             if (available.status !== "Available") {
-              standings.push("Indeterminate");
+              // WP-2423 (cart-unsellable-dishes): no rule offers the dish here (staff hid it,
+              // StopOffering): a stable fact, as the guest menu already reads it (not offered).
+              // `Offer`/`StopOffering` change the rule in one commit and this is one snapshot, so
+              // it is never a change half seen. Every other reason may change by itself.
+              standings.push(
+                available.status === "Indeterminate" &&
+                  (available as { reasonCode?: unknown }).reasonCode === "NO_EFFECTIVE_RULE"
+                  ? "Unavailable"
+                  : "Indeterminate",
+              );
               continue;
             }
-            const facts = await classifiedFacts(
-              tx,
-              { brandReference: brand, storeReference: store },
-              {
-                brandReference: brand,
-                storeReference: store,
-                sellableReference,
-                menuReference,
-                channelCode,
-                orderTypeCode,
-                observedAt,
-              },
-              memo,
-            );
+            let facts: Awaited<ReturnType<typeof classifiedFacts>>;
+            try {
+              facts = await classifiedFacts(
+                tx,
+                { brandReference: brand, storeReference: store },
+                {
+                  brandReference: brand,
+                  storeReference: store,
+                  sellableReference,
+                  menuReference,
+                  channelCode,
+                  orderTypeCode,
+                  observedAt,
+                },
+                memo,
+              );
+            } catch (error) {
+              // WP-2423 (cart-unsellable-dishes): one dish whose choice group the merchant broke
+              // (named rule) is that line's setup problem, never the whole cart's outage.
+              if (isOptionBindingSourceError(error)) {
+                standings.push("SetupIncomplete");
+                continue;
+              }
+              throw error;
+            }
             if (typeof facts === "string") {
               standings.push(facts);
               continue;
             }
             if (facts.sku.taxClassificationReference === null) {
               standings.push("SetupIncomplete");
+              continue;
+            }
+            // A required choice group with nothing offered now: the dish can't be had now.
+            if (requiredGroupOffNow(facts, ownerScope.brandReference, channelCode, observedAt)) {
+              standings.push("Unavailable");
               continue;
             }
             const selection = await createCatalogSelectionValidationService({
@@ -447,4 +481,50 @@ export function createPostgresCatalogLineStandingSource(
       }
     },
   });
+}
+
+/** Either copy of OptionBindingSourceError (the deployed entry may load two copies). */
+function isOptionBindingSourceError(error: unknown): boolean {
+  return (
+    error instanceof OptionBindingSourceError ||
+    (error instanceof Error && error.name === "OptionBindingSourceError")
+  );
+}
+
+/**
+ * WP-2423 (cart-unsellable-dishes): whether a choice group the guest must choose in (always shown,
+ * not opened by another choice) has fewer choices offered now than its minimum. Rules that cannot
+ * be resolved are not judged here: the validation that follows keeps its own answer.
+ */
+function requiredGroupOffNow(
+  facts: Exclude<Awaited<ReturnType<typeof classifiedFacts>>, string>,
+  brandReference: string,
+  channelCode: string,
+  observedAt: string,
+): boolean {
+  let rules;
+  try {
+    const current = resolveCurrentCatalogSelectionRules(
+      facts.bindings,
+      {
+        brandReference,
+        sellableReference: facts.sellableReference,
+        channelCode,
+        observedAt,
+      },
+      { rules: "Sale" },
+    );
+    rules =
+      facts.published.optionRules === undefined
+        ? current
+        : publishedSelectionRules(facts.published.optionRules, current, channelCode);
+  } catch {
+    return false;
+  }
+  return rules.some(
+    (rule) =>
+      rule.activationOptionReferences.length === 0 &&
+      rule.minimumQuantity > 0 &&
+      rule.options.reduce((sum, option) => sum + option.maximumQuantity, 0) < rule.minimumQuantity,
+  );
 }

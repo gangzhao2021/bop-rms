@@ -346,11 +346,44 @@ describe("Option Set / Option / Product Binding minimum model", () => {
     expect(offered.optionSetVersionReference).toBe(ids.version);
     expect(offered.defaultSelections).toEqual([{ optionReference: ids.milk, quantity: 1 }]);
     expect(productOptionBindingRule(offered, serve("Active", false))).toBeNull();
-    // Hot not offered and Iced not a default: no default left, saving the dish cannot fix it.
+    // WP-2423 (cart-unsellable-dishes): Hot off for now and Iced not a default: the dish keeps
+    // Hot (it is back tomorrow). A dish save keeps it; List it still asks for Hot to be offered.
     const hotOff = serve("Inactive", false);
     const rebuilt = rebuiltProductOptionBinding(binding, hotOff);
-    expect(rebuilt.defaultSelections).toEqual([]);
-    expect(productOptionBindingRule(rebuilt, hotOff)).toBe("DefaultsBelowMinimum");
+    expect(rebuilt.defaultSelections).toEqual([{ optionReference: ids.milk, quantity: 1 }]);
+    expect(productOptionBindingRule(rebuilt, hotOff)).toBe("DefaultUnavailable");
+    expect(productOptionBindingRule(rebuilt, hotOff, "Draft")).toBeNull();
+    expect(productOptionBindingRule(rebuilt, hotOff, "Sale")).toBeNull();
+    // Archived is gone for good: no mode keeps it as a default.
+    const hotArchived = parseOptionSetAggregate({
+      ...hotOff,
+      draft: {
+        ...hotOff.draft,
+        options: hotOff.draft.options.map((option) =>
+          option.optionReference === ids.milk ? { ...option, lifecycle: "Archived" } : option,
+        ),
+      },
+    });
+    expect(
+      productOptionBindingRule(
+        { ...rebuilt, enabledOptionReferences: [ids.oat] },
+        hotArchived,
+        "Draft",
+      ),
+    ).toBe("DefaultUnavailable");
+    expect(rebuiltProductOptionBinding(binding, hotArchived).defaultSelections).toEqual([]);
+    // Selling checks no default rule, only the limits.
+    expect(
+      productOptionBindingRule({ ...rebuilt, defaultSelections: [] }, hotOff, "Sale"),
+    ).toBeNull();
+    expect(
+      productOptionBindingRule({ ...rebuilt, enabledOptionReferences: [] }, hotOff, "Sale"),
+    ).toBe("EnabledBelowMinimum");
+    // Ordered by the set alone, a choice turned off moves no default.
+    expect(
+      rebuiltProductOptionBinding(binding, serve("Inactive", true), { offeredFirst: false })
+        .defaultSelections,
+    ).toEqual([{ optionReference: ids.milk, quantity: 1 }]);
     // Iced may be the default: the rebuilt binding starts with Iced and fits.
     const icedDefault = serve("Inactive", true);
     const fixed = rebuiltProductOptionBinding(binding, icedDefault);

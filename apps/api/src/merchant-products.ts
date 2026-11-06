@@ -822,7 +822,9 @@ export function createMerchantProducts(options: {
               );
               // Checked here, where the group can be named: no default guests can start with that
               // is still offered is fixed under Option sets, never by saving the dish again.
-              const rule = productOptionBindingRule(binding, set);
+              // A default that is only off for now is kept: the dish starts with it again once
+              // it is offered (WP-2423 cart-unsellable-dishes); List it still asks for it.
+              const rule = productOptionBindingRule(binding, set, "Draft");
               if (rule !== null && optionBindingDefaultRules.has(rule))
                 choiceGroup(set, "ChoiceGroupDefault");
               return binding;

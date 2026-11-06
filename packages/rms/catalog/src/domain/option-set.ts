@@ -320,10 +320,48 @@ export const optionBindingDefaultRules: ReadonlySet<OptionBindingRule> = new Set
   "DefaultNotEligible",
   "DefaultsBelowMinimum",
 ]);
+/**
+ * WP-2423 (cart-unsellable-dishes): every rule about the choices guests start with. Selling checks
+ * the guest's own choices against the limits and what is offered now, never these: a default that
+ * is off for now (the hot-drink machine broke) must not stop every order of the dish.
+ */
+export const optionBindingSaleExemptRules: ReadonlySet<OptionBindingRule> = new Set([
+  "DefaultUnavailable",
+  "DefaultNotEligible",
+  "DefaultsConflict",
+  "DefaultsBelowMinimum",
+  "DefaultsAboveMaximum",
+  "DefaultsAboveTotal",
+  "DefaultAboveOptionMaximum",
+]);
+/**
+ * Which rules apply. `Listing` (the default: List it, the menu review and the published menu): a
+ * stored default must be offered now, because a listing publishes only offered choices. `Draft`
+ * (Save dish, a product draft write): a default that is off for now stays the dish's default, so
+ * saving a dish during an outage neither loses it nor is refused; an archived one is still refused.
+ * `Sale` (the cart, the quote and the order): no default rule at all.
+ */
+export type OptionBindingRuleMode = "Listing" | "Draft" | "Sale";
 /** The first rule a binding breaks against its option set, or null when it fits. */
 export function productOptionBindingRule(
   binding: ProductOptionBinding,
   optionSet: OptionSetAggregate,
+  mode: OptionBindingRuleMode = "Listing",
+): OptionBindingRule | null {
+  const rule = listingRule(binding, optionSet, mode);
+  return rule !== null && mode === "Sale" && optionBindingSaleExemptRules.has(rule)
+    ? saleRule(binding, optionSet)
+    : rule;
+}
+/** The limit rules alone (Sale): the binding with no defaults, checked as Listing would. */
+function saleRule(binding: ProductOptionBinding, optionSet: OptionSetAggregate) {
+  const rule = listingRule({ ...binding, defaultSelections: [] }, optionSet, "Sale");
+  return rule !== null && optionBindingSaleExemptRules.has(rule) ? null : rule;
+}
+function listingRule(
+  binding: ProductOptionBinding,
+  optionSet: OptionSetAggregate,
+  mode: OptionBindingRuleMode,
 ): OptionBindingRule | null {
   if (binding.optionSetReference !== optionSet.optionSetReference) return "OtherOptionSet";
   if (binding.optionSetVersionReference !== optionSet.draft.versionReference)
@@ -351,7 +389,11 @@ export function productOptionBindingRule(
     const option = optionSet.draft.options.find(
       (candidate) => candidate.optionReference === item.optionReference,
     );
-    if (option === undefined || option.lifecycle === "Inactive" || option.lifecycle === "Archived")
+    if (
+      option === undefined ||
+      option.lifecycle === "Archived" ||
+      (option.lifecycle === "Inactive" && mode === "Listing")
+    )
       return "DefaultUnavailable";
     if (!option.defaultEligible) return "DefaultNotEligible";
     if (option.conflictOptionReferences.some((reference) => selectedReferences.has(reference)))
@@ -383,22 +425,34 @@ export function productOptionBindingRule(
 /**
  * WP-2423 (v15 2026-11-05): a product's binding as a dish save rebuilds it against the option
  * set's current version: the enabled options it was given, the set's options that guests start with
- * (default-eligible and offered, at most the set's maximum, one each), and the set's current
- * version. One rule for the dish save and for telling staff whether saving the dish would fix a
- * binding; checking it with `productOptionBindingRule` says whether it fits.
+ * (default-eligible and not archived, offered ones first, at most the set's maximum, one each), and
+ * the set's current version. One rule for the dish save and for telling staff whether saving the
+ * dish would fix a binding; checking it with `productOptionBindingRule` says whether it fits.
+ *
+ * WP-2423 (cart-unsellable-dishes): a default that is off for now stays the dish's default (the
+ * machine is back tomorrow); an offered default-eligible choice still comes first. `offeredFirst:
+ * false` orders by the set alone, so a change that only turns a choice off or on moves no default.
  */
 export function rebuiltProductOptionBinding(
   binding: ProductOptionBinding,
   optionSet: OptionSetAggregate,
+  order: { readonly offeredFirst: boolean } = { offeredFirst: true },
 ): ProductOptionBinding {
   const enabled = [...binding.enabledOptionReferences].sort();
-  const defaultSelections = optionSet.draft.options
-    .filter(
-      (option) =>
-        option.defaultEligible &&
-        option.lifecycle === "Active" &&
-        enabled.includes(option.optionReference),
-    )
+  const eligible = optionSet.draft.options.filter(
+    (option) =>
+      option.defaultEligible &&
+      option.lifecycle !== "Archived" &&
+      enabled.includes(option.optionReference),
+  );
+  const defaultSelections = (
+    order.offeredFirst
+      ? [
+          ...eligible.filter((option) => option.lifecycle !== "Inactive"),
+          ...eligible.filter((option) => option.lifecycle === "Inactive"),
+        ]
+      : eligible
+  )
     .slice(0, optionSet.draft.maximumSelection ?? undefined)
     .map((option) => ({ optionReference: option.optionReference, quantity: 1 }))
     .sort((a, b) => (a.optionReference < b.optionReference ? -1 : 1));
@@ -414,8 +468,9 @@ export function rebuiltProductOptionBinding(
 export function validateProductOptionBinding(
   binding: ProductOptionBinding,
   optionSet: OptionSetAggregate,
+  mode: OptionBindingRuleMode = "Listing",
 ): void {
-  const rule = productOptionBindingRule(binding, optionSet);
+  const rule = productOptionBindingRule(binding, optionSet, mode);
   if (rule !== null) throw new OptionBindingRuleError(rule);
 }
 /** Parsed owning references and bounds remain strict. Quantity contradiction is

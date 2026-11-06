@@ -3,13 +3,26 @@ import {
   parseProductOptionBinding,
   type CatalogReference,
 } from "../domain/product.js";
-import { parseOptionSetAggregate, validateProductOptionBinding } from "../domain/option-set.js";
+import {
+  parseOptionSetAggregate,
+  validateProductOptionBinding,
+  type OptionBindingRuleMode,
+} from "../domain/option-set.js";
 import type { CatalogResolvedSelectionRule } from "./ports/selection-validation-ports.js";
 const unavailable = (): never => {
   throw new CatalogError("CATALOG_UNAVAILABLE");
 };
 
-/** Current owner rule facts only; publication, scope and availability are separate prerequisites. */
+/**
+ * Current owner rule facts only; publication, scope and availability are separate prerequisites.
+ *
+ * WP-2423 (cart-unsellable-dishes): `rules: "Sale"` (the cart, the quote, the order) checks the
+ * limits, never the defaults guests start with, and a group whose every enabled choice is off for
+ * now is returned with no options and its minimum kept, so validation refuses that one dish
+ * (RULE_UNSATISFIED) instead of failing the whole read. The limits themselves must still fit the
+ * enabled, not archived, choices (counted as if all were offered); limits that do not fit even then
+ * are a setup error and still throw. The default (`Listing`) keeps every rule.
+ */
 export function resolveCurrentCatalogSelectionRules(
   value: unknown,
   scope?: Readonly<{
@@ -18,6 +31,9 @@ export function resolveCurrentCatalogSelectionRules(
     channelCode: string;
     observedAt: string;
   }>,
+  checked: Readonly<{ rules: Extract<OptionBindingRuleMode, "Listing" | "Sale"> }> = {
+    rules: "Listing",
+  },
 ): readonly CatalogResolvedSelectionRule[] {
   try {
     if (
@@ -44,7 +60,7 @@ export function resolveCurrentCatalogSelectionRules(
         return unavailable();
       const binding = parseProductOptionBinding(b.value),
         optionSet = parseOptionSetAggregate(s.value);
-      validateProductOptionBinding(binding, optionSet);
+      validateProductOptionBinding(binding, optionSet, checked.rules);
       if (
         scope &&
         (optionSet.brandReference !== scope.brandReference ||
@@ -67,14 +83,21 @@ export function resolveCurrentCatalogSelectionRules(
       const perOption = optionSet.draft.perOptionMaximumQuantity;
       if (perOption > 999) return unavailable();
       const minimum = binding.minimumSelectionOverride ?? optionSet.draft.minimumSelection;
-      const maximum = Math.min(
-        binding.maximumSelectionOverride ??
-          optionSet.draft.maximumSelection ??
-          active.length * perOption,
-        optionSet.draft.maximumTotalQuantity ?? active.length * perOption,
-        active.length * perOption,
-      );
+      const limit = (count: number) =>
+        Math.min(
+          binding.maximumSelectionOverride ?? optionSet.draft.maximumSelection ?? count * perOption,
+          optionSet.draft.maximumTotalQuantity ?? count * perOption,
+          count * perOption,
+        );
+      let maximum = limit(active.length);
       if (maximum > 99900 || active.length > 100) return unavailable();
+      // Sale: limits that fit the enabled choices but not those offered now. Only the choices off
+      // for now are missing, so the group keeps its limits and offers what is left (maybe none).
+      const offNow =
+        checked.rules === "Sale" &&
+        minimum > maximum &&
+        minimum <= limit(enabled.filter((o) => o.lifecycle !== "Archived").length);
+      if (offNow) maximum = Math.max(minimum, 1);
       return {
         binding,
         optionSet,

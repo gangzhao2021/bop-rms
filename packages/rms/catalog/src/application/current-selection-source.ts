@@ -197,12 +197,17 @@ export function createCurrentCatalogSelectionSource(
           s.catalogEligible !== true
         )
           return null;
-        const currentRules = resolveCurrentCatalogSelectionRules(facts.bindings, {
-          brandReference: fixed.brandReference,
-          sellableReference: requested.sellableReference,
-          channelCode: fixed.channelCode,
-          observedAt: requested.observedAt,
-        });
+        // WP-2423 (cart-unsellable-dishes): selling checks the guest's choices, not the defaults.
+        const currentRules = resolveCurrentCatalogSelectionRules(
+          facts.bindings,
+          {
+            brandReference: fixed.brandReference,
+            sellableReference: requested.sellableReference,
+            channelCode: fixed.channelCode,
+            observedAt: requested.observedAt,
+          },
+          { rules: "Sale" },
+        );
         const rules =
           p.optionRules === undefined
             ? currentRules

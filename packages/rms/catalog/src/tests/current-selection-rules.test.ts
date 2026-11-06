@@ -207,3 +207,65 @@ it("ignores unavailable required children only when their trigger is unreachable
   root.optionSet.draft.options[1].lifecycle = "Active";
   expect(() => resolveCurrentCatalogSelectionRules([root, child])).toThrow();
 });
+it("WP-2423 (cart-unsellable-dishes): selling ignores a default that is off now and keeps the choices offered", async () => {
+  const p = pair();
+  p.optionSet.draft.options[0].lifecycle = "Inactive";
+  // Listing (List it) still refuses it; selling offers the other choice.
+  expect(() => resolveCurrentCatalogSelectionRules([p])).toThrow();
+  const rules = resolveCurrentCatalogSelectionRules([p], undefined, { rules: "Sale" });
+  expect(rules[0]?.options.map((o) => o.optionReference)).toEqual([id(14)]);
+  expect(rules[0]).toMatchObject({ minimumQuantity: 1 });
+});
+it("WP-2423 (cart-unsellable-dishes): a required group with every choice off is a rule nothing satisfies, not an outage", async () => {
+  const p = pair();
+  p.optionSet.draft.options[0].lifecycle = "Inactive";
+  p.optionSet.draft.options[1].lifecycle = "Inactive";
+  const rules = resolveCurrentCatalogSelectionRules([p], undefined, { rules: "Sale" });
+  expect(rules[0]).toMatchObject({ minimumQuantity: 1, options: [] });
+  const validated = createCatalogSelectionValidationService({
+    snapshots: {
+      resolveCurrent: async ({ observedAt, ...input }) => ({
+        ...input,
+        availability: "Available",
+        freshnessStatus: "Fresh",
+        menuVersionReference: parseCatalogReference(id(80)),
+        productVersionReference: parseCatalogReference(id(81)),
+        catalogChannelCode: "CUSTOMER_PWA",
+        catalogOrderTypeCode: "PICKUP",
+        effectiveFrom: parseCatalogInstant(at),
+        effectiveUntil: null,
+        resolvedAt: observedAt,
+        rules,
+      }),
+    },
+  });
+  const result = await validated.validateSelection({
+    brandReference: id(1),
+    storeReference: id(2),
+    sourceChannel: "Web",
+    orderType: "Pickup",
+    sellableReference: id(3),
+    optionSelections: [{ optionReference: id(13), quantity: 1 }],
+    observedAt: at,
+  });
+  expect(result).toMatchObject({ status: "Rejected", reason: "OPTION_NOT_ENABLED" });
+  expect(
+    await validated.validateSelection({
+      brandReference: id(1),
+      storeReference: id(2),
+      sourceChannel: "Web",
+      orderType: "Pickup",
+      sellableReference: id(3),
+      optionSelections: [],
+      observedAt: at,
+    }),
+  ).toMatchObject({ status: "Rejected", reason: "RULE_UNSATISFIED" });
+});
+it("WP-2423 (cart-unsellable-dishes): limits the enabled choices cannot meet even when all offered stay a setup error", () => {
+  const p = pair();
+  p.binding.enabledOptionReferences = [id(13)];
+  p.binding.minimumSelectionOverride = 4 as never;
+  p.optionSet.draft.perOptionMaximumQuantity = 1;
+  p.optionSet.draft.allowRepeatedOption = false;
+  expect(() => resolveCurrentCatalogSelectionRules([p], undefined, { rules: "Sale" })).toThrow();
+});

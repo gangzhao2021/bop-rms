@@ -109,12 +109,25 @@ FROM rms_catalog.sku s
 JOIN rms_catalog.product_version p ON p.product_version_id=s.product_version_id AND p.product_id=s.product_id AND p.brand_id=s.brand_id
 WHERE s.brand_id=$1 AND s.sku_id=$2 AND s.product_version_id=$3
 AND s.created_at <= $5::timestamptz AND p.created_at <= $5::timestamptz AND p.updated_at <= $5::timestamptz`;
-/** Complete current binding facts; Draft labels are not menu publication or sale authority. */
+/**
+ * Complete current binding facts; Draft labels are not menu publication or sale authority.
+ *
+ * WP-2423 (cart-unsellable-dishes): `rules` says which binding rules a read enforces. `Listing`
+ * (default: List it and the menu review) refuses a stored default that is off now and names it;
+ * `Sale` (guest cart, quote, order) checks only the limits, so a default turned off for now never
+ * stops the dish being ordered with another choice.
+ */
 export function createPostgresCurrentOptionBindingsStore(
   runner: AvailabilityQueryTransactionRunner,
-  scope: Readonly<{ brandReference: string }>,
+  scope: Readonly<{ brandReference: string; rules?: "Listing" | "Sale" }>,
 ) {
-  const brand = parseCatalogReference(closed(scope, ["brandReference"]).brandReference);
+  const fixed = closed(
+    scope,
+    Object.hasOwn(scope, "rules") ? ["brandReference", "rules"] : ["brandReference"],
+  );
+  const brand = parseCatalogReference(fixed.brandReference);
+  const mode = fixed.rules === undefined ? "Listing" : fixed.rules;
+  if (mode !== "Listing" && mode !== "Sale") throw new CatalogError("CATALOG_INPUT_INVALID");
   return Object.freeze({
     async load(value: {
       readonly sellableReference: string;
@@ -169,7 +182,7 @@ export function createPostgresCurrentOptionBindingsStore(
               const pair = closed(value, ["binding", "optionSet"]);
               const binding = parseProductOptionBinding(pair.binding),
                 optionSet = parseOptionSetAggregate(pair.optionSet);
-              const rule = productOptionBindingRule(binding, optionSet);
+              const rule = productOptionBindingRule(binding, optionSet, mode);
               // The group and the binding as stored, so the caller can tell whether saving the
               // dish against the set's current version would fix it.
               if (rule !== null) throw new OptionBindingSourceError(rule, sku, binding);
