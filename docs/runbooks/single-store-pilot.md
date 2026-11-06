@@ -2471,7 +2471,30 @@ reference> --name demo-2`. It reads the Store's own default stock site as the se
 --migration-env .local/migrate-v14/migrate-v15.env --until <the same instant> --reason "…"
 --approved-by "Owner" --approval "<the approval wording>"` (dry run first with `--dry-run`).
    It moves the Store's synthetic launch gate and its own tax evidence (a new synthetic tax
-   version, both audited) and its files' common expiry; the Store's staff and roles have no end.
+   version, both audited) and its files' common expiry: the task queue, the entries of its staff
+   file (`internal-test-merchant.json`) that end then (any later end is kept and listed), and
+   the profile last; the Store's staff and roles in the database have no end. The files are
+   checked first: the Store must be served by `stores.json`, and each staff entry must be DEMO
+   staff on the installation's staff file or, at a TEST merchant's Store, its single Owner
+   `owner-<name>` (also on the installation's staff file); anyone else refuses
+   (`identity-not-synthetic`). The dry run prints the gate and tax status plus `rosterChanges`
+   and `retainedRosterEntries`.
+   **A TEST merchant's Store** (opened with `merchant`, its own Tenant and Brand) renews the same
+   way since v15 2026-11-06. The database half first proves, as the services' role, that its
+   Brand and Store are both named "… not production", that the Store was opened from nothing,
+   and that the merchant opening's own audit records (`BRAND_CREATED`, `STORE_OPENED`, reason
+   `MERCHANT_OPENED`, written through the tooling's `DEPLOYMENT` channel, never the Stores page)
+   name both under one operation, and that its staff file's `owner-<name>` is the Owner that
+   opening placed (its opener, an Active member whose relationship evidence is the opening,
+   assigned to the Store). Otherwise it refuses with `merchant-not-labelled-test`,
+   `merchant-not-opened-by-test-tooling` or `merchant-owner-not-placed-by-opening`; a Store
+   directory that `stores.json` does not serve refuses with `store-not-served`. The files are
+   read owner-only and in their exact written form, as the installation's renewal reads its own.
+   A dry run reports the gate and the tax as `DryRun`. The read check verifies the Store's
+   staff pauses and resumes of online ordering against their audit, as the services do; a
+   refusal names its cause (`store-operating-status-unreadable`, `live-gate-not-synthetic`,
+   `live-gate-input-invalid`, `live-gate-changed-try-again`) instead of
+   `database-check-failed`.
 
 ## Platform support staff
 
@@ -2623,12 +2646,27 @@ The database changes run as a dedicated NOLOGIN NOBYPASSRLS role
 privileges listed in `tooling/environment/pilot-internal-test-renew-database.mjs`.
 
 Then the files (validity only): `internal-test-profile.json` `binding.validUntil` and
-`taxConfigurationVersion` (the renewed tax version), every `actors[].validUntil` in
-`internal-test-merchant.json`, `validUntil` in each `internal-test-dining-table*.json`, and
+`taxConfigurationVersion` (the renewed tax version), the `actors[].validUntil` in
+`internal-test-merchant.json` of the DEMO staff and of each TEST merchant's Owner
+(`owner-<name>`), `validUntil` in each `internal-test-dining-table*.json`, and
 `effectiveUntil` plus `exceptionTaskPolicy.effectiveUntil` in `internal-test-task-queue.json`.
 Every value must equal the profile's current expiry (or already equal `--until` after an
 interrupted run); nothing else in any file changes. Historical copies (`*.v1-backup.json`,
 `*.before-*.json`) stay untouched.
+
+Besides the DEMO fixtures, the staff file may name only the TEST people the InternalTest tooling
+added; anyone else refuses everything (`identity-not-synthetic`). A TEST merchant's Owner
+(`owner-<name>`, added by `directory --merchant`) is accepted only when `stores.json` serves
+`stores/<name>/`, that owner-only directory is an InternalTest Store of the same database with
+its own tenant and Brand and exactly this Owner on its staff file, and in the database the same
+proof as the Store's own renewal holds (step 8 of opening a TEST Store); its refusals are
+`test-owner-merchant-not-labelled-test`, `test-owner-merchant-not-opened-by-test-tooling` and
+`test-owner-merchant-owner-not-placed-by-opening`.
+Their membership, Store assignment and role assignments have no end (opening a merchant writes
+none); the dry run lists them, and one ending at the installation's expiry refuses
+(`test-owner-validity-shares-expiry`). TEST platform support staff (`support-<n>`) must be named
+"TEST …" with the same end as in the file; they keep their own end and are listed as kept. The
+Store directories under `stores/` are not touched: step 5 renews them.
 
 It deliberately leaves alone: the Pickup capacity slots (the business worker's
 `pickupCapacitySchedule` loop creates them after deploy; it needs the api INSERT grants on
@@ -2682,8 +2720,9 @@ version until they restart: run the renewal inside a planned update window.
    and appends one line to `internal-test-renewal-log.jsonl`. If it stops part way, run the same
    command again; the database part reports `AlreadyRenewed` and the remaining files are
    finished.
-5. **Every Store in `stores.json`, with the same `--until`.** This command does not touch
-   `stores/`, so skipping this clears the root's alert and leaves each Store to stop at the old end:
+5. **Every Store in `stores.json`, with the same `--until`, in the order listed (DEMO-Brand Stores
+   and TEST merchants alike).** This command does not touch `stores/`, so skipping this clears the
+   root's alert and leaves each Store, and its staff sign-in, to stop at the old end:
    `pilot-internal-test-store-open.mjs renew /app/.local/pilot-v15/stores/<name> …`
    ([step 8 of opening a TEST Store](#opening-a-test-second-store-on-the-internal-test-installation)).
    A Pilot installation: `pilot-installation-issue prepare-renewal` → `sign` → `apply` with that

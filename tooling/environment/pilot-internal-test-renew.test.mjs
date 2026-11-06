@@ -352,6 +352,177 @@ test.each([
   expect(await snapshot()).toEqual(before);
 });
 
+/**
+ * v15 2026-11-06: the roster also holds a TEST merchant's Owner (added by
+ * `pilot-internal-test-store-open.mjs directory --merchant`, served from `stores/<name>/`) and a
+ * TEST platform support person (`pilot-internal-test-support.mjs add`, their own later end).
+ */
+const testMerchant = {
+  tenantReference: "01a1b000-1111-7aaa-8bbb-ccccdddd0010",
+  brandReference: "01a1b000-1111-7aaa-8bbb-ccccdddd0011",
+  storeReference: "01a1b000-1111-7aaa-8bbb-ccccdddd0012",
+};
+const OWNER = "01a1b000-1111-7aaa-8bbb-ccccdddd0001";
+const SUPPORT = "01a1b000-1111-7aaa-8bbb-ccccdddd0020";
+const SUPPORT_UNTIL = "2027-01-30T23:59:17.721Z";
+const ownerEntry = { selector: "owner-tea", actorReference: OWNER, validUntil: OLD };
+const supportEntry = { selector: "support-1", actorReference: SUPPORT, validUntil: SUPPORT_UNTIL };
+function withTestStaff(values = fixtures()) {
+  values["internal-test-merchant.json"].actors.push({ ...supportEntry }, { ...ownerEntry });
+  return values;
+}
+const storeFiles = () => ({
+  "installation.json": { ...fixtures()["installation.json"] },
+  "internal-test-profile.json": {
+    ...fixtures()["internal-test-profile.json"],
+    binding: {
+      ...fixtures()["internal-test-profile.json"].binding,
+      ...testMerchant,
+      publicStoreReference: "01a1b000-1111-7aaa-8bbb-ccccdddd0013",
+    },
+  },
+  "internal-test-merchant.json": {
+    schemaVersion: 2,
+    environment: "InternalTest",
+    database,
+    scope: testMerchant,
+    actors: [{ ...ownerEntry }],
+  },
+});
+async function installStore(name, files = storeFiles(), listed = [name]) {
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(join(directory, "stores", name), { recursive: true, mode: 0o700 });
+  await chmod(join(directory, "stores"), 0o700);
+  for (const [file, value] of Object.entries(files))
+    await writeFile(join(directory, "stores", name, file), JSON.stringify(value, null, 2) + "\n", {
+      mode: 0o600,
+    });
+  await writeFile(
+    join(directory, "stores.json"),
+    JSON.stringify(
+      { schemaVersion: 1, stores: listed.map((entry) => "stores/" + entry) },
+      null,
+      2,
+    ) + "\n",
+    { mode: 0o600 },
+  );
+}
+const storeSnapshot = async () => ({
+  list: await readFile(join(directory, "stores.json"), "utf8"),
+  roster: await readFile(join(directory, "stores/tea/internal-test-merchant.json"), "utf8"),
+  profile: await readFile(join(directory, "stores/tea/internal-test-profile.json"), "utf8"),
+});
+
+test("renews the TEST merchant's Owner with the DEMO staff and keeps later-ending support as it is", async () => {
+  await install(withTestStaff());
+  await installStore("tea");
+  const stores = await storeSnapshot();
+  const planned = await renewInternalTestInstallation(options({ dryRun: true }));
+  expect(planned.status).toBe("Planned");
+  expect(
+    planned.changes
+      .filter((change) => change.file === "internal-test-merchant.json")
+      .map((change) => change.path),
+  ).toEqual(["actors[0].validUntil", "actors[1].validUntil", "actors[3].validUntil"]);
+  expect(planned.retainedRosterEntries).toEqual([
+    { selector: "support-1", kind: "TestPlatformSupport", validUntil: SUPPORT_UNTIL },
+  ]);
+  // The database half verifies who they are (labels, rows) before anything moves.
+  expect(databaseCalls[0].testActors).toEqual([
+    {
+      kind: "TestPlatformSupport",
+      selector: "support-1",
+      actorReference: SUPPORT,
+      validUntil: SUPPORT_UNTIL,
+    },
+    {
+      kind: "TestMerchantOwner",
+      selector: "owner-tea",
+      actorReference: OWNER,
+      store: "stores/tea",
+      ...testMerchant,
+    },
+  ]);
+  const renewed = await renewInternalTestInstallation(options());
+  expect(renewed.status).toBe("Renewed");
+  const roster = JSON.parse(await readFile(join(directory, "internal-test-merchant.json"), "utf8"));
+  expect(roster.actors.map((actor) => [actor.selector, actor.validUntil])).toEqual([
+    ["staff", UNTIL],
+    ["kitchen", UNTIL],
+    ["support-1", SUPPORT_UNTIL],
+    ["owner-tea", UNTIL],
+  ]);
+  // The Store's own directory is its own renewal (`pilot-internal-test-store-open.mjs renew`).
+  expect(await storeSnapshot()).toEqual(stores);
+});
+
+test.each([
+  [
+    "a real-looking staff member beside the TEST staff",
+    (v) =>
+      v["internal-test-merchant.json"].actors.push({
+        selector: "manager",
+        actorReference: "01a1b000-1111-7aaa-8bbb-ccccdddd0099",
+        validUntil: OLD,
+      }),
+    () => installStore("tea"),
+    "identity-not-synthetic",
+  ],
+  [
+    "an Owner whose Store is not served",
+    () => undefined,
+    () => installStore("tea", storeFiles(), []),
+    "test-owner-store-not-served",
+  ],
+  [
+    "an Owner whose Store names someone else",
+    () => undefined,
+    () => {
+      const files = storeFiles();
+      files["internal-test-merchant.json"].actors[0].actorReference =
+        "01a1b000-1111-7aaa-8bbb-ccccdddd0098";
+      return installStore("tea", files);
+    },
+    "test-owner-not-in-store-roster",
+  ],
+  [
+    "an Owner of a Pilot Store",
+    () => undefined,
+    () => {
+      const files = storeFiles();
+      files["internal-test-profile.json"].environment = "Pilot";
+      return installStore("tea", files);
+    },
+    "not-internal-test",
+  ],
+  [
+    "an Owner of the installation's own Brand",
+    () => undefined,
+    () => {
+      const files = storeFiles();
+      files["internal-test-profile.json"].binding.brandReference = scope.brandReference;
+      files["internal-test-merchant.json"].scope.brandReference = scope.brandReference;
+      return installStore("tea", files);
+    },
+    "test-owner-not-own-merchant",
+  ],
+  [
+    "support staff with a fixture-shaped or non-v7 reference",
+    (v) => (v["internal-test-merchant.json"].actors[2].actorReference = "support-person"),
+    () => installStore("tea"),
+    "identity-not-synthetic",
+  ],
+])("refuses %s and changes nothing", async (_, change, store, reason) => {
+  const values = withTestStaff();
+  change(values);
+  await install(values);
+  await store();
+  const before = await snapshot();
+  await expect(renewInternalTestInstallation(options())).rejects.toMatchObject({ reason });
+  expect(databaseCalls).toEqual([]);
+  expect(await snapshot()).toEqual(before);
+});
+
 test.each([
   ["beyond 30 days", { until: new Date(NOW + 31 * DAY).toISOString() }, "until-beyond-30-days"],
   ["in the past", { until: "2026-10-17T00:00:00.000Z" }, "until-not-in-future"],

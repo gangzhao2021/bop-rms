@@ -59,6 +59,15 @@ export interface InternalTestLiveGateRenewalInput {
    * (synthetic gate id, codes and categories, the Tenant and Brand) is checked as for any Store.
    */
   readonly testStoreOpenedInProduct?: true;
+  /**
+   * WP-2423 DEC-MULTI-MERCHANT-ONE-INSTALLATION (InternalTest only, v15 2026-11-06): the Store
+   * belongs to a TEST merchant opened from nothing by the InternalTest tooling, which the caller
+   * confirmed (its Brand and Store named "… not production", its merchant-opening audit records,
+   * the Store served by the installation): its Tenant and Brand are ordinary references too.
+   * Requires `testStoreOpenedInProduct`. The gate itself is still checked as for any Store
+   * (`SYNTHETIC-…` id, Approved, only `SYNTHETIC_…` codes and categories).
+   */
+  readonly testMerchantOpened?: true;
 }
 export interface InternalTestLiveGateRenewal {
   readonly gateReference: string;
@@ -95,8 +104,10 @@ export async function renewInternalTestLiveGates(
   }[];
 }> {
   const opened = input.testStoreOpenedInProduct === true;
+  const merchant = opened && input.testMerchantOpened === true;
   if (
-    !SYNTHETIC.test(input.brandReference) ||
+    (input.testMerchantOpened !== undefined && !merchant) ||
+    !(SYNTHETIC.test(input.brandReference) || (merchant && UUID_V7.test(input.brandReference))) ||
     !(SYNTHETIC.test(input.storeReference) || (opened && UUID_V7.test(input.storeReference))) ||
     !instant(input.from) ||
     !instant(input.to) ||
@@ -147,7 +158,7 @@ export async function renewInternalTestLiveGates(
       typeof head.gate_id !== "string" ||
       !head.gate_id.startsWith("SYNTHETIC-") ||
       typeof head.tenant_id !== "string" ||
-      !SYNTHETIC.test(head.tenant_id) ||
+      !(SYNTHETIC.test(head.tenant_id) || (merchant && UUID_V7.test(head.tenant_id))) ||
       typeof head.gate_reference !== "string" ||
       !(SYNTHETIC.test(head.gate_reference) || (opened && UUID_V7.test(head.gate_reference))) ||
       head.state !== "Approved" ||

@@ -13,6 +13,7 @@ import {
 import {
   InternalTestStoreSetupError,
   internalTestStoreLabel,
+  proveInternalTestMerchant,
 } from "./pilot-internal-test-store-setup.mjs";
 
 /**
@@ -31,6 +32,7 @@ import {
  * Owner's registration and professional review evidence (External Evidence gate).
  */
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const SYNTHETIC = /^[0-9a-f]{8}-0000-7000-8000-[0-9a-f]{12}$/u;
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/u;
 const QUALIFIED = /^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*(?:\([a-z_, ]*\))?$/u;
 const unavailable = (reason, cause) => {
@@ -304,10 +306,27 @@ export async function createInternalTestStoreTax(
  */
 export async function renewInternalTestStoreTax(
   client,
-  { database, role, readRole, profile, menu, from, to, now, evidence, dryRun, nextReference },
+  {
+    database,
+    role,
+    readRole,
+    profile,
+    menu,
+    from,
+    to,
+    now,
+    evidence,
+    dryRun,
+    nextReference,
+    /** As in `renewInternalTestStore`: a TEST merchant's served Store, proven from the files. */
+    servedTestMerchant = false,
+    ownerActorReference,
+  },
 ) {
   if (profile?.storeTaxConfiguration === undefined) return Object.freeze({ status: "None" });
   if (!IDENTIFIER.test(role) || !IDENTIFIER.test(readRole)) return unavailable("input-invalid");
+  const merchant = !SYNTHETIC.test(profile.binding?.brandReference ?? "");
+  if (merchant && servedTestMerchant !== true) return unavailable("merchant-not-served");
   const at = now();
   const current = await policyOf(profile, menu, database);
   const nextVersion = {
@@ -328,6 +347,13 @@ export async function renewInternalTestStoreTax(
   try {
     if ((await client.query("SELECT current_database() db")).rows[0]?.db !== database)
       unavailable("database-mismatch");
+    if (merchant)
+      await proveInternalTestMerchant(client, {
+        readRole,
+        brandReference: profile.binding.brandReference,
+        storeReference: profile.binding.storeReference,
+        ownerActorReference,
+      });
     await client.query(`SET LOCAL ROLE "${role}"`);
     const tx = { query: (sql, values = []) => client.query(sql, [...values]) };
     let tax;
@@ -358,6 +384,7 @@ export async function renewInternalTestStoreTax(
             operatorAccount: evidence.operatorAccount,
           },
           nextReference,
+          ...(merchant ? { testMerchantOpened: true } : {}),
         },
         (transaction, record) => appendAuditRecordInTransaction(transaction, record),
       );
@@ -374,7 +401,10 @@ export async function renewInternalTestStoreTax(
     if (!(await servicesRead(client, tx, { readRole, policy: next, at })))
       unavailable("read-check-failed");
     await client.query(dryRun ? "ROLLBACK" : "COMMIT");
-    return Object.freeze({ status: "Renewed", taxConfigurationVersion: nextVersion });
+    return Object.freeze({
+      status: dryRun ? "DryRun" : "Renewed",
+      taxConfigurationVersion: nextVersion,
+    });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof InternalTestStoreSetupError) throw error;

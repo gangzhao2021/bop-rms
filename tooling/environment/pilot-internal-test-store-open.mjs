@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import console from "node:console";
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import {
@@ -45,8 +45,11 @@ import {
  *               same first day; a rerun answers AlreadyRecorded, a different record is refused and
  *               nothing is written. The directory given is the Store's (`…/stores/<name>`);
  *   renew     — after the installation's own renewal: the Store's synthetic launch gate and its
- *               own tax evidence (`tax`; database) and its files' common expiry move to the same
- *               `--until` (the Store's directory).
+ *               own tax evidence (`tax`; database) and its files' common expiry (task queue, its
+ *               staff file's entries at that expiry, profile) move to the same `--until` (the
+ *               Store's directory). A TEST merchant's Store too (v15 2026-11-06), once proven:
+ *               served by `stores.json`, its own Tenant and Brand, both labelled "not production"
+ *               and opened by `merchant`.
  *
  * Refuses outside development mode or an InternalTest installation. Prints fixed codes only.
  */
@@ -673,6 +676,117 @@ export async function recordSettlementCoverage({ directory, first, base }) {
   return answer("AlreadyRecorded");
 }
 
+const SCOPE_KEYS = ["tenantReference", "brandReference", "storeReference"];
+const SYNTHETIC = /^[0-9a-f]{8}-0000-7000-8000-[0-9a-f]{12}$/u;
+const UUID_V7_REFERENCE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+/**
+ * v15 2026-11-06: the file half of a served Store's `renew`, checked before the database is
+ * touched. The Store directory must be `stores/<name>` below an InternalTest installation of the
+ * same database whose `stores.json` serves it. A Store whose Brand is not the installation's is a
+ * TEST merchant's (own UUIDv7 Tenant and Brand; the database half proves its labels and opening).
+ * Its staff file (`internal-test-merchant.json`) is renewed with the same proofs as the
+ * installation's: every entry is either DEMO staff the installation's staff file also names, or
+ * (a TEST merchant's Store only) its single Owner `owner-<name>`, also on the installation's staff
+ * file; anyone else refuses. Entries ending at the common expiry move to `until`; a later (or
+ * other) own end is kept and reported.
+ */
+export async function planServedStoreRenewal({ storeDirectory, from, until }) {
+  const { rosterActorKind, privateDirectory, readPrivateFile, parseExact } =
+    await import("./pilot-internal-test-renew.mjs");
+  const own = await realpath(storeDirectory).catch(() => unavailable("store-directory-missing"));
+  const name = basename(own);
+  const root = dirname(dirname(own));
+  if (basename(dirname(own)) !== "stores") return unavailable("store-not-served");
+  // Owner-only directories and files in their exact written form, as the installation's renewal.
+  for (const directory of [root, dirname(own), own]) await privateDirectory(directory);
+  const json = async (base, file) => parseExact(await readPrivateFile(join(base, file))).value;
+  const list = await json(root, "stores.json");
+  if (
+    list?.schemaVersion !== 1 ||
+    !Array.isArray(list.stores) ||
+    !list.stores.includes("stores/" + name)
+  )
+    return unavailable("store-not-served");
+  const [rootInstallation, rootProfile, rootRoster, installation, profile, roster] =
+    await Promise.all([
+      json(root, "installation.json"),
+      json(root, "internal-test-profile.json"),
+      json(root, "internal-test-merchant.json"),
+      json(own, "installation.json"),
+      json(own, "internal-test-profile.json"),
+      json(own, "internal-test-merchant.json"),
+    ]);
+  for (const value of [rootInstallation, rootProfile, rootRoster, installation, profile, roster])
+    if (value?.environment !== "InternalTest") return unavailable("not-internal-test");
+  const database = installation.database;
+  if (
+    [rootInstallation, rootProfile, rootRoster, profile, roster].some(
+      (value) => value.database !== database,
+    )
+  )
+    return unavailable("database-mismatch");
+  const binding = profile.binding ?? {};
+  if (profile.binding?.validUntil !== from) return unavailable("window-mismatch");
+  const merchant = binding.brandReference !== rootProfile.binding?.brandReference;
+  if (
+    merchant &&
+    (!UUID_V7_REFERENCE.test(binding.brandReference ?? "") ||
+      SYNTHETIC.test(binding.brandReference) ||
+      !UUID_V7_REFERENCE.test(binding.tenantReference ?? "") ||
+      binding.tenantReference === rootProfile.binding?.tenantReference)
+  )
+    return unavailable("store-not-own-merchant");
+  if (
+    roster.schemaVersion !== 2 ||
+    !Array.isArray(roster.actors) ||
+    roster.actors.length < 1 ||
+    roster.actors.length > 16 ||
+    SCOPE_KEYS.some((key) => roster.scope?.[key] !== binding[key])
+  )
+    return unavailable("roster-invalid");
+  const listed = (entry) =>
+    Array.isArray(rootRoster.actors) &&
+    rootRoster.actors.some(
+      (value) =>
+        value?.selector === entry.selector && value?.actorReference === entry.actorReference,
+    );
+  const changes = [],
+    retained = [];
+  const actors = roster.actors.map((entry, index) => {
+    const kind = rosterActorKind(entry);
+    const proven =
+      listed(entry) &&
+      (kind === "Demo" ||
+        (kind === "TestMerchantOwner" &&
+          merchant &&
+          entry.selector === "owner-" + name &&
+          roster.actors.length === 1));
+    if (!proven) return unavailable("identity-not-synthetic");
+    if (entry.validUntil === from) {
+      changes.push({
+        path: `actors[${index}].validUntil`,
+        selector: entry.selector,
+        from,
+        to: until,
+      });
+      return { ...entry, validUntil: until };
+    }
+    if (entry.validUntil !== until)
+      retained.push({ selector: entry.selector, kind, validUntil: entry.validUntil });
+    return entry;
+  });
+  return Object.freeze({
+    store: "stores/" + name,
+    testMerchant: merchant,
+    // The database half proves this is the Owner the merchant opening placed.
+    ownerActorReference: merchant ? roster.actors[0].actorReference : undefined,
+    roster: changes.length === 0 ? null : { ...roster, actors },
+    rosterChanges: changes,
+    retainedRosterEntries: retained,
+  });
+}
+
 async function renew(options) {
   const database = await import("./pilot-internal-test-renew-database.mjs");
   const store = await import("./pilot-internal-test-store-setup.mjs");
@@ -685,6 +799,12 @@ async function renew(options) {
     unavailable("not-internal-test");
   if (installation.database !== options.expectedDatabaseName) unavailable("database-mismatch");
   const from = profile.binding.validUntil;
+  // The files are proven before the database is touched.
+  const plan = await planServedStoreRenewal({
+    storeDirectory: options.directory,
+    from,
+    until: options.until,
+  });
   const client = await database.connectRenewalDatabase(
     options.envFile,
     options.expectedDatabaseName,
@@ -711,6 +831,8 @@ async function renew(options) {
       },
       dryRun: options.dryRun,
       nextReference: () => uuidV7(),
+      servedTestMerchant: plan.testMerchant,
+      ownerActorReference: plan.ownerActorReference,
     });
     // Its own tax evidence (`tax`), when it has its own configuration.
     const tax = await import("./pilot-internal-test-store-tax.mjs");
@@ -735,12 +857,20 @@ async function renew(options) {
       },
       dryRun: options.dryRun,
       nextReference: () => uuidV7(),
+      servedTestMerchant: plan.testMerchant,
+      ownerActorReference: plan.ownerActorReference,
     });
   } finally {
     await client.end().catch(() => undefined);
   }
-  result = { ...result, tax: taxRenewal.status };
-  if (options.dryRun) return result;
+  result = {
+    ...result,
+    tax: taxRenewal.status,
+    store: plan.store,
+    rosterChanges: plan.rosterChanges,
+    retainedRosterEntries: plan.retainedRosterEntries,
+  };
+  if (options.dryRun) return { ...result, from, to: options.until };
   // Files, the profile last: only the common expiry moves.
   const move = (value) => (value === from ? options.until : value);
   const nextQueue = {
@@ -764,6 +894,8 @@ async function renew(options) {
   };
   for (const [name, value] of [
     ["internal-test-task-queue.json", nextQueue],
+    // Its staff sign-in follows the window too (only the entries at the common expiry).
+    ...(plan.roster === null ? [] : [["internal-test-merchant.json", plan.roster]]),
     ["internal-test-profile.json", nextProfile],
   ]) {
     const file = join(options.directory, name);

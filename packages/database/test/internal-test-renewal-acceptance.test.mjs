@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import pg from "pg";
 import { it, vi } from "vitest";
+import {
+  merchantOpeningReferences,
+  recordMerchantOpening,
+} from "../../../apps/api/dist/merchant-opening.js";
 import { renewInternalTestDatabase } from "../../../tooling/environment/pilot-internal-test-renew-database.mjs";
 import { createInternalPricingPolicy } from "../../../tooling/environment/pilot-pricing-policy.mjs";
 import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
@@ -161,6 +165,81 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
         `GRANT SELECT,UPDATE ON TABLE bop_membership.membership,bop_permission.role,rms_pricing.tax_configuration TO "${renewalRoleName}"`,
       );
 
+      // v15 2026-11-06: a TEST merchant opened from nothing by the TEST tooling's merchant
+      // opening (its own Brand and Store, both "… - not production", as the services' role)
+      // whose Owner holds rows without an end, and TEST support staff.
+      const owner = "01a1b000-1111-7aaa-8bbb-ccccdddd0001",
+        support = "01a1b000-1111-7aaa-8bbb-ccccdddd0020",
+        supportUntil = iso(now + 80 * DAY);
+      const testRef = (n) => `01a1b000-1111-7aaa-8bbb-cccc${n.toString(16).padStart(8, "0")}`;
+      const opened = merchantOpeningReferences(testRef(0x30));
+      await q("BEGIN");
+      try {
+        await q("SET LOCAL ROLE " + api);
+        await recordMerchantOpening(admin, {
+          command: {
+            operationReference: testRef(0x30),
+            ownerActorReference: owner,
+            brandCode: "TEAT",
+            brandName: "Half Sugar Tea TEST - not production",
+            storeCode: "MAIN",
+            storeName: "Half Sugar Tea TEST Main - not production",
+            timeZone: "America/Toronto",
+            locale: "en-CA",
+          },
+          openedByActorReference: testRef(0x31),
+          sourceChannel: "DEPLOYMENT",
+          openedAt: createdAt,
+        });
+        await q("COMMIT");
+      } catch (error) {
+        await q("ROLLBACK");
+        throw error;
+      }
+      const testBrand = opened.brandReference,
+        testStore = opened.storeReference,
+        ownerMembership = opened.membershipReference,
+        ownerAssignment = opened.storeAssignmentReference;
+      // Its Owner's Store role, as role provisioning gives it (no end).
+      await q(
+        "INSERT INTO bop_permission.role VALUES ($1,$2,$3,'store_owner','Active',$4,NULL,1,$4,$4)",
+        [testRef(0x103), testBrand, testStore, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_permission.role_assignment VALUES ($1,$2,$3,$4,$5,$6,$7,'Active',$8,NULL,1,$8,$8)",
+        [
+          testRef(0x104),
+          testRef(0x103),
+          ownerMembership,
+          ownerAssignment,
+          owner,
+          testBrand,
+          testStore,
+          createdAt,
+        ],
+      );
+      await q(
+        "INSERT INTO bop_permission.platform_support_person (actor_id,version,display_name,lifecycle,actions,effective_until,recorded_by_reason,recorded_at) VALUES ($1,1,'TEST Support Sam','Active',ARRAY['platform.support.view'],$2,'acceptance',$3)",
+        [support, supportUntil, createdAt],
+      );
+      const testActors = [
+        {
+          kind: "TestPlatformSupport",
+          selector: "support-1",
+          actorReference: support,
+          validUntil: supportUntil,
+        },
+        {
+          kind: "TestMerchantOwner",
+          selector: "owner-tea",
+          actorReference: owner,
+          store: "stores/tea",
+          tenantReference: opened.tenantReference,
+          brandReference: testBrand,
+          storeReference: testStore,
+        },
+      ];
+
       const evidence = {
         renewalReference: "01a14000-0000-7000-8000-000000000001",
         approvedBy: "Test Owner",
@@ -179,6 +258,7 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
           now: Date.now(),
           evidence,
           dryRun: false,
+          testActors,
           ...extra,
         });
       const state = async () => ({
@@ -233,6 +313,116 @@ it("renews only the synthetic DEMO facts, refuses real rows, audits and is idemp
       assert.equal(accepted(planned.checks.history.before), true);
       assert.deepEqual(planned.checks.history.after, planned.checks.history.before);
       assert.deepEqual(await state(), initial);
+      // The TEST people are proven and reported; their rows have no end and nothing moves.
+      assert.deepEqual(planned.testActors, [
+        {
+          kind: "TestPlatformSupport",
+          selector: "support-1",
+          actorReference: support,
+          lifecycle: "Active",
+          effectiveUntil: supportUntil,
+        },
+        {
+          kind: "TestMerchantOwner",
+          selector: "owner-tea",
+          actorReference: owner,
+          store: "stores/tea",
+          brandReference: testBrand,
+          storeReference: testStore,
+          rows: [
+            {
+              targetType: "Membership",
+              targetId: ownerMembership,
+              lifecycle: "Active",
+              effectiveUntil: null,
+            },
+            {
+              targetType: "RoleAssignment",
+              targetId: testRef(0x104),
+              lifecycle: "Active",
+              effectiveUntil: null,
+            },
+            {
+              targetType: "StoreAssignment",
+              targetId: ownerAssignment,
+              lifecycle: "Active",
+              effectiveUntil: null,
+            },
+          ],
+        },
+      ]);
+      assert.equal(
+        planned.membership.some((change) => change.targetId === ownerMembership),
+        false,
+      );
+
+      // A TEST person that is not what the staff file claims stops everything.
+      // A lookalike: labelled, opened from nothing, its Owner placed, but never opened by the TEST
+      // tooling's merchant opening (no opening audit pair), so it proves nothing.
+      const fakeBrand = testRef(0x200),
+        fakeStore = testRef(0x201);
+      await q(
+        "INSERT INTO bop_tenant.brand(brand_id,code,display_name,default_locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,'FAKE','Lookalike TEST - not production','en-CA','CAD','Active',1,$2,$2)",
+        [fakeBrand, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_tenant.store(store_id,brand_id,code,display_name,time_zone,locale,currency_code,lifecycle,version,created_at,updated_at) VALUES ($1,$2,'MAIN','Lookalike TEST Main - not production','America/Toronto','en-CA','CAD','Active',1,$3,$3)",
+        [fakeStore, fakeBrand, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_membership.membership VALUES ($1,$2,$3,$4,'Active',$5,NULL,1,$5,$5)",
+        [testRef(0x202), owner, fakeBrand, testRef(0x205), createdAt],
+      );
+      await q(
+        "INSERT INTO bop_membership.store_assignment VALUES ($1,$2,$3,$4,$5,'Active',$6,NULL,1,$6,$6)",
+        [testRef(0x203), testRef(0x202), owner, fakeBrand, fakeStore, createdAt],
+      );
+      await q(
+        "INSERT INTO bop_tenant.store_opening(opening_id,brand_id,store_id,opened_from_store_id,actor_id,membership_id,store_assignment_id,code,display_name,time_zone,locale,intent_digest,audit_id,opened_at) VALUES ($1,$2,$3,NULL,$4,$5,$6,'MAIN','Lookalike TEST Main - not production','America/Toronto','en-CA',$7,$8,$9)",
+        [
+          fakeStore,
+          fakeBrand,
+          fakeStore,
+          owner,
+          testRef(0x202),
+          testRef(0x203),
+          "sha256:" + "b".repeat(64),
+          testRef(0x206),
+          createdAt,
+        ],
+      );
+      const withLookalike = await state();
+      const ownerOf = (extra) => [testActors[0], { ...testActors[1], ...extra }];
+      await assert.rejects(
+        renew({ testActors: ownerOf({ brandReference: fakeBrand, storeReference: fakeStore }) }),
+        { reason: "test-owner-merchant-not-opened-by-test-tooling" },
+      );
+      // Someone the opening did not place there is not its Owner.
+      await assert.rejects(renew({ testActors: ownerOf({ actorReference: realLooking }) }), {
+        reason: "test-owner-merchant-owner-not-placed-by-opening",
+      });
+      await q("UPDATE bop_membership.membership SET effective_until=$2 WHERE membership_id=$1", [
+        ownerMembership,
+        old,
+      ]);
+      await assert.rejects(renew(), { reason: "test-owner-validity-shares-expiry" });
+      await q("UPDATE bop_membership.membership SET effective_until=NULL WHERE membership_id=$1", [
+        ownerMembership,
+      ]);
+      await assert.rejects(
+        renew({ testActors: [{ ...testActors[0], validUntil: until }, testActors[1]] }),
+        { reason: "test-support-window-mismatch" },
+      );
+      await q(
+        "INSERT INTO bop_permission.platform_support_person (actor_id,version,display_name,lifecycle,actions,effective_until,recorded_by_reason,recorded_at) VALUES ($1,2,'Sam Support','Active',ARRAY['platform.support.view'],$2,'acceptance',$3)",
+        [support, supportUntil, createdAt],
+      );
+      await assert.rejects(renew(), { reason: "test-support-not-labelled" });
+      await q(
+        "INSERT INTO bop_permission.platform_support_person (actor_id,version,display_name,lifecycle,actions,effective_until,recorded_by_reason,recorded_at) VALUES ($1,3,'TEST Support Sam','Active',ARRAY['platform.support.view'],$2,'acceptance',$3)",
+        [support, supportUntil, createdAt],
+      );
+      assert.deepEqual(await state(), withLookalike);
 
       // Refusals: a real-looking member or a real role with the same expiry stops everything.
       await q("INSERT INTO bop_membership.membership VALUES ($1,$2,$3,$4,'Active',$5,$6,1,$5,$5)", [
