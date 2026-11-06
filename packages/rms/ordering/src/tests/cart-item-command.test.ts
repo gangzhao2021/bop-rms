@@ -579,11 +579,53 @@ describe("Cart Item Add / Update / Remove commands", () => {
       code: "CART_PERMISSION_DENIED",
     });
     expect(blind.operations()).toBe(0);
-    // Changing it stays the adder's, gone or not.
-    const edit = fixture({ aggregate: diningCart, session: remover, adders: { standing } });
-    await expect(
-      edit.service.update({ ...remove, quantity: 2, optionSelections: [], customerNote: null }),
-    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+    // M36: a left phone's line is the table's: anyone at the table may change it too, attributed
+    // to the editor; the adder recorded on the line stays.
+    const change = { ...remove, quantity: 2, optionSelections: [], customerNote: null };
+    const noted = cart({
+      orderType: "DineIn",
+      diningSessionReference: ids.diningSession as never,
+      items: [{ ...otherItem, customerNote: "No peanuts" }] as never,
+    });
+    const edit = fixture({ aggregate: noted, session: remover, adders: { standing } });
+    await expect(edit.service.update(change)).resolves.toMatchObject({
+      status: "Applied",
+      aggregate: {
+        aggregateVersion: 2,
+        // The note the editor could not see is kept, never cleared.
+        items: [
+          { quantity: 2, addedByParticipantReference: ids.participant, customerNote: "No peanuts" },
+        ],
+      },
+    });
+    expect(edit.operation(ids.operation)?.guestSessionReference).toBe(ids.otherSession);
+    // Back at the table: a stale view; not checkable: try again; nothing written either way.
+    const editBack = fixture({
+      aggregate: diningCart,
+      session: remover,
+      adders: {
+        standing: async () => [{ participantReference: ids.participant, standing: "AtTable" }],
+      },
+    });
+    await expect(editBack.service.update(change)).rejects.toMatchObject({
+      code: "CART_VERSION_CONFLICT",
+    });
+    expect(editBack.operations()).toBe(0);
+    const editUnknown = fixture({
+      aggregate: diningCart,
+      session: remover,
+      adders: {
+        standing: async () => [{ participantReference: ids.participant, standing: "Unknown" }],
+      },
+    });
+    await expect(editUnknown.service.update(change)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    expect(editUnknown.operations()).toBe(0);
+    const editBlind = fixture({ aggregate: diningCart, session: remover });
+    await expect(editBlind.service.update(change)).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
     // A pickup cart never asks.
     const pickupStanding = vi.fn(async () => [
       { participantReference: ids.participant, standing: "Gone" },
@@ -596,6 +638,10 @@ describe("Cart Item Add / Update / Remove commands", () => {
     await expect(pickup.service.remove(remove)).rejects.toMatchObject({
       code: "CART_PERMISSION_DENIED",
     });
+    // Nor for a change (pickup carts have no participants: never the Gone-adder path).
+    await expect(
+      pickup.service.update({ ...remove, quantity: 2, optionSelections: [], customerNote: null }),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
     expect(pickupStanding).not.toHaveBeenCalled();
   });
 

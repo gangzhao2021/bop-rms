@@ -721,8 +721,17 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         (candidate) => candidate.cartItemReference === cartItemReference,
       );
       if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
-      if (!canMutateItem(item, current.aggregate, current.session))
-        throw new CartError("CART_PERMISSION_DENIED");
+      const ownLine = canMutateItem(item, current.aggregate, current.session);
+      if (!ownLine) {
+        // WP-2423 M36: a line whose phone has left the table is the table's: anyone at the table
+        // may change it, as they may remove it (the same three-valued Identity check). The line
+        // keeps its adder; the operation and audit name the editor. A pickup cart has no
+        // participants, so it never reaches this path.
+        const adder = await adderGoneStanding(ports, current.aggregate, item, requestedAt);
+        if (adder === "AtTable") throw new CartError("CART_VERSION_CONFLICT");
+        if (adder === "Unknown") throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+        if (adder !== "Removable") throw new CartError("CART_PERMISSION_DENIED");
+      }
       const selectionEvidence = await validatedCatalogEvidence(
         ports.catalog,
         current.aggregate,
@@ -736,7 +745,9 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         ...item,
         quantity,
         optionSelections,
-        customerNote,
+        // M36: another phone never sees the left guest's note (it may say "no peanuts"), so its
+        // change keeps the note as it is instead of clearing it.
+        customerNote: ownLine ? customerNote : item.customerNote,
         catalogSelectionEvidence: selectionEvidence,
       });
       const aggregate = parseCartAggregate({
