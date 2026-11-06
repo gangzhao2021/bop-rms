@@ -503,11 +503,16 @@ export async function startInternalCustomerServer({
           });
           if (store === null) return storeNotFound(res);
           port = store.port;
-        } catch {
+        } catch (error) {
           return res
             .status(503)
             .set("Cache-Control", "no-store")
-            .json({ code: "INTERNAL_API_UNAVAILABLE" });
+            .json({
+              code:
+                error?.message === "CUSTOMER_STORE_UNAVAILABLE"
+                  ? "CUSTOMER_STORE_UNAVAILABLE"
+                  : "INTERNAL_API_UNAVAILABLE",
+            });
         }
       }
       const upstream = request(

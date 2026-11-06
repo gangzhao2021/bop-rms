@@ -110,3 +110,42 @@ it("Stores of one Tenant still fall back to the installation's first Store", asy
   expect(await storeOf(menu(ref(999)))).toBe(first);
   expect(await storeOf(entry(ref(999)))).toBe(first);
 });
+
+// M02 (v15 07b7a1b7): a reload replays the scan that started no visit yet; it must reach the
+// Store that was scanned, never the installation's first one.
+const token = (publicStoreReference) =>
+  "x." + Buffer.from(JSON.stringify({ publicStoreReference })).toString("base64url") + ".y";
+const resume = (cookie) => ({
+  method: "POST",
+  url: "/bff/customer/entry",
+  body: Buffer.from(JSON.stringify({ resume: true, intent: "Join" })),
+  ...(cookie === undefined ? {} : { cookie }),
+});
+
+it("M02: a replayed scan goes to the scanned Store; without one, to no merchant", async () => {
+  const a = store(1, 1),
+    b = store(2, 2);
+  const storeOf = routing([a, b]);
+  expect(await storeOf(resume("x=1; __Secure-bop-scan=" + token(b.publicStoreReference)))).toBe(b);
+  // The guest's Session cookie names no scan; a forged or doubled scan cookie names no Store.
+  expect(await storeOf(resume(cookieOf(credential)))).toBeNull();
+  expect(await storeOf(resume())).toBeNull();
+  expect(await storeOf(resume("__Secure-bop-scan=" + token("not-a-reference")))).toBeNull();
+  const twice = "__Secure-bop-scan=" + token(b.publicStoreReference);
+  expect(await storeOf(resume(twice + "; " + twice))).toBeNull();
+});
+
+it("M02: a scan of a Store not served now is unavailable, never another Store (one Tenant too)", async () => {
+  // One Tenant, several Stores: anything unowned goes to the first Store, but a waiting scan of a
+  // Store that failed to start must not (the first Store refuses the code and the scan is lost).
+  const a = store(1, 1),
+    b = store(2, 1);
+  const storeOf = routing([a, b]);
+  const down = "__Secure-bop-scan=" + token(ref(103));
+  await expect(storeOf(resume(down))).rejects.toThrow("CUSTOMER_STORE_UNAVAILABLE");
+  expect(await storeOf(resume("__Secure-bop-scan=" + token(b.publicStoreReference)))).toBe(b);
+  // No waiting scan: the first Store answers as one Store would (asks the guest to scan).
+  expect(await storeOf(resume())).toBe(a);
+  // A scan in the body still goes by its own code.
+  expect(await storeOf({ ...entry(b.publicStoreReference), cookie: down })).toBe(b);
+});

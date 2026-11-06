@@ -239,16 +239,55 @@ function validCompactFraming(value: string): boolean {
   return bytes.length === 64 && bytes.toString("base64url") === signature;
 }
 
-function parseBody(value: unknown): {
-  readonly qrToken: string;
-  readonly intent: CustomerEntryIntent | undefined;
-} {
-  const body = closedRecord(
-    value,
-    value !== null && typeof value === "object" && Object.hasOwn(value, "intent")
-      ? ["qrToken", "intent"]
-      : ["qrToken"],
-  );
+/**
+ * M02 (v15 07b7a1b7): the code a guest scanned that started no visit yet (a table not open, a
+ * closed Store), so a reload or "I've been seated" asks the same Store about the same table instead
+ * of losing where the guest is. It is the code the guest already holds: never in the address bar,
+ * Web Storage or script, and sent only to this route.
+ */
+export const scanCookieName = "__Secure-bop-scan";
+const scanCookieAttributes = `Path=${entryRoute}; Secure; HttpOnly; SameSite=Strict`;
+export const scanCookieMaxAgeSeconds = 1800;
+const rememberScan = (qrToken: string) =>
+  `${scanCookieName}=${qrToken}; Max-Age=${scanCookieMaxAgeSeconds}; ${scanCookieAttributes}`;
+const forgetScan = `${scanCookieName}=; Max-Age=0; ${scanCookieAttributes}`;
+
+/** The one well-formed scan cookie this browser sent, or null. */
+export function scannedCode(header: unknown): string | null {
+  if (typeof header !== "string" || header.length > 8192) return null;
+  const values = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(scanCookieName + "="))
+    .map((part) => part.slice(scanCookieName.length + 1));
+  const [value] = values;
+  return values.length === 1 &&
+    value !== undefined &&
+    value.length <= 2048 &&
+    validCompactFraming(value)
+    ? value
+    : null;
+}
+
+type EntryBody =
+  | { readonly qrToken: string; readonly intent: CustomerEntryIntent | undefined }
+  | { readonly resume: true; readonly intent: CustomerEntryIntent | undefined };
+
+function parseIntent(value: unknown): CustomerEntryIntent | undefined {
+  if (value !== undefined && value !== "Start" && value !== "Join" && value !== "NewParty")
+    throw new TypeError("invalid entry request");
+  return value as CustomerEntryIntent | undefined;
+}
+
+function parseBody(value: unknown): EntryBody {
+  const withIntent = value !== null && typeof value === "object" && Object.hasOwn(value, "intent");
+  // M02: `{resume:true}`: the code is this browser's scan cookie, not the body.
+  if (value !== null && typeof value === "object" && Object.hasOwn(value, "resume")) {
+    const body = closedRecord(value, withIntent ? ["resume", "intent"] : ["resume"]);
+    if (body.resume !== true) throw new TypeError("invalid entry request");
+    return { resume: true, intent: parseIntent(body.intent) };
+  }
+  const body = closedRecord(value, withIntent ? ["qrToken", "intent"] : ["qrToken"]);
   if (
     typeof body.qrToken !== "string" ||
     body.qrToken.length < 1 ||
@@ -618,12 +657,32 @@ export class CustomerEntryHandler {
 
       let qrToken: string;
       let intent: CustomerEntryIntent | undefined;
+      const remembered = scannedCode(request.get("cookie"));
       try {
-        ({ qrToken, intent } = parseBody(request.body));
+        const body = parseBody(request.body);
+        intent = body.intent;
+        if ("resume" in body) {
+          // Nothing scanned here that is still waiting: the app asks the guest to scan.
+          if (remembered === null) {
+            response.status(404).json({
+              schemaVersion: 1,
+              code: "entry_scan_missing",
+              messageKey: "customer.entry.scan_missing",
+              recovery: { action: "Rescan", storeSelection: "Hidden" },
+            });
+            return;
+          }
+          qrToken = remembered;
+        } else qrToken = body.qrToken;
       } catch {
         sendError(response, "entry_request_invalid");
         return;
       }
+      // An answer that starts no visit remembers the code; a visit or a retired code forgets it.
+      const remember = () => response.setHeader("Set-Cookie", rememberScan(qrToken));
+      const forget = () => {
+        if (remembered !== null) response.append("Set-Cookie", forgetScan);
+      };
 
       try {
         const requestedAt = parseCanonicalInstant(this.#now());
@@ -685,6 +744,7 @@ export class CustomerEntryHandler {
         }
         // WP-2423 Q11: a replaced or turned-off table code; the customer asks staff for help.
         if (result.status === "QrRetired") {
+          forget();
           response.status(410).json({
             schemaVersion: 1,
             code: "entry_qr_retired",
@@ -698,6 +758,7 @@ export class CustomerEntryHandler {
         }
         // Coordinator 2026-10-30: no party is seated at this table; no visit is started.
         if (result.status === "TableNotOpen") {
+          remember();
           response.status(409).json({
             schemaVersion: 1,
             code: "entry_table_not_open",
@@ -735,6 +796,7 @@ export class CustomerEntryHandler {
               "AnswerNewParty",
             ],
           }[result.status];
+          remember();
           response.status(409).json({
             schemaVersion: 1,
             code: offer[0],
@@ -751,6 +813,7 @@ export class CustomerEntryHandler {
         }
         // WP-2423 item 8 ⑦ 1b: this Store takes no pickup orders (dine-in only).
         if (result.status === "ServiceNotOffered") {
+          remember();
           response.status(409).json({
             schemaVersion: 1,
             code: "entry_service_not_offered",
@@ -762,6 +825,7 @@ export class CustomerEntryHandler {
         }
         // WP-2423 Q4: tell the customer the Store is not taking orders, and today's hours.
         if (result.status === "NotAccepting") {
+          remember();
           response.status(409).json({
             schemaVersion: 1,
             code: "entry_not_accepting",
@@ -780,7 +844,9 @@ export class CustomerEntryHandler {
           });
           return;
         }
+        // Both cookies on the one answer: the new visit's, and forgetting the waiting scan.
         response.setHeader("Set-Cookie", serializeCookie(result.sessionCredential));
+        forget();
         response.status(201).json({
           schemaVersion: 2,
           status: "Established",

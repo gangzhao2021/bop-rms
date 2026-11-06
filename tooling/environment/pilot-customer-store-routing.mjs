@@ -9,7 +9,10 @@ import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identit
  *
  * - the public menu: the Store whose public Store reference is in the path;
  * - the table or pickup entry: the public Store reference in the signed QR token (decoded only to
- *   choose the Store; that Store's runtime verifies the signature and the table);
+ *   choose the Store; that Store's runtime verifies the signature and the table); for a replay of a
+ *   scan that started no visit yet (`{resume:true}`, M02), the token in the `__Secure-bop-scan`
+ *   cookie, and a Store not served right now answers 503 CUSTOMER_STORE_UNAVAILABLE (never another
+ *   Store, which would refuse the code and lose the guest's place);
  * - every other guest request: the Store whose own records hold the guest's Session (the guest
  *   cookie, hashed with the installation's guest key, looked up through Identity's Store-scoped
  *   owner read in each Store in turn; a found answer is remembered for that Session);
@@ -19,6 +22,7 @@ import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identit
  *   that isn't its own: null, and the entry refuses it without reaching any Store.
  */
 const GUEST_COOKIE = "__Host-bop-guest";
+const SCAN_COOKIE = "__Secure-bop-scan";
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MENU = /^\/api\/v1\/public\/stores\/([^/?]+)\/menu(?:[?].*)?$/u;
 const ENTRY = /^\/bff\/customer\/entry(?:[?].*)?$/u;
@@ -42,10 +46,8 @@ function guestCookie(header) {
   const value = matches[0].slice(GUEST_COOKIE.length + 1);
   return /^[A-Za-z0-9_-]{43}$/u.test(value) ? value : null;
 }
-/** The public Store reference a QR token's payload names (unverified; only to choose the Store). */
-export function qrTokenPublicStore(body) {
+function tokenPublicStore(token) {
   try {
-    const token = JSON.parse(body.toString("utf8"))?.qrToken;
     if (typeof token !== "string" || token.length > 4096) return null;
     const payload = JSON.parse(
       Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"),
@@ -54,6 +56,31 @@ export function qrTokenPublicStore(body) {
   } catch {
     return null;
   }
+}
+/** The public Store reference a QR token's payload names (unverified; only to choose the Store). */
+export function qrTokenPublicStore(body) {
+  try {
+    return tokenPublicStore(JSON.parse(body.toString("utf8"))?.qrToken);
+  } catch {
+    return null;
+  }
+}
+/** M02: whether an entry body replays this browser's waiting scan instead of carrying a code. */
+function isResume(body) {
+  try {
+    return JSON.parse(body.toString("utf8"))?.resume === true;
+  } catch {
+    return false;
+  }
+}
+/** The public Store reference of the one waiting-scan cookie (unverified), or null. */
+function scanCookiePublicStore(header) {
+  if (typeof header !== "string" || header.length > 8192) return null;
+  const matches = header
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.startsWith(SCAN_COOKIE + "="));
+  return matches.length === 1 ? tokenPublicStore(matches[0].slice(SCAN_COOKIE.length + 1)) : null;
 }
 
 /**
@@ -88,6 +115,15 @@ export function createCustomerStoreRouting({
     const nobody = typeof url === "string" && BEFORE_ANY_STORE.test(url) ? primary : unowned;
     const menu = typeof url === "string" ? MENU.exec(url) : null;
     if (menu) return byPublic.get(decodeURIComponent(menu[1])) ?? unowned;
+    if (isBodyRouted(method, url) && body !== undefined && isResume(body)) {
+      const reference = scanCookiePublicStore(cookie);
+      if (reference === null || !UUID_V7.test(reference)) return unowned;
+      const store = byPublic.get(reference);
+      // The Store the guest scanned isn't being served now (it failed to start): say so, keep the
+      // scan for when it is back, and never hand it to a Store that would refuse it.
+      if (store === undefined) throw new Error("CUSTOMER_STORE_UNAVAILABLE");
+      return store;
+    }
     if (isBodyRouted(method, url) && body !== undefined) {
       const reference = qrTokenPublicStore(body);
       return (reference !== null && UUID_V7.test(reference) && byPublic.get(reference)) || unowned;
