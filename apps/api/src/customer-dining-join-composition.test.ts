@@ -682,4 +682,26 @@ describe("DEC-DINING-GUEST-TABLE-START: a guest starts a free table", () => {
       expect.not.objectContaining({ endedSessionReference: expect.anything() }),
     );
   });
+  it("nothing to end while those people's visit is still open (switch turned off, visit moved): never joined to it", async () => {
+    const f = fixture();
+    const startIfFree = vi.fn(async () => ({
+      status: "Started" as const,
+      diningSessionReference: id(20),
+    }));
+    const composition = createCustomerDiningJoinComposition({
+      ...f.options,
+      // The table is still open: issue would hand out a code for the old party's visit.
+      qr: {
+        issue: issuedAfter(f, 0),
+        startIfFree,
+        closeForNewParty: async () => ({ status: "Held" as const, hold: "Changed" }),
+      },
+    });
+    expect(await composition.join({ ...qrInput(f), newParty: true }, f.request)).toEqual({
+      status: "Refused",
+      reason: "TableInUse",
+    });
+    expect(f.store.join).not.toHaveBeenCalled();
+    expect(startIfFree).not.toHaveBeenCalled();
+  });
 });

@@ -239,6 +239,10 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
             // then refuses it without writing anything, so issue again (bounded).
             let askedToClose = false;
             let endedSessionReference: string | undefined;
+            // A phone that said it isn't with the people here never joins a visit it didn't see
+            // free: "nothing to end" can also mean the switch went off or staff moved the visit,
+            // with those people's Session still open at this table.
+            let mustSeeFree = false;
             const attempts = 6;
             for (let attempt = 0; attempt < attempts; attempt += 1) {
               // Fresh on every attempt: a start commits with its own instant under the table's
@@ -253,10 +257,11 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
                 const closed = await qr.closeForNewParty({ tableReference });
                 if (closed.status === "Closed")
                   endedSessionReference = closed.diningSessionReference;
-                // Nobody's table to end any more (the System just freed it): this phone goes on.
+                // Nothing this phone may end: it goes on only if the table really is free now.
+                else if (closed.hold === "Changed") mustSeeFree = true;
                 else if (closed.hold === "Paused") return "Paused" as const;
                 else if (closed.hold === "Budget") return "TooManyJoins" as const;
-                else if (closed.hold !== "Changed") return "TableInUse" as const;
+                else return "TableInUse" as const;
               }
               const issued = await qr.issue(
                 {
@@ -287,11 +292,15 @@ export function createCustomerDiningJoinComposition(options: CustomerDiningJoinC
                   tableReference,
                   ...(endedSessionReference === undefined ? {} : { endedSessionReference }),
                 });
-                if (started.status === "Started" || started.status === "AlreadyOpen") continue;
+                if (started.status === "Started" || started.status === "AlreadyOpen") {
+                  mustSeeFree = false;
+                  continue;
+                }
                 if (started.status === "Busy") return "TooManyJoins" as const;
                 if (started.status === "BeingCleaned") return "BeingCleaned" as const;
               }
               if (issued.status === "Refused") return issued.reason;
+              if (mustSeeFree) return "TableInUse" as const;
               // A join that lost a race wrote nothing, and its next attempt reads the new versions.
               try {
                 result = await joinWith(String(issued.joinCredential));
