@@ -1,5 +1,9 @@
 import { createMerchantStoreOpening } from "../../apps/api/dist/merchant-store-opening.js";
-import { createServedStoreTarget, servedStoresOf } from "./pilot-served-stores.mjs";
+import {
+  createServedStoreTarget,
+  servedStoreIsOpen,
+  servedStoresOf,
+} from "./pilot-served-stores.mjs";
 import console from "node:console";
 import { URL } from "node:url";
 import { INTERNAL_CUSTOMER_ORIGIN } from "./pilot-hosting.mjs";
@@ -231,6 +235,7 @@ export async function createInternalMerchant(
   const targetScope = createServedStoreTarget({
     served,
     validateAssociation: session.validateAssociation,
+    isOpen: servedStoreIsOpen,
     now: () => resources.now(),
   });
   // Set once the pickup composition exists (the workspace is read per request).

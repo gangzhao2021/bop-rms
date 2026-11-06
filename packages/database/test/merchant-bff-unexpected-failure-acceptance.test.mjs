@@ -19,6 +19,10 @@ import { createPersistentMerchantOrderExceptions } from "../../../apps/api/src/p
 import { createMerchantBffRouter } from "../../../apps/api/dist/merchant-bff.js";
 import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 import { createInternalExceptionSnapshotTransactions } from "../../../tooling/environment/pilot-exception-snapshot.mjs";
+import {
+  createServedStoreTarget,
+  servedStoreIsOpen,
+} from "../../../tooling/environment/pilot-served-stores.mjs";
 import { createMerchantRequestReporter } from "../../../tooling/environment/pilot-unexpected.mjs";
 import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
@@ -787,6 +791,76 @@ it("WP-2423 item 10: the Exceptions page says no permission when it is so, and l
       assert.deepEqual(lines.take(), []);
     } finally {
       await new Promise((resolve) => (listening ? listening.close(resolve) : resolve()));
+      await harness?.pool.end();
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 item 10: a merchant runs two locations on one installation and BOP closes the first one
+ * for good. Sign-in chose the first Store the person works in, was refused there, and so locked
+ * the owner out of the location still trading. Under the rendered pilot ACL, in the sign-in's own
+ * Store scope, the Store owner's read says which Store is open, and sign-in lands on the other.
+ */
+it("WP-2423 item 10: closing one location on BOP leaves its owner a way into the others", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  await withIsolatedDatabase({ caseId: "wp2423_uf_served" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    let harness;
+    try {
+      harness = await restricted(context, admin);
+      const at = new Date(Date.now() - 60_000).toISOString();
+      const east = {
+        tenantReference: id(0x23),
+        brandReference: id(0x21),
+        storeReference: id(0x22),
+      };
+      for (const [brandId, storeId, code] of [
+        [brand, store, "MAIN"],
+        [east.brandReference, east.storeReference, "EAST"],
+      ]) {
+        await admin.query(
+          "INSERT INTO bop_tenant.brand VALUES ($1,$2,$3,'en-CA','CAD','Active',1,$4,$4)",
+          [brandId, "SYNTHETIC_" + code, "Synthetic " + code, at],
+        );
+        await admin.query(
+          "INSERT INTO bop_tenant.store VALUES ($1,$2,$3,$4,'America/Toronto','en-CA','CAD','Active',1,$5,$5)",
+          [storeId, brandId, "SYNTHETIC_" + code + "_STORE", "Synthetic " + code + " Store", at],
+        );
+      }
+      const target = createServedStoreTarget({
+        served: [scope, east],
+        // Test-only: the person works in both (membership is proved by its own acceptance tests).
+        validateAssociation: async () => true,
+        isOpen: servedStoreIsOpen,
+        now: () => new Date().toISOString(),
+      });
+      // The sign-in transaction runs in the installation's own Store scope; it is put back after.
+      const signIn = () =>
+        harness.runner.run(async (tx) => {
+          const chosen = await target(tx, {});
+          const after = await tx.query(
+            "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
+            [],
+          );
+          assert.deepEqual(after.rows[0], { brand, store });
+          return chosen.storeReference;
+        });
+      assert.equal(await signIn(), store);
+      await admin.query(
+        "UPDATE bop_tenant.store SET lifecycle='Archived',version=version+1,updated_at=$2 WHERE store_id=$1",
+        [store, new Date().toISOString()],
+      );
+      assert.equal(await signIn(), east.storeReference);
+      // Both closed (the second by its Brand): the first, whose selection then says it is not open.
+      await admin.query(
+        "UPDATE bop_tenant.brand SET lifecycle='Suspended',version=version+1,updated_at=$2 WHERE brand_id=$1",
+        [east.brandReference, new Date().toISOString()],
+      );
+      assert.equal(await signIn(), store);
+    } finally {
       await harness?.pool.end();
       await admin.end();
     }

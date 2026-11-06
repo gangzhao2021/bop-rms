@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { createPostgresMerchantOrganizationSource } from "../../packages/bop/tenant/src/index.ts";
 import { planPilotConnections } from "./pilot-connection-budget.mjs";
 /**
  * DEC-BRAND-MULTI-STORE-ONE-INSTALLATION: the Stores this installation serves, as Tenant/Brand/Store
@@ -52,17 +53,59 @@ export function servedStoreFor(resources, selected) {
 /**
  * The Store a staff member works in: the one named, or without a name the first served Store where
  * they are associated, so a person of another merchant signs in to their own merchant's Store.
+ * WP-2423 item 10: without a name, a Store BOP paused or closed (`isOpen` false) is passed over for
+ * the next one they work in, so closing one location never locks its owner out of the others. Only
+ * when every Store they work in is closed is the first of them chosen, and its selection says so.
  */
-export function createServedStoreTarget({ served, validateAssociation, now }) {
+export function createServedStoreTarget({ served, validateAssociation, isOpen, now }) {
   return async (tx, authenticated, reference) => {
     const candidates =
       reference === undefined
         ? served
         : served.filter((store) => store.storeReference === reference);
-    for (const store of candidates)
-      if (await validateAssociation(tx, authenticated, store, now())) return store;
+    let closed = null;
+    for (const store of candidates) {
+      const at = now();
+      if (!(await validateAssociation(tx, authenticated, store, at))) continue;
+      if (reference !== undefined || isOpen === undefined || (await isOpen(tx, store, at)))
+        return store;
+      closed ??= store;
+    }
+    if (closed !== null) return closed;
     throw new Error("INTERNAL_MERCHANT_SCOPE_DENIED");
   };
+}
+
+/**
+ * Whether the Store and its Brand are Active, by their owner's read (@bop/tenant), in the caller's
+ * transaction; the caller's own Store scope is put back after. A read that fails throws as itself.
+ */
+export async function servedStoreIsOpen(tx, store, at) {
+  const [prior] = (
+    await tx.query(
+      "SELECT current_setting('bop.brand_id',true) brand,current_setting('bop.store_id',true) store",
+      [],
+    )
+  ).rows;
+  const organizations = createPostgresMerchantOrganizationSource(tx, {
+    brandReference: store.brandReference,
+    storeReference: store.storeReference,
+    observedAt: at,
+  });
+  let open;
+  try {
+    open =
+      (await organizations.getBrand(store.brandReference)) !== null &&
+      (await organizations.getStore(store.storeReference)) !== null;
+  } catch (error) {
+    if (error?.message !== "MERCHANT_ORGANIZATION_NOT_ACTIVE_DENIED") throw error;
+    open = false;
+  }
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    prior?.brand ?? "",
+    prior?.store ?? "",
+  ]);
+  return open;
 }
 
 /**
