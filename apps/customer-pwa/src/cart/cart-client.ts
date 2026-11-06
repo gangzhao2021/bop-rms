@@ -152,21 +152,22 @@ function view(value: unknown): CartView {
       warnings: strings(cart.warnings),
       // Present only while it names an order, so a cart view stays the same shape as before.
       ...(() => {
-        const placed = placedOrder(cart.placedOrder, items.length);
+        const placed = placedOrder(cart.placedOrder);
         return placed === null ? {} : { placedOrder: placed };
       })(),
     }),
   });
 }
 
-/** WP-2423 M03: only an empty cart names the order its dishes went to. */
-function placedOrder(value: unknown, itemCount: number): CartPlacedOrder | null {
+/** WP-2423 M03: the guest's order a cart's dishes went to (or still sit in), when named. */
+function placedOrder(value: unknown): CartPlacedOrder | null {
   if (value === undefined || value === null) return null;
   const raw = record(value);
-  if (itemCount !== 0) throw new CartClientError("cart_service_unavailable");
+  if (typeof raw.notMade !== "boolean") throw new CartClientError("cart_service_unavailable");
   return Object.freeze({
     orderReference: string(raw.orderReference, uuidV7),
     orderNumber: string(raw.orderNumber, /^[1-9][0-9]{0,18}$/u),
+    notMade: raw.notMade,
   });
 }
 
@@ -202,7 +203,13 @@ export interface CustomerCartClient {
   restoreOrder?(input: {
     readonly orderReference: string;
     readonly operationReference: string;
-  }): Promise<{ readonly cart: CartView; readonly added: number; readonly unavailable: number }>;
+  }): Promise<{
+    readonly cart: CartView;
+    readonly added: number;
+    /** Put back by an earlier tap; nothing was added for them now. */
+    readonly alreadyPutBack: number;
+    readonly unavailable: number;
+  }>;
 }
 
 export function setCustomerCartCsrfCredential(value: string | null): void {
@@ -529,7 +536,7 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
     },
     async restoreOrder(input) {
       const contextCurrent = captureCustomerCsrfContext();
-      let counts: { added: number; unavailable: number } | null = null;
+      let counts: { added: number; alreadyPutBack: number; unavailable: number } | null = null;
       const result = await request(
         withNameLocale("/bff/customer/cart/restore-order"),
         {
@@ -545,7 +552,11 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
               throw new CartClientError("cart_service_unavailable");
             return Number(value);
           };
-          counts = { added: count(restored.added), unavailable: count(restored.unavailable) };
+          counts = {
+            added: count(restored.added),
+            alreadyPutBack: count(restored.alreadyPutBack),
+            unavailable: count(restored.unavailable),
+          };
           const { restored: _restored, ...cart } = record(payload);
           void _restored;
           return view(cart);
@@ -553,8 +564,8 @@ export function createBrowserCustomerCartClient(): CustomerCartClient {
       );
       if (!contextCurrent()) throw new CartClientError("network_unknown");
       if (result === null || counts === null) throw new CartClientError("cart_not_found");
-      const { added, unavailable } = counts;
-      return Object.freeze({ cart: result, added, unavailable });
+      const { added, alreadyPutBack, unavailable } = counts;
+      return Object.freeze({ cart: result, added, alreadyPutBack, unavailable });
     },
   };
   return Object.freeze(client);

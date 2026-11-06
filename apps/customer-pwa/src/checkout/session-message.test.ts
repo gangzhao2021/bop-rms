@@ -34,6 +34,9 @@ it("keeps the refusal text for real server refusals only", () => {
     expect(checkoutSessionAlert({ status }, false)).toBeNull();
   // The page prices the cart again and says so itself.
   expect(checkoutSessionAlert({ status: "requote_required", canRetry: false }, false)).toBeNull();
+  expect(
+    checkoutSessionAlert({ status: "already_ordered", canRetry: false, placedOrder: null }, false),
+  ).toBeNull();
 });
 
 it("maps a server conflict through the controller to the cart that changed", async () => {

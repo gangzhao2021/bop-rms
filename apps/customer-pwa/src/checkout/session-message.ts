@@ -20,6 +20,8 @@ export function checkoutSessionAlert(
     case "item_short":
     case "item_unavailable":
     case "requote_required":
+    case "already_ordered":
+      // already_ordered (WP-2423 M03): the page shows the order these dishes are in instead.
       return null;
     case "offline":
       return pageOffline ? null : checkoutText.offline;

@@ -532,7 +532,10 @@ function CartContent({
       state.cart.cart.warnings.length === 0)
   )
     return state.status === "ready" && state.cart.cart.placedOrder ? (
-      <AlreadyOrdered placedOrder={state.cart.cart.placedOrder} />
+      <AlreadyOrdered
+        placedOrder={state.cart.cart.placedOrder}
+        onRestored={() => void controller.load()}
+      />
     ) : round.status === "cart-changed" ? (
       // A second phone tapped after the first sent: without this she'd add it all again.
       <StateMessage heading={cartText.someonePlacedIt}>
@@ -592,8 +595,15 @@ function CartContent({
       ? cart.cart.quote.subtotal
       : null;
   const prices = quoteConsistentLinePrices(cart.cart.items, menu, currentQuote);
+  // WP-2423 M03 review: these dishes are already in an order (a cart filled before pickup carts
+  // were emptied on ordering); their checkout is refused, so say so instead of offering it.
+  const alreadyOrdered =
+    cart.cart.items.length > 0 && cart.cart.placedOrder ? cart.cart.placedOrder : null;
   return (
     <>
+      {alreadyOrdered !== null ? (
+        <AlreadyOrdered placedOrder={alreadyOrdered} dishesInCart />
+      ) : null}
       {terminal ? (
         <StateMessage
           heading={
@@ -742,7 +752,7 @@ function CartContent({
             />
             <p className="cart-next-actions__note">{checkoutText.sendToKitchenNote}</p>
           </div>
-        ) : unsellableLines ? (
+        ) : alreadyOrdered !== null ? null : unsellableLines ? (
           <div className="cart-next-actions__place">
             <button
               className="cart-checkout-link"

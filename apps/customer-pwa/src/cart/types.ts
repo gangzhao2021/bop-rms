@@ -26,7 +26,8 @@ export interface CartView {
     readonly warnings: readonly string[];
     /**
      * WP-2423 M03: the guest's own order these dishes went to, while the pickup cart is empty after
-     * it. Absent or null otherwise (always for a table).
+     * it, or while the cart still holds dishes that are already in it (they can't be checked out
+     * again). Absent or null otherwise (always for a table).
      */
     readonly placedOrder?: CartPlacedOrder | null;
   };
@@ -36,6 +37,8 @@ export interface CartView {
 export interface CartPlacedOrder {
   readonly orderReference: string;
   readonly orderNumber: string;
+  /** That order won't be made (closed unpaid or cancelled): its dishes can be ordered again. */
+  readonly notMade?: boolean;
 }
 
 export interface CartItemView {

@@ -8,6 +8,8 @@ import { CartClientError } from "../cart/types.js";
 type RestoreState =
   | { readonly status: "idle" | "working" }
   | { readonly status: "done"; readonly unavailable: number }
+  /** An earlier tap already put them back; this one added nothing. */
+  | { readonly status: "already" }
   | { readonly status: "refused" | "failed" };
 
 /**
@@ -19,9 +21,12 @@ type RestoreState =
 export function RestoreDishesPanel({
   orderReference,
   client,
+  onRestored,
 }: {
   readonly orderReference: string;
   readonly client?: CustomerCartClient;
+  /** Called once dishes are back, so a page showing the cart can show them. */
+  readonly onRestored?: () => void;
 }) {
   const [cart] = useState(() => client ?? createBrowserCustomerCartClient());
   // One operation for this panel, so a double tap or a retry is the same request.
@@ -32,7 +37,12 @@ export function RestoreDishesPanel({
     setState({ status: "working" });
     try {
       const result = await cart.restoreOrder({ orderReference, operationReference });
-      setState({ status: "done", unavailable: result.unavailable });
+      setState(
+        result.added === 0 && result.alreadyPutBack > 0
+          ? { status: "already" }
+          : { status: "done", unavailable: result.unavailable },
+      );
+      if (result.added > 0) onRestored?.();
     } catch (error) {
       setState({
         status:
@@ -42,6 +52,21 @@ export function RestoreDishesPanel({
       });
     }
   };
+  if (state.status === "already")
+    return (
+      <div className="restore-dishes" role="status">
+        <p>
+          {t(
+            "These dishes were already put back in your cart earlier. Nothing was added this time.",
+          )}
+        </p>
+        {onRestored === undefined ? (
+          <Link className="cart-primary-link" to="/cart">
+            {t("Go to your cart")}
+          </Link>
+        ) : null}
+      </div>
+    );
   if (state.status === "done")
     return (
       <div className="restore-dishes" role="status">

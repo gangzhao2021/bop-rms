@@ -1,5 +1,6 @@
 import { v7 as uuidv7 } from "uuid";
 import { captureCustomerCsrfContext } from "../session/customer-transaction-context.js";
+import type { CartPlacedOrder } from "../cart/types.js";
 import {
   CheckoutSessionClientError,
   type CheckoutRefusedLine,
@@ -37,6 +38,15 @@ export type CheckoutSessionState =
        */
       readonly status: "requote_required";
       readonly canRetry: false;
+    }
+  | {
+      /**
+       * WP-2423 M03: these dishes are already in an order (`placedOrder`: the guest's own, when the
+       * server named it); nothing was created or charged. The page opens that order.
+       */
+      readonly status: "already_ordered";
+      readonly canRetry: false;
+      readonly placedOrder: CartPlacedOrder | null;
     };
 export function createCheckoutSessionController(
   client: {
@@ -108,6 +118,15 @@ export function createCheckoutSessionController(
           publish({ status: "requote_required", canRetry: false });
           return;
         }
+        if (
+          attempt.current() &&
+          online &&
+          error instanceof CheckoutSessionClientError &&
+          error.code === "already_ordered"
+        ) {
+          publish({ status: "already_ordered", canRetry: false, placedOrder: error.placedOrder });
+          return;
+        }
         const code = !attempt.current()
           ? "denied"
           : !online
@@ -116,7 +135,8 @@ export function createCheckoutSessionController(
                 error.code !== "checkout_in_progress" &&
                 error.code !== "item_short" &&
                 error.code !== "item_unavailable" &&
-                error.code !== "requote_required"
+                error.code !== "requote_required" &&
+                error.code !== "already_ordered"
               ? error.code
               : "unknown";
         publish({

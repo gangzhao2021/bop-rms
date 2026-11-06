@@ -49,8 +49,8 @@ describe("Customer Cart browser client", () => {
     );
   });
 
-  it("WP-2423 M03: reads the order an emptied cart went to, and never one beside dishes", async () => {
-    const placedOrder = { orderReference: id(13), orderNumber: "13" };
+  it("WP-2423 M03: reads the order an emptied cart went to, or that its dishes are already in", async () => {
+    const placedOrder = { orderReference: id(13), orderNumber: "13", notMade: false };
     const emptied = { ...cart(), cart: { ...cart().cart, version: 4, placedOrder } };
     vi.stubGlobal(
       "fetch",
@@ -81,6 +81,23 @@ describe("Customer Cart browser client", () => {
       "fetch",
       vi.fn(async () => new Response(JSON.stringify(withDishes))),
     );
+    // Review: a cart filled before pickup carts were emptied on ordering still holds dishes that
+    // are in order 13; the page must know, since their checkout is refused.
+    expect((await createBrowserCustomerCartClient().loadCurrent())?.cart.placedOrder).toEqual(
+      placedOrder,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              ...emptied,
+              cart: { ...emptied.cart, placedOrder: { orderReference: id(13), orderNumber: "13" } },
+            }),
+          ),
+      ),
+    );
     await expect(createBrowserCustomerCartClient().loadCurrent()).rejects.toMatchObject({
       code: "cart_service_unavailable",
     });
@@ -90,9 +107,10 @@ describe("Customer Cart browser client", () => {
     setCustomerCartCsrfCredential("c".repeat(43));
     const fetch = vi.fn(
       async () =>
-        new Response(JSON.stringify({ ...cart(), restored: { added: 1, unavailable: 1 } }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({ ...cart(), restored: { added: 1, alreadyPutBack: 0, unavailable: 1 } }),
+          { status: 200 },
+        ),
     );
     vi.stubGlobal("fetch", fetch);
     const client = createBrowserCustomerCartClient();
@@ -100,7 +118,7 @@ describe("Customer Cart browser client", () => {
       orderReference: id(13),
       operationReference: id(20),
     });
-    expect(result).toEqual({ cart: cart(), added: 1, unavailable: 1 });
+    expect(result).toEqual({ cart: cart(), added: 1, alreadyPutBack: 0, unavailable: 1 });
     expect(fetch).toHaveBeenCalledWith(
       "/bff/customer/cart/restore-order",
       expect.objectContaining({

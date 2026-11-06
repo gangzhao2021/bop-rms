@@ -97,6 +97,17 @@ it("WP-2423: keeps a short item's answer (no retry of the same cart; the guest c
   await c.retry();
   expect(create).toHaveBeenCalledTimes(1);
 });
+it("WP-2423 M03 review: dishes already ordered stop the checkout and keep the order to open", async () => {
+  const placedOrder = { orderReference: id(13), orderNumber: "13" };
+  const create = vi
+    .fn()
+    .mockRejectedValue(new CheckoutSessionClientError("already_ordered", null, null, placedOrder));
+  const c = createCheckoutSessionController({ create });
+  await c.start(selected);
+  expect(c.getState()).toEqual({ status: "already_ordered", canRetry: false, placedOrder });
+  await c.retry();
+  expect(create).toHaveBeenCalledTimes(1);
+});
 it("WP-2423: a menu update makes a new checkout for the new price, never a retry of the old", async () => {
   const create = vi
     .fn()

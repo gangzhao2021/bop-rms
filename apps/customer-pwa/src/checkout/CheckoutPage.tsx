@@ -382,6 +382,25 @@ export function CheckoutPage({
         <AlreadyOrdered placedOrder={state.placedOrder} />
       </CustomerPage>
     );
+  // WP-2423 M03 review: the server refused this checkout because these dishes are already in an
+  // order (another tab ordered them, or the page was stale): open that order, never a conflict
+  // that loops back to the same cart.
+  if (sessionState.status === "already_ordered")
+    return (
+      <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
+        <PageHeading title={checkoutText.pageTitle} />
+        <AlreadyOrdered placedOrder={sessionState.placedOrder} />
+      </CustomerPage>
+    );
+  // WP-2423 M03 review: the cart still holds dishes already in an order (filled before pickup
+  // carts were emptied on ordering); their checkout is refused, so nothing here offers it.
+  if (cart !== null && cart.cart.items.length > 0 && cart.cart.placedOrder)
+    return (
+      <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
+        <PageHeading title={checkoutText.pageTitle} />
+        <AlreadyOrdered placedOrder={cart.cart.placedOrder} dishesInCart cartLink />
+      </CustomerPage>
+    );
   return (
     <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
       <PageHeading title={payLater ? checkoutText.placeOrder : checkoutText.pageTitle} />

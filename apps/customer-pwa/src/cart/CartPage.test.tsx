@@ -282,6 +282,48 @@ it("WP-2423 M03: an emptied pickup cart names the order its dishes went to", () 
   expect(html).not.toContain("Your cart is empty");
   expect(html).not.toContain("cart-checkout-link");
 });
+it("WP-2423 M03 review: an emptied cart whose order closed unpaid offers its dishes back", () => {
+  const empty = cart();
+  const html = renderPage({
+    status: "ready",
+    cart: {
+      ...empty,
+      cart: {
+        ...empty.cart,
+        items: [],
+        quote: null,
+        placedOrder: { orderReference: id(13), orderNumber: "13", notMade: true },
+      },
+    },
+  });
+  expect(html).toContain("Order closed");
+  expect(html).toContain("Order 13 was closed and won’t be made.");
+  expect(html).toContain("Put these dishes back in my cart");
+  expect(html).toContain(`href="/orders/${id(13)}"`);
+  expect(html).not.toContain("Already ordered");
+  expect(html).not.toContain("Open it to see whether it’s paid");
+});
+it("WP-2423 M03 review: a cart filled before this fix says its dishes are already in an order", () => {
+  const full = cart();
+  const html = renderPage({
+    status: "ready",
+    cart: {
+      ...full,
+      cart: {
+        ...full.cart,
+        placedOrder: { orderReference: id(13), orderNumber: "13", notMade: false },
+      },
+    },
+  });
+  expect(html).toContain("Already ordered");
+  expect(html).toContain("The dishes in your cart are already in order 13");
+  expect(html).toContain(`href="/orders/${id(13)}"`);
+  // Its checkout is refused, so it is not offered (the loop back to this cart).
+  expect(html).not.toContain("cart-checkout-link");
+  expect(html).not.toContain('href="/checkout"');
+  // The dishes stay listed so the guest can remove them.
+  expect(html).toContain(full.cart.items[0]?.displayName ?? "missing dish");
+});
 it.each(["FEATURE_DISABLED", "PROJECTION_STALE"])(
   "preserves %s for an empty server Cart",
   (warning) => {

@@ -86,6 +86,34 @@ it("WP-2423: tells a menu update after pricing apart from an ordinary conflict",
     code: "requote_required",
   });
 });
+it("WP-2423 M03 review: dishes already ordered name the guest's order, never a conflict", async () => {
+  const order = { orderReference: id(13), orderNumber: "13" };
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { schemaVersion: 1, error: { code: "checkout_session_already_ordered", order } },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { schemaVersion: 1, error: { code: "checkout_session_already_ordered" } },
+          { status: 409 },
+        ),
+      ),
+  );
+  await expect(createCheckoutSessionClient().create(selected, id(4))).rejects.toMatchObject({
+    code: "already_ordered",
+    placedOrder: order,
+  });
+  await expect(createCheckoutSessionClient().create(selected, id(4))).rejects.toMatchObject({
+    code: "already_ordered",
+    placedOrder: null,
+  });
+});
 it("WP-2423 Q4: tells a closed Store apart from an ordinary conflict", async () => {
   const fetch = vi
     .fn()

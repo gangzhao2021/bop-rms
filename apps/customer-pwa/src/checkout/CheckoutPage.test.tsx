@@ -139,6 +139,24 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(render({ status: "empty" })).toContain("Your cart is empty");
   });
 
+  it("WP-2423 M03 review: a cart whose dishes are already in an order offers no payment", () => {
+    const html = render({
+      status: "ready",
+      cart: {
+        ...cart,
+        cart: {
+          ...cart.cart,
+          placedOrder: { orderReference: id(13), orderNumber: "13", notMade: false },
+        },
+      },
+      quote: null,
+    });
+    expect(html).toContain("The dishes in your cart are already in order 13");
+    expect(html).toContain(`href="/orders/${id(13)}"`);
+    expect(html).toContain('href="/cart"');
+    expect(html).not.toContain("Continue to payment");
+  });
+
   it("v15 live check: an empty cart asks for no tip", () => {
     expect(render({ status: "empty" })).not.toContain('aria-label="Tip amount"');
     expect(

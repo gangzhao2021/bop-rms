@@ -1540,6 +1540,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Already ordered": "已经下单",
   "These dishes are in order {number}. Open it to see whether it’s paid and when it’s ready. To order something else, add dishes from the menu.":
     "这些菜已经在订单 {number} 里。打开订单可查看是否已付款、何时可取。想再点别的，请从菜单添加。",
+  "Order closed": "订单已关闭",
+  "Order {number} was closed and won’t be made. Open it to see its payment.":
+    "订单 {number} 已关闭，不会制作。打开订单可查看付款情况。",
+  "Order {number} was closed and won’t be made. To order these dishes again, remove them from your cart and add them again from the menu.":
+    "订单 {number} 已关闭，不会制作。想再点这些菜，请先从购物车删除，再从菜单重新添加。",
+  "The dishes in your cart are already in order {number}, so they can’t be checked out again. Open the order to see whether it’s paid and when it’s ready. To order something else, remove these dishes first.":
+    "购物车里的这些菜已经在订单 {number} 里，不能再次结账。打开订单可查看是否已付款、何时可取。想再点别的，请先删除这些菜。",
   "It wasn’t sent to the kitchen.": "没有送去厨房。",
   "Your dishes are back in your cart.": "菜已经放回购物车。",
   "1 dish can’t be ordered right now, so it wasn’t put back.": "有 1 道菜现在不能点，没有放回。",
@@ -1553,6 +1560,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The dishes couldn’t be put back. Check your connection and try again.":
     "菜没能放回。请检查网络后再试。",
   "Putting dishes back…": "正在放回…",
+  "These dishes were already put back in your cart earlier. Nothing was added this time.":
+    "这些菜之前已经放回过购物车，这次没有再添加。",
   "Put these dishes back in my cart": "把这些菜放回购物车",
   "These dishes were already ordered (order {number}). Nothing new was charged.":
     "这些菜已经下过单（订单 {number}），这次没有新的扣款。",

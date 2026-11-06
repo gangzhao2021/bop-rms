@@ -2,6 +2,8 @@ import {
   captureCustomerCsrfContext,
   getCustomerCsrfCredential,
 } from "../session/customer-transaction-context.js";
+import { placedOrderOf } from "../payment/session-payment-client.js";
+import type { CartPlacedOrder } from "../cart/types.js";
 import {
   requestCheckoutMutation,
   retryAfterSeconds,
@@ -40,11 +42,15 @@ export class CheckoutSessionClientError extends Error {
       | "item_unavailable"
       /** WP-2423: the restaurant updated its menu after this cart was priced; nothing was created. */
       | "requote_required"
+      /** WP-2423 M03: these dishes are already in an order; nothing was created or charged. */
+      | "already_ordered"
       | "unknown",
     /** WP-2423: the server's bounded wait before retrying, when it sent one. */
     readonly retryAfterSeconds: number | null = null,
     /** WP-2423: for item_short / item_unavailable, the cart line it is about (when sent). */
     readonly line: CheckoutRefusedLine | null = null,
+    /** WP-2423 M03: for already_ordered, the guest's own order that holds these dishes. */
+    readonly placedOrder: CartPlacedOrder | null = null,
   ) {
     super("Checkout session unavailable.");
     this.name = "CheckoutSessionClientError";
@@ -150,6 +156,10 @@ export function createCheckoutSessionClient() {
         throw new CheckoutSessionClientError("item_unavailable", null, refusedLine(payload, false));
       if (response.status === 409 && errorCode(payload) === "checkout_session_requote_required")
         throw new CheckoutSessionClientError("requote_required");
+      // WP-2423 M03: these dishes are already in an order (another tab, a stale page): the page
+      // opens that order instead of asking the guest to change a cart that can't be paid.
+      if (response.status === 409 && errorCode(payload) === "checkout_session_already_ordered")
+        throw new CheckoutSessionClientError("already_ordered", null, null, placedOrderOf(payload));
       if (![200, 201].includes(response.status))
         throw new CheckoutSessionClientError(
           response.status === 404
