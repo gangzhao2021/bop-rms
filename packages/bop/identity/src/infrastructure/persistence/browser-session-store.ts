@@ -695,6 +695,14 @@ function createStore(options: Options, profile: Profile) {
           try {
             next = recordSessionActivity(current.session, observedAt);
           } catch {
+            // M148: pushed out by a newer sign-in of the same person (the concurrent limit).
+            if (
+              current.session.status === "Revoked" &&
+              current.session.revocationReason === "ConcurrentLimit"
+            )
+              throw new BrowserSessionError("BROWSER_SESSION_ENDED", {
+                endReason: "TooManyScreens",
+              });
             return ended();
           }
           if (!claimed || next === null)

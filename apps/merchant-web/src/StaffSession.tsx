@@ -14,6 +14,7 @@ import {
   activityRetryMs,
   createStaffSessionClient,
   isOperationalScreen,
+  isSessionEnded,
   remaining,
   sessionNotice,
   shouldReportActivity,
@@ -215,7 +216,9 @@ export function StaffSessionGuard({
 }) {
   const source = useMemo(() => client ?? createStaffSessionClient(), [client]);
   const [current, setCurrent] = useState<SessionDeadlines | null>(null);
-  const [ended, setEnded] = useState<"Idle" | "Absolute" | "SignedOut" | null>(null);
+  const [ended, setEnded] = useState<"Idle" | "Absolute" | "SignedOut" | "TooManyScreens" | null>(
+    null,
+  );
   const [staying, setStaying] = useState(false);
   const [unconfirmed, setUnconfirmed] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -246,8 +249,8 @@ export function StaffSessionGuard({
       verifying.current = true;
       try {
         const read = await source.expiry(csrf);
-        if (read === "Ended") {
-          setEnded(reason);
+        if (isSessionEnded(read)) {
+          setEnded(read === "EndedTooManyScreens" ? "TooManyScreens" : reason);
           return;
         }
         setCurrent(read);
@@ -263,7 +266,7 @@ export function StaffSessionGuard({
   );
   const apply = useCallback(
     (read: SessionRead) => {
-      if (read === "Ended") {
+      if (isSessionEnded(read)) {
         void confirmEnded("SignedOut");
         return;
       }
@@ -292,7 +295,7 @@ export function StaffSessionGuard({
       try {
         const read = await source.activity(csrf);
         apply(read);
-        if (read === "Ended" || activityRecorded(read, Date.now())) {
+        if (isSessionEnded(read) || activityRecorded(read, Date.now())) {
           lastReport.current = at;
           misses.current = 0;
         } else {
@@ -360,7 +363,8 @@ export function StaffSessionGuard({
       .then(
         (read) => {
           // The explicit server answer on a fresh read (e.g. signed out on another screen).
-          if (read === "Ended") setEnded("SignedOut");
+          if (isSessionEnded(read))
+            setEnded(read === "EndedTooManyScreens" ? "TooManyScreens" : "SignedOut");
           else setCurrent(read);
         },
         () => undefined,
@@ -413,7 +417,7 @@ export function StaffSessionGuard({
     setChecking(true);
     try {
       const read = await source.expiry(csrf);
-      if (read !== "Ended") {
+      if (!isSessionEnded(read)) {
         // Still signed in after all: remove the cover and resume normally.
         setCurrent(read);
         setUnconfirmed(false);
@@ -451,7 +455,11 @@ export function StaffSessionGuard({
                 })
               : ended === "Absolute"
                 ? t("A sign-in lasts at most 12 hours. Sign in again to keep working.")
-                : t("This sign-in has ended (signed out here or on another screen).")}
+                : ended === "TooManyScreens"
+                  ? t(
+                      "You were signed out here because this account signed in on too many screens. The screen used longest ago signs out first. Sign in again to keep working.",
+                    )
+                  : t("This sign-in has ended (signed out here or on another screen).")}
           </p>
           <StaffSignInLink client={source} label={t("Sign in again")} />
           <button type="button" disabled={checking} onClick={() => void checkAgain()}>

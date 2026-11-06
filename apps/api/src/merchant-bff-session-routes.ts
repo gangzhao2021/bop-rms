@@ -296,7 +296,15 @@ export function installMerchantSessionRoutes(
         .catch((error: unknown) => {
           noteFailure(response, error);
           if (error instanceof BrowserSessionError && error.code === "BROWSER_SESSION_ENDED") {
-            response.status(401).json({ error: "session_ended" });
+            // merchant-outage-recovery M148: the one reason staff can act on (sign in again, and
+            // know why); nothing else about the Session is said.
+            response
+              .status(401)
+              .json(
+                error.endReason === "TooManyScreens"
+                  ? { error: "session_ended", reason: "too_many_screens" }
+                  : { error: "session_ended" },
+              );
             return;
           }
           if (

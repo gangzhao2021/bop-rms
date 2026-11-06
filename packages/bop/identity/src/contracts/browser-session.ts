@@ -31,13 +31,25 @@ export class BrowserSessionError extends Error {
    * `cause`: the owner's own refusal behind a denial (for example a Store BOP closed), kept
    * non-enumerable for the caller to recognise; never answered or serialized.
    */
-  constructor(code: BrowserSessionErrorCode, options?: { readonly cause?: unknown }) {
+  /**
+   * merchant-outage-recovery M148: why an ended Session ended, when staff can act on it. Only
+   * "TooManyScreens" (a newer sign-in of the same person pushed this, the oldest, out). Never
+   * serialized and never carries a reference.
+   */
+  readonly endReason?: "TooManyScreens";
+
+  constructor(
+    code: BrowserSessionErrorCode,
+    options?: { readonly cause?: unknown; readonly endReason?: "TooManyScreens" },
+  ) {
     super(
       code === "BROWSER_SESSION_VERSION_CONFLICT" ? "session version conflict" : "request denied",
       options?.cause === undefined ? undefined : { cause: options.cause },
     );
     this.name = "BrowserSessionError";
     this.code = code;
+    if (options?.endReason !== undefined)
+      Object.defineProperty(this, "endReason", { value: options.endReason, enumerable: false });
   }
 }
 

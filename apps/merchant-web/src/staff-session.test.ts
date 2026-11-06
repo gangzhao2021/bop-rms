@@ -156,6 +156,13 @@ describe("WP-2423 Q18 staff session client", () => {
     );
     expect(await ended.expiry("c".repeat(43))).toBe("Ended");
     expect(await ended.activity("c".repeat(43))).toBe("Ended");
+    // merchant-outage-recovery M148: signed out because of too many screens.
+    const pushedOut = createStaffSessionClient(
+      vi.fn(async () =>
+        response(401, { error: "session_ended", reason: "too_many_screens" }),
+      ) as typeof fetch,
+    );
+    expect(await pushedOut.expiry("c".repeat(43))).toBe("EndedTooManyScreens");
     // A refused, busy or unavailable check is never an ended Session.
     for (const [status, body] of [
       [403, { error: "request_denied" }],

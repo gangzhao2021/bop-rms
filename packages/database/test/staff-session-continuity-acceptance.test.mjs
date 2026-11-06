@@ -98,14 +98,14 @@ it("WP-2423 Q18: activity slides the staff idle deadline within the absolute lif
             }),
         });
       const store = storeAs(role);
-      const issue = async (n, at, policyCode = "WorkforceStandard") => {
+      const issue = async (n, at, policyCode = "WorkforceStandard", actor = actorReference) => {
         clock = at;
         const sessionReference = id(100 + n);
         await store.createSession({
           sessionReference,
           actor: createIdentityActor({
             actorType: "User",
-            actorReference,
+            actorReference: actor,
             accountKind: "Workforce",
             status: "Active",
             authenticationMethod: "Oidc",
@@ -120,7 +120,7 @@ it("WP-2423 Q18: activity slides the staff idle deadline within the absolute lif
             algorithm: "SYNTHETIC_AES_256_GCM",
             keyReference: "internal-test-key",
             ciphertext: Buffer.alloc(48, n).toString("base64url"),
-            encryptionContext: "internal-test:session:" + sessionReference + ":" + actorReference,
+            encryptionContext: "internal-test:session:" + sessionReference + ":" + actor,
           },
           observedAt: at,
         });
@@ -192,7 +192,12 @@ it("WP-2423 Q18: activity slides the staff idle deadline within the absolute lif
         observedAt: T(5),
       });
       const revokedRow = await row(revoked);
-      await assert.rejects(activity(2, revoked, T(10)), ENDED);
+      await assert.rejects(activity(2, revoked, T(10)), (error) => {
+        assert.equal(error.code, "BROWSER_SESSION_ENDED");
+        // merchant-outage-recovery M148: a sign-out is not "too many screens".
+        assert.equal(error.endReason, undefined);
+        return true;
+      });
       assert.deepEqual(await row(revoked), revokedRow);
       assert.equal(revokedRow.status, "Revoked");
 
@@ -262,6 +267,28 @@ it("WP-2423 Q18: activity slides the staff idle deadline within the absolute lif
       assert.equal(recorded.recorded, true);
       assert.equal(recorded.session.idleExpiresAt, T(42));
       assert.equal((await row(busy)).idle_expires_at.toISOString(), T(42));
+
+      // --- merchant-outage-recovery M148: a screen pushed out by a newer sign-in of the same person
+      // (the concurrent-session limit) is told why, read with the existing grants only.
+      const crowded = id(2);
+      const limit = 5; // WorkforceStandard maxActiveSessions
+      for (let n = 0; n <= limit; n += 1)
+        await issue(20 + n, T(13 + n), "WorkforceStandard", crowded);
+      const pushedRow = await admin.query(
+        "SELECT status,revocation_reason FROM bop_identity.authentication_session WHERE session_id=$1",
+        [id(120)],
+      );
+      assert.deepEqual(pushedRow.rows[0], {
+        status: "Revoked",
+        revocation_reason: "ConcurrentLimit",
+      });
+      await assert.rejects(result(20, T(20)), (error) => {
+        assert.equal(error.code, "BROWSER_SESSION_ENDED");
+        assert.equal(error.endReason, "TooManyScreens");
+        assert.ok(!JSON.stringify(error).includes(id(120)), "no reference on the error");
+        return true;
+      });
+      assert.equal((await activity(25, id(125), T(20))).idleExpiresAt, T(50));
 
       // --- The named KDS policy slides by its own 60-minute idle timeout ----------------------
       const kds = await issue(5, T(0), "NamedKdsOperator");

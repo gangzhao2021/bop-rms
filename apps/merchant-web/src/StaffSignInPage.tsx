@@ -74,6 +74,12 @@ export function StaffSignInView({
         <a className="staff-switch__action staff-sign-in__primary" href={testEntry ?? SIGN_IN_HREF}>
           {t("Sign in")}
         </a>
+        {/* merchant-outage-recovery M148: the limit differs by sign-in, so no number is named. */}
+        <p className="staff-sign-in__screens">
+          {t(
+            "One account works on a limited number of screens. Signing in here may sign out the screen used longest ago.",
+          )}
+        </p>
         {testEntry ? (
           <p className="staff-session__test-only">
             <strong>{t("TEST-ONLY")}</strong>{" "}

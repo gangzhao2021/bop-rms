@@ -721,3 +721,16 @@ describe("WP-2423 item 10: a read of the session that failed, as told apart from
     expect(isBrowserSessionReadFailure(error)).toBe(false);
   });
 });
+
+describe("merchant-outage-recovery M148: why an ended Session ended", () => {
+  it("carries only TooManyScreens, never serialized", () => {
+    const pushed = new BrowserSessionError("BROWSER_SESSION_ENDED", {
+      endReason: "TooManyScreens",
+    });
+    expect(pushed.code).toBe("BROWSER_SESSION_ENDED");
+    expect(pushed.endReason).toBe("TooManyScreens");
+    expect(Object.keys(pushed)).not.toContain("endReason");
+    expect(JSON.stringify(pushed)).not.toContain("TooManyScreens");
+    expect(new BrowserSessionError("BROWSER_SESSION_ENDED").endReason).toBeUndefined();
+  });
+});

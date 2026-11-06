@@ -21,7 +21,13 @@ export interface SignInEntry {
   readonly testOnly: boolean;
 }
 
-export type SessionRead = SessionDeadlines | "Ended";
+/**
+ * "EndedTooManyScreens" (merchant-outage-recovery M148): ended because this person signed in on
+ * more screens than their sign-in allows, and this screen was the one used longest ago.
+ */
+export type SessionRead = SessionDeadlines | "Ended" | "EndedTooManyScreens";
+export const isSessionEnded = (read: SessionRead): read is "Ended" | "EndedTooManyScreens" =>
+  read === "Ended" || read === "EndedTooManyScreens";
 
 export interface StaffSessionClient {
   activity(csrf: string): Promise<SessionRead>;
@@ -186,7 +192,9 @@ export function createStaffSessionClient(
         typeof body === "object" &&
         (body as { error?: unknown }).error === "session_ended"
       )
-        return "Ended";
+        return (body as { reason?: unknown }).reason === "too_many_screens"
+          ? "EndedTooManyScreens"
+          : "Ended";
     }
     if (!response.ok) throw new Error("STAFF_SESSION_UNAVAILABLE");
     return deadlines(await response.json(), clock());

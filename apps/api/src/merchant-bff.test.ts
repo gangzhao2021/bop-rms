@@ -7477,6 +7477,13 @@ describe("WP-2423 Q18 staff session continuity routes", () => {
     const ended = await request(root, "/merchant/session/expiry", { headers: authorized });
     expect(ended.status).toBe(401);
     expect(await ended.json()).toEqual({ error: "session_ended" });
+    // merchant-outage-recovery M148: pushed out by a newer sign-in says so, and nothing else.
+    vi.mocked(service.recordActivity).mockRejectedValueOnce(
+      new BrowserSessionError("BROWSER_SESSION_ENDED", { endReason: "TooManyScreens" }),
+    );
+    const pushedOut = await request(root, "/merchant/session/expiry", { headers: authorized });
+    expect(pushedOut.status).toBe(401);
+    expect(await pushedOut.json()).toEqual({ error: "session_ended", reason: "too_many_screens" });
     const noCookie = await request(root, "/merchant/session/expiry", {
       headers: { ...safeHeaders, "X-BOP-CSRF": csrf },
     });
