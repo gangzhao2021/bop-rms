@@ -266,6 +266,37 @@ describe("safe shared Dining Cart display", () => {
     });
     expect((await failing.read(request))?.cart).not.toHaveProperty("recentRounds");
   });
+  it("WP-2423 same-table-ordering: a round this phone paid from an earlier session is still its own", async () => {
+    const base = fixture();
+    const query = createCustomerDiningCartViewQuery({
+      reads: { read: base.read },
+      stores: { getPublicStore: async () => profile() },
+      catalog: { describeMany: base.describeMany },
+      rounds: {
+        recent: async () => [
+          // This phone's participant, paid from a session it had before (since renewed).
+          {
+            roundNumber: 2,
+            sentAt: "2026-09-08T12:00:30.000Z",
+            guestSessionReference: id(40),
+            participantReference: id(31),
+            cartItemReferences: [id(50)],
+          },
+          // Another phone, whatever session it used.
+          {
+            roundNumber: 1,
+            sentAt: "2026-09-08T11:59:30.000Z",
+            guestSessionReference: id(5),
+            participantReference: id(42),
+            cartItemReferences: [id(51)],
+          },
+        ],
+      },
+    });
+    expect(
+      (await query.read(request))?.cart.recentRounds?.map((round) => round.sentByThisPhone),
+    ).toEqual([true, false]);
+  });
   it("publishes only the existing customer schema and passes no notes or actors to display dependencies", async () => {
     const f = fixture();
     const result = await f.query.read(request);

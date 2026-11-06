@@ -234,8 +234,19 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
         },
       };
       const at = new Date(Date.now() - 1000).toISOString();
-      const f = orderWriteFixture({ namespace: "01902423", at });
+      const f = orderWriteFixture({ namespace: "01902423", at, dineIn: true });
       await seedSubmissionCart(admin, f);
+      // Ordering's own record of the paying session opening this table's Cart, as participant P.
+      const payer = id(88);
+      await admin.query(
+        `INSERT INTO rms_ordering.dining_cart_operation (brand_id,store_id,operation_id,
+           dining_session_id,guest_session_id,participant_id,action_code,cart_id,cart_version,
+           occurred_at,expires_at)
+         SELECT c.brand_id,c.store_id,$1,c.dining_session_id,$2,$3,'Select',c.cart_id,
+           c.aggregate_version,c.updated_at,c.updated_at + interval '24 hours'
+         FROM rms_ordering.cart c WHERE c.cart_id=$4`,
+        [id(87), f.request.record.guestSessionReference, payer, f.cart.cartReference],
+      );
       const created = await createPostgresOrderCreationStore(runner, f.scope).append(f.request);
       assert.equal(created.status, "Created");
       const lookup = createPostgresCartOrderLookup(runner, f.scope);
@@ -245,6 +256,7 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
           roundNumber: 1,
           sentAt: at,
           guestSessionReference: f.request.record.guestSessionReference,
+          participantReference: payer,
           cartItemReferences: f.cart.items.map((item) => item.cartItemReference).sort(),
         },
       ];

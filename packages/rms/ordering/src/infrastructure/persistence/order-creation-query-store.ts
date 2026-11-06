@@ -574,6 +574,11 @@ export interface RecentCartRound {
   readonly roundNumber: number;
   readonly sentAt: string;
   readonly guestSessionReference: string;
+  /**
+   * The table participant whose Guest Session paid it, from Ordering's own record of that session
+   * opening this table's Cart; null when there is none (then only the session can be compared).
+   */
+  readonly participantReference: string | null;
   readonly cartItemReferences: readonly string[];
 }
 export async function readRecentCartRounds(
@@ -589,7 +594,13 @@ export async function readRecentCartRounds(
     `SELECT r.round_number::integer AS "roundNumber",
        to_char(r.submitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "sentAt",
        r.guest_session_id::text AS "guestSessionReference",
+       (SELECT o.participant_id::text FROM rms_ordering.dining_cart_operation o
+         JOIN rms_ordering.cart c ON c.cart_id=$3 AND c.brand_id=$1 AND c.store_id=$2
+         WHERE o.brand_id=$1 AND o.store_id=$2 AND o.dining_session_id=c.dining_session_id
+           AND o.guest_session_id=r.guest_session_id
+         ORDER BY o.occurred_at, o.operation_id LIMIT 1) AS "participantReference",
        COALESCE((SELECT array_agg(i.source_cart_line_id::text ORDER BY i.source_cart_line_id)
+           FILTER (WHERE i.source_cart_line_id IS NOT NULL)
          FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2
            AND i.order_batch_id=r.order_batch_id), '{}') AS "cartItemReferences"
      FROM (SELECT b.order_batch_id,b.submitted_at,b.source_cart_id,s.guest_session_id,
@@ -615,6 +626,7 @@ export async function readRecentCartRounds(
         "roundNumber",
         "sentAt",
         "guestSessionReference",
+        "participantReference",
         "cartItemReferences",
       ]);
       if (
@@ -629,6 +641,10 @@ export async function readRecentCartRounds(
         roundNumber: raw.roundNumber,
         sentAt: parseOrderingInstant(raw.sentAt),
         guestSessionReference: parseOrderingReference(raw.guestSessionReference),
+        participantReference:
+          raw.participantReference === null
+            ? null
+            : parseOrderingReference(raw.participantReference),
         cartItemReferences: Object.freeze(
           raw.cartItemReferences.map((reference: unknown) => parseOrderingReference(reference)),
         ),

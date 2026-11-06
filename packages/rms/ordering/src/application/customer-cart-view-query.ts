@@ -100,6 +100,8 @@ export interface CustomerCartRecentRoundsPort {
       readonly roundNumber: number;
       readonly sentAt: string;
       readonly guestSessionReference: string;
+      /** The table participant who paid it, when Ordering recorded it; else null or absent. */
+      readonly participantReference?: string | null;
       readonly cartItemReferences: readonly string[];
     }[]
   >;
@@ -422,9 +424,15 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
                   return Object.freeze({
                     roundNumber: round.roundNumber,
                     sentAt: parseOrderingInstant(round.sentAt),
+                    // The same phone at the table, even on a later session of it; the
+                    // session itself only when the participant isn't recorded.
                     sentByThisPhone:
-                      parseOrderingReference(round.guestSessionReference) ===
-                      first.viewer?.guestSessionReference,
+                      round.participantReference !== undefined &&
+                      round.participantReference !== null
+                        ? parseOrderingReference(round.participantReference) ===
+                          first.viewer?.participantReference
+                        : parseOrderingReference(round.guestSessionReference) ===
+                          first.viewer?.guestSessionReference,
                     cartItemReferences: Object.freeze(
                       round.cartItemReferences.map((reference: string) =>
                         String(parseOrderingReference(reference)),
