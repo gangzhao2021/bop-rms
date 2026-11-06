@@ -242,6 +242,7 @@ export function createPostgresCatalogOrderSnapshotSource(
 ) {
   const fixed = Object.freeze({ ...scope });
   const ownerScope = { brandReference: fixed.brandReference, storeReference: fixed.storeReference };
+  const standings = createPostgresCatalogLineStandingSource(runner, scope, safety);
   return Object.freeze({
     async capture(input: ValidateCatalogSelectionInput) {
       try {
@@ -328,6 +329,19 @@ export function createPostgresCatalogOrderSnapshotSource(
         throw new CatalogError("CATALOG_DEPENDENCY_UNAVAILABLE");
       }
     },
+    explainMany: standings.explainMany,
+  });
+}
+
+/** WP-2423 (guest-cart-503): each cart line's standing now, for the quote and the cart's marks. */
+export function createPostgresCatalogLineStandingSource(
+  runner: AvailabilityQueryTransactionRunner,
+  scope: Parameters<typeof createCurrentCatalogSelectionSource>[1],
+  safety: Pick<CurrentAvailabilityQueryPorts, "killSwitch" | "inventory" | "clock">,
+) {
+  const fixed = Object.freeze({ ...scope });
+  const ownerScope = { brandReference: fixed.brandReference, storeReference: fixed.storeReference };
+  return Object.freeze({
     /**
      * WP-2423 (guest-cart-503): why each line can or cannot be sold now, in one read-only
      * transaction for the whole cart (the menu is read once). Only a stable fact refuses a line:

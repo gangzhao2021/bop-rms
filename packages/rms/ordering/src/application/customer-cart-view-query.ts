@@ -1,8 +1,10 @@
-import type { CatalogSelectionDisplayQuery } from "@rms/catalog";
+import type { CatalogSelectionDisplayQuery, ValidateCatalogSelectionInput } from "@rms/catalog";
 import { parseGetPublicStoreRequest, type GetPublicStoreResult } from "@rms/store";
 import { readClosedRecord } from "@bop/identity";
 import {
   CartError,
+  cartItemUnavailableReason,
+  readCartError,
   parseCartAggregate,
   parseOrderingInstant,
   parseOrderingReference,
@@ -67,6 +69,8 @@ export interface CustomerCartDisplayView {
 }
 export interface CustomerCartViewPorts {
   readonly reads: { read(input: unknown): Promise<PickupCartReadResult | null> };
+  /** WP-2423 (guest-cart-503): marks lines a stable Catalog fact says can't be sold now. */
+  readonly availability?: CustomerCartLineStandingPort;
   readonly catalog: Pick<CatalogSelectionDisplayQuery, "describeMany">;
   readonly stores: { getPublicStore(input: unknown): Promise<GetPublicStoreResult> };
   readonly quotes: {
@@ -77,10 +81,19 @@ export interface CustomerCartViewPorts {
     }): Promise<CartQuoteAttachment<1 | 2> | null>;
   };
 }
+/**
+ * WP-2423 (guest-cart-503): each line's Catalog standing now (Catalog `CatalogLineStanding`), one
+ * read-only transaction per cart read. Optional and fail-open: without it, or when it fails, no line
+ * is marked and the quote stays the authority.
+ */
+export interface CustomerCartLineStandingPort {
+  explainMany(inputs: readonly ValidateCatalogSelectionInput[]): Promise<readonly unknown[]>;
+}
 export interface CustomerDiningCartViewPorts {
   readonly reads: { read(input: unknown): Promise<DiningCartReadResult | null> };
   readonly catalog: CustomerCartViewPorts["catalog"];
   readonly stores: CustomerCartViewPorts["stores"];
+  readonly availability?: CustomerCartLineStandingPort;
 }
 type ViewPorts = Omit<CustomerCartViewPorts, "reads"> & {
   readonly reads: {
@@ -185,6 +198,13 @@ function displayLocale(value: unknown): CustomerDisplayLocale {
     throw new CartError("CART_INPUT_INVALID");
   return value;
 }
+const guestStateCodes = [
+  "CART_PERMISSION_DENIED",
+  "CART_INPUT_INVALID",
+  "CART_TABLE_CHECKING_OUT",
+  "CART_REPLACEMENT_FORBIDDEN",
+] as const;
+type GuestStateCode = (typeof guestStateCodes)[number];
 function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
   return Object.freeze({
     async read(
@@ -192,16 +212,16 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
       requestedDisplayLocale?: CustomerDisplayLocale,
     ): Promise<CustomerCartDisplayView | null> {
       const nameLocale = displayLocale(requestedDisplayLocale);
-      let authorizationErrorCode: "CART_PERMISSION_DENIED" | "CART_INPUT_INVALID" | null = null;
+      // WP-2423 (guest-cart-503): what the guest's own state answers is kept as itself (a table
+      // checking out, a phone no longer at the table); only a real fault becomes "unavailable".
+      let authorizationErrorCode: GuestStateCode | null = null;
       const read = async () => {
         try {
           return await ports.reads.read(input);
         } catch (error) {
-          if (
-            error instanceof CartError &&
-            (error.code === "CART_PERMISSION_DENIED" || error.code === "CART_INPUT_INVALID")
-          )
-            authorizationErrorCode = error.code;
+          const code = readCartError(error)?.code;
+          if (code !== undefined && (guestStateCodes as readonly string[]).includes(code))
+            authorizationErrorCode = code as GuestStateCode;
           throw error;
         }
       };
@@ -259,6 +279,35 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
         });
         if (!Array.isArray(descriptions) || descriptions.length !== cart.items.length)
           return unavailable();
+        // WP-2423 (guest-cart-503): a line a stable Catalog fact says can't be sold now is marked
+        // before anyone taps 下单, so it can be removed. A listing in progress marks nothing.
+        let marks: readonly (string | null)[] = cart.items.map(() => null);
+        if (ports.availability !== undefined && cart.items.length > 0) {
+          try {
+            const standings = await ports.availability.explainMany(
+              cart.items.map((item) => ({
+                brandReference: cart.brandReference as never,
+                storeReference: cart.storeReference as never,
+                sourceChannel: cart.sourceChannel,
+                orderType: cart.orderType,
+                sellableReference: item.sellableReference as never,
+                optionSelections: item.optionSelections as never,
+                observedAt: first.observedAt as never,
+              })),
+            );
+            if (Array.isArray(standings) && standings.length === cart.items.length)
+              marks = standings.map((standing) => {
+                const reason = cartItemUnavailableReason(standing);
+                return reason === null
+                  ? null
+                  : reason === "OptionsChanged"
+                    ? "ITEM_OPTIONS_CHANGED"
+                    : "ITEM_UNAVAILABLE";
+              });
+          } catch {
+            // Fail-open: the cart is still shown; the quote names the line if it is refused.
+          }
+        }
         const items = Object.freeze(
           cart.items.map((item, index) => {
             const description = closed(descriptions[index], [
@@ -309,12 +358,13 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
                 status: "Unavailable" as const,
                 reasonCode: "LINE_ESTIMATE_UNAVAILABLE" as const,
               }),
-              warnings: Object.freeze(
-                first.viewer !== null &&
-                  item.addedByParticipantReference !== first.viewer.participantReference
+              warnings: Object.freeze([
+                ...(first.viewer !== null &&
+                item.addedByParticipantReference !== first.viewer.participantReference
                   ? ["OTHER_PARTICIPANT_ITEM"]
-                  : ([] as string[]),
-              ),
+                  : []),
+                ...(marks[index] == null ? [] : [marks[index] as string]),
+              ]),
             });
           }),
         );

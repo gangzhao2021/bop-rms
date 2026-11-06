@@ -2,6 +2,7 @@ import { validateAuditRecord, type AppendAuditRecordInput } from "@bop/audit";
 import { assertGuestSessionUsable, createGuestSession, type GuestSession } from "@bop/identity";
 import {
   CartError,
+  cartItemUnavailableReason,
   parseCartAggregate,
   parseCartItem,
   parseCatalogSelectionEvidence,
@@ -405,6 +406,44 @@ function canMutateItem(
     : item.addedByActorReference === parseOrderingReference(session.sessionReference);
 }
 
+/**
+ * WP-2423 (guest-cart-503): at a table, a line another phone added may be removed by anyone at the
+ * table once a stable Catalog fact says it can't be sold now (sold out, off the menu, options no
+ * longer fit). Checked inside the command at its own instant; a listing in progress, a Catalog
+ * failure or no Catalog answer keeps the remove refused. Only Remove: any other edit stays the
+ * adder's. The remove is the ordinary attributed operation (the remover's Guest Session, its own
+ * Audit record and the next Cart version), so history stays append-only.
+ */
+async function removableAsUnsellable(
+  ports: CartItemCommandPorts,
+  cart: CartAggregate,
+  item: CartAggregate["items"][number],
+  at: OrderingInstant,
+): Promise<boolean> {
+  const explain = ports.catalog.explainMany;
+  if (cart.orderType !== "DineIn" || explain === undefined) return false;
+  try {
+    const standings = await explain([
+      {
+        brandReference: cart.brandReference as never,
+        storeReference: cart.storeReference as never,
+        sourceChannel: cart.sourceChannel,
+        orderType: cart.orderType,
+        sellableReference: item.sellableReference as never,
+        optionSelections: item.optionSelections as never,
+        observedAt: at as never,
+      },
+    ]);
+    return (
+      Array.isArray(standings) &&
+      standings.length === 1 &&
+      cartItemUnavailableReason(standings[0]) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function commit(
   ports: CartItemCommandPorts,
   input: {
@@ -675,7 +714,10 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
         (candidate) => candidate.cartItemReference === cartItemReference,
       );
       if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
-      if (!canMutateItem(item, current.aggregate, current.session))
+      if (
+        !canMutateItem(item, current.aggregate, current.session) &&
+        !(await removableAsUnsellable(ports, current.aggregate, item, requestedAt))
+      )
         throw new CartError("CART_PERMISSION_DENIED");
       const aggregate = parseCartAggregate({
         ...current.aggregate,

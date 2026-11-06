@@ -39,6 +39,12 @@ export interface CartItemCommandPorts {
       input: ValidateCatalogSelectionInput,
       context: CartSelectionContext,
     ): Promise<CatalogSelectionValidationResult>;
+    /**
+     * WP-2423 (guest-cart-503): each line's Catalog standing now (`CatalogLineStanding`). With it, a
+     * table guest may remove another phone's line that a stable fact says can't be sold now, so the
+     * table is never stuck; without it, or on any other answer, that remove stays refused.
+     */
+    explainMany?(inputs: readonly ValidateCatalogSelectionInput[]): Promise<readonly unknown[]>;
   };
   readonly authorization: {
     authorize(input: {

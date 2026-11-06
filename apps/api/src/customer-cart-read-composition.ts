@@ -1,5 +1,5 @@
 import { logGuestFailure } from "./guest-failure-log.js";
-import { CartError, type CustomerCartDisplayView } from "@rms/ordering";
+import { readCartError, type CustomerCartDisplayView } from "@rms/ordering";
 import type { CustomerCartPort, CustomerCartPortResult } from "./customer-cart.js";
 
 export interface CustomerCartDisplayQuery {
@@ -16,6 +16,26 @@ export function readCartView(
   return displayLocale == null ? query.read(input) : query.read(input, displayLocale);
 }
 
+/**
+ * WP-2423 (guest-cart-503): the guest's own state as such (never a 503): permission ended or the
+ * phone left the table → session expired; the table is checking out → say so. Matched by name as
+ * well (the entry can load Ordering twice), and one level of `cause` under "unavailable".
+ */
+function guestState(error: unknown): CustomerCartPortResult | null {
+  let found = readCartError(error);
+  if (found?.code === "CART_DEPENDENCY_UNAVAILABLE")
+    found = readCartError((error as { cause?: unknown }).cause) ?? found;
+  switch (found?.code) {
+    case "CART_PERMISSION_DENIED":
+    case "CART_REPLACEMENT_FORBIDDEN":
+      return { status: "SessionExpired" };
+    case "CART_TABLE_CHECKING_OUT":
+      return { status: "TableCheckingOut" };
+    default:
+      return null;
+  }
+}
+
 // Existing mutation routes stay explicitly unavailable until their owning composition is ready.
 export function createCustomerCartReadPort(query: CustomerCartDisplayQuery): CustomerCartPort {
   const unavailable = Object.freeze({ status: "Unavailable" } as const);
@@ -27,8 +47,8 @@ export function createCustomerCartReadPort(query: CustomerCartDisplayQuery): Cus
       const view = await readCartView(query, input, displayLocale);
       return view === null ? { status: "NotFound" } : { status: "Found", view };
     } catch (error) {
-      if (error instanceof CartError && error.code === "CART_PERMISSION_DENIED")
-        return { status: "SessionExpired" };
+      const known = guestState(error);
+      if (known !== null) return known;
       logGuestFailure("CUSTOMER_CART_READ_UNAVAILABLE", error);
       return unavailable;
     }

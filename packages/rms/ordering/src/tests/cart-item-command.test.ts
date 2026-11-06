@@ -130,6 +130,7 @@ function fixture(
     auditOverride?: Partial<AppendAuditRecordInput>;
     denied?: boolean;
     catalogMode?: "Rejected" | "Mismatch" | "Failure";
+    explainMany?: NonNullable<CartItemCommandPorts["catalog"]["explainMany"]>;
   } = {},
 ) {
   let aggregate = options.aggregate ?? cart();
@@ -161,6 +162,7 @@ function fixture(
           validatedAt: input.observedAt,
         };
       },
+      ...(options.explainMany === undefined ? {} : { explainMany: options.explainMany }),
     },
     authorization: {
       async authorize(input) {
@@ -402,6 +404,80 @@ describe("Cart Item Add / Update / Remove commands", () => {
         expectedAggregateVersion: 1,
         operationReference: ids.operation,
         requestedAt,
+      }),
+    ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
+  });
+
+  it("WP-2423 guest-cart-503: anyone at the table removes another phone's line once it can't be sold", async () => {
+    const otherItem = {
+      cartItemReference: ids.item,
+      cartReference: ids.cart,
+      sellableReference: ids.sellable,
+      quantity: 1,
+      optionSelections: [],
+      customerNote: null,
+      catalogSelectionEvidence: null,
+      addedByActorReference: ids.session,
+      addedByParticipantReference: ids.participant,
+      addedAt: createdAt,
+    };
+    const diningCart = cart({
+      orderType: "DineIn",
+      diningSessionReference: ids.diningSession as never,
+      items: [otherItem] as never,
+    });
+    const remover = guest({
+      channel: "DineIn",
+      diningState: "DiningBound",
+      diningSessionReference: ids.diningSession as never,
+      sessionReference: ids.otherSession as never,
+      diningParticipantReference: ids.otherParticipant as never,
+      publicTableReference: id(32) as never,
+    });
+    const remove = {
+      cartReference: ids.cart,
+      cartItemReference: ids.item,
+      expectedAggregateVersion: 1,
+      operationReference: ids.operation,
+      requestedAt,
+    };
+    // Sold out (a stable fact, checked inside the command at its own instant): removed, version +1.
+    const explainMany = vi.fn(async () => ["Unavailable"]);
+    const soldOut = fixture({ aggregate: diningCart, session: remover, explainMany });
+    await expect(soldOut.service.remove(remove)).resolves.toMatchObject({
+      status: "Applied",
+      aggregate: { items: [], aggregateVersion: 2 },
+    });
+    expect(explainMany).toHaveBeenCalledWith([
+      expect.objectContaining({ sellableReference: ids.sellable, observedAt: requestedAt }),
+    ]);
+    // Attributed to the remover's Guest Session, never to the adder.
+    expect(soldOut.operation(ids.operation)?.guestSessionReference).toBe(ids.otherSession);
+    // A menu listing in progress, a Catalog failure or no Catalog answer: still refused.
+    for (const options of [
+      { explainMany: async () => ["Indeterminate"] },
+      { explainMany: async () => ["Available"] },
+      {
+        explainMany: async () => {
+          throw new Error("synthetic Catalog outage");
+        },
+      },
+      {},
+    ]) {
+      const state = fixture({ aggregate: diningCart, session: remover, ...options });
+      await expect(state.service.remove(remove)).rejects.toMatchObject({
+        code: "CART_PERMISSION_DENIED",
+      });
+      expect(state.operations()).toBe(0);
+    }
+    // Any other edit of another phone's line stays the adder's, sold out or not.
+    const edit = fixture({ aggregate: diningCart, session: remover, explainMany });
+    await expect(
+      edit.service.update({
+        ...remove,
+        quantity: 2,
+        optionSelections: [],
+        customerNote: null,
       }),
     ).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
   });

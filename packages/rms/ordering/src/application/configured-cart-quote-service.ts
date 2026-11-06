@@ -14,7 +14,7 @@ import {
 import {
   CartError,
   CartItemUnavailableError,
-  type CartItemUnavailableReason,
+  cartItemUnavailableReason,
   parseCartAggregate,
   parseOrderingReference,
   parseOrderingInstant,
@@ -95,14 +95,6 @@ export interface ConfiguredCartQuotePorts {
 const fail = (): never => {
   throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
 };
-/** WP-2423 (guest-cart-503): a stable Catalog standing as the guest's reason, or null (retry). */
-export function cartItemUnavailableReason(standing: unknown): CartItemUnavailableReason | null {
-  return standing === "Unavailable" || standing === "NotOnMenu"
-    ? "Unavailable"
-    : standing === "OptionsChanged" || standing === "SetupIncomplete"
-      ? standing
-      : null;
-}
 const denied = (): never => {
   throw new CartError("CART_PERMISSION_DENIED");
 };

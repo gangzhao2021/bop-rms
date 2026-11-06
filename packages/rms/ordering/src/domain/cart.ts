@@ -150,6 +150,15 @@ export const cartItemUnavailableReasons: readonly CartItemUnavailableReason[] = 
   "SetupIncomplete",
 ]);
 
+/** WP-2423 (guest-cart-503): a stable Catalog standing as the guest's reason, or null (retry). */
+export function cartItemUnavailableReason(standing: unknown): CartItemUnavailableReason | null {
+  return standing === "Unavailable" || standing === "NotOnMenu"
+    ? "Unavailable"
+    : standing === "OptionsChanged" || standing === "SetupIncomplete"
+      ? standing
+      : null;
+}
+
 /** WP-2423 (guest-cart-503): the guest's own cart line that cannot be sold now. */
 export class CartItemUnavailableError extends CartError {
   readonly cartItemReference: OrderingReference;

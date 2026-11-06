@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import type { createPostgresCatalogSelectionService } from "@rms/catalog";
+import {
+  createPostgresCatalogLineStandingSource,
+  type createPostgresCatalogSelectionService,
+} from "@rms/catalog";
 import {
   createCustomerCartSelectionInventory,
   withCartItemStockShortage,
@@ -328,6 +331,8 @@ export interface CustomerDiningCartCompositionOptions {
   readonly selection: Omit<DiningCartSelectionStoreOptions, "scope" | "now">;
   readonly catalog: CustomerDiningCartViewPorts["catalog"];
   readonly stores: CustomerDiningCartViewPorts["stores"];
+  /** WP-2423 (guest-cart-503): marks lines a stable Catalog fact says can't be sold now. */
+  readonly availability?: CustomerDiningCartViewPorts["availability"];
   readonly now: () => string;
   /** WP-2423: owner replacement used to continue past a timed-out table Cart (omitted: refused). */
   readonly replacement?: CustomerCartReplacementPort;
@@ -382,6 +387,7 @@ export function createCustomerDiningCartComposition(
     }),
     catalog: options.catalog,
     stores: options.stores,
+    ...(options.availability === undefined ? {} : { availability: options.availability }),
   });
   const replacement = options.replacement;
   const succession = createPostgresDiningCartSuccessionSource(options.cartTransactions, fixedScope);
@@ -594,25 +600,34 @@ export function createCustomerDiningCartWithCatalogInventoryComposition(
 ): CustomerCartPort {
   const { catalogTransactions, catalogScope, catalogSafety, selectedInventory, items, ...cart } =
     options;
+  const catalogOwnerScope = { ...catalogScope, ...cart.scope, orderType: "DineIn" as const };
+  const ownerSafety = { ...catalogSafety, clock: { now: cart.now } };
+  const selection = createCustomerCartSelectionInventory(
+    catalogTransactions,
+    catalogOwnerScope,
+    ownerSafety,
+    {
+      ...selectedInventory,
+      authorize: createCustomerDiningCartInventoryAuthorization(cart.scope, cart.now),
+    },
+  );
+  // WP-2423 (guest-cart-503): one read-only Catalog transaction per cart read or remove.
+  const standing = createPostgresCatalogLineStandingSource(
+    catalogTransactions,
+    catalogOwnerScope,
+    ownerSafety,
+  );
   // WP-2423: a quantity the stock can't make tells the guest how many it can.
   return withCartItemStockShortage(
     createCustomerDiningCartComposition({
       ...cart,
+      availability: standing,
       items: {
         ...items,
-        catalog: createCustomerCartSelectionInventory(
-          catalogTransactions,
-          {
-            ...catalogScope,
-            ...cart.scope,
-            orderType: "DineIn",
-          },
-          { ...catalogSafety, clock: { now: cart.now } },
-          {
-            ...selectedInventory,
-            authorize: createCustomerDiningCartInventoryAuthorization(cart.scope, cart.now),
-          },
-        ),
+        catalog: {
+          validateSelection: (input, context) => selection.validateSelection(input, context),
+          explainMany: (inputs) => standing.explainMany(inputs),
+        },
       },
     }),
   );

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GetPublicStoreResult } from "@rms/store";
-import { createCustomerCartViewQuery } from "../application/customer-cart-view-query.js";
+import {
+  createCustomerCartViewQuery,
+  type CustomerCartViewPorts,
+} from "../application/customer-cart-view-query.js";
 import { CartError, parseCartAggregate, parseOrderingInstant } from "../domain/cart.js";
 import {
   parseCartQuoteAttachment,
@@ -139,7 +142,7 @@ function description(): CatalogSelectionDisplayResult {
     options: [{ optionReference: id(12), displayName: "Synthetic option" }],
   } as unknown as CatalogSelectionDisplayResult;
 }
-function fixture() {
+function fixture(availability?: CustomerCartViewPorts["availability"]) {
   const read = vi.fn(async (): Promise<PickupCartReadResult | null> => snapshot());
   const getPublicStore = vi.fn(async () => profile());
   const describeMany = vi.fn(async (): Promise<readonly CatalogSelectionDisplayResult[]> => [
@@ -151,6 +154,7 @@ function fixture() {
     stores: { getPublicStore },
     catalog: { describeMany },
     quotes: { loadLatest },
+    ...(availability === undefined ? {} : { availability }),
   });
   return { read, getPublicStore, describeMany, loadLatest, query };
 }
@@ -212,6 +216,39 @@ describe("safe Customer Cart display", () => {
       expect(json).not.toContain(value);
     expect(Object.isFrozen(result?.cart.items[0]?.configuration)).toBe(true);
   });
+  it.each([
+    ["Unavailable", ["ITEM_UNAVAILABLE"]],
+    ["NotOnMenu", ["ITEM_UNAVAILABLE"]],
+    ["SetupIncomplete", ["ITEM_UNAVAILABLE"]],
+    ["OptionsChanged", ["ITEM_OPTIONS_CHANGED"]],
+    ["Available", []],
+    ["Indeterminate", []],
+  ])(
+    "WP-2423 guest-cart-503: marks a line Catalog says is %s before anyone orders",
+    async (standing, warnings) => {
+      const explainMany = vi.fn(async () => [standing]);
+      const f = fixture({ explainMany });
+      const result = await f.query.read(request);
+      expect(result?.cart.items[0]?.warnings).toEqual(warnings);
+      // One Catalog call for the whole cart, at the read's own instant.
+      expect(explainMany).toHaveBeenCalledOnce();
+      expect(explainMany).toHaveBeenCalledWith([
+        expect.objectContaining({ sellableReference: id(9), observedAt: at }),
+      ]);
+    },
+  );
+  it("WP-2423 guest-cart-503: shows the cart unmarked when Catalog can't say", async () => {
+    for (const explainMany of [
+      async () => {
+        throw new Error("synthetic Catalog outage");
+      },
+      async () => [],
+    ]) {
+      const f = fixture({ explainMany });
+      const result = await f.query.read(request);
+      expect(result?.cart.items[0]?.warnings).toEqual([]);
+    }
+  });
   it("Owner 2026-10-23: names items in the guest's chosen language; the Store stays in the session's", async () => {
     const f = fixture();
     await f.query.read(request, "zh-Hans-CA");
@@ -267,6 +304,26 @@ describe("safe Customer Cart display", () => {
       await expect(f.query.read(request)).rejects.toMatchObject({ code: "CART_PERMISSION_DENIED" });
       if (!after) expect(f.loadLatest).not.toHaveBeenCalled();
     }
+  });
+  it.each(["CART_TABLE_CHECKING_OUT", "CART_REPLACEMENT_FORBIDDEN"] as const)(
+    "WP-2423 guest-cart-503: keeps the guest's own state %s as itself, never unavailable",
+    async (code) => {
+      for (const after of [false, true]) {
+        const f = fixture();
+        if (after) f.read.mockResolvedValueOnce(snapshot());
+        f.read.mockRejectedValue(new CartError(code));
+        await expect(f.query.read(request)).rejects.toMatchObject({ code });
+      }
+    },
+  );
+  it("WP-2423 guest-cart-503: wraps a real fault, keeping its cause for the log", async () => {
+    const f = fixture();
+    const cause = new CartError("CART_LIFECYCLE_UNAVAILABLE");
+    f.read.mockRejectedValue(cause);
+    await expect(f.query.read(request)).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+      cause,
+    });
   });
   it.each(["version", "context", "missing", "clock"])("denies changed final %s", async (mode) => {
     const f = fixture();

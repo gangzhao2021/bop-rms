@@ -1,4 +1,5 @@
 import { createCustomerDiningCartComposition } from "../../../apps/api/src/customer-dining-cart-composition.ts";
+import { DiningTableCheckingOutError } from "../../rms/dining/src/index.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -35,6 +36,11 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
     let transactions = 0;
     let authorityReads = 0;
     let participationAllowed = true;
+    let tableCheckingOut = false;
+    // WP-2423 guest-cart-503: Catalog's standing for every line (synthetic Catalog provider here;
+    // the Catalog read itself runs in configured-cart-quote-service-acceptance).
+    let lineStanding = "Available";
+    const standing = { explainMany: async (inputs) => inputs.map(() => lineStanding) };
     let generated = 1000;
     let creations = 0;
     let clock = 0;
@@ -181,6 +187,8 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
                 diningSessionReference: intent.diningSessionReference,
                 participantReference: intent.participantReference,
               });
+              // The owner's own error for a Closing session (DEC-DINE-IN-PAY-LATER rule 3).
+              if (tableCheckingOut) throw new DiningTableCheckingOutError();
               return participationAllowed
                 ? {
                     schemaVersion: 1,
@@ -358,6 +366,7 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
           },
           cartTransactions: runner(),
           selectionTransactions: runner(),
+          availability: standing,
           selection: {
             sourceChannel: options.sourceChannel,
             policy: options.policy,
@@ -385,6 +394,7 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
                       ruleEvidence: [],
                       validatedAt: request.observedAt,
                     }),
+                    explainMany: (inputs) => standing.explainMany(inputs),
                   },
                   audit: (input) => ({
                     auditId: id(++generated),
@@ -498,6 +508,17 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
         }),
         { status: "Found", view: apiCreated.view },
       );
+      // WP-2423 guest-cart-503: staff started the table's checkout. The open cart's read says so
+      // (409 cart_table_checking_out at the route), never "couldn't load your cart" (503).
+      tableCheckingOut = true;
+      assert.deepEqual(
+        await api.getCurrentCart({
+          guestCredential: apiRequest.guestCredential,
+          requestedAt: at(),
+        }),
+        { status: "TableCheckingOut" },
+      );
+      tableCheckingOut = false;
       const unknownRequest = { ...apiRequest, operationReference: id(188) };
       profileAvailable = false;
       assert.deepEqual(await api.createCart(unknownRequest), { status: "Unavailable" });
@@ -793,6 +814,54 @@ it("atomically selects one initial shared Dining Cart with immutable replay and 
         "Synthetic other note",
       ])
         assert(!JSON.stringify(removed).includes(privateValue));
+      // WP-2423 guest-cart-503 (M06/M36): the other phone's dish. While it still sells, or while a
+      // menu listing leaves Catalog unsure, only its adder may remove it.
+      const otherRemove = {
+        ...itemCommon,
+        expectedCartVersion: 5,
+        cartItemReference: otherItem,
+      };
+      for (const [n, current] of [
+        [4207, "Available"],
+        [4208, "Indeterminate"],
+      ]) {
+        lineStanding = current;
+        assert.deepEqual(await itemApi.removeItem({ ...otherRemove, operationReference: id(n) }), {
+          status: "SessionExpired",
+        });
+      }
+      assert.equal(await count("rms_ordering.cart_operation_record"), beforeItemOperations + 4);
+      // Sold out: every phone sees it marked, and this phone removes it (one attributed operation,
+      // its own Audit record, the next Cart version).
+      lineStanding = "Unavailable";
+      const marked = await itemApi.getCart({
+        guestCredential: transport.guestCredential,
+        requestedAt: at(),
+        cartReference,
+      });
+      assert.deepEqual(marked.view.cart.items[0].warnings, [
+        "OTHER_PARTICIPANT_ITEM",
+        "ITEM_UNAVAILABLE",
+      ]);
+      const cleared = await itemApi.removeItem({ ...otherRemove, operationReference: id(4209) });
+      assert.equal(cleared.status, "Applied");
+      assert.equal(cleared.view.cart.version, 6);
+      assert.deepEqual(cleared.view.cart.items, []);
+      assert.equal(await count("platform_audit.audit_record"), beforeItemAudit + 6);
+      assert.equal(await count("rms_ordering.cart_operation_record"), beforeItemOperations + 5);
+      const clearedBy = await admin.query(
+        "SELECT action_code,guest_session_id FROM rms_ordering.cart_operation_record WHERE operation_id=$1",
+        [id(4209)],
+      );
+      assert.equal(clearedBy.rows.length, 1);
+      assert.equal(clearedBy.rows[0].action_code, "Remove");
+      // Attributed to this phone's Guest Session, not to the phone that added the dish.
+      const addedBy = await admin.query(
+        "SELECT guest_session_id FROM rms_ordering.cart_operation_record WHERE operation_id=$1",
+        [id(4203)],
+      );
+      assert.notEqual(clearedBy.rows[0].guest_session_id, addedBy.rows[0].guest_session_id);
+      lineStanding = "Available";
       clock = 8000;
       const oldPolicyStore = createPostgresDiningCartSelectionStore(runner(), {
         ...options,

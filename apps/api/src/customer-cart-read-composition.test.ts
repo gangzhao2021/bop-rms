@@ -59,6 +59,55 @@ describe("Customer Cart read bridge", () => {
     });
     expect(await port.getCurrentCart(input)).toEqual({ status });
   });
+  it("WP-2423 guest-cart-503: a table checking out is said as such, plain or as a cause", async () => {
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      for (const error of [
+        new CartError("CART_TABLE_CHECKING_OUT"),
+        Object.assign(new CartError("CART_DEPENDENCY_UNAVAILABLE"), {
+          cause: new CartError("CART_TABLE_CHECKING_OUT"),
+        }),
+      ]) {
+        const port = createCustomerCartReadPort({
+          read: async () => {
+            throw error;
+          },
+        });
+        expect(await port.getCurrentCart(input)).toEqual({ status: "TableCheckingOut" });
+      }
+      expect(write).not.toHaveBeenCalled();
+      const left = createCustomerCartReadPort({
+        read: async () => {
+          throw new CartError("CART_REPLACEMENT_FORBIDDEN");
+        },
+      });
+      expect(await left.getCurrentCart(input)).toEqual({ status: "SessionExpired" });
+      const fault = createCustomerCartReadPort({
+        read: async () => {
+          throw new Error("synthetic fault");
+        },
+      });
+      expect(await fault.getCurrentCart(input)).toEqual({ status: "Unavailable" });
+      expect(write).toHaveBeenCalledOnce();
+    } finally {
+      write.mockRestore();
+    }
+  });
+  it("WP-2423 guest-cart-503: matches a second copy of Ordering's CartError by name", async () => {
+    class CartError extends Error {
+      readonly code = "CART_TABLE_CHECKING_OUT";
+      constructor() {
+        super("cart is unavailable");
+        this.name = "CartError";
+      }
+    }
+    const port = createCustomerCartReadPort({
+      read: async () => {
+        throw new CartError();
+      },
+    });
+    expect(await port.getCurrentCart(input)).toEqual({ status: "TableCheckingOut" });
+  });
   it.each(["createCart", "addItem", "updateItem", "removeItem"] as const)(
     "keeps %s unavailable without invoking reads",
     async (method) => {

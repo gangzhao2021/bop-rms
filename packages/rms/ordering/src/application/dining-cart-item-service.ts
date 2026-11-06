@@ -334,6 +334,15 @@ export function createDiningCartItemService(options: DiningCartItemOptions) {
           catalog: {
             validateSelection: (selection, context) =>
               guarded(() => options.catalog.validateSelection(selection, context)),
+            ...(options.catalog.explainMany === undefined
+              ? {}
+              : {
+                  explainMany: (
+                    inputs: Parameters<
+                      NonNullable<CartItemCommandPorts["catalog"]["explainMany"]>
+                    >[0],
+                  ) => options.catalog.explainMany?.(inputs) ?? Promise.resolve([]),
+                }),
           },
           references: options.references,
           authorization: { authorize: async () => ({ guestSession: first.session, audit }) },
