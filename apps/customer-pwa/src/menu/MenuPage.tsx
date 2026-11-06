@@ -40,6 +40,7 @@ import {
   type ConfigureState,
 } from "./configure-state.js";
 import { createCustomerMenuClient, normalizeMenuSearch } from "./menu-client.js";
+import { isUnseatedTableScan } from "../session/customer-transaction-context.js";
 import {
   allergensForChoice,
   comboDishAllergens,
@@ -1519,7 +1520,13 @@ export function ConfigureStatus({
     "table-checking-out": t(
       "Your table is checking out, so new dishes can’t be sent. To add more, ask a staff member.",
     ),
-    "not-seated": t("You can order once staff seat you. Ask a staff member, then scan again."),
+    // WP-2423 M115: an open table this phone hasn't joined (e.g. after a reload): join it there.
+    "not-seated": isUnseatedTableScan()
+      ? t("You can order once staff seat you. Ask a staff member, then scan again.")
+      : t("Join this table first, then add the dish."),
+    "table-join-refused": t(
+      "We couldn’t join you to this table just now. Try again, or ask staff. Your choices are kept here.",
+    ),
     "participation-ended": participationEndedText().join(" "),
     "table-start-refused": t(
       "This table can’t be started just now. Pick another table or ask staff. Your choices are kept here.",
@@ -1566,6 +1573,9 @@ export function ConfigureStatus({
       ) : null}
       {state.status === "table-question" ? <Link to="/">{t("Back to the question")}</Link> : null}
       {state.status === "table-in-use" ? <Link to="/">{t("Back to this table")}</Link> : null}
+      {state.status === "not-seated" && !isUnseatedTableScan() ? (
+        <Link to="/">{t("Join this table")}</Link>
+      ) : null}
     </div>
   );
 }

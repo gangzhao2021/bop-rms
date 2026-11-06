@@ -12,6 +12,7 @@ import { SettledTableReceiptPanel } from "../dining/SettledTableReceipt.js";
 import {
   getSettledTableLabel,
   setGuestTableQuestion,
+  setGuestTableJoiner,
   setGuestTableStarter,
   setNewPartyJoin,
   type GuestTableStartAnswer,
@@ -176,6 +177,8 @@ export function EntryContextPage({
   useEffect(() => {
     if (state.kind === "Loading") return;
     setGuestTableQuestion(state.kind === "TableAskNewParty");
+    // M115: only an open table's page offers the menu's join; any other answer clears it.
+    if (state.kind !== "Established" && state.kind !== "Resumed") setGuestTableJoiner(null);
     if (state.kind !== "TableMayStart") {
       setGuestTableStarter(null);
       return;
@@ -598,6 +601,34 @@ function EntryNextSteps({
   // Joining is the next step only where it can happen here.
   const first = joining && diningAdmission !== undefined && !joined;
   const opened = useRef(false);
+  // WP-2423 M115: the guest may look at the menu first; their tap on Add there joins this table
+  // by its QR code (the same join as the panel's) and the dish they configured goes in. Cleared
+  // once joined, or for another table.
+  useEffect(() => {
+    if (!first || diningAdmission === undefined || starting === true) {
+      setGuestTableJoiner(null);
+      return;
+    }
+    const join = async (): Promise<GuestTableStartAnswer> => {
+      try {
+        const result = await diningAdmission.journey.start({
+          operationReference: diningAdmission.generateOperationReference(),
+          joinCredential: null,
+        });
+        if (
+          result === null ||
+          typeof result !== "object" ||
+          (result as { status?: unknown }).status !== "Bound"
+        )
+          return "Refused";
+      } catch (error) {
+        return admissionStateForFailure(error) === "TableInUse" ? "InUse" : "Refused";
+      }
+      setGuestTableJoiner(null);
+      return "Started";
+    };
+    setGuestTableJoiner(join);
+  }, [first, diningAdmission, context, starting]);
   return (
     <>
       {joining ? (

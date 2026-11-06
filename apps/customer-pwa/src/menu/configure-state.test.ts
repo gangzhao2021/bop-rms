@@ -1,6 +1,8 @@
 import {
+  getGuestTableJoiner,
   getGuestTableStarter,
   setCustomerCsrfCredential,
+  setGuestTableJoiner,
   setGuestTableQuestion,
   setGuestTableStarter,
   setUnseatedTableScan,
@@ -10,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartView } from "../cart/types.js";
 import { createConfigureController } from "./configure-state.js";
+import { cartText } from "../journey/messages.js";
 
 const id = (n: number) => `018f7600-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -255,6 +258,51 @@ describe("WP-1702 in-memory Configurator state", () => {
     } finally {
       setGuestTableStarter(null);
       setCustomerCsrfCredential(null);
+      setUnseatedTableScan(false);
+    }
+  });
+
+  it("M115: at an open table this phone browsed first, the tap on Add joins the table and adds the dish", async () => {
+    setCustomerCsrfCredential(null);
+    let refuse = true;
+    const joins: string[] = [];
+    setGuestTableJoiner(async (): Promise<GuestTableStartAnswer> => {
+      joins.push("join");
+      if (refuse) return "Refused";
+      setCustomerCsrfCredential("csrf-joined");
+      setGuestTableJoiner(null);
+      return "Started";
+    });
+    try {
+      const state = fixture(null);
+      await state.controller.submit(id(3), draft);
+      // Refused: said as a join, never "staff will seat you"; nothing sent; the dish is kept.
+      expect(state.controller.getState()).toMatchObject({ status: "table-join-refused" });
+      expect(state.calls).toEqual([]);
+      refuse = false;
+      await state.controller.submit(id(3), draft);
+      expect(joins).toEqual(["join", "join"]);
+      expect(state.calls.map((call) => call.name)).toEqual(["load", "create", "add"]);
+      expect(state.controller.getState()).toMatchObject({ status: "added" });
+      expect(getGuestTableJoiner()).toBeNull();
+    } finally {
+      setGuestTableJoiner(null);
+      setCustomerCsrfCredential(null);
+    }
+  });
+
+  it("M115: after a reload (no join in memory) a not-joined phone at an open table is sent to join it, not to staff", () => {
+    setGuestTableJoiner(null);
+    setUnseatedTableScan(false);
+    expect(cartText.failure.notSeated).toEqual([
+      "Join this table first",
+      "Join this table to order and see what your table has ordered.",
+    ]);
+    // A table nobody is seated at still says staff seat the party.
+    setUnseatedTableScan(true);
+    try {
+      expect(cartText.failure.notSeated[0]).toBe("You can order once staff seat you");
+    } finally {
       setUnseatedTableScan(false);
     }
   });

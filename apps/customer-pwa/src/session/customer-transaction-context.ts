@@ -132,6 +132,22 @@ export function getGuestTableStarter(): (() => Promise<GuestTableStartAnswer>) |
 }
 
 /**
+ * WP-2423 M115: this phone is looking at the menu of an open table it may join by its QR code but
+ * has not joined. A guest's tap on Add runs this, which joins the table (the same QR join as the
+ * entry page's), so the dish they configured goes in. Answers as the starter does ("Started" =
+ * joined). Memory only: after a reload the menu sends the guest to the table's page to join.
+ */
+let guestTableJoiner: (() => Promise<GuestTableStartAnswer>) | null = null;
+
+export function setGuestTableJoiner(value: (() => Promise<GuestTableStartAnswer>) | null): void {
+  guestTableJoiner = value;
+}
+
+export function getGuestTableJoiner(): (() => Promise<GuestTableStartAnswer>) | null {
+  return guestTableJoiner;
+}
+
+/**
  * This scan asked whether this phone is with the people at the table, and nobody has answered: the
  * menu sends the guest back to that question rather than to staff. Memory only.
  */

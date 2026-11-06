@@ -2,6 +2,7 @@ import type { CustomerCartClient } from "../cart/cart-client.js";
 import { CartClientError, type CartItemDraft, type CartView } from "../cart/types.js";
 import {
   getCustomerCsrfCredential,
+  getGuestTableJoiner,
   getGuestTableStarter,
   isGuestTableQuestion,
   isUnseatedTableScan,
@@ -30,6 +31,7 @@ export type ConfigureState =
         | "participation-ended"
         | "not-seated"
         | "table-start-refused"
+        | "table-join-refused"
         | "table-in-use"
         | "table-question"
         | "expired"
@@ -154,7 +156,9 @@ export function createConfigureController({
     // WP-2423 DEC-DINING-GUEST-TABLE-START: where the guest may start this table, their tap on Add
     // starts and joins it, then the dish they configured goes in. Only a tap reaches here. A start
     // whose join was refused leaves a starter that only joins, though the visit already exists.
-    const starter = getGuestTableStarter();
+    // WP-2423 M115: at an open table this phone may join by QR but hasn't, the tap on Add joins it.
+    const joiner = getCustomerCsrfCredential() === null ? getGuestTableJoiner() : null;
+    const starter = getGuestTableStarter() ?? joiner;
     if (starter !== null || (getCustomerCsrfCredential() === null && isUnseatedTableScan())) {
       // Asked whether they're with the people here: that answer comes first, not a trip to staff.
       if (starter === null && isGuestTableQuestion()) {
@@ -174,7 +178,12 @@ export function createConfigureController({
       const answer = await starter().catch(() => "Refused" as const);
       if (answer !== "Started" || getCustomerCsrfCredential() === null) {
         publish({
-          status: answer === "InUse" ? "table-in-use" : "table-start-refused",
+          status:
+            starter === joiner && joiner !== null
+              ? "table-join-refused"
+              : answer === "InUse"
+                ? "table-in-use"
+                : "table-start-refused",
           issueCodes: [],
           retryAfterSeconds: null,
           canRetry: false,

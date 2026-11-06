@@ -1,3 +1,4 @@
+import { setUnseatedTableScan } from "../session/customer-transaction-context.js";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -435,10 +436,22 @@ describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
   });
 
   it("tells a guest who has not joined how to join, and offers retry when the table can't load", () => {
+    // M115: the table's page offers the join itself (QR, or a code when paused): no code asked here.
     const notJoined = render({ status: "not-joined" });
     expect(notJoined).toContain("Join your table first");
-    expect(notJoined).toContain("Ask a staff member, or the person who joined your table first");
+    expect(notJoined).toContain("Join this table to order and see what your table has ordered.");
+    expect(notJoined).not.toContain("join code");
+    expect(notJoined).toContain(">Join this table</a>");
     expect(notJoined).not.toContain("Round");
+    // A table nobody is seated at keeps the staff/code guidance.
+    setUnseatedTableScan(true);
+    try {
+      expect(render({ status: "not-joined" })).toContain(
+        "Ask a staff member, or the person who joined your table first",
+      );
+    } finally {
+      setUnseatedTableScan(false);
+    }
     const failed = render({ status: "unavailable", view: null, offline: false });
     expect(failed).toContain("We couldn’t load your table");
     expect(failed).toContain("Try again");

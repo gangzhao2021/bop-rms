@@ -27,6 +27,7 @@ import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
 import {
   getGuestTableStarter,
   isGuestTableQuestion,
+  isUnseatedTableScan,
   subscribeCustomerCsrfContext,
 } from "../session/customer-transaction-context.js";
 import { SettledTableReceiptPanel, type SettledTableReceiptClient } from "./SettledTableReceipt.js";
@@ -1024,6 +1025,13 @@ export function DiningSessionScreen({
               <h2>{t("Join your table first")}</h2>
               <p>{t("First tell us if you’re with the people at this table.")}</p>
             </>
+          ) : !isUnseatedTableScan() ? (
+            // WP-2423 M115: the table's page offers the join this table allows (its QR code, or a
+            // code when QR joins are paused), so the guest is sent there, not asked for a code.
+            <>
+              <h2>{t("Join your table first")}</h2>
+              <p>{t("Join this table to order and see what your table has ordered.")}</p>
+            </>
           ) : (
             <>
               <h2>{t("Join your table first")}</h2>
@@ -1035,7 +1043,9 @@ export function DiningSessionScreen({
             </>
           )}
           <Link className="order-status__back" to="/">
-            {t("Go to the start")}
+            {getGuestTableStarter() === null && !isGuestTableQuestion() && !isUnseatedTableScan()
+              ? t("Join this table")
+              : t("Go to the start")}
           </Link>
         </section>
       ) : null}
