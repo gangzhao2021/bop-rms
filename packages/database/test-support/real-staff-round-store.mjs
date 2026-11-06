@@ -731,13 +731,14 @@ async function listRealMenu({
     const menus = createMerchantMenus({ ...common, currencyMetadata });
     const dishAllergens = createMerchantDishAllergens({ ...common, references: { next: op } });
     const optionSets = createMerchantOptionSets(common);
+    const optionRecipes = createMerchantOptionRecipes(common);
     const commands = createMerchantOneStoreDishes({
       products: createMerchantProducts(common),
       prices: createMerchantPrices({ ...common, currencyMetadata }),
       optionPrices: createMerchantOptionPrices({ ...common, currencyMetadata }),
       menus,
       dishAllergens,
-      optionRecipes: createMerchantOptionRecipes(common),
+      optionRecipes,
       availability: createMerchantAvailability(common),
       combos: createMerchantCombos(common),
       optionSets,
@@ -808,6 +809,10 @@ async function listRealMenu({
         listAll,
         /** The Owner's choice groups (option sets), through the same commands. */
         optionSets,
+        /** The Owner's option recipes (what a choice changes), through the same commands. */
+        optionRecipes,
+        /** The Store's stock item (staff declared, no allergens), for a choice that adds it. */
+        stockItemReference: stock.itemReference,
         /** The connection the Owner's commands run on, for a test watching what waits on them. */
         backendPid: () => authoring.processID,
         close: () => authoring.end(),

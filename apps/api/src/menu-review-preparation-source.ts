@@ -21,6 +21,7 @@ import {
   type MenuAllergenPath,
   type MenuReviewSellableFact,
 } from "@rms/catalog";
+import { createPostgresRecipeReviewSource, RecipeReviewGapError } from "@rms/recipe";
 import {
   createCompleteMenuRecipeAllergenSource,
   MenuRecipeAllergenError,
@@ -43,8 +44,8 @@ const fail = (reason = "MenuReview"): never => {
 
 /**
  * The most choice combinations one menu review checks, across every Store and channel of the menu.
- * A drinks menu with many toppings reaches it; reviewing per option instead of per combination is
- * a separate WP-2423 entry. Submit, Approve, Publish and the listing check all use this one.
+ * A drinks menu whose toppings change the recipe reaches it; one whose choices change nothing is
+ * reviewed per option (WP-2423 item 3). Submit, Approve, Publish and the listing check all use this one.
  */
 export const menuReviewBudget = Object.freeze({
   maximumConfigurations: 10000,
@@ -54,14 +55,19 @@ export const menuReviewBudget = Object.freeze({
 /**
  * WP-2423 DEC-MERCHANT-LOCK-SCOPE: the sellable at which a review of this menu would run out of its
  * budget, or null when it would not. Counted exactly as the review counts (every Store and channel,
- * each distinct set of chosen options and each option at every quantity, the budget shared by the
- * whole menu) with no recipe or allergen work, so a menu the review would refuse is refused before
- * anything of its listing (a price) goes live. Reads only; the caller owns the transaction.
+ * the budget shared by the whole menu, WP-2423 item 3): where no choice changes the dish's recipe
+ * at any Store of the menu ("no change" rules, a milk tea's sizes, sugar, ice and toppings), only
+ * every option at every quantity; where one does, each distinct set of chosen options at every
+ * Store. Whether a choice changes the recipe is read from the option rules alone, with no
+ * SubRecipe, demand or allergen work, so a menu the review would refuse is refused before anything
+ * of its listing (a price) goes live, and a drink the review lists is not. Reads only; the caller
+ * owns the transaction and its scope is left in the Brand's.
  */
 export async function menuReviewBudgetExceededAt(
   tx: ProductLifecycleTransaction,
   input: {
     readonly brandReference: string;
+    readonly actorReference: string;
     readonly menu: Pick<MenuAggregate["draft"], "sections" | "storeReferences" | "channelCodes">;
     readonly observedAt: string;
     readonly authorize: (tx: ProductLifecycleTransaction) => Promise<boolean>;
@@ -85,6 +91,14 @@ export async function menuReviewBudgetExceededAt(
     brandReference: input.brandReference,
     authorize: input.authorize,
   });
+  const recipes = createPostgresRecipeReviewSource({
+    brandReference: input.brandReference,
+    authorize: async () => input.authorize(tx),
+  });
+  const brandScope = () =>
+    tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
+      input.brandReference,
+    ]);
   let counted = 0;
   for (const product of products) {
     const source = await readOptions(tx, {
@@ -93,26 +107,74 @@ export async function menuReviewBudgetExceededAt(
       channelCodes: input.menu.channelCodes,
       observedAt: input.observedAt,
     });
-    // The review checks each channel once for every Store, each time against what is left of the
-    // one budget.
-    for (let stores = input.menu.storeReferences.length; stores > 0; stores -= 1)
+    const sellable = String(product.sellableReference);
+    /** What the review counts for one channel at one Store, against what is left of the budget. */
+    const count = (
+      rules: (typeof source.channels)[number]["rules"],
+      coverage: "every-option" | "distinct-options",
+    ) => {
+      const remaining = menuReviewBudget.maximumConfigurations - counted;
+      if (remaining < 1) return null;
+      try {
+        return enumerateCatalogReviewSelections(
+          rules,
+          {
+            maximumConfigurations: remaining,
+            maximumSearchSteps: menuReviewBudget.maximumSearchSteps,
+          },
+          coverage,
+        );
+      } catch (error) {
+        if (error instanceof CatalogError && error.code === "CATALOG_DEPENDENCY_UNAVAILABLE")
+          return null;
+        throw error;
+      }
+    };
+    // The review covers each channel once for every Store first; a Store whose choices change the
+    // recipe is reviewed set by set straight away, and then, if any did, every other Store too.
+    const unchanged: (typeof source.channels)[number][] = [];
+    let anyChanges = false;
+    for (const store of [...input.menu.storeReferences].sort())
       for (const channel of source.channels) {
-        const remaining = menuReviewBudget.maximumConfigurations - counted;
-        if (remaining < 1) return String(product.sellableReference);
-        try {
-          counted += enumerateCatalogReviewSelections(
-            channel.rules,
+        const covering = count(channel.rules, "every-option");
+        if (covering === null) return sellable;
+        const changes = await recipes
+          .choicesChangeRecipe(
+            tx as never,
             {
-              maximumConfigurations: remaining,
-              maximumSearchSteps: menuReviewBudget.maximumSearchSteps,
+              actorType: "User",
+              actorReference: input.actorReference,
+              action: "ResolveMenuRecipeFacts",
+              purpose: "ReviewMenu",
+              brandReference: input.brandReference,
+              storeReference: store,
+              skuReference: sellable,
+              observedAt: input.observedAt,
             },
-            "distinct-options",
-          ).length;
-        } catch (error) {
-          if (error instanceof CatalogError && error.code === "CATALOG_DEPENDENCY_UNAVAILABLE")
-            return String(product.sellableReference);
-          throw error;
+            covering as never,
+          )
+          // A missing recipe or rule is refused by the listing check and the review, each naming
+          // it; counted here as the larger review, so this check never lets more through.
+          .catch((error: unknown) => {
+            if (error instanceof RecipeReviewGapError) return true;
+            throw error;
+          })
+          .finally(brandScope);
+        if (changes) {
+          anyChanges = true;
+          const every = count(channel.rules, "distinct-options");
+          if (every === null) return sellable;
+          counted += every.length;
+        } else {
+          counted += covering.length;
+          unchanged.push(channel);
         }
+      }
+    if (anyChanges)
+      for (const channel of unchanged) {
+        const every = count(channel.rules, "distinct-options");
+        if (every === null) return sellable;
+        counted += every.length;
       }
   }
   return null;

@@ -524,6 +524,13 @@ export function createPostgresRecipeReviewSource(options: {
     };
     return {
       allowed: scope.allowed,
+      /** Whether any option rule these configurations use changes the recipe; reads rules only. */
+      async changes(configurations: readonly (readonly RecipeOptionSelection[])[]) {
+        for (const configuration of configurations)
+          for (const selection of parseSelections(configuration))
+            if ((await ruleFor(selection)).changes.length > 0) return true;
+        return false;
+      },
       async resolve(configurations: readonly (readonly RecipeOptionSelection[])[]) {
         if (
           !Array.isArray(configurations) ||
@@ -611,6 +618,26 @@ export function createPostgresRecipeReviewSource(options: {
         const results = await resolver.resolve(configurations);
         await resolver.allowed();
         return results;
+      } catch (error) {
+        return rethrow(error);
+      }
+    },
+    /**
+     * WP-2423 DEC-MERCHANT-LOCK-SCOPE: whether a review of `covering` (every option at every
+     * quantity) would find a choice that changes the recipe, which is what decides whether
+     * `resolveCoverage` goes on to every set of choices. Reads the base recipe and the option rules
+     * only (no SubRecipe or demand work), so a listing check can count what the review will count.
+     */
+    async choicesChangeRecipe(
+      tx: RecipeTransaction,
+      input: Omit<RecipeReviewInput, "selections">,
+      covering: readonly (readonly RecipeOptionSelection[])[],
+    ) {
+      try {
+        const resolver = await openConfigurations(tx, input);
+        const changes = await resolver.changes(covering);
+        await resolver.allowed();
+        return changes;
       } catch (error) {
         return rethrow(error);
       }

@@ -858,13 +858,16 @@ export function createMerchantMenus(options: {
   };
   /**
    * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a menu whose review would run past its budget is refused before
-   * anything of it is listed, the item named: a milk tea with ten toppings has more combinations than
-   * one review checks, and finding that out only at Submit left its new prices live and showed staff
-   * a code. Counted as the review counts, without its recipe work. Leaves the Brand's scope.
+   * anything of it is listed, the item named: a drink whose ten toppings each change its recipe has
+   * more combinations than one review checks, and finding that out only at Submit left its new
+   * prices live and showed staff a code. Counted as the review counts: a drink whose choices change
+   * nothing (a milk tea's sizes, sugar, ice and toppings) uses one check per option, not per set.
+   * Leaves the Brand's scope.
    */
   const reviewBudgetGate = async (tx: unknown, s: Scope, aggregate: MenuAggregate) => {
     const over = await menuReviewBudgetExceededAt(ptx(tx) as never, {
       brandReference: s.owner.brandReference,
+      actorReference: s.actor,
       menu: aggregate.draft,
       observedAt: options.persistence.now(),
       authorize: async () => s.permissions.maySubmit,
