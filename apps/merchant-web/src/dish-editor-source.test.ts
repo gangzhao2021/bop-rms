@@ -77,3 +77,33 @@ it("WP-2423: a choice removed from its group since the dish was saved is not sen
   });
   expect([...(source.chosen.get(id(1))?.keys() ?? [])]).toEqual([id(11)]);
 });
+
+it("WP-2423 M25: a choice ticked again starts from what this dish last charged for it", () => {
+  const toppings = group(["Pearls", "Pudding"]);
+  const source = dishEditorSource(id(90), {
+    product: {
+      taxClasses: [],
+      optionSetChoices: [toppings],
+      product: {
+        name: "Milk tea",
+        // Pearls (10) was unticked; pudding (11) is on the dish.
+        optionSets: [{ optionSetReference: id(1), enabledOptionReferences: [id(11)] }],
+      },
+    },
+    optionPrices: {
+      products: [
+        {
+          productReference: id(90),
+          optionSets: [
+            {
+              options: [{ optionReference: id(11), priceMinor: "90", pending: null }],
+              lastPrices: { [id(10)]: "80" },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(source.last.get(id(10))).toBe("0.80");
+  expect(source.last.get(id(11))).toBe("0.90");
+});

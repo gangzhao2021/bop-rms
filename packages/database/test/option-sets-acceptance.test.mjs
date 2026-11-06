@@ -157,11 +157,18 @@ it("creates and edits option sets, keeps saved options and binds them to a produ
           ["ALMOND_MILK", "Almond milk", true, false],
         ],
       );
-      // A retried request returns what it did; a second set with the same name is refused.
+      // A retried request returns what it did; a second set with the same name is refused, naming
+      // the group the Brand has by that name (WP-2423 M134: the dish editor ticks that one).
       const replay = await call(createMilk);
       assert.equal(replay.status, "AlreadyApplied");
       assert.equal(replay.optionSet.optionSetReference, milk.optionSet.optionSetReference);
-      await rejects(call({ ...createMilk, operationReference: op() }), "Invalid");
+      await assert.rejects(
+        call({ ...createMilk, operationReference: op() }),
+        (error) =>
+          (error.code === "CodeTaken" &&
+            error.optionSetReference === milk.optionSet.optionSetReference) ||
+          assert.fail(String(error.code)),
+      );
       // Limits customers could not meet are refused before anything is written.
       await rejects(
         call({

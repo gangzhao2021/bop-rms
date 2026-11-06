@@ -37,7 +37,14 @@ import { onlyRefusal } from "./merchant-failure.js";
  */
 export class MerchantOptionSetError extends Error {
   constructor(
-    readonly code: "PermissionDenied" | "NotFound" | "Conflict" | "Invalid" | "OptionSet",
+    readonly code:
+      | "PermissionDenied"
+      | "NotFound"
+      | "Conflict"
+      | "Invalid"
+      | "OptionSet"
+      /** WP-2423 M134: the Brand already has a group by that name (its reference is given). */
+      | "CodeTaken",
     /**
      * WP-2423 (cart-unsellable-dishes), with "OptionSet": the change would leave these dishes
      * without a choice guests start with in a group they must choose in (`DefaultNeeded`), or it
@@ -49,6 +56,8 @@ export class MerchantOptionSetError extends Error {
       readonly optionName: string;
       readonly productNames: readonly string[];
     } | null = null,
+    /** With "CodeTaken": the group the Brand already has by that name. */
+    readonly optionSetReference: string | null = null,
   ) {
     super(code);
     this.name = "MerchantOptionSetError";
@@ -242,7 +251,7 @@ const catalogErrors: Partial<Record<CatalogError["code"], MerchantOptionSetError
   CATALOG_LIFECYCLE_CONFLICT: "Conflict",
   CATALOG_UNAVAILABLE: "NotFound",
   CATALOG_INPUT_INVALID: "Invalid",
-  CATALOG_CODE_CONFLICT: "Invalid",
+  CATALOG_CODE_CONFLICT: "CodeTaken",
 };
 
 export function createMerchantOptionSets(options: {
@@ -381,6 +390,38 @@ export function createMerchantOptionSets(options: {
   const command = async (input: { sessionCookie: unknown; csrf: unknown; body: unknown }) => {
     const body = parseOptionSetCommandBody(input.body);
     const current = await session(input);
+    return commandOnce(input, body, current).catch(async (error: unknown) => {
+      // WP-2423 M134: a new group named like one the Brand has: the refusal names that group (read
+      // after the refused transaction), so the dish editor ticks it instead of a second one.
+      if (
+        !(error instanceof MerchantOptionSetError) ||
+        error.code !== "CodeTaken" ||
+        body.action !== "Create"
+      )
+        throw error;
+      const code = body.internalCode ?? codeForName(body.name, "SET");
+      const found = await options.persistence.transactions
+        .run((tx) =>
+          withRememberedBrandAuthorization(tx, async () => {
+            const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+            return (await listBrandOptionSets(ptx(tx), { brandReference: s.brand })).find(
+              (set) => set.internalCode === code,
+            );
+          }),
+        )
+        .catch(() => undefined);
+      throw new MerchantOptionSetError(
+        "CodeTaken",
+        null,
+        found === undefined ? null : String(found.optionSetReference),
+      );
+    });
+  };
+  const commandOnce = async (
+    input: { sessionCookie: unknown; csrf: unknown; body: unknown },
+    body: ReturnType<typeof parseOptionSetCommandBody>,
+    current: Awaited<ReturnType<typeof session>>,
+  ) => {
     return retryTransactionConflict(() =>
       options.persistence.transactions.run((tx) =>
         withRememberedBrandAuthorization(tx, async () => {

@@ -16,6 +16,11 @@ export interface DishEditorSource {
   readonly chosen: ReadonlyMap<string, ReadonlyMap<string, string>>;
   /** WP-2423 item 3: what each option usually costs on this Brand's dishes (dollars). */
   readonly usual: ReadonlyMap<string, string>;
+  /**
+   * WP-2423 M25: what this dish charged for each choice it offers or offered (dollars): ticking a
+   * choice again starts from it, never from free.
+   */
+  readonly last: ReadonlyMap<string, string>;
 }
 const object = (value: unknown) =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -40,14 +45,22 @@ export function dishEditorSource(
     (g: ProductOptionSetChoice) => !g.archived && g.comboPart !== true,
   ) as ProductOptionSetChoice[];
   const prices = new Map<string, string>();
+  const last = new Map<string, string>();
   const optionView = object(loaded.optionPrices);
   for (const p of Array.isArray(optionView?.products) ? optionView.products : [])
     if (object(p)?.productReference === productReference)
-      for (const set of (p as { optionSets: { options: Record<string, unknown>[] }[] }).optionSets)
+      for (const set of (
+        p as { optionSets: { options: Record<string, unknown>[]; lastPrices?: unknown }[] }
+      ).optionSets) {
         for (const o of set.options) {
           const dollars = optionRowDollars(o);
           if (dollars !== null) prices.set(String(o.optionReference), dollars);
         }
+        for (const [option, minor] of Object.entries(object(set.lastPrices) ?? {}))
+          if (typeof minor === "string" && /^(0|[1-9][0-9]{0,6})$/u.test(minor))
+            last.set(option, minorToDollars(minor));
+      }
+  for (const [option, dollars] of prices) last.set(option, dollars);
   const usual = new Map<string, string>();
   for (const [option, minor] of Object.entries(object(optionView?.usual) ?? {}))
     if (typeof minor === "string") usual.set(option, minorToDollars(minor));
@@ -89,6 +102,7 @@ export function dishEditorSource(
     groups,
     chosen,
     usual,
+    last,
   };
 }
 

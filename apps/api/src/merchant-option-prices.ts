@@ -306,6 +306,10 @@ export function createMerchantOptionPrices(options: {
                 name: name(option.localizedNames, option.stableCode),
                 offered: option.lifecycle === "Active",
               })),
+            /** WP-2423 M25: the set's choices this dish does not offer now (it may have before). */
+            notOnDish: (set?.draft.options ?? [])
+              .filter((option) => !binding.enabledOptionReferences.includes(option.optionReference))
+              .map((option) => String(option.optionReference)),
           };
         }),
       });
@@ -549,7 +553,35 @@ export function createMerchantOptionPrices(options: {
                     ),
                   });
                 }
-                optionSets.push({ ...set, options: optionRows });
+                // WP-2423 M25: what this dish last charged for a choice it no longer offers (its
+                // rule stays with the binding), so ticking it again starts from that, not free.
+                const lastPrices: Record<string, string> = {};
+                for (const optionReference of input.usual === true ? set.notOnDish : []) {
+                  const own = optionPriceRuleReference(set.bindingReference, optionReference);
+                  // A choice the price store will not read here is simply not prefilled.
+                  const state = (
+                    await store
+                      .listForBinding({ bindingReference: set.bindingReference, optionReference })
+                      .catch(() => [])
+                  ).find((candidate) => candidate.ruleReference === own);
+                  const last =
+                    state === undefined
+                      ? null
+                      : brandWide(state.draft)
+                        ? state.draft
+                        : brandWide(state.currentPublished)
+                          ? state.currentPublished
+                          : null;
+                  if (last !== null)
+                    lastPrices[optionReference] = last.unitAmount.amountMinor.toString();
+                }
+                optionSets.push({
+                  bindingReference: set.bindingReference,
+                  optionSetReference: set.optionSetReference,
+                  name: set.name,
+                  options: optionRows,
+                  lastPrices,
+                });
               }
               rows.push({ ...product, optionSets });
               await beforeCommit();

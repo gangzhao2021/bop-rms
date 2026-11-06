@@ -86,7 +86,12 @@ export function NewChoiceGroupForm({
 }: {
   readonly client: MenuClient;
   /** The group made, and each choice as typed (in order) with its extra. */
-  readonly onCreated: (optionSetReference: string | null, typed: readonly TypedChoice[]) => void;
+  readonly onCreated: (
+    optionSetReference: string | null,
+    typed: readonly TypedChoice[],
+    /** WP-2423 M134: said once the group is ticked (an existing group of that name). */
+    notice?: string,
+  ) => void;
   readonly onClose: () => void;
 }) {
   const [name, setName] = useState("");
@@ -166,6 +171,19 @@ export function NewChoiceGroupForm({
       );
     } catch (error) {
       if (!(error instanceof MenuPageError) || error.code !== "Offline") setOperation(null);
+      // WP-2423 M134: a group by that name exists: it is the one ticked, not a second one.
+      const existing =
+        error instanceof MenuPageError && error.code === "CodeTaken"
+          ? (error as MenuPageError & { optionSetReference?: string }).optionSetReference
+          : undefined;
+      if (existing !== undefined) {
+        onCreated(
+          existing,
+          named.map((row) => ({ name: row.name, nameZh: row.nameZh, extra: row.extra ?? "0.00" })),
+          t("A group named “{name}” already exists. It is ticked below.", { name }),
+        );
+        return;
+      }
       setProblem(
         error instanceof MenuPageError && error.code === "PermissionDenied"
           ? t("You do not have permission to make choice groups.")
