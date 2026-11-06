@@ -30,6 +30,10 @@ export function payErrorText(error: CounterOrderClientError) {
       );
     case "Invalid":
       return t("Check the slip reference and the paid-at time.");
+    case "TakenBeforeRecords":
+      return t(
+        "That paid-at time is before this store started recording sales in the system. Check when it was paid and enter it again.",
+      );
     case "PermissionDenied":
       return t("Your session can't record payments. Sign in again or ask a manager.");
     case "OutcomeUnknown":

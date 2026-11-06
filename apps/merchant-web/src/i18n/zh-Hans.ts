@@ -1064,6 +1064,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Check the names: each needs up to 120 characters and cannot contain links or the characters < > { } [ ].":
     "请检查名称：每个最多 120 个字符，且不能包含链接或字符 < > { } [ ]。",
   "Check the slip reference and the paid-at time.": "请核对签购单参考号和付款时间。",
+  "That paid-at time is before this store started recording sales in the system. Check when it was paid and enter it again.":
+    "这个付款时间早于本店开始在系统里记录销售的时间。请核对实际付款时间后重新填写。",
   "Check the slip reference: letters and numbers only, never the card number.":
     "请核对签购单参考号：只能是字母和数字，绝不能是卡号。",
   "Check the three payment channel settings.": "请检查三项付款渠道设置。",

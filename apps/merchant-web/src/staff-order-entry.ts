@@ -38,6 +38,8 @@ export class CounterOrderClientError extends Error {
       | "InProgress"
       | "AmountChanged"
       | "PaymentWindowClosed"
+      /** WP-2423 M160: the paid-at time is before the Store started recording sales here. */
+      | "TakenBeforeRecords"
       | "AlreadyPaid"
       | "NotPayable"
       | "Invalid"
@@ -652,6 +654,7 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "order_not_payable" || code === "counter_order_not_found")
         throw new CounterOrderClientError("NotPayable");
       if (code === "card_machine_conflict") throw new CounterOrderClientError("Conflict");
+      if (code === "taken_before_records") throw new CounterOrderClientError("TakenBeforeRecords");
       if (response.status === 400) throw new CounterOrderClientError("Invalid");
       throw new CounterOrderClientError(response.status >= 500 ? "OutcomeUnknown" : "Unavailable");
     },

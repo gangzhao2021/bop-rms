@@ -8,6 +8,8 @@ export type TableCheckoutErrorCode =
   | "TipsOff"
   /** The tip percentage is not one the Store offers now (the bill is read again). */
   | "TipChoicesChanged"
+  /** WP-2423 M160: the paid-at time is before the Store started recording sales here. */
+  | "TakenBeforeRecords"
   | "PermissionDenied"
   | "NotStarted"
   | "NotPayLater"
@@ -421,6 +423,7 @@ const codes: Readonly<Record<string, TableCheckoutErrorCode>> = {
   split_locked: "SplitLocked",
   tips_off: "TipsOff",
   tip_choices_changed: "TipChoicesChanged",
+  taken_before_records: "TakenBeforeRecords",
   idempotency_conflict: "BillChanged",
   not_ready: "NotReady",
   not_at_checkout: "NotStarted",

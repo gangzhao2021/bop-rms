@@ -78,6 +78,10 @@ function errorText(error: unknown): string {
       return t(
         "The bill changed (a round is still being sent, or something was changed). It has been read again: check it and try again.",
       );
+    case "TakenBeforeRecords":
+      return t(
+        "That paid-at time is before this store started recording sales in the system. Check when it was paid and enter it again.",
+      );
     case "TenderShort":
       return t("The cash received is less than the cash total.");
     case "AlreadyPaid":
