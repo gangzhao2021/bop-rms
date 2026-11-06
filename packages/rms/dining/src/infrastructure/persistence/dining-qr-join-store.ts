@@ -30,10 +30,16 @@ import type {
  * existing join then consumes it, so joins keep their records and checks. Staff pause or resume QR
  * joining for the table (then a code from staff or the host is needed) and take a phone off the
  * table (its participant leaves). The database refuses a QR issue while paused, for a Session that
- * is not Active, and beyond 12 per Session in any 10 minutes. Lock order as join and invitation:
+ * is not Active, and beyond the budget below. Lock order as join and invitation:
  * Guest identity (in `authorize`) -> Dining Table (advisory) -> Session -> current code.
  */
-export const diningQrJoinBudget = Object.freeze({ joins: 12, windowMinutes: 10 });
+/**
+ * WP-2423 (same-table-ordering): the table's QR budget counts guests, not attempts. In any 10
+ * minutes at most 16 different guest sessions may be issued a code (a 12-seat round table plus a few
+ * re-scans), and a guest who already scanned in that window may always retry; at most 96 issues in
+ * all (16 x 6 attempts) stop hammering. Mirrored by `rms_dining.validate_qr_join_issue` (2000_310).
+ */
+export const diningQrJoinBudget = Object.freeze({ guests: 16, issues: 96, windowMinutes: 10 });
 
 export type DiningQrJoinRefusal = "NotOpen" | "CheckingOut" | "Paused" | "TooManyJoins";
 
@@ -182,7 +188,7 @@ export function createPostgresDiningQrJoinStore(
     /**
      * The guest scanning `tableReference` joins: the open Session's next one-time code, issued
      * for them now (the caller hands it straight to the join). Refused when the table is not
-     * open, is checking out, has QR joining paused, or had 12 joins in the last 10 minutes.
+     * open, is checking out, has QR joining paused, or is over its budget (`diningQrJoinBudget`).
      */
     issue(input: {
       readonly operationReference: string;
@@ -217,15 +223,17 @@ export function createPostgresDiningQrJoinStore(
           if (located === null || located.table !== table) return fail();
           const session = located.session;
           if (await pausedOf(tx, sessionReference)) return refused("Paused");
-          const recent = Number(
-            rows(
-              await tx.query(
-                "SELECT count(*)::int AS n FROM rms_dining.dining_qr_join_issue WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND occurred_at > $5::timestamptz - interval '10 minutes'",
-                [tenant, brand, store, sessionReference, observedAt],
-              ),
-            )[0]?.n ?? 0,
-          );
-          if (recent >= diningQrJoinBudget.joins) return refused("TooManyJoins");
+          const budget = rows(
+            await tx.query(
+              "SELECT count(*)::int AS issues, count(DISTINCT guest_session_id)::int AS guests, bool_or(guest_session_id=$6) AS again FROM rms_dining.dining_qr_join_issue WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 AND occurred_at > $5::timestamptz - interval '10 minutes'",
+              [tenant, brand, store, sessionReference, observedAt, guestSession],
+            ),
+          )[0];
+          if (
+            Number(budget?.issues ?? 0) >= diningQrJoinBudget.issues ||
+            (budget?.again !== true && Number(budget?.guests ?? 0) >= diningQrJoinBudget.guests)
+          )
+            return refused("TooManyJoins");
           const caps = rows(
             await tx.query(
               "SELECT capability_snapshot AS capability FROM rms_dining.dining_join_capability WHERE tenant_id=$1 AND brand_id=$2 AND store_id=$3 AND session_id=$4 ORDER BY (capability_snapshot->>'generation')::numeric DESC LIMIT 1 FOR UPDATE",

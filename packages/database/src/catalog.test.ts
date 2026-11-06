@@ -816,6 +816,7 @@ describe("migration catalog", () => {
       "2000_210_alter_ordering_cart_ordered_once",
       "2000_240_create_role_assignment_sole_operator_approval",
       "2000_260_create_payment_intent_prepared_index",
+      "2000_310_alter_dining_qr_join_budget_guests",
       "2000_320_alter_role_administration_revisions",
       "2000_321_create_role_administration_sole_operator_approval",
       "2000_322_create_role_preset_offer_decision",

@@ -633,15 +633,47 @@ it("lets a guest join an open table by its QR code, with staff pause, removal an
       ).rows;
       assert.equal(removalAudit.length, 1);
 
-      // Decision 8: at most 12 QR joins per table in any 10 minutes (5 so far, from minute 2).
-      for (let n = 0; n < 7; n += 1)
-        assert.equal((await issue(20, 130 + n, 130 + n, 10)).status, "Issued");
-      assert.deepEqual(await issue(20, 140, 140, 11), {
+      // Decision 8 as amended (WP-2423 same-table-ordering, sim M88): the budget counts guests,
+      // not attempts. Phones of one party that retry (two scanned at the same instant) never use
+      // it up: guest 86, who already scanned, retries 9 times (14 issues in the window by now,
+      // which the old budget of 12 issues refused).
+      for (let n = 0; n < 9; n += 1)
+        assert.equal((await issue(20, 86, 130 + n, 10)).status, "Issued");
+      const windowAt = async (minute) =>
+        (
+          await admin.query(
+            "SELECT count(*)::int AS issues, count(DISTINCT guest_session_id)::int AS guests FROM rms_dining.dining_qr_join_issue WHERE session_id=$1 AND occurred_at > $2::timestamptz - interval '10 minutes'",
+            [sessionId, at(minute)],
+          )
+        ).rows[0];
+      assert.ok((await windowAt(10)).issues > 12);
+      // Up to 16 different guests in any 10 minutes (a 12-seat round table plus re-scans).
+      for (let guest = (await windowAt(11)).guests, n = 0; guest < 16; guest += 1, n += 1)
+        assert.equal((await issue(20, 1000 + n, 1100 + n, 11)).status, "Issued");
+      assert.equal((await windowAt(11)).guests, 16);
+      // The 17th different guest is refused, by the store and by the database.
+      assert.deepEqual(await issue(20, 1050, 1150, 11), {
+        status: "Refused",
+        reason: "TooManyJoins",
+      });
+      await assert.rejects(
+        admin.query(
+          "INSERT INTO rms_dining.dining_qr_join_issue (tenant_id,brand_id,store_id,operation_id,session_id,guest_session_id,capability_id,intent_hash,occurred_at) SELECT tenant_id,brand_id,store_id,$1,session_id,$2,capability_id,$5,$3 FROM rms_dining.dining_join_capability WHERE session_id=$4 AND status='Active'",
+          [id(1151), id(1050), at(11), sessionId, "a".repeat(64)],
+        ),
+        /too many joins for the table/u,
+      );
+      // A guest who already scanned in the window may still retry.
+      assert.equal((await issue(20, 1000, 1152, 11)).status, "Issued");
+      // Hammering stops at 96 issues in the window, whoever scans.
+      for (let n = (await windowAt(11)).issues; n < 96; n += 1)
+        assert.equal((await issue(20, 1000, 1200 + n, 11)).status, "Issued");
+      assert.deepEqual(await issue(20, 1000, 1300, 11), {
         status: "Refused",
         reason: "TooManyJoins",
       });
       // Once the window has passed, joining works again.
-      assert.equal((await scanAndJoin(20, 141, 141, 13)).status, "Joined");
+      assert.equal((await scanAndJoin(20, 141, 141, 22)).status, "Joined");
 
       // A table that is checking out cannot be joined by QR.
       guestTable = id(22);
