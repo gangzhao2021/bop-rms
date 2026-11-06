@@ -126,7 +126,18 @@ export interface SettlementView {
     readonly captured: SettlementAmount;
     readonly refunded: SettlementAmount;
   } | null;
+  /**
+   * WP-2423 (settlement-coverage): a closed day not yet compared with the payment provider, decided
+   * by the server (its clock, its 6 h grace, and whether BOP's channels were sent the alert). Null
+   * when it does not apply; undefined from older servers.
+   */
+  readonly dayEndCheck?: SettlementDayEndCheck | null;
   readonly projectedAt: string;
+}
+export interface SettlementDayEndCheck {
+  readonly state: "Waiting" | "NotRun";
+  readonly closedForMs: number;
+  readonly supportAlerted: boolean;
 }
 export interface SettlementCash {
   readonly received: SettlementAmount;
@@ -210,6 +221,9 @@ export function parseSettlementView(value: unknown): SettlementView {
     typeof value === "object" &&
     Object.hasOwn(value, "unmatchedProviderCharges")
       ? ["unmatchedProviderCharges"]
+      : []),
+    ...(value !== null && typeof value === "object" && Object.hasOwn(value, "dayEndCheck")
+      ? ["dayEndCheck"]
       : []),
     "projectedAt",
   ]);
@@ -474,6 +488,27 @@ export function parseSettlementView(value: unknown): SettlementView {
               refunded = amount(u.refunded);
             if (captured === null || refunded === null) return fail();
             return Object.freeze({ captured, refunded });
+          })(),
+        }),
+    ...(raw.dayEndCheck === undefined
+      ? {}
+      : {
+          dayEndCheck: (() => {
+            if (raw.dayEndCheck === null) return null;
+            const d = exact(raw.dayEndCheck, ["state", "closedForMs", "supportAlerted"]);
+            if (
+              (d.state !== "Waiting" && d.state !== "NotRun") ||
+              !Number.isSafeInteger(d.closedForMs) ||
+              (d.closedForMs as number) < 0 ||
+              typeof d.supportAlerted !== "boolean" ||
+              (d.state === "Waiting" && d.supportAlerted)
+            )
+              return fail();
+            return Object.freeze({
+              state: d.state,
+              closedForMs: d.closedForMs as number,
+              supportAlerted: d.supportAlerted,
+            });
           })(),
         }),
     projectedAt: instant(raw.projectedAt),

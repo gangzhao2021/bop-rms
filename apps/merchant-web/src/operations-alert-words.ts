@@ -102,6 +102,10 @@ export function alertAction(english: string): string {
     "Open Settlement, review the listed business day and resolve each item.": t(
       "Open Settlement, review the listed business day and resolve each item.",
     ),
+    "Nothing to change in the store: online payments are taken as usual. The check runs by itself once it is fixed; BOP support can see this.":
+      t(
+        "Nothing to change in the store: online payments are taken as usual. The check runs by itself once it is fixed; BOP support can see this.",
+      ),
     "Ask BOP support to run the backup by hand and check free disk space. Store operation is not affected.":
       t(
         "Ask BOP support to run the backup by hand and check free disk space. Store operation is not affected.",
@@ -178,6 +182,9 @@ function storesAttentionAction(english: string): string | null {
     "record the first closed business day of those with no settlement": t(
       "record the first closed business day of those with no settlement",
     ),
+    "check the day-end settlement worker of those Stores": t(
+      "check the day-end settlement worker of those Stores",
+    ),
     "renew those named as ending soon, right after the installation itself (their owners hear only in the last day)":
       t(
         "renew those named as ending soon, right after the installation itself (their owners hear only in the last day)",
@@ -211,6 +218,23 @@ export function timeLeftWords(ms: number): string {
       : minutes < 60
         ? `${minutes} ${minutes === 1 ? "minute" : "minutes"}`
         : `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  return currentLanguage() === "en" ? english : duration(english);
+}
+
+/** Time passed in the chosen language, by the monitor's own rule (pilot-alerts formatDuration). */
+export function elapsedWords(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const english =
+    !Number.isFinite(ms) || ms < 0
+      ? "a while"
+      : minutes < 1
+        ? "less than a minute"
+        : minutes < 60
+          ? `${minutes} ${minutes === 1 ? "minute" : "minutes"}`
+          : hours < 48
+            ? `${hours} ${hours === 1 ? "hour" : "hours"}`
+            : `${Math.floor(hours / 24)} days`;
   return currentLanguage() === "en" ? english : duration(english);
 }
 
@@ -405,6 +429,22 @@ const SUMMARY_RULES: readonly (readonly [RegExp, (match: Match) => string])[] = 
       ),
   ],
   [
+    /^1 closed business day has not been compared with the payment provider \(closed (.+) ago\)\.$/u,
+    (m) =>
+      t(
+        "1 closed business day has not been compared with the payment provider (closed {duration} ago).",
+        { duration: duration(m[1] as string) },
+      ),
+  ],
+  [
+    /^(\d+) closed business days have not been compared with the payment provider \(the oldest closed (.+) ago\)\.$/u,
+    (m) =>
+      t(
+        "{count} closed business days have not been compared with the payment provider (the oldest closed {duration} ago).",
+        { count: m[1] as string, duration: duration(m[2] as string) },
+      ),
+  ],
+  [
     /^(\d+) settlement problems? (?:is|are) still open \(oldest (.+) ago\)\.$/u,
     (m) =>
       t("{count} settlement problems are still open (oldest {duration} ago).", {
@@ -492,6 +532,10 @@ const STORES_ATTENTION_RULES: readonly (readonly [RegExp, (names: string) => str
   [
     /^Background work needs a person: (.+)\.$/u,
     (names) => t("Background work needs a person: {names}.", { names }),
+  ],
+  [
+    /^Closed business days whose day-end settlement has not run: (.+)\.$/u,
+    (names) => t("Closed business days whose day-end settlement has not run: {names}.", { names }),
   ],
   [
     /^Closed business days with no day-end settlement: (.+)\.$/u,

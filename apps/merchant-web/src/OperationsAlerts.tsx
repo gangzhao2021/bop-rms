@@ -133,6 +133,12 @@ export function alertTitle(title: string): string {
     "Ordering at this Store has stopped": t("Ordering at this Store has stopped"),
     "Payment differences need checking": t("Payment differences need checking"),
     "Day-end settlement has open problems": t("Day-end settlement has open problems"),
+    "Day-end check with the payment provider has not run": t(
+      "Day-end check with the payment provider has not run",
+    ),
+    "Day-end check with the payment provider has run again": t(
+      "Day-end check with the payment provider has run again",
+    ),
     "Last night's backup failed": t("Last night's backup failed"),
     "No recent backup": t("No recent backup"),
     "The newest backup could not be restored": t("The newest backup could not be restored"),
@@ -342,6 +348,11 @@ const ALERT_PAGES: Readonly<Record<string, { readonly href: string; label(): str
     label: () => t("Exceptions"),
   },
   "settlement.exceptions": {
+    href: "/app/operations/payment-reconciliation",
+    label: () => t("Settlement"),
+  },
+  // WP-2423 (settlement-coverage): the days not compared yet are listed on Settlement.
+  "settlement.not_run": {
     href: "/app/operations/payment-reconciliation",
     label: () => t("Settlement"),
   },

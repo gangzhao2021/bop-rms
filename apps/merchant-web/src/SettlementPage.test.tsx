@@ -12,6 +12,7 @@ import {
   summarizeOutcomes,
 } from "./SettlementPage.js";
 import { parseSettlementView } from "./settlement-client.js";
+import { setLanguageForTest } from "./i18n/i18n.js";
 import {
   emptySettlementReconciliationFixture,
   openSettlementReconciliationFixture,
@@ -229,6 +230,51 @@ describe("WP-2423 P1 settlement report", () => {
     expect(empty).not.toContain("Payments needing attention");
     const unreadable = render({ ...base, reconciliation: null });
     expect(unreadable).toContain("Reconciliation records could not be read.");
+  });
+  // WP-2423 (settlement-coverage): a closed day the check has not run for is said plainly, on the
+  // server's word; BOP is named as told only when the alert really reached it.
+  it("a closed day not compared 6 h on says so, and names BOP as told only when it was", () => {
+    const base = settlementViewFixture();
+    const pending = openSettlementReconciliationFixture();
+    const notRun = (supportAlerted: boolean) =>
+      render({
+        ...base,
+        reconciliation: pending,
+        dayEndCheck: { state: "NotRun", closedForMs: 13 * 3600_000, supportAlerted },
+      });
+    const told = notRun(true);
+    expect(told).toContain('data-reconciled="not-run"');
+    expect(told).toContain(
+      "Not compared with the payment provider yet. This business day closed 13 hours ago and its day-end check has not run. BOP support has been told; the figures above are not affected.",
+    );
+    const untold = notRun(false);
+    expect(untold).toContain(
+      "This business day closed 13 hours ago and its day-end check has not run. It runs by itself once it is fixed; the figures above are not affected.",
+    );
+    expect(untold).not.toContain("has been told");
+    const waiting = render({
+      ...base,
+      reconciliation: pending,
+      dayEndCheck: { state: "Waiting", closedForMs: 3600_000, supportAlerted: false },
+    });
+    expect(waiting).toContain(
+      "Not settled yet. The settlement run for this day has not completed.",
+    );
+    expect(waiting).not.toContain("not-run");
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(notRun(true)).toContain(
+        "还没有和支付方核对。这个营业日已结束 13小时，日结核对还没有运行。已通知 BOP 技术支持；上面的数字不受影响。",
+      );
+    } finally {
+      setLanguageForTest("en");
+    }
+    expect(() =>
+      parseSettlementView({
+        ...base,
+        dayEndCheck: { state: "Waiting", closedForMs: 1, supportAlerted: true },
+      }),
+    ).toThrow("Unavailable");
   });
   it("refuses a view whose counts disagree", () => {
     const view = settlementViewFixture();

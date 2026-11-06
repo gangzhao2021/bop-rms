@@ -2649,6 +2649,7 @@ describe("WP-2423 P1 merchant settlement read route", () => {
     unpaidWriteOffs: null,
     comps: null,
     unmatchedProviderCharges: null,
+    dayEndCheck: null,
     projectedAt: "2026-09-22T09:00:00.000Z",
   };
   const headers = {

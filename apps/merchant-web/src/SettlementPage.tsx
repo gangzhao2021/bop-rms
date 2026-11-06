@@ -13,6 +13,7 @@ import {
 } from "./settlement-client.js";
 export { unfinishedGuestPayment };
 import { orderMoney } from "./order-money.js";
+import { elapsedWords } from "./operations-alert-words.js";
 import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
 import { businessDateLabel, businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
 import { Freshness, storeTime } from "./StoreTime.js";
@@ -495,6 +496,20 @@ export function SettlementReport({
                 {t(
                   "The settlement run compares the day's totals with the provider's statement after the business day closes.",
                 )}
+              </p>
+            ) : settlement === null && view.dayEndCheck?.state === "NotRun" ? (
+              // WP-2423 (settlement-coverage): decided by the server; BOP is named as told only
+              // when its channels were really sent the alert.
+              <p role="status" data-reconciled="not-run">
+                {view.dayEndCheck.supportAlerted
+                  ? t(
+                      "Not compared with the payment provider yet. This business day closed {duration} ago and its day-end check has not run. BOP support has been told; the figures above are not affected.",
+                      { duration: elapsedWords(view.dayEndCheck.closedForMs) },
+                    )
+                  : t(
+                      "Not compared with the payment provider yet. This business day closed {duration} ago and its day-end check has not run. It runs by itself once it is fixed; the figures above are not affected.",
+                      { duration: elapsedWords(view.dayEndCheck.closedForMs) },
+                    )}
               </p>
             ) : settlement === null ? (
               <p role="status" data-reconciled="pending">

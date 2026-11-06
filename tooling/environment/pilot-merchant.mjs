@@ -545,6 +545,7 @@ export async function createInternalMerchant(
       persistence,
       selected,
       refundConfiguration,
+      ...(readOperationsAlertBoard === undefined ? {} : { readOperationsAlertBoard }),
     }),
   );
   // WP-2423 Q13: the operations monitor's alert board for this Store (Home).

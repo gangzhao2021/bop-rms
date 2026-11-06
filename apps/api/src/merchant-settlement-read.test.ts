@@ -226,3 +226,77 @@ it("WP-2423 M160: the business-day owner's 'before the records begin' answers wi
   });
   await expect(down({ sessionCookie: "c", businessDate: null })).rejects.toThrow("X");
 });
+
+// WP-2423 (settlement-coverage): whether a closed day's check has run is decided on server time,
+// and the page is told BOP knows only when the alert really reaches BOP's channels.
+it("a closed day with no settlement run is Waiting for 6 h, then NotRun, and BOP told only when alerted", async () => {
+  const at = (now: string, alerted?: () => Promise<boolean>) =>
+    createMerchantSettlementRead({
+      transactions: { run: async (work) => work({ query: vi.fn() } as ConsumerTransaction) },
+      authorize: async () => scope,
+      storeLabel: async () => "Synthetic Store",
+      window: async () => window,
+      captured: async () => null,
+      refunded: async () => null,
+      reconciliation: async () => emptyDay,
+      now: () => now,
+      ...(alerted === undefined ? {} : { dayEndCheckAlerted: alerted }),
+    })({ sessionCookie: "c", businessDate: null });
+  // Closed at 08:00Z.
+  expect((await at("2026-09-22T09:00:00.000Z")).dayEndCheck).toEqual({
+    state: "Waiting",
+    closedForMs: 3600_000,
+    supportAlerted: false,
+  });
+  expect((await at("2026-09-22T21:00:00.000Z")).dayEndCheck).toEqual({
+    state: "NotRun",
+    closedForMs: 13 * 3600_000,
+    supportAlerted: false,
+  });
+  expect((await at("2026-09-22T21:00:00.000Z", async () => true)).dayEndCheck).toMatchObject({
+    state: "NotRun",
+    supportAlerted: true,
+  });
+  // A board that cannot be read is never "BOP has been told".
+  expect(
+    (
+      await at("2026-09-22T21:00:00.000Z", async () => {
+        throw Error("ENOENT");
+      })
+    ).dayEndCheck,
+  ).toMatchObject({ state: "NotRun", supportAlerted: false });
+});
+it("a day already checked, an open day or unread records carry no day-end check line", async () => {
+  const read = (overrides: Partial<Parameters<typeof createMerchantSettlementRead>[0]>) =>
+    createMerchantSettlementRead({
+      transactions: { run: async (work) => work({ query: vi.fn() } as ConsumerTransaction) },
+      authorize: async () => scope,
+      storeLabel: async () => "Synthetic Store",
+      window: async () => window,
+      captured: async () => null,
+      refunded: async () => null,
+      reconciliation: async () => emptyDay,
+      now: () => "2026-09-22T21:00:00.000Z",
+      dayEndCheckAlerted: async () => true,
+      ...overrides,
+    })({ sessionCookie: "c", businessDate: null });
+  expect((await read({ reconciliation: async () => null })).dayEndCheck).toBeNull();
+  expect(
+    (await read({ window: async () => ({ ...window, status: "Open" as const }) })).dayEndCheck,
+  ).toBeNull();
+  const settled = {
+    ...emptyDay,
+    settlement: { run: {}, checks: [], recheck: null },
+  } as unknown as typeof emptyDay;
+  expect((await read({ reconciliation: async () => settled })).dayEndCheck).toBeNull();
+});
+it("waits as long as the operations monitor before a day counts as not run", async () => {
+  const { merchantSettlementNotRunAfterMs } = await import("./merchant-settlement-read.js");
+  const { SETTLEMENT_MISSING_GRACE_MS } = (await import(
+    /* @vite-ignore */ new URL(
+      "../../../tooling/environment/pilot-ops-observe.mjs",
+      import.meta.url,
+    ).href
+  )) as { SETTLEMENT_MISSING_GRACE_MS: number };
+  expect(merchantSettlementNotRunAfterMs).toBe(SETTLEMENT_MISSING_GRACE_MS);
+});

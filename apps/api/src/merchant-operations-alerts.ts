@@ -343,6 +343,30 @@ export const operationsAlertsNotPermitted: OperationsAlertsNotPermitted = Object
 });
 
 /**
+ * WP-2423 (settlement-coverage): whether BOP's support channels carry this alert of the Store's
+ * board now: the monitor is reporting, the alert is raised, an outbound channel is set up and none
+ * is failing. Anything unreadable is false, so no screen claims BOP was told when it was not.
+ */
+export function isOperationsAlertSentToSupport(
+  board: unknown,
+  now: string,
+  alertKey: OperationsAlertKey,
+): boolean {
+  try {
+    const view = projectOperationsAlertBoard(board, now);
+    const raised = new Set(view.active.map((item) => item.key));
+    return (
+      view.monitor === "Reporting" &&
+      raised.has(alertKey) &&
+      !raised.has("channel.delivery") &&
+      (view.outbound.email || view.outbound.webhooks > 0)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The persistent read: the caller's Session, selected Store and permission are resolved in one
  * transaction; only this composition's own Store is answered. The board is read after the
  * authorization and never written here.

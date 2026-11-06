@@ -139,7 +139,6 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
         "the check of the store's order rules",
         "the check for payment differences",
         "the day-end settlement check",
-        "the check for closed business days",
       ],
     },
   ],
@@ -148,6 +147,10 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
     { channels: ["email", "webhook"], failingMs: 40 * MIN },
   ],
   "settlement.not_covered": [{}],
+  "settlement.not_run": [
+    { count: 1, oldestAgeMs: 13 * 60 * MIN },
+    { count: 3, oldestAgeMs: 2 * DAY },
+  ],
   "stores.unchecked": [
     { stores: ["t-1"] },
     { stores: Array.from({ length: 30 }, (_, index) => `s-${index}`) },
@@ -155,20 +158,20 @@ const VARIANTS: Readonly<Record<string, readonly unknown[]>> = {
   "stores.attention": [
     {
       checksFailing: ["d-3"],
-      settlementNotCovered: ["h-2", "d-3"],
+      settlementNotRun: ["h-2", "d-3"],
       setupEnding: ["t-1", "h-2", "d-3"],
     },
     { checksFailing: Array.from({ length: 30 }, (_, index) => `s-${index}`) },
     // Each cause alone, and all together: each says its own step.
     { checksFailing: ["t-1"] },
     { background: ["t-1"] },
-    { settlementNotCovered: ["t-1"] },
+    { settlementNotRun: ["t-1"] },
     { setupEnding: ["t-1"] },
     { noSupportNumber: ["t-1"] },
     {
       checksFailing: ["t-1"],
       background: ["t-1"],
-      settlementNotCovered: ["t-1"],
+      settlementNotRun: ["t-1"],
       setupEnding: ["t-1"],
       noSupportNumber: ["t-1"],
     },
@@ -309,6 +312,25 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
       expect(shown).toContain("在 BOP 技术支持确认修好之前");
     }
   });
+  it("WP-2423 (settlement-coverage): a day not compared yet reads plainly in Chinese", () => {
+    setLanguageForTest("zh-Hans");
+    const shown = renderAlert("settlement.not_run", { count: 1, oldestAgeMs: 13 * 60 * MIN });
+    expect(alertTitle(shown.title)).toBe("日结还没有和支付方核对");
+    expect(alertSummary(shown.summary)).toBe(
+      "有 1 个已结束的营业日还没有和支付方核对（13小时前结束）。",
+    );
+    expect(alertAction(shown.action)).toBe(
+      "店里不用做什么，线上付款照常收。修好后核对会自动补做；BOP 技术支持能看到这条提醒。",
+    );
+    expect(
+      alertSummary(
+        renderAlert("settlement.not_run", { count: 3, oldestAgeMs: 50 * 60 * MIN }).summary,
+      ),
+    ).toBe("有 3 个已结束的营业日还没有和支付方核对（最早的 2天前结束）。");
+    expect(
+      alertSummary(renderAlert("stores.attention", { settlementNotRun: ["tea"] }).summary),
+    ).toBe("有已结束的营业日还没有跑日结：tea。");
+  });
   it("names the other Stores in the Chinese, as many as fit", () => {
     setLanguageForTest("zh-Hans");
     const say = (params: unknown) => alertSummary(renderAlert("stores.attention", params).summary);
@@ -318,7 +340,7 @@ describe("Owner 2026-11-03: system alerts in the store's language", () => {
     expect(
       say({
         checksFailing: ["hotpot", "dessert"],
-        settlementNotCovered: [],
+        settlementNotRun: [],
         setupEnding: ["tea"],
       }),
     ).toBe("部分检查无法运行：hotpot、dessert。点单服务快到期：tea。");

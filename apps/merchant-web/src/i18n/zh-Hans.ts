@@ -2405,6 +2405,10 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Not set yet (step {step}, {name})": "尚未设置（第 {step} 步，{name}）",
   "Not set yet (use the live Store's settings below)": "尚未设置（使用下方当前门店的设置）",
   "Not set — customers cannot choose it": "未设置 — 顾客不能选择",
+  "Not compared with the payment provider yet. This business day closed {duration} ago and its day-end check has not run. BOP support has been told; the figures above are not affected.":
+    "还没有和支付方核对。这个营业日已结束 {duration}，日结核对还没有运行。已通知 BOP 技术支持；上面的数字不受影响。",
+  "Not compared with the payment provider yet. This business day closed {duration} ago and its day-end check has not run. It runs by itself once it is fixed; the figures above are not affected.":
+    "还没有和支付方核对。这个营业日已结束 {duration}，日结核对还没有运行。修好后会自动补做；上面的数字不受影响。",
   "Not settled yet. The settlement run for this day has not completed.":
     "尚未结算。这一天的结算运行尚未完成。",
   "Not started": "未开始",
@@ -7607,6 +7611,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Some checks could not run: {names}.": "部分检查无法运行：{names}。",
   "Background work needs a person: {names}.": "后台工作需要人处理：{names}。",
   "Closed business days with no day-end settlement: {names}.": "营业日已结束但没有日结：{names}。",
+  "Closed business days whose day-end settlement has not run: {names}.":
+    "有已结束的营业日还没有跑日结：{names}。",
+  "check the day-end settlement worker of those Stores": "检查这些门店的日结后台任务",
+  "Day-end check with the payment provider has not run": "日结还没有和支付方核对",
+  "Day-end check with the payment provider has run again": "日结已重新和支付方核对",
+  "1 closed business day has not been compared with the payment provider (closed {duration} ago).":
+    "有 1 个已结束的营业日还没有和支付方核对（{duration}前结束）。",
+  "{count} closed business days have not been compared with the payment provider (the oldest closed {duration} ago).":
+    "有 {count} 个已结束的营业日还没有和支付方核对（最早的 {duration}前结束）。",
+  "Nothing to change in the store: online payments are taken as usual. The check runs by itself once it is fixed; BOP support can see this.":
+    "店里不用做什么，线上付款照常收。修好后核对会自动补做；BOP 技术支持能看到这条提醒。",
   "No support number to call: {names}.": "没有可打的技术支持电话：{names}。",
   "Ordering setup ending soon: {names}.": "点单服务快到期：{names}。",
   "{names} and {count} more": "{names} 和另外 {count} 家",
