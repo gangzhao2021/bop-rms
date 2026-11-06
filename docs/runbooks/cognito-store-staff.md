@@ -104,7 +104,9 @@ INSERT). Read the grants back. No permission catalog change.
    password, sets a password and adds an authenticator app. On a shared tablet they then set a PIN in
    "My PIN" as before (old PINs keep working; a manager can reset).
 4. New staff are invited in the app: Staff → "Invite a staff member" (name, work email, role). The role
-   starts after another manager approves it, once the person has signed in.
+   starts once the person has signed in and the role is approved: by another person who holds staff
+   role approval, or, at a store run by one owner with Sole operator on, by the owner on their own
+   (the person's page, or Approvals, after confirming with the authenticator code; WP-2423 M07).
 5. `status` lists invitations (masked email only).
 
 ## 6. A new Store's first Owner
