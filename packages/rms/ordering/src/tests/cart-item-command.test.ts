@@ -542,10 +542,21 @@ describe("Cart Item Add / Update / Remove commands", () => {
     });
     // The ordinary attributed remove: the remover's Guest Session, never the adder's.
     expect(gone.operation(ids.operation)?.guestSessionReference).toBe(ids.otherSession);
-    // Still at the table, could not be checked, an answer about someone else, a failure or no
-    // port: refused.
+    // Back at the table since the view was read: a conflict, so the guest's phone reads again.
+    const back = fixture({
+      aggregate: diningCart,
+      session: remover,
+      adders: {
+        standing: async () => [{ participantReference: ids.participant, standing: "AtTable" }],
+      },
+    });
+    await expect(back.service.remove(remove)).rejects.toMatchObject({
+      code: "CART_VERSION_CONFLICT",
+    });
+    expect(back.operations()).toBe(0);
+    // Could not be checked (an outage), an answer about someone else or a failure: retry later,
+    // never "your session expired".
     for (const adders of [
-      { standing: async () => [{ participantReference: ids.participant, standing: "AtTable" }] },
       { standing: async () => [{ participantReference: ids.participant, standing: "Unknown" }] },
       { standing: async () => [{ participantReference: ids.otherParticipant, standing: "Gone" }] },
       { standing: async () => [] },
@@ -554,18 +565,19 @@ describe("Cart Item Add / Update / Remove commands", () => {
           throw new Error("synthetic Dining outage");
         },
       },
-      undefined,
     ]) {
-      const state = fixture({
-        aggregate: diningCart,
-        session: remover,
-        ...(adders === undefined ? {} : { adders }),
-      });
+      const state = fixture({ aggregate: diningCart, session: remover, adders });
       await expect(state.service.remove(remove)).rejects.toMatchObject({
-        code: "CART_PERMISSION_DENIED",
+        code: "CART_DEPENDENCY_UNAVAILABLE",
       });
       expect(state.operations()).toBe(0);
     }
+    // No standing source at all: the line is simply another phone's.
+    const blind = fixture({ aggregate: diningCart, session: remover });
+    await expect(blind.service.remove(remove)).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(blind.operations()).toBe(0);
     // Changing it stays the adder's, gone or not.
     const edit = fixture({ aggregate: diningCart, session: remover, adders: { standing } });
     await expect(

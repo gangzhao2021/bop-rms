@@ -217,6 +217,40 @@ describe("WP-1205 in-memory Cart state", () => {
     }
   });
 
+  it("WP-2423 same-table-ordering: removing a left phone's line never says this session expired", async () => {
+    const stranded = () => {
+      const base = cart();
+      const item = base.cart.items[0];
+      if (item === undefined) throw new Error("synthetic item missing");
+      return {
+        ...base,
+        cart: {
+          ...base.cart,
+          items: [{ ...item, warnings: ["OTHER_PARTICIPANT_ITEM", "ADDER_LEFT_TABLE"] }],
+        },
+      };
+    };
+    // The check of that phone could not run (the server answers 503, the client cannot tell
+    // whether it applied): the guest is told to try again, with the same operation.
+    const outage = fixture();
+    outage.setCurrent(stranded());
+    await outage.controller.load();
+    outage.failRemove(new CartClientError("network_unknown"));
+    await outage.controller.removeItem(id(2));
+    expect(outage.controller.getState()).toMatchObject({
+      status: "command-failed",
+      canRetrySameOperation: true,
+    });
+    // That phone is back at the table: the cart is read again and says it changed.
+    const back = fixture();
+    back.setCurrent(stranded());
+    await back.controller.load();
+    back.failRemove(new CartClientError("cart_version_conflict"));
+    await back.controller.removeItem(id(2));
+    expect(back.controller.getState()).toMatchObject({ status: "conflict" });
+    expect(back.calls.filter((call) => call.name === "load")).toHaveLength(2);
+  });
+
   it("WP-2423 same-table-ordering: a read that failed is marked so, and the next read recovers", async () => {
     const f = fixture();
     await f.controller.load();

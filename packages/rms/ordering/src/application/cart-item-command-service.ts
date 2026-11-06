@@ -484,14 +484,20 @@ async function removableAsUnsellable(
  * WP-2423 (same-table-ordering): a table line whose adder can no longer act at this table (staff
  * removed the phone, the table QR was replaced, its session ended) may be removed by anyone at the
  * table, so nobody has to pay for a dish no one can take out. Checked inside the command at its own
- * instant; an unknown answer or a failure keeps the remove refused. Update stays the adder's.
+ * instant, with the full binding check. Update stays the adder's.
+ *
+ * - `Removable`: an owner records the adder `Gone`.
+ * - `AtTable`: the adder is back (or never left); the view the guest saw is stale.
+ * - `Unknown`: no answer could be had (an outage, a failure, a malformed answer). Never read as
+ *   "no permission": the guest is told to try again.
+ * - `NotApplicable`: not a table line with a recorded adder, or no standing source.
  */
-export async function removableAsAdderGone(
+export async function adderGoneStanding(
   ports: Pick<CartItemCommandPorts, "adders">,
   cart: CartAggregate,
   item: CartAggregate["items"][number],
   at: OrderingInstant,
-): Promise<boolean> {
+): Promise<"Removable" | "AtTable" | "Unknown" | "NotApplicable"> {
   const adders = ports.adders;
   const participant = item.addedByParticipantReference;
   if (
@@ -500,7 +506,7 @@ export async function removableAsAdderGone(
     participant === null ||
     cart.diningSessionReference === null
   )
-    return false;
+    return "NotApplicable";
   try {
     const standings = await adders.standing(
       Object.freeze({
@@ -509,14 +515,16 @@ export async function removableAsAdderGone(
         observedAt: at,
       }),
     );
-    return (
-      Array.isArray(standings) &&
-      standings.length === 1 &&
-      standings[0]?.participantReference === String(participant) &&
-      standings[0]?.standing === "Gone"
-    );
+    if (
+      !Array.isArray(standings) ||
+      standings.length !== 1 ||
+      standings[0]?.participantReference !== String(participant)
+    )
+      return "Unknown";
+    const standing = standings[0]?.standing;
+    return standing === "Gone" ? "Removable" : standing === "AtTable" ? "AtTable" : "Unknown";
   } catch {
-    return false;
+    return "Unknown";
   }
 }
 
@@ -792,10 +800,15 @@ export function createCartItemCommandService(ports: CartItemCommandPorts) {
       if (item === undefined) throw new CartError("CART_ITEM_NOT_FOUND");
       if (
         !canMutateItem(item, current.aggregate, current.session) &&
-        !(await removableAsUnsellable(ports, current.aggregate, item, requestedAt)) &&
-        !(await removableAsAdderGone(ports, current.aggregate, item, requestedAt))
-      )
-        throw new CartError("CART_PERMISSION_DENIED");
+        !(await removableAsUnsellable(ports, current.aggregate, item, requestedAt))
+      ) {
+        const adder = await adderGoneStanding(ports, current.aggregate, item, requestedAt);
+        // The adder is back at the table: the guest's view is stale, so its phone reads again.
+        if (adder === "AtTable") throw new CartError("CART_VERSION_CONFLICT");
+        // Could not be checked: try again later, never "your session expired".
+        if (adder === "Unknown") throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+        if (adder !== "Removable") throw new CartError("CART_PERMISSION_DENIED");
+      }
       const aggregate = parseCartAggregate({
         ...current.aggregate,
         aggregateVersion: expectedVersion + 1,
