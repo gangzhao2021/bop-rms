@@ -426,6 +426,20 @@ describe("current-authorized shared Dining Cart read", () => {
     expect(result?.effectiveStatus).toBe("Expired");
     expect(source.lifecycle?.status).toBe("Active");
   });
+  it("M126: a Guest Session store that can't answer is a retry; a really ended visit is still denied", async () => {
+    const f = fixture();
+    f.resolve.mockRejectedValue(
+      Object.assign(new Error("GUEST_SESSION_UNAVAILABLE"), { dependencyFailure: true }),
+    );
+    await expect(f.service.read({ sessionCredential: credential })).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    f.resolve.mockRejectedValue(new Error("GUEST_SESSION_UNAVAILABLE"));
+    await expect(f.service.read({ sessionCredential: credential })).rejects.toMatchObject({
+      code: "CART_PERMISSION_DENIED",
+    });
+    expect(f.current).not.toHaveBeenCalled();
+  });
   it("denies a backwards clock before Cart access", async () => {
     const f = fixture();
     f.now.mockReturnValueOnce(requestedAt).mockReturnValue(createdAt);

@@ -436,10 +436,11 @@ export const cartText = Object.freeze({
         ),
       ] as const;
     },
+    // M126: said only when the visit really ended (a store that can't answer is "try again").
     get sessionExpired() {
       return [
-        t("Session expired"),
-        t("Scan the location QR code again to continue your order."),
+        t("Your visit on this phone has ended"),
+        t("Scan the QR code again to keep ordering."),
       ] as const;
     },
     get notFound() {
@@ -487,7 +488,7 @@ export const cartText = Object.freeze({
     get unavailable() {
       return [
         t("We couldn’t load your cart"),
-        t("Nothing was changed. Try loading it again."),
+        t("Your cart is kept and nothing was changed. Try loading it again."),
       ] as const;
     },
     get notEnoughLeftHeading() {

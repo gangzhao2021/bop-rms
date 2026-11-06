@@ -246,6 +246,17 @@ describe("current Cart channel routing", () => {
     expect(await f.port.getCurrentCart(context())).toEqual({ status: "Unavailable" });
     expect(f.dining.read).not.toHaveBeenCalled();
   });
+  it("M126: a Guest Session store that can't answer is a retry, not an ended visit", async () => {
+    const f = routing();
+    f.resolve.mockRejectedValue(
+      Object.assign(new Error("GUEST_SESSION_UNAVAILABLE"), { dependencyFailure: true }),
+    );
+    expect(await f.port.getCurrentCart(context())).toEqual({ status: "Unavailable" });
+    // A visit that really ended still says so.
+    f.resolve.mockRejectedValue(new Error("GUEST_SESSION_UNAVAILABLE"));
+    expect(await f.port.getCurrentCart(context())).toEqual({ status: "SessionExpired" });
+    expect(f.dining.read).not.toHaveBeenCalled();
+  });
   it("denies a session that expires while Identity resolves", async () => {
     const f = routing();
     f.now.mockReturnValueOnce(at()).mockReturnValue(at(14340));

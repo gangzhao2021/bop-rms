@@ -515,7 +515,10 @@ export function createCustomerCartChannelPort(options: {
             observedAt: at,
           }),
         );
-      } catch {
+      } catch (error) {
+        // M126: the Guest Session store could not answer: a retry, never "your visit ended".
+        if ((error as { dependencyFailure?: unknown } | null)?.dependencyFailure === true)
+          return unavailable;
         return { status: "SessionExpired" };
       }
       const checkedAt = parseOrderingInstant(now());

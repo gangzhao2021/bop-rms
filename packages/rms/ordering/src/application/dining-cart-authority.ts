@@ -129,7 +129,13 @@ export function createDiningCartAuthority(ports: DiningCartAuthorityPorts) {
       )
         return denied();
       return session;
-    } catch {
+    } catch (error) {
+      // M126: the Guest Session store could not answer: a retry, never "your visit ended".
+      if (
+        (error as { dependencyFailure?: unknown } | null)?.dependencyFailure === true ||
+        (error instanceof CartError && error.code === "CART_DEPENDENCY_UNAVAILABLE")
+      )
+        return unavailable();
       return denied();
     }
   }

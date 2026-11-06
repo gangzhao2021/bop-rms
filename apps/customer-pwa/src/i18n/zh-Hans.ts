@@ -662,6 +662,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Served {value1} of {quantity}": "已上 {value1}/{quantity}",
   "Serving your order": "正在为你上菜",
   "Session expired": "会话已过期",
+  "Scan the QR code again to keep ordering.": "请重新扫码继续点单。",
+  "Your cart is kept and nothing was changed. Try loading it again.":
+    "购物车已保留，没有做任何更改。请重新加载。",
   "Show or read this code to staff to collect your order. Valid until ":
     "向店员出示或读出这个代码即可取餐。有效期至 ",
   "Show pickup code": "显示取餐码",

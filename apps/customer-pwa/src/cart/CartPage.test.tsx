@@ -227,7 +227,7 @@ describe("CUST-CART page contract", () => {
     ["loading", "Loading cart"],
     ["empty", "Your cart is empty"],
     ["replacement-forbidden", "Cart replacement not permitted"],
-    ["session-expired", "Session expired"],
+    ["session-expired", "Your visit on this phone has ended"],
     ["not-found", "Cart not found"],
     ["conflict", "Cart changed"],
     ["validation", "Review this item"],
