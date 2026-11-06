@@ -3750,6 +3750,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Slip reference (optional)": "签购单参考号（可选）",
   Sold: "售出",
   "Not available now": "现在不供应",
+  "{set} needs a choice guests start with on {dishes}. Tick “Default” on another offered choice, then save. Nothing was saved.":
+    "{dishes}的“{set}”必须有一个默认选项。请把另一个在供应的选项设为默认，再保存。这次没有保存。",
+  "This changes what {dishes} start with. Ask someone who can edit dishes to save it. Nothing was saved.":
+    "这会改变{dishes}的默认选项。请让能修改菜品的人来保存。这次没有保存。",
+  "{dishes} now start with no choice. List the menu to show it to guests.":
+    "{dishes}现在没有默认选项。上架菜单后客人才看到。",
+  "{dishes} now start with {option}. List the menu to show it to guests.":
+    "{dishes}现在默认选“{option}”。上架菜单后客人才看到。",
+  "Guests start with {option} on {dishes}. While {option} isn't offered, guests choose another choice themselves. Tick Offered again when it's back.":
+    "{dishes}默认选“{option}”。停供期间，客人点这些菜要自己另选。恢复后再勾选“供应”。",
+  "{dishes} will no longer start with {option}. Guests see the change after you list the menu.":
+    "{dishes}将不再默认选“{option}”，上架菜单后客人看到。",
+  "What this changes": "这次修改会影响",
   "Sold out": "售罄",
   "Sold out for the rest of today": "今天余下时间售罄",
   "Sold out to guests (stock)": "对顾客售罄（库存）",

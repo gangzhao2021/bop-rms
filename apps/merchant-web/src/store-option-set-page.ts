@@ -1,12 +1,75 @@
 import { t } from "./i18n/i18n.js";
 /** WP-2423 slice 4: CAT-OPTIONSET-LIST / CAT-OPTIONSET-EDIT view contract and same-origin client. */
 export type OptionSetErrorCode =
-  "PermissionDenied" | "NotFound" | "Conflict" | "Invalid" | "Offline" | "Unavailable";
+  | "PermissionDenied"
+  | "NotFound"
+  | "Conflict"
+  | "Invalid"
+  | "OptionSet"
+  | "Offline"
+  | "Unavailable";
+/** WP-2423 (cart-unsellable-dishes): a Save refused because of the dishes it would change. */
+export interface OptionSetProblem {
+  readonly reason: "DefaultNeeded" | "DefaultChangeNeedsDishEditor";
+  readonly optionName: string;
+  readonly productNames: readonly string[];
+}
 export class OptionSetPageError extends Error {
-  constructor(readonly code: OptionSetErrorCode) {
+  constructor(
+    readonly code: OptionSetErrorCode,
+    readonly problem: OptionSetProblem | null = null,
+  ) {
     super(t("Option sets are unavailable"));
     this.name = "OptionSetPageError";
   }
+}
+/** What a Save did to the dishes using the set (WP-2423 cart-unsellable-dishes). */
+export interface OptionSetSaveEffect {
+  readonly defaultsCarried?: readonly { productName: string; startsWith: string | null }[];
+  readonly notOfferedDefaults?: readonly { optionName: string; productNames: readonly string[] }[];
+}
+/** The staff words for a Save refused because of the dishes it would change. */
+export function optionSetProblemText(problem: OptionSetProblem): string {
+  const dishes = problem.productNames.join(", ");
+  return problem.reason === "DefaultNeeded"
+    ? t(
+        "{set} needs a choice guests start with on {dishes}. Tick “Default” on another offered choice, then save. Nothing was saved.",
+        { set: problem.optionName, dishes },
+      )
+    : t(
+        "This changes what {dishes} start with. Ask someone who can edit dishes to save it. Nothing was saved.",
+        { dishes },
+      );
+}
+/** After a Save: which dishes now start with another choice, and which start with one now off. */
+export function optionSetSaveEffectText(effect: OptionSetSaveEffect): string[] {
+  const lines: string[] = [];
+  const byChoice = new Map<string, string[]>();
+  for (const carried of effect.defaultsCarried ?? []) {
+    const key = carried.startsWith ?? "";
+    byChoice.set(key, [...(byChoice.get(key) ?? []), carried.productName]);
+  }
+  for (const [choice, dishes] of byChoice)
+    lines.push(
+      choice === ""
+        ? t("{dishes} now start with no choice. List the menu to show it to guests.", {
+            dishes: dishes.join(", "),
+          })
+        : t("{dishes} now start with {option}. List the menu to show it to guests.", {
+            dishes: dishes.join(", "),
+            option: choice,
+          }),
+    );
+  for (const off of effect.notOfferedDefaults ?? [])
+    lines.push(offDefaultText(off.optionName, off.productNames));
+  return lines;
+}
+/** A choice guests start with on some dishes is turned off (before and after Save). */
+export function offDefaultText(option: string, dishes: readonly string[]): string {
+  return t(
+    "Guests start with {option} on {dishes}. While {option} isn't offered, guests choose another choice themselves. Tick Offered again when it's back.",
+    { option, dishes: dishes.join(", ") },
+  );
 }
 export type OptionChoiceKind = "One" | "Any" | "Quantity";
 export interface OptionRow {
@@ -17,6 +80,8 @@ export interface OptionRow {
   readonly nameZh?: string;
   readonly offered: boolean;
   readonly defaultChoice: boolean;
+  /** WP-2423 (cart-unsellable-dishes): the dishes whose draft starts guests with this option. */
+  readonly startsOn?: readonly string[];
 }
 export interface OptionSetRow {
   readonly optionSetReference: string;
@@ -142,7 +207,24 @@ export const unavailableOptionSetClient: OptionSetClient = {
     throw new OptionSetPageError("Unavailable");
   },
 };
-const codes = new Set<OptionSetErrorCode>(["PermissionDenied", "NotFound", "Conflict", "Invalid"]);
+const codes = new Set<OptionSetErrorCode>([
+  "PermissionDenied",
+  "NotFound",
+  "Conflict",
+  "Invalid",
+  "OptionSet",
+]);
+const problemOf = (value: unknown): OptionSetProblem | null => {
+  const r = value as Record<string, unknown> | null;
+  return r !== null &&
+    typeof r === "object" &&
+    (r.reason === "DefaultNeeded" || r.reason === "DefaultChangeNeedsDishEditor") &&
+    typeof r.optionName === "string" &&
+    Array.isArray(r.productNames) &&
+    r.productNames.every((item) => typeof item === "string")
+    ? (r as unknown as OptionSetProblem)
+    : null;
+};
 export function createOptionSetClient(
   csrf: string,
   fetcher: typeof fetch = fetch,
@@ -160,10 +242,16 @@ export function createOptionSetClient(
       throw new OptionSetPageError("Offline");
     }
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      const payload = (await response.json().catch(() => null)) as {
+        error?: unknown;
+        problem?: unknown;
+      } | null;
       const code = String(payload?.error) as OptionSetErrorCode;
+      const problem = problemOf(payload?.problem);
+      if (code === "OptionSet" && problem === null) throw new OptionSetPageError("Unavailable");
       throw new OptionSetPageError(
         codes.has(code) ? code : response.status === 403 ? "PermissionDenied" : "Unavailable",
+        problem,
       );
     }
     return response.json() as Promise<unknown>;

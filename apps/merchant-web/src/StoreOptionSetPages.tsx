@@ -8,6 +8,10 @@ import { newOperationReference } from "./operation-reference.js";
 import type { MenuApplyIntent } from "./OneStoreMenuPage.js";
 import {
   OptionSetPageError,
+  offDefaultText,
+  optionSetProblemText,
+  optionSetSaveEffectText,
+  type OptionSetSaveEffect,
   choiceRule,
   optionSetStateText,
   parseOptionSetEditView,
@@ -36,6 +40,7 @@ const copy: Record<OptionSetErrorCode | "Loading", string> = {
   Invalid: t(
     "The option set is not valid. It needs a name, at least one option, different option names, and limits that customers can meet with the options offered.",
   ),
+  OptionSet: serverProblemText,
   Offline: t("Offline. Nothing was confirmed; retry sends the same request again."),
   Unavailable: serverProblemText,
 };
@@ -267,6 +272,22 @@ function OptionSetEditor({
   if (kind === "One" && rows.filter((row) => row.defaultChoice).length > 1)
     problems.push(t("Only one option can be the default when customers choose one."));
 
+  // WP-2423 (cart-unsellable-dishes): what this change does to the dishes, before it is saved.
+  const effects: string[] = [];
+  for (const row of rows) {
+    const saved = set?.options.find((option) => option.optionReference === row.optionReference);
+    const dishes = saved?.startsOn ?? [];
+    if (saved === undefined || dishes.length === 0) continue;
+    if (saved.offered && !row.offered) effects.push(offDefaultText(saved.name, dishes));
+    if (saved.defaultChoice && !row.defaultChoice)
+      effects.push(
+        t(
+          "{dishes} will no longer start with {option}. Guests see the change after you list the menu.",
+          { dishes: dishes.join(", "), option: saved.name },
+        ),
+      );
+  }
+
   const body = () => ({
     name: name.trim(),
     nameZh: nameZh.trim(),
@@ -288,7 +309,9 @@ function OptionSetEditor({
     setMessage(null);
     setPending(command);
     try {
-      const result = (await client.command(command)) as { optionSet?: OptionSetRow };
+      const result = (await client.command(command)) as {
+        optionSet?: OptionSetRow;
+      } & OptionSetSaveEffect;
       setPending(null);
       if (command.action === "Create" && result.optionSet?.optionSetReference) {
         void navigate(`/app/commerce/option-sets/${result.optionSet.optionSetReference}`);
@@ -298,7 +321,10 @@ function OptionSetEditor({
         void navigate("/app/commerce/option-sets");
         return;
       }
-      setMessage({ tone: "neutral", text: t("Saved.") });
+      setMessage({
+        tone: "neutral",
+        text: [t("Saved."), ...optionSetSaveEffectText(result)].join(" "),
+      });
       if (result.optionSet) setLatest(result.optionSet);
       // The choices this save made: the ones it did not send a reference for (whatever language
       // the staff read their names in).
@@ -326,7 +352,13 @@ function OptionSetEditor({
       const code = error instanceof OptionSetPageError ? error.code : "Unavailable";
       // Only an unconfirmed attempt is retried with the same operation; a refusal is final.
       if (code !== "Offline" && code !== "Unavailable") setPending(null);
-      setMessage({ tone: "error", text: copy[code] });
+      setMessage({
+        tone: "error",
+        text:
+          error instanceof OptionSetPageError && error.problem !== null
+            ? optionSetProblemText(error.problem)
+            : copy[code],
+      });
     } finally {
       setBusy(false);
     }
@@ -604,6 +636,13 @@ function OptionSetEditor({
             </button>
           ) : null}
         </fieldset>
+        {effects.length > 0 && mayEdit ? (
+          <ul aria-label={t("What this changes")}>
+            {effects.map((effect) => (
+              <li key={effect}>{effect}</li>
+            ))}
+          </ul>
+        ) : null}
         {problems.length > 0 && mayEdit ? (
           <ul aria-label={t("Before saving")}>
             {problems.map((problem) => (

@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   choiceRule,
   createOptionSetClient,
+  offDefaultText,
+  optionSetProblemText,
+  optionSetSaveEffectText,
   optionSetStateText,
   parseOptionSetListView,
 } from "./store-option-set-page.js";
@@ -46,5 +49,43 @@ describe("WP-2423 option set page helpers", () => {
     });
     await expect(client.list()).rejects.toMatchObject({ code: "Conflict" });
     expect(header).toBe("csrf");
+  });
+  it("WP-2423 (cart-unsellable-dishes): names the dishes a Save affects, and why one was refused", async () => {
+    expect(offDefaultText("Hot", ["Soy milk", "Hot tea"])).toBe(
+      "Guests start with Hot on Soy milk, Hot tea. While Hot isn't offered, guests choose another choice themselves. Tick Offered again when it's back.",
+    );
+    expect(
+      optionSetSaveEffectText({
+        defaultsCarried: [
+          { productName: "Soy milk", startsWith: "Iced" },
+          { productName: "Hot tea", startsWith: "Iced" },
+        ],
+        notOfferedDefaults: [],
+      }),
+    ).toEqual(["Soy milk, Hot tea now start with Iced. List the menu to show it to guests."]);
+    expect(
+      optionSetProblemText({
+        reason: "DefaultNeeded",
+        optionName: "Serve",
+        productNames: ["Soy milk"],
+      }),
+    ).toMatch(/^Serve needs a choice guests start with on Soy milk\..*Nothing was saved\.$/u);
+    const client = createOptionSetClient("csrf", async () =>
+      Response.json(
+        {
+          error: "OptionSet",
+          problem: {
+            reason: "DefaultChangeNeedsDishEditor",
+            optionName: "Serve",
+            productNames: ["Soy milk"],
+          },
+        },
+        { status: 409 },
+      ),
+    );
+    await expect(client.list()).rejects.toMatchObject({
+      code: "OptionSet",
+      problem: { reason: "DefaultChangeNeedsDishEditor", productNames: ["Soy milk"] },
+    });
   });
 });

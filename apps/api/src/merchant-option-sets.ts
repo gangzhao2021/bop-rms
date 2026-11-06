@@ -456,7 +456,7 @@ export function createMerchantOptionSets(options: {
               ...kept,
               ...dropped.map((option) => ({ ...option, lifecycle: "Inactive" as const })),
             ].map((option, sortOrder) => ({ ...option, sortOrder }));
-            const draft: OptionSetAggregate["draft"] = {
+            const draft = {
               ...existing.draft,
               localizedNames: withChinese(
                 { ...existing.draft.localizedNames, [options.locale]: body.name },
@@ -483,7 +483,12 @@ export function createMerchantOptionSets(options: {
               updatedAt: at,
             };
             // WP-2423 (cart-unsellable-dishes): what this Save does to the dishes using the set.
-            const effect = await defaultEffect(tx, s, existing, draft);
+            const effect = await defaultEffect(
+              tx,
+              s,
+              existing,
+              draft as unknown as OptionSetAggregate["draft"],
+            );
             const result = await service.replaceDraft({
               optionSetReference: body.optionSetReference,
               expectedAggregateVersion: body.expectedAggregateVersion,
