@@ -560,6 +560,27 @@ order of the file; then publish the menu. Guests see each name in their phone's 
 kitchen shows the Chinese name first with the English one under it. Check one dish of each
 section on a phone in both languages and on the kitchen screen before testing with staff.
 
+## Counter and Pickup handover (WP-2423 M21, M127, M53)
+
+- **Handing over.** After the guest's code matches, `Pickup` shows one button, `Hand over to
+  customer · Order N`: check every item on the card, then tap it. For an order taken at the counter
+  (no code), call the number and tap `Called and handed over · Order N`; the record says the number
+  was called, never that a name was checked. If someone else is collecting, tap `Someone else is
+  collecting` and fill in their initial and the confirmation as before. A guest who cannot show a
+  valid code, or whose code expired or locked, still goes through the full in-person check.
+- **A counter guest who does not pay.** Card declined: try another card. Guest not paying, entered
+  by mistake, or guest left: a Store Manager or Owner taps `Cancel order` on the counter screen,
+  in "Sent, not paid yet" or on `Orders`, and chooses why (`Back to edit` cancels it as entered by
+  mistake and keeps the items on the screen to send again). Nothing was charged; the order stays on
+  `Orders` as "Cancelled before payment by staff" with the reason, and its items go back to stock
+  at once. Front-of-house staff cannot cancel: they ask the manager, or the order is released at its
+  pay-by time. A paper order entered after an outage can never be cancelled this way: it was paid
+  during the outage, so record its payment.
+- **Kitchen notes.** At the counter, `Change` on an order line opens `Note for the kitchen`, as
+  on a table round; the kitchen ticket shows it.
+- **When the system is down.** Nothing here changes the outage procedure below: take paper slips,
+  charge the card machine, and enter them as paper orders once the system is back.
+
 ## Guests starting free tables (WP-2423 item 5)
 
 [DEC-DINING-GUEST-TABLE-START](../spec/design/dining-guest-table-start.md). Off by default; only for a
@@ -1002,9 +1023,11 @@ Do these in order, before resuming online ordering.
      order)" from the slip (within the last 3 days), add the same items, options and tip;
    - check "To charge" equals the card machine total on the slip; if it differs, stop and give the
      slip to the incident lead (gap G4);
-   - `Send order`, then enter the slip reference and press `Paid on card machine`. The page says
+   - `Send order` (the page says "This paper order was paid during the outage: don't charge
+     again"), then enter the slip reference and press `Paid on card machine`. The page says
      "Recorded after the outage and accepted. If it was already made and handed over, mark it ready
-     in Kitchen and handed over in Pickup." Do that for each one (gap G5);
+     in Kitchen and handed over in Pickup." Do that for each one (gap G5); in Pickup it is one tap,
+     `Called and handed over · Order N`. A paper order is never cancelled: it was paid;
    - write the order number on the paper slip ("entered as order no.").
    - Pressing `Send order` again with the same screen never creates a second order; if the screen
      reports that it did not go through, nothing was charged and it can be sent again.
