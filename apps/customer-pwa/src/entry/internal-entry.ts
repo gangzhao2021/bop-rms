@@ -31,6 +31,33 @@ export async function loadInternalEntryToken({
     : pickup
       ? `/bff/customer/pickup-entry?store=${pickup[1]}`
       : "/bff/customer/pickup-entry";
+  return fetchEntryToken(fetcher, path);
+}
+
+const publicStorePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+/**
+ * M02 (v15 07b7a1b7): a pickup code for one named Store ("Start a new order" at the restored
+ * visit's Store), or with none named, the installation's only Store; an installation of several
+ * Stores answers that with none, and the guest is asked to scan.
+ */
+export async function loadPickupEntryToken({
+  enabled,
+  fetcher,
+  publicStoreReference,
+}: {
+  readonly enabled: boolean;
+  readonly fetcher: typeof fetch;
+  readonly publicStoreReference?: string | undefined;
+}): Promise<string | undefined> {
+  if (!enabled) return undefined;
+  if (publicStoreReference === undefined)
+    return fetchEntryToken(fetcher, "/bff/customer/pickup-entry");
+  if (!publicStorePattern.test(publicStoreReference)) return undefined;
+  return fetchEntryToken(fetcher, `/bff/customer/pickup-entry?store=${publicStoreReference}`);
+}
+
+async function fetchEntryToken(fetcher: typeof fetch, path: string): Promise<string | undefined> {
   try {
     const response = await fetcher(path, {
       credentials: "same-origin",

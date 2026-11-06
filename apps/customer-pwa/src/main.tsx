@@ -1,4 +1,6 @@
-import { loadInternalEntryToken } from "./entry/internal-entry.js";
+import { loadInternalEntryToken, loadPickupEntryToken } from "./entry/internal-entry.js";
+import { createCustomerStartClient, type CustomerEntryStartSource } from "./entry/start-client.js";
+import type { CustomerEntryResumedContext } from "./entry/types.js";
 import { loadRuntimePaymentConfiguration } from "./payment/payment-runtime-configuration.js";
 import type { MenuJourneyContext } from "./menu/types.js";
 import { v7 as uuidv7 } from "uuid";
@@ -10,7 +12,11 @@ import {
   getCustomerCsrfCredential,
   setCustomerCsrfCredential,
 } from "./session/customer-transaction-context.js";
-import { restoreCustomerSession, type CustomerCurrentOrder } from "./session/session-bootstrap.js";
+import {
+  restoreCustomerSession,
+  type CustomerCurrentOrder,
+  type CustomerRestoredVisit,
+} from "./session/session-bootstrap.js";
 import { protectCustomerHistoryRestore } from "./session/history-recovery.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -18,7 +24,7 @@ import { BrowserRouter } from "react-router";
 import { AppErrorBoundary } from "@bop-rms/ui";
 import { App } from "./App.js";
 import { LanguageRoot, t } from "./i18n/i18n.js";
-import { createCustomerEntryClient } from "./entry/entry-client.js";
+import { consumeCustomerQrFragment, createCustomerEntryClient } from "./entry/entry-client.js";
 import "./styles.css";
 import "./customer-v3.css";
 import { ResumeScreen } from "./resume/ResumeScreen.js";
@@ -70,7 +76,24 @@ async function start() {
   }
   let initialMenuContext: MenuJourneyContext | undefined;
   let currentOrder: CustomerCurrentOrder | undefined;
+  let restoredVisit: CustomerRestoredVisit | undefined;
   const hash = window.location.hash;
+  const entryLocation = {
+    origin: window.location.origin,
+    pathname: window.location.pathname,
+    search: window.location.search,
+    hash,
+  };
+  // The code leaves the address bar before anything else is fetched (it is kept only in memory).
+  const scannedCode =
+    window.location.pathname === "/"
+      ? consumeCustomerQrFragment({
+          hash,
+          pathname: window.location.pathname,
+          search: window.location.search,
+          replaceState: window.history.replaceState.bind(window.history),
+        })
+      : null;
   // The deployment's payment mode is runtime configuration, so one image serves both the
   // internal simulator and Stripe; without it the build-time configuration applies.
   const runtimePaymentLoad = loadRuntimePaymentConfiguration({
@@ -87,28 +110,66 @@ async function start() {
     (order) => {
       currentOrder = order;
     },
+    (visit) => {
+      restoredVisit = visit;
+    },
   );
   const runtimePayment = await runtimePaymentLoad;
-  const inMemoryToken = await loadInternalEntryToken({
-    enabled:
-      runtimePayment?.internalTestEntry ??
-      import.meta.env.VITE_BOP_INTERNAL_SIMULATED_PAYMENT === "1",
-    location: window.location,
-    fetcher: window.fetch.bind(window),
-  });
+  const pickupEnabled =
+    runtimePayment?.internalTestEntry ??
+    import.meta.env.VITE_BOP_INTERNAL_SIMULATED_PAYMENT === "1";
+  const fetcher = window.fetch.bind(window);
+  // M02 (v15 07b7a1b7): where this phone is comes from its own scan or its own visit, never from
+  // a default Store (the start sequence is in entry/start-client.ts).
+  const source: CustomerEntryStartSource =
+    hash === ""
+      ? { kind: "None" }
+      : scannedCode !== null
+        ? { kind: "Code", load: async () => scannedCode }
+        : /^#(?:pickup|internal-dining)=/u.test(hash) && entryLocation.search === ""
+          ? {
+              kind: "Code",
+              load: () =>
+                loadInternalEntryToken({
+                  enabled: pickupEnabled,
+                  location: entryLocation,
+                  fetcher,
+                }),
+            }
+          : { kind: "Unusable" };
+  const restored: CustomerEntryResumedContext | undefined =
+    initialMenuContext === undefined
+      ? undefined
+      : Object.freeze({
+          publicStoreReference: initialMenuContext.publicStoreReference,
+          channel: initialMenuContext.channel,
+          locale: initialMenuContext.locale,
+          brandDisplayName: initialMenuContext.brandDisplayName,
+          storeDisplayName: initialMenuContext.storeDisplayName,
+          publicTableReference: restoredVisit?.publicTableReference ?? null,
+          joined: restoredVisit?.joined ?? false,
+        });
+  const boundary = {
+    fetch: fetcher,
+    hash: "",
+    pathname: entryLocation.pathname,
+    search: entryLocation.search,
+    // The address was cleaned above; nothing to replace again.
+    replaceState: () => undefined,
+    online: () => window.navigator.onLine,
+  };
   const entryClient =
-    window.location.pathname === "/"
-      ? createCustomerEntryClient(
-          {
-            fetch: window.fetch.bind(window),
-            hash,
-            pathname: window.location.pathname,
-            search: window.location.search,
-            replaceState: window.history.replaceState.bind(window.history),
-            online: () => window.navigator.onLine,
-          },
-          inMemoryToken,
-        )
+    // As it was opened (the address was cleaned above): a query is no entry.
+    entryLocation.pathname === "/" && entryLocation.search === ""
+      ? createCustomerStartClient({
+          source,
+          restored,
+          forCode: (token) => createCustomerEntryClient(boundary, token),
+          forReplay: () => createCustomerEntryClient(boundary, undefined, { resume: true }),
+          pickupCode: (publicStoreReference) =>
+            loadPickupEntryToken({ enabled: pickupEnabled, fetcher, publicStoreReference }),
+          pickupOffered: pickupEnabled,
+        })
       : undefined;
   if (!root) throw new Error("Application root is missing");
   const transport = { fetch: window.fetch.bind(window), online: () => window.navigator.onLine };

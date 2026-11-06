@@ -29,6 +29,7 @@ import type {
   CustomerEntryIntent,
   CustomerEntryScreenState,
 } from "./types.js";
+import { watchTableOpening } from "./table-open-recheck.js";
 
 const unavailableClient: CustomerEntryClient = Object.freeze({
   hasEntry: false,
@@ -91,6 +92,8 @@ export function EntryContextPage({
   const navigate = useNavigate();
   const established = useRef(onEstablished);
   const runCurrent = useRef<((action: "start" | "retry") => Promise<void>) | null>(null);
+  // M02: "Start a new order" starts at the restored visit's own Store, never a default one.
+  const startingNew = useRef(false);
   // WP-2423 DEC-DINING-GUEST-TABLE-START: what the guest answered, so joining needs no second tap.
   const [answered, setAnswered] = useState<CustomerEntryIntent | null>(null);
   const clientRef = useRef(client);
@@ -112,11 +115,14 @@ export function EntryContextPage({
         // Start after commit, allowing StrictMode cleanup to retire its first generation.
         await Promise.resolve();
         if (!active) return;
-        const next = await client[action]();
+        const fresh = action === "start" && startingNew.current && client.startNew !== undefined;
+        startingNew.current = false;
+        const next = await (fresh && client.startNew ? client.startNew() : client[action]());
         if (!active) return;
         setResult({ client, state: next });
         if (
           next.kind === "Established" ||
+          next.kind === "Resumed" ||
           next.kind === "TableNotOpen" ||
           next.kind === "TableMayStart" ||
           next.kind === "TableBeingCleaned" ||
@@ -180,6 +186,55 @@ export function EntryContextPage({
     });
   }, [state.kind]);
 
+  // M02: while a table isn't open, the page checks again by itself (rarely, only in front) and
+  // when the guest says they're seated, and continues as soon as staff open it. A guest whose own
+  // table was just settled is not moved into the next party's visit.
+  const [recheckNow, setRecheckNow] = useState<(() => void) | null>(null);
+  const waitingAtTable = state.kind === "TableNotOpen" && getSettledTableLabel() === null;
+  useEffect(() => {
+    if (!waitingAtTable || typeof document === "undefined") return;
+    const owner = client;
+    const watcher = watchTableOpening({
+      check: async () => {
+        const next = await owner.retry();
+        if (clientRef.current !== owner) return false;
+        // Still waiting, or a passing failure: keep the page as it is and ask again later.
+        if (
+          next.kind === "TableNotOpen" ||
+          next.kind === "CommandFailed" ||
+          next.kind === "Offline" ||
+          next.kind === "ServiceUnavailable"
+        )
+          return true;
+        setResult({ client: owner, state: next });
+        if (
+          next.kind === "Established" ||
+          next.kind === "TableMayStart" ||
+          next.kind === "TableBeingCleaned" ||
+          next.kind === "TableAskNewParty"
+        )
+          established.current?.(next.context);
+        return false;
+      },
+      visible: () => document.visibilityState === "visible",
+      onVisible: (listener) => {
+        const handler = () => {
+          if (document.visibilityState === "visible") listener();
+        };
+        document.addEventListener("visibilitychange", handler);
+        return () => document.removeEventListener("visibilitychange", handler);
+      },
+      now: () => performance.now(),
+      setTimer: (callback, milliseconds) => setTimeout(callback, milliseconds),
+      clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    });
+    setRecheckNow(() => watcher.checkNow);
+    return () => {
+      watcher.stop();
+      setRecheckNow(null);
+    };
+  }, [waitingAtTable, client]);
+
   const retry = (): void => {
     void runCurrent.current?.("retry");
   };
@@ -203,7 +258,14 @@ export function EntryContextPage({
       <CurrentOrderView
         order={currentOrder}
         store={store}
-        onStartNew={client.hasEntry ? () => setHolding(false) : undefined}
+        onStartNew={
+          client.hasEntry && client.startsNewVisit !== false
+            ? () => {
+                startingNew.current = true;
+                setHolding(false);
+              }
+            : undefined
+        }
       />
     );
   return (
@@ -213,6 +275,7 @@ export function EntryContextPage({
       onContinue={() => navigate("/menu")}
       onRetry={retry}
       onAnswer={client.enter === undefined ? undefined : answer}
+      onSeated={recheckNow ?? undefined}
       autoJoin={answered !== null}
       starting={answered === "Start" || answered === "NewParty"}
       state={state}
@@ -290,6 +353,8 @@ export interface EntryContextViewProps {
   readonly onRetry?: (() => void) | undefined;
   /** WP-2423 DEC-DINING-GUEST-TABLE-START: the guest's answer to a table's choice. */
   readonly onAnswer?: ((intent: CustomerEntryIntent) => void) | undefined;
+  /** M02: at a table not open yet, the guest says staff seated them (checks again now). */
+  readonly onSeated?: (() => void) | undefined;
   /** The guest already answered; the join follows with no second tap. */
   readonly autoJoin?: boolean | undefined;
   /** They answered that they came to start this table. */
@@ -305,12 +370,14 @@ export function EntryContextView({
   onContinue,
   onRetry,
   onAnswer,
+  onSeated,
   autoJoin,
   starting,
   state,
   storeProfile = null,
 }: EntryContextViewProps) {
-  const established = state.kind === "Established" ? state.context : null;
+  const established =
+    state.kind === "Established" || state.kind === "Resumed" ? state.context : null;
   // WP-2423 DEC-DINING-GUEST-TABLE-START: a guest deciding at a table sees where they are, not a
   // line telling them to scan the code they just scanned.
   const at =
@@ -342,6 +409,7 @@ export function EntryContextView({
           onContinue={onContinue}
           onRetry={onRetry}
           onAnswer={onAnswer}
+          onSeated={onSeated}
           autoJoin={autoJoin}
           starting={starting}
           state={state}
@@ -483,6 +551,7 @@ function EntryState({
   onContinue,
   onRetry,
   onAnswer,
+  onSeated,
   autoJoin,
   starting,
   state,
@@ -594,7 +663,9 @@ function EntryState({
         {settled === null ? (
           <>
             <StateHeading headingRef={headingRef}>{t("This table isn’t open yet")}</StateHeading>
-            <p className="entry-context">{t("Ask staff to seat you, then scan again.")}</p>
+            <p className="entry-context">
+              {t("Ask staff to seat you. This page continues by itself once the table is open.")}
+            </p>
           </>
         ) : (
           <>
@@ -613,6 +684,45 @@ function EntryState({
             {t("Look at the menu first")}
           </button>
         ) : null}
+        {settled === null && onSeated ? (
+          <button className="entry-secondary-action" type="button" onClick={onSeated}>
+            {t("We’ve been seated")}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  // M02 (v15 07b7a1b7): this phone's own visit, restored after a reload, a home-screen launch or
+  // the same code scanned again: the same Store, table and cart, and nothing new started.
+  if (state.kind === "Resumed") {
+    const { context } = state;
+    return (
+      <div>
+        <StateHeading headingRef={headingRef}>
+          {context.channel === "DineIn"
+            ? t("Welcome to {storeDisplayName}", { storeDisplayName: context.storeDisplayName })
+            : t("Ready to order")}
+        </StateHeading>
+        {context.channel === "DineIn" ? null : (
+          <p className="entry-context">
+            {t("Pickup from {storeDisplayName} is selected.", {
+              storeDisplayName: context.storeDisplayName,
+            })}
+          </p>
+        )}
+        {onContinue === undefined ? null : context.channel === "DineIn" && !context.joined ? (
+          <EntryNextSteps
+            joining
+            context={context}
+            diningAdmission={diningAdmission}
+            onContinue={onContinue}
+          />
+        ) : (
+          <button className="entry-action" type="button" onClick={onContinue}>
+            {t("Continue ordering")}
+          </button>
+        )}
       </div>
     );
   }

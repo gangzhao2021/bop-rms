@@ -326,6 +326,15 @@ function parseError(
       return Object.freeze({ kind: "ServiceUnavailable" });
     return Object.freeze({ kind: "PickupNotOffered", storeDisplayName: store.storeDisplayName });
   }
+  // M02: a replay with no waiting scan here (or none any merchant owns): the guest is asked to scan.
+  if (
+    status === 404 &&
+    value !== null &&
+    typeof value === "object" &&
+    ((value as { code?: unknown }).code === "entry_scan_missing" ||
+      (value as { code?: unknown }).code === "CUSTOMER_STORE_NOT_FOUND")
+  )
+    return Object.freeze({ kind: "Missing" });
   const raw = exact(value, ["schemaVersion", "code", "messageKey", "recovery"]);
   const recovery = exact(raw.recovery, ["action", "storeSelection"]);
   if (raw.schemaVersion !== 1 || recovery.storeSelection !== "Hidden")
@@ -397,6 +406,11 @@ export function consumeCustomerQrFragment(input: {
 export function createCustomerEntryClient(
   boundary: CustomerEntryBrowserBoundary,
   inMemoryToken?: string,
+  /**
+   * M02: with no code, replay this browser's waiting scan (`{resume:true}`; the server holds the
+   * code). The restored visit's credential stays in place unless a new visit is issued.
+   */
+  options?: Readonly<{ resume?: boolean }>,
 ): CustomerEntryClient {
   const fragmentToken = consumeCustomerQrFragment(boundary);
   const token =
@@ -409,6 +423,7 @@ export function createCustomerEntryClient(
           compactTokenPattern.test(inMemoryToken)
         ? inMemoryToken
         : null;
+  const replay = token === null && options?.resume === true;
   let settled: Promise<CustomerEntryScreenState> | null = null;
   let retryUntil: number | null = null;
   const cooldown = (): CustomerEntryScreenState =>
@@ -451,7 +466,15 @@ export function createCustomerEntryClient(
         referrerPolicy: "no-referrer",
         signal: controller.signal,
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(intent === null ? { qrToken: token } : { qrToken: token, intent }),
+        body: JSON.stringify(
+          replay
+            ? intent === null
+              ? { resume: true }
+              : { resume: true, intent }
+            : intent === null
+              ? { qrToken: token }
+              : { qrToken: token, intent },
+        ),
       });
       try {
         guard();
@@ -506,10 +529,13 @@ export function createCustomerEntryClient(
   const execute = async (
     intent: CustomerEntryIntent | null = null,
   ): Promise<CustomerEntryScreenState> => {
-    setCustomerCsrfCredential(null);
-    setPaymentOperationReference(null);
+    // A scan replaces the visit on this phone; a replay keeps the restored one until it is replaced.
+    if (!replay) {
+      setCustomerCsrfCredential(null);
+      setPaymentOperationReference(null);
+    }
     const current = captureCustomerCsrfContext();
-    if (token === null) return Object.freeze({ kind: "Missing" });
+    if (token === null && !replay) return Object.freeze({ kind: "Missing" });
     if (!online()) return Object.freeze({ kind: "Offline" });
     try {
       let answer = await receive(current, intent);
@@ -526,6 +552,7 @@ export function createCustomerEntryClient(
       if (status === 201) {
         const context = parseSuccess(body);
         if (!online() || !current()) throw new Error("entry unavailable");
+        if (replay) setPaymentOperationReference(null);
         setCustomerCsrfCredential(context.csrfToken);
         return Object.freeze({ kind: "Established", context });
       }
@@ -550,7 +577,7 @@ export function createCustomerEntryClient(
     return pending;
   }
   return Object.freeze({
-    hasEntry: token !== null,
+    hasEntry: token !== null || replay,
     start() {
       return retryUntil === null ? (settled ?? launch()) : Promise.resolve(cooldown());
     },

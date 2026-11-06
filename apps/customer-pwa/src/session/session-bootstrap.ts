@@ -82,11 +82,31 @@ function endedVisit(value: unknown) {
     receiptAvailableUntil: raw.receiptAvailableUntil,
   });
 }
+/** M02: a restored dine-in Session's table, and whether this phone joined the party there. */
+export interface CustomerRestoredVisit {
+  readonly publicTableReference: string;
+  readonly joined: boolean;
+}
+function restoredVisit(value: unknown): CustomerRestoredVisit | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    Object.keys(raw).length !== 2 ||
+    typeof raw.joined !== "boolean" ||
+    typeof raw.publicTableReference !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      raw.publicTableReference,
+    )
+  )
+    return null;
+  return Object.freeze({ publicTableReference: raw.publicTableReference, joined: raw.joined });
+}
 /** Restore foreground CSRF and current public menu context in memory only. */
 export async function restoreCustomerSession(
   fetcher: typeof fetch = fetch,
   onMenuContext?: (context: MenuJourneyContext) => void,
   onCurrentOrder?: (order: CustomerCurrentOrder) => void,
+  onVisit?: (visit: CustomerRestoredVisit) => void,
 ): Promise<boolean> {
   if (getCustomerCsrfCredential() !== null) return true;
   const current = captureCustomerCsrfContext();
@@ -214,7 +234,8 @@ export async function restoreCustomerSession(
         2 +
           ("menuContext" in value ? 1 : 0) +
           ("checkoutSessionReference" in value ? 1 : 0) +
-          ("currentOrder" in value ? 1 : 0) ||
+          ("currentOrder" in value ? 1 : 0) +
+          ("visit" in value ? 1 : 0) ||
       !("schemaVersion" in value) ||
       value.schemaVersion !== 1 ||
       !("csrfToken" in value) ||
@@ -226,6 +247,8 @@ export async function restoreCustomerSession(
     if (context === null) return false;
     const order = "currentOrder" in value ? currentOrder(value.currentOrder) : undefined;
     if (order === null) return false;
+    const visit = "visit" in value ? restoredVisit(value.visit) : undefined;
+    if (visit === null || (visit !== undefined && context?.channel !== "DineIn")) return false;
     const checkout =
       "checkoutSessionReference" in value ? value.checkoutSessionReference : undefined;
     if (
@@ -238,6 +261,7 @@ export async function restoreCustomerSession(
     if (typeof checkout === "string") setCheckoutSessionReference(checkout);
     if (context) onMenuContext?.(context);
     if (order) onCurrentOrder?.(order);
+    if (visit) onVisit?.(visit);
     return true;
   } catch {
     return false;

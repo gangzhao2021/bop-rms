@@ -121,7 +121,10 @@ test.describe("@production CUST-ENTRY table not open", () => {
     await scanNotOpenTable(page);
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { name: "This table isn’t open yet" })).toBeVisible();
-    await expect(main).toContainText("Ask staff to seat you, then scan again.");
+    // M02: the page continues by itself once staff open the table (entry-stays-at-store.spec).
+    await expect(main).toContainText(
+      "Ask staff to seat you. This page continues by itself once the table is open.",
+    );
     await expect(main).not.toContainText("Ready to order");
     await expect(main).not.toContainText("is confirmed for dine-in");
     await expect(main.getByRole("button", { name: "Join this table" })).toHaveCount(0);
@@ -130,7 +133,7 @@ test.describe("@production CUST-ENTRY table not open", () => {
 
     await page.getByRole("button", { name: "切换到中文" }).click();
     await expect(main.getByRole("heading", { name: "这桌还没开台" })).toBeVisible();
-    await expect(main).toContainText("请让店员带位，开台后再扫一次码。");
+    await expect(main).toContainText("请让店员带位，开台后这里会自动继续。");
     await page.screenshot({
       path: "test-results/customer-table-not-open-zh-390.png",
       fullPage: true,

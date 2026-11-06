@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CurrentOrderView, EntryContextView } from "./EntryContextPage.js";
 import type { CustomerEntryEstablishedContext, CustomerEntryScreenState } from "./types.js";
 import { setSettledTable } from "../session/customer-transaction-context.js";
+import { zhHans as zh } from "../i18n/zh-Hans.js";
 
 const context: CustomerEntryEstablishedContext = Object.freeze({
   brandDisplayName: "BOP Test Kitchen",
@@ -83,7 +84,9 @@ describe("CUST-ENTRY-CONTEXT", () => {
     };
     const html = render(notOpen);
     expect(html).toContain("This table isn’t open yet");
-    expect(html).toContain("Ask staff to seat you, then scan again.");
+    expect(html).toContain(
+      "Ask staff to seat you. This page continues by itself once the table is open.",
+    );
     expect(html).toContain("Look at the menu first");
     expect(html).not.toContain("Ready to order");
     expect(html).not.toContain("is confirmed for dine-in");
@@ -349,5 +352,86 @@ describe("WP-2423 item 8 ⑤ one primary action", () => {
     expect(html).toContain("Join this table</button>");
     expect(html).toContain("Look at the menu first");
     expect(html.match(/class="entry-action"/gu)).toHaveLength(1);
+  });
+});
+
+// M02 (v15 07b7a1b7): a reload, a home-screen launch or the same code again stays at this phone's
+// own visit: the same Store and table, with the cart, and nothing new started.
+describe("M02 resumed visit", () => {
+  const resumed = {
+    publicStoreReference: context.publicStoreReference,
+    locale: "en-CA",
+    brandDisplayName: "Lane Brand",
+    storeDisplayName: "Lane Dessert",
+  };
+  it("pickup says the same Store is selected and continues ordering", () => {
+    const html = render({
+      kind: "Resumed",
+      context: { ...resumed, channel: "Pickup", publicTableReference: null, joined: false },
+    });
+    expect(html).toContain("Ready to order");
+    expect(html).toContain("Pickup from Lane Dessert is selected.");
+    expect(html).toContain('class="entry-action" type="button">Continue ordering');
+    expect(html).not.toContain("DEMO");
+    expect(html).not.toContain(context.publicStoreReference);
+  });
+  it("a joined table welcomes the guest back with one action", () => {
+    const html = render({
+      kind: "Resumed",
+      context: {
+        ...resumed,
+        channel: "DineIn",
+        publicTableReference: context.publicTableReference,
+        joined: true,
+      },
+    });
+    expect(html).toContain("Welcome to Lane Dessert");
+    expect(html).toContain("Continue ordering");
+    expect(html).not.toContain("Join this table");
+    expect(html).not.toContain(String(context.publicTableReference));
+  });
+  it("a table this phone hasn't joined yet offers the same join as a fresh scan", () => {
+    const html = render({
+      kind: "Resumed",
+      context: {
+        ...resumed,
+        channel: "DineIn",
+        publicTableReference: context.publicTableReference,
+        joined: false,
+      },
+    });
+    expect(html).toContain("Welcome to Lane Dessert");
+    expect(html).not.toContain("Continue ordering");
+    expect(html).toContain("Continue to menu");
+  });
+  it("in Chinese", () => {
+    expect(zh["Continue ordering"]).toBe("继续点单");
+    expect(zh["We’ve been seated"]).toBe("我们已入座");
+    expect(zh["Ask staff to seat you. This page continues by itself once the table is open."]).toBe(
+      "请让店员带位，开台后这里会自动继续。",
+    );
+  });
+  it("a table not open yet offers 'We've been seated' while it waits, not after a settled visit", () => {
+    const notOpen: CustomerEntryScreenState = {
+      kind: "TableNotOpen",
+      context: { ...resumed, channel: "DineIn" },
+    };
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <EntryContextView onContinue={vi.fn()} onSeated={vi.fn()} state={notOpen} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("We’ve been seated");
+    setSettledTable({ tableLabel: "DEMO-03", csrfToken: "C".repeat(43) });
+    try {
+      const settled = renderToStaticMarkup(
+        <MemoryRouter>
+          <EntryContextView onContinue={vi.fn()} onSeated={vi.fn()} state={notOpen} />
+        </MemoryRouter>,
+      );
+      expect(settled).not.toContain("We’ve been seated");
+    } finally {
+      setSettledTable(null);
+    }
   });
 });

@@ -27,6 +27,21 @@ export type CustomerEntryPublicContext = Readonly<{
 
 export type CustomerEntryIntent = "Start" | "Join" | "NewParty";
 
+/**
+ * M02 (v15 07b7a1b7): the visit this browser already has, restored with its Session: a reload, a
+ * home-screen launch or a second scan of the same code stays here (same Store, table and cart).
+ */
+export type CustomerEntryResumedContext = Readonly<{
+  publicStoreReference: string;
+  channel: "DineIn" | "Pickup";
+  locale: string;
+  brandDisplayName: string;
+  storeDisplayName: string;
+  /** At a table: which one, and whether this phone joined the party there. */
+  publicTableReference: string | null;
+  joined: boolean;
+}>;
+
 export type CustomerEntryScreenState =
   | Readonly<{ kind: "Loading" }>
   | Readonly<{ kind: "Missing" }>
@@ -70,7 +85,9 @@ export type CustomerEntryScreenState =
   | Readonly<{ kind: "RateLimited"; retryAfterSeconds: number }>
   | Readonly<{ kind: "Offline" }>
   | Readonly<{ kind: "CommandFailed" }>
-  | Readonly<{ kind: "Established"; context: CustomerEntryEstablishedContext }>;
+  | Readonly<{ kind: "Established"; context: CustomerEntryEstablishedContext }>
+  /** M02: this browser's own visit, restored; nothing new was started. */
+  | Readonly<{ kind: "Resumed"; context: CustomerEntryResumedContext }>;
 
 export interface CustomerEntryClient {
   readonly hasEntry: boolean;
@@ -78,4 +95,11 @@ export interface CustomerEntryClient {
   retry(): Promise<CustomerEntryScreenState>;
   /** The guest answered a table's choice: a second entry, which may start a visit. */
   enter?(intent: CustomerEntryIntent): Promise<CustomerEntryScreenState>;
+  /**
+   * M02: "Start a new order" after an order in progress: at the restored visit's own Store (a new
+   * pickup visit there, or back to the same table), never a default Store.
+   */
+  startNew?(): Promise<CustomerEntryScreenState>;
+  /** False: a new order here continues the restored table visit, so none is offered to start. */
+  readonly startsNewVisit?: boolean;
 }

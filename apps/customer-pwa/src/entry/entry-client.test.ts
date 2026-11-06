@@ -723,3 +723,55 @@ it.each(["", "invalid", "a.b.c".repeat(500)])(
     expect(fetcher).not.toHaveBeenCalled();
   },
 );
+
+// M02 (v15 07b7a1b7): with no code in the address, the page replays this browser's waiting scan.
+describe("M02 replay of a waiting scan", () => {
+  const boundary = (fetch: typeof globalThis.fetch) => ({
+    fetch,
+    hash: "",
+    pathname: "/",
+    search: "",
+    replaceState: () => undefined,
+    online: () => true,
+  });
+  it("sends {resume:true} (with the guest's answer) and keeps the restored visit until replaced", async () => {
+    setCustomerCsrfCredential("R".repeat(43));
+    setPaymentOperationReference("018f7900-0000-7000-8000-000000000001");
+    const bodies: unknown[] = [];
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return bodies.length === 1
+        ? response(404, {
+            schemaVersion: 1,
+            code: "entry_scan_missing",
+            messageKey: "customer.entry.scan_missing",
+            recovery: { action: "Rescan", storeSelection: "Hidden" },
+          })
+        : response(201, established);
+    });
+    const client = createCustomerEntryClient(boundary(fetch), undefined, { resume: true });
+    expect(client.hasEntry).toBe(true);
+    expect(await client.start()).toEqual({ kind: "Missing" });
+    // Nothing was waiting: the restored visit's credential is untouched.
+    expect(getCustomerCsrfCredential()).toBe("R".repeat(43));
+    expect(getPaymentOperationReference()).toBe("018f7900-0000-7000-8000-000000000001");
+    expect((await client.enter?.("Join"))?.kind).toBe("Established");
+    expect(bodies).toEqual([{ resume: true }, { resume: true, intent: "Join" }]);
+    expect(getCustomerCsrfCredential()).toBe("A".repeat(43));
+    expect(getPaymentOperationReference()).toBeNull();
+    setCustomerCsrfCredential(null);
+  });
+  it("reads 'no merchant owns this' as asked to scan, and without resume a missing code sends nothing", async () => {
+    const fetch = vi.fn(async () =>
+      response(404, { code: "CUSTOMER_STORE_NOT_FOUND" }),
+    ) as unknown as typeof globalThis.fetch;
+    expect(
+      await createCustomerEntryClient(boundary(fetch), undefined, { resume: true }).start(),
+    ).toEqual({ kind: "Missing" });
+    const silent = vi.fn();
+    const plain = createCustomerEntryClient(boundary(silent as never));
+    expect(plain.hasEntry).toBe(false);
+    expect(await plain.start()).toEqual({ kind: "Missing" });
+    expect(silent).not.toHaveBeenCalled();
+  });
+});

@@ -290,3 +290,49 @@ it("keeps that a guest's table was settled, with the value that reads its receip
     expect(getSettledTableLabel()).toBeNull();
   }
 });
+
+// M02 (v15 07b7a1b7): a reloaded table page stays at its own table.
+it("M02: restores a dine-in visit's table and joined state, only at a table and well formed", async () => {
+  const menuContext = {
+    publicStoreReference: "0190fa21-0000-7000-8000-000000000001",
+    channel: "DineIn",
+    locale: "en-CA",
+    brandDisplayName: "Lane Brand",
+    storeDisplayName: "Lane Dessert",
+  };
+  const visit = { publicTableReference: "0190fa21-0000-7000-8000-000000000009", joined: true };
+  const onVisit = vi.fn();
+  expect(
+    await restoreCustomerSession(
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ schemaVersion: 1, csrfToken: "B".repeat(43), menuContext, visit }),
+        ),
+      undefined,
+      undefined,
+      onVisit,
+    ),
+  ).toBe(true);
+  expect(onVisit).toHaveBeenCalledWith(visit);
+  for (const body of [
+    { menuContext, visit: { ...visit, joined: "yes" } },
+    { menuContext, visit: { ...visit, extra: 1 } },
+    { menuContext: { ...menuContext, channel: "Pickup" }, visit },
+  ]) {
+    setCustomerCsrfCredential(null);
+    const rejected = vi.fn();
+    expect(
+      await restoreCustomerSession(
+        vi
+          .fn()
+          .mockResolvedValue(response({ schemaVersion: 1, csrfToken: "B".repeat(43), ...body })),
+        undefined,
+        undefined,
+        rejected,
+      ),
+    ).toBe(false);
+    expect(rejected).not.toHaveBeenCalled();
+    expect(getCustomerCsrfCredential()).toBeNull();
+  }
+});
