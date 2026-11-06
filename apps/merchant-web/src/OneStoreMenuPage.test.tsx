@@ -222,9 +222,15 @@ it("WP-2423 live minors 1/39: right after List it the page never says changes ar
     return next.promise;
   });
   expect(container.textContent).toContain(pendingText);
+  // WP-2423 M71: "List it" shows what goes live first; confirming it lists exactly that.
+  await click(buttonNamed(container, "List it"));
+  await settle(5);
+  expect(container.textContent).toContain("What goes live");
+  expect(sent).toEqual([]);
   await click(buttonNamed(container, "List it"));
   await settle(10);
   expect(sent.map((command) => command.action)).toEqual(["ListAll"]);
+  expect(sent[0]).toMatchObject({ confirmedPriceBook: null });
   expect(container.textContent).toContain("Listed. Guests see the menu as it is now.");
   // The menu is being read again (still pending): nothing is said to wait, no List it offered.
   expect(reads.length).toBeGreaterThan(1);
@@ -245,6 +251,8 @@ it("WP-2423 live minors 1/39: a read after listing that shows newer saved change
     // Someone saved another change right after the listing: a newer version waits.
     return reads === 1 ? builder(id(3), "Submit", id(2)) : builder(id(4), "Submit", id(3));
   });
+  await click(buttonNamed(container, "List it"));
+  await settle(5);
   await click(buttonNamed(container, "List it"));
   await settle(10);
   expect(container.textContent).toContain(pendingText);

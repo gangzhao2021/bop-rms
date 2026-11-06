@@ -1,5 +1,7 @@
 import { createPostgresMerchantOrganizationSource, listBrandStoreReferences } from "@bop/tenant";
 import {
+  brandOwnerAuthority,
+  merchantBrandApprovalHolders,
   merchantBrandSoleOperatorGate,
   MerchantSingleStoreListingError,
   MerchantSoleOperatorGateError,
@@ -36,6 +38,7 @@ import {
   createPostgresPriceBookRepository,
   currentStorePriceBook,
   listBrandPriceBooks,
+  listPriceBookDraftPurposes,
   type CurrencyMetadataSnapshot,
 } from "@rms/pricing";
 import { listInventoryRecipeIngredientFacts } from "@rms/inventory";
@@ -61,7 +64,12 @@ import { derivedReference } from "./merchant-products.js";
 import { sizeRecipeSource } from "./merchant-dish-allergens.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { chineseOf, optionalChinese, withChinese } from "./merchant-chinese-text.js";
-import { storePrices } from "./merchant-store-prices.js";
+import {
+  brandPriceDigest,
+  storeBook,
+  storePricePermission,
+  storePrices,
+} from "./merchant-store-prices.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import { onlyRefusal } from "./merchant-failure.js";
 
@@ -730,9 +738,8 @@ export function createMerchantMenus(options: {
   const sellables = async (tx: unknown, s: Scope) => {
     const skus = await listBrandSkuChoices(ptx(tx) as never, s.owner);
     const assignment = await currentStorePriceBook(ptx(tx) as never, s.owner);
-    const bookPrices = async (priceBookReference: string) => {
-      const found = new Map<string, string>();
-      const book = await createPostgresPriceBookRepository({
+    const loadBook = (priceBookReference: string) =>
+      createPostgresPriceBookRepository({
         brandReference: s.owner.brandReference,
         currencyMetadata: options.currencyMetadata,
         transactions: { run: (work) => work(ptx(tx) as never) },
@@ -741,23 +748,25 @@ export function createMerchantMenus(options: {
           throw new Error("MENU_READ_ONLY");
         },
       }).load(priceBookReference as never);
-      for (const entry of book?.entries ?? [])
-        if (entry.scopeKind === "Brand" && entry.channelCode === null && entry.orderType === null)
-          found.set(entry.sellableReference, entry.amount.amountMinor.toString());
-      // DEC-BRAND-MULTI-STORE segment 9: this Store's own price, where it has one.
-      for (const [sku, own] of storePrices(book, s.owner.storeReference).own) found.set(sku, own);
-      return found;
-    };
-    const prices =
-      assignment === null
-        ? new Map<string, string>()
-        : await bookPrices(assignment.priceBookReference);
-    // WP-2423 item 8 ⑥: prices waiting in the open price book draft (listed with the menu).
-    const draft = (await listBrandPriceBooks(ptx(tx) as never, s.owner))
-      .filter((book) => book.lifecycle === "Draft")
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    const waiting =
-      draft === undefined ? new Map<string, string>() : await bookPrices(draft.priceBookReference);
+    // DEC-BRAND-MULTI-STORE segment 9 / WP-2423 M70: the Brand price and this Store's own price,
+    // where it has one (what the Store charges is its own, else the Brand's).
+    const current = storePrices(
+      assignment === null ? null : await loadBook(assignment.priceBookReference),
+      s.owner.storeReference,
+    );
+    // WP-2423 item 8 ⑥ / M71: Brand prices waiting in the menu's own price draft (listed with the
+    // menu); a price change started on the Prices page is not this page's.
+    const books = await listBrandPriceBooks(ptx(tx) as never, s.owner);
+    const purposes = await listPriceBookDraftPurposes(ptx(tx) as never, s.owner);
+    const open = new Set(
+      books.filter((book) => book.lifecycle === "Draft").map((book) => book.priceBookReference),
+    );
+    const draftPurpose = purposes.find(
+      (p) => p.purpose === "MenuListing" && open.has(p.priceBookReference),
+    );
+    const draftBook =
+      draftPurpose === undefined ? null : await loadBook(draftPurpose.priceBookReference);
+    const waiting = storePrices(draftBook, s.owner.storeReference).brand;
     // WP-2423 (v15 2026-10-16): customers at this Store see a menu item only where it is offered
     // here (Item availability). Sold out still counts as offered: it comes back by itself.
     const rules = await listStoreAvailabilityRules(ptx(tx), s.owner);
@@ -775,16 +784,103 @@ export function createMerchantMenus(options: {
         productNameZh: chineseOf(sku.productLocalizedNames),
         sizeName: name(sku.localizedNames, sku.skuCode),
         active: sku.active,
-        priceMinor: prices.get(sku.skuReference) ?? null,
-        // A different price waiting to be listed (null: none).
+        // What this Store charges now.
+        priceMinor: current.charged(sku.skuReference),
+        // WP-2423 M70: the Brand price and this Store's own price (null: it charges the Brand's).
+        brandPriceMinor: current.brand.get(sku.skuReference) ?? null,
+        storePriceMinor: current.own.get(sku.skuReference) ?? null,
+        // A different Brand price waiting to be listed (null: none).
+        pendingBrandPriceMinor:
+          waiting.has(sku.skuReference) &&
+          waiting.get(sku.skuReference) !== current.brand.get(sku.skuReference)
+            ? (waiting.get(sku.skuReference) ?? null)
+            : null,
+        // What this Store will charge once listed, when it differs (its own price stays its own).
         pendingPriceMinor:
           waiting.has(sku.skuReference) &&
-          waiting.get(sku.skuReference) !== prices.get(sku.skuReference)
+          !current.own.has(sku.skuReference) &&
+          waiting.get(sku.skuReference) !== current.charged(sku.skuReference)
             ? (waiting.get(sku.skuReference) ?? null)
             : null,
         offeredHere: status !== "NotOffered" && status !== "Unavailable",
       };
     });
+  };
+  /**
+   * WP-2423 M71: what "List it" will publish of prices — the menu's own price draft, the version
+   * the review confirms, each price from → to, whether it was started by someone else, and whether
+   * another price change went live since it was started — and how many price changes started on
+   * the Prices page stay there (never listed from here).
+   */
+  const priceListing = async (tx: unknown, s: Scope) => {
+    // WP-2423 M70: where this person may change a dish's price from the menu page.
+    const stores = await listBrandStoreReferences(ptx(tx) as never, s.owner);
+    const severalStores = stores.length > 1 && stores.includes(s.owner.storeReference);
+    const mayManage = (await s.decision("pricing.price-book.manage"))?.effect === "Allow";
+    const mayThisStore =
+      severalStores &&
+      ((await s.scope.authorizeStoreAction(storePricePermission))?.effect === "Allow" ||
+        (await s.decision(storePricePermission))?.effect === "Allow");
+    const mayAllStores =
+      mayManage &&
+      (!severalStores ||
+        (
+          await merchantBrandApprovalHolders(tx as never, {
+            brandReference: s.owner.brandReference,
+            permissionCode: brandOwnerAuthority,
+            observedAt: options.persistence.now(),
+          })
+        ).includes(s.actor));
+    await brandScope(tx, s.owner.brandReference);
+    const pricePowers = { severalStores, mayAllStores, mayThisStore };
+    const books = await listBrandPriceBooks(ptx(tx) as never, s.owner);
+    const purposes = await listPriceBookDraftPurposes(ptx(tx) as never, s.owner);
+    const open = new Map(
+      books.filter((book) => book.lifecycle === "Draft").map((b) => [b.priceBookReference, b]),
+    );
+    const own = purposes.filter((p) => open.has(p.priceBookReference));
+    const menuDraft = own.find((p) => p.purpose === "MenuListing");
+    const otherChanges = own.filter((p) => p.purpose === "PriceChange").length;
+    if (menuDraft === undefined) {
+      await brandScope(tx, s.owner.brandReference);
+      return { pricePowers, priceDraft: null, priceChangesOnPricesPage: otherChanges };
+    }
+    const summary = open.get(menuDraft.priceBookReference);
+    const live = await storeBook(ptx(tx) as never, s.owner, options.currencyMetadata);
+    const draftBook = await createPostgresPriceBookRepository({
+      brandReference: s.owner.brandReference,
+      currencyMetadata: options.currencyMetadata,
+      transactions: { run: (work) => work(ptx(tx) as never) },
+      authorize: async (_tx, input) => !input.write,
+      appendEvent: async () => {
+        throw new Error("MENU_READ_ONLY");
+      },
+    }).load(menuDraft.priceBookReference as never);
+    await brandScope(tx, s.owner.brandReference);
+    const from = storePrices(live?.snapshot ?? null, s.owner.storeReference).brand;
+    const to = storePrices(draftBook, s.owner.storeReference).brand;
+    const liveDigest = brandPriceDigest(live?.snapshot ?? null);
+    return {
+      pricePowers,
+      priceDraft: {
+        priceBookReference: menuDraft.priceBookReference,
+        aggregateVersion: summary?.aggregateVersion ?? 0,
+        startedByViewer: menuDraft.actorReference === s.actor,
+        movedSinceStart:
+          menuDraft.sourceBrandDigest !== null &&
+          live !== null &&
+          liveDigest !== menuDraft.sourceBrandDigest &&
+          liveDigest !== brandPriceDigest(draftBook),
+        prices: [...to]
+          .filter(([sku, amount]) => from.get(sku) !== amount)
+          .map(([skuReference, toMinor]) => ({
+            skuReference,
+            fromMinor: from.get(skuReference) ?? null,
+            toMinor,
+          })),
+      },
+      priceChangesOnPricesPage: otherChanges,
+    };
   };
   /**
    * WP-2423 item 8 ⑥: where each size's allergens come from — declared by staff in this page (the
@@ -1182,6 +1278,7 @@ export function createMerchantMenus(options: {
               };
             })()),
             mayOfferHere,
+            ...(await priceListing(tx, s)),
             customerView,
             allergenRegistry: (await currentAllergenRegistry(ptx(tx) as never, s.owner)) !== null,
           };

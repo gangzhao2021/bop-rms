@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { confirmedMenuPrices } from "../test-support/menu-price-confirmation.mjs";
 import { createHash } from "node:crypto";
 import process from "node:process";
 import { URL } from "node:url";
@@ -60,6 +61,9 @@ import {
   seedBrandMember,
   seedBrandRole,
 } from "../test-support/sole-operator-brand-gate.mjs";
+
+// WP-2423 M71: the price list "List it" confirms (read as the review reads it).
+let menuPrices;
 
 const { Client } = pg;
 const id = (n) => "01909a7f-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -429,7 +433,7 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       const combos = createMerchantCombos(common);
       const dishes = createMerchantOneStoreDishes({
         products: createMerchantProducts(common),
-        prices: createMerchantPrices({ ...common, currencyMetadata }),
+        prices: (menuPrices = createMerchantPrices({ ...common, currencyMetadata })),
         optionPrices: createMerchantOptionPrices({ ...common, currencyMetadata }),
         menus,
         dishAllergens: declaredAllergens,
@@ -509,6 +513,9 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
             descriptionZh: "",
             taxClassificationReference: taxClass,
             priceMinor,
+            // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
+            priceScope: priceMinor === null ? null : "AllStores",
+            expectedPriceMinor: null,
             choiceGroups: [],
             allergens,
           },
@@ -542,7 +549,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       // As on v15: the menu was listed with its dishes before any combo was made.
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference },
+        body: {
+          action: "ListAll",
+          operationReference: op(),
+          menuReference,
+          confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+        },
       });
 
       // 1. A combo for two: 汤 choose 1 (wonton +1.00), 主食 choose 1.
@@ -789,7 +801,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       // 2. "List it": the combo is published alone at the one store, and guests are offered it.
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference },
+        body: {
+          action: "ListAll",
+          operationReference: op(),
+          menuReference,
+          confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+        },
       });
       const listings = async () =>
         (
@@ -913,7 +930,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       // A second "List it" lists nothing again.
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference },
+        body: {
+          action: "ListAll",
+          operationReference: op(),
+          menuReference,
+          confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+        },
       });
       assert.equal((await listings()).length, 1);
 
@@ -992,7 +1014,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       await assert.rejects(
         dishes.command({
           ...session,
-          body: { action: "ListAll", operationReference: op(), menuReference },
+          body: {
+            action: "ListAll",
+            operationReference: op(),
+            menuReference,
+            confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+          },
         }),
         (error) => error.name === "MerchantComboError" && error.code === "NotSingleStore",
       );
@@ -1025,7 +1052,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       // The edit is listed at one store again; guests now get 29.80.
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference },
+        body: {
+          action: "ListAll",
+          operationReference: op(),
+          menuReference,
+          confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+        },
       });
       assert.equal((await listings()).length, 2);
       assert.deepEqual((await guest(saved.skuReference)).price, {
@@ -1603,7 +1635,12 @@ it("one-page menu combo: saved, compiled into a dish, listed alone at one store,
       });
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference },
+        body: {
+          action: "ListAll",
+          operationReference: op(),
+          menuReference,
+          confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+        },
       });
       const dessertItem = await guestItem(dessert.skuReference);
       const dessertChoice = async (dish) =>

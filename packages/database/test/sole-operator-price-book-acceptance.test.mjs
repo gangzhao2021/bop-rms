@@ -198,8 +198,8 @@ it("price book: the author publishes alone only as an in-effect, re-verified sol
           await command({
             action: "CreateDraft",
             operationReference: op(),
-            stableCode: code,
             copyFrom: null,
+            purpose: "PriceChange",
           })
         ).priceBookReference;
         await command({

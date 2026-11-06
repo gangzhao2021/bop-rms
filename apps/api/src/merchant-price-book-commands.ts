@@ -92,7 +92,11 @@ export function createMerchantPriceBookCommands(options: {
   resolveScope?: ReturnType<typeof createMerchantBrandScope>;
 }) {
   const resolveScope = options.resolveScope ?? createMerchantBrandScope(options.merchant);
-  const execute = async (request: MerchantPriceBookCommandRequest, transport: boolean) => {
+  const execute = async (
+    request: MerchantPriceBookCommandRequest,
+    transport: boolean,
+    afterCommand?: PriceBookAfterCommand,
+  ) => {
     const session = await options.authentication.authorize({
       sessionCookie: request.sessionCookie,
       csrf: request.csrf,
@@ -348,6 +352,19 @@ export function createMerchantPriceBookCommands(options: {
           });
           await brandScope();
         }
+        // WP-2423 M71: what the caller records with the command, in its transaction (why a draft
+        // was started). A replay recorded it the first time.
+        if (afterCommand !== undefined && result.status === "Applied") {
+          await afterCommand(transaction, {
+            brandReference: brand,
+            storeReference: String(scope.selectedStoreReference),
+            priceBookReference: book,
+            operationReference: operation,
+            actorReference: String(scope.actorReference),
+            observedAt: String(raw.requestedAt),
+          });
+          await brandScope();
+        }
         if (soleOperatorMfaAt !== null && result.status === "Applied") {
           await recordPriceBookSoleOperatorApproval(transaction, {
             brandReference: brand,
@@ -366,6 +383,22 @@ export function createMerchantPriceBookCommands(options: {
   };
   return Object.freeze({
     execute: (request: MerchantPriceBookCommandRequest) => execute(request, false),
-    executeTransport: (request: MerchantPriceBookCommandRequest) => execute(request, true),
+    executeTransport: (
+      request: MerchantPriceBookCommandRequest,
+      afterCommand?: PriceBookAfterCommand,
+    ) => execute(request, true, afterCommand),
   });
 }
+
+/** WP-2423 M71: written in the command's own transaction after it applied (never on a replay). */
+export type PriceBookAfterCommand = (
+  transaction: Transaction,
+  applied: {
+    readonly brandReference: string;
+    readonly storeReference: string;
+    readonly priceBookReference: string;
+    readonly operationReference: string;
+    readonly actorReference: string;
+    readonly observedAt: string;
+  },
+) => Promise<void>;

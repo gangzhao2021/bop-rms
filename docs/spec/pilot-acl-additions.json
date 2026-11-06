@@ -6083,6 +6083,24 @@
       "privilege": "INSERT",
       "principal": "api",
       "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 role presets (Owner request 2026-11-06): a Store keeps its own version of a preset without what a BOP preset update offered (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_draft_purpose",
+      "column": null,
+      "privilege": "SELECT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 menu-authoring-and-prices (M71): why a price book draft was started and what it was copied from, so \"List it\" never publishes a Prices-page change or overwrites a later one (append-only)"
+    },
+    {
+      "type": "table",
+      "schema": "rms_pricing",
+      "object": "price_book_draft_purpose",
+      "column": null,
+      "privilege": "INSERT",
+      "principal": "api",
+      "approval": "Owner standing approval 2026-10-14 (\"我都批准，之后不需要问我\"); WP-2423 menu-authoring-and-prices (M71): why a price book draft was started and what it was copied from, so \"List it\" never publishes a Prices-page change or overwrites a later one (append-only)"
     }
   ]
 }

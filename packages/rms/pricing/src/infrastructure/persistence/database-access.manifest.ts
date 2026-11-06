@@ -16,6 +16,15 @@ const databaseAccessManifestInput = {
       piiClassification: ["indirect_identifier"],
     },
     {
+      // WP-2423 M71: why a price book draft was started, and what it was copied from.
+      table: "price_book_draft_purpose",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/pricing" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
       table: "price_book_single_store_listing",
       classification: "append-only-record",
       writeOwner: { kind: "module", id: "@rms/pricing" },
@@ -494,6 +503,26 @@ const databaseAccessManifestInput = {
     },
   ],
   accesses: [
+    {
+      id: "price-book-draft-purpose.read",
+      operation: "read",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_draft_purpose" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: "owner-repository",
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-draft-purpose-store.ts",
+    },
+    {
+      id: "price-book-draft-purpose.write",
+      operation: "write",
+      mechanism: "repository",
+      target: { schema: "rms_pricing", table: "price_book_draft_purpose" },
+      principal: { kind: "module", id: "@rms/pricing" },
+      readPattern: null,
+      source:
+        "packages/rms/pricing/src/infrastructure/persistence/price-book-draft-purpose-store.ts",
+    },
     {
       id: "price-book-single-store-listing.read",
       operation: "read",

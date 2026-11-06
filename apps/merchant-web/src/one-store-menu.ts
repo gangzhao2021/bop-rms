@@ -44,8 +44,12 @@ export interface MenuDish {
   /** The size's own name when it differs from the dish's (e.g. "Large"). */
   readonly sizeName: string | null;
   readonly priceMinor: string | null;
-  /** A different price waiting to be listed (null: none). */
+  /** What this Store will charge once listed, when different (null: none). */
   readonly pendingPriceMinor: string | null;
+  /** WP-2423 M70: the Brand price, this Store's own (null: none) and a waiting Brand price. */
+  readonly brandPriceMinor: string | null;
+  readonly storePriceMinor: string | null;
+  readonly pendingBrandPriceMinor: string | null;
   /** The dish (product) of the size; null in views without it. */
   readonly productReference: string | null;
   readonly soldOut: boolean;
@@ -129,6 +133,13 @@ function dishOf(
     sizeName: sku.sizeName === sku.productName || sku.sizeName === "" ? null : sku.sizeName,
     priceMinor: sku.priceMinor,
     pendingPriceMinor: sku.pendingPriceMinor ?? null,
+    // Older views have one price, the Brand's.
+    brandPriceMinor: sku.brandPriceMinor === undefined ? sku.priceMinor : sku.brandPriceMinor,
+    storePriceMinor: sku.storePriceMinor ?? null,
+    pendingBrandPriceMinor:
+      sku.pendingBrandPriceMinor === undefined
+        ? (sku.pendingPriceMinor ?? null)
+        : sku.pendingBrandPriceMinor,
     productReference: sku.productReference ?? null,
     soldOut: status === "SoldOut",
     // Not offered at this Store: guests here do not see it (it stays on the menu).

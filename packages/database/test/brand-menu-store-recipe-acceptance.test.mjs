@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { confirmedMenuPrices } from "../test-support/menu-price-confirmation.mjs";
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { it } from "vitest";
@@ -27,6 +28,9 @@ import {
   seedBrandMember,
   seedBrandRole,
 } from "../test-support/sole-operator-brand-gate.mjs";
+
+// WP-2423 M71: the price list "List it" confirms (read as the review reads it).
+let menuPrices;
 
 const { Client } = pg;
 const id = (n) => "01909a9f-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -395,7 +399,7 @@ it("a menu served at two Stores is listed only when each Store has the dish's re
           products,
           dishes: createMerchantOneStoreDishes({
             products,
-            prices: createMerchantPrices({ ...common, currencyMetadata }),
+            prices: (menuPrices = createMerchantPrices({ ...common, currencyMetadata })),
             optionPrices: createMerchantOptionPrices({ ...common, currencyMetadata }),
             menus,
             dishAllergens: createMerchantDishAllergens({ ...common, references: { next: op } }),
@@ -410,11 +414,16 @@ it("a menu served at two Stores is listed only when each Store has the dish's re
       const one = at(store1),
         two = at(store2);
       const session = { sessionCookie: "cookie", csrf: "csrf" };
-      const listAll = (where) =>
+      const listAll = async (where) =>
         where.dishes
           .command({
             ...session,
-            body: { action: "ListAll", operationReference: op(), menuReference },
+            body: {
+              action: "ListAll",
+              operationReference: op(),
+              menuReference,
+              confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+            },
           })
           .then(
             () => null,
@@ -453,6 +462,9 @@ it("a menu served at two Stores is listed only when each Store has the dish's re
           descriptionZh: "",
           taxClassificationReference: taxClass,
           priceMinor: "450",
+          // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
+          priceScope: "AllStores",
+          expectedPriceMinor: null,
           choiceGroups: [
             {
               optionSetReference: set.optionSetReference,

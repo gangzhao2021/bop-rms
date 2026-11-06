@@ -9,6 +9,7 @@ import type { createMerchantOptionRecipes } from "./merchant-option-recipes.js";
 import type { createMerchantOptionSets } from "./merchant-option-sets.js";
 import type { createMerchantPrices } from "./merchant-prices.js";
 import type { createMerchantProducts } from "./merchant-products.js";
+import type { createMerchantStorePrices } from "./merchant-store-prices.js";
 
 /**
  * WP-2423 item 8 ⑥ DEC-SINGLE-STORE-MENU (Owner 2026-10-28 decisions 7–8): one dish edited on
@@ -53,7 +54,29 @@ export class MerchantOneStoreDishError extends Error {
        * a choice group turned into "a quantity of each" to the new quantities, before anything was
        * listed: what was written stays, guests see nothing new, and listing again finishes it.
        */
-      | "ChoiceRecipesStopped",
+      | "ChoiceRecipesStopped"
+      /**
+       * WP-2423 M70: the price for this scope is not the one the person saw (someone changed it
+       * since): read the dish again, then change it.
+       */
+      | "PriceChanged"
+      /**
+       * WP-2423 M70: at a Brand with several Stores, only someone with Brand Owner authority
+       * changes a dish's price for every Store; anyone else changes it at this Store only.
+       */
+      | "NeedsBrandOwner"
+      /**
+       * WP-2423 M70: a dish with no price yet takes its first price for every Store (the owner
+       * lists it); a Store's own price comes after.
+       */
+      | "NoBrandPriceYet"
+      /**
+       * WP-2423 M71: what "List it" was confirmed for is not what is waiting now (someone saved a
+       * price since the review was shown): look again, then list.
+       */
+      | "PricesChangedSinceShown"
+      /** WP-2423 M69: dishes on the menu have no allergens answered yet; nothing was listed. */
+      | "AllergensUndeclared",
   ) {
     super(code);
     this.name = "MerchantOneStoreDishError";
@@ -104,6 +127,13 @@ export interface SaveDishBody {
    * Store's price, or minutes old; a save that does not change the price must not write one.
    */
   readonly priceMinor: string | null;
+  /**
+   * WP-2423 M70: where the price changes — every Store, with "List it" (the Brand price), or this
+   * Store only, at once (its own price, at a Brand with several Stores). null with no price.
+   */
+  readonly priceScope: "AllStores" | "ThisStore" | null;
+  /** The price the person saw for that scope (null: there was none); a different one is refused. */
+  readonly expectedPriceMinor: string | null;
   readonly choiceGroups: readonly {
     readonly optionSetReference: string;
     readonly options: readonly { readonly optionReference: string; readonly amountMinor: string }[];
@@ -124,6 +154,14 @@ export interface ListAllBody {
   readonly action: "ListAll";
   readonly operationReference: string;
   readonly menuReference: string;
+  /**
+   * WP-2423 M71: the menu's own price draft as the review showed it (null: none was waiting).
+   * Anything saved into it since is refused, so nothing goes live unseen.
+   */
+  readonly confirmedPriceBook: {
+    readonly priceBookReference: string;
+    readonly aggregateVersion: number;
+  } | null;
 }
 /**
  * WP-2423 item 8 ⑥ part 4: a combo saved from the one-page menu — its names, price, tax class,
@@ -240,16 +278,37 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
   if (r === null || typeof r !== "object" || Array.isArray(r)) return fail("Invalid");
   if (r.action === "SaveCombo") return parseSaveCombo(r);
   const keys = Object.keys(r).sort().join(",");
-  if (r.action === "ListAll" && keys === "action,menuReference,operationReference")
+  if (
+    r.action === "ListAll" &&
+    keys === "action,confirmedPriceBook,menuReference,operationReference"
+  ) {
+    const c = r.confirmedPriceBook as Record<string, unknown> | null;
+    if (
+      c !== null &&
+      (typeof c !== "object" ||
+        Array.isArray(c) ||
+        Object.keys(c).sort().join(",") !== "aggregateVersion,priceBookReference" ||
+        !Number.isSafeInteger(c.aggregateVersion) ||
+        (c.aggregateVersion as number) < 1)
+    )
+      return fail("Invalid");
     return {
       action: "ListAll",
       operationReference: ref(r.operationReference),
       menuReference: ref(r.menuReference),
+      confirmedPriceBook:
+        c === null
+          ? null
+          : {
+              priceBookReference: ref(c.priceBookReference),
+              aggregateVersion: c.aggregateVersion as number,
+            },
     };
+  }
   if (
     r.action !== "SaveDish" ||
     keys !==
-      "action,allergens,choiceGroups,description,descriptionZh,menuReference,name,nameZh,operationReference,priceMinor,productReference,sectionCode,taxClassificationReference" ||
+      "action,allergens,choiceGroups,description,descriptionZh,expectedPriceMinor,menuReference,name,nameZh,operationReference,priceMinor,priceScope,productReference,sectionCode,taxClassificationReference" ||
     !Array.isArray(r.choiceGroups) ||
     r.choiceGroups.length > 12 ||
     (r.allergens !== null &&
@@ -308,6 +367,17 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
   // Only an existing dish can keep its place and price: a new one has neither yet.
   if (r.productReference === null && (r.sectionCode === null || r.priceMinor === null))
     return fail("Invalid");
+  // WP-2423 M70: a price says where it changes and what it was; no price, no scope. A new dish's
+  // first price is for every Store.
+  const priceScope =
+    r.priceScope === "AllStores" || r.priceScope === "ThisStore" ? r.priceScope : null;
+  if (
+    (r.priceMinor === null) !== (priceScope === null) ||
+    (r.priceScope !== null && priceScope === null) ||
+    (r.priceMinor === null && r.expectedPriceMinor !== null) ||
+    (r.productReference === null && priceScope !== "AllStores")
+  )
+    return fail("Invalid");
   const sectionCode =
     r.sectionCode === null ? null : typeof r.sectionCode === "string" ? r.sectionCode : "";
   if (sectionCode !== null && !/^[A-Z][A-Z0-9_-]{0,63}$/u.test(sectionCode)) return fail("Invalid");
@@ -323,6 +393,8 @@ export function parseOneStoreDishBody(value: unknown): SaveDishBody | ListAllBod
     descriptionZh: text(r.descriptionZh, 240, false),
     taxClassificationReference: ref(r.taxClassificationReference),
     priceMinor: r.priceMinor === null ? null : amount(r.priceMinor),
+    priceScope,
+    expectedPriceMinor: r.expectedPriceMinor === null ? null : amount(r.expectedPriceMinor),
     choiceGroups,
     allergens,
   };
@@ -393,6 +465,11 @@ export function createMerchantOneStoreDishes(options: {
     "query" | "saveBundle" | "recordDish" | "listDrafts"
   >;
   readonly optionSets?: Pick<ReturnType<typeof createMerchantOptionSets>, "query" | "command">;
+  /**
+   * WP-2423 M70: this Store's own prices at a Brand with several Stores (absent: one price, the
+   * Brand's).
+   */
+  readonly storePrices?: Pick<ReturnType<typeof createMerchantStorePrices>, "query" | "command">;
   readonly now: () => string;
 }) {
   /**
@@ -444,6 +521,171 @@ export function createMerchantOneStoreDishes(options: {
       menu = await loadMenu(session, menuReference);
     }
     return menu;
+  };
+
+  /** WP-2423 M70: a dish's prices after a save: the Brand's, one waiting, and this Store's own. */
+  interface SavedPrice {
+    readonly brandPriceMinor: string | null;
+    readonly pendingBrandPriceMinor: string | null;
+    readonly storePriceMinor: string | null;
+  }
+  interface PriceList {
+    readonly viewer: string;
+    readonly allStores: { readonly multiStore: boolean; readonly mayList: boolean };
+    readonly storeAssignment: { readonly priceBookReference: string } | null;
+    readonly books: readonly {
+      readonly priceBookReference: string;
+      readonly lifecycle: string;
+      readonly aggregateVersion: number;
+      readonly purpose: "MenuListing" | "PriceChange" | null;
+      readonly startedBy: string | null;
+    }[];
+  }
+  interface PriceEditor {
+    readonly book: {
+      readonly aggregateVersion: number;
+      readonly prices: readonly {
+        readonly sellableReference: string;
+        readonly amountMinor: string;
+      }[];
+    };
+    readonly draftAuthor: string | null;
+    readonly viewer: string;
+  }
+  const priceList = async (session: Session) =>
+    (await options.prices.query({ ...session, priceBookReference: null })) as unknown as PriceList;
+  const priceEditor = async (session: Session, priceBookReference: string) =>
+    (await options.prices.query({ ...session, priceBookReference })) as unknown as PriceEditor;
+  /** WP-2423 M71: the menu page's own open price draft (one per Brand), if any. */
+  const menuDraftOf = (list: PriceList) =>
+    list.books.find((book) => book.lifecycle === "Draft" && book.purpose === "MenuListing");
+
+  /**
+   * WP-2423 M70: a combo's Brand price now (waiting in the menu's draft, else in effect): the
+   * combo editor has one price for every Store and no price of its own to compare.
+   */
+  const comboPriceNow = async (session: Session, sku: string | null) => {
+    if (sku === null) return null;
+    const list = await priceList(session);
+    const draft = menuDraftOf(list);
+    const read = async (book: string | undefined) =>
+      book === undefined
+        ? null
+        : ((await priceEditor(session, book)).book.prices.find((p) => p.sellableReference === sku)
+            ?.amountMinor ?? null);
+    return (
+      (await read(draft?.priceBookReference)) ??
+      (await read(list.storeAssignment?.priceBookReference))
+    );
+  };
+
+  /**
+   * WP-2423 M70: a dish's price, where the person said. "This Store": the Store's own price,
+   * live at once and recorded with who changed it. "All Stores": the Brand price, in the menu's own
+   * price draft, live with "List it" (a Store with its own price keeps it). Either is compared with
+   * the price the person saw for that scope; already the new price (a retried save) is done.
+   */
+  const savePrice = async (
+    session: Session,
+    body: SaveDishBody,
+    sku: string,
+    step: (purpose: string) => string,
+  ): Promise<SavedPrice> => {
+    const priceMinor = body.priceMinor ?? fail("Invalid");
+    const list = await priceList(session);
+    const multiStore = list.allStores.multiStore && options.storePrices !== undefined;
+    const assigned =
+      list.storeAssignment === null
+        ? null
+        : await priceEditor(session, list.storeAssignment.priceBookReference);
+    const assignedBrand =
+      assigned?.book.prices.find((p) => p.sellableReference === sku)?.amountMinor ?? null;
+    // This Store's own price now (several Stores only).
+    const ownNow = async () =>
+      multiStore && options.storePrices !== undefined
+        ? ((
+            (await options.storePrices.query(session)) as unknown as {
+              prices: readonly { sellableReference: string; storePriceMinor: string | null }[];
+            }
+          ).prices.find((p) => p.sellableReference === sku)?.storePriceMinor ?? null)
+        : null;
+    const waitingBrand = async () => {
+      const open = menuDraftOf(await priceList(session));
+      const price =
+        open === undefined
+          ? null
+          : ((await priceEditor(session, open.priceBookReference)).book.prices.find(
+              (p) => p.sellableReference === sku,
+            )?.amountMinor ?? null);
+      return price === assignedBrand ? null : price;
+    };
+    const answer = async (): Promise<SavedPrice> => ({
+      brandPriceMinor: assignedBrand,
+      pendingBrandPriceMinor: await waitingBrand(),
+      storePriceMinor: await ownNow(),
+    });
+    if (body.priceScope === "ThisStore") {
+      if (!multiStore || options.storePrices === undefined) return fail("Invalid");
+      if (assignedBrand === null) return fail("NoBrandPriceYet");
+      await options.storePrices.command({
+        ...session,
+        body: {
+          action: "ChangeStorePrice",
+          operationReference: step("store-price"),
+          sellableReference: sku,
+          expectedAmountMinor: body.expectedPriceMinor ?? fail("Invalid"),
+          amountMinor: priceMinor,
+        },
+      });
+      return answer();
+    }
+    let draft = menuDraftOf(list);
+    const waiting =
+      draft === undefined ? null : await priceEditor(session, draft.priceBookReference);
+    const brandNow =
+      waiting?.book.prices.find((p) => p.sellableReference === sku)?.amountMinor ?? assignedBrand;
+    if (brandNow === priceMinor) return answer();
+    if (brandNow !== body.expectedPriceMinor) return fail("PriceChanged");
+    // Several Stores: an existing dish's price for all of them is the Brand Owner's to change.
+    if (multiStore && assignedBrand !== null && !list.allStores.mayList)
+      return fail("NeedsBrandOwner");
+    if (waiting !== null && waiting.draftAuthor !== null && waiting.draftAuthor !== waiting.viewer)
+      return fail("OthersPending");
+    let editor = waiting;
+    if (draft === undefined || editor === null) {
+      const created = (await options.prices.command({
+        ...session,
+        body: {
+          action: "CreateDraft",
+          operationReference: step("price-book"),
+          copyFrom: list.storeAssignment?.priceBookReference ?? null,
+          purpose: "MenuListing",
+        },
+      })) as { priceBookReference: string };
+      editor = await priceEditor(session, created.priceBookReference);
+      draft = {
+        priceBookReference: created.priceBookReference,
+        lifecycle: "Draft",
+        aggregateVersion: editor.book.aggregateVersion,
+        purpose: "MenuListing",
+        startedBy: editor.viewer,
+      };
+    }
+    if (editor.book.prices.find((p) => p.sellableReference === sku)?.amountMinor !== priceMinor)
+      await options.prices.command({
+        ...session,
+        body: {
+          action: "SaveDraft",
+          operationReference: step("price"),
+          priceBookReference: draft.priceBookReference,
+          expectedAggregateVersion: editor.book.aggregateVersion,
+          prices: [
+            ...editor.book.prices.filter((p) => p.sellableReference !== sku),
+            { sellableReference: sku, amountMinor: priceMinor },
+          ],
+        },
+      });
+    return answer();
   };
 
   /**
@@ -612,68 +854,9 @@ export function createMerchantOneStoreDishes(options: {
       });
     else if (body.productReference === null) await offerUndecided(session, new Set([sku]), step);
 
-    // 2. The price, in the store's open price book draft (published by "List it"). No price given:
-    // this save leaves it as it is.
-    const priceMinor = body.priceMinor;
-    if (priceMinor !== null) {
-      const books = (await options.prices.query({ ...session, priceBookReference: null })) as {
-        books: readonly { priceBookReference: string; lifecycle: string; createdAt: string }[];
-        storeAssignment: { priceBookReference: string } | null;
-      };
-      const charged = async () => {
-        if (books.storeAssignment === null) return null;
-        const book = (await options.prices.query({
-          ...session,
-          priceBookReference: books.storeAssignment.priceBookReference,
-        })) as { book: { prices: readonly { sellableReference: string; amountMinor: string }[] } };
-        return book.book.prices.find((p) => p.sellableReference === sku)?.amountMinor ?? null;
-      };
-      let draft = [...books.books]
-        .filter((book) => book.lifecycle === "Draft")
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]?.priceBookReference;
-      if (draft !== undefined || (await charged()) !== priceMinor) {
-        if (draft === undefined)
-          draft = (
-            (await options.prices.command({
-              ...session,
-              body: {
-                action: "CreateDraft",
-                operationReference: step("price-book"),
-                stableCode:
-                  "MENU-" +
-                  options.now().slice(0, 10).replaceAll("-", "") +
-                  "-" +
-                  step("code").slice(-4).toUpperCase(),
-                copyFrom: books.storeAssignment?.priceBookReference ?? null,
-              },
-            })) as { priceBookReference: string }
-          ).priceBookReference;
-        const editor = (await options.prices.query({ ...session, priceBookReference: draft })) as {
-          book: {
-            aggregateVersion: number;
-            prices: readonly { sellableReference: string; amountMinor: string }[];
-          };
-          draftAuthor: string | null;
-          viewer: string;
-        };
-        if (editor.draftAuthor !== null && editor.draftAuthor !== editor.viewer)
-          return fail("OthersPending");
-        if (editor.book.prices.find((p) => p.sellableReference === sku)?.amountMinor !== priceMinor)
-          await options.prices.command({
-            ...session,
-            body: {
-              action: "SaveDraft",
-              operationReference: step("price"),
-              priceBookReference: draft,
-              expectedAggregateVersion: editor.book.aggregateVersion,
-              prices: [
-                ...editor.book.prices.filter((p) => p.sellableReference !== sku),
-                { sellableReference: sku, amountMinor: priceMinor },
-              ],
-            },
-          });
-      }
-    }
+    // 2. The price (M70): for every Store in the menu's own price draft (published by "List it"),
+    // or at this Store only, at once. No price given: this save leaves it as it is.
+    const price = body.priceMinor === null ? null : await savePrice(session, body, sku, step);
 
     // 3. Choice prices (waiting until "List it").
     const wanted = new Map(
@@ -812,7 +995,14 @@ export function createMerchantOneStoreDishes(options: {
         left = round.remaining;
       }
     }
-    return { status: "Saved" as const, productReference, skuReference: sku, choicesWaiting };
+    return {
+      status: "Saved" as const,
+      productReference,
+      skuReference: sku,
+      choicesWaiting,
+      // WP-2423 M70: the dish's prices as this save left them (null: no price was sent).
+      price,
+    };
   };
 
   /**
@@ -963,6 +1153,9 @@ export function createMerchantOneStoreDishes(options: {
         descriptionZh: body.descriptionZh,
         taxClassificationReference: body.taxClassificationReference,
         priceMinor: body.priceMinor,
+        // A combo has one price, the Brand's; what was there is what the combo editor showed.
+        priceScope: "AllStores",
+        expectedPriceMinor: await comboPriceNow(session, current?.skuReference ?? null),
         choiceGroups: slots.map((slot) => ({
           optionSetReference: slot.optionSetReference,
           options: slot.dishes.map((d) => ({
@@ -1009,10 +1202,48 @@ export function createMerchantOneStoreDishes(options: {
     // WP-2423 (v15 2026-11-05): a choice group turned into "a quantity of each" under Option sets:
     // its "no change" option recipes are carried to the new quantities first (a real change stays
     // for a person, and the check below names it). A stop here comes before anything is listed.
-    const menu = await loadMenu(session, body.menuReference);
+    const menu = (await loadMenu(session, body.menuReference)) as MenuBuilder & {
+      sellables?: readonly {
+        skuReference: string;
+        productName: string;
+        allergens?: { source: string };
+      }[];
+    };
     const skus = new Set(
       menu.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference)),
     );
+    // WP-2423 M69: dishes whose allergens nobody answered are named first, before anything slow
+    // runs or anything is written (the menu's own check below stays the full guard).
+    const undeclared = [
+      ...new Set(
+        (menu.sellables ?? [])
+          .filter((x) => skus.has(x.skuReference) && x.allergens?.source === "None")
+          .map((x) => x.productName),
+      ),
+    ];
+    if (undeclared.length > 0)
+      throw Object.assign(new MerchantOneStoreDishError("AllergensUndeclared"), {
+        problem: { dishes: undeclared.slice(0, 20), count: undeclared.length },
+      });
+    // WP-2423 M71: the menu's own price draft must be the one the review showed, unchanged; a
+    // price change started on the Prices page is never listed from here.
+    const priceBooks = await priceList(session);
+    const menuDraft = menuDraftOf(priceBooks);
+    const confirmed = body.confirmedPriceBook;
+    if (
+      menuDraft === undefined
+        ? confirmed !== null &&
+          !priceBooks.books.some(
+            (b) =>
+              b.priceBookReference === confirmed.priceBookReference &&
+              b.lifecycle === "Published" &&
+              b.purpose === "MenuListing",
+          )
+        : confirmed === null ||
+          confirmed.priceBookReference !== menuDraft.priceBookReference ||
+          confirmed.aggregateVersion !== menuDraft.aggregateVersion
+    )
+      return fail("PricesChangedSinceShown");
     try {
       await options.optionRecipes.extendNoChangeChoices({
         ...session,
@@ -1036,26 +1267,30 @@ export function createMerchantOneStoreDishes(options: {
     // Combos with saved changes first: each is listed alone at the Brand's one store.
     if (options.combos !== undefined)
       await options.combos.listDrafts({ ...session, operationReference: step("combos") });
-    const books = (await options.prices.query({ ...session, priceBookReference: null })) as {
-      books: readonly { priceBookReference: string; lifecycle: string; aggregateVersion: number }[];
-    };
-    for (const book of books.books.filter((b) => b.lifecycle === "Draft")) {
-      await options.prices.command({
-        ...session,
-        body: {
-          action: "Publish",
-          operationReference: step("publish-" + book.priceBookReference.slice(-12)),
-          priceBookReference: book.priceBookReference,
-          expectedAggregateVersion: book.aggregateVersion,
-          approvalMode: "SingleStoreListing",
-        },
-      });
+    // The menu's own price draft: listed alone at the Brand's one Store by its author, or by the
+    // Brand Owner at several; someone else's draft is published as a review (its author never
+    // approves it). Retrying after it was published goes on to assign it.
+    const listing = menuDraft?.priceBookReference ?? confirmed?.priceBookReference ?? null;
+    if (listing !== null) {
+      if (menuDraft !== undefined)
+        await options.prices.command({
+          ...session,
+          body: {
+            action: "Publish",
+            operationReference: step("publish-" + listing.slice(-12)),
+            priceBookReference: listing,
+            expectedAggregateVersion: menuDraft.aggregateVersion,
+            ...(menuDraft.startedBy === null || menuDraft.startedBy === priceBooks.viewer
+              ? { approvalMode: "SingleStoreListing" }
+              : {}),
+          },
+        });
       await options.prices.command({
         ...session,
         body: {
           action: "AssignToStore",
-          operationReference: step("assign-" + book.priceBookReference.slice(-12)),
-          priceBookReference: book.priceBookReference,
+          operationReference: step("assign-" + listing.slice(-12)),
+          priceBookReference: listing,
         },
       });
     }

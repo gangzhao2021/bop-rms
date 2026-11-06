@@ -37,6 +37,7 @@ import { menuErrorText } from "./StoreMenuPages.js";
 import { allergenSummary } from "./dish-allergens.js";
 import { firstDishUsing } from "./dish-choice-apply.js";
 import { DishEditor } from "./DishEditor.js";
+import { MenuListingReview } from "./MenuListingReview.js";
 import { ComboEditor, comboDishChoices } from "./ComboEditor.js";
 import {
   MenuPageError,
@@ -48,6 +49,7 @@ import {
   type MenuBuilderView,
   type MenuClient,
   type MenuCombo,
+  type ListAllCommand,
 } from "./store-menu-pages.js";
 
 const filterText: Record<MenuFilter, string> = {
@@ -157,6 +159,11 @@ export function OneStoreMenuPage({
   const [listing, setListing] = useState<string | null>(null);
   // The menu version `listing` lists (M103): a changed menu is a new listing.
   const listingVersion = useRef<string | null>(null);
+  // WP-2423 M71: the menu's price draft as the review showed it, kept with the listing reference it
+  // was confirmed for, so a retry finishes exactly what was confirmed.
+  const confirmedPrices = useRef<ListAllCommand["confirmedPriceBook"]>(null);
+  const confirmedFor = useRef<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const newListing = () => {
     const reference = newOperationReference();
     setListing(reference);
@@ -352,7 +359,32 @@ export function OneStoreMenuPage({
   // Just listed (ListAll lists the waiting combos with it): nothing waits until the menu is read again.
   const orderPending =
     listedVersion !== view.menu.versionReference &&
-    (listingPending(view) || combos.some((c) => c.state === "Waiting"));
+    (listingPending(view) ||
+      combos.some((c) => c.state === "Waiting") ||
+      (view.priceDraft ?? null) !== null);
+  // WP-2423 M69: dishes on the menu whose allergens nobody answered ("List it" waits for them).
+  const undeclaredOnMenu = [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.dishes.filter((dish) => dish.allergens.source === "None").map((dish) => dish.name),
+      ),
+    ),
+  ];
+  // WP-2423 M71: the menu's price changes, started again from the prices in use now.
+  const rebasePrices = async () => {
+    const draft = view.priceDraft ?? null;
+    if (client.rebasePriceDraft === undefined || draft === null || blocked) return;
+    setListingBusy(true);
+    try {
+      await client.rebasePriceDraft(draft.priceBookReference, draft.aggregateVersion);
+      setProblem(t("Your price changes now start from the prices in use. Check them, then list."));
+    } catch {
+      setProblem(t("That didn't go through. Read the menu again and retry."));
+    } finally {
+      setListingBusy(false);
+      reload();
+    }
+  };
   const comboOf = (skuReference: string) => combos.find((c) => c.skuReference === skuReference);
   const isCombo = (skuReference: string) => comboOf(skuReference) !== undefined;
 
@@ -459,12 +491,30 @@ export function OneStoreMenuPage({
     listingVersion.current = version;
     writeListingAttempt(menuReference, { reference: operationReference, version, at: started });
     try {
-      // The open price book and waiting choice prices are listed with the menu.
+      // WP-2423 M71: the menu's price draft as the review showed it is captured once per listing,
+      // so a retry of the same listing finishes exactly what was confirmed.
+      if (confirmedFor.current !== operationReference) {
+        confirmedPrices.current =
+          view.priceDraft == null
+            ? null
+            : {
+                priceBookReference: view.priceDraft.priceBookReference,
+                aggregateVersion: view.priceDraft.aggregateVersion,
+              };
+        confirmedFor.current = operationReference;
+      }
+      // The menu's own price draft (as reviewed) and waiting choice prices are listed with it.
       if (client.oneStore !== undefined)
-        await client.oneStore({ action: "ListAll", operationReference, menuReference });
+        await client.oneStore({
+          action: "ListAll",
+          operationReference,
+          menuReference,
+          confirmedPriceBook: confirmedPrices.current,
+        });
       else await client.command({ action: "List", operationReference, menuReference });
       setListing(null);
       writeListingAttempt(menuReference, null);
+      setReviewing(false);
       setListingSince(null);
       writeListingMarker(menuReference, null);
       setProblem(t("Listed. Guests see the menu as it is now."));
@@ -836,6 +886,7 @@ export function OneStoreMenuPage({
           allergenChoices={choices}
           keepsStock={view.keepsStock === true}
           client={client}
+          {...(view.pricePowers === undefined ? {} : { priceScopes: view.pricePowers })}
           isCombo={isCombo}
           openApply={openApply?.skuReference === dish.skuReference ? openApply : null}
           onSaved={(message, product) => {
@@ -994,6 +1045,7 @@ export function OneStoreMenuPage({
           allergenChoices={choices}
           keepsStock={view.keepsStock === true}
           client={client}
+          {...(view.pricePowers === undefined ? {} : { priceScopes: view.pricePowers })}
           isCombo={isCombo}
           lastSaved={lastSaved}
           onSaved={(message, product) => {
@@ -1095,15 +1147,30 @@ export function OneStoreMenuPage({
                 {t("Undo")}
               </button>
             </div>
+          ) : mayList && reviewing && !underway && listing === null ? (
+            <MenuListingReview
+              view={view}
+              undeclared={undeclaredOnMenu}
+              busy={blocked}
+              onList={() => void listMenu()}
+              onRebase={() => void rebasePrices()}
+              onShowUndeclared={() => {
+                setReviewing(false);
+                setFilters(noAllergensFilter);
+              }}
+              onBack={() => setReviewing(false)}
+            />
           ) : mayList ? (
             <div className="one-menu__pending-actions">
               <button
                 type="button"
                 className="one-menu__primary"
                 disabled={blocked}
-                onClick={() => void listMenu()}
+                onClick={() =>
+                  underway || listing !== null ? void listMenu() : setReviewing(true)
+                }
               >
-                {underway ? t("Continue listing") : t("List it")}
+                {underway || listing !== null ? t("Continue listing") : t("List it")}
               </button>
             </div>
           ) : (

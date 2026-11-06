@@ -1092,6 +1092,12 @@ async function scanUnsupported(root, module, diagnostics) {
           module.manifest.ownedDatabase?.schema === "rms_pricing" &&
           module.manifest.ownedDatabase?.tables?.includes("store_price_change") &&
           moduleRelative === "src/infrastructure/persistence/store-price-change-store.ts";
+        // WP-2423 M71: why a price book draft was started (2000_480).
+        const acceptedPriceBookDraftPurposeAsset =
+          module.packageName === "@rms/pricing" &&
+          module.manifest.ownedDatabase?.schema === "rms_pricing" &&
+          module.manifest.ownedDatabase?.tables?.includes("price_book_draft_purpose") &&
+          moduleRelative === "src/infrastructure/persistence/price-book-draft-purpose-store.ts";
         const acceptedPriceBookSoleOperatorAsset =
           module.packageName === "@rms/pricing" &&
           module.manifest.ownedDatabase?.schema === "rms_pricing" &&
@@ -3875,6 +3881,7 @@ async function scanUnsupported(root, module, diagnostics) {
           !acceptedBrandSoleOperatorSettingAsset &&
           !acceptedPriceBookSoleOperatorAsset &&
           !acceptedStorePriceChangeAsset &&
+          !acceptedPriceBookDraftPurposeAsset &&
           !acceptedMenuSoleOperatorAsset &&
           !acceptedStoreConfigurationSoleOperatorAsset &&
           !acceptedStoreConfigurationWithdrawalAsset &&

@@ -13,7 +13,6 @@ import {
   unavailablePriceClient,
   dollarsToMinor,
   minorToDollars,
-  suggestPriceBookCode,
 } from "./store-price-pages.js";
 
 describe("WP-2423 price page helpers", () => {
@@ -28,7 +27,6 @@ describe("WP-2423 price page helpers", () => {
     expect(minorToDollars("450")).toBe("4.50");
     expect(minorToDollars("5")).toBe("0.05");
     expect(minorToDollars("0")).toBe("0.00");
-    expect(suggestPriceBookCode("2026-10-08")).toBe("PRICES-20261008");
   });
   it("carries the items a refusal names", async () => {
     const client = createPriceClient("csrf", () =>
@@ -198,7 +196,8 @@ describe("WP-2423 price book list", () => {
     // Only drafts offer to be continued; only published books can be copied.
     expect(html.match(/Continue draft/gu)).toHaveLength(2);
     expect(html).not.toContain("Copy of PRICES-Q19-TEST");
-    expect(html).toContain("Copy of PRICES-20261001 (in use here)");
+    // WP-2423 M124: the book in use is named by what it is, not by its code.
+    expect(html).toContain("The prices in use here");
     // Internal references never show as text.
     expect(text).not.toContain(ref(20));
   });

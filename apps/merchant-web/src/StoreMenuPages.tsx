@@ -107,6 +107,24 @@ export const menuErrorText: Record<MenuErrorCode | "Loading", string> = {
     "Someone else's price changes are waiting to be listed. They list them first, then try again.",
   ),
   NoSection: t("That section is no longer on the menu. Read the menu again and choose a section."),
+  PriceChanged: t(
+    "Someone changed this price since you opened the dish. Close it, open it again and check the price.",
+  ),
+  NeedsBrandOwner: t(
+    "Only the owner changes this dish's price at every Store. Choose “Only at this Store”, or ask the owner.",
+  ),
+  NoBrandPriceYet: t(
+    "This dish has no price yet. Its first price is for every Store; the owner lists it.",
+  ),
+  PricesChangedSinceShown: t(
+    "Prices changed since you looked. Nothing was listed. Check them again, then list.",
+  ),
+  PricesMoved: t(
+    "Another price change went live after these menu prices were changed. Nothing was listed. Apply your price changes to the prices in use, check them, then list.",
+  ),
+  AllergensUndeclared: t(
+    "Some dishes on the menu have no allergens answered yet. Nothing was listed. Answer them first.",
+  ),
   ManySizes: t("This dish has more than one size. Change it on the Products page."),
   NotADish: t("A combo can only offer dishes on sale, not another combo. Choose its dishes again."),
   ChoiceRecipesStopped: t(

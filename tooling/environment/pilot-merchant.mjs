@@ -1391,6 +1391,8 @@ export async function createInternalMerchant(
           availability,
           combos,
           optionSets,
+          // WP-2423 M70: a dish's price changed at this Store only (several Stores).
+          ...(storePrices === undefined ? {} : { storePrices }),
           now: () => new Date().toISOString(),
         });
   const stockCounts = createMerchantStockCounts({

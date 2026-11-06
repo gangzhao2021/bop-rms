@@ -16,7 +16,6 @@ import {
   parsePriceBookEditorView,
   parsePriceBookListView,
   parsePriceRouteReference,
-  suggestPriceBookCode,
   unavailablePriceClient,
   type PriceBookEditorView,
   type PriceBookListView,
@@ -49,6 +48,12 @@ const copy: Record<PriceErrorCode | "Loading", string> = {
     "Someone else now holds price approval, so they must publish this. Refresh to see who.",
   ),
   NeedsReverification: t("Confirm it is you with your authenticator code, then publish again."),
+  DraftOpen: t(
+    "Dish prices changed on the Menu page are already waiting there. List them on the Menu page first.",
+  ),
+  PricesMoved: t(
+    "Another price change went live after this one was started. Apply your changes to the prices in use, check them, then publish.",
+  ),
   FullSignInRequired: FULL_SIGN_IN_REQUIRED_TEXT,
   Offline: offlineCheckBeforeRepeatText,
   Unavailable: serverProblemText,
@@ -286,7 +291,6 @@ export function StorePriceList({
   readonly fetcher: typeof fetch | undefined;
 }) {
   const navigate = useNavigate();
-  const [code, setCode] = useState("");
   const [copyFrom, setCopyFrom] = useState<string | null | undefined>(undefined);
   // Owner 2026-10-25: discarded (test) books are hidden unless asked for.
   const [showDiscarded, setShowDiscarded] = useState(false);
@@ -296,9 +300,6 @@ export function StorePriceList({
   });
   const current = view.storeAssignment;
   const source = copyFrom === undefined ? (current?.priceBookReference ?? null) : copyFrom;
-  const stableCode = (code || suggestPriceBookCode(view.sourceAsOf.slice(0, 10)))
-    .trim()
-    .toUpperCase();
   return (
     <AppFrame title={t("Prices")} description="">
       <header className="screen-heading">
@@ -306,7 +307,9 @@ export function StorePriceList({
           <p className="bop-eyebrow">{t("Prices · Brand")}</p>
           <h2>{t("Prices")}</h2>
           <PageIntro
-            summary={t("To change prices, start a new price book and publish it.")}
+            summary={t(
+              "To change one dish's price, open it on the Menu page. To change several prices together, start a price change here.",
+            )}
             aside={
               <>
                 {t("Updated")} <SourceTime instant={view.sourceAsOf} />
@@ -356,24 +359,16 @@ export function StorePriceList({
           aria-labelledby="new-book"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!/^[A-Z][A-Z0-9_-]{0,63}$/u.test(stableCode) || busy) return;
+            if (busy) return;
             void send({
               action: "CreateDraft",
               operationReference: newOperationReference(),
-              stableCode,
               copyFrom: source,
+              purpose: "PriceChange",
             });
           }}
         >
           <h3 id="new-book">{t("New price book")}</h3>
-          <label>
-            {t("Code")}
-            <input
-              value={code || suggestPriceBookCode(view.sourceAsOf.slice(0, 10))}
-              maxLength={64}
-              onChange={(event) => setCode(event.target.value.toUpperCase())}
-            />
-          </label>
           <label>
             {t("Start from")}
             <select
@@ -387,13 +382,12 @@ export function StorePriceList({
                 .filter((book) => book.lifecycle === "Published")
                 .map((book) => (
                   <option key={book.priceBookReference} value={book.priceBookReference}>
-                    {t("Copy of {stableCode}{value}", {
-                      stableCode: book.stableCode,
-                      value:
-                        book.priceBookReference === current?.priceBookReference
-                          ? " (in use here)"
-                          : "",
-                    })}
+                    {book.priceBookReference === current?.priceBookReference
+                      ? t("The prices in use here")
+                      : t("Copy of {stableCode}{value}", {
+                          stableCode: book.stableCode,
+                          value: "",
+                        })}
                   </option>
                 ))}
             </select>
@@ -530,13 +524,21 @@ function PriceBookEditor({
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const { send, busy, pending, message, setMessage } = useCommand(client, (_result, command) => {
+  const navigate = useNavigate();
+  const { send, busy, pending, message, setMessage } = useCommand(client, (result, command) => {
+    // WP-2423 M71: the changes moved to a new draft started from the prices in use.
+    const moved = (result as { priceBookReference?: string } | null)?.priceBookReference;
+    if (command.action === "Rebase" && moved && moved !== priceBookReference) {
+      void navigate(`/app/commerce/pricing/${moved}`);
+      return;
+    }
     setNotice(
       {
         CreateDraft: "Created.",
         SaveDraft: t("Prices saved."),
         Publish: "Published.",
         Discard: t("Draft discarded."),
+        Rebase: t("Your changes now start from the prices in use."),
         AssignToStore: t("This Store now charges these prices."),
       }[command.action],
     );
@@ -624,6 +626,41 @@ function PriceBookEditor({
             </ul>
           ) : null}
         </PriceCommandMessage>
+      ) : null}
+      {draft && view.purpose === "MenuListing" ? (
+        <StatePanel heading={t("Prices changed on the Menu page")} status>
+          <p>
+            {t(
+              "These are dish prices changed on the Menu page. They go live when someone presses List it there.",
+            )}{" "}
+            <Link to="/app/commerce/menus">{t("Go to Menu")}</Link>
+          </p>
+        </StatePanel>
+      ) : null}
+      {draft && view.movedSinceStart === true ? (
+        <StatePanel heading={t("Prices changed since this was started")} status>
+          <p>
+            {t(
+              "Another price change went live after this draft was started. Publishing it as it is would undo that change, so it cannot be published until your changes start from the prices in use now.",
+            )}
+          </p>
+          {editable ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void send({
+                  action: "Rebase",
+                  operationReference: newOperationReference(),
+                  priceBookReference: book.priceBookReference,
+                  expectedAggregateVersion: book.aggregateVersion,
+                })
+              }
+            >
+              {t("Apply my changes to the prices in use")}
+            </button>
+          ) : null}
+        </StatePanel>
       ) : null}
       {view.uncovered.length > 0 && book.lifecycle !== "Archived" ? (
         <StatePanel heading={t("Missing prices")} status>

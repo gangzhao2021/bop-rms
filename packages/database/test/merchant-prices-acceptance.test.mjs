@@ -259,8 +259,8 @@ it("drafts, independently publishes and assigns price books that cover the Store
       const createDraft = {
         action: "CreateDraft",
         operationReference: op(),
-        stableCode: "prices-a",
         copyFrom: null,
+        purpose: "PriceChange",
       };
       const created = await command(createDraft);
       assert.equal(created.status, "Applied");
@@ -328,8 +328,8 @@ it("drafts, independently publishes and assigns price books that cover the Store
         await command({
           action: "CreateDraft",
           operationReference: op(),
-          stableCode: "PRICES-B",
           copyFrom: bookA,
+          purpose: "PriceChange",
         })
       ).priceBookReference;
       const draftB = await prices.query({ ...session, priceBookReference: bookB });
@@ -362,8 +362,8 @@ it("drafts, independently publishes and assigns price books that cover the Store
         await command({
           action: "CreateDraft",
           operationReference: op(),
-          stableCode: "PRICES-C",
           copyFrom: bookB,
+          purpose: "PriceChange",
         })
       ).priceBookReference;
       const draftC = await prices.query({ ...session, priceBookReference: bookC });
@@ -391,20 +391,25 @@ it("drafts, independently publishes and assigns price books that cover the Store
         priceBookReference: bookC,
       });
       const list = await prices.query({ ...session, priceBookReference: null });
-      assert.equal(list.storeAssignment.stableCode, "PRICES-C");
+      // WP-2423 M124: the server names each book (PRICES-<Store date>-…); staff never type one.
+      const letter = (reference) => ({ [bookA]: "A", [bookB]: "B", [bookC]: "C" })[reference];
+      assert.match(list.storeAssignment.stableCode, /^PRICES-\d{8}-[0-9A-F]{6}$/u);
+      assert.equal(list.storeAssignment.priceBookReference, bookC);
       assert.deepEqual(
-        list.assignmentHistory.map((item) => [item.stableCode, item.endedAt === null]),
+        list.assignmentHistory.map((item) => [
+          letter(item.priceBookReference),
+          item.endedAt === null,
+        ]),
         [
-          ["PRICES-C", true],
-          ["PRICES-A", false],
+          ["C", true],
+          ["A", false],
         ],
       );
       assert.equal(list.assignmentHistory[1].endedAt, list.assignmentHistory[0].effectiveFrom);
-      assert.deepEqual(list.books.map((book) => book.stableCode + ":" + book.lifecycle).sort(), [
-        "PRICES-A:Published",
-        "PRICES-B:Published",
-        "PRICES-C:Published",
-      ]);
+      assert.deepEqual(
+        list.books.map((book) => letter(book.priceBookReference) + ":" + book.lifecycle).sort(),
+        ["A:Published", "B:Published", "C:Published"],
+      );
 
       // A draft can be discarded; the database refuses a second open assignment or edits.
       scope.as(owner);
@@ -412,19 +417,25 @@ it("drafts, independently publishes and assigns price books that cover the Store
         await command({
           action: "CreateDraft",
           operationReference: op(),
-          stableCode: "PRICES-D",
           copyFrom: null,
+          purpose: "PriceChange",
         })
       ).priceBookReference;
       // An unpublished draft is listed with its state so it can be continued.
       const withDraft = await prices.query({ ...session, priceBookReference: null });
-      assert.deepEqual(
-        withDraft.books.map((book) => book.stableCode + ":" + book.lifecycle).sort(),
-        ["PRICES-A:Published", "PRICES-B:Published", "PRICES-C:Published", "PRICES-D:Draft"],
-      );
+      const named = (book) =>
+        ({ [bookA]: "A", [bookB]: "B", [bookC]: "C", [bookD]: "D" })[book.priceBookReference] +
+        ":" +
+        book.lifecycle;
+      assert.deepEqual(withDraft.books.map(named).sort(), [
+        "A:Published",
+        "B:Published",
+        "C:Published",
+        "D:Draft",
+      ]);
       assert.equal(
-        withDraft.books.find((book) => book.stableCode === "PRICES-D").priceBookReference,
-        bookD,
+        withDraft.books.find((book) => book.lifecycle === "Draft").purpose,
+        "PriceChange",
       );
       const discarded = await command({
         action: "Discard",
@@ -433,12 +444,9 @@ it("drafts, independently publishes and assigns price books that cover the Store
         expectedAggregateVersion: 1,
       });
       assert.equal(discarded.lifecycle, "Archived");
-      // A discarded draft stays listed (its code stays taken), after the books in use.
+      // A discarded draft stays listed, after the books in use.
       const afterDiscard = await prices.query({ ...session, priceBookReference: null });
-      assert.equal(
-        afterDiscard.books.at(-1).stableCode + ":" + afterDiscard.books.at(-1).lifecycle,
-        "PRICES-D:Archived",
-      );
+      assert.equal(named(afterDiscard.books.at(-1)), "D:Archived");
       await assert.rejects(
         admin.query("UPDATE rms_pricing.store_price_book_assignment SET effective_from=now()"),
         /append-only/u,
@@ -469,7 +477,7 @@ it("drafts, independently publishes and assigns price books that cover the Store
           .rows[0].store;
         return { book, classes: [...classes.values()], restored };
       });
-      assert.equal(quoteFacts.book.stableCode, "PRICES-C");
+      assert.equal(quoteFacts.book.stableCode, list.storeAssignment.stableCode);
       assert.deepEqual(quoteFacts.classes, [taxClass]);
       assert.equal(quoteFacts.restored, storeReference);
 

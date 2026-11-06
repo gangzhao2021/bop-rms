@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { confirmedMenuPrices } from "../test-support/menu-price-confirmation.mjs";
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { it } from "vitest";
@@ -39,6 +40,9 @@ import {
   seedBrandMember,
   seedBrandRole,
 } from "../test-support/sole-operator-brand-gate.mjs";
+
+// WP-2423 M71: the price list "List it" confirms (read as the review reads it).
+let menuPrices;
 
 const { Client } = pg;
 const id = (n) => "01909a8f-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -387,7 +391,7 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
       const availability = createMerchantAvailability(common);
       const dishes = createMerchantOneStoreDishes({
         products: createMerchantProducts(common),
-        prices: createMerchantPrices({ ...common, currencyMetadata }),
+        prices: (menuPrices = createMerchantPrices({ ...common, currencyMetadata })),
         optionPrices: createMerchantOptionPrices({ ...common, currencyMetadata }),
         menus,
         dishAllergens: allergens,
@@ -407,10 +411,15 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
           );
           return work(tx);
         });
-      const listAll = () =>
+      const listAll = async () =>
         dishes.command({
           ...session,
-          body: { action: "ListAll", operationReference: op(), menuReference },
+          body: {
+            action: "ListAll",
+            operationReference: op(),
+            menuReference,
+            confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+          },
         });
       const choices = () =>
         asApi((tx) =>
@@ -440,6 +449,9 @@ it("tea charge: a new dish declared with no stock ingredients is listed, chosen 
             descriptionZh: "",
             taxClassificationReference: taxClass,
             priceMinor,
+            // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
+            priceScope: priceMinor === null ? null : "AllStores",
+            expectedPriceMinor: null,
             choiceGroups: [],
             allergens,
           },

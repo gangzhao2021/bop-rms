@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { confirmedMenuPrices } from "./menu-price-confirmation.mjs";
 import process from "node:process";
 import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -50,6 +51,9 @@ import { seedSubmissionInventoryRecipe } from "./submission-inventory-recipe.mjs
 import { seedSubmissionInventoryStock } from "./submission-inventory-stock.mjs";
 import { seedSubmissionInventoryWorkflow } from "./submission-inventory-workflow.mjs";
 import { seedTaxConfiguration } from "./tax-configuration-seed.mjs";
+
+// WP-2423 M71: the price list "List it" confirms (read as the review reads it).
+let menuPrices;
 
 const { Client, Pool } = pg;
 const idsOf = (merchant) => (n) =>
@@ -734,7 +738,7 @@ async function listRealMenu({
     const optionRecipes = createMerchantOptionRecipes(common);
     const commands = createMerchantOneStoreDishes({
       products: createMerchantProducts(common),
-      prices: createMerchantPrices({ ...common, currencyMetadata }),
+      prices: (menuPrices = createMerchantPrices({ ...common, currencyMetadata })),
       optionPrices: createMerchantOptionPrices({ ...common, currencyMetadata }),
       menus,
       dishAllergens,
@@ -768,6 +772,9 @@ async function listRealMenu({
           descriptionZh: "",
           taxClassificationReference,
           priceMinor,
+          // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
+          priceScope: priceMinor === null ? null : "AllStores",
+          expectedPriceMinor: null,
           choiceGroups,
           allergens,
         },
@@ -786,10 +793,15 @@ async function listRealMenu({
     );
     const soupDish = await saveDish("Hot and sour soup (TEST)", "酸辣汤", "650");
     await bindRecipe(soupDish.skuReference);
-    const listAll = () =>
+    const listAll = async () =>
       commands.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference },
+        body: {
+          action: "ListAll",
+          operationReference: op(),
+          menuReference,
+          confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+        },
       });
     await listAll();
     return {

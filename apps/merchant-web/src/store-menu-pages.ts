@@ -1,5 +1,6 @@
 import { t } from "./i18n/i18n.js";
 import { parseSoleOperatorGate, type SoleOperatorGateView } from "./SoleOperatorSelfApproval.js";
+import { newOperationReference } from "./operation-reference.js";
 // The guest app's own menu reader, so staff are told exactly what guests cannot be shown.
 import { guestUnreadableItems } from "../../customer-pwa/src/menu/menu-contract.js";
 /** WP-2423 / DEC-MENU-REVISION: CAT-MENU-LIST / CAT-MENU-BUILDER view contract and same-origin client. */
@@ -60,6 +61,20 @@ export type MenuErrorCode =
    * it); what was saved before stays, and saving again goes on from there.
    */
   | "StoppedPartWay"
+  /** WP-2423 M70: the price changed since the dish was opened. */
+  | "PriceChanged"
+  /** WP-2423 M70: several Stores: only the owner changes a dish's price for all of them. */
+  | "NeedsBrandOwner"
+  /** WP-2423 M70: a dish with no price yet takes its first price for every Store. */
+  | "NoBrandPriceYet"
+  /** WP-2423 M71: prices were saved after the "List it" review was shown. */
+  | "PricesChangedSinceShown"
+  /** WP-2423 M71: another price change went live after these menu prices were started. */
+  | "PricesMoved"
+  /** WP-2423 M69: dishes on the menu have no allergens answered yet. */
+  | "AllergensUndeclared"
+  /** WP-2423 M134: the Brand already has a choice group by that name. */
+  | "CodeTaken"
   | "Offline"
   | "Unavailable";
 export class MenuPageError extends Error {
@@ -402,8 +417,13 @@ export interface MenuSellable {
   readonly priceMinor: string | null;
   /** WP-2423 item 8 ⑥: the dish (product) of the size, for its editor (absent in older views). */
   readonly productReference?: string;
-  /** WP-2423 item 8 ⑥: a different price waiting to be listed (null or absent: none). */
+  /** WP-2423 item 8 ⑥: what this Store will charge once listed, when different (null: none). */
   readonly pendingPriceMinor?: string | null;
+  /** WP-2423 M70: the Brand price, and this Store's own price (null: it charges the Brand's). */
+  readonly brandPriceMinor?: string | null;
+  readonly storePriceMinor?: string | null;
+  /** WP-2423 M70: a different Brand price waiting to be listed (null or absent: none). */
+  readonly pendingBrandPriceMinor?: string | null;
   /** WP-2423: offered at the selected Store (Item availability); customers here see it only then.
    * Absent from older views: treated as offered. */
   readonly offeredHere?: boolean;
@@ -441,6 +461,10 @@ export interface SaveDishCommand {
   readonly taxClassificationReference: string;
   /** null only for a dish that exists: its price stays as it is. */
   readonly priceMinor: string | null;
+  /** WP-2423 M70: where the price changes (null with no price). */
+  readonly priceScope: "AllStores" | "ThisStore" | null;
+  /** WP-2423 M70: the price seen for that scope (null: none). */
+  readonly expectedPriceMinor: string | null;
   readonly choiceGroups: readonly {
     readonly optionSetReference: string;
     readonly options: readonly { readonly optionReference: string; readonly amountMinor: string }[];
@@ -543,6 +567,24 @@ export interface ListAllCommand {
   readonly action: "ListAll";
   readonly operationReference: string;
   readonly menuReference: string;
+  /** WP-2423 M71: the menu's own price draft as the review showed it (null: none waiting). */
+  readonly confirmedPriceBook: {
+    readonly priceBookReference: string;
+    readonly aggregateVersion: number;
+  } | null;
+}
+/** WP-2423 M71: the menu's own price draft, what "List it" publishes of prices. */
+export interface MenuPriceDraft {
+  readonly priceBookReference: string;
+  readonly aggregateVersion: number;
+  readonly startedByViewer: boolean;
+  /** Another price change went live since it was started: it must be re-applied first. */
+  readonly movedSinceStart: boolean;
+  readonly prices: readonly {
+    readonly skuReference: string;
+    readonly fromMinor: string | null;
+    readonly toMinor: string;
+  }[];
 }
 export interface MenuBuilderView extends MenuViewBase {
   readonly screenId: "CAT-MENU-BUILDER";
@@ -591,6 +633,16 @@ export interface MenuBuilderView extends MenuViewBase {
    * serves the selected Store. Absent from older views (one Store).
    */
   readonly stores?: { readonly severalStores: boolean; readonly servesHere: boolean };
+  /** WP-2423 M71: the menu's own price draft (null or absent: none waiting). */
+  readonly priceDraft?: MenuPriceDraft | null;
+  /** WP-2423 M71: price changes started on the Prices page: never listed from here. */
+  readonly priceChangesOnPricesPage?: number;
+  /** WP-2423 M70: where this person may change a dish's price (absent: one Store). */
+  readonly pricePowers?: {
+    readonly severalStores: boolean;
+    readonly mayAllStores: boolean;
+    readonly mayThisStore: boolean;
+  };
 }
 export interface MenuSectionInput {
   readonly sectionReference: string | null;
@@ -656,6 +708,11 @@ export interface MenuClient {
   loadDish?(productReference: string | null): Promise<{ product: unknown; optionPrices: unknown }>;
   /** WP-2423 item 3 F: every dish's choices and prices, to see which dishes have a group. */
   loadChoicePrices?(): Promise<unknown>;
+  /**
+   * WP-2423 M71: the menu's price changes, started again from the prices in use now (another
+   * change went live after they were made).
+   */
+  rebasePriceDraft?(priceBookReference: string, aggregateVersion: number): Promise<unknown>;
   /** WP-2423 item 8 ⑥: one dish saved, or everything listed. */
   oneStore?(command: SaveDishCommand | ListAllCommand | SaveComboCommand): Promise<unknown>;
   /** WP-2423 item 8 ⑥ part 4: the combos of the one-page menu. */
@@ -983,6 +1040,13 @@ const codes = new Set<MenuErrorCode>([
   "DishHasRecipe",
   "ChoiceGroup",
   "ChoiceRecipesStopped",
+  "PriceChanged",
+  "NeedsBrandOwner",
+  "NoBrandPriceYet",
+  "PricesChangedSinceShown",
+  "PricesMoved",
+  "AllergensUndeclared",
+  "CodeTaken",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {
@@ -1003,8 +1067,11 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
         part?: unknown;
         productReference?: unknown;
       } | null;
-      const code = String(payload?.error) as MenuErrorCode;
-      throw new MenuPageError(
+      // A Store price that changed since it was shown (the Store price command's own word).
+      const code = (
+        payload?.error === "Changed" ? "PriceChanged" : String(payload?.error)
+      ) as MenuErrorCode;
+      const refusal = new MenuPageError(
         codes.has(code)
           ? code
           : response.status === 403
@@ -1022,6 +1089,11 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
           : null,
         typeof payload?.productReference === "string" ? payload.productReference : null,
       );
+      // WP-2423 M134: the group the Brand already has by the name given.
+      const existing = (payload as { optionSetReference?: unknown } | null)?.optionSetReference;
+      if (typeof existing === "string")
+        Object.defineProperty(refusal, "optionSetReference", { value: existing });
+      throw refusal;
     }
     return response.json() as Promise<unknown>;
   };
@@ -1037,6 +1109,13 @@ export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): M
       return { product, optionPrices };
     },
     loadChoicePrices: () => post("/merchant/commerce/option-prices/query", {}),
+    rebasePriceDraft: (priceBookReference, aggregateVersion) =>
+      post("/merchant/commerce/pricing/command", {
+        action: "Rebase",
+        operationReference: newOperationReference(),
+        priceBookReference,
+        expectedAggregateVersion: aggregateVersion,
+      }),
     oneStore: (command) => post("/merchant/commerce/one-store-dishes/command", command),
     combos: () => post("/merchant/commerce/one-store-combos/query", {}),
     kitchenNotPrepared: (command) =>

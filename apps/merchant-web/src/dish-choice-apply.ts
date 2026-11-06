@@ -248,6 +248,8 @@ export function appliedDishCommand(input: {
     descriptionZh: input.source.descriptionZh,
     taxClassificationReference: input.source.taxClassificationReference ?? "",
     priceMinor: null,
+    priceScope: null,
+    expectedPriceMinor: null,
     choiceGroups: [...groups].map(([optionSetReference, options]) => ({
       optionSetReference,
       options: [...options].map(([optionReference, dollars]) => ({

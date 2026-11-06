@@ -287,7 +287,7 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
           .then((facts) => facts.get(skuReference));
       const price = async (storeReference, sku) =>
         (await guest(storeReference, sku))?.price?.amount ?? null;
-      const dish = (productReference, priceMinor) => ({
+      const dish = (productReference, priceMinor, expectedPriceMinor = null) => ({
         action: "SaveDish",
         operationReference: op(),
         menuReference: id(499),
@@ -299,14 +299,33 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
         descriptionZh: "",
         taxClassificationReference: taxClass,
         priceMinor,
+        // WP-2423 M70: the price is the Brand's, for every Store, compared with the one seen.
+        priceScope: priceMinor === null ? null : "AllStores",
+        expectedPriceMinor,
         choiceGroups: [],
         allergens: null,
       });
-      const listAll = () =>
-        one.dishes.command({
+      // WP-2423 M71: "List it" confirms the menu's own price draft as the review shows it.
+      const listAll = async () => {
+        const draft = (await one.prices.query({ ...session, priceBookReference: null })).books.find(
+          (b) => b.lifecycle === "Draft" && b.purpose === "MenuListing",
+        );
+        return one.dishes.command({
           ...session,
-          body: { action: "ListAll", operationReference: op(), menuReference: id(499) },
+          body: {
+            action: "ListAll",
+            operationReference: op(),
+            menuReference: id(499),
+            confirmedPriceBook:
+              draft === undefined
+                ? null
+                : {
+                    priceBookReference: draft.priceBookReference,
+                    aggregateVersion: draft.aggregateVersion,
+                  },
+          },
         });
+      };
       const owned = async (sql, values) => {
         await admin.query("BEGIN");
         try {
@@ -425,7 +444,7 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
       assert.equal(await price(store1, sku), "6.50");
 
       // 5. The Owner's next Brand price reaches Store 1; Store 2 keeps its own.
-      await one.dishes.command({ ...session, body: dish(saved.productReference, "680") });
+      await one.dishes.command({ ...session, body: dish(saved.productReference, "680", "650") });
       await listAll();
       assert.equal(await price(store1, sku), "6.80");
       assert.equal(await price(store2, sku), "7.25");
@@ -477,8 +496,8 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
           body: {
             action: "CreateDraft",
             operationReference: op(),
-            stableCode: "MANAGER",
             copyFrom: null,
+            purpose: "PriceChange",
           },
         }),
         (error) => error.code === "PermissionDenied",

@@ -19,6 +19,10 @@ export type PriceErrorCode =
   | "Invalid"
   | "SoleOperatorNotInEffect"
   | "NeedsReverification"
+  /** WP-2423 M71: the menu page's own price draft is already open (one at a time). */
+  | "DraftOpen"
+  /** WP-2423 M71: another price change went live after this draft was started. */
+  | "PricesMoved"
   /** A PIN sign-in must confirm it is the staff member first (not a missing permission). */
   | FullSignInRequired
   | "Offline"
@@ -72,6 +76,12 @@ export interface PriceBookSummary {
   readonly entries: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /**
+   * WP-2423 M71: why the draft was started (the menu page's own, listed with the menu; or a price
+   * change here), and whether prices in effect changed since it was started.
+   */
+  readonly purpose?: "MenuListing" | "PriceChange" | null;
+  readonly movedSinceStart?: boolean;
 }
 export interface PriceBookListView extends PriceViewBase {
   readonly screenId: "PRICE-BOOK-LIST";
@@ -95,6 +105,9 @@ export interface PriceBookEditorView extends PriceViewBase {
     readonly otherEntries: number;
   };
   readonly draftAuthor: string | null;
+  /** WP-2423 M71: see PriceBookSummary. */
+  readonly purpose?: "MenuListing" | "PriceChange" | null;
+  readonly movedSinceStart?: boolean;
   /** WP-2423 Q19: present for an author who may approve: may they publish alone, and why not. */
   readonly soleOperator: SoleOperatorGateView | null;
   readonly uncovered: readonly string[];
@@ -103,8 +116,16 @@ export type PriceCommand =
   | {
       readonly action: "CreateDraft";
       readonly operationReference: string;
-      readonly stableCode: string;
       readonly copyFrom: string | null;
+      /** WP-2423 M71: a price change started on this page (the server names it). */
+      readonly purpose: "PriceChange";
+    }
+  | {
+      /** WP-2423 M71: start the draft again from the prices in effect now, with its changes. */
+      readonly action: "Rebase";
+      readonly operationReference: string;
+      readonly priceBookReference: string;
+      readonly expectedAggregateVersion: number;
     }
   | {
       readonly action: "SaveDraft";
@@ -188,7 +209,6 @@ export function minorToDollars(minor: string): string {
     ? "0." + digits.padStart(2, "0")
     : digits.slice(0, -2) + "." + digits.slice(-2);
 }
-export const suggestPriceBookCode = (date: string) => "PRICES-" + date.replaceAll("-", "");
 export const unavailablePriceClient: PriceClient = {
   load: async () => {
     throw new PricePageError("Unavailable");
@@ -206,6 +226,8 @@ const codes = new Set<PriceErrorCode>([
   "Lifecycle",
   "Invalid",
   "SoleOperatorNotInEffect",
+  "DraftOpen",
+  "PricesMoved",
   "NeedsReverification",
 ]);
 export function createPriceClient(csrf: string, fetcher: typeof fetch = fetch): PriceClient {

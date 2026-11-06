@@ -21,7 +21,7 @@ import {
   bindMerchantPriceBookTransport,
   parseMerchantPriceBookTransport,
 } from "./merchant-price-book-transport.js";
-import { localBoundary } from "./merchant-prices.js";
+import { localBoundary, storeLocalDate } from "./merchant-prices.js";
 import { derivedReference } from "./merchant-products.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
@@ -137,6 +137,17 @@ export function storePrices(snapshot: PriceBookSnapshot | null, store: string) {
   return { brand, own, charged: (sku: string) => own.get(sku) ?? brand.get(sku) ?? null };
 }
 
+/**
+ * WP-2423 M71: the digest of a book's Brand prices (what every Store charges unless it has its own),
+ * so a draft records what it was started from and is never published over a later change.
+ */
+export function brandPriceDigest(snapshot: PriceBookSnapshot | null): string {
+  const brand = [...storePrices(snapshot, "").brand].sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  return "sha256:" + sha256Hex(JSON.stringify(brand));
+}
+
 type Tx = Parameters<Parameters<PersistentMerchantBffOptions["transactions"]["run"]>[0]>[0];
 interface Owner {
   readonly tenantReference: string;
@@ -162,12 +173,14 @@ async function writeStoreBook(
     readonly entries: readonly TransportEntry[];
     readonly actorReference: string;
     readonly at: string;
+    /** The Store's time zone: the book is named by the Store's own date (M150), never UTC's. */
+    readonly timeZone: string;
   },
 ): Promise<StorePriceChangeRecord> {
   const step = (purpose: string) => derivedReference(input.operationReference, purpose);
   const book = step("store-price-book");
   const stableCode =
-    "STORE-" + input.at.slice(0, 10).replaceAll("-", "") + "-" + book.slice(-8).toUpperCase();
+    "STORE-" + storeLocalDate(input.at, input.timeZone) + "-" + book.slice(-8).toUpperCase();
   const hash = (value: string) => "sha256:" + sha256Hex(value);
   const intentHash = hash(
     JSON.stringify([
@@ -298,7 +311,11 @@ const loadBook = async (
   return snapshot;
 };
 /** The Store's current book and what it charges. */
-const storeBook = async (tx: Tx, owner: Owner, currencyMetadata: CurrencyMetadataSnapshot) => {
+export const storeBook = async (
+  tx: Tx,
+  owner: Owner,
+  currencyMetadata: CurrencyMetadataSnapshot,
+) => {
   const assignment = await currentStorePriceBook(tx as never, owner);
   if (assignment === null) return null;
   const snapshot = await loadBook(tx, owner, currencyMetadata, assignment.priceBookReference);
@@ -321,6 +338,8 @@ export async function carryBrandPriceBook(
     readonly operationReference: string;
     readonly actorReference: string;
     readonly at: string;
+    /** The acting Store's time zone (Store books are named by its date). */
+    readonly timeZone: string;
     readonly currencyMetadata: CurrencyMetadataSnapshot;
     /** Store items the book (with that Store's own prices) leaves unpriced. */
     readonly uncovered: (owner: Owner, snapshot: PriceBookSnapshot) => Promise<readonly string[]>;
@@ -377,6 +396,7 @@ export async function carryBrandPriceBook(
       entries: entries.map(transportEntry),
       actorReference: input.actorReference,
       at: input.at,
+      timeZone: input.timeZone,
     });
     results.push({ storeReference, status: "Applied" });
   }
@@ -523,6 +543,7 @@ export function createMerchantStorePrices(options: {
             entries,
             actorReference: s.actor,
             at,
+            timeZone: s.timeZone,
           });
           return { status: "Applied" as const, change };
         }),

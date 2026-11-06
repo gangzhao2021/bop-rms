@@ -522,6 +522,8 @@ export function installMerchantCommerceRoutes(
     SoleOperatorNotInEffect: 409,
     NeedsReverification: 409,
     NotSingleStore: 409,
+    DraftOpen: 409,
+    PricesMoved: 409,
   } as const;
   const priceFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantPriceError)) {
@@ -856,6 +858,7 @@ export function installMerchantCommerceRoutes(
     Conflict: 409,
     Invalid: 400,
     OptionSet: 409,
+    CodeTaken: 409,
   } as const;
   const optionSetFailure = (response: express.Response, error: unknown) => {
     if (!(error instanceof MerchantOptionSetError)) {
@@ -866,9 +869,12 @@ export function installMerchantCommerceRoutes(
     response
       .status(optionSetStatus[error.code])
       .json(
-        error.problem === null
-          ? { error: error.code }
-          : { error: error.code, problem: error.problem },
+        error.problem !== null
+          ? { error: error.code, problem: error.problem }
+          : error.optionSetReference !== null
+            ? // WP-2423 M134: the group the Brand already has by that name.
+              { error: error.code, optionSetReference: error.optionSetReference }
+            : { error: error.code },
       );
   };
   const optionSetUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;

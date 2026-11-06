@@ -225,8 +225,8 @@ it("price book: a single store's author publishes alone; no price approval or a 
           await command({
             action: "CreateDraft",
             operationReference: op(),
-            stableCode: code,
             copyFrom: null,
+            purpose: "PriceChange",
           })
         ).priceBookReference;
         await command({

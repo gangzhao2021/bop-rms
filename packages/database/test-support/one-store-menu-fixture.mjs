@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { confirmedMenuPrices } from "./menu-price-confirmation.mjs";
 import { performance } from "node:perf_hooks";
 import pg from "pg";
 import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
@@ -464,15 +465,23 @@ export async function createOneStoreMenuFixture(
         descriptionZh: "",
         taxClassificationReference: taxClass,
         priceMinor: "550",
+        // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
+        priceScope: "AllStores",
+        expectedPriceMinor: null,
         choiceGroups: [],
         allergens: [],
         ...overrides,
       },
     });
-  const listAll = () =>
+  const listAll = async () =>
     dishes.command({
       ...session,
-      body: { action: "ListAll", operationReference: op(), menuReference },
+      body: {
+        action: "ListAll",
+        operationReference: op(),
+        menuReference,
+        confirmedPriceBook: await confirmedMenuPrices(prices),
+      },
     });
   return {
     id,

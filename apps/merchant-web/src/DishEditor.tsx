@@ -24,6 +24,17 @@ import { taxClassText, type ProductOptionSetChoice } from "./product-pages.js";
 import { dollarsToMinor, minorToDollars } from "./store-price-pages.js";
 import { menuErrorText } from "./StoreMenuPages.js";
 import {
+  DishPriceScope,
+  expectedFor,
+  parseSavedPrice,
+  priceBasisOf,
+  priceScopeChoices,
+  shownPrice,
+  singleStorePrice,
+  type DishPriceScopes,
+  type PriceBasis,
+} from "./dish-price-scope.js";
+import {
   MenuPageError,
   type AllergenChoice,
   type AllergenClassification,
@@ -72,6 +83,7 @@ export function DishEditor({
   isCombo = () => false,
   lastSaved = null,
   openApply = null,
+  priceScopes = singleStorePrice,
   onSaved,
   onSavedKeepOpen,
   onClose,
@@ -93,6 +105,8 @@ export function DishEditor({
     readonly optionSetReference: string;
     readonly optionReferences: readonly string[];
   } | null;
+  /** WP-2423 M70: where this person may change a dish's price (one Store: the one price). */
+  readonly priceScopes?: DishPriceScopes;
   readonly onSaved: (message: string, productReference?: string | null) => void;
   /** "Save and add another": the menu reads again, and this form stays. */
   readonly onSavedKeepOpen?: (productReference: string | null) => void;
@@ -104,12 +118,15 @@ export function DishEditor({
   const productReference = readReference ?? adopted;
   const [source, setSource] = useState<DishEditorSource | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  // A dish not listed yet has only its waiting price.
-  const [readPrice] = useState(() =>
-    (dish?.pendingPriceMinor ?? dish?.priceMinor)
-      ? minorToDollars((dish?.pendingPriceMinor ?? dish?.priceMinor) as string)
-      : "",
-  );
+  // WP-2423 M70: the prices the dish has now — the Brand's (or one waiting to be listed) and this
+  // Store's own — kept up to date by each save, so a later save compares with what is there.
+  const [basis, setBasis] = useState<PriceBasis>(() => priceBasisOf(dish));
+  const several = priceScopes.severalStores;
+  const [readPrice] = useState(() => {
+    const shown = shownPrice(priceBasisOf(dish), several);
+    return shown === null ? "" : minorToDollars(shown);
+  });
+  const [scope, setScope] = useState<"AllStores" | "ThisStore" | null>(null);
   const [form, setForm] = useState({
     name: "",
     nameZh: "",
@@ -197,9 +214,6 @@ export function DishEditor({
   };
   // One reference per intended save, kept until it is answered (a retry continues it).
   const [operation, setOperation] = useState<string | null>(null);
-  // Once a save sent the price, the price read earlier is no longer what the dish has: a save that
-  // stopped part-way may have set it, so a price put back is sent too, not taken as unchanged.
-  const priceSent = useRef(false);
   const sent = useRef<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -272,6 +286,17 @@ export function DishEditor({
     dish === null ? t("New dish") : dish.nameZh ? `${dish.name} ${dish.nameZh}` : dish.name;
   const recipeAllergens = dish?.allergens.source === "Recipe";
   const priceMinor = dollarsToMinor(form.price);
+  // WP-2423 M70: a price is sent only when it differs from what the dish has now, with where it
+  // changes. A new dish's first price is for every Store; at one Store there is one price.
+  const priceEdited = dish === null || priceMinor !== shownPrice(basis, several);
+  const scopes = priceScopeChoices(priceScopes, basis, dish === null && adopted === null);
+  const chosenScope: "AllStores" | "ThisStore" | null = !priceEdited
+    ? null
+    : scopes.length === 1
+      ? (scopes[0] ?? null)
+      : scope !== null && scopes.includes(scope)
+        ? scope
+        : null;
   const choicePrices = useMemo(
     () =>
       [...chosen].map(([optionSetReference, options]) => ({
@@ -288,6 +313,7 @@ export function DishEditor({
     form.section === "" ||
     priceMinor === null ||
     form.tax === "" ||
+    (priceEdited && chosenScope === null) ||
     choicePrices.some(
       (g) => g.options.length === 0 || g.options.some((o) => o.amountMinor === null),
     );
@@ -304,12 +330,12 @@ export function DishEditor({
     description: form.description.trim(),
     descriptionZh: form.descriptionZh.trim(),
     taxClassificationReference: form.tax,
-    // Only when it was edited. At a Store with its own price, sending the shown price back would
-    // open a price draft for the whole Brand, and a price read minutes ago could undo a newer one.
-    priceMinor:
-      dish !== null && !priceSent.current && priceMinor === dollarsToMinor(readPrice)
-        ? null
-        : (priceMinor ?? "0"),
+    // Only when it was edited, with where it changes and the price seen for that scope: sending
+    // the shown price back would undo a newer one, or write this Store's price for every Store.
+    priceMinor: priceEdited ? (priceMinor ?? "0") : null,
+    priceScope: priceEdited ? (chosenScope ?? "AllStores") : null,
+    expectedPriceMinor:
+      priceEdited && dish !== null ? expectedFor(basis, chosenScope ?? "AllStores") : null,
     choiceGroups: choicePrices.map((g) => ({
       optionSetReference: g.optionSetReference,
       options: g.options.map((o) => ({
@@ -386,12 +412,16 @@ export function DishEditor({
     sent.current = fingerprint;
     const reference = operation ?? newOperationReference();
     setOperation(reference);
-    if (content.priceMinor !== null) priceSent.current = true;
     const result = (await client.oneStore({ ...content, operationReference: reference })) as {
       productReference?: unknown;
       choicesWaiting?: unknown;
+      price?: unknown;
     } | null;
     setOperation(null);
+    // WP-2423 M70: what the dish's prices are now, as the save left them: the next save compares
+    // with these, not with what the page read when it opened.
+    const after = parseSavedPrice(result?.price);
+    if (after !== null) setBasis(after);
     // Saved: what is on the form is now what the dish is.
     if (loaded.current !== null) loaded.current = JSON.stringify(content);
     return {
@@ -499,6 +529,9 @@ export function DishEditor({
       setAllergensChecked(false);
       setCharge(false);
       setAdopted(null);
+      // The next dish is new: no price of its own yet.
+      setBasis(priceBasisOf(null));
+      setScope(null);
       setCarried(true);
       setOpenGroups(new Set());
       setAllergensOpen(false);
@@ -730,12 +763,21 @@ export function DishEditor({
             lang: "zh-Hans",
             "data-saves": true,
           })}
-          {field("price", t("Price ($)"), {
+          {field("price", several ? t("Price here ($)") : t("Price ($)"), {
             inputMode: "decimal",
             required: true,
             placeholder: "12.88",
             "data-saves": true,
           })}
+          {several ? (
+            <DishPriceScope
+              basis={basis}
+              choices={scopes}
+              edited={priceEdited && priceMinor !== null}
+              chosen={chosenScope}
+              onChoose={setScope}
+            />
+          ) : null}
           <label className="dish-editor__field">
             <span>{t("Tax class")}</span>
             <select
@@ -781,6 +823,11 @@ export function DishEditor({
         {priceMinor === null && form.price.trim() !== "" ? (
           <p className="dish-editor__problem">{t("Enter the price like 12.88.")}</p>
         ) : null}
+        {choicePrices.some((g) => g.options.some((o) => o.amountMinor === null)) ? (
+          <p className="dish-editor__problem">
+            {t("Type the extra for each ticked choice (0.00 if it is free).")}
+          </p>
+        ) : null}
         <fieldset>
           <legend>{t("Choice groups")}</legend>
           {source.groups.length === 0 ? (
@@ -823,7 +870,11 @@ export function DishEditor({
                       setChosen((current) => {
                         const next = new Map(current);
                         if (event.target.checked)
-                          next.set(group.optionSetReference, groupStart(group, source.usual));
+                          next.set(
+                            group.optionSetReference,
+                            // WP-2423 M25: the dish's own last extras first.
+                            groupStart(group, new Map([...source.usual, ...source.last])),
+                          );
                         else next.delete(group.optionSetReference);
                         return next;
                       })
@@ -845,10 +896,15 @@ export function DishEditor({
                                 setChosen((current) => {
                                   const next = new Map(current);
                                   const set = new Map(next.get(group.optionSetReference) ?? []);
+                                  // WP-2423 M25: what this dish charged for it, else the
+                                  // usual extra; nothing known stays empty to be typed (never
+                                  // silently free).
                                   if (event.target.checked)
                                     set.set(
                                       option.optionReference,
-                                      source.usual.get(option.optionReference) ?? "0.00",
+                                      source.last.get(option.optionReference) ??
+                                        source.usual.get(option.optionReference) ??
+                                        "",
                                     );
                                   else set.delete(option.optionReference);
                                   next.set(group.optionSetReference, set);
@@ -933,7 +989,10 @@ export function DishEditor({
           ) : makingGroup ? (
             <NewChoiceGroupForm
               client={client}
-              onCreated={(reference, extras) => void groupMade(reference, extras)}
+              onCreated={(reference, extras, notice) => {
+                if (notice !== undefined) setNote(notice);
+                void groupMade(reference, extras);
+              }}
               onClose={() => setMakingGroup(false)}
             />
           ) : (

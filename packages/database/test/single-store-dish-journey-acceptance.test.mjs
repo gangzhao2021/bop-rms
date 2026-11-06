@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { confirmedMenuPrices } from "../test-support/menu-price-confirmation.mjs";
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { it } from "vitest";
@@ -16,6 +17,9 @@ import {
   seedBrandMember,
   seedBrandRole,
 } from "../test-support/sole-operator-brand-gate.mjs";
+
+// WP-2423 M71: the price list "List it" confirms (read as the review reads it).
+let menuPrices;
 
 const { Client } = pg;
 const id = (n) => "01909a7f-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -211,7 +215,7 @@ it("one-page menu journey: a new dish, listed, is offered to guests at the store
       const availability = createMerchantAvailability(common);
       const dishes = createMerchantOneStoreDishes({
         products: createMerchantProducts(common),
-        prices: createMerchantPrices({ ...common, currencyMetadata }),
+        prices: (menuPrices = createMerchantPrices({ ...common, currencyMetadata })),
         // No choice prices waiting (a listing reads them).
         optionPrices: { waiting: async () => [], command: unused.command },
         menus,
@@ -270,6 +274,9 @@ it("one-page menu journey: a new dish, listed, is offered to guests at the store
           descriptionZh: "",
           taxClassificationReference: taxClass,
           priceMinor: "650",
+          // WP-2423 M70: the Brand price, for every Store (the one-Store menu has one).
+          priceScope: "AllStores",
+          expectedPriceMinor: null,
           choiceGroups: [],
           allergens: null,
         },
@@ -279,7 +286,12 @@ it("one-page menu journey: a new dish, listed, is offered to guests at the store
       ]);
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference: id(499) },
+        body: {
+          action: "ListAll",
+          operationReference: op(),
+          menuReference: id(499),
+          confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+        },
       });
       assert.equal(listed, true);
       // 2. Guests at the store are offered it, at its listed price.
@@ -300,7 +312,12 @@ it("one-page menu journey: a new dish, listed, is offered to guests at the store
       });
       await dishes.command({
         ...session,
-        body: { action: "ListAll", operationReference: op(), menuReference: id(499) },
+        body: {
+          action: "ListAll",
+          operationReference: op(),
+          menuReference: id(499),
+          confirmedPriceBook: await confirmedMenuPrices(menuPrices),
+        },
       });
       assert.equal((await guest(saved.skuReference))?.availability, "NotOffered");
     } finally {
