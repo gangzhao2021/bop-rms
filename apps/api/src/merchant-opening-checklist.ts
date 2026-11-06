@@ -1,4 +1,8 @@
-import { currentAllergenRegistry, listBrandMenus } from "@rms/catalog";
+import {
+  createPostgresCurrentMenuReleaseStore,
+  currentAllergenRegistry,
+  listBrandMenus,
+} from "@rms/catalog";
 import { listStoreMembers } from "@bop/membership";
 import { currentStoreTaxConfigurationReference } from "@rms/pricing";
 import { hasOwnerPublishedStoreSetup } from "@rms/store";
@@ -20,6 +24,37 @@ export class MerchantOpeningApproversError extends Error {
     this.name = "MerchantOpeningApproversError";
   }
 }
+/**
+ * WP-2423 M66: guests at this Store can order from a listed menu now — a release of one of the
+ * Brand's menus is in effect here for the guest app, for dine-in or pickup — as the guest menu
+ * resolves it. Saved changes not listed yet (at this Store or another of the Brand) never turn the
+ * opening list back on: they are the menu page's to show.
+ */
+async function guestsCanOrder(
+  tx: ReturnType<typeof businessTransaction>,
+  owner: { readonly brandReference: string; readonly storeReference: string },
+  at: string,
+): Promise<boolean> {
+  const releases = createPostgresCurrentMenuReleaseStore(
+    { run: (work) => work(tx as never) },
+    { brandReference: owner.brandReference, storeReference: owner.storeReference },
+  );
+  for (const menu of await listBrandMenus(tx as never, owner)) {
+    if (menu.latestRelease === null) continue;
+    for (const orderTypeCode of ["DINE_IN", "PICKUP"])
+      if (
+        (await releases.load({
+          menuReference: menu.menuReference,
+          channelCode: "CUSTOMER_PWA",
+          orderTypeCode,
+          observedAt: at,
+        })) !== null
+      )
+        return true;
+  }
+  return false;
+}
+
 /**
  * WP-2423 item 13 ③: what a new merchant's Owner still has to do before guests can order, for the
  * Home page's opening list. Yes or no only, from each fact's owner; the other steps come from the
@@ -55,9 +90,7 @@ export function createMerchantOpeningChecklist(options: {
         return Object.freeze({
           setupPublished: await hasOwnerPublishedStoreSetup(tx, owner),
           allergenList: (await currentAllergenRegistry(tx as never, owner)) !== null,
-          menuListed: (await listBrandMenus(tx as never, owner)).some(
-            (menu) => menu.publication?.state === "Published",
-          ),
+          menuListed: await guestsCanOrder(tx, owner, at),
           // The Store's own tax rates: BOP support sets these up, the Owner waits for them.
           taxRatesSet: tax !== null && tax.evidenceValidUntil > at,
         });
