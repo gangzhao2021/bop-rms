@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  StoreBusinessDateBeforeRecordsError,
+  businessDateErrorCodes,
   resolveClosedStoreBusinessDateWindow,
   resolveClosedStoreBusinessDateWindowAcross,
   resolveStoreBusinessDateBounds,
@@ -61,6 +63,7 @@ describe("closed business day across configuration versions", () => {
       contentDigest: `sha256:${"b".repeat(64)}`,
       timeZone: "America/Toronto",
       businessDayStartLocalTime: "04:00:00",
+      opensAt: null,
     });
   });
   it.each<[string, Record<string, unknown>]>([
@@ -116,5 +119,93 @@ describe("closed business day across configuration versions", () => {
     expect(() =>
       resolveStoreBusinessDateBounds({ businessDate: "2026-02-30", configuration: v2 }),
     ).toThrow(expect.objectContaining({ code: "STORE_BUSINESS_DATE_INPUT_INVALID" }));
+  });
+});
+
+/**
+ * WP-2423 M160 (v15 2026-11-06): a Store set up mid-shift — its first configuration took effect at
+ * 20:51 on business day 11-04 (America/Toronto, 04:00 day start) — could not read that day at all,
+ * so every report range touching it and the "last closed day" settlement failed.
+ */
+describe("the Store's first business day opens inside it", () => {
+  const opening = "2026-11-05T01:51:48.000Z";
+  const first = { ...v1, effectiveFrom: opening };
+  const at = "2026-11-06T15:00:00.000Z";
+  const firstDay = (
+    configurations: readonly unknown[],
+    opensAt: unknown,
+    businessDate = "2026-11-04",
+  ) =>
+    resolveClosedStoreBusinessDateWindowAcross({
+      businessDate,
+      observedAt: at,
+      configurations,
+      opensAt,
+    });
+  it("reads the whole nominal day from 04:00 to 04:00 and carries the opening instant", () => {
+    expect(firstDay([first], opening)).toMatchObject({
+      businessDate: "2026-11-04",
+      startsAt: "2026-11-04T09:00:00.000Z",
+      endsAt: "2026-11-05T09:00:00.000Z",
+      configurationReference: id(1),
+      opensAt: opening,
+    });
+  });
+  it("still refuses the same day without the opening instant (an ordinary day needs full coverage)", () => {
+    expect(() => firstDay([first], undefined)).toThrow(
+      expect.objectContaining({ code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE" }),
+    );
+    expect(() => firstDay([first], null)).toThrow(
+      expect.objectContaining({ code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE" }),
+    );
+  });
+  it("refuses an opening instant outside the day or before the first version governs", () => {
+    for (const opensAt of [
+      "2026-11-04T08:59:59.999Z",
+      "2026-11-05T09:00:00.000Z",
+      "2026-11-05T01:51:47.999Z",
+    ])
+      expect(() => firstDay([first], opensAt)).toThrow(
+        expect.objectContaining({ code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE" }),
+      );
+  });
+  it("opens on the 25-hour day clocks fall back (business day 2026-10-31)", () => {
+    // 01:31 EDT on 11-01, before the 04:00 day start: business day 10-31, which ends in EST.
+    const dst = { ...v1, effectiveFrom: "2026-11-01T05:31:00.000Z" };
+    expect(firstDay([dst], "2026-11-01T05:31:00.000Z", "2026-10-31")).toMatchObject({
+      startsAt: "2026-10-31T08:00:00.000Z",
+      endsAt: "2026-11-01T09:00:00.000Z",
+      opensAt: "2026-11-01T05:31:00.000Z",
+    });
+  });
+  it("opens with a second version published later that day (same boundaries)", () => {
+    const second = { ...v2, effectiveFrom: "2026-11-05T03:10:00.000Z" };
+    expect(firstDay([first, second], opening)).toMatchObject({
+      startsAt: "2026-11-04T09:00:00.000Z",
+      endsAt: "2026-11-05T09:00:00.000Z",
+      configurationReference: id(4),
+      opensAt: opening,
+    });
+    expect(() =>
+      firstDay(
+        [
+          first,
+          {
+            ...second,
+            businessDayStartLocalTime: "05:00:00",
+            businessDayStartSource: "StoreOverride",
+          },
+        ],
+        opening,
+      ),
+    ).toThrow(expect.objectContaining({ code: "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE" }));
+  });
+  it("an earlier day is a typed answer naming the first business day", () => {
+    const error = new StoreBusinessDateBeforeRecordsError("2026-11-04");
+    expect(error).toMatchObject({
+      code: "STORE_BUSINESS_DATE_BEFORE_RECORDS",
+      firstBusinessDate: "2026-11-04",
+    });
+    expect(businessDateErrorCodes).toContain("STORE_BUSINESS_DATE_BEFORE_RECORDS");
   });
 });

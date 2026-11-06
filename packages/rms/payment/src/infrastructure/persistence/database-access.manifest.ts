@@ -731,6 +731,16 @@ const databaseAccessManifestInput = {
       source: "packages/rms/payment/src/infrastructure/persistence/card-machine-payment-store.ts",
     },
     {
+      // WP-2423 M160: no payment before the Store's first business day (reports, settlement).
+      id: "card-machine-payment-store.read.payment_intent",
+      operation: "read",
+      readPattern: "owner-repository",
+      mechanism: "repository",
+      target: { schema: "rms_payment", table: "payment_intent" },
+      principal: { kind: "module", id: "@rms/payment" },
+      source: "packages/rms/payment/src/infrastructure/persistence/card-machine-payment-store.ts",
+    },
+    {
       id: "card-machine-payment.write",
       operation: "write",
       readPattern: null,

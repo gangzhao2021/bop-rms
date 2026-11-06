@@ -4,7 +4,10 @@ import {
   listStorePriceReductionsDecided,
 } from "@rms/ordering";
 import { createPostgresStoreSalesPaymentLedger } from "@rms/payment";
-import { createMerchantBusinessDayWindows } from "./merchant-business-day-window.js";
+import {
+  createMerchantBusinessDayWindows,
+  MerchantBusinessDayBeforeRecordsError,
+} from "./merchant-business-day-window.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { createMerchantTargetStoreAuthority } from "./merchant-target-store-authority.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
@@ -24,6 +27,18 @@ export const storeReportsExportPermission = "reporting.sales.export" as const;
 /** The longest range one request may cover. */
 export const storeReportsMaximumDays = 31;
 export const merchantStoreReportsBusy = "MERCHANT_STORE_REPORTS_BUSY" as const;
+/**
+ * WP-2423 M160: the whole asked period is before the Store started using the system, so it has no
+ * sales; an answer naming the Store's first business day, not an outage.
+ */
+export const merchantStoreReportsNotCovered = "MERCHANT_STORE_REPORTS_NOT_COVERED" as const;
+export class MerchantStoreReportsNotCoveredError extends Error {
+  readonly code = merchantStoreReportsNotCovered;
+  constructor(readonly firstBusinessDate: string) {
+    super(merchantStoreReportsNotCovered);
+    this.name = "MerchantStoreReportsNotCoveredError";
+  }
+}
 const businessDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
 
 const unavailable = (): never => {
@@ -190,11 +205,19 @@ export function createPersistentMerchantStoreReports(options: {
           const to = input.to ?? today,
             from = input.from ?? to;
           if (to > today) return invalidRange();
-          const days = await windows.range(
-            tx,
-            businessDatesBetween(from, to, storeReportsMaximumDays),
-            { now, current },
-          );
+          let covered;
+          try {
+            covered = await windows.range(
+              tx,
+              businessDatesBetween(from, to, storeReportsMaximumDays),
+              { now, current },
+            );
+          } catch (error) {
+            if (!(error instanceof MerchantBusinessDayBeforeRecordsError)) throw error;
+            if ((await sameTransaction(tx)) !== true) return denied();
+            throw new MerchantStoreReportsNotCoveredError(error.firstBusinessDate);
+          }
+          const days = covered.windows;
           const first = days[0] ?? unavailable(),
             last = days.at(-1) ?? unavailable();
           if (days.some((day, index) => index > 0 && day.startsAt !== days[index - 1]?.endsAt))
@@ -228,6 +251,8 @@ export function createPersistentMerchantStoreReports(options: {
             priceReductions,
             mayExport,
             generatedAt: persistence.now(),
+            requestedFrom: from,
+            recordsBeginOn: from < covered.firstBusinessDate ? covered.firstBusinessDate : null,
           });
           if (input.tonight !== true) return { view, tonight: null };
           // The closing summary is today's report (the same sources and computation, above) with

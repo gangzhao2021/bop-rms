@@ -77,6 +77,36 @@ function samePayment(left: CardMachinePaymentRecord, right: CardMachinePaymentRe
 }
 
 /**
+ * WP-2423 M160: whether the Store has a payment taken before an instant: an online payment
+ * prepared, or a card-machine payment taken (one entered after an outage may carry an earlier
+ * time than its recording). The sales reports and the settlement begin at the Store's first
+ * business day; a payment before that day would fall outside every day, so the reads refuse
+ * instead of leaving it out. Read in the caller's transaction, under its Store scope.
+ */
+export async function readStorePaymentTakenBefore(
+  tx: { query(sql: string, values: readonly unknown[]): Promise<unknown> },
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  before: string,
+): Promise<boolean> {
+  const brandReference = parsePaymentReference(scope.brandReference);
+  const storeReference = parsePaymentReference(scope.storeReference);
+  const at = parsePaymentInstant(before);
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brandReference,
+    storeReference,
+  ]);
+  // A card-machine payment is recorded at most 72 hours after it was taken (table check).
+  const found = rows(
+    await tx.query(
+      "SELECT EXISTS (SELECT 1 FROM rms_payment.payment_intent WHERE brand_id=$1 AND store_id=$2 AND prepared_at < $3) OR EXISTS (SELECT 1 FROM rms_payment.card_machine_payment WHERE brand_id=$1 AND store_id=$2 AND recorded_at < $3::timestamptz + interval '72 hours' AND taken_at < $3) AS found",
+      [brandReference, storeReference, at],
+    ),
+  );
+  if (found.length !== 1 || typeof found[0]?.found !== "boolean") return fail();
+  return found[0].found;
+}
+
+/**
  * WP-2423 Q7: Payment-owned card-machine payments and refunds. The caller holds the transaction,
  * authorizes the staff member and the Store, and supplies server-resolved facts only.
  */

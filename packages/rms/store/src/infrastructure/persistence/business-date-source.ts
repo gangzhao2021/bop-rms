@@ -1,6 +1,7 @@
 import { parseBrandReference, parseStoreReference, parseCanonicalInstant } from "@bop/tenant";
 import {
   BusinessDateError,
+  StoreBusinessDateBeforeRecordsError,
   resolveStoreBusinessDate,
   resolveStoreBusinessDay,
   resolveStoreBusinessDateBounds,
@@ -151,11 +152,16 @@ export function createPostgresStoreBusinessDateConfigurationSource(options: {
 }
 
 /**
- * v15 2026-11-01: when the Store's first published configuration took effect (null: none yet). A
- * Store opened today has no business day before it, so "the last closed day" does not exist yet.
- * Read under the caller's authorization in the caller's transaction.
+ * WP-2423 M160: the first instant a published configuration of the Store governs (null: none yet),
+ * by the same rule the configuration source reads with: a Published version governs once it is
+ * effective and its Store publication was recorded, created and updated (the earliest such instant
+ * over every Published version, while it is still in force, at its first whole millisecond). The
+ * Store's records begin there: its first business day is the day this instant falls in, and a
+ * Store opened today has no closed day yet. Read under the caller's authorization in the caller's
+ * transaction; callers still read the configuration at this instant, so a version the source
+ * would not accept there (its release not yet created, say) is an outage, never a guess.
  */
-export async function readStoreFirstConfigurationEffectiveFrom(
+export async function readStoreFirstConfigurationGoverningFrom(
   tx: Transaction,
   scope: { readonly brandReference: string; readonly storeReference: string },
 ): Promise<string | null> {
@@ -167,7 +173,7 @@ export async function readStoreFirstConfigurationEffectiveFrom(
       storeReference,
     ]);
     const result = await tx.query(
-      "SELECT min(effective_from) AS first FROM rms_store.store_configuration_version WHERE brand_id=$1 AND store_id=$2 AND lifecycle IN ('Published','Superseded','Archived')",
+      "SELECT date_trunc('milliseconds',min(t))+CASE WHEN min(t)>date_trunc('milliseconds',min(t)) THEN interval '1 millisecond' ELSE interval '0' END AS first FROM (SELECT greatest(v.effective_from,v.created_at,v.updated_at,c.recorded_at) AS t,v.effective_until FROM rms_store.store_configuration_version v JOIN rms_store.store_configuration_publication_content c ON c.brand_id=v.brand_id AND c.store_id=v.store_id AND c.configuration_id=v.configuration_id WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published') governing WHERE effective_until IS NULL OR effective_until > t",
       [brandReference, storeReference],
     );
     const rows = Object.getOwnPropertyDescriptor(result, "rows")?.value;
@@ -206,7 +212,9 @@ export function createPostgresStoreBusinessDaySource(
  * Several versions may govern the day only with identical boundaries (see
  * resolveClosedStoreBusinessDateWindowAcross); a mismatch is refused with
  * STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE, anything else with
- * STORE_BUSINESS_DATE_UNAVAILABLE.
+ * STORE_BUSINESS_DATE_UNAVAILABLE. WP-2423 M160: the Store's first business day is read from the
+ * instant its first configuration governs (the window carries it as opensAt); a day that ends
+ * by then throws StoreBusinessDateBeforeRecordsError with the first business date.
  */
 export function createPostgresStoreClosedBusinessDateWindowSource(
   options: Parameters<typeof createPostgresStoreBusinessDateConfigurationSource>[0],
@@ -223,15 +231,36 @@ export function createPostgresStoreClosedBusinessDateWindowSource(
     },
   ): Promise<ClosedStoreBusinessDateWindow> => {
     try {
-      const anchorAt = parseCanonicalInstant(input.anchorAt);
+      const requestedAnchorAt = parseCanonicalInstant(input.anchorAt);
       const observedAt = parseCanonicalInstant(input.observedAt);
+      if ((await options.authorize(tx, observedAt)) !== true) return denied();
+      // WP-2423 M160: the Store's records begin when its first configuration governs. Its first
+      // business day usually opens inside that day (set up mid-shift); earlier days are an answer.
+      const opening = await readStoreFirstConfigurationGoverningFrom(tx, {
+        brandReference,
+        storeReference,
+      });
+      if (opening === null || opening > observedAt) return denied();
+      const anchorAt = requestedAnchorAt < opening ? opening : requestedAnchorAt;
       const anchor = await read(tx, anchorAt);
       const { startsAt, endsAt } = resolveStoreBusinessDateBounds({
         businessDate: input.businessDate,
         configuration: anchor,
       });
+      if (endsAt <= opening) {
+        const first = resolveStoreBusinessDate({
+          occurredAt: opening,
+          configuration: await read(tx, opening),
+        });
+        if ((await options.authorize(tx, observedAt)) !== true) return denied();
+        throw new StoreBusinessDateBeforeRecordsError(String(first.businessDate));
+      }
       if (endsAt > observedAt) return denied();
       if ((await options.authorize(tx, observedAt)) !== true) return denied();
+      // On the first day the chain is read from the opening instant (nothing governs before it);
+      // the window keeps the day's nominal boundaries, so every fact of the day is inside it.
+      const opensAt = startsAt < opening ? opening : null;
+      const from = opensAt ?? startsAt;
       // The source read already holds SHARE locks on these Store tables in this tx.
       // Every change point inside the day is read, page by page (keyset on the instant): a
       // real Store may edit its hours or configuration many times in one day, and the day's
@@ -243,14 +272,14 @@ export function createPostgresStoreClosedBusinessDateWindowSource(
         if (!previous || JSON.stringify(previous) !== JSON.stringify(configuration))
           configurations.push(configuration);
       };
-      await consider(startsAt);
+      await consider(from);
       // The cursor keeps the database's microsecond precision so paging never repeats or skips
       // a point; each point is read at its first whole millisecond (instants are milliseconds).
       let cursor: string | null = null;
       for (;;) {
         const result = await tx.query(
           "SELECT to_char(t AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS cursor,date_trunc('milliseconds',t)+CASE WHEN t>date_trunc('milliseconds',t) THEN interval '1 millisecond' ELSE interval '0' END AS read_at FROM (SELECT DISTINCT t FROM (SELECT v.effective_from AS t FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.effective_until FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.created_at FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT v.updated_at FROM rms_store.store_configuration_version v WHERE v.brand_id=$1 AND v.store_id=$2 AND v.lifecycle='Published' UNION ALL SELECT c.recorded_at FROM rms_store.store_configuration_publication_content c WHERE c.brand_id=$1 AND c.store_id=$2 UNION ALL SELECT o.occurred_at FROM rms_store.store_configuration_authoring_operation o WHERE o.brand_id=$1 AND o.store_id=$2) points WHERE t > COALESCE($3::timestamptz,$4::timestamptz) AND t < $5) page ORDER BY t LIMIT $6",
-          [brandReference, storeReference, cursor, startsAt, endsAt, CHANGE_POINT_PAGE_SIZE],
+          [brandReference, storeReference, cursor, from, endsAt, CHANGE_POINT_PAGE_SIZE],
         );
         if (!result || typeof result !== "object") return denied();
         const descriptor = Object.getOwnPropertyDescriptor(result, "rows");
@@ -273,7 +302,7 @@ export function createPostgresStoreClosedBusinessDateWindowSource(
             return denied();
           cursor = next;
           const at = instant(row.read_at);
-          if (at <= startsAt || at > endsAt) return denied();
+          if (at <= from || at > endsAt) return denied();
           // A change in the day's last millisecond governs from the next day's start.
           if (at < endsAt) await consider(at);
         }
@@ -283,6 +312,7 @@ export function createPostgresStoreClosedBusinessDateWindowSource(
         businessDate: input.businessDate,
         observedAt,
         configurations,
+        opensAt,
       });
       // The day's governing versions must place the same boundaries the anchor did.
       if (
@@ -295,7 +325,8 @@ export function createPostgresStoreClosedBusinessDateWindowSource(
     } catch (error) {
       if (
         error instanceof BusinessDateError &&
-        error.code === "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE"
+        (error.code === "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE" ||
+          error instanceof StoreBusinessDateBeforeRecordsError)
       )
         throw error;
       return denied();

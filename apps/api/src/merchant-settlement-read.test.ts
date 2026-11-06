@@ -181,3 +181,48 @@ it("WP-2423: a day before the Store's records begin answers with the first day, 
     "MERCHANT_SETTLEMENT_UNAVAILABLE",
   );
 });
+it("WP-2423 M160: the business-day owner's 'before the records begin' answers with the first day", async () => {
+  const tx = { query: vi.fn() } as ConsumerTransaction;
+  const authorize = vi.fn(async () => scope);
+  const before = Object.assign(new Error("MERCHANT_BUSINESS_DAY_BEFORE_RECORDS"), {
+    code: "MERCHANT_BUSINESS_DAY_BEFORE_RECORDS",
+    firstBusinessDate: "2026-11-04",
+  });
+  const captured = vi.fn(async () => null);
+  const read = createMerchantSettlementRead({
+    transactions: { run: async (work) => work(tx) },
+    authorize,
+    storeLabel: async () => "Synthetic Store",
+    window: vi.fn(async () => {
+      throw before;
+    }),
+    captured,
+    refunded: async () => null,
+    reconciliation: async () => emptyDay,
+    now: () => "2026-11-06T09:00:00.000Z",
+  });
+  await expect(read({ sessionCookie: "c", businessDate: "2026-11-03" })).rejects.toMatchObject({
+    code: "MERCHANT_SETTLEMENT_NOT_COVERED",
+    firstBusinessDate: "2026-11-04",
+  });
+  expect(captured).not.toHaveBeenCalled();
+  expect(authorize).toHaveBeenCalledTimes(2);
+  // A changed scope is refused, not answered; any other window failure stays a failure.
+  authorize.mockResolvedValueOnce(scope).mockResolvedValueOnce({ ...scope, storeReference: id(9) });
+  await expect(read({ sessionCookie: "c", businessDate: null })).rejects.toThrow(
+    "MERCHANT_SETTLEMENT_UNAVAILABLE",
+  );
+  const down = createMerchantSettlementRead({
+    transactions: { run: async (work) => work(tx) },
+    authorize,
+    storeLabel: async () => "Synthetic Store",
+    window: vi.fn(async () => {
+      throw Object.assign(new Error("X"), { code: "MERCHANT_BUSINESS_DAY_BEFORE_RECORDS" });
+    }),
+    captured,
+    refunded: async () => null,
+    reconciliation: async () => emptyDay,
+    now: () => "2026-11-06T09:00:00.000Z",
+  });
+  await expect(down({ sessionCookie: "c", businessDate: null })).rejects.toThrow("X");
+});

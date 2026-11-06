@@ -57,6 +57,12 @@ export interface StoreSalesReportInput {
   }[];
   readonly mayExport: boolean;
   readonly generatedAt: string;
+  /**
+   * WP-2423 M160: the first day the person asked for, and the Store's first business day when the
+   * range was asked from before it (the days before have no sales; the range starts there).
+   */
+  readonly requestedFrom?: string;
+  readonly recordsBeginOn?: string | null;
 }
 /** A payment line of an order refunded in full the day it was paid (what it took). */
 interface CancelledInFullLine {
@@ -922,6 +928,8 @@ function computeSales(
     currencyCode: "CAD" as const,
     from: first.businessDate,
     to: last.businessDate,
+    requestedFrom: input.requestedFrom ?? first.businessDate,
+    recordsBeginOn: input.recordsBeginOn ?? null,
     startsAt: first.startsAt,
     endsAt: last.endsAt,
     includesOpenDay: input.days.some((day) => day.status === "Open"),
@@ -948,6 +956,7 @@ function computeSales(
           status: f.window.status,
           startsAt: f.window.startsAt,
           endsAt: f.window.endsAt,
+          opensAt: f.window.opensAt ?? null,
           summary: summary(f.all),
           byChannel: Object.freeze(
             storeSalesChannels.map((c) =>
@@ -1084,6 +1093,9 @@ export function storeSalesReportCsv(
           view.currencyCode,
         ];
       }),
+      // WP-2423 M160: a range asked from before the Store's records says where they begin, after
+      // the figures (the column header stays the first row for accounting imports).
+      ...(view.recordsBeginOn === null ? [] : [[], ["Records begin", view.recordsBeginOn]]),
     ]);
   }
   if (kind === "items")

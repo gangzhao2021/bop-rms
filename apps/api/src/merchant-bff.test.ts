@@ -2864,6 +2864,40 @@ describe("WP-2423 Q14 store reports routes", () => {
     expect(later.headers.get("retry-after")).toBe("5");
     expect(await later.json()).toEqual({ error: "reports_busy" });
   });
+  it("WP-2423 M160: a period before the Store's records begin is an answer naming its first day", async () => {
+    const before = fake();
+    const notCovered = () =>
+      Object.assign(new Error("MERCHANT_STORE_REPORTS_NOT_COVERED"), {
+        code: "MERCHANT_STORE_REPORTS_NOT_COVERED",
+        firstBusinessDate: "2026-11-04",
+      });
+    before.read.mockRejectedValue(notCovered());
+    before.export.mockRejectedValue(notCovered());
+    const root = await serveReports(before);
+    for (const path of [
+      "/merchant/reports?from=2026-10-01&to=2026-10-31",
+      "/merchant/reports/export?report=summary&from=2026-10-01&to=2026-10-31",
+    ]) {
+      const answer = await request(root, path, { headers });
+      expect(answer.status).toBe(404);
+      expect(answer.headers.get("cache-control")).toBe("no-store");
+      expect(await answer.json()).toEqual({
+        error: "reports_not_covered",
+        firstBusinessDate: "2026-11-04",
+      });
+    }
+    // Never a code-shaped date or another answer's body.
+    const odd = fake();
+    odd.read.mockRejectedValue(
+      Object.assign(new Error("MERCHANT_STORE_REPORTS_NOT_COVERED"), {
+        code: "MERCHANT_STORE_REPORTS_NOT_COVERED",
+        firstBusinessDate: "x",
+      }),
+    );
+    expect((await request(await serveReports(odd), "/merchant/reports", { headers })).status).toBe(
+      503,
+    );
+  });
 });
 describe("WP-2423 Q21 merchant business-day read route", () => {
   const day = {

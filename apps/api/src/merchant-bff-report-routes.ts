@@ -100,6 +100,19 @@ export function installMerchantReportRoutes(
         .json({ error: "reports_busy" });
       return;
     }
+    // WP-2423 M160: a period wholly before the Store's records begin is an answer, not a refusal.
+    const notCovered = error as { code?: unknown; firstBusinessDate?: unknown } | null;
+    if (
+      notCovered?.code === "MERCHANT_STORE_REPORTS_NOT_COVERED" &&
+      typeof notCovered.firstBusinessDate === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/u.test(notCovered.firstBusinessDate)
+    ) {
+      response.status(404).set("Cache-Control", NO_STORE).json({
+        error: "reports_not_covered",
+        firstBusinessDate: notCovered.firstBusinessDate,
+      });
+      return;
+    }
     failed(response, error);
   };
   router.get("/reports", safeRead(options), (request, response) => {

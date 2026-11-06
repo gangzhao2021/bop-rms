@@ -55,6 +55,7 @@ export interface StoreBusinessDateResolution {
 export const businessDateErrorCodes = [
   "STORE_BUSINESS_DATE_INPUT_INVALID",
   "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE",
+  "STORE_BUSINESS_DATE_BEFORE_RECORDS",
 ] as const;
 export type BusinessDateErrorCode = (typeof businessDateErrorCodes)[number];
 
@@ -65,6 +66,18 @@ export class BusinessDateError extends Error {
     super("store business date resolution failed");
     this.name = "BusinessDateError";
     this.code = code;
+  }
+}
+
+/**
+ * WP-2423 M160: the asked business day ends before the Store's first published configuration
+ * governs, so the Store has no records for it. An answer (the records begin on
+ * `firstBusinessDate`), not an outage.
+ */
+export class StoreBusinessDateBeforeRecordsError extends BusinessDateError {
+  constructor(readonly firstBusinessDate: string) {
+    super("STORE_BUSINESS_DATE_BEFORE_RECORDS");
+    this.name = "StoreBusinessDateBeforeRecordsError";
   }
 }
 
@@ -409,6 +422,12 @@ export interface ClosedStoreBusinessDateWindow {
   readonly contentDigest: BusinessDateContentDigest;
   readonly timeZone: string;
   readonly businessDayStartLocalTime: BusinessDayStartLocalTime;
+  /**
+   * WP-2423 M160: on the Store's first business day, the instant its first configuration began to
+   * govern (inside the day); null on every other day. The window still spans the whole nominal
+   * day, so no recorded sale of that day falls outside it.
+   */
+  readonly opensAt: CanonicalInstant | null;
 }
 
 function closedBounds(configuration: StoreBusinessDateConfiguration, businessDate: unknown) {
@@ -479,6 +498,7 @@ export function resolveClosedStoreBusinessDateWindow(input: {
     contentDigest: configuration.contentDigest,
     timeZone: configuration.timeZone,
     businessDayStartLocalTime: configuration.businessDayStartLocalTime,
+    opensAt: null,
   });
 }
 
@@ -494,6 +514,12 @@ export function resolveClosedStoreBusinessDateWindowAcross(input: {
   readonly businessDate: unknown;
   readonly observedAt: unknown;
   readonly configurations: readonly unknown[];
+  /**
+   * WP-2423 M160: the Store's first governing instant when it falls inside this day (its first
+   * business day). The chain must then cover the day from that instant, not from its start;
+   * the window keeps the day's nominal local boundaries under the first configuration.
+   */
+  readonly opensAt?: unknown;
 }): ClosedStoreBusinessDateWindow {
   // No ceiling on the chain: a Store may publish many versions within one day.
   if (!Array.isArray(input.configurations) || input.configurations.length < 1) return fail();
@@ -513,6 +539,29 @@ export function resolveClosedStoreBusinessDateWindowAcross(input: {
       configuration.businessDayStartSource !== last.businessDayStartSource
     )
       throw new BusinessDateError("STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE");
+  }
+  if (input.opensAt !== undefined && input.opensAt !== null) {
+    const opensAt = parseBusinessDateInstant(input.opensAt);
+    const at = Date.parse(opensAt);
+    const { start, end } = closedBounds(last, input.businessDate);
+    // Only the Store's first day opens inside it, and only once its first version governs.
+    if (
+      Date.parse(first.effectiveFrom) > at ||
+      at < start.epochMilliseconds ||
+      at >= end.epochMilliseconds
+    )
+      throw new BusinessDateError("STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE");
+    return Object.freeze({
+      ...resolveClosedStoreBusinessDateWindow({
+        businessDate: input.businessDate,
+        observedAt: input.observedAt,
+        configuration: {
+          ...last,
+          effectiveFrom: new Date(start.epochMilliseconds).toISOString(),
+        },
+      }),
+      opensAt,
+    });
   }
   // The chain covers the day from the first version's start to the last version's end.
   return resolveClosedStoreBusinessDateWindow({

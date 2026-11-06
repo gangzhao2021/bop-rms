@@ -46,6 +46,7 @@ const days = [
     endsAt: "2026-10-14T08:00:00.000Z",
     timeZone: "America/Toronto",
     status: "Closed" as const,
+    opensAt: null,
   },
   {
     businessDate: "2026-10-14",
@@ -53,6 +54,7 @@ const days = [
     endsAt: "2026-10-14T23:00:00.000Z",
     timeZone: "America/Toronto",
     status: "Open" as const,
+    opensAt: null,
   },
 ];
 const p0Items = [item(sku.latteLarge, 2, 1000)];
@@ -520,6 +522,7 @@ describe("store sales report (WP-2423 Q14)", () => {
           endsAt: "2026-10-14T23:00:00.000Z",
           timeZone: "America/Toronto",
           status: "Open" as const,
+          opensAt: null,
         },
       ],
       orders: [table],
@@ -638,6 +641,38 @@ describe("store sales report (WP-2423 Q14)", () => {
     ]);
     for (const kind of ["summary", "items", "hourly", "tips"] as const)
       expect(storeSalesReportCsv(view, kind)).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7/u);
+  });
+
+  it("WP-2423 M160: a range clamped to the Store's first day says so, after the figures", () => {
+    const plain = computeStoreSalesReport(today);
+    expect(plain).toMatchObject({ requestedFrom: "2026-10-14", recordsBeginOn: null });
+    expect(storeSalesReportCsv(plain, "summary")).not.toContain("Records begin");
+    const opensAt = "2026-10-14T15:20:00.000Z";
+    const clamped = computeStoreSalesReport({
+      ...today,
+      days: days.slice(1).map((day) => ({ ...day, opensAt })),
+      requestedFrom: "2026-10-01",
+      recordsBeginOn: "2026-10-14",
+    });
+    expect(clamped).toMatchObject({
+      from: "2026-10-14",
+      to: "2026-10-14",
+      requestedFrom: "2026-10-01",
+      recordsBeginOn: "2026-10-14",
+    });
+    expect(clamped.days.map((day) => day.opensAt)).toEqual([opensAt]);
+    // The figures are the covered days' own: the same as the unclamped day.
+    expect(clamped.summary).toEqual(plain.summary);
+    const lines = storeSalesReportCsv(clamped, "summary").slice(1).trimEnd().split("\r\n");
+    // The column header stays the first row; the note follows the day rows after a blank line.
+    expect(lines[0]?.startsWith("business_date,day_status,")).toBe(true);
+    expect(lines.slice(1)).toEqual([
+      storeSalesReportCsv(plain, "summary").slice(1).trimEnd().split("\r\n")[1],
+      "",
+      "Records begin,2026-10-14",
+    ]);
+    for (const kind of ["items", "hourly", "tips"] as const)
+      expect(storeSalesReportCsv(clamped, kind)).toBe(storeSalesReportCsv(plain, kind));
   });
 
   it("keeps spreadsheet formulas and separators in item names as plain text", () => {

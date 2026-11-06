@@ -220,19 +220,34 @@ export function createMerchantSettlementRead(options: {
       const storeLabel = await options.storeLabel(tx, scope);
       if (typeof storeLabel !== "string" || !/^[^\p{Cc}\p{Cf}]{1,100}$/u.test(storeLabel))
         return unavailable();
+      const notCovered = async (first: string): Promise<never> => {
+        const again = await options.authorize(tx, {
+          sessionCookie: input.sessionCookie,
+          permission,
+        });
+        if (!again || !sameScope(again, scope)) return unavailable();
+        throw new MerchantSettlementNotCoveredError(first);
+      };
       if (input.businessDate !== null && options.firstBusinessDate !== undefined) {
         const first = await options.firstBusinessDate(tx, scope);
         if (first !== null && !businessDatePattern.test(first)) return unavailable();
-        if (first !== null && input.businessDate < first) {
-          const again = await options.authorize(tx, {
-            sessionCookie: input.sessionCookie,
-            permission,
-          });
-          if (!again || !sameScope(again, scope)) return unavailable();
-          throw new MerchantSettlementNotCoveredError(first);
-        }
+        if (first !== null && input.businessDate < first) return notCovered(first);
       }
-      const window = await options.window(tx, scope, input.businessDate);
+      let window: MerchantSettlementWindow;
+      try {
+        window = await options.window(tx, scope, input.businessDate);
+      } catch (error) {
+        // WP-2423 M160: the business-day owner's "before the Store's records begin" is the same
+        // answer (for instance the last closed day of a Store that opened today).
+        const before = error as { code?: unknown; firstBusinessDate?: unknown } | null;
+        if (
+          before?.code === "MERCHANT_BUSINESS_DAY_BEFORE_RECORDS" &&
+          typeof before.firstBusinessDate === "string" &&
+          businessDatePattern.test(before.firstBusinessDate)
+        )
+          return notCovered(before.firstBusinessDate);
+        throw error;
+      }
       if (
         !businessDatePattern.test(window.businessDate) ||
         (input.businessDate !== null && window.businessDate !== input.businessDate) ||
