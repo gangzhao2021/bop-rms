@@ -52,9 +52,10 @@ export interface CartStateController {
   load(): Promise<void>;
   /**
    * Reads the cart again with what's on screen kept there (and the guest's place on the page with it);
-   * a failed read changes nothing. With nothing on screen yet it is a load.
+   * a failed read changes nothing. With nothing on screen yet it is a load. Resolves whether the
+   * read worked (WP-2423 same-table-ordering: the table poll waits longer after a failure).
    */
-  refresh(): Promise<void>;
+  refresh(): Promise<boolean>;
   removeItem(cartItemReference: string): Promise<void>;
   replaceExpiredCart?(): Promise<void>;
   retry(): Promise<void>;
@@ -98,11 +99,11 @@ export function createCartStateController({
   };
   const currentCart = () => ("cart" in state ? state.cart : null);
 
-  const read = async (quiet: boolean) => {
-    if (commandFlight !== null) return commandFlight;
+  const read = async (quiet: boolean): Promise<boolean> => {
+    if (commandFlight !== null) return commandFlight.then(() => true);
     if (!online) {
       publish({ status: "offline-readonly", cart: currentCart() });
-      return;
+      return false;
     }
     const priorCart = currentCart();
     const revision = ++readRevision;
@@ -110,15 +111,17 @@ export function createCartStateController({
     if (pending === null && !keep) publish({ status: "loading" });
     try {
       const cart = await client.loadCurrent();
-      if (revision !== readRevision) return;
+      if (revision !== readRevision) return true;
       if (!online) publish({ status: "offline-readonly", cart });
       else if (pending !== null) mapError(new CartClientError("network_unknown"), cart, true);
       else publish(cart === null ? { status: "empty" } : { status: "ready", cart });
+      return true;
     } catch (error) {
-      if (revision !== readRevision) return;
+      if (revision !== readRevision) return true;
       if (!online) publish({ status: "offline-readonly", cart: priorCart });
       else if (pending !== null) mapError(new CartClientError("network_unknown"), priorCart, true);
       else if (!keep || quietlyShown(error)) mapError(error, priorCart, false);
+      return false;
     }
   };
   // WP-2423 (guest-cart-503): a quiet re-read keeps a passing fault off the page, but the guest's
@@ -128,7 +131,9 @@ export function createCartStateController({
     (error.code === "cart_table_checking_out" ||
       error.code === "cart_session_expired" ||
       error.code === "cart_replacement_forbidden");
-  const load = () => read(false);
+  const load = async () => {
+    await read(false);
+  };
 
   const mapError = (
     error: unknown,

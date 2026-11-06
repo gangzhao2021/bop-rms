@@ -1,4 +1,4 @@
-import { parseOrderingReference } from "../../domain/cart.js";
+import { parseOrderingInstant, parseOrderingReference } from "../../domain/cart.js";
 import {
   OrderCreationError,
   parseOrderCreationRecord,
@@ -563,6 +563,79 @@ export async function readLatestCartOrder(
   const notMade = await readNotMade(transaction, brand, store, [found.orderReference]);
   return record(found, notMade.has(found.orderReference));
 }
+/**
+ * WP-2423 (same-table-ordering): a table round sent from this Cart in the last 15 minutes — its
+ * number at the table (rounds of the table's Order by time), when, which Guest Session paid it and
+ * which Cart lines it took — so every phone can say "these dishes were sent by someone at your
+ * table", whatever was added to the Cart since. At most 5, newest first. Read on the caller's
+ * transaction with local Brand/Store context set.
+ */
+export interface RecentCartRound {
+  readonly roundNumber: number;
+  readonly sentAt: string;
+  readonly guestSessionReference: string;
+  readonly cartItemReferences: readonly string[];
+}
+export async function readRecentCartRounds(
+  transaction: OrderCreationQueryTransaction,
+  scope: Readonly<{ brandReference: string; storeReference: string }>,
+  value: Readonly<{ cartReference: string; observedAt: string }>,
+): Promise<readonly RecentCartRound[]> {
+  const brand = parseOrderingReference(scope.brandReference),
+    store = parseOrderingReference(scope.storeReference),
+    cart = parseOrderingReference(value.cartReference),
+    observedAt = parseOrderingInstant(value.observedAt);
+  const result = await transaction.query(
+    `SELECT r.round_number::integer AS "roundNumber",
+       to_char(r.submitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "sentAt",
+       r.guest_session_id::text AS "guestSessionReference",
+       COALESCE((SELECT array_agg(i.source_cart_line_id::text ORDER BY i.source_cart_line_id)
+         FROM rms_ordering.order_item i WHERE i.brand_id=$1 AND i.store_id=$2
+           AND i.order_batch_id=r.order_batch_id), '{}') AS "cartItemReferences"
+     FROM (SELECT b.order_batch_id,b.submitted_at,b.source_cart_id,s.guest_session_id,
+             row_number() OVER (PARTITION BY b.order_id ORDER BY b.submitted_at,b.order_batch_id)
+               AS round_number
+           FROM rms_ordering.order_batch b
+           JOIN rms_ordering.order_submission_record s ON s.submission_id=b.submission_id
+             AND s.brand_id=$1 AND s.store_id=$2
+           WHERE b.brand_id=$1 AND b.store_id=$2 AND b.order_id IN (
+             SELECT o.order_id FROM rms_ordering.order_batch o
+             WHERE o.brand_id=$1 AND o.store_id=$2 AND o.source_cart_id=$3)) r
+     WHERE r.source_cart_id=$3 AND r.submitted_at > $4::timestamptz - interval '15 minutes'
+       AND r.submitted_at <= $4::timestamptz
+     ORDER BY r.submitted_at DESC, r.order_batch_id DESC LIMIT 5`,
+    [brand, store, cart, observedAt],
+  );
+  const rows =
+    result !== null && typeof result === "object" && "rows" in result ? result.rows : null;
+  if (!Array.isArray(rows) || rows.length > 5) return unavailable();
+  return Object.freeze(
+    rows.map((row: unknown) => {
+      const raw = exact(row, [
+        "roundNumber",
+        "sentAt",
+        "guestSessionReference",
+        "cartItemReferences",
+      ]);
+      if (
+        typeof raw.roundNumber !== "number" ||
+        !Number.isSafeInteger(raw.roundNumber) ||
+        raw.roundNumber < 1 ||
+        !Array.isArray(raw.cartItemReferences) ||
+        raw.cartItemReferences.length > 100
+      )
+        return unavailable();
+      return Object.freeze({
+        roundNumber: raw.roundNumber,
+        sentAt: parseOrderingInstant(raw.sentAt),
+        guestSessionReference: parseOrderingReference(raw.guestSessionReference),
+        cartItemReferences: Object.freeze(
+          raw.cartItemReferences.map((reference: unknown) => parseOrderingReference(reference)),
+        ),
+      });
+    }),
+  );
+}
 /** WP-2423 M03: one ordered dish as the guest chose it, to put back in the Cart. */
 export interface RestorableOrderLine {
   readonly orderItemReference: string;
@@ -669,5 +742,7 @@ export function createPostgresCartOrderLookup(
       run((transaction) => readLatestCartOrder(transaction, local, value)),
     findRestorable: (value: Readonly<{ cartReference: string; orderReference: string }>) =>
       run((transaction) => readRestorableCartOrder(transaction, local, value)),
+    recentRounds: (value: Readonly<{ cartReference: string; observedAt: string }>) =>
+      run((transaction) => readRecentCartRounds(transaction, local, value)),
   });
 }

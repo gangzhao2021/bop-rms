@@ -87,6 +87,13 @@ export interface CustomerCartView {
       readonly orderNumber: string;
       readonly notMade: boolean;
     } | null;
+    /** WP-2423 (same-table-ordering): a table Cart's rounds sent lately (absent otherwise). */
+    readonly recentRounds?: readonly {
+      readonly roundNumber: number;
+      readonly sentAt: string;
+      readonly sentByThisPhone: boolean;
+      readonly cartItemReferences: readonly string[];
+    }[];
   };
 }
 
@@ -420,6 +427,9 @@ function publicView(value: unknown): CustomerCartView {
     ...(root.cart !== null && typeof root.cart === "object" && "placedOrder" in root.cart
       ? ["placedOrder"]
       : []),
+    ...(root.cart !== null && typeof root.cart === "object" && "recentRounds" in root.cart
+      ? ["recentRounds"]
+      : []),
   ]);
   if (cart.orderType !== "DineIn" && cart.orderType !== "Pickup")
     throw new TypeError("invalid order type");
@@ -534,8 +544,42 @@ function publicView(value: unknown): CustomerCartView {
       quote,
       warnings: codes(cart.warnings),
       placedOrder: placedOrderView(cart.placedOrder, cart.orderType),
+      ...(cart.recentRounds === undefined
+        ? {}
+        : { recentRounds: recentRoundsView(cart.recentRounds, cart.orderType) }),
     }),
   });
+}
+function recentRoundsView(
+  value: unknown,
+  orderType: "DineIn" | "Pickup",
+): NonNullable<CustomerCartView["cart"]["recentRounds"]> {
+  if (orderType !== "DineIn" || !Array.isArray(value) || value.length > 5)
+    throw new TypeError("invalid rounds");
+  return Object.freeze(
+    value.map((candidate) => {
+      const raw = closed(candidate, [
+        "roundNumber",
+        "sentAt",
+        "sentByThisPhone",
+        "cartItemReferences",
+      ]);
+      if (
+        typeof raw.sentByThisPhone !== "boolean" ||
+        !Array.isArray(raw.cartItemReferences) ||
+        raw.cartItemReferences.length > 100
+      )
+        throw new TypeError("invalid round");
+      return Object.freeze({
+        roundNumber: positive(raw.roundNumber, 999),
+        sentAt: canonicalInstant(raw.sentAt),
+        sentByThisPhone: raw.sentByThisPhone,
+        cartItemReferences: Object.freeze(
+          raw.cartItemReferences.map((reference: unknown) => scalar(reference, uuidV7)),
+        ),
+      });
+    }),
+  );
 }
 function placedOrderView(
   value: unknown,

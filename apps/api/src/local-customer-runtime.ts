@@ -523,6 +523,10 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       stores,
       now,
       ...(adders === undefined ? {} : { adders }),
+      rounds: {
+        recent: (input: { cartReference: string; observedAt: string }) =>
+          cartOrders.recentRounds(input),
+      },
       // WP-2423: a timed-out table Cart is replaced through the owner command, not a dead end.
       ...(options.cartReplacement === undefined ? {} : { replacement: options.cartReplacement }),
     };

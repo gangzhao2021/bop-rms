@@ -4,6 +4,7 @@ import {
   type CartErrorCode,
   type CartItemDraft,
   type CartPlacedOrder,
+  type CartRecentRound,
   type CartView,
 } from "./types.js";
 import {
@@ -155,8 +156,30 @@ function view(value: unknown): CartView {
         const placed = placedOrder(cart.placedOrder);
         return placed === null ? {} : { placedOrder: placed };
       })(),
+      ...(cart.recentRounds === undefined ? {} : { recentRounds: recentRounds(cart.recentRounds) }),
     }),
   });
+}
+
+/** WP-2423 (same-table-ordering): the table cart's recent rounds. */
+function recentRounds(value: unknown): readonly CartRecentRound[] {
+  if (!Array.isArray(value) || value.length > 5)
+    throw new CartClientError("cart_service_unavailable");
+  return Object.freeze(
+    value.map((candidate) => {
+      const raw = record(candidate);
+      if (typeof raw.sentByThisPhone !== "boolean" || !Array.isArray(raw.cartItemReferences))
+        throw new CartClientError("cart_service_unavailable");
+      return Object.freeze({
+        roundNumber: integer(raw.roundNumber),
+        sentAt: string(raw.sentAt, canonicalInstant),
+        sentByThisPhone: raw.sentByThisPhone,
+        cartItemReferences: Object.freeze(
+          raw.cartItemReferences.map((reference: unknown) => string(reference, uuidV7)),
+        ),
+      });
+    }),
+  );
 }
 
 /** WP-2423 M03: the guest's order a cart's dishes went to (or still sit in), when named. */

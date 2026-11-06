@@ -30,7 +30,20 @@ export interface CartView {
      * again). Absent or null otherwise (always for a table).
      */
     readonly placedOrder?: CartPlacedOrder | null;
+    /**
+     * WP-2423 (same-table-ordering): a table cart's rounds sent in the last 15 minutes, newest
+     * first, with the cart lines each took; absent when unknown.
+     */
+    readonly recentRounds?: readonly CartRecentRound[];
   };
+}
+
+/** WP-2423 (same-table-ordering): a round sent from this table cart (no names, no payer). */
+export interface CartRecentRound {
+  readonly roundNumber: number;
+  readonly sentAt: string;
+  readonly sentByThisPhone: boolean;
+  readonly cartItemReferences: readonly string[];
 }
 
 /** WP-2423 M03: an order the guest already placed from this cart (its store number for display). */

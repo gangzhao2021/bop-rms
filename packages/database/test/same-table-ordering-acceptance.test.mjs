@@ -7,6 +7,13 @@ import {
   createPostgresGuestParticipantSessionSource,
 } from "../../bop/identity/src/index.ts";
 import { createCustomerCartAdderStanding } from "../../../apps/api/src/customer-cart-adder-standing.ts";
+import {
+  createPostgresCartOrderLookup,
+  createPostgresOrderCreationStore,
+} from "../../rms/ordering/src/index.ts";
+import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
+import { seedSubmissionCart } from "../test-support/dining-order-submission-seed.mjs";
+import { grantPilotApiAcl } from "../test-support/pilot-api-acl.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { createPilotApiRole, dbNow } from "../test-support/sole-operator-brand-gate.mjs";
 
@@ -184,6 +191,96 @@ it("WP-2423 (same-table-ordering): a stranded line's phone is found Gone from it
       } finally {
         await admin.query("ROLLBACK");
       }
+    } finally {
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 (same-table-ordering): every phone at the table learns that a round took the cart's
+ * dishes, from Ordering's own round record (the batch, its submission's Guest Session and the cart
+ * lines it took), not from "the cart's version just before this one": it is still found after
+ * other dishes were added to the cart. Read as the restricted pilot API role; another Store sees
+ * nothing; after 15 minutes it is no longer reported.
+ */
+it("WP-2423 (same-table-ordering): a round sent from the cart is reported with its lines, even after more dishes were added", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_sto_rounds" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const api = "wp2423_rounds_" + context.runId;
+    try {
+      await admin.query(
+        "CREATE ROLE " + api + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+      );
+      await grantPilotApiAcl(admin, api);
+      const runner = {
+        async run(action) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          try {
+            await client.query("BEGIN");
+            await client.query("SET LOCAL ROLE " + api);
+            const value = await action({ query: (sql, values) => client.query(sql, [...values]) });
+            await client.query("COMMIT");
+            return value;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+          }
+        },
+      };
+      const at = new Date(Date.now() - 1000).toISOString();
+      const f = orderWriteFixture({ namespace: "01902423", at });
+      await seedSubmissionCart(admin, f);
+      const created = await createPostgresOrderCreationStore(runner, f.scope).append(f.request);
+      assert.equal(created.status, "Created");
+      const lookup = createPostgresCartOrderLookup(runner, f.scope);
+      const now = new Date().toISOString();
+      const expected = [
+        {
+          roundNumber: 1,
+          sentAt: at,
+          guestSessionReference: f.request.record.guestSessionReference,
+          cartItemReferences: f.cart.items.map((item) => item.cartItemReference).sort(),
+        },
+      ];
+      const rounds = await lookup.recentRounds({
+        cartReference: f.cart.cartReference,
+        observedAt: now,
+      });
+      assert.deepEqual(
+        rounds.map((round) => ({ ...round, cartItemReferences: [...round.cartItemReferences] })),
+        expected,
+      );
+      // Someone adds a dish after the round (the cart moves on twice): the round is still found.
+      await admin.query(
+        "UPDATE rms_ordering.cart SET aggregate_version=aggregate_version+2 WHERE cart_id=$1",
+        [f.cart.cartReference],
+      );
+      assert.equal(
+        (await lookup.recentRounds({ cartReference: f.cart.cartReference, observedAt: now }))
+          .length,
+        1,
+      );
+      // Another Store sees nothing; 15 minutes later it is no longer news.
+      const otherStore = createPostgresCartOrderLookup(runner, {
+        brandReference: f.scope.brandReference,
+        storeReference: id(2),
+      });
+      assert.deepEqual(
+        await otherStore.recentRounds({ cartReference: f.cart.cartReference, observedAt: now }),
+        [],
+      );
+      assert.deepEqual(
+        await lookup.recentRounds({
+          cartReference: f.cart.cartReference,
+          observedAt: new Date(Date.parse(at) + 16 * 60_000).toISOString(),
+        }),
+        [],
+      );
     } finally {
       await admin.end();
     }

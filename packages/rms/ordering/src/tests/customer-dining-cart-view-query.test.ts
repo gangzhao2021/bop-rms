@@ -215,6 +215,57 @@ describe("safe shared Dining Cart display", () => {
       ]);
     }
   });
+  it("WP-2423 same-table-ordering: says which recent rounds took which lines, and whose phone paid", async () => {
+    const recent = vi.fn(async () => [
+      {
+        roundNumber: 2,
+        sentAt: "2026-09-08T12:00:30.000Z",
+        guestSessionReference: id(41),
+        cartItemReferences: [id(50)],
+      },
+      {
+        roundNumber: 1,
+        sentAt: "2026-09-08T11:59:30.000Z",
+        guestSessionReference: id(5),
+        cartItemReferences: [id(51), id(52)],
+      },
+    ]);
+    const base = fixture();
+    const query = createCustomerDiningCartViewQuery({
+      reads: { read: base.read },
+      stores: { getPublicStore: async () => profile() },
+      catalog: { describeMany: base.describeMany },
+      rounds: { recent },
+    });
+    const view = await query.read(request);
+    expect(view?.cart.recentRounds).toEqual([
+      {
+        roundNumber: 2,
+        sentAt: "2026-09-08T12:00:30.000Z",
+        sentByThisPhone: false,
+        cartItemReferences: [id(50)],
+      },
+      {
+        roundNumber: 1,
+        sentAt: "2026-09-08T11:59:30.000Z",
+        sentByThisPhone: true,
+        cartItemReferences: [id(51), id(52)],
+      },
+    ]);
+    expect(recent).toHaveBeenCalledWith({ cartReference: id(4), observedAt: at });
+    // Can't be read: absent (unknown), never an empty "no rounds".
+    const failing = createCustomerDiningCartViewQuery({
+      reads: { read: base.read },
+      stores: { getPublicStore: async () => profile() },
+      catalog: { describeMany: base.describeMany },
+      rounds: {
+        recent: async () => {
+          throw new Error("synthetic outage");
+        },
+      },
+    });
+    expect((await failing.read(request))?.cart).not.toHaveProperty("recentRounds");
+  });
   it("publishes only the existing customer schema and passes no notes or actors to display dependencies", async () => {
     const f = fixture();
     const result = await f.query.read(request);

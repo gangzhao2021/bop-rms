@@ -78,7 +78,31 @@ export interface CustomerCartDisplayView {
       readonly orderNumber: string;
       readonly notMade: boolean;
     } | null;
+    /**
+     * WP-2423 (same-table-ordering): a table Cart's rounds sent in the last 15 minutes (newest
+     * first): the round's number at the table, when, whether this phone paid it, and which Cart
+     * lines it took, so another phone can tell "sent by someone at your table" from "changed".
+     * Absent for a pickup Cart, and when it can't be read.
+     */
+    readonly recentRounds?: readonly CustomerCartRecentRound[];
   };
+}
+export interface CustomerCartRecentRound {
+  readonly roundNumber: number;
+  readonly sentAt: string;
+  readonly sentByThisPhone: boolean;
+  readonly cartItemReferences: readonly string[];
+}
+/** WP-2423 (same-table-ordering): Ordering's own rounds sent from a table Cart. */
+export interface CustomerCartRecentRoundsPort {
+  recent(input: { readonly cartReference: string; readonly observedAt: string }): Promise<
+    readonly {
+      readonly roundNumber: number;
+      readonly sentAt: string;
+      readonly guestSessionReference: string;
+      readonly cartItemReferences: readonly string[];
+    }[]
+  >;
 }
 export interface CustomerCartViewPorts {
   readonly reads: { read(input: unknown): Promise<PickupCartReadResult | null> };
@@ -112,9 +136,11 @@ export interface CustomerDiningCartViewPorts {
    * can no longer act at the table, so anyone may remove it. Optional and fail-open (no mark).
    */
   readonly adders?: CartAdderStandingPort;
+  readonly rounds?: CustomerCartRecentRoundsPort;
 }
 type ViewPorts = Omit<CustomerCartViewPorts, "reads"> & {
   readonly adders?: CartAdderStandingPort;
+  readonly rounds?: CustomerCartRecentRoundsPort;
   readonly reads: {
     read(input: unknown): Promise<PickupCartReadResult | DiningCartReadResult | null>;
   };
@@ -376,6 +402,41 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
             // Fail-open: no line is marked; the remove command checks again at its own instant.
           }
         }
+        // WP-2423 (same-table-ordering): rounds this table Cart sent lately (fail-open: absent).
+        let recentRounds: readonly CustomerCartRecentRound[] | undefined;
+        if (mode === "DineIn" && ports.rounds !== undefined && first.viewer !== null) {
+          try {
+            const rounds = await ports.rounds.recent({
+              cartReference: cart.cartReference,
+              observedAt: first.observedAt,
+            });
+            if (Array.isArray(rounds) && rounds.length <= 5)
+              recentRounds = Object.freeze(
+                rounds.map((round) => {
+                  if (
+                    !Number.isSafeInteger(round.roundNumber) ||
+                    round.roundNumber < 1 ||
+                    !Array.isArray(round.cartItemReferences)
+                  )
+                    throw new Error("bad round");
+                  return Object.freeze({
+                    roundNumber: round.roundNumber,
+                    sentAt: parseOrderingInstant(round.sentAt),
+                    sentByThisPhone:
+                      parseOrderingReference(round.guestSessionReference) ===
+                      first.viewer?.guestSessionReference,
+                    cartItemReferences: Object.freeze(
+                      round.cartItemReferences.map((reference: string) =>
+                        String(parseOrderingReference(reference)),
+                      ),
+                    ),
+                  });
+                }),
+              );
+          } catch {
+            recentRounds = undefined;
+          }
+        }
         const items = Object.freeze(
           cart.items.map((item, index) => {
             const description = closed(descriptions[index], [
@@ -518,6 +579,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
                   }),
             warnings: Object.freeze([] as string[]),
             placedOrder: final.placedOrder,
+            ...(recentRounds === undefined ? {} : { recentRounds }),
           }),
         });
       } catch (error) {

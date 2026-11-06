@@ -20,7 +20,9 @@ import {
 } from "./CheckoutDetailsForm.js";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate } from "react-router";
-import { createBrowserCustomerCartClient } from "../cart/cart-client.js";
+import { createBrowserCustomerCartClient, type CustomerCartClient } from "../cart/cart-client.js";
+import { startTableCartPoll } from "../cart/table-cart-poll.js";
+import { tableCartChange, type TableCartChange } from "../cart/table-cart-change.js";
 import { formatCartMoney } from "../cart/format-money.js";
 import { checkoutInProgressMessage, orderProcessingMessage } from "../cart/types.js";
 import { describeConfiguration } from "../cart/CartPage.js";
@@ -43,6 +45,7 @@ import {
   commonText,
   lineEstimateLabel,
   quoteIssueMessage,
+  tableCartAddedDishes,
 } from "../journey/messages.js";
 import {
   createCheckoutClient,
@@ -76,7 +79,10 @@ export function CheckoutPage({
   diningClient,
   sendClient,
   sessionController: providedSession,
+  cartClient,
 }: {
+  /** WP-2423 (same-table-ordering): reads the table cart while this phone checks out. */
+  readonly cartClient?: Pick<CustomerCartClient, "loadCurrent">;
   /** DEC-DINE-IN-PAY-LATER: the table's payment timing (tests pass their own). */
   readonly diningClient?: DiningSessionClient;
   readonly sendClient?: Pick<ReturnType<typeof createSessionPaymentClient>, "sendToKitchen">;
@@ -125,6 +131,9 @@ export function CheckoutPage({
     readonly contact: PickupContactDraft;
   } | null>(null);
   const [continueRequested, setContinueRequested] = useState(false);
+  // WP-2423 (same-table-ordering): what another phone at the table did to this cart meanwhile.
+  const [tableChange, setTableChange] = useState<TableCartChange | null>(null);
+  const [tableCartReader] = useState(() => cartClient ?? createBrowserCustomerCartClient());
   const [sendClientValue] = useState(() => sendClient ?? createSessionPaymentClient());
   const [sendState, setSendState] = useState<
     "idle" | "sending" | "failed" | "pay_first" | "store_closed" | "items_short"
@@ -227,6 +236,51 @@ export function CheckoutPage({
   const cart = "cart" in state ? state.cart : null;
   const dineIn = cart?.cart.orderType === "DineIn";
   const quote = state.status === "ready" ? state.quote : null;
+  // WP-2423 (same-table-ordering): before payment starts, a table checkout re-reads the cart every
+  // few seconds (only on screen and online, slower after a failure), so this phone learns at once
+  // that someone at the table added a dish, or sent these dishes in their own round.
+  const loadedCart = useRef(cart);
+  loadedCart.current = cart;
+  const pollAllowed = useRef(false);
+  pollAllowed.current =
+    dineIn &&
+    cart !== null &&
+    sessionState.status === "idle" &&
+    sendState === "idle" &&
+    !continueRequested &&
+    !detailsLocked &&
+    (tableChange === null || tableChange.kind === "changed");
+  const checkTable = useRef(async (): Promise<boolean> => false);
+  checkTable.current = async () => {
+    const loaded = loadedCart.current;
+    if (loaded === null || loaded.cart.orderType !== "DineIn") return true;
+    const current = await tableCartReader.loadCurrent();
+    if (loadedCart.current !== loaded) return true;
+    const change = tableCartChange(loaded, current);
+    setTableChange(change.kind === "unchanged" ? null : change);
+    return true;
+  };
+  useEffect(() => {
+    if (!dineIn) return;
+    const poll = startTableCartPoll({
+      read: () => checkTable.current().catch(() => false),
+      shouldRead: () => pollAllowed.current,
+      visible: () => typeof document === "undefined" || document.visibilityState === "visible",
+      online: () => typeof navigator === "undefined" || navigator.onLine !== false,
+    });
+    const wake = () => poll.wake();
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    return () => {
+      poll.stop();
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("online", wake);
+    };
+  }, [dineIn]);
+  // A refused start or details save because the cart moved: say what happened at the table.
+  useEffect(() => {
+    if (sessionState.status === "conflict" && dineIn) void checkTable.current().catch(() => false);
+  }, [sessionState.status, dineIn]);
   const menu = usePublishedMenu(
     menuContext,
     menuClient,
@@ -329,7 +383,8 @@ export function CheckoutPage({
     ) &&
     detailsSelection !== null;
   const sessionAlert = checkoutSessionAlert(sessionState, state.status === "offline");
-  const canContinue = paymentOpen && !detailsLocked && (detailsReady || detailsSubmittable);
+  const canContinue =
+    paymentOpen && !detailsLocked && (detailsReady || detailsSubmittable) && tableChange === null;
   const startPayment = () => {
     if (!detailsSelection || quoteExpired || tipAmount === null) return;
     selectedTip.current ??= { selectionReference: uuidv7(), amountMinor: tipAmount };
@@ -415,6 +470,26 @@ export function CheckoutPage({
       <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
         <PageHeading title={checkoutText.pageTitle} />
         <AlreadyOrdered placedOrder={cart.cart.placedOrder} dishesInCart cartLink />
+      </CustomerPage>
+    );
+  // WP-2423 (same-table-ordering): these dishes left in a round someone at the table sent:
+  // nothing here to pay, and no tip asked.
+  if (tableChange?.kind === "sent")
+    return (
+      <CustomerPage step="checkout" store={resolvedStore} className="checkout-page">
+        <PageHeading title={checkoutText.pageTitle} />
+        <section role="status" className="checkout-attention">
+          <p>
+            {checkoutText.tableCartSent(tableChange.roundNumber, tableChange.byThisPhone, payLater)}
+          </p>
+          {tableChange.cartHasDishes ? <p>{checkoutText.tableCartSentMore}</p> : null}
+          <div className="cart-state__actions">
+            <Link className="checkout-continue__button" to="/dine-in/session">
+              {checkoutText.seeYourTable}
+            </Link>
+            {tableChange.cartHasDishes ? <Link to="/cart">{checkoutText.goToYourCart}</Link> : null}
+          </div>
+        </section>
       </CustomerPage>
     );
   return (
@@ -662,7 +737,17 @@ export function CheckoutPage({
               now={now}
               selection={detailsSelection}
               // WP-2423 live minor 24: the cart moved (another tab ordered it): read it again.
-              onCheckoutChanged={() => void controller.load()}
+              onCheckoutChanged={() => {
+                // WP-2423 (same-table-ordering): at a table, say what someone there did first.
+                if (!dineIn) {
+                  void controller.load();
+                  return;
+                }
+                void checkTable.current().then(
+                  () => undefined,
+                  () => void controller.load(),
+                );
+              }}
               payLater={payLater}
               unsavedContact={
                 unsavedContact?.cartReference === detailsSelection.cartReference
@@ -758,6 +843,12 @@ export function CheckoutPage({
             </p>
           ) : null}
           {sendState === "sending" ? <p role="status">{checkoutText.placingOrder}</p> : null}
+          {tableChange?.kind === "changed" ? (
+            // WP-2423 (same-table-ordering): beside the action, where the guest is looking.
+            <p role="status">
+              {checkoutText.tableCartChangedBy(tableCartAddedDishes(tableChange.added))}
+            </p>
+          ) : null}
           {menuUpdated && sessionState.status === "idle" && sendState === "idle" ? (
             <p role="status">{checkoutText.menuUpdatedPricedAgain}</p>
           ) : null}
@@ -793,9 +884,20 @@ export function CheckoutPage({
               ) : null}
             </p>
           ) : null}
-          {(sendState === "failed" || sendState === "pay_first") &&
-          sessionState.status === "ready" &&
-          selectedTip.current !== null ? (
+          {tableChange?.kind === "changed" && sessionState.status === "idle" ? (
+            <button
+              type="button"
+              className="checkout-continue__button"
+              onClick={() => {
+                setTableChange(null);
+                void controller.load();
+              }}
+            >
+              {checkoutText.checkOutWithNewTotal}
+            </button>
+          ) : (sendState === "failed" || sendState === "pay_first") &&
+            sessionState.status === "ready" &&
+            selectedTip.current !== null ? (
             <button
               type="button"
               className="checkout-continue__button"

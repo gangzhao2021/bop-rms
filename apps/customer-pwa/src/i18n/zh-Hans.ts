@@ -18,6 +18,18 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Add something from the menu to get started.": "先从菜单中加点东西吧。",
   "Add to cart": "加入购物车",
   "Add to your order": "加入订单",
+  "Someone at your table changed the cart.": "同桌有人改了购物车。",
+  "Someone at your table changed the cart: added {dishes}.": "同桌有人改了购物车：加了 {dishes}。",
+  "{dish} ×{quantity}": "{dish} ×{quantity}",
+  ", ": "、",
+  "Check out with the new total": "用新的合计结账",
+  "You already sent these dishes (round {round}).": "这些菜你已经送出（第 {round} 轮）。",
+  "These dishes were sent to the kitchen by someone at your table (round {round}).":
+    "这些菜已由同桌送去厨房（第 {round} 轮）。",
+  "These dishes were paid and sent by someone at your table (round {round}).":
+    "这些菜已由同桌付款送出（第 {round} 轮）。",
+  "Dishes added since then are still in the cart.": "之后加的菜还在购物车里。",
+  "Round {round} was sent by someone at your table.": "第 {round} 轮已由同桌送出。",
   "We couldn’t add you to the table just now. Please try again.":
     "暂时没能加入这一桌，请再试一次。",
   "If it still doesn’t work, ask staff for help.": "如果还是不行，请找店员帮忙。",

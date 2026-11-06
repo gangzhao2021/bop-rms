@@ -66,7 +66,7 @@ function controller(state: CartState): CartStateController {
   return {
     getState: () => state,
     load: async () => undefined,
-    refresh: async () => undefined,
+    refresh: async () => true,
     removeItem: async () => undefined,
     retry: async () => undefined,
     setOnline: () => undefined,
@@ -862,7 +862,8 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
   });
 
   it("WP-2423 guest-cart-503: the open table cart re-reads only on screen and never mid-send", () => {
-    expect(cartPollIntervalMs).toBe(15_000);
+    // WP-2423 same-table-ordering: within seconds, not 15 s.
+    expect(cartPollIntervalMs).toBe(4_000);
     const ready = { status: "ready", cart: tableCart() } as const;
     expect(cartPollShouldRead("visible", { status: "idle" }, ready)).toBe(true);
     expect(cartPollShouldRead("hidden", { status: "idle" }, ready)).toBe(false);

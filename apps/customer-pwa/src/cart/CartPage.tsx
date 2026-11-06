@@ -35,6 +35,7 @@ import { useTablePaymentTiming, type TableTimingAnswer } from "../dining/table-t
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { formatMinutesUntil, formatMoney } from "../journey/format.js";
 import { SlowWaitNote } from "../journey/SlowWaitNote.js";
+import { startTableCartPoll, tableCartPollIntervalMs } from "./table-cart-poll.js";
 import {
   quoteConsistentLinePrices,
   cartLinesSubtotal,
@@ -196,6 +197,12 @@ function CartItem({
     </article>
   );
 }
+
+/** WP-2423 (same-table-ordering): the newest round from this cart, when another phone sent it. */
+export const tableRoundSentByOther = (cart: CartView): number | null => {
+  const latest = cart.cart.recentRounds?.[0];
+  return latest === undefined || latest.sentByThisPhone ? null : latest.roundNumber;
+};
 
 /** WP-2423 (guest-cart-503): the Store marked this line as not sellable now (stable fact). */
 const cartLineUnsellable = (item: CartView["cart"]["items"][number]) =>
@@ -550,6 +557,19 @@ function CartContent({
           <Link to="/menu">{commonText.browseMenu}</Link>
         </div>
       </StateMessage>
+    ) : state.status === "ready" && tableRoundSentByOther(state.cart) !== null ? (
+      // WP-2423 (same-table-ordering): another phone's round took this cart's dishes.
+      <StateMessage heading={commonText.emptyCartHeading}>
+        <p role="status">
+          {cartText.line.roundSentByTable(tableRoundSentByOther(state.cart) ?? 1)}
+        </p>
+        <div className="cart-state__actions">
+          <Link className="cart-primary-link" to="/dine-in/session">
+            {cartText.seeYourTable}
+          </Link>
+          <Link to="/menu">{commonText.browseMenu}</Link>
+        </div>
+      </StateMessage>
     ) : (
       <StateMessage heading={commonText.emptyCartHeading}>
         <p>{cartText.emptyBody}</p>
@@ -665,6 +685,11 @@ function CartContent({
           {cartText.quoteExpired}
         </div>
       ) : null}
+      {tableRoundSentByOther(cart) === null ? null : (
+        <p className="cart-stale" role="status">
+          {cartText.line.roundSentByTable(tableRoundSentByOther(cart) ?? 1)}
+        </p>
+      )}
       <div className="cart-layout" aria-busy={pending}>
         <section className="cart-items" aria-labelledby="cart-items-heading">
           <div className="cart-page__subheading">
@@ -780,8 +805,12 @@ function CartContent({
   );
 }
 
-/** WP-2423 (guest-cart-503): how often an open table cart re-reads while on screen. */
-export const cartPollIntervalMs = 15_000;
+/**
+ * WP-2423 (guest-cart-503, same-table-ordering): how often an open table cart re-reads while on
+ * screen, so a dish another phone adds shows here within seconds (`table-cart-poll.ts`: never
+ * hidden or offline, slower after a failure). A pickup cart doesn't poll.
+ */
+export const cartPollIntervalMs = tableCartPollIntervalMs;
 /**
  * Whether the open table cart re-reads now: only on screen, with the cart shown as it stands, and
  * never while a change or a round is on its way (the cart holds still for those).
@@ -891,21 +920,24 @@ export function CartPage({
   const dineIn = cart?.orderType === "DineIn";
   useEffect(() => {
     if (!dineIn) return;
-    const tick = () => {
-      if (
+    const poll = startTableCartPoll({
+      read: () => controller.refresh(),
+      shouldRead: () =>
         cartPollShouldRead(
           typeof document === "undefined" ? "visible" : document.visibilityState,
           round.getState(),
           controller.getState(),
-        )
-      )
-        void controller.refresh();
-    };
-    const timer = window.setInterval(tick, cartPollIntervalMs);
-    document.addEventListener("visibilitychange", tick);
+        ),
+      visible: () => typeof document === "undefined" || document.visibilityState === "visible",
+      online: () => typeof navigator === "undefined" || navigator.onLine !== false,
+    });
+    const wake = () => poll.wake();
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
     return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", tick);
+      poll.stop();
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("online", wake);
     };
   }, [dineIn, controller, round]);
   // Leaving forgets a stop; a send that may have happened stays, to be finished when the guest is back.

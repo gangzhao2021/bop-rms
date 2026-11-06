@@ -243,7 +243,7 @@ function staticCartController(): CartStateController {
   return Object.freeze({
     getState: () => cartState,
     load: async () => undefined,
-    refresh: async () => undefined,
+    refresh: async () => true,
     removeItem: async () => undefined,
     retry: async () => undefined,
     setOnline: () => undefined,

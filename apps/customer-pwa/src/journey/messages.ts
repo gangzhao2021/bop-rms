@@ -69,6 +69,17 @@ const lineEstimateReasons: Readonly<Record<string, string>> = Object.freeze({
   },
 });
 
+/** WP-2423 (same-table-ordering): "Dumplings ×2, Tea ×1" in the guest's language. */
+export function tableCartAddedDishes(
+  added: readonly { readonly displayName: string; readonly quantity: number }[],
+): string {
+  return added
+    .map((line) =>
+      t("{dish} ×{quantity}", { dish: line.displayName, quantity: String(line.quantity) }),
+    )
+    .join(t(", "));
+}
+
 /** Sentence for a cart line warning, or null when the code carries nothing a customer can act on. */
 export function cartItemWarningMessage(code: string): string | null {
   // Both are said by the line's ownership sentence instead.
@@ -331,6 +342,9 @@ export const cartText = Object.freeze({
     get addedByPhoneThatLeft() {
       return t("Added by a phone that has left this table. Anyone at the table can remove it.");
     },
+    /** WP-2423 (same-table-ordering): another phone sent a round from this cart lately. */
+    roundSentByTable: (round: number) =>
+      t("Round {round} was sent by someone at your table.", { round: String(round) }),
     get removeUnavailableFirst() {
       return t("Remove the dishes that aren’t available right now, then order.");
     },
@@ -588,6 +602,36 @@ export const checkoutText = Object.freeze({
   get cartChanged() {
     return t("Your cart changed. Refresh to price the current cart.");
   },
+  /** WP-2423 (same-table-ordering): another phone at the table changed the cart meanwhile. */
+  /** `dishes`: what was added, as `tableCartAddedDishes` words it ("" when nothing was). */
+  tableCartChangedBy: (dishes: string) =>
+    dishes === ""
+      ? t("Someone at your table changed the cart.")
+      : t("Someone at your table changed the cart: added {dishes}.", { dishes }),
+  get checkOutWithNewTotal() {
+    return t("Check out with the new total");
+  },
+  /** WP-2423 (same-table-ordering): these dishes left in a round someone at the table sent. */
+  tableCartSent: (round: number, byThisPhone: boolean, payLater: boolean) =>
+    byThisPhone
+      ? t("You already sent these dishes (round {round}).", { round: String(round) })
+      : payLater
+        ? t("These dishes were sent to the kitchen by someone at your table (round {round}).", {
+            round: String(round),
+          })
+        : t("These dishes were paid and sent by someone at your table (round {round}).", {
+            round: String(round),
+          }),
+  get tableCartSentMore() {
+    return t("Dishes added since then are still in the cart.");
+  },
+  get seeYourTable() {
+    return t("See your table");
+  },
+  get goToYourCart() {
+    return t("Go to your cart");
+  },
+
   get cartValidation() {
     return t(
       "Something in your cart can’t be ordered as selected. Review your cart, then refresh.",

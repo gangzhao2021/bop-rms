@@ -358,6 +358,37 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
   });
 
+  it("WP-2423 same-table-ordering: a table Cart passes on its recent rounds; a pickup Cart can't", async () => {
+    const recentRounds = [
+      {
+        roundNumber: 2,
+        sentAt: "2026-08-02T20:00:00.000Z",
+        sentByThisPhone: false,
+        cartItemReferences: [id(2)],
+      },
+    ];
+    port.result = {
+      status: "Found",
+      view: view({ orderType: "DineIn", serviceMode: "DineIn", placedOrder: null, recentRounds }),
+    };
+    const response = await request("/bff/customer/cart", { headers: headers() });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as CustomerCartView).cart.recentRounds).toEqual(recentRounds);
+    for (const overrides of [
+      { recentRounds },
+      {
+        orderType: "DineIn" as const,
+        recentRounds: [{ ...recentRounds[0], cartItemReferences: ["not-a-reference"] }],
+      },
+    ]) {
+      port.result = { status: "Found", view: view(overrides as never) };
+      expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
+    }
+    port.result = { status: "Found", view: view() };
+    const plain = await request("/bff/customer/cart", { headers: headers() });
+    expect((await plain.json()) as CustomerCartView).not.toHaveProperty("cart.recentRounds");
+  });
+
   it("WP-2423 M03: an emptied pickup Cart names the guest's Order its dishes went to", async () => {
     const placedOrder = { orderReference: id(9), orderNumber: "13", notMade: false };
     port.result = {
