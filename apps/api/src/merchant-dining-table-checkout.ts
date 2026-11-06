@@ -19,6 +19,8 @@ import {
   listOrderItemPrices,
   listOrderPriceReductions,
   listOrderBillOrders,
+  listOrderDiningSessions,
+  listOrderMergedInto,
   listStoreDiningSessionOrders,
   createPostgresStaffDiningRoundEntryStore,
   computeBillTaxRounding,
@@ -810,6 +812,61 @@ export async function tableRefundedMinor(
     ...card,
     ...online.filter((refund) => refund.outcome?.status !== "Failed"),
   ].reduce((sum, refund) => sum + refund.amountMinor, 0n);
+}
+
+/**
+ * WP-2423 DEC-TAX-WHOLE-RECEIPT (docs/spec/design/tax-whole-receipt.md): this Order's share of its
+ * bill's tax rounding, for the Order's own detail, so the table panel and Orders read the figure
+ * the checkout takes. 0 for an Order with no pay-at-end rounds (pickup, counter, a table paying
+ * each round first): each of its rounds is its own receipt. Once the bill has any payment (or was
+ * written off) the recorded version is the answer, without reading the table (it may be closed
+ * long since); before that, the bill as checkout reads it now. A read never records. Fails closed
+ * (TABLE_CHECKOUT_UNAVAILABLE) only when neither can be read.
+ */
+export async function readOrderTaxRoundingShare(
+  tx: ConsumerTransaction,
+  scope: Scope,
+  input: {
+    readonly orderReference: string;
+    readonly observedAt: string;
+    authorize(): Promise<boolean>;
+  },
+): Promise<bigint> {
+  const owner = { brandReference: scope.brandReference, storeReference: scope.storeReference };
+  const allowed = async () => (await input.authorize()) === true;
+  const order = input.orderReference;
+  const rounds = await createPostgresOrderPayLaterConfirmationStore({
+    ...owner,
+    quoteVersion: 2,
+    sha256,
+    authorize: allowed,
+  }).listByOrders({ transaction: tx, orderReferences: [order] });
+  if (rounds.length === 0) return 0n;
+  // A table merged into another is on that table's bill (DEC-DINING-TABLE-MERGE).
+  const billOrder = (await listOrderMergedInto(tx, owner, [order])).get(order) ?? order;
+  const payments = createPostgresDiningTableSettlementStore({
+    scope,
+    authorize: async (_tx, value) => value.orderReference === billOrder && (await allowed()),
+  });
+  // The same test as readDiningTableBill: anything paid, being paid online, or written off.
+  const anyPayment =
+    (await payments.listByOrders(tx, [billOrder])).length > 0 ||
+    (await payments.listOnlinePaymentsByOrders(tx, [billOrder])).length > 0 ||
+    (await payments.listWriteOffsByOrders(tx, [billOrder])).length > 0;
+  if (anyPayment)
+    return ((await loadBillTaxRounding(tx, owner, billOrder))?.lines ?? [])
+      .filter((line) => line.orderReference === order)
+      .reduce((sum, line) => sum + line.amountMinor, 0n);
+  const session = (await listOrderDiningSessions(tx, owner, [billOrder])).get(billOrder);
+  if (session === undefined) return fail("TABLE_CHECKOUT_UNAVAILABLE");
+  const bill = await readDiningTableBill(tx, scope, {
+    diningSessionReference: session,
+    observedAt: input.observedAt,
+    authorize: allowed,
+  });
+  return bill.rounds
+    .filter((round) => round.orderReference === order)
+    .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
 }
 
 export const publicBill = (

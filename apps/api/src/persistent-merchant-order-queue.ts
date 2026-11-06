@@ -69,7 +69,11 @@ import {
 } from "./merchant-order-staff-cancellation.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
-import { readDiningTableBill, tableRefundedMinor } from "./merchant-dining-table-checkout.js";
+import {
+  readDiningTableBill,
+  readOrderTaxRoundingShare,
+  tableRefundedMinor,
+} from "./merchant-dining-table-checkout.js";
 import { withOptionalRead } from "./merchant-round-business-date.js";
 import { readPaidOrderWatch } from "./merchant-paid-order-watch.js";
 import { readItemCancellationRefund } from "./merchant-order-item-staff-cancellation.js";
@@ -1159,6 +1163,21 @@ export function createPersistentMerchantOrderQueue(options: {
                       only.orderReference,
                     )
                   : 0n) + (cardMachineTips.get(only.orderReference) ?? 0n);
+          // WP-2423 DEC-TAX-WHOLE-RECEIPT: a pay-at-end table's tax is rounded once over its bill;
+          // this Order's share of that rounding is part of its total (as checkout charges it). The
+          // lines' total is before comps, so Total less the comps is what checkout asks for.
+          const taxRoundingMinor =
+            lines === null || only === undefined || scoped === null || tenantReference === null
+              ? 0n
+              : await readOrderTaxRoundingShare(
+                  businessTransaction,
+                  { tenantReference, ...scoped },
+                  {
+                    orderReference: only.orderReference,
+                    observedAt: new Date(Date.parse(String(source.now()))).toISOString(),
+                    authorize: async () => stillAllowed(),
+                  },
+                );
           const detailLines =
             lines === null || only === undefined
               ? lines
@@ -1166,6 +1185,16 @@ export function createPersistentMerchantOrderQueue(options: {
                   ...lines,
                   totals: Object.freeze({
                     ...lines.totals,
+                    taxRounding: Object.freeze({
+                      amountMinor: taxRoundingMinor.toString(),
+                      currencyCode: lines.totals.total.currencyCode,
+                    }),
+                    total: Object.freeze({
+                      amountMinor: (
+                        BigInt(lines.totals.total.amountMinor) + taxRoundingMinor
+                      ).toString(),
+                      currencyCode: lines.totals.total.currencyCode,
+                    }),
                     tip: Object.freeze({
                       amountMinor: tipMinor.toString(),
                       currencyCode: lines.totals.total.currencyCode,

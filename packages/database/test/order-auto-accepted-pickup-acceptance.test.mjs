@@ -364,6 +364,24 @@ it("nothing left to refund: Can't make it and the System close still end it, and
         (item) => item.orderReference === handGiven.orderReference,
       );
       assert.equal(row.batches[0].canCantMake, true);
+      // DEC-TAX-WHOLE-RECEIPT: a pickup is its own receipt; its detail has no bill tax rounding
+      // and its total is its lines' as charged.
+      const detail = await createPersistentMerchantOrderQueue({
+        persistence: { ...staff.persistence, now: world.now },
+        quoteVersion: 1,
+        acceptanceConfigured: true,
+      })({
+        sessionCookie: staff.sessionCookie,
+        afterOrderReference: null,
+        orderReference: handGiven.orderReference,
+      });
+      assert.equal(detail.lines.totals.taxRounding.amountMinor, "0");
+      assert.equal(
+        detail.lines.totals.total.amountMinor,
+        detail.lines.items
+          .reduce((sum, line) => sum + BigInt(line.total.amountMinor), 0n)
+          .toString(),
+      );
       const answer = await refuse(handGiven);
       assert.equal(answer.status, "Cancelled");
       // Nothing more goes back: the answer says it was already refunded.

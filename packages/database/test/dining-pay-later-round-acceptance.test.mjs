@@ -2091,6 +2091,37 @@ async function journey(journeyEnding) {
               .toString(),
             paid: null,
           });
+          // DEC-TAX-WHOLE-RECEIPT: each Order's detail (the table panel's "This table's order")
+          // carries its own rounds' share of the bill's tax rounding; the host's and the merged
+          // table's details add up to the bill the panel's whole-bill line and checkout show.
+          const mergedBill = await bill();
+          const details = [];
+          for (const reference of [orderReference, mOrder])
+            details.push(
+              await createPersistentMerchantOrderQueue({
+                persistence: persistenceOf(server),
+                quoteVersion: 1,
+                acceptanceConfigured: true,
+              })({
+                sessionCookie: server.sessionCookie,
+                afterOrderReference: null,
+                orderReference: reference,
+              }),
+            );
+          const shareOf = (reference) =>
+            mergedBill.rounds
+              .filter((round) => round.orderReference === reference)
+              .reduce((sum, round) => sum + BigInt(round.taxRoundingMinor), 0n);
+          assert.deepEqual(
+            details.map((detail) => detail.lines.totals.taxRounding.amountMinor),
+            [shareOf(orderReference).toString(), shareOf(mOrder).toString()],
+          );
+          assert.equal(
+            details
+              .reduce((sum, detail) => sum + BigInt(detail.lines.totals.total.amountMinor), 0n)
+              .toString(),
+            mergedBill.owed.totalMinor,
+          );
 
           // ── The table checks out and splits "each pays own rounds": T-M's phone pays its own
           // round on the phone (the guests' real payment entry), staff take the rest in cash.
@@ -4110,6 +4141,28 @@ async function journey(journeyEnding) {
           assert.equal(two.split.stale, true);
           const resplit = await splitInTwo();
           assert.equal(resplit.status, "Recorded");
+          // The Order's detail (the table panel and Orders) reads its share of the bill's tax
+          // rounding, and its Total less the comps (listed apart, "To pay after comps") is what
+          // checkout asks for — before payment (as checkout reads it now) and after.
+          const detailAgreesWithCheckout = async (expectedOwedMinor) => {
+            const detail = await createPersistentMerchantOrderQueue({
+              persistence: persistenceOf(server),
+              quoteVersion: 1,
+              acceptanceConfigured: true,
+            })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
+            const comps = detail.items[0].batches
+              .flatMap((batch) => batch.compedItems)
+              .reduce((sum, item) => sum + BigInt(item.amountMinor), 0n);
+            assert.ok(comps > 0n);
+            assert.equal(detail.lines.totals.taxRounding.amountMinor, "1");
+            assert.equal(
+              (BigInt(detail.lines.totals.total.amountMinor) - comps).toString(),
+              expectedOwedMinor,
+            );
+            return detail;
+          };
+          const unpaidDetail = await detailAgreesWithCheckout(resplit.bill.owed.totalMinor);
+          assert.equal(unpaidDetail.items[0].tableBill.totalMinor, resplit.bill.owed.totalMinor);
           const versions = await recorded();
           const last = versions.at(-1);
           assert.deepEqual(
@@ -4221,6 +4274,8 @@ async function journey(journeyEnding) {
             [orderReference],
           );
           assert.equal(lines[0].rounds, owed.toString());
+          // Paid: the detail reads the recorded rounding, equal to what the settlement took.
+          await detailAgreesWithCheckout(lines[0].rounds);
           // Frozen once paid: the bill keeps the recorded rounding; nothing new is recorded.
           assert.equal(card.bill.taxRoundingMinor, "1");
           assert.deepEqual(await recorded(), versions);
@@ -4291,6 +4346,36 @@ async function journey(journeyEnding) {
             })(),
             /do not add up to the total/u,
           );
+          // The table closes as the Tables page does it (the Order, then the table): its Order's
+          // detail still reads the recorded rounding and equals what the settlement took.
+          const progress = await createMerchantDiningOrderProgress({
+            persistence: persistenceOf(server),
+            locale: "en-CA",
+            authentication: server.authentication,
+          })({ ...as(server), query: { orderReference } });
+          const closed = await createMerchantDiningOrderCloseCommand({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            resolveConfiguration: createDiningOrderCloseConfiguration({
+              ...ownerScope,
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+            newReference: fresh,
+            audit: { retentionPolicyCode: "ORDER_AUDIT", retentionPolicyVersion: 1 },
+          })({
+            ...as(server),
+            command: {
+              orderReference,
+              operationReference: fresh(),
+              expectedOrderVersion: progress.currentOrderVersion,
+              expectedClosureVersion: progress.closureVersion,
+              reasonCode: "ORDER_COMPLETED",
+            },
+          });
+          assert.equal(closed.status, "Committed");
+          assert.equal((await closing(server, "Finalize")).phase, "Closed");
+          await detailAgreesWithCheckout(lines[0].rounds);
         }
 
         async function compedWholeEnding() {

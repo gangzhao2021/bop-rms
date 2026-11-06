@@ -328,6 +328,7 @@ it("WP-2423: shows what was ordered with options, notes and totals", () => {
           tax: money("182"),
           fee: money("0"),
           total: money("1582"),
+          taxRounding: money("0"),
           tip: money("237"),
         },
       }}
@@ -351,6 +352,7 @@ it("WP-2423: shows what was ordered with options, notes and totals", () => {
             tax: money("182"),
             fee: money("0"),
             total: money("1582"),
+            taxRounding: money("0"),
             tip,
           },
         }}
@@ -999,6 +1001,7 @@ function parseCurrentOrderDetailFixtureLines() {
       tax: money("0"),
       fee: money("0"),
       total: money("1576"),
+      taxRounding: money("0"),
       tip: money("209"),
     },
   };

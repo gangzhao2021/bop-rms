@@ -618,6 +618,8 @@ const detailView = {
       tax: money("260"),
       fee: money("0"),
       tip: money("0"),
+      // DEC-TAX-WHOLE-RECEIPT: the Order's share of its table bill's tax rounding (in the total).
+      taxRounding: money("0"),
       total: money("2260"),
     },
   } as Queue["lines"],
@@ -636,6 +638,8 @@ const pickupDetailView = {
       tax: money("130"),
       fee: money("0"),
       tip: money("0"),
+      // DEC-TAX-WHOLE-RECEIPT: the Order's share of its table bill's tax rounding (in the total).
+      taxRounding: money("0"),
       total: money("1130"),
     },
   } as Queue["lines"],

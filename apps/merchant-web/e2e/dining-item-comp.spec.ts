@@ -125,8 +125,9 @@ test("@production a manager discounts a started dish from the Tables page; only 
       },
     ],
     canRequestAcceptance: false,
-    // The table's bill (Payment's figure): 22.60, then 1.70 off.
-    tableBill: { totalMinor: discounted ? "2090" : "2260", paid: null },
+    // The table's bill (Payment's figure): 22.60, then 1.70 off and the bill's tax rounded once
+    // (DEC-TAX-WHOLE-RECEIPT: 18.50 × 13% = 2.405 → 2.41, the rounds charged 2.40): 20.91.
+    tableBill: { totalMinor: discounted ? "2091" : "2260", paid: null },
     currentPhase: "InProgress",
     currentVersion: 3,
     unfulfillable: null,
@@ -151,7 +152,9 @@ test("@production a manager discounts a started dish from the Tables page; only 
             discount: money("0"),
             tax: money("260"),
             fee: money("0"),
-            total: money("2260"),
+            // The Order's share of the bill's tax rounding is in its total (before comps).
+            taxRounding: money(discounted ? "1" : "0"),
+            total: money(discounted ? "2261" : "2260"),
           },
         },
       },
@@ -238,7 +241,12 @@ test("@production a manager discounts a started dish from the Tables page; only 
   );
   // What is left to pay shows under it at once, before checkout.
   await expect(details.getByRole("list", { name: "Comps and discounts" })).toContainText(
-    "To pay after comps$20.90",
+    "To pay after comps$20.91",
   );
+  // DEC-TAX-WHOLE-RECEIPT: the table's order shows the bill's tax rounding on its own line, and
+  // its Total less the comp is what is left to pay (the figure checkout takes).
+  const tableOrder = details.getByRole("region", { name: "This table's order" });
+  await expect(tableOrder).toContainText("Tax rounding$0.01");
+  await expect(tableOrder).toContainText("Total$22.61");
   await expectNoInternalText(page, ["Temporarily unavailable"]);
 });

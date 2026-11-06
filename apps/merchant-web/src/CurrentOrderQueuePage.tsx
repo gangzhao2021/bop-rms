@@ -487,6 +487,13 @@ export function CurrentOrderLines({
           <dt>{t("Tax")}</dt>
           <dd>{orderMoney(shown.tax)}</dd>
         </div>
+        {/* WP-2423 DEC-TAX-WHOLE-RECEIPT: the table bill's tax is rounded once; the total has it. */}
+        {totals.taxRounding.amountMinor !== "0" ? (
+          <div>
+            <dt>{t("Tax rounding")}</dt>
+            <dd>{orderMoney(totals.taxRounding)}</dd>
+          </div>
+        ) : null}
         {totals.tip !== null && totals.tip.amountMinor !== "0" ? (
           <div>
             <dt>{t("Tip")}</dt>

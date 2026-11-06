@@ -1385,6 +1385,12 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
   // WP-2423 (3cd0f8dd M1): the tip the order's payments carried (absent from an older server).
   const withTip =
     lines.totals !== null && typeof lines.totals === "object" && Object.hasOwn(lines.totals, "tip");
+  // WP-2423 DEC-TAX-WHOLE-RECEIPT: this Order's share of its table bill's tax rounding, signed
+  // (absent from an older server: none). The total already includes it.
+  const withTaxRounding =
+    lines.totals !== null &&
+    typeof lines.totals === "object" &&
+    Object.hasOwn(lines.totals, "taxRounding");
   const totals = exact(lines.totals, [
     "subtotal",
     "discount",
@@ -1392,11 +1398,20 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
     "fee",
     "total",
     ...(withTip ? ["tip"] : []),
+    ...(withTaxRounding ? ["taxRounding"] : []),
   ]);
   const tip = withTip ? money(totals.tip) : null;
   if (
     tip !== null &&
     (tip.amountMinor.startsWith("-") || tip.currencyCode !== money(totals.total).currencyCode)
+  )
+    return fail();
+  const taxRounding = withTaxRounding
+    ? money(totals.taxRounding)
+    : Object.freeze({ amountMinor: "0", currencyCode: money(totals.total).currencyCode });
+  if (
+    taxRounding.currencyCode !== money(totals.total).currencyCode ||
+    taxRounding.amountMinor === "-0"
   )
     return fail();
   const paymentPosition = parsePaymentPosition(raw.paymentPosition);
@@ -1421,6 +1436,8 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
         tax: money(totals.tax),
         fee: money(totals.fee),
         total: money(totals.total),
+        /** This Order's share of its table bill's tax rounding ("0" when none), in the total. */
+        taxRounding,
         /** What the order's payments carried as tip (null from an older server). */
         tip,
       }),
