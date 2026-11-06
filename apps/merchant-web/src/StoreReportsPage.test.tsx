@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { StoreBusinessDayContext } from "./StoreBusinessDay.js";
-import { StoreReports, StoreReportsPage, shiftDate } from "./StoreReportsPage.js";
+import { StoreReports, StoreReportsPage, coveredRangeFrom, shiftDate } from "./StoreReportsPage.js";
 import { createStoreReportsClient, parseStoreReportsView } from "./store-reports-client.js";
 import { storeReportsViewFixture } from "./store-reports.fixtures.js";
 
@@ -204,5 +204,94 @@ describe("WP-2423 Q14 store reports page", () => {
     expect(html).toContain('aria-pressed="true">Today&#x27;s summary');
     expect(html).toContain("Reading today&#x27;s figures…");
     expect(html).not.toContain("Last 7 days");
+  });
+});
+
+/**
+ * WP-2423 M160 (v15 2026-11-06): a Store set up partway through a business day. Its first day reads
+ * in full and is marked, a period asked from before it starts there and says so, and a period
+ * wholly before it is an answer with the way to the first day — never "Reports unavailable".
+ */
+describe("WP-2423 M160 the Store's first business day in reports", () => {
+  const firstDay = (fixture = storeReportsViewFixture()) => ({
+    ...fixture,
+    from: "2026-10-13",
+    requestedFrom: "2026-10-01",
+    recordsBeginOn: "2026-10-13",
+    days: (fixture.days as Record<string, unknown>[]).map((day, index) => ({
+      ...day,
+      opensAt: index === 0 ? "2026-10-14T00:51:00.000Z" : null,
+    })),
+  });
+  it("reads where records begin and when the first day opened, strictly", () => {
+    const view = parseStoreReportsView(firstDay());
+    expect(view).toMatchObject({ requestedFrom: "2026-10-01", recordsBeginOn: "2026-10-13" });
+    expect(view.days.map((day) => day.opensAt)).toEqual(["2026-10-14T00:51:00.000Z", null]);
+    // Before M160 the server sent neither (the period is then exactly what was asked).
+    expect(parseStoreReportsView(storeReportsViewFixture())).toMatchObject({
+      requestedFrom: "2026-10-13",
+      recordsBeginOn: null,
+    });
+    for (const corrupt of [
+      { recordsBeginOn: "2026-10-12" },
+      { requestedFrom: "2026-10-14" },
+      { recordsBeginOn: null },
+      { recordsBeginOn: "13 Oct" },
+    ])
+      expect(() => parseStoreReportsView({ ...firstDay(), ...corrupt })).toThrow();
+    const odd = firstDay();
+    expect(() =>
+      parseStoreReportsView({
+        ...odd,
+        days: odd.days.map((day) => ({ ...day, opensAt: "today" })),
+      }),
+    ).toThrow();
+  });
+  it("says the records begin on the first day and marks it in the day list", () => {
+    const html = render(firstDay());
+    expect(html).toContain(
+      "Records begin on Tue, Oct 13. Days before that have no sales and are counted as zero.",
+    );
+    expect(html).toContain("First day · from 20:51");
+    const single = firstDay();
+    const one = render({
+      ...single,
+      to: "2026-10-13",
+      days: single.days.slice(0, 1),
+      requestedFrom: "2026-10-13",
+      recordsBeginOn: null,
+    });
+    expect(one).toContain("First day · from 20:51");
+    expect(one).not.toContain("Records begin");
+  });
+  it("answers a period wholly before the Store with its first day, and offers the same length from it", async () => {
+    const client = createStoreReportsClient(
+      (async () =>
+        new Response(
+          JSON.stringify({ error: "reports_not_covered", firstBusinessDate: "2026-11-04" }),
+          { status: 404, headers: { "cache-control": "no-store" } },
+        )) as typeof fetch,
+    );
+    const signal = new AbortController().signal;
+    await expect(client.load("2026-10-01", "2026-10-31", signal)).rejects.toMatchObject({
+      code: "NotCovered",
+      firstBusinessDate: "2026-11-04",
+    });
+    const plain404 = createStoreReportsClient(
+      (async () => new Response("{}", { status: 404 })) as typeof fetch,
+    );
+    await expect(plain404.load("2026-10-01", "2026-10-31", signal)).rejects.toMatchObject({
+      code: "Unavailable",
+    });
+    // "Show from {date}": the asked number of days from the first day, ending no later than today.
+    expect(
+      coveredRangeFrom("2026-11-04", { from: "2026-10-01", to: "2026-10-31" }, "2026-11-06"),
+    ).toEqual({ from: "2026-11-04", to: "2026-11-06" });
+    expect(
+      coveredRangeFrom("2026-11-04", { from: "2026-10-30", to: "2026-10-31" }, "2026-11-20"),
+    ).toEqual({ from: "2026-11-04", to: "2026-11-05" });
+    expect(
+      coveredRangeFrom("2026-11-04", { from: "2026-11-03", to: "2026-11-03" }, "2026-11-06"),
+    ).toEqual({ from: "2026-11-04", to: "2026-11-04" });
   });
 });

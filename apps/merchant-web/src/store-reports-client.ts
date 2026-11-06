@@ -2,7 +2,11 @@ import { createContractParsers } from "./contract-parsers.js";
 
 /** WP-2423 Q14 (RPT-OPS-DASHBOARD): the Store sales reports view and its strict reader. */
 export class StoreReportsClientError extends Error {
-  constructor(readonly code: "PermissionDenied" | "Busy" | "Unavailable") {
+  constructor(
+    readonly code: "PermissionDenied" | "Busy" | "Unavailable" | "NotCovered",
+    /** WP-2423 M160: with NotCovered, the Store's first business day (when its records begin). */
+    readonly firstBusinessDate: string | null = null,
+  ) {
     super(code);
     this.name = "StoreReportsClientError";
   }
@@ -90,6 +94,12 @@ export interface StoreReportsView {
   readonly currencyCode: "CAD";
   readonly from: string;
   readonly to: string;
+  /**
+   * WP-2423 M160: the first day asked for, and the Store's first business day when the period was
+   * asked from before it (the period then starts on that day; null otherwise).
+   */
+  readonly requestedFrom: string;
+  readonly recordsBeginOn: string | null;
   readonly startsAt: string;
   readonly endsAt: string;
   readonly includesOpenDay: boolean;
@@ -112,6 +122,8 @@ export interface StoreReportsView {
   readonly days: readonly {
     readonly businessDate: string;
     readonly status: "Open" | "Closed";
+    /** WP-2423 M160: on the Store's first business day, when it started using the system. */
+    readonly opensAt: string | null;
     readonly summary: StoreReportSummary;
   }[];
   readonly reconciliation: {
@@ -243,7 +255,11 @@ const hourRow = (value: unknown): StoreReportHourRow => {
   });
 };
 
+const has = (value: unknown, key: string) =>
+  typeof value === "object" && value !== null && Object.hasOwn(value, key);
 export function parseStoreReportsView(value: unknown): StoreReportsView {
+  // WP-2423 M160: where the Store's records begin (read strictly when the server sends it).
+  const covered = has(value, "requestedFrom") || has(value, "recordsBeginOn");
   const raw = exact(value, [
     "screenId",
     "queryName",
@@ -268,6 +284,7 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
     ...(typeof value === "object" && value !== null && Object.hasOwn(value, "pointsUsedMinor")
       ? ["pointsUsedMinor"]
       : []),
+    ...(covered ? ["requestedFrom", "recordsBeginOn"] : []),
   ]);
   if (
     raw.screenId !== "RPT-OPS-DASHBOARD" ||
@@ -279,6 +296,14 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
   const from = date(raw.from),
     to = date(raw.to);
   if (from > to) return fail();
+  const requestedFrom = covered ? date(raw.requestedFrom) : from;
+  const recordsBeginOn = covered && raw.recordsBeginOn !== null ? date(raw.recordsBeginOn) : null;
+  // Clamped: asked from before the first day, which is where the period now starts.
+  if (
+    requestedFrom > from ||
+    (recordsBeginOn === null ? requestedFrom !== from : recordsBeginOn !== from)
+  )
+    return fail();
   const reconciliation = exact(raw.reconciliation, [
     "matchesSettlement",
     "settlementCollectedMinor",
@@ -295,6 +320,8 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
     currencyCode: "CAD",
     from,
     to,
+    requestedFrom,
+    recordsBeginOn,
     startsAt: instant(raw.startsAt),
     endsAt: instant(raw.endsAt),
     includesOpenDay: bool(raw.includesOpenDay),
@@ -325,11 +352,13 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
       });
     }),
     days: list(raw.days, 31, (item) => {
+      const opens = has(item, "opensAt");
       const day = exact(item, [
         "businessDate",
         "status",
         "startsAt",
         "endsAt",
+        ...(opens ? ["opensAt"] : []),
         "summary",
         "byChannel",
         "items",
@@ -338,6 +367,7 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
       return Object.freeze({
         businessDate: date(day.businessDate),
         status: oneOf(day.status, ["Open", "Closed"] as const),
+        opensAt: opens && day.opensAt !== null ? instant(day.opensAt) : null,
         summary: summary(exact(day.summary, summaryKeys)),
       });
     }),
@@ -522,6 +552,20 @@ async function request(
     });
     if (response.status === 401 || response.status === 403)
       throw new StoreReportsClientError("PermissionDenied");
+    // WP-2423 M160: the whole period is before the Store started using the system.
+    if (response.status === 404) {
+      const answer = (await response.json().catch(() => null)) as {
+        error?: unknown;
+        firstBusinessDate?: unknown;
+      } | null;
+      if (
+        answer?.error === "reports_not_covered" &&
+        typeof answer.firstBusinessDate === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/u.test(answer.firstBusinessDate) &&
+        response.headers.get("cache-control") === "no-store"
+      )
+        throw new StoreReportsClientError("NotCovered", answer.firstBusinessDate);
+    }
     if (response.status === 503) {
       const busy = await response
         .json()

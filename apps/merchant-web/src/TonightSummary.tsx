@@ -477,7 +477,11 @@ export function TonightReport({
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        const code = error instanceof StoreReportsClientError ? error.code : "Unavailable";
+        // Today is never before the Store's records, so "not covered" here is an outage too.
+        const code =
+          error instanceof StoreReportsClientError && error.code !== "NotCovered"
+            ? error.code
+            : "Unavailable";
         setState((prior) =>
           prior.kind === "Ready" && code !== "PermissionDenied"
             ? { ...prior, stale: true }

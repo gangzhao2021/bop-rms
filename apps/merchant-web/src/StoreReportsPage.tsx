@@ -37,6 +37,23 @@ export function shiftDate(date: string, days: number): string {
     .toISOString()
     .slice(0, 10);
 }
+/** WP-2423 M160: "First day · from 20:51" on the day the Store started using the system. */
+function firstDayText(opensAt: string, timeZone: string): string {
+  return t("First day · from {time}", { time: storeTime(opensAt, timeZone) });
+}
+/**
+ * WP-2423 M160: a period wholly before the Store's records is shown again from its first business
+ * day for the same number of days, ending no later than today.
+ */
+export function coveredRangeFrom(
+  firstBusinessDate: string,
+  asked: { readonly from: string; readonly to: string },
+  today: string | null,
+): { readonly from: string; readonly to: string } {
+  const days = Math.round((Date.parse(asked.to) - Date.parse(asked.from)) / 86_400_000);
+  const to = shiftDate(firstBusinessDate, Math.max(0, days));
+  return { from: firstBusinessDate, to: today !== null && to > today ? today : to };
+}
 function rangeLabel(view: StoreReportsView): string {
   return view.from === view.to
     ? t("Business day {from}", { from: businessDateText(view.from) })
@@ -218,6 +235,18 @@ export function StoreReports({
             </span>
           ) : null}
         </header>
+        {view.days.length === 1 && view.days[0]?.opensAt ? (
+          <p className="store-reports__first-day">
+            {firstDayText(view.days[0].opensAt, view.timeZone)}
+          </p>
+        ) : null}
+        {view.recordsBeginOn === null ? null : (
+          <p role="note" className="store-reports__records-begin">
+            {t("Records begin on {date}. Days before that have no sales and are counted as zero.", {
+              date: businessDateText(view.recordsBeginOn),
+            })}
+          </p>
+        )}
         <p className="bop-muted">
           {t(
             "{startsAt} to {endsAt} (store time). A sale counts on the business day it was paid and a refund on the day the money went back, the same as the day-end settlement. Orders cancelled before payment are not sales.",
@@ -368,7 +397,9 @@ export function StoreReports({
               ]}
               empty={t("No days.")}
               rows={view.days.map((day) => [
-                businessDateText(day.businessDate) + (day.status === "Open" ? t(" (so far)") : ""),
+                businessDateText(day.businessDate) +
+                  (day.status === "Open" ? t(" (so far)") : "") +
+                  (day.opensAt === null ? "" : " · " + firstDayText(day.opensAt, view.timeZone)),
                 day.summary.paymentCount,
                 money(day.summary.netSalesMinor),
                 money(day.summary.taxMinor),
@@ -478,7 +509,12 @@ export function StoreReports({
 type State =
   | { readonly kind: "Loading" }
   | { readonly kind: "Ready"; readonly view: StoreReportsView }
-  | { readonly kind: "PermissionDenied" | "Busy" | "Unavailable" };
+  | { readonly kind: "PermissionDenied" | "Busy" | "Unavailable" }
+  | {
+      readonly kind: "NotCovered";
+      readonly firstBusinessDate: string;
+      readonly asked: { readonly from: string; readonly to: string };
+    };
 
 /** RPT-OPS-DASHBOARD: Store sales reports for the Owner and Store Manager. */
 export function StoreReportsPage({
@@ -534,9 +570,23 @@ export function StoreReportsPage({
           if (!controller.signal.aborted) setState({ kind: "Ready", view });
         })
         .catch((error: unknown) => {
-          if (!controller.signal.aborted)
+          if (controller.signal.aborted) return;
+          if (
+            error instanceof StoreReportsClientError &&
+            error.code === "NotCovered" &&
+            error.firstBusinessDate !== null
+          )
             setState({
-              kind: error instanceof StoreReportsClientError ? error.code : "Unavailable",
+              kind: "NotCovered",
+              firstBusinessDate: error.firstBusinessDate,
+              asked: current,
+            });
+          else
+            setState({
+              kind:
+                error instanceof StoreReportsClientError && error.code !== "NotCovered"
+                  ? error.code
+                  : "Unavailable",
             });
         });
     },
@@ -723,11 +773,29 @@ export function StoreReportsPage({
                     )}
               </p>
             </StatePanel>
+          ) : state.kind === "NotCovered" ? (
+            <StatePanel heading={t("No sales in this period")} tone="neutral" status>
+              <p>
+                {t(
+                  "The store started using this system on {date}, so there are no sales before then.",
+                  { date: businessDateText(state.firstBusinessDate) },
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = coveredRangeFrom(state.firstBusinessDate, state.asked, today);
+                  show(next.from, next.to);
+                }}
+              >
+                {t("Show from {date}", { date: businessDateText(state.firstBusinessDate) })}
+              </button>
+            </StatePanel>
           ) : state.kind === "Unavailable" ? (
             <StatePanel heading={t("Reports unavailable")} tone="error" status>
               <p>
                 {t(
-                  "The reports could not be read. Check your connection and refresh. A period before the Store's setup took effect cannot be shown.",
+                  "The reports could not be read just now. Refresh in a minute; if it keeps happening, contact BOP support.",
                 )}
               </p>
             </StatePanel>

@@ -3315,7 +3315,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   Reported: "已报告",
   "Reporting disabled": "报表已停用",
   Reports: "报表",
-  "Reports unavailable": "报表暂不可用",
+  "Reports unavailable": "报表暂时读不到",
   "Request an ordinary refund within policy": "按政策申请普通退款",
   "Request assignment": "申请分配",
   "Request refund of {amount}": "申请退款 {amount}",
@@ -4492,8 +4492,16 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "The refund status could not be checked. Try again.": "无法查看退款状态。请重试。",
   "The remake changed on another screen. The board has been refreshed.":
     "重做在另一块屏幕上已变更。看板已刷新。",
-  "The reports could not be read. Check your connection and refresh. A period before the Store's setup took effect cannot be shown.":
-    "无法读取报表。请检查网络后刷新。门店设置生效之前的时段无法显示。",
+  "The reports could not be read just now. Refresh in a minute; if it keeps happening, contact BOP support.":
+    "现在没能读取报表。请过一分钟再刷新；如果一直这样，请联系 BOP 支持。",
+  // WP-2423 M160: a Store's first business day and the days before it.
+  "No sales in this period": "这段时间没有销售",
+  "The store started using this system on {date}, so there are no sales before then.":
+    "门店从 {date} 开始使用本系统，之前没有销售记录。",
+  "Show from {date}": "从 {date} 开始显示",
+  "Records begin on {date}. Days before that have no sales and are counted as zero.":
+    "记录从 {date} 开始。之前的日子没有销售，按 0 计。",
+  "First day · from {time}": "第一天 · {time} 起",
   "The request already completed. Its code cannot be displayed again. Confirm replacement to generate a new code.":
     "请求已完成，入桌码不能再次显示。确认更换以生成新码。",
   "The request could not be confirmed. Recover its original save or submission before writing again.":
