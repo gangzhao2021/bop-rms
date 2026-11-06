@@ -34,7 +34,7 @@ Pilot 门店进程的守卫已收尾，但 v15 的运行目录（档案与有效
    业务/厨房 worker 的系统参与者。续期从不改变它们。
 5. **签发的文件**（均 `environment: "Pilot"`、0600，档案最后写）：`installation.json`、`internal-test-menu.json`、`internal-test-inventory.json`、
    `internal-test-task-queue.json`、`internal-test-receipt-template.json`（仅签发闸门；实际模板是已发布配置的 `receiptReference`）、
-   `customer-runtime.json`（`diningTableFiles: []`）、`merchant-runtime.json`（标准退款角色映射）、三个 worker 文件、`daily-settlement-coverage.json`、
+   `customer-runtime.json`（`diningTableFiles: []`）、`merchant-runtime.json`（标准退款角色映射）、三个 worker 文件、`daily-settlement-coverage.json`（正式 Pilot 店日结从这里开始；缺了日结 worker 不运行，不按第一营业日推算，WP-2423 settlement-coverage）、
    `internal-test-profile.json`。从不签发：DEMO 名单、DEMO 桌台、本地密钥/QR 密钥/TOTP、模拟服务商库——目录里出现任何一个都拒绝（`internal-test-file-present`）。
    文件名保留 `internal-test-` 前缀（运行时加载器与备份清单不改）；已有不同内容的文件不覆盖（`installation-exists`，改用续期）。
 6. **服务数据库角色由签发创建**：api/worker 为 `LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`；新角色生成随机密码，只写入

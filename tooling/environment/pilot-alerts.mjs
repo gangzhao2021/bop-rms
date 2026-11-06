@@ -492,7 +492,7 @@ export const ALERT_CATALOG = Object.freeze({
       "This Store has a closed business day but no day-end settlement, so its payments are not being compared with the payment provider.",
     action: () =>
       "BOP support: record this Store's first closed business day so its day-end settlement starts.",
-    runbook: "alert-settlement-none",
+    runbook: "alert-settlement-not-run",
   },
   // A Store nobody is checking is urgent: its money checks are not running, and it is the one thing
   // no Store can say for itself. So it has a key of its own, and BOP hears each time it starts and
