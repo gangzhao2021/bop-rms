@@ -74,6 +74,14 @@ import { createInternalAdditionalReceiptConsumer } from "../../../tooling/enviro
 import { exerciseReceiptTemplate } from "../test-support/receipt-template.mjs";
 import { assertLateRoundBusinessDate } from "../test-support/round-business-date-assertions.mjs";
 import { createMerchantStaffDiningRound } from "../../../apps/api/src/merchant-staff-dining-round.ts";
+import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
+import {
+  fullServiceTemplate,
+  navigationForStoreFeatures,
+  readStoreFeatures,
+} from "../../../apps/api/src/merchant-store-features.ts";
+import { changeStoreFeatureSetting } from "../../rms/store/src/index.ts";
+import { staffTableRoundsComposed } from "../../../tooling/environment/pilot-merchant-workspace.mjs";
 import { readStaffDiningRoundPaymentPreparation } from "../../../apps/api/src/staff-dining-round-payment-preparation.ts";
 import { createPersistentMerchantOrderQueue } from "../../../apps/api/src/persistent-merchant-order-queue.ts";
 import { kitchenPreparation } from "../../../apps/api/src/merchant-kitchen-query.ts";
@@ -1567,6 +1575,173 @@ it("the real staff round command takes a round from table entry to the card mach
       );
 
       // The restricted role is what ran all this: it is not the owner and cannot bypass RLS.
+      assert.deepEqual(
+        await store.asApi(async (tx) => {
+          const seen = await tx.query(
+            "SELECT current_user AS who,(SELECT rolbypassrls FROM pg_roles WHERE rolname=current_user) AS bypass",
+            [],
+          );
+          return seen.rows[0];
+        }),
+        { who: api, bypass: false },
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      if (store !== null) await store.close();
+      for (const name of [api, api + "_w"]) {
+        await admin.query("DROP OWNED BY " + name).catch(() => undefined);
+        await admin.query("DROP ROLE " + name).catch(() => undefined);
+      }
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * WP-2423 M08 (simulation blocker, hotpot dinner): with counter ordering off (the full-service
+ * setting) the Tables panel offered no "Take order for table", although the Store features page,
+ * the last-orders banner and the guest page all say table rounds still work. Under the restricted
+ * API role with the rendered pilot ACL and real staff sessions: the owner turns counter ordering
+ * off; the navigation drops the walk-up screen; the Tables read still offers table rounds to the
+ * server (and not to a Tables-only role); the pilot's real staff round command sends the round,
+ * attributed and audited, confirmed for the kitchen; the walk-up counter order is refused with
+ * COUNTER_ORDER_TURNED_OFF and writes nothing. Synthetic TEST references only.
+ */
+it("with counter ordering off a table round still reaches the kitchen and a walk-up order is refused", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_m08" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    vi.stubEnv("NODE_ENV", "development");
+    const api = await createPilotApiRole(admin, context, "wp2423_m08");
+    let store = null;
+    try {
+      store = await prepareRealStaffRoundStore({ admin, context, api });
+      const { soup, tableReference, reference, ownerScope } = store;
+      const owner = id(0x7a2);
+      const rows = async (sql, values = []) => (await admin.query(sql, values)).rows;
+      const serverActor = id(0x7a0);
+      const server = await store.staff(serverActor, [
+        "ordering.order.create_staff",
+        "dining.operate",
+      ]);
+      const tablesOnly = await store.staff(id(0x7a1), ["dining.operate"]);
+      const as = (who) => ({ sessionCookie: who.sessionCookie, csrf: who.csrf });
+
+      // The owner applies the full-service template: counter ordering off.
+      const applied = await store.asApi((tx) =>
+        changeStoreFeatureSetting(tx, ownerScope, {
+          operationReference: reference(),
+          expectedVersion: 0,
+          template: "FullService",
+          modules: {
+            counterOrder: true,
+            pickup: true,
+            inventory: true,
+            loyalty: true,
+            complianceDocuments: true,
+            alcohol: false,
+            ...fullServiceTemplate,
+          },
+          actorReference: owner,
+          observedAt: new Date().toISOString(),
+        }),
+      );
+      assert.equal(applied.counterOrder, false);
+      // The sidebar drops the walk-up "Counter order" screen (unchanged).
+      const features = await store.asApi((tx) => readStoreFeatures(tx, store.scope, "Refuse"));
+      assert.deepEqual(
+        navigationForStoreFeatures(
+          [
+            { screenId: "OPS-ORDER-ENTRY", href: "/operations/order-entry" },
+            { screenId: "DIN-FLOOR-BOARD", href: "/operations/dining" },
+          ],
+          features,
+        ).map((item) => item.screenId),
+        ["DIN-FLOOR-BOARD"],
+      );
+
+      // Tables still offers a table round to the server, never to a Tables-only role.
+      const counter = await store.counterFor(server);
+      const tablesFor = (who) =>
+        createMerchantDiningTables({
+          persistence: store.persistenceOf(who),
+          authentication: who.authentication,
+          tableAvailabilityCommandEnabled: true,
+          // As the pilot composes it: from the staff round and its menu actually composed.
+          staffDiningRoundEnabled: staffTableRoundsComposed(counter),
+        })({ ...as(who), csrf: who.csrf, query: { afterTableReference: null, limit: 50 } });
+      assert.equal((await tablesFor(server)).canTakeTableRounds, true);
+      assert.equal((await tablesFor(tablesOnly)).canTakeTableRounds, false);
+
+      // The real staff round command sends the table's round (the table opens with it).
+      const batches = async () =>
+        (await rows("SELECT count(*)::int AS n FROM rms_ordering.order_batch"))[0].n;
+      const before = await batches();
+      const round = await counter.staffDiningRound({
+        ...as(server),
+        command: {
+          operationReference: reference(),
+          tableReference,
+          lines: [
+            { sellableReference: soup.skuReference, quantity: 1, optionSelections: [], note: null },
+          ],
+          tip: { kind: "None" },
+          recordedAfterOutage: false,
+        },
+      });
+      assert.deepEqual([round.status, round.payLater], ["Placed", true]);
+      assert.equal(await batches(), before + 1);
+      // Recorded and attributed to the server who entered it, audited.
+      assert.deepEqual(
+        await rows(
+          "SELECT e.actor_id::text AS actor,e.table_id::text AS table_ref,a.action_code,a.actor_reference::text AS audit_actor FROM rms_ordering.staff_dining_round_entry e JOIN platform_audit.audit_record a ON a.audit_id=e.audit_id",
+        ),
+        [
+          {
+            actor: serverActor,
+            table_ref: tableReference,
+            action_code: "ORDERING_STAFF_DINING_ROUND_STARTED",
+            audit_actor: serverActor,
+          },
+        ],
+      );
+      // Confirmed for the kitchen: the OrderConfirmed event the kitchen takes, for this round.
+      const confirmed = [];
+      for (const { event } of await rows(
+        "SELECT event_id::text AS event FROM platform_eventing.outbox_event WHERE event_type='OrderConfirmed'",
+      ))
+        confirmed.push(
+          await store.restricted.run(async (tx) => (await loadOutboxEnvelope(tx, event)).payload),
+        );
+      assert.ok(
+        confirmed.some((payload) => payload.orderBatchReference === round.orderBatchReference),
+        "the table's round is sent to the kitchen",
+      );
+
+      // The walk-up counter order is refused and writes nothing.
+      const entriesBefore = await rows(
+        "SELECT (SELECT count(*)::int FROM rms_ordering.order_batch) AS batches,(SELECT count(*)::int FROM rms_ordering.counter_order_entry) AS counter",
+      );
+      await assert.rejects(
+        counter.counterOrder({
+          ...as(server),
+          command: {
+            operationReference: reference(),
+            lines: [{ sellableReference: soup.skuReference, quantity: 1, optionSelections: [] }],
+            tip: { kind: "None" },
+            recordedAfterOutage: false,
+          },
+        }),
+        { code: "COUNTER_ORDER_TURNED_OFF" },
+      );
+      assert.deepEqual(
+        await rows(
+          "SELECT (SELECT count(*)::int FROM rms_ordering.order_batch) AS batches,(SELECT count(*)::int FROM rms_ordering.counter_order_entry) AS counter",
+        ),
+        entriesBefore,
+      );
+
+      // The restricted role ran all this.
       assert.deepEqual(
         await store.asApi(async (tx) => {
           const seen = await tx.query(
