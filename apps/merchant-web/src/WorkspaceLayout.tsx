@@ -1,6 +1,7 @@
 import { t } from "./i18n/i18n.js";
 import { LanguageSwitch } from "./i18n/LanguageSwitch.js";
 import {
+  StaffCallsWaitingContext,
   approvalsBadgeCount,
   useApprovalsWaiting,
   useStaffCallsWaiting,
@@ -469,7 +470,11 @@ export function WorkspaceLayout({
           <LanguageSwitch className="workspace-topbar__language" />
         </div>
         <SkipLinkProvidedContext.Provider value={true}>
-          <WorkspaceFrameContext.Provider value={true}>{children}</WorkspaceFrameContext.Provider>
+          <WorkspaceFrameContext.Provider value={true}>
+            <StaffCallsWaitingContext.Provider value={staffCalls}>
+              {children}
+            </StaffCallsWaitingContext.Provider>
+          </WorkspaceFrameContext.Provider>
         </SkipLinkProvidedContext.Provider>
       </div>
     </div>

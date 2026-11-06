@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { SlowWaitNotice } from "./slow-wait.js";
 import { t, saidTable } from "./i18n/i18n.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
@@ -223,6 +224,9 @@ export function TableCheckout({
   const [bill, setBill] = useState<TableBill | null>(null);
   const [reload, setReload] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
+  // merchant-outage-recovery M100: why the bill could not be read again, apart from what an action
+  // said. The next read that works clears it.
+  const [readProblem, setReadProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // WP-2423 item 8 ① (Owner 2026-10-27): no tip is chosen for the guests; staff ask and choose.
   const [tip, setTip] = useState<Tip | null>(null);
@@ -262,10 +266,12 @@ export function TableCheckout({
     client
       .bill(csrf, sessionReference, controller.signal)
       .then((value) => {
-        if (!controller.signal.aborted) setBill(value);
+        if (controller.signal.aborted) return;
+        setBill(value);
+        setReadProblem(null);
       })
       .catch((error: unknown) => {
-        if (!controller.signal.aborted) setProblem(errorText(error));
+        if (!controller.signal.aborted) setReadProblem(errorText(error));
       });
     return () => controller.abort();
   }, [client, csrf, sessionReference, session.phase, session.version, reload]);
@@ -281,6 +287,10 @@ export function TableCheckout({
     const timer = window.setInterval(() => setReload((value) => value + 1), 5000);
     return () => window.clearInterval(timer);
   }, [session.phase, paidNow, bill?.writeOff]);
+  // M100: once the table has paid, a warning left by an earlier lost answer no longer applies.
+  useEffect(() => {
+    if (paidNow) setProblem(null);
+  }, [paidNow]);
   // …and once it is paid, the table's close check reads again.
   const notified = useRef(false);
   useEffect(() => {
@@ -604,8 +614,17 @@ export function TableCheckout({
             ? t("Paid")
             : t("Checkout")}
       </h3>
+      {readProblem !== null ? (
+        <p className="table-checkout__stale" role="status">
+          {bill === null
+            ? readProblem
+            : t(
+                "The bill could not be read again; showing the last update. Trying again by itself.",
+              )}
+        </p>
+      ) : null}
       {bill === null ? (
-        problem ? null : (
+        problem || readProblem !== null ? null : (
           <p role="status">{t("Reading the bill…")}</p>
         )
       ) : (
@@ -1020,6 +1039,7 @@ export function TableCheckout({
                                 : t("Paid on card machine · {amount}", { amount: cad(due) })}
                     </button>
                   )}
+                  <SlowWaitNotice busy={busy} />
                 </>
               )}
               {/* v15 2026-10-28 b: only while something is unpaid — for a split bill, the parts

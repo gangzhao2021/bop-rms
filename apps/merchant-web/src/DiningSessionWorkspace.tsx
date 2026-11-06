@@ -10,7 +10,8 @@ import {
 import { UnpaidRoundCancelAction, isPaymentUnconfirmed } from "./UnpaidRoundCancelAction.js";
 import { paidRoundWait, tableRoundWaitText, type PaidRoundWaitTier } from "./paid-round-wait.js";
 import { DiningHostTransferAction } from "./DiningHostTransferAction.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { StaffCallsWaitingContext } from "./approvals-waiting.js";
 import { DiningServeReadyClientError } from "./dining-serve-ready-client.js";
 import { serveReadySummary } from "./dining-serve-ready.js";
 import {
@@ -677,6 +678,26 @@ export function DiningSessionWorkspace({
     }, 15_000);
     return () => clearInterval(timer);
   }, [anySeated, live, paused]);
+  // merchant-outage-recovery M174: the frame counts guests waiting for staff every 5 s; when the
+  // count moves (a new call, or one answered elsewhere, or both at once) the tables read again, so
+  // a new call shows here within seconds instead of at the next 30 s read.
+  const staffCallsWaiting = useContext(StaffCallsWaitingContext);
+  const seenStaffCalls = useRef<number | null>(null);
+  useEffect(() => {
+    if (staffCallsWaiting === null) return;
+    const previous = seenStaffCalls.current;
+    seenStaffCalls.current = staffCallsWaiting;
+    if (previous !== null && previous !== staffCallsWaiting && live && !paused) reread();
+  });
+  // …and back on this tab, the tables read again at once.
+  useEffect(() => {
+    if (!live || typeof document === "undefined") return;
+    const visible = () => {
+      if (document.visibilityState === "visible" && !paused) void loadRef.current(false, true);
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => document.removeEventListener("visibilitychange", visible);
+  }, [live, paused]);
   // IDR-0039: the browser saying the network is gone is enough to go read-only at once.
   useBrowserOffline(() => {
     const lastLoadedAt = loadedAt.current;

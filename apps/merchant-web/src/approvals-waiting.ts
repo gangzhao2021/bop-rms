@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useEffect, useMemo, useState } from "react";
 import { createRefundApprovalClient } from "./refund-approval-client.js";
 import { useStaffSessionLive } from "./staff-session-reads.js";
 import { createDiningSessionClient } from "./dining-session-client.js";
@@ -151,8 +151,15 @@ export function useStaffRolesWaiting(
   return waiting;
 }
 
-/** WP-2423 Q28: how often the guests waiting for staff are counted while a page is visible. */
-export const STAFF_CALLS_WAITING_REFRESH_MS = 30_000;
+/**
+ * WP-2423 Q28: how often the guests waiting for staff are counted while a page is visible.
+ * merchant-outage-recovery M174: every 5 s (a snapshot read that never waits for a command), so a
+ * guest's call reaches an open Tables page within seconds; the Tables page rereads when it moves.
+ */
+export const STAFF_CALLS_WAITING_REFRESH_MS = 5_000;
+
+/** M174: the count above, for the page in the frame (Tables rereads when it changes). */
+export const StaffCallsWaitingContext = createContext<number | null>(null);
 
 /**
  * WP-2423 Q28 DEC-DINING-STAFF-CALL: how many guests at the selected Store asked staff to come to
@@ -186,8 +193,13 @@ export function useStaffCallsWaiting(csrf: string | null, enabled: boolean): num
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") read();
     }, STAFF_CALLS_WAITING_REFRESH_MS);
+    const visible = () => {
+      if (document.visibilityState === "visible") read();
+    };
+    document.addEventListener("visibilitychange", visible);
     return () => {
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
       controller?.abort();
     };
   }, [csrf, enabled, live]);

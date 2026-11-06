@@ -5,7 +5,8 @@ import { FullSignInPrompt } from "./FullSignInPrompt.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { dollarsToMinor } from "./TableCheckout.js";
-import { notConfirmedPressAgainText } from "./failure-words.js";
+import { notConfirmedPressAgainText, offlineMayNotHaveGoneThroughText } from "./failure-words.js";
+import { browserOffline } from "./stale-read.js";
 
 const cad = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -340,7 +341,11 @@ function TablePaymentBlock({
       onStale();
     } catch {
       setProblem(
-        t("We couldn't confirm the result. Press the button again: it is never recorded twice."),
+        browserOffline()
+          ? offlineMayNotHaveGoneThroughText
+          : t(
+              "We couldn't confirm the result. Press the button again: it is never recorded twice.",
+            ),
       );
     } finally {
       setBusy(false);

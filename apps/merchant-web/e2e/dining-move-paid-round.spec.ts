@@ -139,9 +139,9 @@ test("@production a paid round moved to another table is accepted there once and
   await expect(
     orderPanel(page).getByRole("status").filter({ hasText: "Sending to the kitchen…" }),
   ).toBeVisible();
-  await expect(page.getByText("Acceptance could not be confirmed", { exact: false })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByText("can't tell whether this order was accepted", { exact: false }),
+  ).toHaveCount(0);
   expect(accepted).toHaveLength(1);
   expect(JSON.parse(accepted[0] ?? "{}")).toMatchObject({
     orderReference: id(1),

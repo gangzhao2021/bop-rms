@@ -1,4 +1,5 @@
 import { t } from "./i18n/i18n.js";
+import { notConfirmedPressAgainText } from "./failure-words.js";
 import { useEffect, useRef, useState } from "react";
 import {
   createDiningSessionCloseClient,
@@ -89,9 +90,7 @@ export function DiningSessionCloseAction({
         </button>
       ) : null}
       {state === "Unknown" ? (
-        <p role="status">
-          {t("The result is unknown. Retry the same request to recover its result.")}
-        </p>
+        <p role="status">{notConfirmedPressAgainText}</p>
       ) : state === "Denied" ? (
         <p role="status">
           {t(

@@ -120,3 +120,102 @@ test("@production staff see guests asking for staff and mark a call handled", as
       .toBe(true);
   }
 });
+
+// merchant-outage-recovery M174: a guest's new call reaches an open Tables page within seconds,
+// with no tap, also when another call was answered elsewhere meanwhile.
+test("@production an open Tables page shows a new staff call within seconds", async ({ page }) => {
+  const id = (n: number) => "0190996d-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+  const scope = {
+    brandLabel: "Synthetic Brand",
+    storeLabel: "Synthetic Store",
+    storeReference: id(99),
+    timeZone: "America/Toronto",
+  };
+  const headers = { "cache-control": "no-store" };
+  await page.route("**/merchant/session", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        authenticated: true,
+        csrf: "a".repeat(43),
+        workspace: {
+          screenId: "HOME-OVERVIEW",
+          selectedScope: scope,
+          authorizedStores: [scope],
+          businessDate: "2026-10-25",
+          storeStatus: "Open",
+          freshness: "Current",
+          dashboardAvailability: "UnavailableUntilWP1905",
+          navigation: [
+            {
+              screenId: "DIN-FLOOR-BOARD",
+              label: "Tables",
+              href: "/operations/dining",
+              permission: "dining.operate",
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const calls: Record<string, { callReference: string; reason: string; calledAt: string } | null> =
+    { T1: null, T2: null, T3: null };
+  const call = (n: number) => ({
+    callReference: id(30 + n),
+    reason: "Question",
+    calledAt: new Date().toISOString(),
+  });
+  calls.T1 = call(1);
+  const table = (n: number, label: string) => ({
+    tableReference: id(n),
+    stableLabel: label,
+    areaCode: "MAIN",
+    capacity: 4,
+    lifecycle: "Published",
+    operationalState: "Available",
+    aggregateVersion: 2,
+    currentDiningSessionReference: id(10 + n),
+    elapsedMinutes: 20,
+    qrCodeValidUntil: "2027-04-12T13:00:00.000Z",
+    staffRoundsAwaitingPayment: [],
+    guestRoundsAwaitingPayment: [],
+    roundsAwaitingAcceptance: [],
+    staffCall: calls[label] ?? null,
+  });
+  await page.route("**/merchant/dining/tables", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        canOperateTables: false,
+        canCloseSessions: false,
+        canTransferHost: false,
+        canCancelUnpaidRounds: false,
+        items: [table(1, "T1"), table(2, "T2"), table(3, "T3")],
+        nextAfterTableReference: null,
+      },
+    }),
+  );
+  await page.route("**/merchant/dining/staff-calls/count", (route) =>
+    route.fulfill({
+      headers,
+      json: { open: Object.values(calls).filter((entry) => entry !== null).length },
+    }),
+  );
+  await page.goto("/operations/dining");
+  const items = page.locator(".table-row");
+  await expect(items.filter({ hasText: "Asked for staff" })).toHaveCount(1);
+  // A guest at T2 asks for staff.
+  calls.T2 = call(2);
+  await expect(page.locator(".table-row", { hasText: "Table T2" })).toContainText(
+    "Asked for staff",
+    { timeout: 7_000 },
+  );
+  // T1's call is answered on another screen while T3's guest asks: the count moves 2 → 1 → 2.
+  calls.T1 = null;
+  await expect(items.filter({ hasText: "Asked for staff" })).toHaveCount(1, { timeout: 7_000 });
+  calls.T3 = call(3);
+  await expect(page.locator(".table-row", { hasText: "Table T3" })).toContainText(
+    "Asked for staff",
+    { timeout: 7_000 },
+  );
+});
