@@ -602,7 +602,12 @@ test("@production Kitchen reads, refreshes and clears denied data with keyboard 
     // Only the display's own sound preference (WP-2423 Q33) stays on the device, never orders.
     await page.evaluate(() => ({
       local: Object.keys(localStorage).filter((key) => key !== "bop.kitchen.sound").length,
-      session: sessionStorage.length,
+      // merchant-outage-recovery M01: the tab's navigation frame only (labels and addresses).
+      session: Object.keys(sessionStorage).filter(
+        (key) =>
+          key !== "bop.workspace.frame.v1" ||
+          /[0-9a-f]{8}-[0-9a-f]{4}-/iu.test(sessionStorage.getItem(key) ?? ""),
+      ).length,
     })),
   ).toEqual({ local: 0, session: 0 });
   showOrders = true;
@@ -1097,7 +1102,12 @@ test("@production Kitchen commands preserve intent and wait for projection versi
     // Only the display's own sound preference (WP-2423 Q33) stays on the device, never orders.
     await page.evaluate(() => ({
       local: Object.keys(localStorage).filter((key) => key !== "bop.kitchen.sound").length,
-      session: sessionStorage.length,
+      // merchant-outage-recovery M01: the tab's navigation frame only (labels and addresses).
+      session: Object.keys(sessionStorage).filter(
+        (key) =>
+          key !== "bop.workspace.frame.v1" ||
+          /[0-9a-f]{8}-[0-9a-f]{4}-/iu.test(sessionStorage.getItem(key) ?? ""),
+      ).length,
     })),
   ).toEqual({ local: 0, session: 0 });
 });

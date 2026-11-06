@@ -327,7 +327,14 @@ test("@production Pickup paging, current scope and permission recovery", async (
   await expect(heading("No access")).toBeVisible();
   await expect(page.locator("article")).toHaveCount(0);
   expect(
-    await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
+    await page.evaluate(() => ({
+      local: localStorage.length, // merchant-outage-recovery M01: the tab's navigation frame only (labels and addresses).
+      session: Object.keys(sessionStorage).filter(
+        (key) =>
+          key !== "bop.workspace.frame.v1" ||
+          /[0-9a-f]{8}-[0-9a-f]{4}-/iu.test(sessionStorage.getItem(key) ?? ""),
+      ).length,
+    })),
   ).toEqual({ local: 0, session: 0 });
 });
 
@@ -765,7 +772,14 @@ test("@production Pickup accepts the typed six-digit code, explains wrong codes 
   // The code never reaches browser storage or the address bar.
   expect(page.url()).not.toContain("048213");
   expect(
-    await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
+    await page.evaluate(() => ({
+      local: localStorage.length, // merchant-outage-recovery M01: the tab's navigation frame only (labels and addresses).
+      session: Object.keys(sessionStorage).filter(
+        (key) =>
+          key !== "bop.workspace.frame.v1" ||
+          /[0-9a-f]{8}-[0-9a-f]{4}-/iu.test(sessionStorage.getItem(key) ?? ""),
+      ).length,
+    })),
   ).toEqual({ local: 0, session: 0 });
 });
 

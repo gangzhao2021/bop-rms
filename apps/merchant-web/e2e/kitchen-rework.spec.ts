@@ -254,7 +254,14 @@ test("@production WP-2423 Q26: the kitchen remakes a dropped dish and puts a dis
     quantity: 2,
   });
   expect(
-    await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
+    await page.evaluate(() => ({
+      local: localStorage.length, // merchant-outage-recovery M01: the tab's navigation frame only (labels and addresses).
+      session: Object.keys(sessionStorage).filter(
+        (key) =>
+          key !== "bop.workspace.frame.v1" ||
+          /[0-9a-f]{8}-[0-9a-f]{4}-/iu.test(sessionStorage.getItem(key) ?? ""),
+      ).length,
+    })),
   ).toEqual({
     local: 0,
     session: 0,
