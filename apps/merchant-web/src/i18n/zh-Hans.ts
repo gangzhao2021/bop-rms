@@ -6800,7 +6800,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{count} tables free themselves within 10 min": "{count} 张桌 10 分钟内自动空出",
   "New guests at free tables will be sent to staff. Only the owner can turn this back on.":
     "之后空桌的新客人会被请去找店员。只有店主能再打开。",
-  "Yes, turn off": "确定关掉",
   "Keep on": "不关",
   "Turning off…": "正在关…",
   "a new party ended the last visit": "新客人结束了上一桌",
