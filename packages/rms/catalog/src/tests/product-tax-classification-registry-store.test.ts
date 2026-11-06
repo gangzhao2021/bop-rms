@@ -327,7 +327,7 @@ it("keeps nine accepted 1000-definition revisions readable within the full histo
   expect(current.registry.registryVersion).toBe(9);
   expect(current.registry.definitions).toHaveLength(1000);
   expect(current.snapshotDigest).toBe(previousSnapshotDigest);
-});
+}, 120_000); // Builds near-limit payloads many times: CPU-heavy on a shared CI runner.
 it("reads and replays an accepted large localized snapshot without merging duplicate payload budgets", async () => {
   const h = harness(false),
     localizedNames = {

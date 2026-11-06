@@ -389,4 +389,4 @@ it("rejects a near-limit complete report that fits compact wire JSON but exceeds
   expect(new TextEncoder().encode(JSON.stringify(nearLimit)).length).toBeGreaterThan(1040000);
   expect(() => parse(nearLimit)).toThrow();
   expect(parse(candidate(Math.floor(lower * 0.8))).details.coverage).toBe("Complete");
-});
+}, 120_000); // Builds near-limit payloads many times: CPU-heavy on a shared CI runner.
