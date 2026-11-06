@@ -45,6 +45,13 @@ export interface CartAdderStandingPort {
     readonly diningSessionReference: string;
     readonly participantReferences: readonly string[];
     readonly observedAt: string;
+    /**
+     * `Full` (default, every command): the binding check per live session, then recorded facts.
+     * `Recorded` (a polled view): recorded facts only, a bounded number of owner reads for any
+     * number of phones; never answers `AtTable` (undecided is `Unknown`, shown unmarked). The
+     * remove command checks again in full at its own instant.
+     */
+    readonly check?: "Full" | "Recorded";
   }): Promise<
     readonly {
       readonly participantReference: string;

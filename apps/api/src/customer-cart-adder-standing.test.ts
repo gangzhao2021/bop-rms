@@ -229,4 +229,51 @@ describe("WP-2423 same-table-ordering: has the phone that added a line left the 
     ).resolves.toEqual([]);
     expect(listBound).not.toHaveBeenCalled();
   });
+  it("a view's Recorded check reads two owner facts for any number of phones and never runs the binding check", async () => {
+    const phones = Array.from({ length: 8 }, (_, n) => id(60 + n));
+    const listBound = vi.fn(async () =>
+      // The first phone's session ended; every other phone has one live session.
+      phones.slice(1).map((phone, n) => sessionAt(200 + n, phone, 2)),
+    );
+    const validate = vi.fn(async () => "Current");
+    const readDepartures = vi.fn(async () => [
+      departure(phones[1] as string, "Left"),
+      departure(phones[2] as string, "Present", 3),
+      ...phones.slice(3).map((phone) => departure(phone, "Present")),
+    ]);
+    const port = createCustomerCartAdderStanding({
+      scope,
+      sessions: { listBound },
+      binding: { validate },
+      departures: { readDepartures } as never,
+    });
+    const answers = await port.standing({
+      diningSessionReference: id(30),
+      participantReferences: phones,
+      observedAt: at,
+      check: "Recorded",
+    });
+    expect(answers.map((answer) => answer.standing)).toEqual([
+      "Gone", // session ended
+      "Gone", // staff removed it
+      "Gone", // the code its session scanned was replaced
+      ...phones.slice(3).map(() => "Unknown"), // nothing recorded: not marked
+    ]);
+    expect(validate).not.toHaveBeenCalled();
+    expect(listBound).toHaveBeenCalledTimes(1);
+    expect(readDepartures).toHaveBeenCalledTimes(1);
+    // A failed Dining read leaves every phone with a live session unmarked.
+    readDepartures.mockRejectedValueOnce(new Error("synthetic Dining outage"));
+    const failed = await port.standing({
+      diningSessionReference: id(30),
+      participantReferences: phones,
+      observedAt: at,
+      check: "Recorded",
+    });
+    expect(failed.map((answer) => answer.standing)).toEqual([
+      "Gone",
+      ...phones.slice(1).map(() => "Unknown"),
+    ]);
+    expect(validate).not.toHaveBeenCalled();
+  });
 });

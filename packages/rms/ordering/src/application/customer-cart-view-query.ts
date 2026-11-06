@@ -395,6 +395,9 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
               diningSessionReference: String(cart.diningSessionReference),
               participantReferences: Object.freeze(others),
               observedAt: first.observedAt,
+              // Polled every few seconds by every phone: recorded facts only, never a binding
+              // check per phone (the remove command runs the full check).
+              check: "Recorded",
             });
             if (Array.isArray(standings))
               for (const standing of standings)

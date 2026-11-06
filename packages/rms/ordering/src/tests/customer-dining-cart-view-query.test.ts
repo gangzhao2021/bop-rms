@@ -191,11 +191,13 @@ describe("safe shared Dining Cart display", () => {
       [],
       ["OTHER_PARTICIPANT_ITEM", "ADDER_LEFT_TABLE"],
     ]);
-    // Only other phones are asked about; the viewer's own lines never are.
+    // Only other phones are asked about; the viewer's own lines never are. A polled view asks
+    // for recorded facts only, so its cost does not grow with every phone's binding check.
     expect(standing).toHaveBeenCalledWith({
       diningSessionReference: id(30),
       participantReferences: [id(42)],
       observedAt: at,
+      check: "Recorded",
     });
     // Still at the table, or the answer fails: shown unmarked (the command checks again).
     for (const answer of [

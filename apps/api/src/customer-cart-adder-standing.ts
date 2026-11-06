@@ -16,6 +16,10 @@ import type { DiningParticipantDepartureSource } from "@rms/dining";
  *   answer "Unavailable" for a timeout or a lock wait too), so the line stays its adder's.
  *
  * A listing failure throws (callers fail closed). A departure read failure answers `Unknown`.
+ *
+ * `check: "Recorded"` (the polled table cart view) skips the binding check: one Identity listing
+ * and one Dining read for any number of phones, so a busy table's polling stays bounded. It never
+ * answers `AtTable`; the remove command runs the full check at its own instant.
  */
 export function createCustomerCartAdderStanding(options: {
   readonly scope: Readonly<{ brandReference: string; storeReference: string }>;
@@ -53,12 +57,17 @@ export function createCustomerCartAdderStanding(options: {
       }
       const answers = new Map<string, "AtTable" | "Gone" | "Unknown">();
       const undecided: string[] = [];
+      const recordedOnly = input.check === "Recorded";
       // Sequential: the binding check may share one caller transaction.
       for (const participant of participants) {
         const own = byParticipant.get(participant) ?? [];
         // Identity read the live sessions and found none: this phone's session ended.
         if (own.length === 0) {
           answers.set(participant, "Gone");
+          continue;
+        }
+        if (recordedOnly) {
+          undecided.push(participant);
           continue;
         }
         let current = false;
