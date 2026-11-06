@@ -128,3 +128,51 @@ describe("Guest abuse keyed scopes", () => {
     expect(provider.ip("192.0.2.1", scope)).toHaveLength(32);
   });
 });
+
+// M02 (v15 07b7a1b7): a phone at a table not open yet checks again by itself, and every check is an
+// entry attempt. The customer app's schedule (apps/customer-pwa tableOpenRecheckDelaysSeconds,
+// which its own test holds to at most 6 checks in any ten minutes) must leave a busy room's new
+// scans room to get in, on the restaurant's Wi-Fi (one address) and at the Store.
+describe("waiting phones leave room for new guests", () => {
+  const recheckDelaysSeconds = [20, 40, 80, 120, 120, 120, 120, 120, 120, 120];
+  /** One phone's attempts in the first ten minutes: its scan, then the checks. */
+  const attemptsPerWaitingPhone = (() => {
+    let at = 0;
+    let count = 1;
+    for (const seconds of recheckDelaysSeconds) {
+      at += seconds;
+      if (at < 600) count += 1;
+    }
+    return count;
+  })();
+  function windowBudget(): GuestSessionAbuseBudget["consume"] {
+    const used = new Map<string, number>();
+    return async ({ keyHash, limitCount }) => {
+      const key = Buffer.from(keyHash).toString("hex");
+      const count = used.get(key) ?? 0;
+      if (count >= limitCount) return { allowed: false, remaining: 0, retry_after_seconds: 60 };
+      used.set(key, count + 1);
+      return { allowed: true, remaining: limitCount - count - 1, retry_after_seconds: 0 };
+    };
+  }
+  it("four parties waiting on the Wi-Fi and twenty on their own phones: a full room still gets in", async () => {
+    expect(attemptsPerWaitingPhone).toBe(7);
+    const admission = setup(windowBudget());
+    const wifi = "198.51.100.7";
+    const answers: string[] = [];
+    for (let phone = 0; phone < 4; phone += 1)
+      for (let attempt = 0; attempt < attemptsPerWaitingPhone; attempt += 1)
+        answers.push((await admission.consume({ ...request, remoteAddress: wifi })).status);
+    for (let phone = 0; phone < 20; phone += 1)
+      for (let attempt = 0; attempt < attemptsPerWaitingPhone; attempt += 1)
+        answers.push(
+          (await admission.consume({ ...request, remoteAddress: `203.0.113.${phone + 1}` })).status,
+        );
+    expect(answers.every((status) => status === "Allowed")).toBe(true);
+    // Sixty new guests scanning on the same Wi-Fi in the same ten minutes all get in.
+    for (let guest = 0; guest < 60; guest += 1)
+      expect(await admission.consume({ ...request, remoteAddress: wifi })).toEqual({
+        status: "Allowed",
+      });
+  });
+});
