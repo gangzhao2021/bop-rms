@@ -157,6 +157,22 @@ describe("CUST-CHECKOUT page contract", () => {
     expect(html).not.toContain("Continue to payment");
   });
 
+  it("WP-2423 live minor 22: a dish that can't be ordered now leads to the cart, with no tip asked", () => {
+    const html = render({
+      status: "item-unavailable",
+      cart,
+      refusal: "item_unavailable",
+      line: null,
+      canRetry: false,
+    });
+    expect(html).not.toContain('aria-label="Tip amount"');
+    expect(html).not.toContain("Choose a tip to continue");
+    expect(html).toMatch(
+      /<a[^>]*class="checkout-continue__button"[^>]*href="\/cart"[^>]*>Change your cart<\/a>/u,
+    );
+    expect(html).not.toMatch(/<button[^>]*class="checkout-continue__button"/u);
+  });
+
   it("v15 live check: an empty cart asks for no tip", () => {
     expect(render({ status: "empty" })).not.toContain('aria-label="Tip amount"');
     expect(

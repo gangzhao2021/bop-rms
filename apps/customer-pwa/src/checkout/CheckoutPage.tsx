@@ -283,6 +283,9 @@ export function CheckoutPage({
   const tipPresets = [0, ...tips.tierPercents];
   // Nothing in the cart (v15 live check): nothing to pay for, so no tip is asked either.
   const asksTip = !payLater && tips.enabled && cart !== null && cart.cart.items.length > 0;
+  // WP-2423 live minor 22: a dish in the cart can't be ordered now; the way on is the cart, so no
+  // tip is asked (a tip would read as what unblocks it).
+  const refusedItem = state.status === "item-unavailable";
   // A percentage the Store no longer offers (the quote was read again) is chosen again.
   useEffect(() => {
     if (typeof tipChoice === "number" && tipChoice !== 0 && !tips.tierPercents.includes(tipChoice))
@@ -648,6 +651,8 @@ export function CheckoutPage({
               ref={detailsForm}
               now={now}
               selection={detailsSelection}
+              // WP-2423 live minor 24: the cart moved (another tab ordered it): read it again.
+              onCheckoutChanged={() => void controller.load()}
               payLater={payLater}
               unsavedContact={
                 unsavedContact?.cartReference === detailsSelection.cartReference
@@ -666,7 +671,7 @@ export function CheckoutPage({
               onSubmittableChange={setDetailsSubmittable}
             />
           ) : null}
-          {!asksTip ? null : (
+          {!asksTip || refusedItem ? null : (
             <section
               className="checkout-boundary checkout-tip"
               aria-labelledby="checkout-tip-heading"
@@ -788,6 +793,10 @@ export function CheckoutPage({
             >
               {sendState === "pay_first" ? checkoutText.continueToPayment : checkoutText.placeOrder}
             </button>
+          ) : refusedItem ? (
+            <Link className="checkout-continue__button" to="/cart">
+              {checkoutText.changeYourCart}
+            </Link>
           ) : sessionState.status === "store_closed" || sendState === "store_closed" ? (
             // WP-2423 item 8 ⑦ s1: closed or past last orders: retrying does not help now.
             <Link className="checkout-continue__button" to={dineIn ? "/dine-in/session" : "/menu"}>

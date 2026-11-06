@@ -18,6 +18,7 @@ import {
   type OrderMessageOptions,
 } from "./order-messages-client.js";
 import {
+  CheckoutDetailsClientError,
   createCheckoutDetailsClient,
   createCheckoutDetailsController,
   type CheckoutDetailsDraft,
@@ -84,6 +85,7 @@ export function CheckoutDetailsForm({
   onBusyChange,
   onReadyChange,
   onSubmittableChange,
+  onCheckoutChanged,
   payLater = false,
   ref,
 }: {
@@ -101,6 +103,12 @@ export function CheckoutDetailsForm({
   readonly onReadyChange?: (selection: CheckoutFormSelection | null) => void;
   /** Whether a save could be attempted now (details loaded, policies accepted, online, not expired). */
   readonly onSubmittableChange?: (submittable: boolean) => void;
+  /**
+   * WP-2423 live minor 24: the cart moved under this checkout (details answered "changed"): the
+   * page reads the cart again — an order placed from it in another tab then shows as that order,
+   * never a details form that keeps answering the same conflict.
+   */
+  readonly onCheckoutChanged?: () => void;
   readonly ref?: React.Ref<CheckoutDetailsFormHandle>;
 }) {
   const [selection] = useState(() => Object.freeze({ ...provided }));
@@ -124,6 +132,8 @@ export function CheckoutDetailsForm({
   const unsaved = useRef(unsavedContact);
   unsaved.current = unsavedContact;
   const context = useRef<(() => boolean) | null>(null);
+  const changed = useRef(onCheckoutChanged);
+  changed.current = onCheckoutChanged;
   const load = useCallback(async () => {
     const run = ++generation.current,
       current = captureCustomerCsrfContext();
@@ -165,8 +175,14 @@ export function CheckoutDetailsForm({
       setPolicy(requirements);
       setMessages(channels);
       setDirty(true);
-    } catch {
+    } catch (error) {
       if (run === generation.current) setFailed(true);
+      if (
+        run === generation.current &&
+        error instanceof CheckoutDetailsClientError &&
+        error.code === "conflict"
+      )
+        changed.current?.();
     } finally {
       if (run === generation.current) setLoading(false);
     }
@@ -206,6 +222,9 @@ export function CheckoutDetailsForm({
     );
     return () => window.clearTimeout(timer);
   }, [expired, expiresAt, now]);
+  useEffect(() => {
+    if (save.status === "conflict") changed.current?.();
+  }, [save.status]);
   const uncertain = "canRetry" in save && save.canRetry;
   const busy = save.status === "pending" || uncertain;
   useEffect(() => {
