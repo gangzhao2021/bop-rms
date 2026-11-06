@@ -405,6 +405,73 @@ test("@production Home shows store system alerts with what to do, and their reso
   expect(home.unexpected).toEqual([]);
 });
 
+// WP-2423 item 9: when the store's order rules are refused, staff hear it on Home before a guest is
+// stuck on "preparing payment". The words are the monitor's own catalog, the longest it writes.
+test("@production Home says what a refused order Workflow stops and what staff do, at every width (WP-2423 item 9)", async ({
+  page,
+}) => {
+  const catalog = new URL("../../../tooling/environment/pilot-alerts.mjs", import.meta.url).href;
+  const { renderAlert } = (await import(catalog)) as {
+    readonly renderAlert: (
+      key: string,
+      params: unknown,
+    ) => { readonly title: string; readonly summary: string; readonly action: string };
+  };
+  const row = (key: string, params: unknown) => {
+    const { title, summary, action } = renderAlert(key, params);
+    return {
+      key,
+      severity: "critical",
+      title,
+      summary,
+      action,
+      raisedAt: "2026-10-15T15:56:00.000Z",
+    };
+  };
+  const board = {
+    ...problem,
+    active: [
+      row("orders.workflow", { state: "PaidOrders", refused: "Pickup:ExpectedVersionChanged" }),
+      row("orders.unpaid_rounds", { refused: "Cancellation:TwoBrandVersions" }),
+    ],
+  };
+  const home = await pilotHome(page, "owner", () => board);
+  await page.goto("/app");
+  const needs = page.getByRole("region", { name: "Needs attention" });
+  await expect(
+    needs.getByText(
+      "Paid orders may not reach the kitchen, and paid pickup orders may be refunded automatically",
+    ),
+  ).toBeVisible();
+  await expect(needs.getByText("Unpaid rounds are not being cancelled")).toBeVisible();
+  await expect(
+    needs.getByText(/What to do: Pause all services in Hours & ordering/u),
+  ).toBeVisible();
+  await expect(needs.getByText(/Call BOP support now/u).first()).toBeVisible();
+  await needs.getByText("More about this").first().click();
+  await expect(
+    needs.getByText(/refunded automatically about 30 minutes after payment/u),
+  ).toBeVisible();
+  // Which binding refused and by which rule is for BOP's log, never on a screen.
+  await expect(
+    page.getByText(/ExpectedVersionChanged|TwoBrandVersions|Cancellation:/u),
+  ).toHaveCount(0);
+  await expectNoInternalText(page);
+  for (const width of [1440, 1024, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(needs).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/home-order-workflow-${width}.png`,
+      fullPage: true,
+    });
+  }
+  expect(home.errors).toEqual([]);
+  expect(home.unexpected).toEqual([]);
+});
+
 // v15 finding: the pilot navigation has never had to carry an exceptions entry for the card to
 // appear; the server's answer decides. Owner and Store Manager see it, front of house does not.
 for (const role of ["owner", "store-manager"] as const)
