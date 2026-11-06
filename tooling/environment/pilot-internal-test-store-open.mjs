@@ -42,6 +42,13 @@ import {
  *   settlement — once the Store's first business day has closed, its day-end settlement
  *               coverage (that day), read as the services do; its settlement worker starts at the
  *               next restart. The directory given is the Store's (`…/stores/<name>`);
+ *   worker-account — v15 2026-11-06: a Store directory written before its dining-exception
+ *               worker got the Store's own Provider account (it named the installation Store's, so
+ *               its points sweep saw none of the Store's captures). Rewrites only that file's
+ *               account, to the one its business worker and guest runtime name (and its merchant
+ *               runtime, when that names one); the old file is kept as a backup. Refuses when they
+ *               disagree or name the installation Store's own. The directory given is the Store's
+ *               (`…/stores/<name>`); no database; takes effect at the next planned restart;
  *   renew     — after the installation's own renewal: the Store's synthetic launch gate and its
  *               own tax evidence (`tax`; database) and its files' common expiry (task queue, its
  *               staff file's entries at that expiry, profile) move to the same `--until` (the
@@ -126,6 +133,7 @@ const flags = {
   },
   settlement: { "--database": "expectedDatabaseName", "--migration-env": "envFile" },
   provider: {},
+  "worker-account": {},
   renew: {
     "--database": "expectedDatabaseName",
     "--migration-env": "envFile",
@@ -876,6 +884,94 @@ async function renew(options) {
   return Object.freeze({ ...result, from, to: options.until });
 }
 
+/**
+ * v15 2026-11-06 (points-sweep): the Store's dining-exception worker, with the Provider account its
+ * business worker and guest runtime name. Pure; `files` are the parsed JSON of the Store's own
+ * files plus `installationBusinessWorker` (the installation Store's). Fixed reasons only.
+ */
+export function alignDiningExceptionWorkerAccount(files) {
+  const {
+    installation,
+    profile,
+    businessWorker,
+    customerRuntime,
+    merchantRuntime,
+    diningExceptionWorker,
+    installationBusinessWorker,
+  } = files;
+  if (installation?.environment !== "InternalTest" || profile?.environment !== "InternalTest")
+    return unavailable("not-internal-test");
+  const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+  const account = businessWorker?.providerAccountReference;
+  if (
+    typeof account !== "string" ||
+    !ref.test(account) ||
+    customerRuntime?.providerAccountReference !== account ||
+    // On v15 the merchant runtime names no account; when it does, it must be the same one.
+    (Object.hasOwn(merchantRuntime ?? {}, "providerAccountReference") &&
+      merchantRuntime.providerAccountReference !== account)
+  )
+    return unavailable("account-disagrees");
+  if (account === installationBusinessWorker?.providerAccountReference)
+    return unavailable("installation-account");
+  if (
+    diningExceptionWorker === null ||
+    typeof diningExceptionWorker !== "object" ||
+    typeof diningExceptionWorker.providerAccountReference !== "string" ||
+    diningExceptionWorker.database !== installation.database ||
+    diningExceptionWorker.scope?.storeReference !== profile.binding?.storeReference
+  )
+    return unavailable("worker-invalid");
+  if (diningExceptionWorker.providerAccountReference === account)
+    return Object.freeze({ status: "AlreadyAligned" });
+  return Object.freeze({
+    status: "Aligned",
+    next: { ...diningExceptionWorker, providerAccountReference: account },
+  });
+}
+
+async function workerAccount(options) {
+  const { basename, dirname } = await import("node:path");
+  const { lstat, rename, writeFile } = await import("node:fs/promises");
+  const directory = options.directory;
+  if (basename(dirname(directory)) !== "stores") return unavailable("not-a-store-directory");
+  const read = async (folder, name) => {
+    try {
+      return JSON.parse(await readFile(join(folder, name), "utf8"));
+    } catch {
+      return unavailable("file-unavailable");
+    }
+  };
+  const result = alignDiningExceptionWorkerAccount({
+    installation: await read(directory, "installation.json"),
+    profile: await read(directory, "internal-test-profile.json"),
+    businessWorker: await read(directory, "business-worker.json"),
+    customerRuntime: await read(directory, "customer-runtime.json"),
+    merchantRuntime: await read(directory, "merchant-runtime.json"),
+    diningExceptionWorker: await read(directory, "dining-exception-worker.json"),
+    installationBusinessWorker: await read(dirname(dirname(directory)), "business-worker.json"),
+  });
+  if (result.status === "AlreadyAligned") return result;
+  const file = join(directory, "dining-exception-worker.json");
+  let backup = null;
+  for (let version = 1; version < 100 && backup === null; version++) {
+    const candidate = join(directory, `dining-exception-worker.v${version}-backup.json`);
+    if (
+      await lstat(candidate).then(
+        () => false,
+        () => true,
+      )
+    )
+      backup = candidate;
+  }
+  if (backup === null) return unavailable("backup-unavailable");
+  await writeFile(backup, await readFile(file), { mode: 0o600, flag: "wx" });
+  await writeFile(file + ".next", JSON.stringify(result.next, null, 2) + "\n", { mode: 0o600 });
+  await rename(file + ".next", file);
+  return Object.freeze({ status: "Aligned" });
+}
+export { workerAccount as alignStoreDiningExceptionWorkerAccount };
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const options = parseStoreOpenArguments(process.argv.slice(2));
@@ -897,7 +993,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
                     ? await kitchen(options)
                     : options.command === "provider"
                       ? await provisionStoreSimulator(options.directory)
-                      : await directory(options);
+                      : options.command === "worker-account"
+                        ? await workerAccount(options)
+                        : await directory(options);
     console.log(JSON.stringify(result));
   } catch (error) {
     const reason = typeof error?.reason === "string" ? error.reason : "unexpected-error";
