@@ -38,6 +38,10 @@ describe("WP-2423 Q10 store contact", () => {
       <StoreContactCard contact={{ ...contact, phone: null }} />,
     );
     expect(withoutPhone).not.toContain("tel:");
+    // M109: with no phone, the guest is told where help is instead of "the store can help".
+    expect(withoutPhone).toContain("Ask at the counter when you collect it");
+    expect(withoutPhone).not.toContain("The store can help");
+    expect(withPhone).toContain("Call the store");
     expect(withoutPhone).toContain("Toronto, ON M5V 1A1");
   });
 });

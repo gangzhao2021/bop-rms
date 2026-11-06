@@ -67,6 +67,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Application update ready.": "应用更新已准备好。",
   "Applying application update.": "正在更新应用。",
   "Ask a staff member at": "请询问店员：",
+  "To tell the store about an allergy, call them or ask at the counter before you order. The QR code does not record allergy or health information.":
+    "如有过敏，请在下单前致电门店或到柜台告诉店员。二维码不会记录过敏或健康信息。",
   "Ask a staff member for an accessible ordering option. Tell staff about allergies before ordering; the QR code does not record allergy or health information.":
     "如需其他点单方式，请向店员求助。点单前请告知店员过敏情况；扫码点单不会记录过敏或健康信息。",
   "Ask a staff member if you need help.": "需要帮助请问店员。",
@@ -553,7 +555,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Quantity for {item}": "{item} 的数量",
   "Quantity must be between 1 and 100.": "数量必须在 1 到 100 之间。",
   "Questions about this order?": "对这笔订单有疑问？",
-  "Questions about this order? The store can help.": "对这笔订单有疑问？门店可以帮你。",
+  "Questions about this order? Call the store.": "对这笔订单有疑问？请致电门店。",
+  "Questions about this order? Ask at the counter when you collect it.":
+    "对这笔订单有疑问？请在取餐时到柜台询问。",
   Ready: "已做好",
   "Ready for pickup": "可以取餐",
   "Ready to order": "可以开始点单",
@@ -1091,8 +1095,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Your visit on this phone has ended": "你在这部手机上的用餐已结束",
   "Your visit on this phone has ended, so the code can’t be shown here. Give your name or order number at the counter.":
     "你在这部手机上的用餐已结束，所以这里无法显示代码。请在柜台报上姓名或订单号。",
-  "Your visit on this phone has ended, so this can’t be changed here. Ask a staff member to remove your contact details.":
-    "你在这部手机上的用餐已结束，所以这里无法修改。请让店员删除你的联系方式。",
+  "Your visit on this phone has ended, so this can’t be changed here. Ask the store to remove your contact details; they are also deleted automatically 30 days after the order.":
+    "这部手机上的到店已结束，这里不能再修改。可以请门店删除你的联系方式；订单 30 天后也会自动删除。",
   "You’ll enter your card on the next step. Nothing is charged until you confirm.":
     "下一步输入银行卡，确认前不会扣款。",
   "You’re offline": "你已离线",

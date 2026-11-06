@@ -536,3 +536,36 @@ describe("M104/M105: a rescan says what happened to the visit on this phone", ()
     expect(html).not.toContain("This location is not accepting orders");
   });
 });
+
+describe("M109: a pickup guest's help names the store, not a staff member beside them", () => {
+  it("says to call or ask at the counter at a pickup entry, and keeps staff at a table", () => {
+    const at = (channel: "Pickup" | "DineIn") =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <EntryContextView
+            onContinue={vi.fn()}
+            onRetry={vi.fn()}
+            state={{
+              kind: "Established",
+              context: {
+                brandDisplayName: "BOP Test Kitchen",
+                storeDisplayName: "Harbour Test Store",
+                publicStoreReference: "018f2a1b-7c3d-7a4e-8b5c-1234567890ab",
+                publicTableReference:
+                  channel === "DineIn" ? "018f2a1b-7c3d-7a4e-9b5c-1234567890ab" : null,
+                channel,
+                operatingState: "Open",
+                availableServiceModes: [channel],
+                locale: "en-CA",
+                contextExpiresAt: "2026-08-11T20:00:00.000Z",
+                csrfToken: "A".repeat(43),
+              },
+            }}
+          />
+        </MemoryRouter>,
+      );
+    expect(at("Pickup")).toContain("call them or ask at the counter before you order");
+    expect(at("Pickup")).not.toContain("Tell staff about allergies");
+    expect(at("DineIn")).toContain("Tell staff about allergies before ordering");
+  });
+});

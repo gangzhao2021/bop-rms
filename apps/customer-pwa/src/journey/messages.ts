@@ -1487,7 +1487,7 @@ export const orderStatusText = Object.freeze({
     }),
     get visitEnded() {
       return t(
-        "Your visit on this phone has ended, so this can’t be changed here. Ask a staff member to remove your contact details.",
+        "Your visit on this phone has ended, so this can’t be changed here. Ask the store to remove your contact details; they are also deleted automatically 30 days after the order.",
       );
     },
     get removalFailed() {

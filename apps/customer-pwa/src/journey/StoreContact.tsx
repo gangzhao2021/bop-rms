@@ -67,7 +67,12 @@ export function StoreContactCard({
   return (
     <section className="store-contact" aria-labelledby="store-contact-heading">
       <h2 id="store-contact-heading">{t("Contact the store")}</h2>
-      <p>{t("Questions about this order? The store can help.")}</p>
+      {/* M109: with no published phone, say where help is, not that "the store can help". */}
+      <p>
+        {contact.phone
+          ? t("Questions about this order? Call the store.")
+          : t("Questions about this order? Ask at the counter when you collect it.")}
+      </p>
       {contact.phone ? (
         <p>
           <a className="store-contact__phone" href={`tel:${contact.phone}`}>

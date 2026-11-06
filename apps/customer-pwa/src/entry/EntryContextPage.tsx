@@ -485,9 +485,14 @@ export function EntryContextView({
         <aside className="entry-help" aria-labelledby="entry-help-heading">
           <h2 id="entry-help-heading">{t("Need help?")}</h2>
           <p>
-            {t(
-              "Ask a staff member for an accessible ordering option. Tell staff about allergies before ordering; the QR code does not record allergy or health information.",
-            )}
+            {/* M109: a pickup guest ordering from elsewhere has no staff member beside them. */}
+            {at?.channel === "Pickup"
+              ? t(
+                  "To tell the store about an allergy, call them or ask at the counter before you order. The QR code does not record allergy or health information.",
+                )
+              : t(
+                  "Ask a staff member for an accessible ordering option. Tell staff about allergies before ordering; the QR code does not record allergy or health information.",
+                )}
           </p>
         </aside>
       )}
