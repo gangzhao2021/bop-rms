@@ -100,6 +100,25 @@ async function start() {
     location: window.location,
     fetcher: window.fetch.bind(window),
   });
+  // M106: a Store's pickup link or the internal table launcher asks for its entry code at once,
+  // beside the session restore and the payment configuration, not after both.
+  const internalCodeLoad =
+    /^#(?:pickup|internal-dining)=/u.test(hash) &&
+    entryLocation.pathname === "/" &&
+    entryLocation.search === "" &&
+    scannedCode === null
+      ? runtimePaymentLoad
+          .then((configuration) =>
+            loadInternalEntryToken({
+              enabled:
+                configuration?.internalTestEntry ??
+                import.meta.env.VITE_BOP_INTERNAL_SIMULATED_PAYMENT === "1",
+              location: entryLocation,
+              fetcher: window.fetch.bind(window),
+            }),
+          )
+          .catch(() => undefined)
+      : null;
   // WP-2423 Q10: a reopened app, or a QR code scanned again while an order is in progress, still
   // finds the order this browser placed before a new visit could replace its Session.
   await restoreCustomerSession(
@@ -133,6 +152,7 @@ async function start() {
           ? {
               kind: "Code",
               load: () =>
+                internalCodeLoad ??
                 loadInternalEntryToken({
                   enabled: pickupEnabled,
                   location: entryLocation,

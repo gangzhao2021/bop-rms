@@ -1,0 +1,54 @@
+/* M106: what a guest sees while the app loads (served as a file of its own under the customer
+   CSP, never inline). React replaces it on first render. No script, no codes, no Store name. */
+.boot-shell {
+  box-sizing: border-box;
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  padding: 16px;
+  margin: 0;
+  color: #171717;
+  background: #ffffff;
+  font:
+    400 16px/1.5 Inter,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "PingFang SC",
+    "Noto Sans SC",
+    sans-serif;
+  text-align: center;
+}
+.boot-shell p {
+  margin: 0;
+}
+.boot-shell__bar {
+  width: min(240px, 70vw);
+  height: 2px;
+  margin: 16px auto 0;
+  overflow: hidden;
+  background: #ededed;
+}
+.boot-shell__bar::after {
+  content: "";
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: #171717;
+  animation: boot-shell 1.4s ease-in-out infinite;
+}
+@keyframes boot-shell {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boot-shell__bar::after {
+    width: 100%;
+    animation: none;
+  }
+}
