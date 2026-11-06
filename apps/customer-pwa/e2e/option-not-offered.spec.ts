@@ -240,6 +240,7 @@ for (const screen of [
           expect(adds).toEqual([[iced]]);
         } else {
           await expect(hotChoice).toBeChecked();
+          const readsBeforeAdd = menuReads;
           await press(add);
           // The menu is read again in place: Hot is greyed and named, the guest chooses Iced.
           await expect(
@@ -249,6 +250,9 @@ for (const screen of [
           ).toBeVisible();
           await expect(page.getByText("Not available now", { exact: true })).toBeVisible();
           await expect(add).toBeDisabled();
+          // Read again once only: the guest's phone does not keep fetching the menu.
+          await page.waitForTimeout(1_500);
+          expect(menuReads).toBe(readsBeforeAdd + 1);
           await press(icedChoice);
           // Once the guest moves off it, the choice that is off can't be chosen again.
           await expect(hotChoice).toBeDisabled();
@@ -256,7 +260,6 @@ for (const screen of [
           await press(add);
           await expect(page).toHaveURL(/\/menu$/u);
           expect(adds).toEqual([[hot], [iced]]);
-          expect(menuReads).toBeGreaterThanOrEqual(2);
         }
         await expect(page.getByText(/connection dropped/u)).toHaveCount(0);
         await expectNoInternalText(page);

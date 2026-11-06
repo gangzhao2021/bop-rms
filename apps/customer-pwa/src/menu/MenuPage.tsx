@@ -11,6 +11,7 @@ import { formatDecimalMoney, formatMoney } from "../journey/format.js";
 import { cartIssueMessage } from "../journey/messages.js";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -177,18 +178,20 @@ function useMenuLoad(
     // Owner 2026-11-03 walkthrough: moving the focus never moves the guest off where they were.
     if (state.kind !== "Loading") heading.current?.focus({ preventScroll: true });
   }, [state.kind]);
+  // WP-2423 (cart-unsellable-dishes): read the menu again in place (no loading screen), so
+  // a choice turned off since it was shown greys out while the guest keeps their page. Stable
+  // across renders, so a consumer's effect does not fire again when the menu it read arrives.
+  const refresh = useCallback(() => {
+    if (client === null || input === null) return;
+    void client.load(input).then((next) => {
+      if (next.kind === "Found") setState(next);
+    });
+  }, [client, input]);
   return {
     state,
     heading,
     retry: () => setRevision((value) => value + 1),
-    // WP-2423 (cart-unsellable-dishes): read the menu again in place (no loading screen), so
-    // a choice turned off since it was shown greys out while the guest keeps their page.
-    refresh: () => {
-      if (client === null || input === null) return;
-      void client.load(input).then((next) => {
-        if (next.kind === "Found") setState(next);
-      });
-    },
+    refresh,
   };
 }
 
@@ -1541,15 +1544,20 @@ export function SellableConfigurator({
     void controller.submit(sellable.sellableReference, draft);
   };
   // WP-2423 (cart-unsellable-dishes): the add was refused because a choice or the dish is not
-  // offered now: read the menu again once, so the page shows what can be chosen.
+  // offered now: read the menu again once per refusal, so the page shows what can be chosen.
+  // Keyed on the refusal itself, so a re-render (a new menu, a new callback) never reads again.
+  const refreshedFor = useRef<typeof state | null>(null);
   useEffect(() => {
     if (
       state.status === "validation" &&
+      refreshedFor.current !== state &&
       state.issueCodes.some(
         (code) => code === "CATALOG_OPTION_NOT_OFFERED" || code === "CATALOG_ITEM_UNAVAILABLE",
       )
-    )
+    ) {
+      refreshedFor.current = state;
       onRefresh?.();
+    }
   }, [state, onRefresh]);
   // Owner 2026-11-03 walkthrough: added, the guest goes on choosing. A cart that was cleared has
   // something to say, so that one stays.
