@@ -7393,6 +7393,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "{item}：「{group}」的选项有变动。请打开这道菜，检查选项并保存，然后再上架菜单。",
   "One of this product's choice groups no longer fits it: a choice was removed, or the choice guests start with is no longer offered. Check the group under Option sets, then save again.":
     "这个商品的某个选项组已不再适用：有选项被删除，或顾客默认的选项已不再供应。请在“选项组”中检查该选项组，然后再保存。",
+  "Listing stopped before anything was listed: some choices were set to make no change at their new quantities, the rest not yet. Guests see nothing new. List it again to finish.":
+    "上架在任何内容上架之前停止了：部分选项已按新的数量设为“不改变配方”，其余还没有。顾客看不到任何新内容。请再点一次“上架”完成。",
   "One of this dish's choice groups no longer fits it: a choice was removed, or the choice guests start with is no longer offered. Check the group under Option sets, then save the dish again.":
     "这道菜的某个选项组已不再适用：有选项被删除，或顾客默认的选项已不再供应。请在“选项组”中检查该选项组，然后再保存这道菜。",
   "{item}: one of its choices no longer fits its choice group (an option was removed, or a default is no longer offered). Open the dish, check its choices, save it, then list the menu again.":

@@ -205,6 +205,8 @@ it("one-page menu journey: a new dish, listed, is offered to guests at the store
       const unused = {
         query: async () => assert.fail("not used without choice groups"),
         command: async () => assert.fail("not used without choice groups"),
+        // "List it" carries choices to new quantities: a menu without choice groups has none.
+        extendNoChangeChoices: async () => ({ extended: 0, needsPerson: 0 }),
       };
       const availability = createMerchantAvailability(common);
       const dishes = createMerchantOneStoreDishes({

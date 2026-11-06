@@ -410,10 +410,12 @@ export function OneStoreMenuPage({
       // WP-2423 item 10: a stop on the server may be after the prices went live: the same listing
       // reference goes again, so the steps already done are not done twice.
       const stopped = code === "Unavailable" || code === "StoppedPartWay";
+      // Stopped before anything was listed: the same listing goes again and finishes it.
+      const notListed = code === "ChoiceRecipesStopped";
       // No answer (offline, or the page is going away): the listing may still be running on the
       // server, so it stays shown in progress until the menu says listed (or three minutes pass).
       if (code !== "Offline") {
-        if (!stopped) setListing(null);
+        if (!stopped && !notListed) setListing(null);
         setListingSince(null);
         writeListingMarker(menuReference, null);
       }

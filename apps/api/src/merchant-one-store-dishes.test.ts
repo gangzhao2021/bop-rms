@@ -70,6 +70,8 @@ function fakes() {
     stuck: false,
     /** The next round throws this. */
     coverFails: null as unknown,
+    /** "List it"'s carrying of "no change" choices to new quantities throws this. */
+    extendFails: null as unknown,
     /** Product commands answer what they recorded back then (a replay after a lost response). */
     replayProductCommands: false,
     /** Each round covers this many choices. */
@@ -265,6 +267,10 @@ function fakes() {
       },
     },
     optionRecipes: {
+      extendNoChangeChoices: async () => {
+        if (state.extendFails !== null) throw state.extendFails;
+        return { extended: 0, needsPerson: 0 };
+      },
       coverDishChoices: async (input: {
         skuReference: string;
         choices: Map<string, string | null>;
@@ -506,6 +512,26 @@ describe("WP-2423 item 8 ⑥ one dish saved from the one-page menu", () => {
       }),
     ).rejects.toMatchObject({ code: "OptionRecipeMissing" });
     expect(calls).toEqual(["menu:Check"]);
+    expect(state.assigned).toBeNull();
+  });
+
+  it("WP-2423: a stop while carrying choices to new quantities says nothing was listed", async () => {
+    const { calls, state, dishes } = fakes();
+    await dishes.command({ ...session, body: save() });
+    calls.length = 0;
+    state.extendFails = new Error("lock timeout");
+    const stopped = await dishes
+      .command({
+        ...session,
+        body: { action: "ListAll", operationReference: id(103), menuReference: MENU },
+      })
+      .catch((error: unknown) => error);
+    expect(stopped).toMatchObject({
+      name: "MerchantOneStoreDishError",
+      code: "ChoiceRecipesStopped",
+    });
+    // Nothing checked, nothing published: the prices sentence would be false.
+    expect(calls).toEqual([]);
     expect(state.assigned).toBeNull();
   });
 

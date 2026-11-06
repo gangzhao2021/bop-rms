@@ -51,6 +51,11 @@ export type MenuErrorCode =
    */
   | "ChoiceGroup"
   /**
+   * WP-2423 (v15 2026-11-05): "List it" stopped while carrying "no change" choices to a group's new
+   * quantities, before anything was listed; listing again (same listing) finishes it.
+   */
+  | "ChoiceRecipesStopped"
+  /**
    * v15 2026-10-29: a one-page menu save stopped at a later step (another page's command refused
    * it); what was saved before stays, and saving again goes on from there.
    */
@@ -977,6 +982,7 @@ const codes = new Set<MenuErrorCode>([
   "DishAllergensMissing",
   "DishHasRecipe",
   "ChoiceGroup",
+  "ChoiceRecipesStopped",
 ]);
 export function createMenuClient(csrf: string, fetcher: typeof fetch = fetch): MenuClient {
   const post = async (path: string, body: unknown) => {

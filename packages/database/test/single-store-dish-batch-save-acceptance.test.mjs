@@ -1033,3 +1033,169 @@ it("a default no longer offered is named on Save dish and on List it; offering i
     }
   });
 });
+
+const publishedAt = async (admin, brand, quantity) =>
+  (
+    await admin.query(
+      "SELECT count(*)::int n FROM rms_recipe.recipe_modifier_version WHERE brand_id=$1 AND lifecycle='Published' AND selected_quantity=$2",
+      [brand, quantity],
+    )
+  ).rows[0].n;
+/** The Option recipes page's row for a dish's choice. */
+const choiceRow = async (f, productName, optionName) =>
+  (await f.optionRecipes.query(f.session)).options.find(
+    (row) => row.productName === productName && row.optionName === optionName,
+  );
+/** A person sets a real change under Option recipes, reviews it alone and publishes it. */
+const setRealChange = async (f, row, itemReference) => {
+  const saved = await f.optionRecipes.command({
+    ...f.session,
+    body: {
+      action: "Save",
+      operationReference: f.op(),
+      bindingReference: row.bindingReference,
+      optionReference: row.optionReference,
+      expectedVersion: row.change?.version ?? null,
+      change: {
+        kind: "Add",
+        fromItemReference: null,
+        toItemReference: itemReference,
+        quantity: "1",
+        unitCostCents: null,
+        lossPercent: "0",
+      },
+    },
+  });
+  for (const kind of ["Cost", "FoodSafety"])
+    await f.optionRecipes.command({
+      ...f.session,
+      body: {
+        action: "Review",
+        operationReference: f.op(),
+        changeVersionReference: saved.changeVersionReference,
+        kind,
+        decision: "Approved",
+        comment: null,
+        approvalMode: "SingleStoreListing",
+      },
+    });
+  await f.optionRecipes.command({
+    ...f.session,
+    body: {
+      action: "Publish",
+      operationReference: f.op(),
+      changeVersionReference: saved.changeVersionReference,
+    },
+  });
+};
+
+it("a choice group turned into a quantity of each: List it carries its no-change recipes over, never a real change", async () => {
+  await withIsolatedDatabase(
+    { caseId: "wp2423_bquantity", timeoutMs: 600_000 },
+    async (context) => {
+      const admin = new Client(context.clientConfig);
+      await admin.connect();
+      const role = await createPilotApiRole(admin, context, "wp2423_bq");
+      const f = await createOneStoreMenuFixture(admin, context, { role });
+      try {
+        // 1. Half Sugar Tea: 36 drinks with Toppings ("choose several", one of each), and one
+        // whose Pearls really adds something (set by a person under Option recipes).
+        const toppings = await f.makeGroup("Toppings (TEST)", "Any", toppingNames);
+        // Free toppings: this case is about recipes, not about publishing choice prices.
+        const groups = choiceGroups({ toppings }).map((group) => ({
+          ...group,
+          options: group.options.map((option) => ({ ...option, amountMinor: "0" })),
+        }));
+        const drinks = 36;
+        for (let n = 1; n <= drinks; n += 1)
+          await f.saveDish({ name: `Drink ${n} (TEST)`, nameZh: "", choiceGroups: groups });
+        const special = await f.saveDish({
+          name: "Pearl special (TEST)",
+          nameZh: "",
+          choiceGroups: groups,
+        });
+        const firstSku = (
+          await admin.query(
+            "SELECT s.sku_id::text sku FROM rms_catalog.sku s JOIN rms_catalog.product_version v ON v.product_version_id=s.product_version_id WHERE s.brand_id=$1 AND v.localized_names_json->>'en-CA'='Drink 1 (TEST)'",
+            [f.brandReference],
+          )
+        ).rows[0]?.sku;
+        const item = (
+          await admin.query(
+            "SELECT inventory_item_id::text item FROM rms_recipe.staff_declared_allergen_source WHERE brand_id=$1 AND sku_id=$2",
+            [f.brandReference, firstSku],
+          )
+        ).rows[0]?.item;
+        assert.ok(item, "Drink 1 declared its allergens");
+        await setRealChange(f, await choiceRow(f, "Pearl special (TEST)", "Pearls"), item);
+        assert.equal((await f.listAll()).status, "Listed");
+        assert.equal(await publishedAt(admin, f.brandReference, 2), 0);
+
+        // 2. Option sets: Toppings becomes "a quantity of each", 2 of one, 3 in all.
+        await saveGroup(f, toppings, "Quantity", { maximum: 3, perOptionMaximum: 2 });
+
+        // 3. Saving the special again covers its "no change" toppings at 2, and leaves its real
+        // Pearls change as it is (it was overwritten with "no change" before).
+        await f.saveDish({
+          productReference: special.productReference,
+          name: "Pearl special (TEST)",
+          nameZh: "",
+          description: "With extra pearls (TEST)",
+          choiceGroups: groups,
+        });
+        assert.equal(
+          (await choiceRow(f, "Pearl special (TEST)", "Pearls")).change.content.kind,
+          "Add",
+        );
+        assert.equal(await publishedAt(admin, f.brandReference, 2), 7);
+
+        // 4. List it carries every "no change" topping of the 36 drinks to 2, then names the one
+        // real change a person sets. Nothing is listed.
+        const audit = await auditCounts(admin, f.brandReference);
+        const menusBefore = await listingRecords(admin, f.brandReference);
+        const started = performance.now();
+        await assert.rejects(f.listAll(), (error) => {
+          assert.equal(error.name, "MerchantMenuError", String(error.name) + ":" + error.code);
+          assert.equal(error.code, "OptionRecipeMissing");
+          assert.equal(error.problem.productName, "Pearl special (TEST)");
+          assert.equal(error.problem.optionName, "Pearls");
+          return true;
+        });
+        measured.push(
+          `${drinks} drinks x 8 toppings carried to quantity 2 in ${Math.round(
+            performance.now() - started,
+          )} ms`,
+        );
+        assert.equal(await publishedAt(admin, f.brandReference, 2), drinks * 8 + 7);
+        const grown = await auditCounts(admin, f.brandReference);
+        for (const [code, n] of Object.entries(grown)) assert.ok(n >= (audit[code] ?? 0), code);
+        assert.ok(
+          Object.values(grown).reduce((a, b) => a + b, 0) >
+            Object.values(audit).reduce((a, b) => a + b, 0) + drinks * 8,
+          "each extension is audited",
+        );
+        assert.equal(
+          (await listingRecords(admin, f.brandReference)).menus,
+          menusBefore.menus,
+          "nothing listed",
+        );
+        assert.equal(
+          (await choiceRow(f, "Pearl special (TEST)", "Pearls")).change.content.kind,
+          "Add",
+        );
+
+        // 5. The owner sets Pearls for 2 under Option recipes; List it lists.
+        await setRealChange(f, await choiceRow(f, "Pearl special (TEST)", "Pearls"), item);
+        assert.equal((await f.listAll()).status, "Listed");
+        // 6. Listing again carries nothing over: everything is covered.
+        const settled = await recordsOf(admin, f.brandReference);
+        await f.listAll();
+        assert.deepEqual(await recordsOf(admin, f.brandReference), settled);
+      } finally {
+        printMeasured();
+        await f.close();
+        await admin.end();
+      }
+    },
+  );
+});

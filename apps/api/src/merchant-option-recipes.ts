@@ -295,6 +295,10 @@ export function createMerchantOptionRecipes(options: {
     }
     return rows;
   }
+  const changeOf = (
+    found: Awaited<ReturnType<typeof listOptionRecipeChanges>>,
+    target: OptionRecipeTarget,
+  ) => found.get(target.bindingReference + ":" + target.optionReference) ?? null;
   const mapError = (error: unknown): never => {
     if (error instanceof MerchantOptionRecipeError) throw error;
     if (error instanceof OptionRecipeChangeError)
@@ -609,7 +613,12 @@ export function createMerchantOptionRecipes(options: {
     readonly skuReference: string;
     /** The dish's choices; each with the item it adds to the recipe (a combo's), or null. */
     readonly choices: ReadonlyMap<string, string | null>;
-  }): Promise<{ readonly remaining: number; readonly waitingForAllergens: boolean }> => {
+  }): Promise<{
+    readonly remaining: number;
+    readonly waitingForAllergens: boolean;
+    /** Choices with a real recipe change that no longer covers every quantity: left as they are. */
+    readonly needsPerson: number;
+  }> => {
     const current = await session(input);
     return retryTransactionConflict(() =>
       options.persistence.transactions.run((tx) =>
@@ -633,29 +642,42 @@ export function createMerchantOptionRecipes(options: {
               at,
             );
             const uncovered = rows.filter((row) => coverage.get(row.target)?.covered !== true);
-            if (uncovered.length === 0) return { remaining: 0, waitingForAllergens: false };
+            if (uncovered.length === 0)
+              return { remaining: 0, waitingForAllergens: false, needsPerson: 0 };
             // No recipe for the size yet: its allergens are not declared, so there is nothing a
             // choice could change. Nothing is written; declaring them later covers the choices.
             if (uncovered.some((row) => coverage.get(row.target)?.bound !== true))
-              return { remaining: uncovered.length, waitingForAllergens: true };
+              return { remaining: uncovered.length, waitingForAllergens: true, needsPerson: 0 };
+            // WP-2423 (v15 2026-11-05): a choice whose published change is real (adds, removes or
+            // replaces an ingredient) and no longer covers every quantity is a person's to set
+            // under Option recipes: it is never overwritten with "no change" (a stock or allergen
+            // fact would be lost). The listing names it. A combo's choice is the combo's own.
+            const latest = await listOptionRecipeChanges(
+              rtx(tx),
+              scope,
+              uncovered.map((row) => row.target),
+            );
+            const ours = uncovered.filter((row) => {
+              const change = changeOf(latest, row.target);
+              return (
+                change === null ||
+                change.publishedAt === null ||
+                change.content.kind === "NoChange" ||
+                (input.choices.get(row.target.optionReference) ?? null) !== null
+              );
+            });
+            const needsPerson = uncovered.length - ours.length;
+            if (ours.length === 0) return { remaining: 0, waitingForAllergens: false, needsPerson };
             // Always the first one, however many rules it has (up to 20 of each); then as many as
             // fit in one short hold.
             let rules = 0;
-            const picked = uncovered.filter((row, index) => {
+            const picked = ours.filter((row, index) => {
               const count = coverage.get(row.target)?.rules ?? 0;
               if (index > 0 && rules + count > OPTION_RECIPE_RULES_PER_TRANSACTION) return false;
               rules += count;
               return true;
             });
-            const changeOf = (
-              found: Awaited<ReturnType<typeof listOptionRecipeChanges>>,
-              target: OptionRecipeTarget,
-            ) => found.get(target.bindingReference + ":" + target.optionReference) ?? null;
-            const changes = await listOptionRecipeChanges(
-              rtx(tx),
-              scope,
-              picked.map((row) => row.target),
-            );
+            const changes = latest;
             const plan = picked.map((row) => {
               const change = changeOf(changes, row.target);
               const save = change === null || change.publishedAt !== null;
@@ -773,7 +795,11 @@ export function createMerchantOptionRecipes(options: {
                 ...checks,
               });
             }
-            return { remaining: uncovered.length - picked.length, waitingForAllergens: false };
+            return {
+              remaining: ours.length - picked.length,
+              waitingForAllergens: false,
+              needsPerson,
+            };
           } catch (error) {
             return mapError(error);
           }
@@ -781,5 +807,176 @@ export function createMerchantOptionRecipes(options: {
       ),
     );
   };
-  return { query, command, coverDishChoices };
+  /**
+   * WP-2423 (v15 2026-11-05): "List it" at a single store, after a choice group of existing dishes
+   * was turned into "a quantity of each" under Option sets. A choice whose published change is "no
+   * change" at the quantities it had changes nothing at the new ones either, so that change is saved
+   * again for every quantity now choosable, reviewed (Cost, FoodSafety) and published, exactly as
+   * a dish save covers a new choice: the owner in single-store listing mode, the same audit, under
+   * operation references derived from the listing's (`extend-…`), so a retried listing continues
+   * without duplicates. A real change (adds, removes or replaces an ingredient) is never extended:
+   * it stays for a person under Option recipes, and the listing check names it. Without option
+   * recipe edit, review and publish permission nothing is written. Reads first, in one
+   * transaction; then at most `OPTION_RECIPE_RULES_PER_TRANSACTION` rules per short transaction.
+   */
+  const extendNoChangeChoices = async (input: {
+    readonly sessionCookie: unknown;
+    readonly csrf: unknown;
+    /** The listing's operation. */
+    readonly operationReference: string;
+    /** The menu's dishes (sizes). */
+    readonly skuReferences: ReadonlySet<string>;
+  }): Promise<{ readonly extended: number; readonly needsPerson: number }> => {
+    const current = await session(input);
+    const run = <T>(work: (tx: Tx, s: Scope, at: string) => Promise<T>) =>
+      retryTransactionConflict(() =>
+        options.persistence.transactions.run((tx) =>
+          withRememberedBrandAuthorization(tx, async () => {
+            const s = await scopeFor(tx, input.sessionCookie, current.sessionReference);
+            const at = options.persistence.now();
+            try {
+              return await work(tx, s, at);
+            } catch (error) {
+              return mapError(error);
+            }
+          }),
+        ),
+      );
+    const found = await run(async (tx, s, at) => {
+      const { mayEdit, mayReview, mayPublish } = s.permissions;
+      if (!mayEdit || !mayReview || !mayPublish) return null;
+      const scope = { brandReference: s.brandReference, storeReference: s.storeReference };
+      const rows = (await targets(tx, s)).filter((row) =>
+        row.sizes.some((size) => input.skuReferences.has(size.skuReference)),
+      );
+      const coverage = await optionRecipesCovered(
+        rtx(tx),
+        scope,
+        rows.map((row) => row.target),
+        at,
+      );
+      // Not covered, with a recipe to change (a dish without one waits for its allergens).
+      const uncovered = rows.filter(
+        (row) =>
+          coverage.get(row.target)?.covered !== true && coverage.get(row.target)?.bound === true,
+      );
+      const latest = await listOptionRecipeChanges(
+        rtx(tx),
+        scope,
+        uncovered.map((row) => row.target),
+      );
+      return uncovered.map((row) => ({
+        target: row.target,
+        rules: coverage.get(row.target)?.rules ?? 0,
+        change: changeOf(latest, row.target),
+      }));
+    });
+    if (found === null) return { extended: 0, needsPerson: 0 };
+    const extendable = found.filter(
+      (entry) => entry.change?.publishedAt != null && entry.change.content.kind === "NoChange",
+    );
+    // Rounds: always the first, however many rules; then as many as fit in one short hold.
+    const rounds: (typeof extendable)[] = [];
+    let rules = 0;
+    for (const entry of extendable) {
+      const last = rounds.at(-1);
+      if (last === undefined || rules + entry.rules > OPTION_RECIPE_RULES_PER_TRANSACTION) {
+        rounds.push([entry]);
+        rules = entry.rules;
+      } else {
+        last.push(entry);
+        rules += entry.rules;
+      }
+    }
+    let extended = 0;
+    for (const round of rounds)
+      extended += await run(async (tx, s, at) => {
+        const scope = { brandReference: s.brandReference, storeReference: s.storeReference };
+        // Again in this transaction: still uncovered, and still that same published "no change".
+        const coverage = await optionRecipesCovered(
+          rtx(tx),
+          scope,
+          round.map((entry) => entry.target),
+          at,
+        );
+        const latest = await listOptionRecipeChanges(
+          rtx(tx),
+          scope,
+          round.map((entry) => entry.target),
+        );
+        const plan = round.filter((entry) => {
+          const change = changeOf(latest, entry.target);
+          return (
+            coverage.get(entry.target)?.covered !== true &&
+            change !== null &&
+            change.publishedAt !== null &&
+            change.content.kind === "NoChange" &&
+            change.changeVersionReference === entry.change?.changeVersionReference
+          );
+        });
+        if (plan.length === 0) return 0;
+        const { singleStore } = reviewGates(tx, s, at);
+        const listingMode = await singleStore(s.actor);
+        const checks = publishChecks(tx, s, at);
+        await checks.reviewersAuthorized([s.actor]);
+        await checks.singleStoreListingEffective(s.actor);
+        await lockOptionRecipeTables(rtx(tx));
+        for (const { target, change } of plan) {
+          const key = derivedReference(
+            input.operationReference,
+            "extend-" +
+              target.bindingReference +
+              ":" +
+              target.optionReference +
+              ":" +
+              target.quantities.join(","),
+          );
+          const step = (purpose: string) => derivedReference(key, purpose);
+          const saved = await saveOptionRecipeChange(rtx(tx), scope, {
+            operationReference: step("save"),
+            actorReference: s.actor,
+            at,
+            target,
+            content: {
+              kind: "NoChange",
+              fromItemReference: null,
+              toItemReference: null,
+              quantity: null,
+              unitCostCents: null,
+              lossPercent: "0",
+            },
+            items: new Map(),
+            expectedVersion: change?.version ?? null,
+          });
+          // A replay: what that operation already recorded stands, reviews included.
+          const reviews =
+            saved.status === "AlreadyApplied"
+              ? (changeOf(await listOptionRecipeChanges(rtx(tx), scope, [target]), target)
+                  ?.reviews ?? [])
+              : [];
+          for (const kind of ["Cost", "FoodSafety"] as const)
+            if (!reviews.some((review) => review.kind === kind && review.decision === "Approved"))
+              await reviewOptionRecipeChange(rtx(tx), scope, {
+                singleStoreListing: { storeReference: s.storeReference, mode: listingMode },
+                operationReference: step("review-" + kind),
+                actorReference: s.actor,
+                at,
+                changeVersionReference: saved.changeVersionReference,
+                kind,
+                decision: "Approved",
+                comment: null,
+              });
+          await publishOptionRecipeChange(rtx(tx), scope, {
+            operationReference: step("publish"),
+            actorReference: s.actor,
+            at,
+            changeVersionReference: saved.changeVersionReference,
+            ...checks,
+          });
+        }
+        return plan.length;
+      });
+    return { extended, needsPerson: found.length - extendable.length };
+  };
+  return { query, command, coverDishChoices, extendNoChangeChoices };
 }

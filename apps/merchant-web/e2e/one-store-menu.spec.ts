@@ -375,6 +375,18 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     0,
   );
   await expectNoInternalText(page);
+  // WP-2423 (v15 2026-11-05): a stop while carrying "no change" choices to a group's new
+  // quantities comes before anything is listed: it says so, and the same listing goes again.
+  oneStoreRefusal = { error: "ChoiceRecipesStopped", part: "OneStoreDish" };
+  await page.getByRole("button", { name: "List it" }).click();
+  await expect(
+    page.getByText(
+      "Listing stopped before anything was listed: some choices were set to make no change at their new quantities, the rest not yet. Guests see nothing new. List it again to finish.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("New prices may already be showing", { exact: false })).toHaveCount(
+    0,
+  );
   // WP-2423 item 10: a stop on the server may be after the prices went live, so it does not say
   // guests see nothing new; listing again carries on as the same listing.
   listingStops = true;
@@ -399,7 +411,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
     page.getByText("There are saved changes not listed yet.", { exact: false }),
   ).toHaveCount(0);
   const listings = menuCommands.filter((command) => command.action === "List");
-  expect(listings).toHaveLength(4);
+  expect(listings).toHaveLength(5);
   expect(Object.keys(listings[2] ?? {}).sort()).toEqual([
     "action",
     "menuReference",
@@ -409,6 +421,7 @@ test("@production a single store's menu on one page: search, filters, sold out, 
   expect(listings[0]?.operationReference).not.toBe(listings[1]?.operationReference);
   expect(listings[1]?.operationReference).not.toBe(listings[2]?.operationReference);
   expect(listings[3]?.operationReference).toBe(listings[2]?.operationReference);
+  expect(listings[4]?.operationReference).toBe(listings[2]?.operationReference);
 });
 
 test("@production one dish edited on the one-page menu: names, price, choices, allergens; new dish and section; List it", async ({

@@ -218,6 +218,8 @@ it("two Stores: Brand Owner lists, each Store keeps its own price, sold out and 
       const unused = {
         query: async () => assert.fail("not used without choice groups"),
         command: async () => assert.fail("not used without choice groups"),
+        // "List it" carries choices to new quantities: a menu without choice groups has none.
+        extendNoChangeChoices: async () => ({ extended: 0, needsPerson: 0 }),
       };
       const at = (storeReference) => {
         const scope = scopeAt(storeReference);

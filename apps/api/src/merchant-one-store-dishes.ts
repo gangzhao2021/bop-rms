@@ -47,7 +47,13 @@ export class MerchantOneStoreDishError extends Error {
        * would not answer. What was saved stays, and saving again goes on from there (409 with its
        * part, which the page shows as "Saving stopped part-way").
        */
-      | "StoppedPartWay",
+      | "StoppedPartWay"
+      /**
+       * WP-2423 (v15 2026-11-05): "List it" stopped while carrying the "no change" option recipes of
+       * a choice group turned into "a quantity of each" to the new quantities, before anything was
+       * listed: what was written stays, guests see nothing new, and listing again finishes it.
+       */
+      | "ChoiceRecipesStopped",
   ) {
     super(code);
     this.name = "MerchantOneStoreDishError";
@@ -1000,6 +1006,27 @@ export function createMerchantOneStoreDishes(options: {
   /** "List it": the open price book, the waiting choice prices and the menu, alone at one store. */
   const listAll = async (session: Session, body: ListAllBody) => {
     const step = (purpose: string) => derivedReference(body.operationReference, purpose);
+    // WP-2423 (v15 2026-11-05): a choice group turned into "a quantity of each" under Option sets:
+    // its "no change" option recipes are carried to the new quantities first (a real change stays
+    // for a person, and the check below names it). A stop here comes before anything is listed.
+    const menu = await loadMenu(session, body.menuReference);
+    const skus = new Set(
+      menu.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference)),
+    );
+    try {
+      await options.optionRecipes.extendNoChangeChoices({
+        ...session,
+        operationReference: body.operationReference,
+        skuReferences: skus,
+      });
+    } catch (error) {
+      // Not allowed to read or set option recipes: nothing is carried over, and the check below
+      // names any choice that needs a person (as it did before).
+      if (!(error instanceof MerchantOptionRecipeError && error.code === "PermissionDenied"))
+        throw Object.assign(new MerchantOneStoreDishError("ChoiceRecipesStopped"), {
+          cause: error,
+        });
+    }
     // v15 2026-10-29 finding c: nothing is published while the menu itself could not be listed
     // (its tax, choice recipes or allergen list): prices never go live ahead of their menu.
     await options.menus.command({
@@ -1051,11 +1078,12 @@ export function createMerchantOneStoreDishes(options: {
         },
       });
     }
-    // Every dish on the menu that was never decided at the store is offered with it.
-    const menu = await loadMenu(session, body.menuReference);
+    // Every dish on the menu that was never decided at the store is offered with it (read again:
+    // listing its combos may have changed it).
+    const listed = await loadMenu(session, body.menuReference);
     await offerUndecided(
       session,
-      new Set(menu.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference))),
+      new Set(listed.menu.sections.flatMap((s) => s.items.map((item) => item.skuReference))),
       step,
     );
     return options.menus.command({
