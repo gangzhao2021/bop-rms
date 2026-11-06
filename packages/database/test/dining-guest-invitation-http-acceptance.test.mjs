@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { URL } from "node:url";
 import pg from "pg";
 import { it } from "vitest";
 import { prepareCurrentEntryProfile } from "../test-support/current-entry-profile.mjs";
 import { exercisePersistentProfileEntry } from "../test-support/persistent-profile-entry.mjs";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { renderPilotAclSql } from "../../../tooling/environment/pilot-acl-render.mjs";
 
 // WP-2423 DEC-DINING-GUEST-INVITATION (v15 8c4480dd H1): the real path. A guest enters by the
 // table QR, joins with the staff code and binds over HTTP; the Host then reads and issues through
@@ -15,25 +18,20 @@ it("lets the joined Host make a code over the composed API that seats the next g
     await client.connect();
     const role = "wp2423ih_" + env.runId;
     try {
-      await client.query("CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOBYPASSRLS");
-      await client.query(
-        "GRANT EXECUTE ON FUNCTION platform_helpers.current_brand_id(),platform_helpers.current_store_id(),platform_helpers.is_uuid_v7(uuid) TO " +
-          role,
+      const worker = "wp2423ihw_" + env.runId;
+      for (const name of [role, worker])
+        await client.query(
+          "CREATE ROLE " + name + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+        );
+      // Exactly the pilot's grants: a read the entry gains (e.g. a merchant's paused new guests)
+      // is refused here as on v15 until the pilot ACL holds it.
+      const root = new URL("../../../docs/spec/", import.meta.url);
+      const matrices = await Promise.all(
+        ["pilot-acl-matrix.json", "pilot-acl-additions.json"].map(async (file) =>
+          JSON.parse(await readFile(new URL(file, root), "utf8")),
+        ),
       );
-      await client.query("GRANT USAGE ON TYPE platform_helpers.uuid_v7 TO " + role);
-
-      await client.query(
-        "GRANT USAGE ON SCHEMA rms_store,platform_helpers,platform_audit TO " + role,
-      );
-      await client.query(
-        "GRANT SELECT,INSERT,UPDATE,DELETE ON rms_store.public_store_profile_version TO " + role,
-      );
-      // The pilot api role's read of the Store's modules (whether pickup is offered).
-      await client.query("GRANT SELECT ON rms_store.store_feature_setting TO " + role);
-      await client.query(
-        "GRANT SELECT,INSERT,UPDATE ON platform_audit.audit_record,platform_audit.audit_chain_head TO " +
-          role,
-      );
+      await client.query(renderPilotAclSql(matrices, { api: role, worker }));
       // Independent reads may run concurrently; never share transaction context.
       const run = async (work) => {
         const connection = new pg.Client({
@@ -60,9 +58,6 @@ it("lets the joined Host make a code over the composed API that seats the next g
         }
       };
 
-      await client.query(
-        "GRANT SELECT,INSERT,UPDATE ON rms_store.public_store_profile_timing TO " + role,
-      );
       let activeWorkerConnections = 0;
       const acquire = async () => {
         const connection = new pg.Client({
