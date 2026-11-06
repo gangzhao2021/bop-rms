@@ -322,6 +322,43 @@ describe("counter order command — WP-2423 Q7", () => {
     expect(onUnexpected).not.toHaveBeenCalled();
   });
 
+  it("WP-2423 (staff-round-soldout): a line the quote can't sell is named, never a system failure", async () => {
+    const twoLines = {
+      lines: [
+        { sellableReference: id(2), quantity: 1, optionSelections: [] },
+        { sellableReference: id(3), quantity: 1, optionSelections: [] },
+      ],
+    };
+    const linesAfter = (count: number) =>
+      Array.from({ length: count }, (_, at) => ({ cartItemReference: id(40 + at), quantity: 1 }));
+    for (const [reason, optionsChanged] of [
+      ["Unavailable", false],
+      ["OptionsChanged", true],
+    ] as const) {
+      state.entries.clear();
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.addItem
+        .mockResolvedValueOnce({ status: "Applied", cartVersion: 2, lines: linesAfter(1) } as never)
+        .mockResolvedValueOnce({
+          status: "Applied",
+          cartVersion: 3,
+          lines: linesAfter(2),
+        } as never);
+      pipeline.quote.mockResolvedValueOnce({
+        status: "ItemUnavailable",
+        cartItemReference: id(41),
+        reason,
+      } as never);
+      await expect(send(twoLines)).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ITEM_UNAVAILABLE",
+        lineIndex: 1,
+        optionsChanged,
+      });
+      expect(pipeline.startCheckout).not.toHaveBeenCalled();
+      expect(onUnexpected).not.toHaveBeenCalled();
+    }
+  });
+
   describe("v15 run: an item with too little stock", () => {
     const stockOf = (left: number) =>
       vi.fn(async (_c: unknown, input: { quantity: number }) => input.quantity <= left);

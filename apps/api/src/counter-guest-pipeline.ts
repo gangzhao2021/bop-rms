@@ -318,6 +318,23 @@ export function createGuestOrderSteps(options: {
         requestedAt: input.requestedAt,
       });
       if (result.status === "InvalidConfiguration") return { status: "NotPriced" as const };
+      // WP-2423 (staff-round-soldout): a Cart line that can't be sold now (sold out, off the menu,
+      // its setup incomplete, or its options changed) is named, never an unknown failure.
+      if (result.status === "ItemUnavailable")
+        return {
+          status: "ItemUnavailable" as const,
+          cartItemReference: String(result.cartItemReference),
+          reason:
+            result.reason === "OptionsChanged"
+              ? ("OptionsChanged" as const)
+              : ("Unavailable" as const),
+        };
+      // A guest phone at the table started paying for this Cart meanwhile (dine-in only).
+      if (result.status === "CheckoutInProgress") return { status: "CheckoutInProgress" as const };
+      // DEC-DINE-IN-PAY-LATER: staff started the table's checkout; no more rounds now.
+      if (result.status === "TableCheckingOut") return { status: "TableCheckingOut" as const };
+      // The Cart changed since it was read (a guest edited it): nothing was priced; send again.
+      if (result.status === "VersionConflict") return { status: "NotPriced" as const };
       if (result.status !== "Created" && result.status !== "Current") return failed();
       const quote = result.quote;
       if (

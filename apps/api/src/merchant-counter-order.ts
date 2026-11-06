@@ -77,6 +77,11 @@ export class CounterOrderError extends Error {
   readonly sharedStock: boolean;
   /** For COUNTER_ORDER_ALREADY_ORDERED: the Store's number of the Order, when known. */
   readonly orderNumber: string | null;
+  /**
+   * WP-2423 (staff-round-soldout): for COUNTER_ORDER_ITEM_UNAVAILABLE, the dish is sold but the
+   * options chosen for it no longer fit the menu (staff remove it and add it with new choices).
+   */
+  optionsChanged = false;
   constructor(
     code: CounterOrderErrorCode,
     lineIndex: number | null = null,
@@ -276,6 +281,19 @@ export interface CounterGuestPipeline {
         readonly totalMinor: bigint;
       }
     | { readonly status: "NotPriced" }
+    /**
+     * WP-2423 (staff-round-soldout): this Cart line can't be sold now (sold out, off the menu, its
+     * setup incomplete), or the dish is sold but its chosen options no longer fit.
+     */
+    | {
+        readonly status: "ItemUnavailable";
+        readonly cartItemReference: string;
+        readonly reason: "Unavailable" | "OptionsChanged";
+      }
+    /** A guest at the table is paying for the table's Cart (dine-in only). */
+    | { readonly status: "CheckoutInProgress" }
+    /** DEC-DINE-IN-PAY-LATER: the table's checkout started; no more rounds (dine-in only). */
+    | { readonly status: "TableCheckingOut" }
   >;
   /**
    * The checkout details every pickup Order carries. A walk-up guest gives no contact (staff
@@ -749,6 +767,14 @@ export function createMerchantCounterOrder(options: {
         cartVersion,
         requestedAt: now(),
       });
+      // WP-2423 (staff-round-soldout): a line hidden, sold out or changed between adding it and
+      // pricing it is named (the walk-up Cart holds only this order's lines); nothing was sent.
+      if (quoted.status === "ItemUnavailable") {
+        const at = cartLines.indexOf(quoted.cartItemReference);
+        const refused = new CounterOrderError("COUNTER_ORDER_ITEM_UNAVAILABLE", at < 0 ? null : at);
+        refused.optionsChanged = quoted.reason === "OptionsChanged";
+        throw refused;
+      }
       if (quoted.status !== "Quoted") return fail("COUNTER_ORDER_NOT_PRICED");
       const tip = counterTipMinor(command.tip, quoted.subtotalMinor);
       await options.pipeline.saveDetails(credentials, {

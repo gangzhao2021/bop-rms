@@ -222,6 +222,49 @@ describe("counter guest pipeline — WP-2423 Q7", () => {
     expect(await p.quote(guest, input)).toEqual({ status: "NotPriced" });
   });
 
+  it("WP-2423 (staff-round-soldout): names the line the quote can't sell, never an unknown failure", async () => {
+    const { pipeline: p, options } = pipeline();
+    const input = {
+      operationReference: id(12),
+      cartReference: id(6),
+      cartVersion: 2,
+      requestedAt: "2026-10-13T18:00:00.000Z",
+    };
+    options.quote.quoteCart.mockResolvedValueOnce({
+      status: "ItemUnavailable",
+      cartItemReference: id(40),
+      reason: "Unavailable",
+    } as never);
+    expect(await p.quote(guest, input)).toEqual({
+      status: "ItemUnavailable",
+      cartItemReference: id(40),
+      reason: "Unavailable",
+    });
+    options.quote.quoteCart.mockResolvedValueOnce({
+      status: "ItemUnavailable",
+      cartItemReference: id(41),
+      reason: "OptionsChanged",
+    } as never);
+    expect(await p.quote(guest, input)).toEqual({
+      status: "ItemUnavailable",
+      cartItemReference: id(41),
+      reason: "OptionsChanged",
+    });
+    options.quote.quoteCart.mockResolvedValueOnce({
+      status: "CheckoutInProgress",
+      heldUntil: "2026-10-13T18:05:00.000Z",
+    } as never);
+    expect(await p.quote(guest, input)).toEqual({ status: "CheckoutInProgress" });
+    options.quote.quoteCart.mockResolvedValueOnce({ status: "TableCheckingOut" } as never);
+    expect(await p.quote(guest, input)).toEqual({ status: "TableCheckingOut" });
+    // A guest changed the Cart since it was read: nothing priced, staff send again.
+    options.quote.quoteCart.mockResolvedValueOnce({ status: "VersionConflict" } as never);
+    expect(await p.quote(guest, input)).toEqual({ status: "NotPriced" });
+    // The quote service itself failing is still the unknown failure.
+    options.quote.quoteCart.mockResolvedValueOnce({ status: "Unavailable" } as never);
+    await expect(p.quote(guest, input)).rejects.toThrow("COUNTER_GUEST_PIPELINE_UNAVAILABLE");
+  });
+
   it("refuses checkout and payment while the Store is not taking pickup orders", async () => {
     const { pipeline: p, options } = pipeline();
     options.checkout.create.mockRejectedValueOnce(new CheckoutSessionServiceError("STORE_CLOSED"));
