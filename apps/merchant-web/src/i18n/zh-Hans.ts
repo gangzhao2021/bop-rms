@@ -6782,8 +6782,9 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "只用于最后结账的桌。短时间大量下单总会先等确认：同一台手机 10 分钟内第 4 轮，或同一桌第 7 轮。",
   "A manager changes this.": "由店长修改。",
   "Remove phone {number} from this table": "把手机 {number} 移出这桌",
-  "Check it belongs to this table. If not, remove it below or pause joining by scan.":
-    "看看是不是这桌的客人；不是的话，在下面移出，或暂停扫码加入。",
+  "Check it belongs to this table. If not, remove it below. To stop it joining again by scan, also pause joining by scan.":
+    "检查它是不是这桌的。不是的话在下面移出；要防止它再扫码加入，还要暂停扫码加入。",
+  "Also pause joining by scan": "也暂停扫码加入",
   Hidden: "已隐藏",
   "Missing a name": "缺中文名或英文名",
   "You do not have permission to see the menu.": "你没有查看菜单的权限。",

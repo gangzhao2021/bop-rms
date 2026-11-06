@@ -58,6 +58,8 @@ export function TablePanelPhones({
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [hidden, setHidden] = useState(false);
+  // M36: removing a phone does not stop it scanning in again; after a removal, offer the pause.
+  const [justRemoved, setJustRemoved] = useState<string | null>(null);
   // One reference per intended change, kept until it is answered (pressing again never repeats it).
   const pending = useRef<{ readonly key: string; readonly reference: string } | null>(null);
   const roundsRef = useRef(onRounds);
@@ -83,7 +85,11 @@ export function TablePanelPhones({
   }, [client, csrf, diningSessionReference, refreshKey]);
   if (hidden || state === null)
     return problem ? <p className="table-panel__notice">{problem}</p> : null;
-  const run = async (key: string, action: (reference: string) => Promise<TablePhones>) => {
+  const run = async (
+    key: string,
+    action: (reference: string) => Promise<TablePhones>,
+    done?: () => void,
+  ) => {
     if (busy) return;
     if (pending.current?.key !== key)
       pending.current = { key, reference: serviceOperationReference() };
@@ -95,6 +101,7 @@ export function TablePanelPhones({
       setConfirming(null);
       setState(next);
       roundsRef.current?.(next.rounds);
+      done?.();
     } catch (error) {
       setProblem(
         error instanceof TablePhonesError && error.code === "OutcomeUnknown"
@@ -110,12 +117,15 @@ export function TablePanelPhones({
       client.setPaused(csrf, { diningSessionReference, paused, operationReference }),
     );
   const remove = (phone: TablePhone) =>
-    void run("remove:" + phone.participantReference, (operationReference) =>
-      client.remove(csrf, {
-        diningSessionReference,
-        participantReference: phone.participantReference,
-        operationReference,
-      }),
+    void run(
+      "remove:" + phone.participantReference,
+      (operationReference) =>
+        client.remove(csrf, {
+          diningSessionReference,
+          participantReference: phone.participantReference,
+          operationReference,
+        }),
+      () => setJustRemoved(phone.participantReference),
     );
   const fresh = newPhones(state.phones, now);
   const disabled = locked || busy;
@@ -127,7 +137,9 @@ export function TablePanelPhones({
       {fresh.map((phone) => (
         <p key={phone.participantReference} className="table-phones__new" role="note">
           <strong>{t("Phone {number} just joined.", { number: String(phone.phoneNumber) })}</strong>{" "}
-          {t("Check it belongs to this table. If not, remove it below or pause joining by scan.")}
+          {t(
+            "Check it belongs to this table. If not, remove it below. To stop it joining again by scan, also pause joining by scan.",
+          )}
         </p>
       ))}
       <header className="table-phones__head">
@@ -157,7 +169,13 @@ export function TablePanelPhones({
                   ? t("left")
                   : t("joined {time}", { time: orderWhen(phone.joinedAt, timeZone, today) })}
             </span>
-            {phone.left ? null : confirming === phone.participantReference ? (
+            {phone.left ? (
+              justRemoved === phone.participantReference && !state.paused ? (
+                <button type="button" disabled={disabled} onClick={() => pause(true)}>
+                  {t("Also pause joining by scan")}
+                </button>
+              ) : null
+            ) : confirming === phone.participantReference ? (
               <span className="table-phones__confirm" role="group">
                 <span>
                   {t(
