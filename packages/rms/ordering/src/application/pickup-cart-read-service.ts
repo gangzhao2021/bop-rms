@@ -27,6 +27,16 @@ export interface PickupCartReadPorts {
   };
   readonly scope: { readonly brandReference: string; readonly storeReference: string };
   readonly now: () => string;
+  /**
+   * WP-2423 M03: the guest's latest Order from this Cart while nothing was put in it since, read
+   * only when the Cart is empty, so the page can say "already ordered" instead of an empty Cart.
+   */
+  readonly orders?: {
+    latest(input: {
+      readonly cartReference: string;
+      readonly guestSessionReference: string;
+    }): Promise<{ readonly orderReference: string; readonly orderNumber: string } | null>;
+  };
 }
 
 // Restricted owner-internal read result. A separate safe display DTO is required for HTTP.
@@ -35,6 +45,8 @@ export interface PickupCartReadResult {
   readonly cart: CartAggregate;
   readonly effectiveStatus: "Active" | "Abandoned" | "Expired";
   readonly observedAt: OrderingInstant;
+  /** WP-2423 M03: set only while the Cart is empty after this guest's Order from it. */
+  readonly placedOrder: { readonly orderReference: string; readonly orderNumber: string } | null;
 }
 
 function closed(value: unknown): Readonly<Record<string, unknown>> {
@@ -161,6 +173,28 @@ export function createPickupCartReadService(ports: PickupCartReadPorts) {
         (observedAt >= lifecycle.idleExpiresAt || observedAt >= lifecycle.absoluteExpiresAt)
           ? "Expired"
           : lifecycle.status;
+      let placedOrder: PickupCartReadResult["placedOrder"] = null;
+      if (cart.items.length === 0 && ports.orders !== undefined) {
+        try {
+          const found = await ports.orders.latest({
+            cartReference: cart.cartReference,
+            guestSessionReference: String(session.sessionReference),
+          });
+          placedOrder =
+            found === null
+              ? null
+              : Object.freeze({
+                  orderReference: parseOrderingReference(found.orderReference),
+                  orderNumber: /^[1-9][0-9]{0,18}$/u.test(found.orderNumber)
+                    ? found.orderNumber
+                    : (() => {
+                        throw new Error("invalid order number");
+                      })(),
+                });
+        } catch {
+          throw new CartError("CART_DEPENDENCY_UNAVAILABLE");
+        }
+      }
       return Object.freeze({
         context: Object.freeze({
           publicStoreReference: String(currentSession.publicStoreReference),
@@ -169,6 +203,7 @@ export function createPickupCartReadService(ports: PickupCartReadPorts) {
         cart,
         effectiveStatus,
         observedAt,
+        placedOrder,
       });
     },
   });

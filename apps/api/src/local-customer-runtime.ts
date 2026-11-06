@@ -1,3 +1,4 @@
+import { createCustomerPickupCartRestore } from "./customer-pickup-cart-restore.js";
 import { loadDiningTeaChargeSetting } from "@rms/dining";
 import { guestCartWithoutTea, guestMenuWithoutTea } from "./customer-cart-tea-guard.js";
 import {
@@ -74,6 +75,7 @@ import { createPublicStoreProfileService } from "@rms/store";
 import {
   createCustomerCartViewQuery,
   createPickupCartReadService,
+  createPostgresCartOrderLookup,
   createPostgresPickupCartBindingReader,
   createPostgresAnyCartQuoteReader,
   type CartQueryTransactionRunner,
@@ -412,12 +414,22 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
               },
             },
           });
+    const cartOrders = createPostgresCartOrderLookup(options.cartTransactions, scope);
     const query = createCustomerCartViewQuery({
       reads: createPickupCartReadService({
         sessions,
         binding: createPostgresPickupCartBindingReader(options.cartTransactions, scope),
         scope,
         now,
+        // WP-2423 M03: an emptied Cart says which Order its dishes went to.
+        orders: {
+          latest: async (input) => {
+            const found = await cartOrders.findLatest(input);
+            return found === null
+              ? null
+              : { orderReference: found.orderReference, orderNumber: found.orderNumber };
+          },
+        },
       }),
       catalog,
       stores,
@@ -491,6 +503,11 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       now,
       port: guestPort,
       ...(options.cartReplacement === undefined ? {} : { replacement: options.cartReplacement }),
+      // WP-2423 M03: an unmade pickup Order's dishes go back through the guest's own add path.
+      restore: createCustomerPickupCartRestore({
+        cart: guestPort,
+        orders: { findRestorable: (input) => cartOrders.findRestorable(input) },
+      }),
     });
   }
   const customerCartBinding =

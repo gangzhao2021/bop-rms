@@ -20,6 +20,7 @@ const view: CustomerCartDisplayView = {
     items: [],
     quote: null,
     warnings: [],
+    placedOrder: null,
   },
 };
 describe("Customer Cart read bridge", () => {

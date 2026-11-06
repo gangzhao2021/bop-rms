@@ -66,6 +66,7 @@ function snapshot(): PickupCartReadResult {
     context: { publicStoreReference: id(16), locale: "en-CA" },
     effectiveStatus: "Active",
     observedAt: parseOrderingInstant(at),
+    placedOrder: null,
   };
 }
 function quote(): CartQuoteAttachment {

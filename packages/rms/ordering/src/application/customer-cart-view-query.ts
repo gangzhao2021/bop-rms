@@ -65,6 +65,12 @@ export interface CustomerCartDisplayView {
       readonly blockingReasons: readonly string[];
     };
     readonly warnings: readonly string[];
+    /**
+     * WP-2423 M03: the guest's Order these dishes went to, while the pickup Cart is empty after it
+     * (so Back from the paid page shows "already ordered", never a payable checkout). Always null
+     * for a table's Cart.
+     */
+    readonly placedOrder: { readonly orderReference: string; readonly orderNumber: string } | null;
   };
 }
 export interface CustomerCartViewPorts {
@@ -148,7 +154,7 @@ function snapshot(value: PickupCartReadResult | DiningCartReadResult, mode: "Pic
     value,
     mode === "DineIn"
       ? ["context", "cart", "effectiveStatus", "observedAt", "viewer"]
-      : ["context", "cart", "effectiveStatus", "observedAt"],
+      : ["context", "cart", "effectiveStatus", "observedAt", "placedOrder"],
   );
   const currentViewer = mode === "DineIn" ? viewer(raw.viewer) : null;
   const context = closed(raw.context, ["publicStoreReference", "locale"]);
@@ -174,7 +180,21 @@ function snapshot(value: PickupCartReadResult | DiningCartReadResult, mode: "Pic
       ? "Expired"
       : cart.lifecycle.status;
   if (raw.effectiveStatus !== effectiveStatus) return unavailable();
-  return { cart, storeRequest, observedAt, effectiveStatus, viewer: currentViewer };
+  let placedOrder: { readonly orderReference: string; readonly orderNumber: string } | null = null;
+  if (mode === "Pickup" && raw.placedOrder !== null) {
+    const placed = closed(raw.placedOrder, ["orderReference", "orderNumber"]);
+    if (
+      cart.items.length !== 0 ||
+      typeof placed.orderNumber !== "string" ||
+      !/^[1-9][0-9]{0,18}$/u.test(placed.orderNumber)
+    )
+      return unavailable();
+    placedOrder = Object.freeze({
+      orderReference: String(parseOrderingReference(placed.orderReference)),
+      orderNumber: placed.orderNumber,
+    });
+  }
+  return { cart, storeRequest, observedAt, effectiveStatus, viewer: currentViewer, placedOrder };
 }
 
 export function createCustomerCartViewQuery(ports: CustomerCartViewPorts) {
@@ -445,6 +465,7 @@ function createViewQuery(ports: ViewPorts, mode: "Pickup" | "DineIn") {
                     ),
                   }),
             warnings: Object.freeze([] as string[]),
+            placedOrder: final.placedOrder,
           }),
         });
       } catch (error) {

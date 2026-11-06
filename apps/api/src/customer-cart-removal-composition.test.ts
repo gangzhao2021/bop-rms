@@ -24,6 +24,7 @@ const view: CustomerCartDisplayView = {
     items: [],
     quote: null,
     warnings: [],
+    placedOrder: null,
   },
 };
 

@@ -9,6 +9,7 @@ import {
   type CustomerCartPortResult,
   type CustomerCartView,
 } from "./customer-cart.js";
+import type { CustomerCartRestorePort } from "./customer-pickup-cart-restore.js";
 
 const id = (n: number) => `018f5300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const guest = "g".repeat(43);
@@ -60,6 +61,7 @@ function view(overrides: Partial<CustomerCartView["cart"]> = {}): CustomerCartVi
         blockingReasons: [],
       },
       warnings: [],
+      placedOrder: null,
       ...overrides,
     },
   };
@@ -101,6 +103,7 @@ class FakePort implements CustomerCartPort {
 
 let port: FakePort;
 let replacement: CustomerCartReplacementPort | undefined;
+let restore: CustomerCartRestorePort | undefined;
 
 function headers(extra: Record<string, string> = {}) {
   return {
@@ -121,6 +124,7 @@ async function request(path: string, init?: RequestInit) {
     now: () => at,
     port,
     ...(replacement === undefined ? {} : { replacement }),
+    ...(restore === undefined ? {} : { restore }),
   });
   const server = createServer(createApp({ customerCart: handler }));
   servers.push(server);
@@ -133,6 +137,7 @@ async function request(path: string, init?: RequestInit) {
 beforeEach(() => {
   port = new FakePort();
   replacement = undefined;
+  restore = undefined;
 });
 
 afterEach(async () => {
@@ -351,6 +356,82 @@ describe("WP-1205 Customer Cart HTTP contract", () => {
     });
     port.result = { status: "SelectionInvalid", issueCodes: ["ITEM_SHORT"], available: -1 };
     expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
+  });
+
+  it("WP-2423 M03: an emptied pickup Cart names the guest's Order its dishes went to", async () => {
+    const placedOrder = { orderReference: id(9), orderNumber: "13" };
+    port.result = {
+      status: "Found",
+      view: view({ version: 4, items: [], quote: null, placedOrder }),
+    };
+    const response = await request("/bff/customer/cart", { headers: headers() });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as CustomerCartView).cart.placedOrder).toEqual(placedOrder);
+    // A Cart with dishes in it, or a table's Cart, never claims an Order.
+    for (const overrides of [
+      { placedOrder },
+      { orderType: "DineIn" as const, items: [], quote: null, placedOrder },
+      { items: [], quote: null, placedOrder: { orderReference: id(9), orderNumber: "13A" } },
+    ]) {
+      port.result = { status: "Found", view: view(overrides) };
+      expect((await request("/bff/customer/cart", { headers: headers() })).status).toBe(503);
+    }
+    port.result = { status: "Found", view: view() };
+    const plain = await request("/bff/customer/cart", { headers: headers() });
+    expect(((await plain.json()) as CustomerCartView).cart.placedOrder).toBeNull();
+  });
+
+  it("WP-2423 M03: puts an unmade Order's dishes back and says how many could not go back", async () => {
+    const calls: unknown[] = [];
+    let answer: Awaited<ReturnType<CustomerCartRestorePort["restore"]>> = {
+      status: "Restored",
+      view: view({ version: 5 }),
+      added: 1,
+      unavailable: 1,
+    };
+    restore = {
+      restore: async (input, ...locale) => {
+        calls.push([input, ...locale]);
+        return answer;
+      },
+    };
+    const send = (init: RequestInit = {}) =>
+      request("/bff/customer/cart/restore-order?locale=zh-Hans-CA", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ orderReference: id(7) }),
+        ...init,
+      });
+    const response = await send();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { restored: unknown; cart: { version: number } };
+    expect(body.restored).toEqual({ added: 1, unavailable: 1 });
+    expect(body.cart.version).toBe(5);
+    expect(calls).toEqual([
+      [
+        {
+          guestCredential: guest,
+          csrfCredential: csrf,
+          operationReference: id(20),
+          requestedAt: at,
+          orderReference: id(7),
+        },
+        "zh-Hans-CA",
+      ],
+    ]);
+    answer = { status: "NotRestorable" };
+    const refused = await send();
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: { code: "cart_restore_not_available" } });
+    // No CSRF, another site, or extra fields: refused before the port.
+    calls.length = 0;
+    for (const init of [
+      { headers: headers({ "x-csrf-token": "" }) },
+      { headers: headers({ origin: "https://other.example.test" }) },
+      { body: JSON.stringify({ orderReference: id(7), cartReference: id(1) }) },
+    ])
+      expect((await send(init)).status).toBeGreaterThanOrEqual(400);
+    expect(calls).toEqual([]);
   });
 
   it("WP-2423: answers a guest without an active Cart with an explicit empty Cart", async () => {

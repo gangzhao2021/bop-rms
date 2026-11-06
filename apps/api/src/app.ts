@@ -394,6 +394,10 @@ export function createApp({
   );
   app.get(customerCartRoutes.read, customerCart?.read() ?? unavailableCustomerCartHandler);
   app.post(customerCartRoutes.addItem, customerCart?.addItem() ?? unavailableCustomerCartHandler);
+  app.post(
+    customerCartRoutes.restoreOrder,
+    customerCart?.restoreOrder() ?? unavailableCustomerCartHandler,
+  );
   app.patch(
     customerCartRoutes.updateItem,
     customerCart?.updateItem() ?? unavailableCustomerCartHandler,

@@ -107,6 +107,51 @@ function fixture() {
 }
 
 describe("authorized Pickup reads", () => {
+  it("WP-2423 M03: an empty Cart names the guest's Order its dishes went to; a full one never asks", async () => {
+    const f = fixture();
+    const latest = vi.fn(async () => ({ orderReference: id(50), orderNumber: "13" }));
+    const service = createPickupCartReadService({
+      sessions: { resolve: f.resolve },
+      binding: { current: f.current },
+      now: f.now,
+      scope: { brandReference: ids.brand, storeReference: ids.store },
+      orders: { latest },
+    });
+    expect((await service.read({ sessionCredential: credential }))?.placedOrder).toEqual({
+      orderReference: id(50),
+      orderNumber: "13",
+    });
+    expect(latest).toHaveBeenCalledWith({
+      cartReference: ids.cart,
+      guestSessionReference: ids.session,
+    });
+    latest.mockResolvedValueOnce({ orderReference: id(50), orderNumber: "13A" });
+    await expect(service.read({ sessionCredential: credential })).rejects.toMatchObject({
+      code: "CART_DEPENDENCY_UNAVAILABLE",
+    });
+    latest.mockClear();
+    f.current.mockResolvedValue(
+      cart({
+        items: [
+          {
+            cartItemReference: ids.item,
+            cartReference: ids.cart,
+            sellableReference: ids.sellable,
+            quantity: 1,
+            optionSelections: [],
+            customerNote: null,
+            catalogSelectionEvidence: null,
+            addedByActorReference: ids.session,
+            addedByParticipantReference: null,
+            addedAt: createdAt,
+          },
+        ] as never,
+      }),
+    );
+    expect((await service.read({ sessionCredential: credential }))?.placedOrder).toBeNull();
+    expect(latest).not.toHaveBeenCalled();
+  });
+
   it("resolves live credentials twice without interactive renewal and returns an internal snapshot", async () => {
     const f = fixture();
     const result = await f.service.read({ sessionCredential: credential });
@@ -115,6 +160,7 @@ describe("authorized Pickup reads", () => {
       cart: cart(),
       effectiveStatus: "Active",
       observedAt: requestedAt,
+      placedOrder: null,
     });
     expect(f.resolve).toHaveBeenCalledTimes(2);
     expect(f.resolve).toHaveBeenNthCalledWith(1, {

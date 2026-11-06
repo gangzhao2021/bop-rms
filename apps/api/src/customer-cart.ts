@@ -2,6 +2,7 @@ import { logGuestFailure } from "./guest-failure-log.js";
 import { CartError, CartReplacementPendingError } from "@rms/ordering";
 import { checkoutHoldRetrySeconds } from "./customer-checkout-hold.js";
 import { customerDisplayLocale } from "./customer-display-locale.js";
+import type { CustomerCartRestorePort } from "./customer-pickup-cart-restore.js";
 import type { Request, RequestHandler, Response } from "express";
 
 const uuidV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -21,6 +22,8 @@ export const customerCartRoutes = Object.freeze({
   addItem: "/api/v1/carts/:cart_id/items",
   updateItem: "/api/v1/carts/:cart_id/items/:cart_item_id",
   removeItem: "/api/v1/carts/:cart_id/items/:cart_item_id",
+  /** WP-2423 M03: put the dishes of an Order that won't be made back in the guest's Cart. */
+  restoreOrder: "/bff/customer/cart/restore-order",
 });
 
 export interface CustomerCartMoney {
@@ -74,6 +77,11 @@ export interface CustomerCartView {
       readonly blockingReasons: readonly string[];
     };
     readonly warnings: readonly string[];
+    /**
+     * WP-2423 M03: the guest's own Order these dishes went to, while the pickup Cart is empty
+     * after it; null otherwise and always null for a table.
+     */
+    readonly placedOrder: { readonly orderReference: string; readonly orderNumber: string } | null;
   };
 }
 
@@ -206,6 +214,7 @@ type ErrorCode =
   | "cart_checkout_in_progress"
   | "cart_table_checking_out"
   | "cart_dining_not_seated"
+  | "cart_restore_not_available"
   | "cart_service_unavailable";
 
 /**
@@ -237,6 +246,8 @@ const errors = Object.freeze({
   // DEC-DINE-IN-PAY-LATER: the table is checking out (no new rounds; staff add dishes).
   cart_table_checking_out: { status: 409, messageKey: "customer.cart.table_checking_out" },
   cart_dining_not_seated: { status: 409, messageKey: "customer.cart.dining_not_seated" },
+  // WP-2423 M03: no Order of this Cart that won't be made (still open, paid, or another Cart's).
+  cart_restore_not_available: { status: 409, messageKey: "customer.cart.restore_not_available" },
   // WP-2423: the table's last checkout may still create an order or charge; retry shortly.
   cart_order_processing: { status: 409, messageKey: "customer.cart.order_processing" },
   // DEC-DINING-ANY-PARTICIPANT-SUBMIT: another guest at the table is paying for this Cart.
@@ -401,6 +412,9 @@ function publicView(value: unknown): CustomerCartView {
     "items",
     "quote",
     "warnings",
+    ...(root.cart !== null && typeof root.cart === "object" && "placedOrder" in root.cart
+      ? ["placedOrder"]
+      : []),
   ]);
   if (cart.orderType !== "DineIn" && cart.orderType !== "Pickup")
     throw new TypeError("invalid order type");
@@ -514,7 +528,21 @@ function publicView(value: unknown): CustomerCartView {
       items,
       quote,
       warnings: codes(cart.warnings),
+      placedOrder: placedOrderView(cart.placedOrder, cart.orderType, items.length),
     }),
+  });
+}
+function placedOrderView(
+  value: unknown,
+  orderType: "DineIn" | "Pickup",
+  itemCount: number,
+): CustomerCartView["cart"]["placedOrder"] {
+  if (value === undefined || value === null) return null;
+  const raw = closed(value, ["orderReference", "orderNumber"]);
+  if (orderType !== "Pickup" || itemCount !== 0) throw new TypeError("invalid placed order");
+  return Object.freeze({
+    orderReference: scalar(raw.orderReference, uuidV7),
+    orderNumber: scalar(raw.orderNumber, /^[1-9][0-9]{0,18}$/u),
   });
 }
 
@@ -649,6 +677,7 @@ export class CustomerCartHandler {
   readonly #now: () => string;
   readonly #port: CustomerCartPort;
   readonly #replacement: CustomerCartReplacementPort | undefined;
+  readonly #restore: CustomerCartRestorePort | undefined;
   readonly #invoke = (
     response: Response,
     operation: Promise<CustomerCartPortResult>,
@@ -660,16 +689,70 @@ export class CustomerCartHandler {
     now = () => new Date().toISOString(),
     port,
     replacement,
+    restore,
   }: {
     readonly allowedOrigin: string;
     readonly now?: () => string;
     readonly port: CustomerCartPort;
     readonly replacement?: CustomerCartReplacementPort;
+    readonly restore?: CustomerCartRestorePort;
   }) {
     this.#allowedOrigin = parseOrigin(allowedOrigin);
     this.#now = now;
     this.#port = port;
     this.#replacement = replacement;
+    this.#restore = restore;
+  }
+
+  /** WP-2423 M03: puts an unmade Order's dishes back in the Cart (never an Order or a charge). */
+  restoreOrder(): RequestHandler {
+    return async (request, response) => {
+      responseControls(response);
+      let input: Parameters<CustomerCartRestorePort["restore"]>[0];
+      let locale: string | null;
+      try {
+        const raw = body(request, ["orderReference"]);
+        input = {
+          ...this.#mutation(request),
+          orderReference: scalar(raw.orderReference, uuidV7),
+        };
+        locale = this.#displayLocale(request);
+      } catch (error) {
+        this.#requestError(response, error);
+        return;
+      }
+      if (this.#restore === undefined) {
+        sendError(response, "cart_service_unavailable");
+        return;
+      }
+      try {
+        const result = await this.#restore.restore(input, ...cartDisplayArguments(locale));
+        if (result.status === "SessionExpired") {
+          sendError(response, "cart_session_expired");
+          return;
+        }
+        if (result.status === "NotRestorable") {
+          sendError(response, "cart_restore_not_available");
+          return;
+        }
+        if (result.status !== "Restored") {
+          sendError(response, "cart_service_unavailable");
+          return;
+        }
+        const view = publicView(result.view);
+        response.setHeader("ETag", `"${view.cart.version}"`);
+        response.status(200).json({
+          ...view,
+          restored: {
+            added: count(result.added, 100),
+            unavailable: count(result.unavailable, 100),
+          },
+        });
+      } catch (error) {
+        logGuestFailure("CUSTOMER_CART_RESTORE_UNAVAILABLE", error);
+        sendError(response, "cart_service_unavailable");
+      }
+    };
   }
 
   #context(request: Request): CustomerCartContext {
