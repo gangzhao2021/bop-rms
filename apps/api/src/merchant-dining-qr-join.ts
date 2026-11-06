@@ -6,7 +6,7 @@ import {
   parseDiningReference,
   type DiningCredentialPort,
 } from "@rms/dining";
-import { listOrderItemPrices, listStoreDiningSessionOrders } from "@rms/ordering";
+import { listDiningSessionRoundSenders } from "@rms/ordering";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
@@ -162,33 +162,29 @@ export function createMerchantDiningQrJoin(options: {
             ...(await store.state(command.diningSessionReference)),
             phones: await loadDiningGuestPhones(tx as never, scope, command.diningSessionReference),
           };
-          // Decision 4: which phone sent each round (the order's own item records); staff rounds
-          // have none.
+          // Decision 4 / WP-2423 M139: which phone sent each round — the round's own submission,
+          // not the phone that added its first dish; staff rounds have none.
           const owner = {
             brandReference: scope.brandReference,
             storeReference: scope.storeReference,
           };
-          const consumer = tx as unknown as ConsumerTransaction;
-          const order =
-            (
-              await listStoreDiningSessionOrders(consumer, owner, [command.diningSessionReference])
-            ).get(command.diningSessionReference) ?? null;
           const phoneOf = new Map(
             state.phones.map((phone) => [String(phone.participantReference), phone.phoneNumber]),
           );
-          const rounds = new Map<string, number | null>();
-          if (order !== null)
-            for (const item of await listOrderItemPrices(consumer, owner, order)) {
-              const batch = String(item.orderBatchReference);
-              if (rounds.has(batch)) continue;
-              const participant = item.addedByParticipantReference;
-              rounds.set(
-                batch,
-                participant === null || participant === undefined
-                  ? null
-                  : (phoneOf.get(String(participant)) ?? null),
-              );
-            }
+          const rounds = new Map<string, number | null>(
+            (
+              await listDiningSessionRoundSenders(
+                tx as unknown as ConsumerTransaction,
+                owner,
+                command.diningSessionReference,
+              )
+            ).map((round) => [
+              round.orderBatchReference,
+              round.staffEntered || round.participantReference === null
+                ? null
+                : (phoneOf.get(round.participantReference) ?? null),
+            ]),
+          );
           return Object.freeze({
             ...state,
             rounds: Object.freeze(

@@ -154,3 +154,65 @@ export async function listStoreDiningSessionOrderActivity(
     );
   return found;
 }
+
+/** WP-2423 M139: who sent one round of a table: the table phone, or staff. */
+export interface DiningSessionRoundSender {
+  readonly orderBatchReference: string;
+  /** The table participant whose Guest Session sent (or paid) it; null when not recorded. */
+  readonly participantReference: string | null;
+  /** Staff entered it with the staff round (its Guest Session is a staff round's). */
+  readonly staffEntered: boolean;
+}
+
+/**
+ * WP-2423 M139: each round of a dining session's Order with the phone that sent it — from the
+ * round's own submission (its Guest Session), then Ordering's earliest record of that session
+ * opening this table's Cart — never the phone that added its first dish. Staff rounds are marked.
+ * Oldest first. Caller authorizes and owns the transaction.
+ */
+export async function listDiningSessionRoundSenders(
+  transaction: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  diningSessionReference: string,
+): Promise<readonly DiningSessionRoundSender[]> {
+  const brand = parseOrderingReference(scope.brandReference);
+  const store = parseOrderingReference(scope.storeReference);
+  const session = parseOrderingReference(diningSessionReference);
+  await transaction.query(
+    "SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)",
+    [brand, store],
+  );
+  const rows = (
+    await transaction.query(
+      `SELECT b.order_batch_id::text batch,
+         (SELECT o.participant_id::text FROM rms_ordering.dining_cart_operation o
+           WHERE o.brand_id=$1 AND o.store_id=$2 AND o.dining_session_id=$3
+             AND o.guest_session_id=s.guest_session_id
+           ORDER BY o.occurred_at, o.operation_id LIMIT 1) participant,
+         EXISTS (SELECT 1 FROM rms_ordering.staff_dining_round_entry e
+           WHERE e.brand_id=$1 AND e.store_id=$2 AND e.guest_session_id=s.guest_session_id) staff
+       FROM rms_ordering.order_header h
+       JOIN rms_ordering.order_batch b ON b.order_id=h.order_id AND b.brand_id=h.brand_id
+         AND b.store_id=h.store_id
+       JOIN rms_ordering.order_submission_record s ON s.submission_id=b.submission_id
+         AND s.brand_id=h.brand_id AND s.store_id=h.store_id
+       WHERE h.brand_id=$1 AND h.store_id=$2 AND h.order_type='DineIn' AND h.dining_session_id=$3
+       ORDER BY b.submitted_at, b.order_batch_id
+       LIMIT 201`,
+      [brand, store, session],
+    )
+  ).rows as readonly Record<string, unknown>[];
+  if (rows.length > 200) throw new Error("DINING_SESSION_ORDER_LOOKUP_UNAVAILABLE");
+  return Object.freeze(
+    rows.map((row) => {
+      if (typeof row.staff !== "boolean")
+        throw new Error("DINING_SESSION_ORDER_LOOKUP_UNAVAILABLE");
+      return Object.freeze({
+        orderBatchReference: parseOrderingReference(row.batch),
+        participantReference:
+          row.participant === null ? null : parseOrderingReference(row.participant),
+        staffEntered: row.staff,
+      });
+    }),
+  );
+}
