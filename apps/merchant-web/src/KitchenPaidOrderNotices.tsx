@@ -9,7 +9,8 @@ export const kitchenNeedsPersonRepeatMs = 20_000;
 
 /** "Table 4 · Order 12 · has alcohol": each paid order that did not come straight here. */
 export function kitchenNeedsPersonLines(view: KitchenBoardView): readonly string[] {
-  if (!view.paidOrderWatch?.on) return [];
+  // For a day after it is turned off too: whoever switched it off may not have told the kitchen.
+  if (!view.paidOrderWatch?.on && !view.paidOrderWatch?.recentlyOn) return [];
   return (view.awaitingAcceptance ?? []).map((label) =>
     label.notSent === undefined
       ? kitchenOrderText(label)

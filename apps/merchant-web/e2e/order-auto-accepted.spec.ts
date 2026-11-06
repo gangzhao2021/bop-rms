@@ -178,6 +178,20 @@ test("@production Orders: sent by itself, why one is not, Can't make it and the 
     paidOrderWatch: watch({ canTurnOff: true }) as Record<string, unknown> | undefined,
   };
   await page.route("**/merchant/orders", (route) => route.fulfill({ headers, json: current }));
+  // What Can't make it would give back, read as its dialog opens.
+  await page.route("**/merchant/orders/cant-make/preview", (route) =>
+    route.fulfill({
+      headers,
+      json: {
+        orderReference: id(21),
+        orderBatchReference: id(71),
+        refundMethod: "Online",
+        paidMinor: "1450",
+        refundMinor: "1450",
+        currencyCode: "CAD",
+      },
+    }),
+  );
   const refusals: Record<string, unknown>[] = [];
   await page.route("**/merchant/orders/cant-make", (route) => {
     refusals.push(route.request().postDataJSON() as Record<string, unknown>);
@@ -239,10 +253,11 @@ test("@production Orders: sent by itself, why one is not, Can't make it and the 
   // Can't make it: a reason, one confirmation, the same operation a retry would send.
   await orderPanel(page).getByRole("button", { name: "Can't make it · refund" }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("full refund, tip included, to the card they paid with");
-  await expect(dialog.getByRole("button", { name: "Refund in full" })).toBeDisabled();
+  await expect(dialog).toContainText("The customer is refunded in full, $14.50 including tip.");
+  await expect(dialog).toContainText("The money goes back to the card they paid with");
+  await expect(dialog.getByRole("button", { name: "Refund", exact: true })).toBeDisabled();
   await dialog.getByLabel("Reason").selectOption("SOLD_OUT");
-  await dialog.getByRole("button", { name: "Refund in full" }).click();
+  await dialog.getByRole("button", { name: "Refund", exact: true }).click();
   await expect(
     orderPanel(page).getByRole("button", { name: "Can't make it · refund" }),
   ).toBeHidden();
@@ -264,6 +279,114 @@ test("@production Orders: sent by itself, why one is not, Can't make it and the 
   await row.getByRole("button", { name: "Yes, turn off" }).click();
   await expect(row.getByText("Paid orders now wait for Accept on Orders.")).toBeVisible();
   expect(turnedOff[0]).toMatchObject({ expectedVersion: 3 });
+});
+
+test("@production Orders: a pickup that never reached the kitchen is made by hand, and the warnings stack", async ({
+  page,
+}) => {
+  await signIn(page, ordersNavigation);
+  const lost = (kept: boolean) =>
+    order(23, {
+      acceptedAutomaticallyAt: ago(26),
+      canCantMake: true,
+      reachedKitchen: false,
+      kept,
+      canKeep: !kept,
+    });
+  const filler = Array.from({ length: 24 }, (_, index) =>
+    order(100 + index, { acceptedAutomaticallyAt: ago(8), canCantMake: false }),
+  ).reverse();
+  let current = {
+    items: [...filler, lost(false)],
+    nextAfterOrderReference: null,
+    paidOrderWatch: watch({
+      waiting: [
+        {
+          orderNumber: "23",
+          orderType: "Pickup",
+          acceptedAt: ago(26),
+          reachedKitchen: false,
+          refundAt: new Date(start + 4 * 60_000).toISOString(),
+        },
+      ],
+    }) as Record<string, unknown>,
+  };
+  await page.route("**/merchant/orders", (route) => route.fulfill({ headers, json: current }));
+  const kept: Record<string, unknown>[] = [];
+  await page.route("**/merchant/orders/auto-accepted/keep", (route) => {
+    kept.push(route.request().postDataJSON() as Record<string, unknown>);
+    current = {
+      ...current,
+      items: [...filler, lost(true)],
+      paidOrderWatch: watch({ waiting: [] }) as Record<string, unknown>,
+    };
+    return route.fulfill({ headers, json: { status: "Kept" } });
+  });
+  await page.goto("/operations/orders");
+  // The countdown says only a person on Orders can stop it; the alarm sits under it.
+  const countdown = page.getByRole("region", { name: "Orders about to be refunded" });
+  await expect(countdown).toContainText(
+    "Order 23 did not reach the kitchen. It will be refunded automatically in 4 min unless someone taps Making it by hand on Orders.",
+  );
+  const alarm = page.locator(".paid-order-alarm");
+  await expect(alarm).toContainText("1 paid order did not reach the kitchen");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.mouse.wheel(0, 1600);
+    // Scrolled: the two warnings stack, and the page's own sticky parts start under both.
+    const layout = await page.evaluate(() => {
+      const box = (selector: string) =>
+        document.querySelector(selector)?.getBoundingClientRect() ?? null;
+      const countdown = box(".refund-deadline-warning:not(.paid-order-alarm)");
+      const alarm = box(".paid-order-alarm");
+      // What is on top at the alarm's middle: the alarm itself, not a row painted over it.
+      const middle =
+        alarm === null
+          ? null
+          : document.elementFromPoint(alarm.left + alarm.width / 2, alarm.top + alarm.height / 2);
+      const onTop = middle?.closest(".paid-order-alarm") !== null && middle !== null;
+      return {
+        onTop,
+        topTag: middle === null ? "none" : middle.tagName + "." + String(middle.className),
+        scrollY: window.scrollY,
+        background: getComputedStyle(document.querySelector(".paid-order-alarm") as Element)
+          .backgroundColor,
+        countdownBottom: countdown?.bottom ?? -1,
+        alarmTop: alarm?.top ?? -1,
+        alarmBottom: alarm?.bottom ?? -1,
+        pinned: Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--bop-pinned-top"),
+        ),
+      };
+    });
+    expect(layout, JSON.stringify(layout)).toMatchObject({
+      onTop: true,
+      background: "rgb(255, 255, 255)",
+    });
+    expect(Math.abs(layout.alarmTop - layout.countdownBottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.pinned - layout.alarmBottom)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: `test-results/order-auto-accepted-stacked-${width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.mouse.wheel(0, -4000);
+  await openOrder(page, "23");
+  await expect(
+    orderPanel(page).getByText("Accepted automatically · it did not reach the kitchen screen"),
+  ).toBeVisible();
+  await expectNoInternalText(page);
+  await orderPanel(page).getByRole("button", { name: "Making it by hand" }).click();
+  await expect(
+    orderPanel(page).getByText("Accepted automatically · being made by hand"),
+  ).toBeVisible();
+  await expect(orderPanel(page).getByRole("button", { name: "Making it by hand" })).toBeHidden();
+  // Still possible to give it back after all.
+  await expect(
+    orderPanel(page).getByRole("button", { name: "Can't make it · refund" }),
+  ).toBeVisible();
+  // The screen-wide countdown re-reads on its own cycle, as after an Accept.
+  await page.clock.fastForward(16_000);
+  await expect(countdown).toBeHidden();
+  expect(kept).toEqual([{ orderReference: id(23), orderBatchReference: id(73) }]);
 });
 
 test("@production a Store without it sees nothing new, and a working kitchen raises no alarm", async ({
@@ -429,4 +552,8 @@ test("@production whoever may pause does it from Orders, at a Store sending orde
   await expect(page.getByText(/Ordering paused until/u)).toBeVisible();
   await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
   expect(commands[0]).toMatchObject({ command: "PauseService", expectedVersion: 3 });
+  // When its time is up it is over here too, without anyone pressing Resume.
+  await page.clock.fastForward(31 * 60_000);
+  await expect(page.getByText(/Ordering paused until/u)).toBeHidden();
+  await expect(page.getByRole("button", { name: "Pause ordering" })).toBeVisible();
 });

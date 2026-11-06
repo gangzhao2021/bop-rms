@@ -417,7 +417,8 @@ it("Warn before timeouts: reads a paid pickup's refund deadline with one small f
     },
   ]);
   const body = JSON.parse(String(f.fetcher.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-  expect(body).toMatchObject({ kind: "List", cursor: null, limit: 1 });
+  // DEC-PAID-ORDER-AUTO-ACCEPT: asked as a Watch, so it never counts as an open kitchen board.
+  expect(body).toEqual({ kind: "Watch" });
   // A dine-in round is never refunded for waiting: a deadline on one is refused.
   f.fetcher.mockResolvedValue(
     response({

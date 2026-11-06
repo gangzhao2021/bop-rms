@@ -10,8 +10,11 @@ import {
   type StoreReportChannel,
   type StoreReportsClient,
   type StoreReportSummary,
+  type TonightPaidOrderEvent,
   type TonightSummary,
 } from "./store-reports-client.js";
+import type { StaffCancellationReason } from "./current-order-queue-client.js";
+import { staffCancellationReasonLabel } from "./StaffOrderCancelAction.js";
 
 const money = (minor: string | bigint) =>
   orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
@@ -80,6 +83,36 @@ export function tonightProblems(summary: TonightSummary): readonly string[] {
     "open tables",
   );
   return problems;
+}
+
+/** "Order 12 · Can't make it · refunded": one line per decision nobody senior was asked about. */
+export function tonightPaidOrderEventText(event: TonightPaidOrderEvent): string {
+  switch (event.kind) {
+    case "CantMake":
+      return t("Order {orderNumber} · Can't make it · refunded", {
+        orderNumber: event.orderNumber,
+      });
+    case "AutomaticRefund":
+      return t("Order {orderNumber} · refunded automatically · the kitchen never started it", {
+        orderNumber: event.orderNumber,
+      });
+    case "KeptByHand":
+      return t("Order {orderNumber} · made by hand · not refunded automatically", {
+        orderNumber: event.orderNumber,
+      });
+  }
+}
+
+/** Who, and the reason they chose, in staff words; never a code. */
+export function tonightPaidOrderEventDetail(event: TonightPaidOrderEvent): string | null {
+  const reason =
+    event.reasonCode !== null && Object.hasOwn(staffCancellationReasonLabel, event.reasonCode)
+      ? staffCancellationReasonLabel[event.reasonCode as StaffCancellationReason]
+      : null;
+  const parts = [event.kind === "AutomaticRefund" ? null : event.staffName, reason].filter(
+    (part): part is string => part !== null && part !== "",
+  );
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 function Row({
@@ -368,6 +401,19 @@ export function TonightSummaryView({ summary }: { readonly summary: TonightSumma
             value={money(c.cancelledUnpaid.amountMinor)}
           />
         </dl>
+        {/* DEC-PAID-ORDER-AUTO-ACCEPT: decided without a manager, so each is named here. */}
+        {summary.paidOrderEvents.length === 0 ? null : (
+          <dl aria-label={t("Paid orders sent straight to the kitchen")}>
+            {summary.paidOrderEvents.map((event) => (
+              <Row
+                key={event.kind + event.orderNumber + event.at}
+                label={tonightPaidOrderEventText(event)}
+                detail={tonightPaidOrderEventDetail(event)}
+                value={storeTime(event.at, report.timeZone)}
+              />
+            ))}
+          </dl>
+        )}
       </section>
 
       <section aria-labelledby="tonight-match" className="tonight__section">

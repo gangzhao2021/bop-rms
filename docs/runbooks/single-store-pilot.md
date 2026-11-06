@@ -503,20 +503,28 @@ what staff do when something fails is different:
   someone at the counter.
 - **Kitchen tablet dead, Orders still working:** new paid orders stop going to the kitchen within 3
   minutes of the last board read and wait on Orders, saying "Kitchen screen was off". Orders already
-  sent show one warning on every screen ("The kitchen hasn't touched anything…"). Open the board on
-  another device, or work from Orders on paper and turn the switch off.
+  sent show one warning on every screen after 3 minutes ("No kitchen screen has been open…"). Open
+  the board on another device, or work from Orders on paper: tap "Making it by hand" on each pickup
+  you make that way, so it is not refunded by itself, and turn the switch off.
 - **Store network down:** orders stop being sent within 3 minutes. Orders paid on mobile data wait on
   Orders and follow the outage hold below. When screens return, make what is on the kitchen list or
   tap "Can't make it · refund".
-- **Out of something:** on Orders, "Can't make it · refund" gives the full amount, tip included, back
-  to the card, while the kitchen has not started it. Anyone who can accept can do it; it is recorded
-  in their name and listed on the manager's Home. After the kitchen started, it is an ordinary refund
-  or item cancellation by a manager.
+- **Out of something:** on Orders, "Can't make it · refund" gives back what is left of the payment,
+  tip included, to the card, while the kitchen has not started it; the dialog shows the amount.
+  Anyone who can accept can do it; it is recorded in their name and listed on the manager's Home and
+  in tonight's summary. After the kitchen started, it is an ordinary refund or item cancellation by
+  a manager.
 - **A pickup nobody touched:** 30 minutes after it was sent it closes and refunds by itself, with
-  warnings at 5 minutes, 2 minutes and 30 seconds on every screen. Any kitchen step stops it. A table
+  warnings at 5 minutes, 2 minutes and 30 seconds on every screen. Any kitchen step on it stops it,
+  and so does "Making it by hand" on Orders. While the kitchen is still recording steps on other
+  tickets it waits until the kitchen has been quiet for 10 minutes. If no staff screen is on at its
+  time (an outage), nothing is refunded until staff are back, and then not for 15 minutes. A table
   round is never refunded by itself: it stays until someone acts.
 - **"did not reach the kitchen":** the order was accepted but its ticket never arrived. Make it from
-  the order details on Orders, or tap "Can't make it · refund", then tell the operator.
+  the order details on Orders and tap "Making it by hand" (pickups), or tap "Can't make it · refund",
+  then tell the operator.
+- **At closing:** tonight's summary names every "Can't make it" refund, every automatic refund and
+  every "Making it by hand", with who did it.
 
 ### Roles during an outage
 

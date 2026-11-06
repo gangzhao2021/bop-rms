@@ -465,8 +465,10 @@ describe("WP-2423 M3 kitchen display", () => {
   it("DEC-PAID-ORDER-AUTO-ACCEPT: at a Store sending paid orders here, sound off is a full alert", () => {
     const watch = {
       on: true,
+      recentlyOn: false,
       settingVersion: 1,
       lastKitchenStepAt: null,
+      kitchenScreenSeenAt: null,
       canTurnOff: false,
       canAcceptOrders: false,
       cantMakeRefunds: 0,
@@ -493,8 +495,10 @@ describe("WP-2423 M3 kitchen display", () => {
   it("DEC-PAID-ORDER-AUTO-ACCEPT: a paid order left for a person says so, and who can accept it", () => {
     const watch = {
       on: true,
+      recentlyOn: false,
       settingVersion: 1,
       lastKitchenStepAt: null,
+      kitchenScreenSeenAt: null,
       canTurnOff: false,
       canAcceptOrders: false,
       cantMakeRefunds: 0,

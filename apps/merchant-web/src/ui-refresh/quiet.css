@@ -193,6 +193,12 @@
   padding-inline: 0;
   background: none;
 }
+/* The pinned warnings stay in view as the page scrolls under them: white, so the rows under them
+   never show through (no box, no side bar). */
+:root .refund-deadline-warning {
+  padding-inline: 16px;
+  background: var(--bop-color-surface-default);
+}
 .workspace-page
   :is(.overview-card--alerts-critical, .overview-card--alerts-warning, .own-name-prompt--required) {
   border: 0;

@@ -7580,4 +7580,26 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "后厨已经 {minutes} 分钟没动过，有 1 张已付款的单在等 · 看一下后厨屏幕",
   "1 paid order did not reach the kitchen · make it from the order details, or tap Can't make it for a full refund":
     "1 张已付款的单没到后厨 · 按订单详情来做，或点“做不了”全额退款",
+  // DEC-PAID-ORDER-AUTO-ACCEPT (fix-up): made by hand, never reached, tonight's list.
+  "The money goes back to the card they paid with, and they are told why. Your name is recorded.":
+    "钱退回客人付款的那张卡，并告诉客人原因。会记下你的名字。",
+  "Accepted automatically · being made by hand": "已自动接单 · 正在手工做",
+  "Accepted automatically · it did not reach the kitchen screen": "已自动接单 · 没到后厨屏幕",
+  "Not saved. It may have changed on another screen; this shows it as it is now.":
+    "没保存。可能在别的屏幕上改过了，这里显示的是现在的状态。",
+  "Order {orderNumber} · Can't make it · refunded": "{orderNumber} 号 · 做不了 · 已退款",
+  "Order {orderNumber} · refunded automatically · the kitchen never started it":
+    "{orderNumber} 号 · 后厨一直没开始，已自动退款",
+  "Order {orderNumber} · made by hand · not refunded automatically":
+    "{orderNumber} 号 · 手工做 · 不自动退款",
+  "Paid orders sent straight to the kitchen": "直接进后厨的已付款订单",
+  "No kitchen screen has been open for {minutes} min and 1 paid order was sent there · open the kitchen screen":
+    "后厨屏幕已经 {minutes} 分钟没开，有 1 张已付款的单送了过去 · 打开后厨屏幕",
+  "No kitchen screen has been open for {minutes} min and {count} paid orders were sent there · open the kitchen screen":
+    "后厨屏幕已经 {minutes} 分钟没开，有 {count} 张已付款的单送了过去 · 打开后厨屏幕",
+  "Order {orderNumber} did not reach the kitchen. It will be refunded automatically {when} unless someone taps Making it by hand on Orders.":
+    "{orderNumber} 号没到后厨，{when}会自动退款，除非有人在订单页点“正在手工做”。",
+  "Noted. It won't be refunded automatically. If you can't make it after all, tap Can't make it.":
+    "记下了，不会自动退款。如果最后还是做不了，点“做不了”。",
+  "Making it by hand": "正在手工做",
 });

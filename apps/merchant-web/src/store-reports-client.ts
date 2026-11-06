@@ -359,8 +359,22 @@ export function parseStoreReportsView(value: unknown): StoreReportsView {
  * the reports page and, once the day closes, the day-end settlement), the tables still open with
  * what each still owes, and tonight's cancellations (listed, not sales).
  */
+/**
+ * DEC-PAID-ORDER-AUTO-ACCEPT: what the closing manager should see named because no manager was
+ * asked: a "Can't make it" refund, an automatic refund, a pickup someone made by hand.
+ */
+export interface TonightPaidOrderEvent {
+  readonly kind: "CantMake" | "AutomaticRefund" | "KeptByHand";
+  readonly orderNumber: string;
+  /** Null for the System, or a person no longer on the staff list. */
+  readonly staffName: string | null;
+  readonly reasonCode: string | null;
+  readonly at: string;
+}
 export interface TonightSummary {
   readonly report: StoreReportsView;
+  /** Empty at a Store without any (the server leaves the key out). */
+  readonly paidOrderEvents: readonly TonightPaidOrderEvent[];
   readonly openTables: readonly {
     readonly tableLabel: string;
     readonly phase: "Active" | "Closing";
@@ -380,7 +394,27 @@ export interface TonightSummary {
   };
 }
 export function parseTonightSummary(value: unknown): TonightSummary {
-  const raw = exact(value, ["report", "openTables", "openTablesOwedMinor", "cancelled"]);
+  const withEvents =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "paidOrderEvents");
+  const raw = exact(value, [
+    "report",
+    ...(withEvents ? ["paidOrderEvents"] : []),
+    "openTables",
+    "openTablesOwedMinor",
+    "cancelled",
+  ]);
+  const paidOrderEvents = withEvents
+    ? list(raw.paidOrderEvents, 100, (entry) => {
+        const event = exact(entry, ["kind", "orderNumber", "staffName", "reasonCode", "at"]);
+        return Object.freeze({
+          kind: oneOf(event.kind, ["CantMake", "AutomaticRefund", "KeptByHand"] as const),
+          orderNumber: text(event.orderNumber, 20),
+          staffName: event.staffName === null ? null : text(event.staffName, 200),
+          reasonCode: event.reasonCode === null ? null : text(event.reasonCode, 80),
+          at: instant(event.at),
+        });
+      })
+    : Object.freeze([]);
   const report = parseStoreReportsView(raw.report);
   if (report.days.length !== 1) return fail();
   const openTables = list(raw.openTables, 500, (entry) => {
@@ -418,6 +452,7 @@ export function parseTonightSummary(value: unknown): TonightSummary {
   const unpaid = exact(cancelled.cancelledUnpaid, ["roundCount", "dishCount", "amountMinor"]);
   return Object.freeze({
     report,
+    paidOrderEvents,
     openTables,
     openTablesOwedMinor: owed,
     cancelled: Object.freeze({

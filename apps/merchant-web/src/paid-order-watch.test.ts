@@ -14,8 +14,10 @@ const now = Date.parse("2026-11-05T20:00:00.000Z");
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
 const watch = (input: Partial<PaidOrderWatch>): PaidOrderWatch => ({
   on: true,
+  recentlyOn: false,
   settingVersion: 1,
   lastKitchenStepAt: null,
+  kitchenScreenSeenAt: null,
   canTurnOff: false,
   canAcceptOrders: false,
   cantMakeRefunds: 0,
@@ -28,6 +30,7 @@ const waiting = (minutes: number, reachedKitchen = true) => ({
   acceptedAt: ago(minutes),
   reachedKitchen,
   refundAt: new Date(now + (30 - minutes) * 60_000).toISOString(),
+  kept: false,
 });
 
 describe("DEC-PAID-ORDER-AUTO-ACCEPT Store-level alarm", () => {
@@ -83,7 +86,9 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT Store-level alarm", () => {
       now,
     );
     expect(alarm).toMatchObject({ notReached: 1, silent: 0 });
-    expect(paidOrderAlarmLines(alarm as PaidOrderAlarm).join(" ")).toContain("did not reach the kitchen");
+    expect(paidOrderAlarmLines(alarm as PaidOrderAlarm).join(" ")).toContain(
+      "did not reach the kitchen",
+    );
     expect(paidOrderAlarm(watch({ waiting: [waiting(4, false)] }), now)).toBeNull();
   });
 
@@ -99,6 +104,66 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT Store-level alarm", () => {
       ),
     ).toEqual([{ orderNumber: "26", acceptBy: ago(-4), kitchenStart: true }]);
     expect(paidOrderRefundDeadlines(null)).toEqual([]);
+  });
+
+  it("one that never reached the kitchen counts down as such: only Orders can stop it", () => {
+    expect(paidOrderRefundDeadlines(watch({ waiting: [waiting(26, false)] }))).toEqual([
+      { orderNumber: "26", acceptBy: ago(-4), kitchenStart: true, notReached: true },
+    ]);
+  });
+
+  it("one somebody is making by hand raises nothing", () => {
+    expect(
+      paidOrderAlarm(
+        watch({
+          lastKitchenStepAt: ago(20),
+          waiting: [
+            { ...waiting(12), kept: true, refundAt: null },
+            { ...waiting(9, false), kept: true, refundAt: null },
+          ],
+        }),
+        now,
+      ),
+    ).toBeNull();
+  });
+
+  it("a kitchen screen that is off is said after 3 minutes, before the 5-minute quiet rule", () => {
+    const alarm = paidOrderAlarm(
+      watch({ lastKitchenStepAt: ago(1), kitchenScreenSeenAt: ago(3), waiting: [waiting(2)] }),
+      now,
+    );
+    expect(alarm).toMatchObject({ screenOff: true, silent: 1, minutes: 3, tier: 1 });
+    expect(paidOrderAlarmLines(alarm as PaidOrderAlarm)).toEqual([
+      "No kitchen screen has been open for 3 min and 1 paid order was sent there · open the kitchen screen",
+    ]);
+    expect(
+      paidOrderAlarm(
+        watch({ kitchenScreenSeenAt: ago(11), waiting: [waiting(2), waiting(12)] }),
+        now,
+      ),
+    ).toMatchObject({ screenOff: true, silent: 2, tier: 2 });
+  });
+
+  it("an open board, or one not known, leaves the quiet rule as it was", () => {
+    expect(
+      paidOrderAlarm(watch({ kitchenScreenSeenAt: ago(1), waiting: [waiting(2)] }), now),
+    ).toBeNull();
+    expect(
+      paidOrderAlarm(watch({ kitchenScreenSeenAt: null, waiting: [waiting(2)] }), now),
+    ).toBeNull();
+    // Nothing sent there, or only what is made by hand: a closed board at night raises nothing.
+    expect(paidOrderAlarm(watch({ kitchenScreenSeenAt: ago(60), waiting: [] }), now)).toBeNull();
+    expect(
+      paidOrderAlarm(
+        watch({ kitchenScreenSeenAt: ago(60), waiting: [{ ...waiting(2), kept: true }] }),
+        now,
+      ),
+    ).toBeNull();
+  });
+
+  it("the screen-off episode keeps its key while the board stays off, so each tier chimes once", () => {
+    const off = watch({ kitchenScreenSeenAt: ago(4), waiting: [waiting(2)] });
+    expect(paidOrderAlarm(off, now)?.key).toBe(paidOrderAlarm(off, now + 60_000)?.key);
   });
 });
 
@@ -152,5 +217,30 @@ describe("the watch's own parser", () => {
         waiting: [{ ...waiting(6), refundAt: null }],
       }),
     ).toMatchObject({ on: true, canAcceptOrders: false, cantMakeRefunds: 1 });
+  });
+
+  it("reads a day after turning off, the board's last read and who is making one by hand", () => {
+    const parsed = parsePaidOrderWatch({
+      on: false,
+      recentlyOn: true,
+      settingVersion: 3,
+      canTurnOff: false,
+      lastKitchenStepAt: null,
+      kitchenScreenSeenAt: ago(2),
+      cantMakeRefunds: 0,
+      waiting: [{ ...waiting(6), refundAt: null, kept: true }, waiting(7)],
+    });
+    expect(parsed).toMatchObject({ on: false, recentlyOn: true, kitchenScreenSeenAt: ago(2) });
+    expect(parsed?.waiting.map((item) => item.kept)).toEqual([true, false]);
+    // An earlier server leaves them out: not turned off lately, board not known, none by hand.
+    expect(
+      parsePaidOrderWatch({
+        on: true,
+        settingVersion: 1,
+        canTurnOff: false,
+        lastKitchenStepAt: null,
+        waiting: [{ ...waiting(6), kept: undefined }],
+      }),
+    ).toMatchObject({ recentlyOn: false, kitchenScreenSeenAt: null, waiting: [{ kept: false }] });
   });
 });

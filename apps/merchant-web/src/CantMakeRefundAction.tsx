@@ -3,9 +3,12 @@ import { t } from "./i18n/i18n.js";
 import type { CurrentOrderQueue, StaffCancellationReason } from "./current-order-queue-client.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import {
+  parseStaffCancelRefundPreview,
   staffCancellationReasonLabel,
   staffCancellationReasonsFor,
   staffCancelOutcome,
+  staffCancelRefundText,
+  type StaffCancelRefundPreview,
 } from "./StaffOrderCancelAction.js";
 
 type Order = CurrentOrderQueue["items"][number];
@@ -14,8 +17,9 @@ type State = "Idle" | "Pending" | "Done" | "Started" | "Changed" | "Failed" | "D
 
 /**
  * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: whoever can accept may give back an automatically accepted
- * order the kitchen has not started. A full refund, tip included, to the card that paid; a reason,
- * one confirmation and their name on it. The manager sees it on Home.
+ * order the kitchen has not started. What is left of its payment, tip included, to the card that
+ * paid, read when the dialog opens; a reason, one confirmation and their name on it. The manager
+ * sees it on Home and in tonight's summary.
  */
 export function CantMakeRefundAction({
   order,
@@ -38,6 +42,35 @@ export function CantMakeRefundAction({
   } | null>(null);
   const [reason, setReason] = useState<StaffCancellationReason | "">("");
   const [state, setState] = useState<State>("Idle");
+  const [preview, setPreview] = useState<StaffCancelRefundPreview | "Checking" | "Failed">(
+    "Checking",
+  );
+  const pickup = order.orderType === "Pickup";
+  // What it would give back, read each time the dialog opens (less if a dish was taken off since).
+  const checkRefund = async () => {
+    if (order.currentVersion === null) return;
+    setPreview("Checking");
+    try {
+      const response = await fetcher("/merchant/orders/cant-make/preview", {
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "error",
+        cache: "no-store",
+        headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+        body: JSON.stringify({
+          orderReference: order.orderReference,
+          orderBatchReference: batch.orderBatchReference,
+          expectedOrderVersion: order.currentVersion,
+        }),
+      });
+      const read = response.ok
+        ? parseStaffCancelRefundPreview(await response.json(), order, batch)
+        : null;
+      setPreview(read ?? "Failed");
+    } catch {
+      setPreview("Failed");
+    }
+  };
   const submit = async () => {
     if (state === "Pending" || order.currentVersion === null) return;
     if (intent.current === null) {
@@ -108,16 +141,20 @@ export function CantMakeRefundAction({
         type="button"
         className="order-cancel-open"
         disabled={state === "Done"}
-        onClick={() => dialog.current?.showModal()}
+        onClick={() => {
+          dialog.current?.showModal();
+          void checkRefund();
+        }}
       >
         {t("Can't make it · refund")}
       </button>
       {state === "Done" ? <p role="status">{message.Done}</p> : null}
       <dialog ref={dialog} className="order-cancel-dialog">
         <h2>{t("Can't make order {orderNumber}", { orderNumber: order.orderNumber })}</h2>
+        <p>{staffCancelRefundText(pickup, preview)}</p>
         <p>
           {t(
-            "The guest gets a full refund, tip included, to the card they paid with, and is told why. Your name is recorded.",
+            "The money goes back to the card they paid with, and they are told why. Your name is recorded.",
           )}
         </p>
         <form
@@ -148,7 +185,7 @@ export function CantMakeRefundAction({
               data-variant="destructive"
               disabled={state === "Pending" || (reason === "" && intent.current === null)}
             >
-              {state === "Pending" ? t("Refunding…") : t("Refund in full")}
+              {state === "Pending" ? t("Refunding…") : t("Refund")}
             </button>
             <button type="button" onClick={() => dialog.current?.close()}>
               {t("Keep the order")}

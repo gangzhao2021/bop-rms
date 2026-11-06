@@ -282,20 +282,11 @@ export function createKitchenBoardClient(options: {
     return fail();
   }
   // Warn before timeouts (WP-2423 2026-10-17): the first page alone carries them; one ticket keeps
-  // the read small for the store-wide refund warning.
+  // the read small for the store-wide refund warning. DEC-PAID-ORDER-AUTO-ACCEPT: asked as a
+  // "Watch", because this runs on every screen of a kitchen sign-in and must not count as a kitchen
+  // board being open (paid orders are only sent straight to a board someone has open).
   async function readWatch() {
-    const first = await query({
-      kind: "List",
-      filters: {
-        orderReference: null,
-        ticketReference: null,
-        workItemReference: null,
-        stationReference: null,
-        status: null,
-      },
-      cursor: null,
-      limit: 1,
-    });
+    const first = await query({ kind: "Watch" });
     if (!("awaitingAcceptance" in first)) return { awaiting: null, paidOrderWatch: null };
     const view = parseKitchenBoardView({
       screenId: "KIT-KITCHEN-QUEUE",

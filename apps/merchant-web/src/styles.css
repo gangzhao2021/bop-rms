@@ -1563,6 +1563,17 @@
   font-size: 14px;
   color: var(--bop-color-text-muted);
 }
+/* The choices on their own line, so an open order panel never hides them. */
+.pause-ordering[data-asking="true"] > span:first-child,
+.pause-ordering__choices,
+.pause-ordering__failed {
+  display: block;
+}
+.pause-ordering__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
 .paid-order-switch-line button,
 .pause-ordering button {
   background: none;
@@ -8255,6 +8266,11 @@ body:has(.product-complete-draft) .bop-shell__header,
 .refund-deadline-warning[data-tier="urgent"],
 .refund-deadline-warning[data-tier="final"] {
   border-left-color: var(--bop-color-danger-mark);
+}
+/* DEC-PAID-ORDER-AUTO-ACCEPT: the Store-level alarm stays in view under the refund countdown. */
+.refund-deadline-warning.paid-order-alarm {
+  top: var(--bop-pinned-refund, 0px);
+  z-index: 61;
 }
 .refund-deadline-warning ul {
   flex: 1 1 18rem;

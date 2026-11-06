@@ -11,13 +11,22 @@ export interface PaidOrderWatchItem {
   readonly acceptedAt: string;
   /** False: no ticket reached the kitchen. */
   readonly reachedKitchen: boolean;
-  /** A pickup is refunded at this time unless the kitchen starts it; a table round never is. */
+  /**
+   * A pickup is refunded at this time unless the kitchen starts it; a table round never is, nor one
+   * staff are making by hand, nor one at a Store whose screens are off past its time.
+   */
   readonly refundAt: string | null;
+  /** Someone said it is being made by hand. */
+  readonly kept: boolean;
 }
 export interface PaidOrderWatch {
   readonly on: boolean;
+  /** Turned off in the last 24 hours: the kitchen is still told what waits for a person. */
+  readonly recentlyOn: boolean;
   readonly settingVersion: number;
   readonly lastKitchenStepAt: string | null;
+  /** When a kitchen board was last open here (null: not known). */
+  readonly kitchenScreenSeenAt: string | null;
   readonly canTurnOff: boolean;
   /** Kitchen board only: whether this person can accept on Orders. */
   readonly canAcceptOrders: boolean;
@@ -49,8 +58,13 @@ export function parsePaidOrderWatch(value: unknown): PaidOrderWatch | null {
       return null;
     return Object.freeze({
       on: raw.on,
+      recentlyOn: raw.recentlyOn === true,
       settingVersion: Number(raw.settingVersion),
       lastKitchenStepAt: raw.lastKitchenStepAt === null ? null : instant(raw.lastKitchenStepAt),
+      kitchenScreenSeenAt:
+        raw.kitchenScreenSeenAt === undefined || raw.kitchenScreenSeenAt === null
+          ? null
+          : instant(raw.kitchenScreenSeenAt),
       canTurnOff: raw.canTurnOff,
       canAcceptOrders: raw.canAcceptOrders === true,
       cantMakeRefunds: Number.isSafeInteger(raw.cantMakeRefunds) ? Number(raw.cantMakeRefunds) : 0,
@@ -69,6 +83,7 @@ export function parsePaidOrderWatch(value: unknown): PaidOrderWatch | null {
             acceptedAt: instant(item.acceptedAt),
             reachedKitchen: item.reachedKitchen,
             refundAt: item.refundAt === null ? null : instant(item.refundAt),
+            kept: item.kept === true,
           });
         }),
       ),
@@ -105,14 +120,22 @@ export function notSentReasonText(reason: string, itemCount: number | null): str
 /** When to speak up: nothing touched for this long, and again at twice this. */
 export const paidOrderAlarmMinutes = 5;
 export const paidOrderAlarmUrgentMinutes = 10;
+/**
+ * No kitchen board read for this long: the screen is off. An open board is recorded at least once a
+ * minute, and this is when paid orders stop being sent there, so a dead screen is said sooner than
+ * a busy cook.
+ */
+export const paidOrderScreenOffMinutes = 3;
 
 export interface PaidOrderAlarm {
   /** Orders that never reached the kitchen (5 minutes after being sent). */
   readonly notReached: number;
   /** Orders waiting while the kitchen has touched nothing (0: a working kitchen raises nothing). */
   readonly silent: number;
-  /** How long nothing has been touched. */
+  /** How long nothing has been touched (or, with `screenOff`, how long no board has been open). */
   readonly minutes: number;
+  /** The orders counted in `silent` were sent to a kitchen screen that is now off. */
+  readonly screenOff: boolean;
   readonly tier: 0 | 1 | 2;
   /** Identifies this episode, so each tier chimes once. */
   readonly key: string;
@@ -126,11 +149,28 @@ export interface PaidOrderAlarm {
 export function paidOrderAlarm(watch: PaidOrderWatch | null, now: number): PaidOrderAlarm | null {
   if (watch === null) return null;
   const minutesSince = (at: number) => Math.floor((now - at) / 60_000);
-  const old = watch.waiting.filter(
+  // One somebody is making by hand is not going nowhere.
+  const open = watch.waiting.filter((item) => !item.kept);
+  const seen = watch.kitchenScreenSeenAt === null ? null : Date.parse(watch.kitchenScreenSeenAt);
+  const screenOffFor = seen === null ? 0 : minutesSince(seen);
+  const onDeadScreen =
+    seen !== null && screenOffFor >= paidOrderScreenOffMinutes
+      ? open.filter((item) => item.reachedKitchen)
+      : [];
+  const old = open.filter(
     (item) => minutesSince(Date.parse(item.acceptedAt)) >= paidOrderAlarmMinutes,
   );
-  if (old.length === 0) return null;
   const notReached = old.filter((item) => !item.reachedKitchen);
+  if (onDeadScreen.length > 0)
+    return Object.freeze({
+      notReached: notReached.length,
+      silent: onDeadScreen.length,
+      minutes: screenOffFor,
+      screenOff: true,
+      tier: screenOffFor >= paidOrderAlarmUrgentMinutes ? 2 : 1,
+      key: "screen:" + String(seen),
+    });
+  if (old.length === 0) return null;
   const reached = old.filter((item) => item.reachedKitchen);
   const lastStep = watch.lastKitchenStepAt === null ? null : Date.parse(watch.lastKitchenStepAt);
   const oldest = Math.min(...old.map((item) => Date.parse(item.acceptedAt)));
@@ -143,6 +183,7 @@ export function paidOrderAlarm(watch: PaidOrderWatch | null, now: number): PaidO
     notReached: notReached.length,
     silent,
     minutes: quiet,
+    screenOff: false,
     tier: quiet >= paidOrderAlarmUrgentMinutes ? 2 : 1,
     key: String(quietFrom),
   });
@@ -152,19 +193,31 @@ export function paidOrderAlarmLines(alarm: PaidOrderAlarm): readonly string[] {
   return [
     ...(alarm.silent === 0
       ? []
-      : alarm.silent === 1
+      : alarm.screenOff
         ? [
-            t(
-              "The kitchen hasn't touched anything for {minutes} min and 1 paid order is waiting · check the kitchen screen",
-              { minutes: alarm.minutes },
-            ),
+            alarm.silent === 1
+              ? t(
+                  "No kitchen screen has been open for {minutes} min and 1 paid order was sent there · open the kitchen screen",
+                  { minutes: alarm.minutes },
+                )
+              : t(
+                  "No kitchen screen has been open for {minutes} min and {count} paid orders were sent there · open the kitchen screen",
+                  { minutes: alarm.minutes, count: alarm.silent },
+                ),
           ]
-        : [
-            t(
-              "The kitchen hasn't touched anything for {minutes} min and {count} paid orders are waiting · check the kitchen screen",
-              { minutes: alarm.minutes, count: alarm.silent },
-            ),
-          ]),
+        : alarm.silent === 1
+          ? [
+              t(
+                "The kitchen hasn't touched anything for {minutes} min and 1 paid order is waiting · check the kitchen screen",
+                { minutes: alarm.minutes },
+              ),
+            ]
+          : [
+              t(
+                "The kitchen hasn't touched anything for {minutes} min and {count} paid orders are waiting · check the kitchen screen",
+                { minutes: alarm.minutes, count: alarm.silent },
+              ),
+            ]),
     ...(alarm.notReached === 0
       ? []
       : alarm.notReached === 1
@@ -187,6 +240,13 @@ export function paidOrderRefundDeadlines(watch: PaidOrderWatch | null): readonly
   return (watch?.waiting ?? []).flatMap((item) =>
     item.refundAt === null
       ? []
-      : [{ orderNumber: item.orderNumber, acceptBy: item.refundAt, kitchenStart: true }],
+      : [
+          {
+            orderNumber: item.orderNumber,
+            acceptBy: item.refundAt,
+            kitchenStart: true,
+            ...(item.reachedKitchen ? {} : { notReached: true }),
+          },
+        ],
   );
 }

@@ -274,6 +274,7 @@ test("@production the kitchen display is warned too and told who can accept", as
   // A dine-in round is never refunded for waiting: no warning for it.
   await expect(warning).not.toContainText("Order 4");
   await expect.poll(() => chimes(page)).toBe(1);
-  expect(queries.some((query) => query.limit === 1 && query.cursor === null)).toBe(true);
+  // The screen-wide watch is its own small read, never counted as the board being open.
+  expect(queries.some((query) => query.kind === "Watch")).toBe(true);
   await expectNoInternalText(page);
 });

@@ -620,7 +620,15 @@ export function App({ client: injectedClient, brandClient, demo: injectedDemo }:
           deadlines: result.orders.flatMap((order) =>
             order.acceptBy === null
               ? []
-              : [{ orderNumber: order.orderNumber, acceptBy: order.acceptBy }],
+              : [
+                  {
+                    orderNumber: order.orderNumber,
+                    acceptBy: order.acceptBy,
+                    // DEC-PAID-ORDER-AUTO-ACCEPT: its refund stops at a kitchen step, not Accept.
+                    ...(order.autoAccepted === undefined ? {} : { kitchenStart: true }),
+                    ...(order.autoAccepted === "NotReached" ? { notReached: true } : {}),
+                  },
+                ],
           ),
         };
       } catch (error) {

@@ -99,7 +99,9 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT evaluator", () => {
     });
     const prepared = await f.evaluator.prepare(f.tx, event);
     expect(prepared?.operating?.state).toBe("Open");
-    const order = f.statements.filter((sql) => /order_auto_acceptance_operating|lock_timeout/u.test(sql));
+    const order = f.statements.filter((sql) =>
+      /order_auto_acceptance_operating|lock_timeout/u.test(sql),
+    );
     expect(order).toEqual([
       "SAVEPOINT order_auto_acceptance_operating",
       "SET LOCAL lock_timeout='250ms'",
@@ -108,16 +110,31 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT evaluator", () => {
     ]);
   });
 
-  it("a status that can't be read counts as not open and leaves the transaction usable", async () => {
+  it("a status that can't be read counts as not open, leaves the transaction usable and is said once per payment", async () => {
+    const failure = new Error("aborted");
     const f = harness({
       settingRows: on,
       readOperating: async () => {
-        throw new Error("aborted");
+        throw failure;
       },
     });
     const prepared = await f.evaluator.prepare(f.tx, event);
     expect(prepared?.operating).toBeNull();
     expect(f.statements).toContain("ROLLBACK TO SAVEPOINT order_auto_acceptance_operating");
+    // A reader that always fails must not pass for a quiet closed Store, nor log every second.
+    await f.evaluator.prepare(f.tx, event);
+    expect(f.report).toHaveBeenCalledTimes(1);
+    expect(f.report).toHaveBeenCalledWith("ORDER_AUTO_ACCEPT_STORE_STATUS_UNREADABLE", failure);
+  });
+
+  it("a status read held up by a Store change is a quiet skip", async () => {
+    const f = harness({
+      settingRows: on,
+      readOperating: async () => {
+        throw Object.assign(new Error("lock"), { code: "55P03" });
+      },
+    });
+    expect((await f.evaluator.prepare(f.tx, event))?.operating).toBeNull();
     expect(f.report).not.toHaveBeenCalled();
   });
 
@@ -130,7 +147,10 @@ describe("DEC-PAID-ORDER-AUTO-ACCEPT evaluator", () => {
   });
 
   it("a lock conflict is a quiet skip; the wait workload tries again", async () => {
-    const f = harness({ settingRows: [], failSetting: Object.assign(new Error("x"), { code: "55P03" }) });
+    const f = harness({
+      settingRows: [],
+      failSetting: Object.assign(new Error("x"), { code: "55P03" }),
+    });
     expect(await f.evaluator.prepare(f.tx, event)).toBeNull();
     expect(f.report).not.toHaveBeenCalled();
   });

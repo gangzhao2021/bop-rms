@@ -284,6 +284,25 @@ describe("v15 cbff9d6f: tablet re-check of remembered refund countdowns", () => 
     ).toThrow(StaffPinError);
     expect(() => parseRefundRecheck({ ...answer, extra: 1 }, ["16", "17"])).toThrow(StaffPinError);
   });
+  it("DEC-PAID-ORDER-AUTO-ACCEPT: reads which orders were sent straight to the kitchen, and only those values", () => {
+    const sent = {
+      ...answer,
+      orders: [
+        { orderNumber: "16", acceptBy: null },
+        { orderNumber: "17", acceptBy: "2026-10-17T14:20:00.000Z", autoAccepted: "NotReached" },
+      ],
+    };
+    expect(parseRefundRecheck(sent, ["16", "17"])).toEqual(sent);
+    expect(() =>
+      parseRefundRecheck(
+        {
+          ...answer,
+          orders: [{ orderNumber: "16", acceptBy: null, autoAccepted: "Accepted" }],
+        },
+        ["16"],
+      ),
+    ).toThrow(StaffPinError);
+  });
   it("maps a browser that is not a registered tablet, a busy tablet and failures", async () => {
     const recheck = (status: number, body: unknown) =>
       failure(createStaffPinClient(null, respond(status, body)).refundRecheck(["16"]));

@@ -493,8 +493,8 @@ export interface MerchantBffRouterOptions {
   /** What Can't make it would refund, for its dialog. */
   readonly orderCantMakePreview?: ReturnType<typeof createMerchantOrderStaffCancellationPreview>;
   /** "Making it by hand": stops a pickup's automatic refund. */
-  /** DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause turns automatic sending off. */
   readonly paidOrderKeep?: ReturnType<typeof createMerchantPaidOrderKeep>;
+  /** DEC-PAID-ORDER-AUTO-ACCEPT: whoever may pause turns automatic sending off. */
   readonly paidOrderAutoAcceptOff?: ReturnType<typeof createMerchantPaidOrderAutoAcceptOff>;
   /** WP-2423 (v15 2026-10-18): what that cancellation would refund, for the cancel dialog. */
   readonly orderStaffCancellationPreview?: ReturnType<

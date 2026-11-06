@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router";
 import { playKitchenChime } from "./alert-chime.js";
@@ -13,6 +13,7 @@ import {
   type RefundDeadline,
 } from "./refund-deadline-warning.js";
 import { storeTime } from "./StoreTime.js";
+import { pinnedHeightRef } from "./pinned-warnings.js";
 
 /** How often the warning re-reads the Store's paid orders waiting for acceptance. */
 export const REFUND_WATCH_READ_MS = 15_000;
@@ -203,22 +204,8 @@ export function RefundDeadlineWatch({
   }, [clock, tickMs]);
   // UI refresh: the warning is pinned to the top edge; pages that pin their own bar (Orders
   // filters, Counter order categories, Tables details) sit below it through this height.
-  const pinWarning = useCallback((node: HTMLElement | null) => {
-    if (node === null) return;
-    const root = document.documentElement;
-    const publish = () =>
-      root.style.setProperty(
-        "--bop-pinned-top",
-        `${Math.ceil(node.getBoundingClientRect().height)}px`,
-      );
-    publish();
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(publish) : null;
-    observer?.observe(node);
-    return () => {
-      observer?.disconnect();
-      root.style.removeProperty("--bop-pinned-top");
-    };
-  }, []);
+  // Stacked with the paid order alarm under it; the page's sticky parts sit below both.
+  const pinWarning = useMemo(() => pinnedHeightRef("refund"), []);
   const warnings = refundWarnings(deadlines, now);
   // Out of date without a sign-in: no sound or announcement for an order that may be handled.
   const unsure = refundCountdownUnsure(signedOut, checkedAt, now);
@@ -268,7 +255,9 @@ export function RefundDeadlineWatch({
               : `Ask someone at the counter to accept ${them} on Orders.`}
           {checked}
         </p>
-      ) : warnings.every((warning) => warning.kitchenStart) ? null : ordersHref === null ? (
+      ) : warnings.every(
+          (warning) => warning.kitchenStart && !warning.notReached,
+        ) ? null : ordersHref === null ? (
         <p>Ask someone at the counter to accept {them} on Orders.</p>
       ) : onOrdersPage ? null : (
         <Link className="shell-action" to={ordersHref}>

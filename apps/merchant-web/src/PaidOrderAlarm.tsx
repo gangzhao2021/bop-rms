@@ -1,6 +1,7 @@
-import { createContext, useEffect, useRef, useState } from "react";
+import { createContext, useEffect, useMemo, useRef, useState } from "react";
 import { playKitchenChime } from "./alert-chime.js";
 import { paidOrderAlarm, paidOrderAlarmLines, type PaidOrderWatch } from "./paid-order-watch.js";
+import { pinnedHeightRef } from "./pinned-warnings.js";
 
 /** What the Store's paid order watch last said, for any page that shows part of it. */
 export const PaidOrderWatchContext = createContext<PaidOrderWatch | null>(null);
@@ -42,6 +43,8 @@ export function PaidOrderAlarmBanner({
       document.removeEventListener("keydown", unlock, true);
     };
   }, []);
+  // Under the refund countdown when both show; the page's sticky parts sit below it.
+  const pin = useMemo(() => pinnedHeightRef("alarm"), []);
   const chimeKey = alarm === null ? null : `${alarm.key}|${alarm.tier}`;
   useEffect(() => {
     if (chimeKey === null || chimed.current.has(chimeKey)) return;
@@ -51,7 +54,8 @@ export function PaidOrderAlarmBanner({
   if (alarm === null) return null;
   return (
     <section
-      className="refund-deadline-warning"
+      ref={pin}
+      className="refund-deadline-warning paid-order-alarm"
       data-tier={alarm.tier === 2 ? "urgent" : "warning"}
       role="alert"
     >

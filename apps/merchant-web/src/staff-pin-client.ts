@@ -274,19 +274,43 @@ export interface StaffPinClient {
 
 export interface RefundRecheck {
   readonly checkedAt: string;
-  readonly orders: readonly { readonly orderNumber: string; readonly acceptBy: string | null }[];
+  readonly orders: readonly {
+    readonly orderNumber: string;
+    readonly acceptBy: string | null;
+    /**
+     * DEC-PAID-ORDER-AUTO-ACCEPT: sent straight to the kitchen, so Accept does not stop its refund:
+     * "Marked" the kitchen can, "NotReached" no ticket arrived. Absent for any other order.
+     */
+    readonly autoAccepted?: "Marked" | "NotReached";
+  }[];
 }
 const ORDER_NUMBER = /^[A-Za-z0-9-]{1,20}$/u;
 /** The tablet re-check answer, as a closed record naming only the asked orders. */
 export function parseRefundRecheck(value: unknown, asked: readonly string[]): RefundRecheck {
   const raw = record(value, ["checkedAt", "orders"]);
   const orders = list(raw.orders, (entry) => {
-    const order = record(entry, ["orderNumber", "acceptBy"]);
+    // Only on an order sent straight to the kitchen, so a Store without it reads as before.
+    const automatic =
+      entry !== null && typeof entry === "object" && Object.hasOwn(entry, "autoAccepted");
+    const order = record(entry, [
+      "orderNumber",
+      "acceptBy",
+      ...(automatic ? ["autoAccepted"] : []),
+    ]);
     const orderNumber =
       typeof order.orderNumber === "string" && ORDER_NUMBER.test(order.orderNumber)
         ? order.orderNumber
         : invalid();
-    return Object.freeze({ orderNumber, acceptBy: optionalInstant(order.acceptBy) });
+    const autoAccepted = automatic
+      ? order.autoAccepted === "Marked" || order.autoAccepted === "NotReached"
+        ? order.autoAccepted
+        : invalid()
+      : undefined;
+    return Object.freeze({
+      orderNumber,
+      acceptBy: optionalInstant(order.acceptBy),
+      ...(autoAccepted === undefined ? {} : { autoAccepted }),
+    });
   });
   if (
     orders.length !== asked.length ||

@@ -17,6 +17,7 @@ import {
 } from "./DiningRounds.js";
 import { OrderAcceptanceAction } from "./OrderAcceptanceAction.js";
 import { CantMakeRefundAction } from "./CantMakeRefundAction.js";
+import { MakingByHandAction } from "./MakingByHandAction.js";
 import { notSentReasonText } from "./paid-order-watch.js";
 import { PaidOrderSwitchLine } from "./PaidOrderSwitchLine.js";
 import { PauseOrderingControl } from "./PauseOrderingControl.js";
@@ -1744,14 +1745,18 @@ function OrderDetailBody({
       {/* DEC-PAID-ORDER-AUTO-ACCEPT: quiet facts, no alarm per order. */}
       {batch.acceptedAutomaticallyAt !== null ? (
         <p role="note" className="order-round__acceptance">
-          {batch.canCantMake && now !== undefined
-            ? t("Accepted automatically · sent {minutes} min ago", {
-                minutes: Math.max(
-                  0,
-                  Math.floor((now - Date.parse(batch.acceptedAutomaticallyAt)) / 60_000),
-                ),
-              })
-            : t("Accepted automatically")}
+          {batch.kept
+            ? t("Accepted automatically · being made by hand")
+            : !batch.reachedKitchen && batch.canCantMake
+              ? t("Accepted automatically · it did not reach the kitchen screen")
+              : batch.canCantMake && now !== undefined
+                ? t("Accepted automatically · sent {minutes} min ago", {
+                    minutes: Math.max(
+                      0,
+                      Math.floor((now - Date.parse(batch.acceptedAutomaticallyAt)) / 60_000),
+                    ),
+                  })
+                : t("Accepted automatically")}
         </p>
       ) : batch.notSentAutomatically !== null ? (
         <p role="note" className="order-round__acceptance">
@@ -3427,8 +3432,22 @@ export function CurrentOrderQueuePage({
                       )}
                     </fieldset>
                   ) : !batch.canRequestAcceptance &&
-                    (batch.canCancel || batch.canCancelItems || batch.canCantMake) ? (
+                    (batch.canCancel ||
+                      batch.canCancelItems ||
+                      batch.canCantMake ||
+                      batch.canKeep) ? (
                     <fieldset disabled={servingBusy} className="order-cancel-actions">
+                      {/* DEC-PAID-ORDER-AUTO-ACCEPT: stops a pickup's automatic refund. */}
+                      {batch.canKeep ? (
+                        <MakingByHandAction
+                          key={"keep-" + batch.orderBatchReference}
+                          order={order}
+                          batch={batch}
+                          csrf={csrf}
+                          fetcher={fetcher}
+                          onSettled={() => reload(after)}
+                        />
+                      ) : null}
                       {batch.canCantMake ? (
                         <CantMakeRefundAction
                           key={"cant-make-" + batch.orderBatchReference}

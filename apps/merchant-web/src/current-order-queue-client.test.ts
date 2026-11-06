@@ -1149,3 +1149,37 @@ it("v15 a2458cff: one row it can't read is named and left out; the rest stay", (
   expect(paged.items).toHaveLength(49);
   expect(paged.nextAfterOrderReference).toBe(id(11));
 });
+it("DEC-PAID-ORDER-AUTO-ACCEPT: reads a batch sent straight to the kitchen, made by hand or never arrived", () => {
+  const batch = row().batches[0];
+  const read = (extra: Record<string, unknown>) =>
+    parseCurrentOrderQueue({
+      items: [{ ...row(), batches: [{ ...batch, ...extra }] }],
+      nextAfterOrderReference: null,
+    }).items[0]?.batches[0];
+  const sent = {
+    acceptedAutomaticallyAt: "2026-09-14T00:00:20.000Z",
+    canCantMake: true,
+  };
+  expect(read({ ...sent, reachedKitchen: false, kept: false, canKeep: true })).toMatchObject({
+    acceptedAutomaticallyAt: "2026-09-14T00:00:20.000Z",
+    canCantMake: true,
+    reachedKitchen: false,
+    kept: false,
+    canKeep: true,
+  });
+  expect(read({ ...sent, reachedKitchen: true, kept: true, canKeep: false })).toMatchObject({
+    reachedKitchen: true,
+    kept: true,
+    canKeep: false,
+  });
+  // An earlier server sends only the first two: it reached the kitchen, nobody made it by hand.
+  expect(read(sent)).toMatchObject({ reachedKitchen: true, kept: false, canKeep: false });
+  // Any other batch carries none of them.
+  expect(read({})).toMatchObject({
+    acceptedAutomaticallyAt: null,
+    reachedKitchen: true,
+    kept: false,
+  });
+  expect(() => read({ ...sent, kept: "yes" })).toThrow();
+  expect(() => read({ reachedKitchen: false })).toThrow();
+});

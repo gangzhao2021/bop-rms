@@ -271,6 +271,9 @@ const dineIn = {
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
+      reachedKitchen: false,
+      kept: true,
+      canKeep: false,
       notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: true,
       canCancelItems: true,
@@ -296,6 +299,9 @@ const dineIn = {
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
+      reachedKitchen: false,
+      kept: true,
+      canKeep: false,
       notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
@@ -319,6 +325,9 @@ const dineIn = {
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
+      reachedKitchen: false,
+      kept: true,
+      canKeep: false,
       notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
@@ -342,6 +351,9 @@ const dineIn = {
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
+      reachedKitchen: false,
+      kept: true,
+      canKeep: false,
       notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
@@ -424,6 +436,9 @@ const heldPickup = {
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
+      reachedKitchen: false,
+      kept: true,
+      canKeep: false,
       notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
@@ -502,6 +517,9 @@ const earlierCounterPickup = {
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
+      reachedKitchen: false,
+      kept: true,
+      canKeep: false,
       notSentAutomatically: { reason: "HasAlcohol", itemCount: 2 },
       canCancel: false,
       canCancelItems: false,
@@ -521,10 +539,13 @@ const earlierCounterPickup = {
 // DEC-PAID-ORDER-AUTO-ACCEPT: sent only at a Store that uses it; the type wants it always.
 const paidOrderWatch = {
   on: true,
+  recentlyOn: false,
   settingVersion: 1,
   lastKitchenStepAt: at(5),
+  kitchenScreenSeenAt: at(6),
   cantMakeRefunds: 0,
   canTurnOff: false,
+  canAcceptOrders: true,
   waiting: [
     {
       orderNumber: "21",
@@ -532,6 +553,16 @@ const paidOrderWatch = {
       acceptedAt: at(1),
       reachedKitchen: true,
       refundAt: at(31),
+      // Sent only on one someone is making by hand; every element carries it here.
+      kept: true as const,
+    },
+    {
+      orderNumber: "22",
+      orderType: "Pickup" as const,
+      acceptedAt: at(2),
+      reachedKitchen: false,
+      refundAt: null,
+      kept: true as const,
     },
   ],
 };
@@ -986,17 +1017,20 @@ describe("merchant BFF responses carry every read-model field the browser parses
     const model = {
       checkedAt: at(41),
       orders: [
-        { orderNumber: "16", acceptBy: null },
-        { orderNumber: "17", acceptBy: at(50) },
+        // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends autoAccepted only on an order sent straight
+        // to the kitchen; every element carries it here so the recorder sees it arrive.
+        { orderNumber: "16", acceptBy: null, autoAccepted: "Marked" as const },
+        { orderNumber: "17", acceptBy: at(50), autoAccepted: "Marked" as const },
+        { orderNumber: "18", acceptBy: at(52), autoAccepted: "NotReached" as const },
       ],
     } satisfies Full<Awaited<ReturnType<StaffPinPort["refundRecheck"]>>>;
     tabletRecheck.mockResolvedValue(model);
     const answer = await throughClient(() =>
-      createStaffPinClient(null, fetcher).refundRecheck(["16", "17"], signal()),
+      createStaffPinClient(null, fetcher).refundRecheck(["16", "17", "18"], signal()),
     );
     expect(dropped(model)).toEqual([]);
     expect(answer).toEqual(model);
-    expect(tabletRecheck).toHaveBeenCalledWith(deviceCookie, ["16", "17"]);
+    expect(tabletRecheck).toHaveBeenCalledWith(deviceCookie, ["16", "17", "18"]);
   });
 
   it("the recorder sees a field the BFF drops", async () => {

@@ -16,6 +16,8 @@ export interface RefundDeadline {
    * (absent: unless someone accepts it).
    */
   readonly kitchenStart?: boolean;
+  /** Sent straight to the kitchen but no ticket arrived: only a person on Orders can stop it. */
+  readonly notReached?: boolean;
 }
 
 export type RefundWarningTier = "warning" | "urgent" | "final";
@@ -27,6 +29,7 @@ export interface RefundWarning {
   readonly tier: RefundWarningTier;
   readonly text: string;
   readonly kitchenStart: boolean;
+  readonly notReached: boolean;
 }
 
 /** Warnings start this long before the refund (the Orders page's urgent tier starts here too). */
@@ -45,11 +48,17 @@ export function refundWarningText(
   orderNumber: string,
   leftMs: number,
   kitchenStart = false,
+  notReached = false,
 ): string {
   const when =
     leftMs <= 60_000
       ? t("in less than a minute")
       : t("in {value} min", { value: Math.ceil(leftMs / 60_000) });
+  if (notReached)
+    return t(
+      "Order {orderNumber} did not reach the kitchen. It will be refunded automatically {when} unless someone taps Making it by hand on Orders.",
+      { orderNumber: orderNumber, when: when },
+    );
   if (kitchenStart)
     return t(
       "Order {orderNumber} will be refunded automatically {when} unless the kitchen starts it.",
@@ -110,7 +119,13 @@ export function refundWarnings(
               leftMs,
               tier,
               kitchenStart: deadline.kitchenStart === true,
-              text: refundWarningText(deadline.orderNumber, leftMs, deadline.kitchenStart === true),
+              notReached: deadline.notReached === true,
+              text: refundWarningText(
+                deadline.orderNumber,
+                leftMs,
+                deadline.kitchenStart === true,
+                deadline.notReached === true,
+              ),
             },
           ];
     })
@@ -185,6 +200,7 @@ export function saveLastKnownRefundDeadlines(value: LastKnownRefundDeadlines): v
           orderNumber: deadline.orderNumber,
           acceptBy: deadline.acceptBy,
           ...(deadline.kitchenStart === true ? { kitchenStart: true } : {}),
+          ...(deadline.notReached === true ? { notReached: true } : {}),
         })),
         checkedAt: value.checkedAt,
         canAccept: value.canAccept,
@@ -216,13 +232,20 @@ export function loadLastKnownRefundDeadlines(now: number): LastKnownRefundDeadli
     return null;
   const deadlines = body.deadlines.flatMap((item: unknown) => {
     if (item === null || typeof item !== "object") return [];
-    const { orderNumber, acceptBy, kitchenStart } = item as Record<string, unknown>;
+    const { orderNumber, acceptBy, kitchenStart, notReached } = item as Record<string, unknown>;
     return typeof orderNumber === "string" &&
       ORDER_NUMBER.test(orderNumber) &&
       typeof acceptBy === "string" &&
       INSTANT.test(acceptBy) &&
       Date.parse(acceptBy) > now
-      ? [{ orderNumber, acceptBy, ...(kitchenStart === true ? { kitchenStart: true } : {}) }]
+      ? [
+          {
+            orderNumber,
+            acceptBy,
+            ...(kitchenStart === true ? { kitchenStart: true } : {}),
+            ...(notReached === true ? { notReached: true } : {}),
+          },
+        ]
       : [];
   });
   if (deadlines.length === 0) return null;

@@ -9,6 +9,8 @@ import { PaidOrderWatchContext } from "./PaidOrderAlarm.js";
 import { storeTime } from "./StoreTime.js";
 
 const choices = [15, 30, 60] as const;
+/** Re-read this often, so a pause that ended, or one set on another screen, shows as it is. */
+export const pauseOrderingReadMs = 30_000;
 
 /**
  * WP-2423 DEC-PAID-ORDER-AUTO-ACCEPT: the busy-night brake where staff work, on Orders and the
@@ -33,15 +35,37 @@ export function PauseOrderingControl({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!offered) return;
     const controller = new AbortController();
     client
       .load(storeReference, controller.signal)
-      .then(setView)
+      .then((next) => {
+        setView(next);
+        setNow(Date.now());
+      })
       .catch(() => setView(null));
-    return () => controller.abort();
+    const timer = setTimeout(() => setRevision((value) => value + 1), pauseOrderingReadMs);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, [client, offered, storeReference, revision]);
+  // A pause whose time has passed is over, whatever the last read said.
+  const paused = view?.activePauses.find((pause) => Date.parse(pause.effectiveUntil) > now);
+  useEffect(() => {
+    if (paused === undefined) return;
+    const left = Date.parse(paused.effectiveUntil) - Date.now();
+    const timer = setTimeout(
+      () => {
+        setNow(Date.now());
+        setRevision((value) => value + 1);
+      },
+      Math.max(0, Math.min(left, pauseOrderingReadMs)) + 500,
+    );
+    return () => clearTimeout(timer);
+  }, [paused]);
   if (!offered || view === null) return null;
   const run = async (command: Parameters<typeof client.execute>[0]) => {
     setBusy(true);
@@ -51,7 +75,9 @@ export function PauseOrderingControl({
       setAsking(false);
       setRevision((value) => value + 1);
     } catch {
+      // Often it changed on another screen (a pause ended or was set): show it as it is now.
       setFailed(true);
+      setRevision((value) => value + 1);
     } finally {
       setBusy(false);
     }
@@ -62,9 +88,11 @@ export function PauseOrderingControl({
     configurationReference: view.configurationReference,
     expectedVersion: view.expectedVersion,
   };
-  const paused = view.activePauses[0];
   return (
-    <div className="pause-ordering">
+    <div
+      className="pause-ordering"
+      data-asking={asking && paused === undefined ? "true" : undefined}
+    >
       {paused !== undefined ? (
         <>
           <span>
@@ -88,29 +116,31 @@ export function PauseOrderingControl({
         </>
       ) : asking ? (
         <>
-          <span>{t("Guests can't order while paused. Orders already paid still come in.")}</span>{" "}
-          {choices.map((minutes) => (
-            <button
-              key={minutes}
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void run({
-                  ...common,
-                  command: "PauseService",
-                  content: {
-                    effectiveUntil: new Date(Date.now() + minutes * 60_000).toISOString(),
-                    serviceModes: null,
-                  },
-                })
-              }
-            >
-              {t("{minutes} min", { minutes })}
+          <span>{t("Guests can't order while paused. Orders already paid still come in.")}</span>
+          <span className="pause-ordering__choices">
+            {choices.map((minutes) => (
+              <button
+                key={minutes}
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void run({
+                    ...common,
+                    command: "PauseService",
+                    content: {
+                      effectiveUntil: new Date(Date.now() + minutes * 60_000).toISOString(),
+                      serviceModes: null,
+                    },
+                  })
+                }
+              >
+                {t("{minutes} min", { minutes })}
+              </button>
+            ))}{" "}
+            <button type="button" disabled={busy} onClick={() => setAsking(false)}>
+              {t("Cancel")}
             </button>
-          ))}{" "}
-          <button type="button" disabled={busy} onClick={() => setAsking(false)}>
-            {t("Cancel")}
-          </button>
+          </span>
         </>
       ) : (
         <button type="button" onClick={() => setAsking(true)}>
@@ -118,7 +148,9 @@ export function PauseOrderingControl({
         </button>
       )}
       {failed ? (
-        <span role="alert"> {t("Not saved. Check the connection and try again.")}</span>
+        <span role="alert" className="pause-ordering__failed">
+          {t("Not saved. It may have changed on another screen; this shows it as it is now.")}
+        </span>
       ) : null}
     </div>
   );

@@ -13,6 +13,54 @@ const render = (value: Record<string, unknown>) =>
     </MemoryRouter>,
   );
 
+describe("DEC-PAID-ORDER-AUTO-ACCEPT: decisions nobody senior was asked about, named tonight", () => {
+  const events = [
+    {
+      kind: "CantMake",
+      orderNumber: "21",
+      staffName: "Mei",
+      reasonCode: "SOLD_OUT",
+      at: "2026-10-28T00:10:00.000Z",
+    },
+    {
+      kind: "AutomaticRefund",
+      orderNumber: "22",
+      staffName: null,
+      reasonCode: "STORE_ERROR",
+      at: "2026-10-28T00:20:00.000Z",
+    },
+    {
+      kind: "KeptByHand",
+      orderNumber: "23",
+      staffName: null,
+      reasonCode: null,
+      at: "2026-10-28T00:30:00.000Z",
+    },
+  ];
+  it("lists each in staff words, with who and why, never a code", () => {
+    const html = render({ ...tonightSummaryFixture(), paidOrderEvents: events });
+    expect(html).toContain("Order 21 · Can&#x27;t make it · refunded");
+    expect(html).toContain("Mei · Sold out");
+    expect(html).toContain("Order 22 · refunded automatically · the kitchen never started it");
+    expect(html).toContain("Order 23 · made by hand · not refunded automatically");
+    expect(html).not.toContain("SOLD_OUT");
+    expect(html).not.toContain("STORE_ERROR");
+    expect(html).not.toContain("KeptByHand");
+  });
+  it("a Store without any sees nothing new, and a wrong entry is refused", () => {
+    expect(parseTonightSummary(tonightSummaryFixture()).paidOrderEvents).toEqual([]);
+    expect(render(tonightSummaryFixture())).not.toContain(
+      "Paid orders sent straight to the kitchen",
+    );
+    expect(() =>
+      parseTonightSummary({
+        ...tonightSummaryFixture(),
+        paidOrderEvents: [{ ...events[0], kind: "Deleted" }],
+      }),
+    ).toThrow();
+  });
+});
+
 describe("WP-2423 item 8 ② tonight's closing summary", () => {
   it("Owner addition (a): the sample's figures add up and the real parser accepts it", () => {
     const summary = parseTonightSummary(tonightSummaryFixture());

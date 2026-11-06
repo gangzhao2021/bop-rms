@@ -709,10 +709,16 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         Object.hasOwn(value, "acceptedAutomaticallyAt");
       const withNotSent =
         value !== null && typeof value === "object" && Object.hasOwn(value, "notSentAutomatically");
+      // Whether it reached the kitchen and "Making it by hand": absent from an earlier server.
+      const automaticExtras = withAutomatic
+        ? (["reachedKitchen", "kept", "canKeep"] as const).filter((key) =>
+            Object.hasOwn(value as object, key),
+          )
+        : [];
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
-        ...(withAutomatic ? ["acceptedAutomaticallyAt", "canCantMake"] : []),
+        ...(withAutomatic ? ["acceptedAutomaticallyAt", "canCantMake", ...automaticExtras] : []),
         ...(withNotSent ? ["notSentAutomatically"] : []),
         ...(withSubmittedAt ? ["submittedAt"] : []),
         "acceptanceStatus",
@@ -862,6 +868,7 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         : null;
       if (
         (withAutomatic && typeof batch.canCantMake !== "boolean") ||
+        automaticExtras.some((key) => typeof batch[key] !== "boolean") ||
         (notSent !== null &&
           (typeof notSent.reason !== "string" ||
             (notSent.itemCount !== null && !Number.isSafeInteger(notSent.itemCount))))
@@ -874,6 +881,12 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         acceptedAutomaticallyAt: withAutomatic ? instant(batch.acceptedAutomaticallyAt) : null,
         /** Whoever can accept may give it back while the kitchen has not started it. */
         canCantMake: withAutomatic && batch.canCantMake === true,
+        /** False only when it was sent but no ticket reached the kitchen. */
+        reachedKitchen: !withAutomatic || batch.reachedKitchen !== false,
+        /** Someone said it is being made by hand: a pickup's automatic refund is stopped. */
+        kept: withAutomatic && batch.kept === true,
+        /** Whoever can accept may say it is being made by hand (a pickup not yet marked). */
+        canKeep: withAutomatic && batch.canKeep === true,
         /** Why a paid batch at a Store with the switch on is still here; null otherwise. */
         notSentAutomatically:
           notSent === null

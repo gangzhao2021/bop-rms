@@ -87,6 +87,25 @@ describe("WP-2423 warn before an unaccepted paid order is refunded", () => {
   });
 });
 
+describe("DEC-PAID-ORDER-AUTO-ACCEPT: a pickup sent straight to the kitchen", () => {
+  it("says the kitchen can stop it, or, when no ticket arrived, who can", () => {
+    expect(refundWarningText("21", 120_000, true)).toBe(
+      "Order 21 will be refunded automatically in 2 min unless the kitchen starts it.",
+    );
+    const lost = refundWarningText("22", 120_000, true, true);
+    expect(lost).toBe(
+      "Order 22 did not reach the kitchen. It will be refunded automatically in 2 min unless someone taps Making it by hand on Orders.",
+    );
+    expect(findInternalText([lost])).toEqual([]);
+    expect(
+      refundWarnings(
+        [{ orderNumber: "22", acceptBy: at(120), kitchenStart: true, notReached: true }],
+        now,
+      ),
+    ).toMatchObject([{ kitchenStart: true, notReached: true, text: lost }]);
+  });
+});
+
 describe("v15 c9b377cb: the last known countdown for a signed-out or PIN screen", () => {
   afterEach(() => vi.unstubAllGlobals());
   const stubStorage = () => {
@@ -126,6 +145,21 @@ describe("v15 c9b377cb: the last known countdown for a signed-out or PIN screen"
     });
     // Nothing left ahead: nothing to show.
     expect(loadLastKnownRefundDeadlines(now + 121_000)).toBeNull();
+  });
+
+  it("DEC-PAID-ORDER-AUTO-ACCEPT: remembers which were sent straight to the kitchen, and which never got there", () => {
+    stubStorage();
+    const deadlines = [
+      { orderNumber: "21", acceptBy: at(120), kitchenStart: true },
+      { orderNumber: "22", acceptBy: at(150), kitchenStart: true, notReached: true },
+    ];
+    saveLastKnownRefundDeadlines({
+      deadlines,
+      checkedAt: now,
+      canAccept: false,
+      timeZone: "America/Toronto",
+    });
+    expect(loadLastKnownRefundDeadlines(now)?.deadlines).toEqual(deadlines);
   });
 
   it("ignores anything malformed and works without storage", () => {
