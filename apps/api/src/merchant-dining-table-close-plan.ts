@@ -24,6 +24,7 @@ import {
   readyToServeQuantity,
 } from "./dining-order-delivery-progress.js";
 import { createDiningSettledCloseEvidence } from "./dining-settled-close-evidence.js";
+import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import {
@@ -36,6 +37,9 @@ import type { MerchantBffService } from "./merchant-bff.js";
 /**
  * What a manager closing a table whose guests left must resolve for one round, in staff terms:
  * - NotPaid: never paid; nothing to refund; the System cancels it at `cancelsAt`.
+ * - WaitingForStaff: a guest round at a table that pays at the end, waiting for staff OK (never in
+ *   the kitchen, nothing paid, never cancelled by time): closing cancels it with the held-round
+ *   Cancel (its release and the unpaid cancellation; nothing is refunded).
  * - PaymentInProgress: an online payment was started and has no result yet; wait for it.
  * - PaidNotSent: paid but never accepted (never reached the kitchen): cancel and refund it.
  * - AlreadyRefunded: paid, never accepted, payment already refunded in full: cancel (nothing owed).
@@ -53,6 +57,7 @@ import type { MerchantBffService } from "./merchant-bff.js";
  */
 export type TableCloseRoundState =
   | "NotPaid"
+  | "WaitingForStaff"
   | "PaymentInProgress"
   | "PaidNotSent"
   | "AlreadyRefunded"
@@ -81,7 +86,7 @@ export interface TableCloseRound {
     readonly method: "Online" | "CardMachine";
     readonly amountMinor: string;
   };
-  /** NotPaid: when the System cancels it. */
+  /** NotPaid: when the System cancels it (never for a round waiting for staff). */
   readonly cancelsAt: string | null;
   /** When this round reached the kitchen; null: it has not. */
   readonly kitchenReceivedAt: string | null;
@@ -273,6 +278,12 @@ export function createMerchantDiningTableClosePlan(options: {
                     settlement.part.partNumber === part.partNumber,
                 ),
               ));
+          // WP-2423 item 8 ⑤: rounds waiting for staff OK (the same read as Tables and checkout).
+          const waitingForStaff = new Set(
+            (await listRoundsWaitingForStaff(tx, owner, [orderReference], stillAllowed)).map(
+              (hold) => String(hold.orderBatchReference),
+            ),
+          );
           let configuration: Awaited<ReturnType<typeof options.resolveRefundConfiguration>> | null =
             null;
           /** What a whole-round cancellation refunds now (all that is left, tip included). */
@@ -364,6 +375,10 @@ export function createMerchantDiningTableClosePlan(options: {
                 ...base,
                 state: tablePaid ? "PaidWithTable" : "OnTableBill",
               });
+              continue;
+            }
+            if (waitingForStaff.has(reference)) {
+              rounds.push({ ...base, state: "WaitingForStaff" });
               continue;
             }
             if (batch.acceptance === null) {

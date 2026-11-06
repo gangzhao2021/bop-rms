@@ -5,7 +5,13 @@ import {
   DiningSessionError,
   loadDiningRoundHoldSetting,
 } from "@rms/dining";
-import { createPostgresOrderRoundStaffHoldStore, parseOrderingReference } from "@rms/ordering";
+import {
+  createPostgresOrderRoundStaffHoldStore,
+  listOrderMergedInto,
+  parseOrderingReference,
+} from "@rms/ordering";
+import { createPostgresDiningTableSettlementStore, onlinePaymentHoldsBill } from "@rms/payment";
+import { fenceTableBill } from "./dining-waiting-rounds.js";
 import type { createDiningBatchCancellation } from "./dining-batch-cancellation.js";
 import type { DiningPayLaterRound } from "./dining-pay-later-round.js";
 import { createMerchantStoreScope } from "./merchant-store-scope.js";
@@ -18,6 +24,11 @@ export type MerchantDiningHeldRoundErrorCode =
   | "HELD_ROUND_INPUT_INVALID"
   | "HELD_ROUND_PERMISSION_DENIED"
   | "HELD_ROUND_NOT_WAITING"
+  /**
+   * WP-2423 item 8 ⑤ D4: the table's bill was already paid (or is being paid, or was written off):
+   * the round can't go on it any more. Cancel it instead, or take a new order for it.
+   */
+  | "HELD_ROUND_TABLE_PAID"
   /** The setting changed since it was read: read it again. */
   | "HELD_ROUND_CHANGED"
   | "HELD_ROUND_UNAVAILABLE";
@@ -117,6 +128,13 @@ export function createMerchantDiningHeldRound(options: {
               storeReference: selected.storeReference,
               authorize: async (candidate) => candidate === consumer && (await allowed()),
             });
+            const owner = {
+              brandReference: selected.brandReference,
+              storeReference: selected.storeReference,
+            };
+            // The bill's fence first (as every payment takes it): a payment and this decision run
+            // one after the other, never both on what each read before the other committed.
+            await fenceTableBill(consumer, owner, [command.orderReference]);
             const hold = await holds.load({
               transaction: consumer,
               orderReference: command.orderReference,
@@ -126,6 +144,27 @@ export function createMerchantDiningHeldRound(options: {
             const outcome = command.action === "Confirm" ? "Confirmed" : "Cancelled";
             if (hold.release !== null && hold.release.outcome !== outcome)
               return fail("HELD_ROUND_NOT_WAITING");
+            // WP-2423 item 8 ⑤ D4: a round sent to the kitchen goes on the table's bill, so never
+            // once the bill was paid (whole or a part), is being paid on a phone, or written off.
+            if (command.action === "Confirm" && hold.release === null) {
+              const billOrder =
+                (await listOrderMergedInto(consumer, owner, [command.orderReference])).get(
+                  command.orderReference,
+                ) ?? command.orderReference;
+              const payments = createPostgresDiningTableSettlementStore({
+                scope: selected,
+                authorize: async (_tx, value) =>
+                  value.orderReference === billOrder && (await allowed()) === true,
+              });
+              if (
+                (await payments.listByOrders(consumer, [billOrder])).length > 0 ||
+                (await payments.listWriteOffsByOrders(consumer, [billOrder])).length > 0 ||
+                (await payments.listOnlinePaymentsByOrders(consumer, [billOrder])).some(
+                  onlinePaymentHoldsBill,
+                )
+              )
+                return fail("HELD_ROUND_TABLE_PAID");
+            }
             await holds.release({
               transaction: consumer,
               operationReference: command.operationReference,

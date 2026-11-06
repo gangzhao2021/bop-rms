@@ -387,6 +387,7 @@ const errorBodies: Readonly<Record<string, [number, string]>> = {
   TABLE_ONLINE_PAYMENT_INPUT_INVALID: [400, "table_payment_invalid"],
   TABLE_ONLINE_PAYMENT_TIPS_OFF: [409, "table_tips_turned_off"],
   TABLE_ONLINE_PAYMENT_TIP_CHOICES_CHANGED: [409, "table_tip_choices_changed"],
+  TABLE_ONLINE_PAYMENT_ROUNDS_WAITING: [409, "table_rounds_waiting"],
 };
 
 /** HTTP: POST {action: "Read" | "Start", ...}; POST /handoff for the secure card form. */

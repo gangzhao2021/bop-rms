@@ -83,6 +83,7 @@ import {
 } from "../../../apps/api/src/customer-dining-table-payment.ts";
 import { createMerchantDiningOrderProgress } from "../../../apps/api/src/merchant-dining-order-progress.ts";
 import { createMerchantDiningTableClosePlan } from "../../../apps/api/src/merchant-dining-table-close-plan.ts";
+import { createMerchantDiningHeldRound } from "../../../apps/api/src/merchant-dining-held-round.ts";
 import { tableClosePlanResponse } from "../../../apps/api/src/merchant-dining-table-close-plan-response.ts";
 import { createKitchenInventoryConsumption } from "../../../apps/api/src/kitchen-inventory-consumption.ts";
 import {
@@ -248,6 +249,11 @@ it("a split table that paid one part and left is written off for the rest", () =
 // refuses that and a cancellation without staff), asking again finds the same hold, and staff send
 // it with their release in one transaction. Then the table goes on and pays as usual.
 it("a new phone's first round waits for staff, who send it to the kitchen", () => journey("Held"));
+// v15 2026-11-06 (Fireside Table 5): a guest round still waiting for staff at checkout is not on
+// the bill, has no payment deadline and is never "cancelled automatically"; no payment is taken
+// until staff decide it, and a "Send to kitchen" racing a payment leaves exactly one of them.
+it("a round waiting for staff at checkout is not on the bill and stops payment until staff decide it", () =>
+  journey("HeldAtCheckout"));
 // WP-2423 item 8 ⑦ DEC-STORE-FEATURES (Owner 2026-10-28 decision 11): the owner turned tips off.
 // Neither staff at checkout nor a guest on their phone can add a tip (the commands refuse, and the
 // database refuses a tip selection by any path); the table pays with no tip, part of it is
@@ -1081,13 +1087,15 @@ async function journey(journeyEnding) {
                                   ? "wp2423_plsplwo"
                                   : ending === "Held"
                                     ? "wp2423_plheld"
-                                    : ending === "TipsOff"
-                                      ? "wp2423_pltips"
-                                      : ending === "Moved"
-                                        ? "wp2423_plmove"
-                                        : ending === "Merged"
-                                          ? "wp2423_plmerge"
-                                          : "wp2423_plon",
+                                    : ending === "HeldAtCheckout"
+                                      ? "wp2423_plheldco"
+                                      : ending === "TipsOff"
+                                        ? "wp2423_pltips"
+                                        : ending === "Moved"
+                                          ? "wp2423_plmove"
+                                          : ending === "Merged"
+                                            ? "wp2423_plmerge"
+                                            : "wp2423_plon",
     },
     async (context) => {
       const admin = new Client(context.clientConfig);
@@ -1793,6 +1801,10 @@ async function journey(journeyEnding) {
         assert.equal(submitted.status, "Created");
 
         clock = now();
+        if (ending === "HeldAtCheckout") {
+          await heldAtCheckoutEnding();
+          return;
+        }
         const sent2 = await guestSends(R2.batch.submissionReference, tableGuest);
         assert.equal(sent2.status, "Confirmed");
         const c2 = sent2.confirmation;
@@ -4799,6 +4811,214 @@ async function journey(journeyEnding) {
             (BigInt(paidDetail.lines.totals.total.amountMinor) - comps).toString(),
             owed,
           );
+        }
+
+        /**
+         * v15 2026-11-06 (Fireside Table 5): the Store turned on "a new phone's first round waits
+         * for staff" after round 1 went to the kitchen; round 2, the table guest's first, waits.
+         * At checkout it is not on the bill (shown apart with what it would add), has no payment
+         * deadline on Orders and is never cancelled by time on the close check. No payment is
+         * taken while it waits (staff at the table, after an outage, or the guest's phone). Staff
+         * "Send to kitchen" and a card machine payment at once: they run one after the other on
+         * the bill's fence, and exactly one commits (the round goes on the bill; the payment
+         * taken for the old amount is refused). Then the table pays the bill with the round.
+         */
+        async function heldAtCheckoutEnding() {
+          const setting = await transactions().run((tx) =>
+            changeDiningRoundHoldSetting(tx, ownerScope, {
+              operationReference: fresh(),
+              expectedVersion: 0,
+              firstRoundNeedsStaff: true,
+              actorReference: staffMember,
+              observedAt: clock,
+            }),
+          );
+          assert.equal(setting.firstRoundNeedsStaff, true);
+          const held = await holdIfNeeded(R2.batch.submissionReference, tableGuest);
+          assert.equal(held.status, "Waiting");
+          const round2Minor = items2.reduce(
+            (sum, item) => sum + item.pricing.total.amountMinor,
+            0n,
+          );
+          const round1Minor = items1.reduce(
+            (sum, item) => sum + item.pricing.total.amountMinor,
+            0n,
+          );
+          assert.equal((await closing(server, "Begin")).phase, "Closing");
+
+          // Checkout: round 1 is the bill; round 2 is shown apart, with what it would add.
+          const open = await bill();
+          assert.deepEqual(
+            open.rounds.map((round) => [round.roundNumber, round.totalMinor]),
+            [[1, round1Minor.toString()]],
+          );
+          assert.equal(open.owed.totalMinor, round1Minor.toString());
+          assert.deepEqual(
+            (open.waitingRounds ?? []).map((round) => [
+              round.orderBatchReference,
+              round.totalMinor,
+            ]),
+            [[R2.batch.orderBatchReference, round2Minor.toString()]],
+          );
+          assert.equal(open.consistent, true);
+          // Orders: no payment deadline, nothing to cancel as unpaid; marked as waiting.
+          const detail = await createPersistentMerchantOrderQueue({
+            persistence: persistenceOf(server),
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          })({ sessionCookie: server.sessionCookie, afterOrderReference: null, orderReference });
+          const batch2 = detail.items[0].batches.find(
+            (batch) => batch.orderBatchReference === R2.batch.orderBatchReference,
+          );
+          assert.equal(batch2.paymentDue, null);
+          assert.equal(batch2.canCancelUnpaid, false);
+          assert.notEqual(batch2.waitingForStaff ?? null, null);
+          assert.equal(detail.items[0].tableBill.totalMinor, round1Minor.toString());
+          // The close check: waiting for staff, never "cancelled automatically".
+          const plan = await createMerchantDiningTableClosePlan({
+            persistence: persistenceOf(manager),
+            authentication: manager.authentication,
+            resolveRefundConfiguration: async () => ({
+              providerAccountReference: provider,
+              environment: "Test",
+            }),
+          })({
+            ...as(manager),
+            query: { orderReference, diningSessionReference: sessionReference },
+          });
+          const planned = plan.rounds.find(
+            (round) => round.orderBatchReference === R2.batch.orderBatchReference,
+          );
+          assert.deepEqual([planned.state, planned.cancelsAt], ["WaitingForStaff", null]);
+
+          // No payment while it waits: at the table, after an outage, on the guest's phone.
+          await assert.rejects(
+            settleWith(server, {
+              method: "CardMachine",
+              tip: { kind: "None" },
+              tenderedMinor: null,
+              slipReference: "TEST 0004",
+            }),
+            { code: "TABLE_CHECKOUT_ROUNDS_WAITING" },
+          );
+          await assert.rejects(
+            settleWith(server, {
+              tip: { kind: "None" },
+              recordedAfterOutage: true,
+              takenAt: now(),
+            }),
+            { code: "TABLE_CHECKOUT_ROUNDS_WAITING" },
+          );
+          const phone = createDiningTableOnlinePayments({
+            scope: ownerScope,
+            providerAccountReference: provider,
+            environment: "Test",
+            provider: {
+              async createIntent() {
+                throw new Error("no Provider transaction may be created");
+              },
+              async retrieveIntent() {
+                throw new Error("nothing to ask the Provider about");
+              },
+              async cancelIntent() {
+                throw new Error("nothing to cancel");
+              },
+            },
+            transactions: transactions(),
+            now,
+            nextReference: fresh,
+          });
+          await assert.rejects(
+            phone.start(
+              {
+                diningSessionReference: sessionReference,
+                guestSessionReference: guestSession,
+                allowed: async () => true,
+              },
+              { operationReference: fresh(), tip: { kind: "None" } },
+            ),
+            { code: "TABLE_ONLINE_PAYMENT_ROUNDS_WAITING" },
+          );
+          assert.deepEqual(
+            await rows("SELECT 1 FROM rms_payment.dining_table_settlement WHERE order_id=$1", [
+              orderReference,
+            ]),
+            [],
+          );
+
+          // "Send to kitchen" and a card machine payment for the bill as staff saw it, at once.
+          // A barrier on the bill's fence starts them together (deterministic, no sleeps).
+          const heldRound = createMerchantDiningHeldRound({
+            persistence: persistenceOf(server),
+            authentication: server.authentication,
+            payLater: () => payLater,
+            cancellation: {
+              cancelUnpaidForStaff: async () => {
+                throw new Error("not cancelled here");
+              },
+            },
+            now,
+          });
+          const barrier = new Client(context.clientConfig);
+          await barrier.connect();
+          await barrier.query("BEGIN");
+          await barrier.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+            "OrderingOrderDisposition:" +
+              [scope.brandReference, scope.storeReference, orderReference].join(":"),
+          ]);
+          const outcomes = Promise.allSettled([
+            heldRound({
+              ...as(server),
+              command: {
+                action: "Confirm",
+                orderReference,
+                orderBatchReference: R2.batch.orderBatchReference,
+                operationReference: fresh(),
+              },
+            }),
+            settleWith(server, {
+              method: "CardMachine",
+              tip: { kind: "None" },
+              tenderedMinor: null,
+              slipReference: "TEST 0005",
+              owedMinor: open.owed.totalMinor,
+            }),
+          ]);
+          for (let tries = 0; ; tries += 1) {
+            const [waiting] = await rows(
+              "SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND NOT granted",
+            );
+            if (waiting.n >= 2) break;
+            if (tries > 400) assert.fail("both commands should wait on the bill's fence");
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          await barrier.query("COMMIT");
+          await barrier.end();
+          const [confirmed, payment] = await outcomes;
+          assert.equal(confirmed.status, "fulfilled", String(confirmed.reason?.code ?? ""));
+          assert.deepEqual(confirmed.value, { status: "Sent" });
+          assert.equal(payment.status, "rejected", "a payment for the old bill was recorded");
+          assert.match(payment.reason.code, /^TABLE_CHECKOUT_(ROUNDS_WAITING|BILL_CHANGED)$/u);
+          assert.deepEqual(
+            await rows("SELECT 1 FROM rms_payment.dining_table_settlement WHERE order_id=$1", [
+              orderReference,
+            ]),
+            [],
+          );
+
+          // Round 2 is on the bill now; the table pays it.
+          const now2 = await bill();
+          assert.deepEqual(now2.waitingRounds, []);
+          assert.equal(now2.owed.totalMinor, (round1Minor + round2Minor).toString());
+          const paid = await settleWith(server, {
+            method: "CardMachine",
+            tip: { kind: "None" },
+            tenderedMinor: null,
+            slipReference: "TEST 0006",
+            owedMinor: now2.owed.totalMinor,
+          });
+          assert.equal(paid.status, "Recorded");
+          assert.equal(paid.bill.settlement.roundsMinor, now2.owed.totalMinor);
         }
 
         async function compedWholeEnding() {

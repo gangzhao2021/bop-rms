@@ -44,6 +44,8 @@ export type DiningTableOnlinePaymentErrorCode =
   | "TABLE_ONLINE_PAYMENT_TIPS_OFF"
   /** The tip percentage is not one the Store offers now: the bill is read again. */
   | "TABLE_ONLINE_PAYMENT_TIP_CHOICES_CHANGED"
+  /** WP-2423 item 8 ⑤ D4: some of the table's dishes wait for staff to confirm them first. */
+  | "TABLE_ONLINE_PAYMENT_ROUNDS_WAITING"
   | "TABLE_ONLINE_PAYMENT_UNAVAILABLE";
 export class DiningTableOnlinePaymentError extends Error {
   constructor(readonly code: DiningTableOnlinePaymentErrorCode) {
@@ -144,6 +146,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
     tx: ConsumerTransaction,
     authority: TableOnlinePaymentAuthority,
     record = false,
+    lockForPayment = false,
   ): Promise<Awaited<ReturnType<typeof readDiningTableBill>>> =>
     readDiningTableBill(tx, scope, {
       diningSessionReference: authority.diningSessionReference,
@@ -153,6 +156,7 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
       // WP-2423 DEC-TAX-WHOLE-RECEIPT: before a payment is started, the bill's tax rounding is
       // recorded (system rule).
       ...(record ? { recordTaxRounding: { nextReference: () => options.nextReference() } } : {}),
+      ...(lockForPayment ? { lockForPayment: true } : {}),
     });
   const attemptsOf = async (
     tx: ConsumerTransaction,
@@ -208,6 +212,8 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
       return fail("TABLE_ONLINE_PAYMENT_NOT_CHECKING_OUT");
     if (current.settlement !== null || current.writeOff !== null)
       return fail("TABLE_ONLINE_PAYMENT_ALREADY_PAID");
+    // A guest round still waiting for staff is not on the bill yet: staff decide it first.
+    if (current.waitingRounds.length > 0) return fail("TABLE_ONLINE_PAYMENT_ROUNDS_WAITING");
     if (!current.consistent) return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");
     if ((current.split === null) !== (partNumber === null))
       return fail("TABLE_ONLINE_PAYMENT_INPUT_INVALID");
@@ -502,8 +508,9 @@ export function createDiningTableOnlinePayments(options: DiningTableOnlinePaymen
       if (created.kind !== "Snapshot") return fail("TABLE_ONLINE_PAYMENT_UNAVAILABLE");
       try {
         await options.transactions.run(async (tx) => {
-          // The bill may have changed while the Provider answered: what is owed must still be it.
-          const current = await bill(tx, authority);
+          // The bill may have changed while the Provider answered: what is owed must still be it
+          // (read under the bill's fence, so a staff "Send to kitchen" can't change it meanwhile).
+          const current = await bill(tx, authority, false, true);
           const again = owedPlan(current, command.tip, partNumber);
           if (again.roundsMinor !== plan.plan.roundsMinor || again.tipMinor !== plan.plan.tipMinor)
             return fail("TABLE_ONLINE_PAYMENT_BILL_CHANGED");

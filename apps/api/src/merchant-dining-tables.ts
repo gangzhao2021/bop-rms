@@ -17,7 +17,6 @@ import {
   parseDiningReference,
 } from "@rms/dining";
 import {
-  createPostgresOrderRoundStaffHoldStore,
   createPostgresStaffDiningRoundEntryStore,
   listStoreDiningSessionOrderActivity,
   listStoreDiningSessionOrders,
@@ -35,6 +34,7 @@ import { createMerchantStoreScope } from "./merchant-store-scope.js";
 import { withMerchantTransactionAuthorization } from "./merchant-transaction-authorization.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
 import { runMerchantSnapshotRead } from "./merchant-snapshot-read.js";
+import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
 import { merchantDiningStaffCallStore } from "./merchant-dining-staff-calls.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 /** The Tables page's own permission first, then the actions it offers. */
@@ -372,14 +372,12 @@ export function createMerchantDiningTables(options: {
                   ),
                 ].map((entry) => sessionOfOrder.get(String(entry.orderReference)) ?? ""),
           );
-          const waitingRounds = await createPostgresOrderRoundStaffHoldStore({
-            brandReference: ownerScope.brandReference,
-            storeReference: ownerScope.storeReference,
-            authorize: async () => (await authorize()) === true,
-          }).listWaiting({
-            transaction: tx as unknown as Parameters<typeof listStoreDiningSessionOrders>[0],
-            orderReferences: [...sessionOfOrder.keys()],
-          });
+          const waitingRounds = await listRoundsWaitingForStaff(
+            tx as unknown as Parameters<typeof listRoundsWaitingForStaff>[0],
+            ownerScope,
+            [...sessionOfOrder.keys()],
+            async () => (await authorize()) === true,
+          );
           const heldRounds = new Map<
             string,
             {

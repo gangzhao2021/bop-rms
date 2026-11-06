@@ -82,6 +82,7 @@ import {
   resolveMerchantBatchPaymentDue,
   type BatchPaymentOutcome,
 } from "./dining-batch-payment-due.js";
+import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
 
 /** Read-only merchant intent; session identity and selected scope are resolved inside its transaction. */
 export function createPersistentMerchantOrderQueue(options: {
@@ -362,6 +363,20 @@ export function createPersistentMerchantOrderQueue(options: {
             ))
               paymentOutcomes.set(entry.orderBatchReference, entry.status);
           }
+          // WP-2423 item 8 ⑤ decisions 5–7: guest rounds waiting for staff (the same read as
+          // Tables): no payment is due for them, they are not on the bill, never cancelled by time.
+          const waitingForStaff = new Map<string, { heldAt: string }>();
+          if (ownerScope !== null)
+            for (let start = 0; start < diningOrders.length; start += 200)
+              for (const hold of await listRoundsWaitingForStaff(
+                businessTransaction as never,
+                ownerScope,
+                diningOrders.slice(start, start + 200),
+                async () => (await stillAllowed()) === true,
+              ))
+                waitingForStaff.set(String(hold.orderBatchReference), {
+                  heldAt: String(hold.heldAt),
+                });
           // WP-2423: what each Order was paid online (Payment's status projection), so staff see a
           // paid online order as paid, as they do a counter order paid on the card machine.
           const paidOnline = new Map<string, { amountMinor: string; currencyCode: "CAD" }>();
@@ -1430,6 +1445,7 @@ export function createPersistentMerchantOrderQueue(options: {
                         deadlines: paymentDeadlines,
                         outcomes: paymentOutcomes,
                         paymentStarted,
+                        waitingForStaff: new Set(waitingForStaff.keys()),
                       });
                       const canRequestAcceptance =
                         closed === null &&
@@ -1563,6 +1579,8 @@ export function createPersistentMerchantOrderQueue(options: {
                           ),
                         ),
                         kitchenReceivedAt: kitchenReceived.get(batch.orderBatchReference) ?? null,
+                        // WP-2423 item 8 ⑤: a guest round waiting for staff (not on the bill).
+                        waitingForStaff: waitingForStaff.get(batch.orderBatchReference) ?? null,
                         // WP-2423 M04: a paid round accepted but not yet released to the kitchen
                         // (the payment worker releases it within seconds). "NotInKitchen" a minute
                         // after acceptance: staff make it from its dishes, or reject and refund.

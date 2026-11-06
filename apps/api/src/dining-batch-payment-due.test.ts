@@ -44,6 +44,32 @@ it("WP-2423: tells staff a dine-in round's payment failed and when it is cancell
     expect(resolveMerchantBatchPaymentDue({ ...input, ...other })).toBeNull();
 });
 
+it("WP-2423 item 8 ⑤: a round waiting for staff has no payment due and is never cancelled by time", () => {
+  const input = {
+    orderType: "DineIn" as const,
+    open: true,
+    batch: { orderBatchReference: id(2), acceptanceStatus: "NotAccepted" },
+    paidBatches: new Set<string>(),
+    // Its capacity link's 30-minute window has long passed (v15 Fireside Table 5).
+    deadlines: new Map([[id(2), deadline]]),
+    outcomes: new Map<string, "Succeeded" | "Failed">(),
+    paymentStarted: new Set<string>(),
+  };
+  expect(resolveMerchantBatchPaymentDue(input)).toEqual({
+    status: "Awaiting",
+    cancelsAt: deadline,
+  });
+  const waitingForStaff = new Set([id(2)]);
+  expect(resolveMerchantBatchPaymentDue({ ...input, waitingForStaff })).toBeNull();
+  expect(
+    resolveMerchantBatchPaymentDue({
+      ...input,
+      waitingForStaff,
+      outcomes: new Map([[id(2), "Failed" as const]]),
+    }),
+  ).toBeNull();
+});
+
 it("WP-2423: gives the customer each Dining-owned round's payment and drops the cancel time once cancelled", () => {
   const deadlines = new Map([
     [id(1), deadline],

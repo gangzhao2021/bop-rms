@@ -32,10 +32,16 @@ export function resolveMerchantBatchPaymentDue(input: {
    * the card machine). Absent: unknown, so only a failed payment has a cancellation time.
    */
   readonly paymentStarted?: ReadonlySet<string>;
+  /**
+   * WP-2423 item 8 ⑤ decisions 5–7: guest rounds waiting for staff at a table that pays at the
+   * end. No payment is due for them and they are never cancelled by time: staff decide them.
+   */
+  readonly waitingForStaff?: ReadonlySet<string>;
 }): MerchantBatchPaymentDue {
   const reference = input.batch.orderBatchReference;
   const deadline = input.deadlines.get(reference);
   if (
+    input.waitingForStaff?.has(reference) === true ||
     input.orderType !== "DineIn" ||
     !input.open ||
     input.batch.acceptanceStatus !== "NotAccepted" ||

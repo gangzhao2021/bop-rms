@@ -51,6 +51,7 @@ import {
   type StoreTipChoices,
 } from "./merchant-store-features.js";
 import { keepingCause, onlyRefusal } from "./merchant-failure.js";
+import { fenceTableBill, listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
 
 /**
  * WP-2423 DEC-DINE-IN-PAY-LATER: a pay-later table's checkout. Staff read the table's bill (each
@@ -91,6 +92,11 @@ export const diningTableCheckoutErrorCodes = [
    * system. A table pays after it orders; nothing was recorded, the slip time is checked.
    */
   "TABLE_CHECKOUT_TAKEN_BEFORE_ORDERED",
+  /**
+   * WP-2423 item 8 ⑤ D4: a guest round of this bill still waits for staff OK. Send it to the
+   * kitchen or cancel it first (a served round is sent, never cancelled); nothing was recorded.
+   */
+  "TABLE_CHECKOUT_ROUNDS_WAITING",
   "TABLE_CHECKOUT_UNAVAILABLE",
 ] as const;
 export type DiningTableCheckoutErrorCode = (typeof diningTableCheckoutErrorCodes)[number];
@@ -193,6 +199,21 @@ export interface DiningTableBill {
    * were charged), already in the rounds' tax; shown on its own line as "Tax rounding".
    */
   readonly taxRoundingMinor: string;
+  /**
+   * WP-2423 item 8 ⑤ decisions 5–7: guest rounds waiting for staff OK. Not in the kitchen and not
+   * on this bill (not in `rounds` or `owed`) until staff send them; no payment is taken while any
+   * waits (staff send them to the kitchen or cancel them first). `totalMinor`: what the round
+   * would add, tax included, before the bill's tax rounding.
+   */
+  readonly waitingRounds: readonly {
+    readonly orderReference: string;
+    readonly orderBatchReference: string;
+    readonly heldAt: string;
+    readonly itemCount: number;
+    readonly totalMinor: string;
+    /** The phone that sent it (as `rounds[].orderedBy`), or null when unknown. */
+    readonly orderedBy: number | null;
+  }[];
   /** Still owed: the rounds not yet paid, before tax, tax and total. */
   readonly owed: {
     readonly subtotalMinor: string;
@@ -303,6 +324,11 @@ export async function readDiningTableBill(
      * tax rounding first (a new version when the bill changed; never once anything is paid).
      */
     readonly recordTaxRounding?: { readonly nextReference: () => string } | undefined;
+    /**
+     * A command about to take a payment holds the bill's fence before reading it (implied by
+     * `recordTaxRounding`), so a staff "Send to kitchen" can't change the bill meanwhile.
+     */
+    readonly lockForPayment?: boolean;
     /** The guest's languages for dish names, most preferred first (absent: as stored). */
     readonly displayLocales?: readonly string[] | undefined;
   },
@@ -348,6 +374,7 @@ export async function readDiningTableBill(
     return Object.freeze({
       ...base,
       rounds: Object.freeze([]),
+      waitingRounds: Object.freeze([]),
       taxRoundingMinor: "0",
       owed: zero,
       consistent: true,
@@ -363,6 +390,8 @@ export async function readDiningTableBill(
   // WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): the bill is the table's Order and the Orders of
   // tables merged into it; each round stays on its own Order, with who ordered it.
   const billOrders = await listOrderBillOrders(tx, owner, orderReference);
+  if (input.recordTaxRounding !== undefined || input.lockForPayment === true)
+    await fenceTableBill(tx, owner, billOrders);
   const confirmations = [
     ...(await createPostgresOrderPayLaterConfirmationStore({
       ...owner,
@@ -595,6 +624,31 @@ export async function readDiningTableBill(
           : new Date(Date.parse(String(confirmation.confirmedAt))).toISOString(),
     });
   });
+  // WP-2423 item 8 ⑤: guest rounds waiting for staff OK, shown apart (never on the bill yet). The
+  // same dishes the bill counts: a dish taken off is left out (as the panel's "not on the bill").
+  const waitingRounds = Object.freeze(
+    (await listRoundsWaitingForStaff(tx, owner, billOrders, allowed)).map((hold) => {
+      const batch = String(hold.orderBatchReference);
+      const items = prices.filter((item) => String(item.orderBatchReference) === batch);
+      return Object.freeze({
+        orderReference: String(hold.orderReference),
+        orderBatchReference: batch,
+        heldAt: String(hold.heldAt),
+        itemCount: items.reduce((sum, item) => sum + item.quantity, 0),
+        totalMinor: items
+          .reduce(
+            (sum, item) =>
+              sum +
+              item.total.amountMinor -
+              (reductions.get(String(item.orderItemReference))?.totalMinor ?? 0n),
+            0n,
+          )
+          .toString(),
+        orderedBy: orderedByOf(batch),
+      });
+    }),
+  );
+  const waitingMinor = waitingRounds.reduce((sum, round) => sum + BigInt(round.totalMinor), 0n);
   // WP-2423 按菜分单: the dishes of the rounds still owing, as they stand now.
   const owingBatches = new Set(
     rounds.filter((round) => round.totalMinor !== "0").map((round) => round.orderBatchReference),
@@ -770,17 +824,19 @@ export async function readDiningTableBill(
     pricedTotalMinor: pricedOrders.reduce((sum, entry) => sum + entry.pricedTotalMinor, 0n),
   };
   // Ordering's priced total holds the recorded tax rounding; a bill shown before it is recorded
-  // carries the one it would record instead.
+  // carries the one it would record instead. Rounds waiting for staff are on the Order, not yet
+  // on the bill.
   const consistent =
     priced.pendingAmendmentCount === 0 &&
     priced.pricedTotalMinor - (recordedRounding?.totalMinor ?? 0n) + taxRoundingMinor ===
-      paidAllocation + owedTotal &&
+      paidAllocation + owedTotal + waitingMinor &&
     (settlement === null || settlement.roundsMinor === paidAllocation) &&
     split?.stale !== true;
   return Object.freeze({
     ...base,
     ...(refundedMinor > 0n ? { refundedMinor: refundedMinor.toString() } : {}),
     rounds: Object.freeze(rounds),
+    waitingRounds,
     taxRoundingMinor: taxRoundingMinor.toString(),
     owed: Object.freeze({
       subtotalMinor: owedSubtotal.toString(),
@@ -994,7 +1050,18 @@ export function parseDiningTableSettleCommand(value: unknown) {
       ...(value !== null && typeof value === "object" && Object.hasOwn(value, "partNumber")
         ? ["partNumber"]
         : []),
+      ...(value !== null && typeof value === "object" && Object.hasOwn(value, "owedMinor")
+        ? ["owedMinor"]
+        : []),
     ]);
+    // WP-2423 item 8 ⑤: what the bill (or the part) came to when staff took the payment
+    // (absent from an older page: not checked).
+    const owedMinor =
+      raw.owedMinor === undefined || raw.owedMinor === null
+        ? null
+        : typeof raw.owedMinor === "string" && /^(0|[1-9][0-9]{0,11})$/u.test(raw.owedMinor)
+          ? raw.owedMinor
+          : fail("TABLE_CHECKOUT_INPUT_INVALID");
     const method = raw.method === "Cash" || raw.method === "CardMachine" ? raw.method : null;
     // WP-2423 item 8 ④: the part of a split bill this payment is (absent or null: the whole table).
     const partNumber =
@@ -1057,6 +1124,7 @@ export function parseDiningTableSettleCommand(value: unknown) {
       recordedAfterOutage: raw.recordedAfterOutage,
       takenAt,
       partNumber,
+      owedMinor,
     });
   } catch (error) {
     if (error instanceof DiningTableCheckoutError) throw error;
@@ -1086,6 +1154,7 @@ export function createMerchantDiningTableSettle(options: {
         slipReference: command.slipReference,
         takenAt: command.takenAt,
         ...(command.partNumber === null ? {} : { partNumber: command.partNumber }),
+        ...(command.owedMinor === null ? {} : { owedMinor: command.owedMinor }),
       }),
     );
     try {
@@ -1158,6 +1227,9 @@ export function createMerchantDiningTableSettle(options: {
             // Paid, or written off when the guests left: never a (second) payment.
             if (bill.settlement !== null || bill.writeOff !== null)
               return fail("TABLE_CHECKOUT_ALREADY_PAID");
+            // WP-2423 item 8 ⑤ D4: never a payment while a round of the bill waits for staff
+            // (at the table or entered after an outage): it would be owed on a paid bill.
+            if (bill.waitingRounds.length > 0) return fail("TABLE_CHECKOUT_ROUNDS_WAITING");
             // WP-2423 item 8 ④: a split bill is paid part by part; a whole bill at once.
             const part =
               bill.split === null || command.partNumber === null
@@ -1182,6 +1254,12 @@ export function createMerchantDiningTableSettle(options: {
               );
             const owed = bill.rounds.filter((round) => !round.paid && round.totalMinor !== "0");
             if (owed.length === 0) return fail("TABLE_CHECKOUT_NOTHING_OWED");
+            // What staff were shown and charged on the card machine must still be the bill.
+            if (
+              command.owedMinor !== null &&
+              command.owedMinor !== (part === null ? bill.owed.totalMinor : part.amountMinor)
+            )
+              return fail("TABLE_CHECKOUT_BILL_CHANGED");
             const planPart =
               part === null || bill.splitPlanRecord === null
                 ? null
@@ -1470,6 +1548,8 @@ export function createMerchantDiningTableSplit(options: {
               bill.onlinePayment?.status === "InProgress"
             )
               return fail("TABLE_CHECKOUT_SPLIT_LOCKED");
+            // WP-2423 item 8 ⑤ D4: a split plans what is paid; decide the waiting rounds first.
+            if (bill.waitingRounds.length > 0) return fail("TABLE_CHECKOUT_ROUNDS_WAITING");
             // A stale split is exactly what a new split corrects; any other mismatch is not.
             if (!bill.consistent && bill.split?.stale !== true)
               return fail("TABLE_CHECKOUT_BILL_CHANGED");
