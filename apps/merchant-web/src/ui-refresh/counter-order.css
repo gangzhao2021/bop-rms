@@ -659,3 +659,11 @@
 .counter-order__table-cart .order-accept-by {
   margin-top: 0;
 }
+/* The action names the dishes it takes off, so it wraps instead of running past its edges. */
+.counter-order .counter-order__table-cart-action {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  white-space: normal;
+  text-align: center;
+}

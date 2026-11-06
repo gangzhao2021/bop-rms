@@ -733,6 +733,11 @@ test("@production a refused counter order says why and what to do, then sends as
   const replies = [
     { status: 503, json: { error: "counter_order_unavailable" } },
     { status: 409, json: { error: "counter_order_no_pickup_times" } },
+    // WP-2423 (staff-round-soldout): the dish's choices changed between adding and pricing it.
+    {
+      status: 409,
+      json: { error: "item_unavailable", lineIndex: 0, sharedStock: false, optionsChanged: true },
+    },
   ];
   await page.route("**/merchant/counter/orders", (route) => {
     operations.push(
@@ -767,7 +772,13 @@ test("@production a refused counter order says why and what to do, then sends as
   await expect(page.getByRole("alert")).toHaveText(
     "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.",
   );
-  await expect(page.getByText(/counter_order|no_pickup_times|409|503/u)).toHaveCount(0);
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Banana Bread's choices changed on the menu. Remove it, add it again with the new choices, then send. Nothing was sent or charged.",
+  );
+  await expect(
+    page.getByText(/counter_order|no_pickup_times|item_unavailable|409|503/u),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("list", { name: "Items in this order" }).getByRole("listitem"),
   ).toHaveCount(1);
@@ -776,7 +787,7 @@ test("@production a refused counter order says why and what to do, then sends as
     page.getByRole("heading", { name: "Charge $4.75 on the card machine" }),
   ).toBeVisible();
   // Each send after a definite refusal is a new order (never a resend of the failed one).
-  expect(new Set(operations).size).toBe(3);
+  expect(new Set(operations).size).toBe(4);
 });
 
 // v15 run (738b4c8b): right after an order was sent the counter menu still offered Flat White

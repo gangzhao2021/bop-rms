@@ -438,7 +438,7 @@ export function TableCartOfferActions({
         <p>
           <button
             type="button"
-            className="counter-order__primary"
+            className="counter-order__primary counter-order__table-cart-action"
             disabled={disabled}
             onClick={() => onSend(unsellable)}
           >

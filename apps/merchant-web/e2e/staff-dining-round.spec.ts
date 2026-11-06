@@ -214,7 +214,14 @@ test("@production staff take an order for a table from the Tables page, charge i
         // WP-2423 item 8 ⑦ (v15 finding t): after last orders guests can't send it themselves.
         json: {
           error: "table_cart_has_items",
-          items: [{ name: "Iced Latte", quantity: 1 }],
+          items: [
+            {
+              cartItemReference: id(60),
+              name: "Iced Latte",
+              quantity: 1,
+              standing: "Available",
+            },
+          ],
           cartVersion: 5,
           guestsCanSend: false,
         },
@@ -909,6 +916,171 @@ test("@production DEC-DINE-IN-PAY-LATER: a pay-later table's round goes to the k
       fullPage: true,
     });
   }
+});
+
+/**
+ * WP-2423 (staff-round-soldout, v15 8911a4c1 M06): a guest's plum juice in the table's shared cart
+ * sold out. Staff see it marked, remove it and send the rest with their round; the guests are to
+ * be told. Never "the system couldn't send".
+ */
+async function guestCartSoldOut(
+  page: Page,
+  items: readonly Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  await page.route("**/merchant/counter/menu**", (route) => route.fulfill({ headers, json: menu }));
+  const rounds: Record<string, unknown>[] = [];
+  await page.route("**/merchant/dining/staff-rounds", (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    rounds.push(body);
+    if (rounds.length === 1)
+      return route.fulfill({
+        status: 409,
+        headers,
+        json: { error: "table_cart_has_items", items, cartVersion: 6, guestsCanSend: true },
+      });
+    return route.fulfill({
+      headers,
+      json: {
+        status: "Placed",
+        orderReference: id(20),
+        orderBatchReference: id(21),
+        orderNumber: "7",
+        orderVersion: 5,
+        tableLabel: "T4",
+        orderMinor: "2034",
+        tipMinor: "0",
+        totalMinor: "2034",
+        payBy: null,
+        payLater: true,
+        recordedAfterOutage: false,
+      },
+    });
+  });
+  return rounds;
+}
+const plumJuice = {
+  cartItemReference: id(61),
+  name: "Plum juice",
+  quantity: 1,
+  standing: "Unavailable",
+};
+const noodles = {
+  cartItemReference: id(62),
+  name: "Hand-pulled noodles",
+  quantity: 2,
+  standing: "Available",
+};
+
+test("@production a guest's sold-out item is marked; staff remove it and send the rest of the table's cart", async ({
+  page,
+}) => {
+  await signIn(page, { ...table, paymentTiming: "PayLater" });
+  const rounds = await guestCartSoldOut(page, [plumJuice, noodles]);
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await expect(page.getByRole("heading", { level: 1, name: "Table T4 order" })).toBeVisible();
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Guests at this table have items in their shared cart that haven't been sent. Plum juice can't be served now. Remove it from their order, or ask the guests to change their order on their phone.",
+  );
+  const guestItems = page.getByRole("list", { name: "Guests' items not sent yet" });
+  await expect(guestItems.getByRole("listitem")).toHaveText([
+    "1 × Plum juiceSold out or off the menu now",
+    "2 × Hand-pulled noodles",
+  ]);
+  await expect(page.getByRole("button", { name: "Add them to this round" })).toHaveCount(0);
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await expect(guestItems).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/staff-dining-round-guest-sold-out-${width}.png`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page
+    .getByRole("button", { name: "Remove Plum juice and add the rest to this round" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Table T4 round sent to the kitchen" }),
+  ).toBeVisible();
+  expect(rounds).toHaveLength(2);
+  expect(rounds[1]).toMatchObject({
+    tableReference,
+    includeTableCart: { expectedCartVersion: 6, removeUnavailable: [id(61)] },
+  });
+  await expect(page.getByRole("note").filter({ hasText: "Tell the guests" })).toHaveText(
+    "Tell the guests: Plum juice isn't available now, so it was taken off their order.",
+  );
+  await expectNoInternalText(page);
+  await page.screenshot({
+    path: "test-results/staff-dining-round-guest-sold-out-sent.png",
+    fullPage: true,
+  });
+});
+
+test("@production every guest item sold out: staff remove them and send just this round, in Chinese too", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("bop.merchant.language", "zh-Hans");
+  });
+  await signIn(page, { ...table, paymentTiming: "PayLater" });
+  const rounds = await guestCartSoldOut(page, [
+    { ...plumJuice, name: "酸梅汤" },
+    { ...noodles, name: "手拉面", standing: "OptionsChanged" },
+  ]);
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await expect(page.getByRole("heading", { level: 1, name: "桌台 T4 的订单" })).toBeVisible();
+  await page.getByRole("button", { name: "添加Gyoza" }).click();
+  await page.getByRole("button", { name: "发送订单" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "这桌客人的共用购物车里还有没送出的菜。酸梅汤、手拉面 现在不供应。可以把它们从他们的点单里删掉，或者请客人在手机上修改。",
+  );
+  const guestItems = page.getByRole("list", { name: "客人还没送出的菜" });
+  await expect(guestItems.getByRole("listitem")).toHaveText([
+    "1 × 酸梅汤现在不供应",
+    "2 × 手拉面可选项已变，需要重新选",
+  ]);
+  await expectNoInternalText(page);
+  await expectAccessible(page);
+  await page.screenshot({
+    path: "test-results/staff-dining-round-guest-sold-out-zh.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "删掉酸梅汤、手拉面，送出这一轮" }).click();
+  await expect(page.getByRole("heading", { name: "T4 桌这一轮已送厨房" })).toBeVisible();
+  expect(rounds[1]).toMatchObject({
+    includeTableCart: { expectedCartVersion: 6, removeUnavailable: [id(61), id(62)] },
+  });
+  await expect(page.getByRole("note").filter({ hasText: "请告诉客人" })).toHaveText(
+    "请告诉客人：酸梅汤、手拉面 现在不供应，已从他们的点单里删掉。",
+  );
+});
+
+test("@production a guest item with too few left: staff ask the guests, nothing to remove", async ({
+  page,
+}) => {
+  await signIn(page, { ...table, paymentTiming: "PayLater" });
+  const rounds = await guestCartSoldOut(page, [{ ...noodles, standing: "Short", available: 1 }]);
+  await page.goto("/operations/order-entry?table=" + tableReference);
+  await page.getByRole("button", { name: "Add Gyoza" }).click();
+  await page.getByRole("button", { name: "Send order" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Hand-pulled noodles has only 1 left. Ask the guests to lower it on their phone, then send again. Nothing was sent or charged.",
+  );
+  await expect(
+    page.getByRole("list", { name: "Guests' items not sent yet" }).getByRole("listitem"),
+  ).toHaveText(["2 × Hand-pulled noodlesOnly 1 left"]);
+  await expect(page.getByRole("button", { name: /Remove .+ (round|rest)/u })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add them to this round" })).toHaveCount(0);
+  expect(rounds).toHaveLength(1);
+  await expectNoInternalText(page);
 });
 
 /** WP-2423 M08: the Store's business day, guests' last orders 20 minutes ago. */
