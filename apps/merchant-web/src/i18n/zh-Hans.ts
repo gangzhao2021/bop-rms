@@ -6802,6 +6802,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "之后空桌的新客人会被请去找店员。只有店主能再打开。",
   "Keep on": "不关",
   "Turning off…": "正在关…",
+  "Not saved. Check your connection and save again.": "没有保存。请检查网络后再保存一次。",
   "a new party ended the last visit": "新客人结束了上一桌",
   "When the guests have left, clean the table, then close it: its order is closed and the next guest can start it straight away.":
     "客人走后先把桌子收拾干净，再关桌：订单随之关闭，下一位客人马上可以开始用这张桌。",
@@ -7994,6 +7995,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Save paid orders": "保存已付款订单设置",
   "Paid orders now wait for Accept on Orders.": "已付款的订单现在要在订单页接单。",
   "Paid orders go straight to the kitchen": "已付款的订单直接进后厨",
+  Seen: "看到了",
   "Yes, turn off": "确定关闭",
   "Keep it on": "继续开着",
   "Someone else changed this just now. Check it again.": "刚才有人改过了，请再看一下。",
