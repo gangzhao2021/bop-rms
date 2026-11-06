@@ -12,6 +12,7 @@ import {
   changeDiningServiceSetting,
   changeDiningTeaChargeSetting,
   createDiningGuestBindingQuery,
+  createDiningParticipantSubmissionQuery,
   createDiningTable,
   createPostgresDiningGuestBindingStore,
   createPostgresDiningQrJoinStore,
@@ -2871,11 +2872,15 @@ async function journey(journeyEnding) {
               [sessionReference, dining.table.stableLabel],
             ],
           );
-          // The old table's phone no longer acts for the party (it joined at the old table, and
-          // the table codes are bound to it); it is told where the party sits now.
-          const binding = (table) =>
+          // WP-2423 table-move-payment (v15 fabf0261, 2026-11-06): the phone that joined at the
+          // old table follows the party. Its binding, named by the code it scanned (the old table)
+          // or by the table the party sits at now, is current at the new table, and the round it
+          // sends next is prepared there (the guest preparation names the party's current table).
+          const binding = (table, purpose = "GuestSessionBinding") =>
             transactions().run((tx) =>
-              createDiningGuestBindingQuery({
+              (purpose === "GuestSessionBinding"
+                ? createDiningGuestBindingQuery
+                : createDiningParticipantSubmissionQuery)({
                 scope,
                 now: () => new Date().toISOString(),
                 repository: createPostgresDiningGuestBindingStore(
@@ -2883,14 +2888,20 @@ async function journey(journeyEnding) {
                   ownerScope,
                 ),
               }).resolve({
-                purpose: "GuestSessionBinding",
+                purpose,
                 diningSessionReference: sessionReference,
                 participantReference: id(0x601),
                 tableReference: table,
               }),
             );
-          assert.equal(await binding(fromTable), null);
-          assert.equal(await binding(target), null);
+          assert.equal((await binding(fromTable))?.tableReference, target);
+          assert.equal((await binding(target))?.tableReference, target);
+          assert.equal(
+            (await binding(target, "DiningParticipantSubmission"))?.tableReference,
+            target,
+          );
+          // A table the party never sat at names nothing.
+          assert.equal(await binding(target === B ? F : B), null);
           assert.deepEqual(
             await transactions().run((tx) =>
               loadDiningParticipantMove(tx, scope, {
@@ -2901,11 +2912,11 @@ async function journey(journeyEnding) {
             { tableLabel: target === B ? "T-B" : "T-F", fromTableLabel: dining.table.stableLabel },
           );
 
-          // v15 2026-10-30: the phone that joined at the old table reloads the table page. The
-          // visit is restored first (the page's CSRF token lives in memory), which its table binding
-          // no longer allows; the restore says where the party sits now instead of "nothing to
-          // restore", and the table page says so (the real restore handler and the guest app's own
-          // restore and table clients, the phone's cookie, the pilot API role).
+          // v15 2026-10-30, changed by table-move-payment: the phone that joined at the old table
+          // reloads the table page. The visit is restored first (the page's CSRF token lives in
+          // memory); its binding follows the party, so the restore gives the visit back instead of
+          // asking the guest to scan the new table (the real restore handler and the guest app's
+          // own restore and table clients, the phone's cookie, the pilot API role).
           const bootstrap = createCustomerSessionBootstrapHandler({
             allowedOrigin: "https://synthetic-journey.invalid",
             port: createCustomerSessionBootstrapRead({
@@ -2991,9 +3002,9 @@ async function journey(journeyEnding) {
                 (error) => [error.code, error.tableLabel ?? null],
               );
           };
-          assert.deepEqual(await restoreOnReload(), ["moved", target === B ? "T-B" : "T-F"]);
-          assert.equal(getMovedTableLabel(), target === B ? "T-B" : "T-F");
-          // A new visit (the phone scans the new table's code) forgets it.
+          assert.notEqual((await restoreOnReload())[0], "moved");
+          assert.equal(getMovedTableLabel(), null);
+          // A new visit (the phone scans the new table's code) has nothing to forget.
           setCustomerCsrfCredential("x".repeat(43));
           assert.equal(getMovedTableLabel(), null);
           setCustomerCsrfCredential(null);
@@ -3016,8 +3027,9 @@ async function journey(journeyEnding) {
           assert.equal((await closing(server, "Cancel")).phase, "Active");
 
           // ── v15 2026-10-30: moved back to the first table (A to B and back to A) once it is
-          // cleaned. The host's phone (it joined at A before) is told the party sits at A now; a
-          // scan of A's code joins it again.
+          // cleaned. The host's phone (it joined at A before) follows the party back to A; the
+          // move it was last told about came from the other table (never "from A to A"); a scan
+          // of A's code still joins a phone.
           const cleanedVersion = await tableVersion(fromTable);
           await createMerchantDiningTableCommand({
             persistence: persistenceOf(server),
@@ -3044,9 +3056,9 @@ async function journey(journeyEnding) {
                 participantReference: id(0x601),
               }),
             ),
-            { tableLabel: dining.table.stableLabel, fromTableLabel: dining.table.stableLabel },
+            { tableLabel: dining.table.stableLabel, fromTableLabel: target === B ? "T-B" : "T-F" },
           );
-          assert.equal(await binding(fromTable), null);
+          assert.equal((await binding(fromTable))?.tableReference, fromTable);
           const rejoined = await scanAt(fromTable, fresh());
           assert.equal(rejoined.status, "Issued", JSON.stringify(rejoined));
           assert.equal(

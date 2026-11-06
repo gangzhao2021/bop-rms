@@ -68,6 +68,8 @@ const snapshot = () => ({
     createdAt: started,
     observedAt: started,
   },
+  // WP-2423 table-move-payment: no recorded Move off the phone's table since it joined.
+  moved_at: null as string | null,
 });
 function fixture(result: unknown) {
   const calls = vi.fn();
@@ -106,6 +108,28 @@ describe("WP-2299 coherent current binding storage", () => {
     expect(found?.admission.status).toBe("Consumed");
     expect(Object.isFrozen(found?.admission)).toBe(true);
     expect(query.mock.calls[1]?.[1]).toEqual([id(1), id(2), id(3), id(5), id(6)]);
+  });
+  it("WP-2423 table-move-payment: reports the recorded Move off the phone's table (the phone follows its party)", async () => {
+    const source = { ...snapshot(), moved_at: "2026-09-09T15:02:30.000Z" };
+    source.session.tableReference = id(40);
+    source.session.tableAssignmentVersion = 7;
+    source.table.tableReference = id(40);
+    const { store, query } = fixture({ rows: [source] });
+    const found = await store.readCurrent(input() as never);
+    expect(found?.followedMove).toEqual({
+      fromTableReference: id(4),
+      movedAt: "2026-09-09T15:02:30.000Z",
+    });
+    expect(found?.table.tableReference).toBe(id(40));
+    expect(found?.table.assignmentVersion).toBe(7);
+    // Only a Move of this session off the table the phone joined at, after it joined.
+    const sql = String(query.mock.calls[1]?.[0]);
+    expect(sql).toContain("FROM rms_dining.dining_session_move_operation m");
+    expect(sql).toContain("m.session_id=s.session_id");
+    expect(sql).toContain("m.source_table_id=(a.admission_snapshot->>'tableReference')::uuid");
+    expect(sql).toContain("m.occurred_at>=(a.admission_snapshot->>'consumedAt')::timestamptz");
+    const unmoved = await fixture({ rows: [snapshot()] }).store.readCurrent(input() as never);
+    expect(unmoved?.followedMove).toBeNull();
   });
   it("returns null for absence and does not cache", async () => {
     const { store, query } = fixture({ rows: [] });

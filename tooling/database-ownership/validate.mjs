@@ -2988,6 +2988,8 @@ async function scanUnsupported(root, module, diagnostics) {
             "dining_session",
             "dining_participant",
             "dining_identity_admission",
+            // WP-2423 table-move-payment: the phone follows its party's recorded Move.
+            "dining_session_move_operation",
           ].every((table) => module.manifest.ownedDatabase?.tables?.includes(table)) &&
           moduleRelative === "src/infrastructure/persistence/dining-guest-binding-store.ts";
         // WP-2352 admits only the owner atomic Order writer with its current Cart dependencies.

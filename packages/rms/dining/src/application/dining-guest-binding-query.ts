@@ -21,6 +21,15 @@ export interface DiningGuestBindingReadSnapshot {
   readonly session: DiningSession;
   readonly participant: DiningParticipant;
   readonly table: DiningTableStartEvidence;
+  /**
+   * WP-2423 (table-move-payment): Dining's first recorded Move of this session off the table the
+   * phone joined at, after it joined; null when the party was not moved since. Optional for owner
+   * snapshots read before it existed (they cannot follow a move).
+   */
+  readonly followedMove?: {
+    readonly fromTableReference: DiningReference;
+    readonly movedAt: DiningInstant;
+  } | null;
 }
 export interface DiningGuestBindingEvidence {
   readonly schemaVersion: 1;
@@ -117,10 +126,22 @@ function createBindingQuery(options: DiningGuestBindingOptions, purpose: Binding
           }),
         );
         // Own dependency data before calling the clock again, which may be an injected callback.
+        const copied = source === null ? null : captureSessionData(source);
         const raw =
-          source === null
+          copied === null
             ? null
-            : closed(captureSessionData(source), ["session", "participant", "table", "admission"]);
+            : closed(
+                copied,
+                copied !== null &&
+                  typeof copied === "object" &&
+                  Object.hasOwn(copied, "followedMove")
+                  ? ["session", "participant", "table", "admission", "followedMove"]
+                  : ["session", "participant", "table", "admission"],
+              );
+        const move =
+          raw === null || raw.followedMove === undefined || raw.followedMove === null
+            ? null
+            : closed(raw.followedMove, ["fromTableReference", "movedAt"]);
         const snapshot =
           raw === null
             ? null
@@ -129,12 +150,36 @@ function createBindingQuery(options: DiningGuestBindingOptions, purpose: Binding
                 session: parseDiningSession(raw.session),
                 participant: parseDiningParticipant(raw.participant),
                 table: parseDiningTableStartEvidence(raw.table),
+                followedMove:
+                  move === null
+                    ? null
+                    : {
+                        fromTableReference: parseDiningReference(move.fromTableReference),
+                        movedAt: parseDiningInstant(move.movedAt),
+                      },
               };
         const checkedAt = parseDiningInstant(options.now());
         if (checkedAt < requestedAt) return unavailable();
         if (snapshot === null) return null;
-        const { session, participant, table, admission } = snapshot;
+        const { session, participant, table, admission, followedMove } = snapshot;
         if (table.observedAt < requestedAt || table.observedAt > checkedAt) return unavailable();
+        // WP-2423 (table-move-payment): a phone that joined before staff moved its party follows the
+        // party. The caller names the table the phone joined at (its code) or the table the party
+        // sits at now; either way the admission's table must be the one the recorded Move left.
+        const notMoved =
+          session.tableReference === tableReference &&
+          admission.tableReference === tableReference &&
+          admission.tableAssignmentVersion === session.tableAssignmentVersion;
+        const followed =
+          followedMove !== null &&
+          (tableReference === admission.tableReference ||
+            tableReference === session.tableReference) &&
+          (session.tableReference !== admission.tableReference ||
+            session.tableAssignmentVersion !== admission.tableAssignmentVersion) &&
+          followedMove.fromTableReference === admission.tableReference &&
+          admission.consumedAt !== null &&
+          followedMove.movedAt >= admission.consumedAt &&
+          followedMove.movedAt <= table.observedAt;
         if (
           session.brandReference !== brandReference ||
           session.storeReference !== storeReference ||
@@ -148,7 +193,7 @@ function createBindingQuery(options: DiningGuestBindingOptions, purpose: Binding
           table.activeDiningSessionReference !== diningSessionReference ||
           (session.phase !== "Active" && session.phase !== "Closing") ||
           session.version < 2 ||
-          session.tableReference !== tableReference ||
+          !(notMoved || followed) ||
           admission.status !== "Consumed" ||
           admission.version !== 2 ||
           admission.consumedAt === null ||
@@ -156,8 +201,6 @@ function createBindingQuery(options: DiningGuestBindingOptions, purpose: Binding
           admission.diningSessionReference !== diningSessionReference ||
           admission.participantReference !== participantReference ||
           admission.storeReference !== storeReference ||
-          admission.tableReference !== tableReference ||
-          admission.tableAssignmentVersion !== session.tableAssignmentVersion ||
           admission.issuedAt !== participant.joinedAt ||
           admission.consumedAt < admission.issuedAt ||
           (submission && session.phase !== "Active") ||

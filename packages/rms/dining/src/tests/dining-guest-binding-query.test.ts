@@ -460,3 +460,86 @@ describe("DEC-DINING-ANY-PARTICIPANT-SUBMIT current participant submission facts
     },
   );
 });
+
+/**
+ * WP-2423 table-move-payment (v15 fabf0261, 2026-11-06): staff moved the party; the phone that
+ * joined before the move follows it (payment, order page, next round), on Dining's recorded Move
+ * off the table the phone joined at.
+ */
+describe("WP-2423 a phone follows the party staff moved", () => {
+  const moved = (
+    change: Partial<{ to: string; version: number; from: string; movedAt: string }> = {},
+  ): DiningGuestBindingReadSnapshot => {
+    const base = source();
+    const to = change.to ?? id(50),
+      version = change.version ?? 7;
+    return {
+      ...base,
+      session: { ...base.session, tableReference: to, tableAssignmentVersion: version },
+      table: { ...base.table, tableReference: to, assignmentVersion: version },
+      followedMove: { fromTableReference: change.from ?? id(5), movedAt: change.movedAt ?? at },
+    } as DiningGuestBindingReadSnapshot;
+  };
+  const query = (snapshot: DiningGuestBindingReadSnapshot | null, kind = "GuestSessionBinding") =>
+    (kind === "GuestSessionBinding"
+      ? createDiningGuestBindingQuery
+      : createDiningParticipantSubmissionQuery)({
+      scope,
+      repository: { readCurrent: async () => snapshot },
+      now: () => at,
+    });
+  it("is current at the new table, named by the code it scanned or by the table it sits at now", async () => {
+    for (const tableReference of [id(5), id(50)]) {
+      const found = await query(moved()).resolve({ ...input, tableReference });
+      expect(found?.tableReference).toBe(id(50));
+      expect(found?.tableAssignmentVersion).toBe(7);
+    }
+    // The next round is prepared at the table the party sits at (the guest preparation names it).
+    const submitter = await query(moved(), "DiningParticipantSubmission").resolve({
+      ...input,
+      purpose: "DiningParticipantSubmission",
+      tableReference: id(50),
+    });
+    expect(submitter?.tableReference).toBe(id(50));
+  });
+  it("follows A to B and back to A (same table, a later assignment)", async () => {
+    const found = await query(moved({ to: id(5), version: 9 })).resolve(input);
+    expect(found?.tableReference).toBe(id(5));
+    expect(found?.tableAssignmentVersion).toBe(9);
+  });
+  it("still works without a move, and for an owner snapshot without the move field", async () => {
+    expect((await query({ ...source(), followedMove: null }).resolve(input))?.tableReference).toBe(
+      id(5),
+    );
+    expect((await query(source()).resolve(input))?.tableReference).toBe(id(5));
+  });
+  it.each([
+    ["no recorded move", { followedMove: null }],
+    ["a move off another table", { from: id(51) }],
+    ["a move before the phone joined", { movedAt: "2026-08-02T12:01:30.000Z" }],
+    ["a move after this reading", { movedAt: "2026-08-02T12:03:00.000Z" }],
+  ])("refuses a party at another table with %s", async (_name, change) => {
+    const snapshot =
+      "followedMove" in change
+        ? { ...moved(), followedMove: null }
+        : moved(change as Parameters<typeof moved>[0]);
+    expect(await query(snapshot).resolve(input)).toBeNull();
+  });
+  it("refuses a table the party never sat at", async () => {
+    expect(await query(moved()).resolve({ ...input, tableReference: id(52) })).toBeNull();
+  });
+  it("still refuses a participant staff removed after the move", async () => {
+    const snapshot = moved();
+    const left = {
+      ...snapshot,
+      participant: { ...snapshot.participant, status: "Left", version: 2, leftAt: at },
+    } as DiningGuestBindingReadSnapshot;
+    expect(await query(left).resolve(input)).toBeNull();
+  });
+  it("refuses a malformed move", async () => {
+    const snapshot = { ...moved(), followedMove: { fromTableReference: id(5) } } as never;
+    await expect(query(snapshot).resolve(input)).rejects.toMatchObject({
+      code: "DINING_SESSION_DEPENDENCY_UNAVAILABLE",
+    });
+  });
+});
