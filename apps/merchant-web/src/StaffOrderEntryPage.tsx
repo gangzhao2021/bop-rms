@@ -26,6 +26,7 @@ import {
   createCounterOrderClient,
   type CounterMenu,
   type CounterMenuItem,
+  type CounterMenuRule,
   type CounterTip,
   type PlacedCounterOrder,
 } from "./staff-order-entry.js";
@@ -82,6 +83,33 @@ function defaultChoices(item: CounterMenuItem) {
 /** The group's limit counts each repeat of a choice (two of pearls is two of "at most 3"). */
 const chosenInRule = (choices: readonly string[], counts: Readonly<Record<string, number>>) =>
   choices.reduce((sum, reference) => sum + (counts[reference] ?? 1), 0);
+/** The group's rule in the words guests see: "Required", "Optional · up to 3", "Choose 1 to 2". */
+export function staffChoiceText(
+  rule: Pick<CounterMenuRule, "minimumSelections" | "maximumSelections">,
+) {
+  const { minimumSelections: min, maximumSelections: max } = rule;
+  if (min === max) return max === 1 ? t("Required") : t("Required · choose {max}", { max });
+  if (min === 0) return max === 1 ? t("Optional") : t("Optional · up to {max}", { max });
+  return t("Choose {min} to {max}", { min, max });
+}
+/**
+ * WP-2423 item 3b: how many of one chosen option staff may enter — its own limit, or what the
+ * group's total leaves after the other choices, whichever is lower (never below one).
+ */
+export function repeatLimit(
+  rule: CounterMenuRule,
+  optionReference: string,
+  choices: readonly string[],
+  counts: Readonly<Record<string, number>>,
+) {
+  const option = rule.options.find((candidate) => candidate.optionReference === optionReference);
+  if (option === undefined) return 1;
+  const others = chosenInRule(
+    choices.filter((reference) => reference !== optionReference),
+    counts,
+  );
+  return Math.max(1, Math.min(option.maximumQuantity, rule.maximumSelections - others));
+}
 export function choicesComplete(
   item: CounterMenuItem,
   choices: Record<string, string[]>,
@@ -1478,8 +1506,16 @@ export function StaffOrderEntryPage({
                 <fieldset key={rule.bindingReference}>
                   <legend>
                     {rule.name}
-                    {rule.minimumSelections > 0 ? t(" (required)") : ""}
+                    {` · ${staffChoiceText(rule)}`}
                   </legend>
+                  {total > rule.maximumSelections ? (
+                    <p role="status">
+                      {t("{name} allows at most {max}. Choose fewer.", {
+                        name: rule.name,
+                        max: rule.maximumSelections,
+                      })}
+                    </p>
+                  ) : null}
                   {rule.options.map((option) => (
                     <label key={option.optionReference}>
                       <input
@@ -1527,7 +1563,7 @@ export function StaffOrderEntryPage({
                           type="number"
                           inputMode="numeric"
                           min={1}
-                          max={option.maximumQuantity}
+                          max={repeatLimit(rule, option.optionReference, picked, choosing.counts)}
                           value={choosing.counts[option.optionReference] ?? 1}
                           onChange={(event) =>
                             setChoosing({
@@ -1535,7 +1571,12 @@ export function StaffOrderEntryPage({
                               counts: {
                                 ...choosing.counts,
                                 [option.optionReference]: Math.min(
-                                  option.maximumQuantity,
+                                  repeatLimit(
+                                    rule,
+                                    option.optionReference,
+                                    picked,
+                                    choosing.counts,
+                                  ),
                                   Math.max(1, Number(event.currentTarget.value) || 1),
                                 ),
                               },

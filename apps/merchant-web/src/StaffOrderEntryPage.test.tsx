@@ -7,6 +7,8 @@ import {
   estimatedLineMinor,
   paidAtInstant,
   placeErrorText,
+  repeatLimit,
+  staffChoiceText,
   StaffOrderEntryPage,
   paymentWindowNotice,
 } from "./StaffOrderEntryPage.js";
@@ -199,6 +201,16 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
         options: [{ optionReference: pearls, name: "Pearls", quantity: 2 }],
       }),
     ).toBe(610n);
+    // "Up to 3 in total, up to 2 of each": with 2 pearls, pudding can be entered once only.
+    const group = toppings.rules[0];
+    if (!group) throw new Error("fixture");
+    expect(repeatLimit(group, pudding, [pearls, pudding], { [pearls]: 2, [pudding]: 1 })).toBe(1);
+    expect(repeatLimit(group, pearls, [pearls, pudding], { [pearls]: 2, [pudding]: 1 })).toBe(2);
+    expect(repeatLimit(group, pearls, [pearls], { [pearls]: 1 })).toBe(2);
+    // The legend says the rule as guests read it.
+    expect(staffChoiceText(group)).toBe("Optional · up to 3");
+    expect(staffChoiceText({ minimumSelections: 1, maximumSelections: 1 })).toBe("Required");
+    expect(staffChoiceText({ minimumSelections: 1, maximumSelections: 2 })).toBe("Choose 1 to 2");
   });
 
   it("v15 run: names a short item, how many are left and how many were ordered", () => {
