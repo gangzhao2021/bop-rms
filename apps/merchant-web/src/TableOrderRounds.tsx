@@ -9,6 +9,7 @@ import {
   unpaidCancelledBatches,
 } from "./CurrentOrderQueuePage.js";
 import { DiningRoundsProvider } from "./DiningRounds.js";
+import { KitchenReleaseNotice } from "./KitchenReleaseNotice.js";
 import {
   PayLaterItemRemoveAction,
   PayLaterRemoveRefusalNotice,
@@ -119,7 +120,16 @@ export function TableOrderRounds({
           removedItems={removedUnpaidItems(detail.view)}
           failedPaymentBatches={failedPaymentBatches(detail.view)}
           refundRows={orderRefundRows(detail.order, detail.lines, detail.paymentPosition)}
-          rounds={{ batches: detail.order.batches, timeZone, today, phones: roundPhones }}
+          rounds={{
+            batches: detail.order.batches,
+            timeZone,
+            today,
+            phones: roundPhones,
+            // WP-2423 M04: a paid round accepted but not yet in the kitchen says so here too.
+            head: (batch) => (
+              <KitchenReleaseNotice release={batch.kitchenRelease} now={Date.now()} />
+            ),
+          }}
         />
       </DiningRoundsProvider>
       {detail.order.batches

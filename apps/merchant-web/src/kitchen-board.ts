@@ -135,6 +135,8 @@ export interface KitchenAwaitingLabel extends KitchenOrderLabel {
   readonly acceptBy?: string | null;
   /** DEC-PAID-ORDER-AUTO-ACCEPT: why it was not sent automatically (absent: it does not apply). */
   readonly notSent?: { readonly reason: string; readonly itemCount: number | null };
+  /** WP-2423 M04: staff accepted it; it has not reached the kitchen yet (absent: not so). */
+  readonly acceptedNotInKitchen?: true;
 }
 
 export interface KitchenWorkItemDetailView {
@@ -282,14 +284,19 @@ export function parseKitchenOrderLabel(value: unknown): KitchenOrderLabel | null
 function parseKitchenAwaitingLabel(value: unknown): KitchenAwaitingLabel {
   const hasDeadline =
     value !== null && typeof value === "object" && Object.hasOwn(value, "acceptBy");
-  const { acceptBy, notSent, ...rest } = (
+  const { acceptBy, notSent, acceptedNotInKitchen, ...rest } = (
     hasDeadline ? value : { ...(value as object), acceptBy: null }
   ) as {
     acceptBy: unknown;
     notSent?: unknown;
+    acceptedNotInKitchen?: unknown;
   };
   const label = parseKitchenOrderLabel(rest);
-  if (label === null || (acceptBy !== null && label.orderType !== "Pickup"))
+  if (
+    label === null ||
+    (acceptBy !== null && label.orderType !== "Pickup") ||
+    (acceptedNotInKitchen !== undefined && acceptedNotInKitchen !== true)
+  )
     throw new Error("KITCHEN_BOARD_INVALID");
   const why = notSent === undefined ? null : closed(notSent, ["reason", "itemCount"]);
   if (
@@ -301,6 +308,7 @@ function parseKitchenAwaitingLabel(value: unknown): KitchenAwaitingLabel {
     throw new Error("KITCHEN_BOARD_INVALID");
   return Object.freeze({
     ...label,
+    ...(acceptedNotInKitchen === true ? { acceptedNotInKitchen: true as const } : {}),
     acceptBy: acceptBy === null ? null : instant(acceptBy),
     ...(why === null
       ? {}

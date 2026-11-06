@@ -8184,4 +8184,17 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     "平台已暂停本店接待新客人，暂时不能开新桌。已入座的桌照常上菜、收款和退款。有疑问请问店主。",
   "New guests are paused for this restaurant by the platform, so the counter can't take a new order. Nothing was sent or charged. Orders already placed carry on as usual: prepare, hand over and refund them. Ask the owner about it.":
     "平台已暂停本店接待新客人，柜台暂时不能接新单，没有发送也没有扣款。已下的单照常制作、交付和退款。有疑问请问店主。",
+  // WP-2423 M04: a paid order that did not reach the kitchen, or whose refund did not go through.
+  "Sending to the kitchen…": "正在发送到后厨…",
+  "Not in the kitchen yet": "还没进后厨",
+  "Paid and accepted {minutes} min ago, but the kitchen hasn't received it. Make it from the dishes listed here and tell the manager.":
+    "已付款，{minutes} 分钟前已接单，但后厨还没收到。请按这里列出的菜品制作，并告诉经理。",
+  "The automatic refund didn't go through.": "自动退款没有完成。",
+  "Reject the order to refund the guest in full.": "请拒单，给客人全额退款。",
+  "Paid orders that need you": "需要你处理的已付订单",
+  "{orders} paid but not in the kitchen, or not refunded as it should be. Open each on Orders to see what to do.":
+    "{orders}已付款，但没进后厨或没有按规定退款。请在“订单”里逐一打开查看怎么处理。",
+  "Needs you": "需要处理",
+  "{subject} was accepted but hasn't reached the kitchen yet — make it from its dishes on Orders.":
+    "{subject}已接单，但还没进后厨 — 请按订单页上的菜品制作。",
 });

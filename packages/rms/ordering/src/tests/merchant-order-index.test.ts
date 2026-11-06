@@ -323,20 +323,40 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
               order_batch_id: id(13),
               awaiting: true,
               since: "2026-10-16T14:50:00.000Z",
+              accepted_at: null,
             },
-            { order_id: id(4), order_batch_id: id(14), awaiting: false, since: null },
+            {
+              order_id: id(4),
+              order_batch_id: id(14),
+              awaiting: false,
+              since: null,
+              accepted_at: null,
+            },
+            {
+              order_id: id(5),
+              order_batch_id: id(15),
+              awaiting: true,
+              since: "2026-10-16T14:51:00.000Z",
+              accepted_at: "2026-10-16T14:52:00.000Z",
+            },
           ],
-      rowCount: 2,
+      rowCount: 3,
     }),
   );
   const tx = { query } as unknown as ConsumerTransaction;
   const result = await listStorePaidOrderBatches(tx, scope, [id(3), id(4), id(5)]);
-  expect([...result.paidOrders]).toEqual([id(3), id(4)]);
-  expect([...result.awaitingAcceptance]).toEqual([id(13)]);
-  expect([...result.paidBatches]).toEqual([id(13), id(14)]);
+  expect([...result.paidOrders]).toEqual([id(3), id(4), id(5)]);
+  expect([...result.awaitingAcceptance]).toEqual([id(13), id(15)]);
+  expect([...result.paidBatches]).toEqual([id(13), id(14), id(15)]);
   // WP-2423: when each batch awaiting acceptance was recorded as paid (the staff wait warning).
-  expect([...result.awaitingSince]).toEqual([[id(13), "2026-10-16T14:50:00.000Z"]]);
+  expect([...result.awaitingSince]).toEqual([
+    [id(13), "2026-10-16T14:50:00.000Z"],
+    [id(15), "2026-10-16T14:51:00.000Z"],
+  ]);
+  // WP-2423 M04: accepted, but not yet released to the kitchen (with when it was accepted).
+  expect([...result.acceptedNotReleased]).toEqual([[id(15), "2026-10-16T14:52:00.000Z"]]);
   expect(query.mock.calls[1]?.[0]).toContain("order_payment_acceptance_wait");
+  expect(query.mock.calls[1]?.[0]).toContain("order_acceptance_record");
   expect(query.mock.calls[1]?.[1]).toEqual([
     scope.brandReference,
     scope.storeReference,
@@ -350,6 +370,7 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
         order_batch_id: id(19),
         awaiting: true,
         since: "2026-10-16T14:50:00.000Z",
+        accepted_at: null,
       },
     ],
     rowCount: 1,
@@ -362,10 +383,13 @@ it("WP-2423 Q1: reads recorded payments and batches awaiting acceptance for the 
     paidBatches: new Set(),
     awaitingAcceptance: new Set(),
     awaitingSince: new Map(),
+    acceptedNotReleased: new Map(),
   });
   // An awaiting batch without its paid time is not data.
   query.mockResolvedValueOnce({ rows: [], rowCount: 0 }).mockResolvedValueOnce({
-    rows: [{ order_id: id(3), order_batch_id: id(13), awaiting: true, since: null }],
+    rows: [
+      { order_id: id(3), order_batch_id: id(13), awaiting: true, since: null, accepted_at: null },
+    ],
     rowCount: 1,
   });
   await expect(listStorePaidOrderBatches(tx, scope, [id(3)])).rejects.toThrow(
@@ -406,8 +430,21 @@ it("WP-2423 v15: lists today's Orders with a paid round waiting for acceptance",
       rows: sql.startsWith("SELECT set_config")
         ? []
         : [
-            { order_id: id(3), order_number: "13", order_type: "Pickup", dining_session: null },
-            { order_id: id(4), order_number: "7", order_type: "DineIn", dining_session: id(40) },
+            {
+              order_id: id(3),
+              order_number: "13",
+              order_type: "Pickup",
+              dining_session: null,
+              accepted: false,
+            },
+            // WP-2423 M04: accepted, only its release to the kitchen outstanding.
+            {
+              order_id: id(4),
+              order_number: "7",
+              order_type: "DineIn",
+              dining_session: id(40),
+              accepted: true,
+            },
           ],
       rowCount: 2,
     }),
@@ -415,12 +452,19 @@ it("WP-2423 v15: lists today's Orders with a paid round waiting for acceptance",
   const tx = { query } as unknown as ConsumerTransaction;
   const input = { since: "2026-10-16T08:00:00.000Z", businessDate: "2026-10-16", limit: 50 };
   expect(await listStoreOrdersAwaitingAcceptance(tx, scope, input)).toEqual([
-    { orderReference: id(3), orderNumber: "13", orderType: "Pickup", diningSessionReference: null },
+    {
+      orderReference: id(3),
+      orderNumber: "13",
+      orderType: "Pickup",
+      diningSessionReference: null,
+      accepted: false,
+    },
     {
       orderReference: id(4),
       orderNumber: "7",
       orderType: "DineIn",
       diningSessionReference: id(40),
+      accepted: true,
     },
   ]);
   const sql = String(query.mock.calls[1]?.[0]);
@@ -428,6 +472,7 @@ it("WP-2423 v15: lists today's Orders with a paid round waiting for acceptance",
   expect(sql).toContain("h.business_date=$3::date OR b.submitted_at>=$4::timestamptz");
   expect(sql).toContain("order_payment_disposition_record");
   expect(sql).toContain("order_staff_cancellation");
+  expect(sql).toContain("order_acceptance_record");
   expect(sql).not.toMatch(/guest|contact|name/iu);
   expect(query.mock.calls[1]?.[1]).toEqual([
     scope.brandReference,

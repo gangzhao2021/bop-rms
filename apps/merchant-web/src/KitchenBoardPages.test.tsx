@@ -1543,6 +1543,16 @@ describe("DEC-KITCHEN-STALE-TICKETS earlier business days on the kitchen board",
       ),
     ).toBe("2 orders for “13” are not accepted yet — accept them on Orders.");
     expect(kitchenSearchAwaitingText([], "13", false)).toBeNull();
+    // WP-2423 M04: accepted, but its ticket never arrived: never told to accept it again.
+    expect(
+      kitchenSearchAwaitingText(
+        twelve.awaitingMatches.map((label) => ({ ...label, acceptedNotInKitchen: true as const })),
+        "12",
+        false,
+      ),
+    ).toBe(
+      "Order 12 (table T4) was accepted but hasn't reached the kitchen yet — make it from its dishes on Orders.",
+    );
     // Today's own order is still found; nothing waits for it.
     expect(search("14").todayMatches).toHaveLength(1);
     expect(search("14").awaitingMatches).toEqual([]);

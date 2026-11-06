@@ -586,6 +586,12 @@ export async function listStorePaidOrderBatches(
   readonly awaitingAcceptance: ReadonlySet<string>;
   /** WP-2423: when Ordering recorded each batch awaiting acceptance as paid (by batch). */
   readonly awaitingSince: ReadonlyMap<string, string>;
+  /**
+   * WP-2423 M04: paid batches staff (or the System) accepted that Ordering has not yet released to
+   * the kitchen (no payment outcome, not cancelled), with when they were accepted. Released by the
+   * payment worker within seconds; one still here a minute later did not reach the kitchen.
+   */
+  readonly acceptedNotReleased: ReadonlyMap<string, string>;
 }> {
   if (orderReferences.length === 0)
     return {
@@ -593,6 +599,7 @@ export async function listStorePaidOrderBatches(
       paidBatches: new Set(),
       awaitingAcceptance: new Set(),
       awaitingSince: new Map(),
+      acceptedNotReleased: new Map(),
     };
   if (orderReferences.length > 100) throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
   const orders = orderReferences.map((reference) => parseOrderingReference(reference));
@@ -608,9 +615,11 @@ export async function listStorePaidOrderBatches(
         // A never-accepted round staff cancelled (its payment refunded) no longer awaits acceptance.
         "AND NOT EXISTS (SELECT 1 FROM rms_ordering.order_staff_cancellation c WHERE c.brand_id=w.brand_id " +
         "AND c.store_id=w.store_id AND c.order_batch_id=w.order_batch_id) awaiting," +
-        "to_char(w.evaluated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') since " +
+        "to_char(w.evaluated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') since," +
+        "(SELECT to_char(min(a.accepted_at) AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') FROM rms_ordering.order_acceptance_record a " +
+        "WHERE a.brand_id=w.brand_id AND a.store_id=w.store_id AND a.order_id=w.order_id AND a.order_batch_id=w.order_batch_id) accepted_at " +
         "FROM rms_ordering.order_payment_acceptance_wait w WHERE w.brand_id=$1 AND w.store_id=$2 AND w.order_id=ANY($3::uuid[]) " +
-        "UNION ALL SELECT d.order_id::text,d.order_batch_id::text,false,NULL FROM rms_ordering.order_payment_disposition_record d " +
+        "UNION ALL SELECT d.order_id::text,d.order_batch_id::text,false,NULL,NULL FROM rms_ordering.order_payment_disposition_record d " +
         "WHERE d.brand_id=$1 AND d.store_id=$2 AND d.order_id=ANY($3::uuid[])",
       [scope.brandReference, scope.storeReference, orders],
     )
@@ -619,11 +628,13 @@ export async function listStorePaidOrderBatches(
     order_batch_id: unknown;
     awaiting: unknown;
     since: unknown;
+    accepted_at: unknown;
   }[];
   const paidOrders = new Set<string>(),
     paidBatches = new Set<string>(),
     awaitingAcceptance = new Set<string>(),
-    awaitingSince = new Map<string, string>();
+    awaitingSince = new Map<string, string>(),
+    acceptedNotReleased = new Map<string, string>();
   for (const row of rows) {
     const order = parseOrderingReference(row.order_id),
       batch = parseOrderingReference(row.order_batch_id);
@@ -635,9 +646,14 @@ export async function listStorePaidOrderBatches(
       if (typeof row.since !== "string") throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
       awaitingAcceptance.add(batch);
       awaitingSince.set(batch, parseOrderingInstant(row.since));
+      if (row.accepted_at !== null) {
+        if (typeof row.accepted_at !== "string")
+          throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
+        acceptedNotReleased.set(batch, parseOrderingInstant(row.accepted_at));
+      }
     }
   }
-  return { paidOrders, paidBatches, awaitingAcceptance, awaitingSince };
+  return { paidOrders, paidBatches, awaitingAcceptance, awaitingSince, acceptedNotReleased };
 }
 
 /** WP-2423 (v15 2026-10-16): a Store Order with a paid round still waiting for staff acceptance. */
@@ -646,6 +662,11 @@ export interface StoreOrderAwaitingAcceptance {
   readonly orderNumber: string;
   readonly orderType: "Pickup" | "DineIn";
   readonly diningSessionReference: string | null;
+  /**
+   * WP-2423 M04: every waiting round of it was accepted, and only its release to the kitchen is
+   * outstanding (the kitchen search then never says "not accepted yet").
+   */
+  readonly accepted: boolean;
 }
 
 /**
@@ -676,7 +697,9 @@ export async function listStoreOrdersAwaitingAcceptance(
   );
   const rows = (
     await transaction.query(
-      "SELECT h.order_id::text order_id,h.order_number,h.order_type,h.dining_session_id::text dining_session " +
+      "SELECT h.order_id::text order_id,h.order_number,h.order_type,h.dining_session_id::text dining_session," +
+        "bool_and(EXISTS (SELECT 1 FROM rms_ordering.order_acceptance_record a WHERE a.brand_id=w.brand_id AND a.store_id=w.store_id " +
+        "AND a.order_id=w.order_id AND a.order_batch_id=w.order_batch_id)) accepted " +
         "FROM rms_ordering.order_payment_acceptance_wait w " +
         "JOIN rms_ordering.order_header h ON h.order_id=w.order_id AND h.brand_id=w.brand_id AND h.store_id=w.store_id " +
         "JOIN rms_ordering.order_batch b ON b.order_batch_id=w.order_batch_id AND b.order_id=w.order_id " +
@@ -698,7 +721,8 @@ export async function listStoreOrdersAwaitingAcceptance(
       if (
         typeof row.order_number !== "string" ||
         (row.order_type !== "Pickup" && row.order_type !== "DineIn") ||
-        (row.order_type === "DineIn") !== (row.dining_session !== null)
+        (row.order_type === "DineIn") !== (row.dining_session !== null) ||
+        (row.accepted !== undefined && typeof row.accepted !== "boolean")
       )
         throw new Error("MERCHANT_ORDER_INDEX_UNAVAILABLE");
       return Object.freeze({
@@ -707,6 +731,7 @@ export async function listStoreOrdersAwaitingAcceptance(
         orderType: row.order_type,
         diningSessionReference:
           row.dining_session === null ? null : parseOrderingReference(row.dining_session),
+        accepted: row.accepted === true,
       });
     }),
   );

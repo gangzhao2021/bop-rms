@@ -9,6 +9,7 @@ import { Link } from "react-router";
 import {
   createCurrentOrderQueueClient,
   ordersAwaitingAcceptance,
+  paidOrdersStuck,
   roundsAwaitingAcceptance,
   type CurrentOrderQueue,
 } from "./current-order-queue-client.js";
@@ -57,6 +58,11 @@ export interface OrdersSummary {
   /** WP-2423: rounds awaiting acceptance (a table may have several) and paid ones waiting long. */
   readonly awaitingRounds: number;
   readonly urgentRounds: number;
+  /**
+   * WP-2423 M04: paid orders that need a person now — accepted but not in the kitchen a minute
+   * later, or a pickup whose automatic refund did not go through.
+   */
+  readonly paidStuck: number;
   /**
    * Open dine-in orders (tables) with food the kitchen marked ready that nobody served yet, in any
    * round — the Tables page's rule, so a ready round counts even while another round waits for
@@ -164,6 +170,7 @@ export function summarizeOrders(queue: CurrentOrderQueue, now = Date.now()): Ord
     ).length,
     awaitingRounds: rounds.rounds,
     urgentRounds: rounds.urgentRounds,
+    paidStuck: paidOrdersStuck(queue, now),
     readyToServe: dineIn.filter(
       (order) =>
         // DEC-DINING-GUEST-TABLE-START: at a table a guest started, the kitchen finishing a dish is
@@ -480,6 +487,19 @@ export function attentionItems(
     });
   if (state.orders.kind === "Ready") {
     const o = state.orders.value;
+    if (o.paidStuck > 0)
+      items.push({
+        key: "paid-stuck",
+        title: t("Paid orders that need you"),
+        detail: t(
+          "{orders} paid but not in the kitchen, or not refunded as it should be. Open each on Orders to see what to do.",
+          { orders: countOf(o.paidStuck, "order") },
+        ),
+        state: t("Needs you"),
+        tone: "danger",
+        href: "/operations/orders",
+        action: t("View orders"),
+      });
     if (o.awaitingAcceptance + o.awaitingRounds > 0)
       items.push({
         key: "orders",

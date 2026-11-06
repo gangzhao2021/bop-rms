@@ -270,6 +270,9 @@ const dineIn = {
       acceptanceStatus: "Accepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      // WP-2423 M04: accepted and paid, still on its way to the kitchen.
+      kitchenRelease: { state: "Sending" as const, acceptedAt: at(3) },
+      automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
@@ -298,6 +301,8 @@ const dineIn = {
       canRequestAcceptance: true,
       // The paid round waiting for staff: Orders and Home warn after 5 and 10 minutes.
       awaitingAcceptanceSince: at(14),
+      kitchenRelease: null,
+      automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
@@ -324,6 +329,8 @@ const dineIn = {
       acceptanceStatus: "NotAccepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      kitchenRelease: null,
+      automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
@@ -350,6 +357,8 @@ const dineIn = {
       acceptanceStatus: "Cancelled",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      kitchenRelease: null,
+      automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
@@ -435,6 +444,8 @@ const heldPickup = {
       acceptanceStatus: "NotAccepted",
       canRequestAcceptance: true,
       awaitingAcceptanceSince: null,
+      kitchenRelease: null,
+      automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
@@ -516,6 +527,8 @@ const earlierCounterPickup = {
       acceptanceStatus: "Accepted",
       canRequestAcceptance: false,
       awaitingAcceptanceSince: null,
+      kitchenRelease: null,
+      automaticRefundLate: false,
       // DEC-PAID-ORDER-AUTO-ACCEPT: the server sends these only where they apply; the type wants all.
       acceptedAutomaticallyAt: at(10),
       canCantMake: true,
@@ -941,6 +954,7 @@ describe("merchant BFF responses carry every read-model field the browser parses
     ).toEqual([]);
     const table = view.items.find((item) => item.orderReference === dineIn.orderReference);
     expect(table?.batches[1]?.awaitingAcceptanceSince).toBe(at(14));
+    expect(table?.batches[0]?.kitchenRelease).toEqual({ state: "Sending", acceptedAt: at(3) });
     expect(table?.readyToServeItemCount).toBe(2);
     expect(view.items.map((item) => item.orderReference)).toEqual([
       earlierCounterPickup.orderReference,

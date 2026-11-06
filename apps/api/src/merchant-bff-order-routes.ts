@@ -163,6 +163,12 @@ function orderQueueRow(item: MerchantOrderQueueItem) {
       ...(batch.kitchenReceivedAt === undefined
         ? {}
         : { kitchenReceivedAt: batch.kitchenReceivedAt }),
+      // WP-2423 M04: a paid round accepted and still on its way to the kitchen (null once there),
+      // and a paid pickup whose automatic refund did not go through.
+      ...(batch.kitchenRelease === undefined ? {} : { kitchenRelease: batch.kitchenRelease }),
+      ...(batch.automaticRefundLate === undefined
+        ? {}
+        : { automaticRefundLate: batch.automaticRefundLate }),
     })),
     currentPhase: item.currentPhase,
     currentVersion: item.currentVersion,

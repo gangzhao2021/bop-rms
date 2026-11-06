@@ -7,6 +7,7 @@ import {
   isAwaitingAcceptance,
   ordersAwaitingAcceptance,
   parseCurrentOrderDetail,
+  paidOrdersStuck,
   parseCurrentOrderQueue,
 } from "./current-order-queue-client.js";
 const id = (n: number) => "01909968-0000-7000-8000-" + n.toString(16).padStart(12, "0");
@@ -1182,4 +1183,59 @@ it("DEC-PAID-ORDER-AUTO-ACCEPT: reads a batch sent straight to the kitchen, made
   });
   expect(() => read({ ...sent, kept: "yes" })).toThrow();
   expect(() => read({ reachedKitchen: false })).toThrow();
+});
+
+// WP-2423 M04: a paid round staff accepted that the kitchen has not received yet.
+it("reads a paid round still on its way to the kitchen, and counts it for Home once a minute late", () => {
+  const accepted = "2026-09-14T00:00:30.000Z";
+  const view = parseCurrentOrderQueue(
+    {
+      items: [
+        {
+          ...row(),
+          batches: [
+            {
+              ...row().batches[0],
+              kitchenRelease: { state: "Sending", acceptedAt: accepted },
+              automaticRefundLate: false,
+            },
+          ],
+        },
+      ],
+      nextAfterOrderReference: null,
+    },
+    null,
+  );
+  expect(view.items[0]?.batches[0]?.kitchenRelease).toEqual({
+    state: "Sending",
+    acceptedAt: accepted,
+  });
+  expect(paidOrdersStuck(view, Date.parse(accepted) + 30_000)).toBe(0);
+  // A minute after acceptance it should have arrived: Home asks for someone (no reload needed).
+  expect(paidOrdersStuck(view, Date.parse(accepted) + 60_000)).toBe(1);
+  // An older server sends neither: nothing is claimed.
+  const older = parseCurrentOrderQueue({ items: [row()], nextAfterOrderReference: null }, null);
+  expect(older.items[0]?.batches[0]?.kitchenRelease).toBeNull();
+  expect(older.items[0]?.batches[0]?.automaticRefundLate).toBe(false);
+  // Only an accepted round is on its way to the kitchen.
+  expect(() =>
+    parseCurrentOrderQueue(
+      {
+        items: [
+          {
+            ...row(),
+            batches: [
+              {
+                ...row().batches[0],
+                acceptanceStatus: "NotAccepted",
+                kitchenRelease: { state: "Sending", acceptedAt: accepted },
+              },
+            ],
+          },
+        ],
+        nextAfterOrderReference: null,
+      },
+      null,
+    ),
+  ).toThrow();
 });

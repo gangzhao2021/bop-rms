@@ -358,6 +358,8 @@ export interface KitchenAwaitingAcceptanceLabel extends Omit<KitchenOrderLabel, 
   readonly acceptBy: string | null;
   /** DEC-PAID-ORDER-AUTO-ACCEPT: why it was not sent automatically (only when it applies). */
   readonly notSent?: { readonly reason: string; readonly itemCount: number | null };
+  /** WP-2423 M04: accepted, and not in the kitchen yet (only when so). */
+  readonly acceptedNotInKitchen?: true;
 }
 /**
  * WP-2423 (v15 2026-10-16): how the kitchen names today's orders waiting for acceptance — number,
@@ -371,6 +373,7 @@ export async function kitchenAwaitingAcceptance(
     readonly orderNumber: string;
     readonly orderType: "Pickup" | "DineIn";
     readonly diningSessionReference: string | null;
+    readonly accepted?: boolean;
   }[],
   refundDeadlines: ReadonlyMap<string, string> = new Map(),
   notSent: ReadonlyMap<string, NonNullable<KitchenAwaitingAcceptanceLabel["notSent"]>> = new Map(),
@@ -410,6 +413,7 @@ export async function kitchenAwaitingAcceptance(
         ...((reason) => (reason === undefined ? {} : { notSent: reason }))(
           notSent.get(order.orderReference),
         ),
+        ...(order.accepted === true ? { acceptedNotInKitchen: true as const } : {}),
       }),
     ),
   );

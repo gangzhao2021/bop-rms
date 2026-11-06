@@ -321,6 +321,7 @@ export function createPersistentMerchantOrderQueue(options: {
                   paidBatches: new Set<string>(),
                   awaitingAcceptance: new Set<string>(),
                   awaitingSince: new Map<string, string>(),
+                  acceptedNotReleased: new Map<string, string>(),
                 }
               : await listStorePaidOrderBatches(
                   businessTransaction,
@@ -1335,9 +1336,12 @@ export function createPersistentMerchantOrderQueue(options: {
                 }),
             items: Object.freeze(
               result.items.map((item) => {
+                const observedAtMs = Date.parse(String(source.now()));
                 const closed = unfulfillable.get(item.orderReference) ?? null;
                 const hold = closed === null ? (held.get(item.orderReference) ?? null) : null;
                 const { decideBy, refundChosen } = pickupAcceptanceDeadline(null, hold);
+                const acceptBy =
+                  hold === null ? (deadlines.get(item.orderReference) ?? null) : decideBy;
                 const summary = summaries.get(item.orderReference);
                 return Object.freeze({
                   ...item,
@@ -1365,7 +1369,7 @@ export function createPersistentMerchantOrderQueue(options: {
                   paymentPosition: paymentPositions.get(item.orderReference) ?? null,
                   // A held order's deadline is the decision deadline once staff are back (none while
                   // it is held); otherwise Fulfillment's capacity expiry.
-                  acceptBy: hold === null ? (deadlines.get(item.orderReference) ?? null) : decideBy,
+                  acceptBy,
                   acceptanceHold:
                     hold === null || item.currentPhase !== "Submitted"
                       ? null
@@ -1530,6 +1534,23 @@ export function createPersistentMerchantOrderQueue(options: {
                           ),
                         ),
                         kitchenReceivedAt: kitchenReceived.get(batch.orderBatchReference) ?? null,
+                        // WP-2423 M04: a paid round accepted but not yet released to the kitchen
+                        // (the payment worker releases it within seconds). "NotInKitchen" a minute
+                        // after acceptance: staff make it from its dishes, or reject and refund.
+                        kitchenRelease: kitchenRelease(
+                          closed === null && batch.acceptanceStatus === "Accepted"
+                            ? (payments.acceptedNotReleased.get(batch.orderBatchReference) ?? null)
+                            : null,
+                          observedAtMs,
+                        ),
+                        // A paid pickup not accepted by its deadline is refunded by the System
+                        // within seconds; still here a minute later, staff reject and refund it.
+                        automaticRefundLate:
+                          item.orderType === "Pickup" &&
+                          canRequestAcceptance &&
+                          hold === null &&
+                          acceptBy !== null &&
+                          observedAtMs - Date.parse(acceptBy) >= kitchenReleaseLateMs,
                       });
                     }),
                   ),
@@ -1560,6 +1581,21 @@ export function createPersistentMerchantOrderQueue(options: {
       await options.storePresence.observe(observed.scope);
     return view;
   };
+}
+
+/** WP-2423 M04: a healthy payment worker releases an accepted paid round within a few seconds. */
+const kitchenReleaseLateMs = 60_000;
+/** WP-2423 M04: an accepted paid round still on its way to the kitchen (null once released). */
+function kitchenRelease(
+  acceptedAt: string | null,
+  observedAtMs: number,
+): Readonly<{ state: "Sending" | "NotInKitchen"; acceptedAt: string }> | null {
+  if (acceptedAt === null) return null;
+  return Object.freeze({
+    state:
+      observedAtMs - Date.parse(acceptedAt) >= kitchenReleaseLateMs ? "NotInKitchen" : "Sending",
+    acceptedAt,
+  });
 }
 
 /** A throwaway reference for a payment preparation built only to read its amount (never stored). */

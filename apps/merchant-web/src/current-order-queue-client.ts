@@ -722,6 +722,11 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
       // DEC-KITCHEN-ONE-TAP: absent from an older server (no warning then).
       const withKitchenReceived =
         value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenReceivedAt");
+      // WP-2423 M04: absent from an older server (no "sending to the kitchen" then).
+      const withKitchenRelease =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "kitchenRelease");
+      const withRefundLate =
+        value !== null && typeof value === "object" && Object.hasOwn(value, "automaticRefundLate");
       const batch = exact(value, [
         "orderBatchReference",
         "sequence",
@@ -740,6 +745,8 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         ...(withUnpaidRemoval ? ["unpaidRemovableItems", "unpaidRemovedItems"] : []),
         ...(withComps ? ["compableItems", "compedItems"] : []),
         ...(withKitchenReceived ? ["kitchenReceivedAt"] : []),
+        ...(withKitchenRelease ? ["kitchenRelease"] : []),
+        ...(withRefundLate ? ["automaticRefundLate"] : []),
       ]);
       const references = (list: unknown) =>
         Array.isArray(list) && list.length <= 500
@@ -868,6 +875,16 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
                 !(item.currentPhase === "Rejected" && batch.acceptanceStatus === "NotAccepted"))))
       )
         return fail();
+      const kitchenRelease = withKitchenRelease
+        ? parseKitchenRelease(batch.kitchenRelease, batch.acceptanceStatus)
+        : null;
+      if (
+        withRefundLate &&
+        (typeof batch.automaticRefundLate !== "boolean" ||
+          (batch.automaticRefundLate &&
+            (item.orderType !== "Pickup" || batch.canRequestAcceptance !== true)))
+      )
+        return fail();
       previousSequence = batch.sequence;
       seenBatches.add(orderBatchReference);
       const batchSubmittedAt = withSubmittedAt ? instant(batch.submittedAt) : null;
@@ -929,6 +946,13 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
         compableItems,
         /** Comps and discounts on this round (tax included), never removed. */
         compedItems,
+        /**
+         * WP-2423 M04: paid and accepted, still on its way to the kitchen (null once there, or from
+         * an older server). "NotInKitchen": a minute after acceptance it has not arrived.
+         */
+        kitchenRelease,
+        /** WP-2423 M04: a paid pickup past its deadline whose automatic refund has not happened. */
+        automaticRefundLate: withRefundLate && batch.automaticRefundLate === true,
         /** DEC-KITCHEN-ONE-TAP: when this round reached the kitchen; null: not yet or unknown. */
         kitchenReceivedAt:
           withKitchenReceived && typeof batch.kitchenReceivedAt === "string"
@@ -1106,6 +1130,40 @@ export function parseCurrentOrderQueue(value: unknown, after: string | null = nu
     ...(paidOrderWatch === null ? {} : { paidOrderWatch }),
     unreadable: Object.freeze(unreadable),
   });
+}
+/** WP-2423 M04: how long a healthy Store takes at most to get an accepted paid round to the kitchen. */
+export const KITCHEN_RELEASE_LATE_MS = 60_000;
+function parseKitchenRelease(value: unknown, acceptanceStatus: unknown) {
+  if (value === null) return null;
+  const raw = exact(value, ["state", "acceptedAt"]);
+  if ((raw.state !== "Sending" && raw.state !== "NotInKitchen") || acceptanceStatus !== "Accepted")
+    return fail();
+  return Object.freeze({
+    state: raw.state as "Sending" | "NotInKitchen",
+    acceptedAt: instant(raw.acceptedAt),
+  });
+}
+/** Whether an accepted paid round should have reached the kitchen by now and has not. */
+export function notInKitchen(
+  release: { readonly state: "Sending" | "NotInKitchen"; readonly acceptedAt: string } | null,
+  now: number,
+): boolean {
+  return (
+    release !== null &&
+    (release.state === "NotInKitchen" ||
+      now - Date.parse(release.acceptedAt) >= KITCHEN_RELEASE_LATE_MS)
+  );
+}
+/**
+ * WP-2423 M04: paid orders that need a person — accepted rounds that did not reach the kitchen, and
+ * pickups whose automatic refund did not go through. Home's attention line counts them.
+ */
+export function paidOrdersStuck(view: Pick<CurrentOrderQueue, "items">, now: number): number {
+  return view.items.filter((order) =>
+    order.batches.some(
+      (batch) => notInKitchen(batch.kitchenRelease, now) || batch.automaticRefundLate,
+    ),
+  ).length;
 }
 export type CurrentOrderQueue = ReturnType<typeof parseCurrentOrderQueue>;
 /**

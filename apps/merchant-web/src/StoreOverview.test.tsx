@@ -59,6 +59,7 @@ describe("WP-2423 P2 store overview", () => {
       earlierUnfinished: 0,
       awaitingRounds: 1,
       urgentRounds: 0,
+      paidStuck: 0,
       // The fixture's only Ready order is a pickup; pickup readiness is counted from the pickup queue.
       readyToServe: 0,
       dineIn: true,
@@ -282,6 +283,7 @@ describe("WP-2423 P2 store overview", () => {
                 earlierUnfinished: 0,
                 awaitingRounds: 4,
                 urgentRounds: 0,
+                paidStuck: 0,
                 readyToServe: 2,
                 dineIn: true,
                 more: true,
@@ -345,6 +347,7 @@ describe("WP-2423 P2 store overview", () => {
                 earlierUnfinished: 0,
                 awaitingRounds: 1,
                 urgentRounds: 0,
+                paidStuck: 0,
                 readyToServe: 0,
                 dineIn: false,
                 more: false,
@@ -391,6 +394,38 @@ describe("WP-2423 P2 store overview", () => {
     );
     expect(items.map((item) => [item.title, item.detail])).toEqual([
       ["Open exceptions", "3 open · None overdue"],
+    ]);
+  });
+  it("WP-2423 M04: a paid order that did not reach the kitchen comes first among orders", () => {
+    const items = attentionItems(
+      {
+        ...initialOverviewState,
+        orders: {
+          kind: "Ready",
+          value: {
+            open: 2,
+            awaitingAcceptance: 1,
+            earlierUnfinished: 0,
+            awaitingRounds: 0,
+            urgentRounds: 0,
+            paidStuck: 1,
+            readyToServe: 0,
+            dineIn: true,
+            more: false,
+            servedDineIn: new Set(),
+          },
+        },
+      },
+      null,
+    );
+    expect(items.map((item) => [item.key, item.title, item.detail, item.tone])).toEqual([
+      [
+        "paid-stuck",
+        "Paid orders that need you",
+        "1 order paid but not in the kitchen, or not refunded as it should be. Open each on Orders to see what to do.",
+        "danger",
+      ],
+      ["orders", "Orders waiting to be accepted", expect.any(String), "warning"],
     ]);
   });
   it("Owner 2026-11-03: a failed read says so; the list never calmly claims nothing is wrong", () => {
@@ -450,6 +485,7 @@ describe("WP-2423 P2 store overview", () => {
                 earlierUnfinished: 0,
                 awaitingRounds: 0,
                 urgentRounds: 0,
+                paidStuck: 0,
                 readyToServe: 0,
                 dineIn: false,
                 more: false,
@@ -722,6 +758,7 @@ describe("WP-2423 3cd0f8dd: tables to close, earlier-day pickups and the day che
           earlierUnfinished: 0,
           awaitingRounds: 0,
           urgentRounds: 0,
+          paidStuck: 0,
           readyToServe: 0,
           dineIn: true,
           more: false,
@@ -824,6 +861,7 @@ describe("Figma v1 (2026-10-25): Home lists what needs attention now", () => {
     earlierUnfinished: 0,
     awaitingRounds: 0,
     urgentRounds: 0,
+    paidStuck: 0,
     readyToServe: 0,
     dineIn: false,
     more: false,

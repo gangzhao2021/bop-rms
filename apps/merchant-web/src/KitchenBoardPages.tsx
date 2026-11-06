@@ -480,12 +480,28 @@ export function kitchenSearchHiddenText(input: {
  * is already on the board and done, and a new round waits for acceptance.
  */
 export function kitchenSearchAwaitingText(
-  labels: readonly Pick<KitchenOrderLabel, "orderNumber" | "orderType" | "tableLabel">[],
+  labels: readonly (Pick<KitchenOrderLabel, "orderNumber" | "orderType" | "tableLabel"> & {
+    readonly acceptedNotInKitchen?: true;
+  })[],
   search: string,
   hasKitchenWork: boolean,
 ): string | null {
   const [first] = labels;
   if (first === undefined) return null;
+  // WP-2423 M04: accepted and paid, but its ticket never arrived: never "not accepted yet".
+  if (labels.length === 1 && first.acceptedNotInKitchen === true)
+    return t(
+      "{subject} was accepted but hasn't reached the kitchen yet — make it from its dishes on Orders.",
+      {
+        subject:
+          first.orderType === "DineIn" && first.tableLabel
+            ? t("Order {orderNumber} (table {tableLabel})", {
+                orderNumber: first.orderNumber,
+                tableLabel: saidTable(first.tableLabel),
+              })
+            : t("Order {orderNumber}", { orderNumber: first.orderNumber }),
+      },
+    );
   if (labels.length > 1)
     return t("{length} orders for “{search}” are not accepted yet — accept them on Orders.", {
       length: labels.length,

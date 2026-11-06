@@ -17,6 +17,7 @@ import {
   createPostgresOrderKitchenSourceStore,
   createPostgresOrderPaymentAcceptanceWaitStore,
   createPostgresOrderPaymentOutcomeStore,
+  listStorePaidOrderBatches,
 } from "../../rms/ordering/src/index.ts";
 import { createPostgresCapturedBatchPaymentSource } from "../../rms/payment/src/index.ts";
 import { createCustomerSubmissionInventoryFinalizer } from "../../../apps/api/src/customer-submission-inventory-finalizer.ts";
@@ -688,6 +689,33 @@ it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
             acceptedOrderVersion: before.currentVersion + 1,
           });
 
+          // ── Until the worker releases it, Orders and Tables say it is being sent (never "sent"),
+          // and a minute after acceptance that it has not reached the kitchen (Home counts it).
+          const releasing = await transactions().run((tx) =>
+            listStorePaidOrderBatches(tx, scope, [orderReference]),
+          );
+          assert.equal(releasing.acceptedNotReleased.has(R1.batch.orderBatchReference), true);
+          const sending = (await queued()).batches[0];
+          assert.equal(sending.kitchenRelease.state, "Sending");
+          const minuteLater = createPersistentMerchantOrderQueue({
+            persistence: {
+              ...staffSession.persistence,
+              now: () =>
+                new Date(Date.parse(sending.kitchenRelease.acceptedAt) + 61_000).toISOString(),
+            },
+            quoteVersion: 1,
+            acceptanceConfigured: true,
+          });
+          const late = (
+            await minuteLater({
+              sessionCookie: staffSession.sessionCookie,
+              afterOrderReference: null,
+              orderReference,
+            })
+          ).items[0].batches[0];
+          assert.equal(late.kitchenRelease.state, "NotInKitchen");
+          assert.equal(late.automaticRefundLate, false);
+
           // ── The worker releases it to the kitchen: Ordering confirms the payment at the
           // acceptance version, and the kitchen's Ordering source resolves the round.
           const confirmed = await transactions().run((tx) =>
@@ -729,6 +757,16 @@ it.each(["CapturedBeforeMove", "MovedTwice", "CapturedAfterMove"])(
           assert.equal(labels.get(dining.session.diningSessionReference), seatedLabel);
           const after = await queued();
           assert.equal(after.batches[0].acceptanceStatus, "Accepted");
+          // Released: the round reads as in the kitchen, and nothing is left to warn about.
+          assert.equal(after.batches[0].kitchenRelease, null);
+          assert.equal(
+            (
+              await transactions().run((tx) =>
+                listStorePaidOrderBatches(tx, scope, [orderReference]),
+              )
+            ).acceptedNotReleased.size,
+            0,
+          );
           assert.equal(after.summary.tableLabel, seatedLabel);
           // The table the party left waits for cleaning and holds nobody.
           const [left] = await one(

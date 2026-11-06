@@ -48,6 +48,12 @@ export interface DiningRoundsProgress {
 
 export const DiningRoundsContext = createContext<DiningRoundsProgress | null>(null);
 export const useDiningRounds = () => useContext(DiningRoundsContext);
+/**
+ * WP-2423 M04: the round numbers staff accepted that are still on their way to the kitchen (the
+ * order's rounds say so, see CurrentOrderLines). Their accepted dishes read "Sending to the
+ * kitchen…", never "Sent", until the kitchen has them.
+ */
+export const KitchenSendingContext = createContext<ReadonlySet<number>>(new Set());
 
 /** Dish states in staff words (the same words as the kitchen's and the guest's). */
 export const diningItemPhaseText: Readonly<Record<string, string>> = {
@@ -112,7 +118,11 @@ export function roundServedCount(
 }
 
 /** Where a round as a whole is, from its dishes: the least advanced open dish names it. */
-export function roundStateText(items: readonly Item[], sequence: number): string | null {
+export function roundStateText(
+  items: readonly Item[],
+  sequence: number,
+  sending = false,
+): string | null {
   const open = items.filter(
     (item) =>
       item.batchSequence === sequence && item.phase !== "Cancelled" && item.phase !== "Rejected",
@@ -122,7 +132,10 @@ export function roundStateText(items: readonly Item[], sequence: number): string
   const ready = open.filter((item) => item.phase === "Ready" && servableQuantity(item) > 0).length;
   for (const phase of ["Submitted", "Accepted", "InProgress"] as const)
     if (open.some((item) => item.phase === phase)) {
-      const text = diningItemPhaseText[phase] ?? null;
+      const text =
+        phase === "Accepted" && sending
+          ? t("Sending to the kitchen…")
+          : (diningItemPhaseText[phase] ?? null);
       return ready > 0 && text !== null
         ? t("{text} · {count} ready to serve", { text, count: ready })
         : text;
@@ -437,6 +450,7 @@ export function DiningRoundItemState({
   readonly orderItemReference: string;
 }) {
   const rounds = useDiningRounds();
+  const sending = useContext(KitchenSendingContext);
   const item = rounds?.view?.items.find((entry) => entry.orderItemReference === orderItemReference);
   if (rounds === null || rounds.view === null || item === undefined) return null;
   // A table checking out (Closing) still gets its last dishes served before it closes.
@@ -451,7 +465,9 @@ export function DiningRoundItemState({
       <span className="dining-round-item__state">
         {item.phase === "Ready" && remaking && servable === 0
           ? t("Being remade")
-          : (diningItemPhaseText[item.phase] ?? t("Checking"))}
+          : item.phase === "Accepted" && sending.has(item.batchSequence)
+            ? t("Sending to the kitchen…")
+            : (diningItemPhaseText[item.phase] ?? t("Checking"))}
         {item.deliveredQuantity > 0 && item.remainingQuantity > 0
           ? t(" · {served} of {ordered} served", {
               served: item.deliveredQuantity,
@@ -544,9 +560,10 @@ export function DiningRoundItemState({
 /** A round's "served x of y" and state for its header; null until the progress is read. */
 export function DiningRoundSummary({ sequence }: { readonly sequence: number }) {
   const rounds = useDiningRounds();
+  const sending = useContext(KitchenSendingContext);
   if (rounds?.view == null) return null;
   const count = roundServedCount(rounds.view.items, sequence);
-  const state = roundStateText(rounds.view.items, sequence);
+  const state = roundStateText(rounds.view.items, sequence, sending.has(sequence));
   return (
     <span className="dining-round__progress">
       {count === null
