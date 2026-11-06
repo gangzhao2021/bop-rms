@@ -478,6 +478,29 @@ describe("WP-2423 item 6: placing a round from the cart", () => {
     expect(answered.controller.getState()).toEqual({ status: "table-checking-out" });
   });
 
+  it.each([
+    ["cart_item_unavailable", "item_unavailable"],
+    ["cart_item_options_changed", "item_options_changed"],
+  ] as const)(
+    "WP-2423 guest-cart-503: %s names the dish, ends the round and sends nothing",
+    async (code, refusal) => {
+      const { controller, ports } = setUp({
+        quote: vi.fn<SendRoundPorts["quote"]>(async () => {
+          throw new CartClientError(code, { cartItemReference: id(51) });
+        }),
+      });
+      await controller.send(cart(), seen);
+      expect(controller.getState()).toEqual({
+        status: "refused",
+        refusal,
+        line: { cartItemReference: id(51), available: null, sharedStock: false },
+      });
+      expect(ports.quote).toHaveBeenCalledOnce();
+      expect(ports.saveDetails).not.toHaveBeenCalled();
+      expect(ports.createSession).not.toHaveBeenCalled();
+    },
+  );
+
   it("checks the table again on every retry", async () => {
     const { controller, ports } = setUp();
     ports.quote.mockRejectedValueOnce(lost());

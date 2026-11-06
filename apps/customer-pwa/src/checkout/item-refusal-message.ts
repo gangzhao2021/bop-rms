@@ -1,4 +1,5 @@
 import { listSeparator, t } from "../i18n/i18n.js";
+import { getTablePaymentTiming } from "../session/customer-transaction-context.js";
 import type { CartItemView } from "../cart/types.js";
 import type { CheckoutRefusedLine } from "./session-client.js";
 
@@ -48,7 +49,7 @@ function lowerTo(name: string, lines: readonly CartItemView[], left: number): st
  * controls; the cart is kept.
  */
 export function checkoutItemRefusalMessage(
-  status: "item_short" | "item_unavailable",
+  status: "item_short" | "item_unavailable" | "item_options_changed",
   line: CheckoutRefusedLine | null,
   items: readonly CartItemView[],
 ): string {
@@ -64,6 +65,24 @@ export function checkoutItemRefusalMessage(
     );
   const name = itemName(item);
   const lines = linesOf(item, items);
+  // WP-2423 (guest-cart-503): at a table that pays at the end nothing is charged when ordering, so
+  // the guest is told the round wasn't sent, and to tap Order again.
+  const payLater = getTablePaymentTiming() === "PayLater";
+  if (status === "item_options_changed")
+    return payLater
+      ? t(
+          "The choices for {name} have changed, so this round hasn’t been sent. {value1}, then add it again with the new choices.",
+          { name, value1: lowerTo(name, [item], 0) },
+        )
+      : t(
+          "The choices for {name} have changed. {notCharged} {value1}, then add it again with the new choices.",
+          { name, notCharged, value1: lowerTo(name, [item], 0) },
+        );
+  if (status === "item_unavailable" && payLater)
+    return t(
+      "{name} isn’t available right now, so this round hasn’t been sent. {value1}, then tap Place order.",
+      { name, value1: lowerTo(name, lines, 0) },
+    );
   if (status === "item_unavailable" || line === null || line.available === null)
     return t(
       "{name} isn’t available right now. {notCharged} {value1} from your cart, then try again.",

@@ -87,6 +87,10 @@ export type CartErrorCode =
   | "cart_table_checking_out"
   /** Coordinator 2026-10-30: this phone scanned a table but hasn't joined it yet. */
   | "cart_dining_not_seated"
+  /** WP-2423 (guest-cart-503): a named cart line can't be sold now; remove it (never retried). */
+  | "cart_item_unavailable"
+  /** WP-2423 (guest-cart-503): a named cart line's dish is sold, its options no longer fit. */
+  | "cart_item_options_changed"
   | "cart_service_unavailable"
   | "quote_operation_expired"
   | "network_unknown";
@@ -98,6 +102,8 @@ export class CartClientError extends Error {
   readonly retryAfterSeconds: number | null;
   /** WP-2423 (`ITEM_SHORT`): how many of the item the store can make (0: none). */
   readonly available: number | null;
+  /** WP-2423 (guest-cart-503): the guest's own cart line the answer names. */
+  readonly cartItemReference: string | null;
 
   constructor(
     code: CartErrorCode,
@@ -106,6 +112,7 @@ export class CartClientError extends Error {
       readonly issueCodes?: readonly string[];
       readonly retryAfterSeconds?: number;
       readonly available?: number;
+      readonly cartItemReference?: string;
     } = {},
   ) {
     super("The cart request could not be completed.");
@@ -115,6 +122,7 @@ export class CartClientError extends Error {
     this.issueCodes = Object.freeze([...(details.issueCodes ?? [])]);
     this.retryAfterSeconds = details.retryAfterSeconds ?? null;
     this.available = details.available ?? null;
+    this.cartItemReference = details.cartItemReference ?? null;
   }
 }
 

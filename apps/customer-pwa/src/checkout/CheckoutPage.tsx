@@ -551,6 +551,13 @@ export function CheckoutPage({
               </button>
             </section>
           ) : null}
+          {state.status === "item-unavailable" ? (
+            // WP-2423 (guest-cart-503): the dish is named; the cart's own Remove clears it.
+            <section role="alert" className="checkout-attention">
+              <p>{checkoutItemRefusalMessage(state.refusal, state.line, state.cart.cart.items)}</p>
+              <Link to="/cart">{checkoutText.changeYourCart}</Link>
+            </section>
+          ) : null}
           {state.status === "order-processing" || state.status === "checkout-in-progress" ? (
             <section role="alert" className="checkout-attention">
               <h2>

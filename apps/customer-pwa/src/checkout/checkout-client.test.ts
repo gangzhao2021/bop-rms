@@ -1107,3 +1107,96 @@ describe("a busy store while a guest sends an order", () => {
     }
   });
 });
+
+describe("WP-2423 guest-cart-503: a dish the Store can't sell now when priced", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setCustomerCsrfCredential(null);
+  });
+  it.each([
+    [
+      "quote_item_unavailable",
+      "customer.quote.item_unavailable",
+      "cart_item_unavailable",
+      "item_unavailable",
+    ],
+    [
+      "quote_item_options_changed",
+      "customer.quote.item_options_changed",
+      "cart_item_options_changed",
+      "item_options_changed",
+    ],
+  ] as const)(
+    "%s names the line, once, with nothing to wait for",
+    async (code, messageKey, said, refusal) => {
+      setCustomerCsrfCredential("c".repeat(43));
+      const cartItemReference = "018f7800-0000-7000-8000-000000000009";
+      const fetch = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              schemaVersion: 1,
+              error: { code, messageKey, line: { cartItemReference } },
+            }),
+            { status: 409 },
+          ),
+      );
+      vi.stubGlobal("fetch", fetch);
+      const cart = {
+        schemaVersion: 1,
+        cart: { cartReference: "018f7800-0000-7000-8000-000000000001", version: 3, items: [{}] },
+      } as unknown as CartView;
+      const client = createCheckoutClient({} as CustomerCartClient);
+      const failure = await client
+        .quote(cart, "018f7800-0000-7000-8000-000000000002")
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(CartClientError);
+      expect(failure).toMatchObject({ code: said, cartItemReference });
+      // Never asked again: the answer stays the same until the guest removes the dish.
+      expect(fetch).toHaveBeenCalledOnce();
+      const controller = createCheckoutController({
+        loadCart: async () => cart,
+        quote: async () => {
+          throw failure;
+        },
+      });
+      await controller.load();
+      await controller.quote();
+      expect(controller.getState()).toEqual({
+        status: "item-unavailable",
+        cart,
+        refusal,
+        line: { cartItemReference, available: null, sharedStock: false },
+        canRetry: false,
+      });
+    },
+  );
+  it("refuses a malformed line as an unknown answer", async () => {
+    setCustomerCsrfCredential("c".repeat(43));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              schemaVersion: 1,
+              error: {
+                code: "quote_item_unavailable",
+                messageKey: "customer.quote.item_unavailable",
+                line: { cartItemReference: "not-a-reference" },
+              },
+            }),
+            { status: 409 },
+          ),
+      ),
+    );
+    const cart = {
+      schemaVersion: 1,
+      cart: { cartReference: "018f7800-0000-7000-8000-000000000001", version: 3, items: [{}] },
+    } as unknown as CartView;
+    const failure = await createCheckoutClient({} as CustomerCartClient)
+      .quote(cart, "018f7800-0000-7000-8000-000000000002")
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "network_unknown" });
+  });
+});

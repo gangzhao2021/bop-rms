@@ -351,6 +351,10 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
         }
         const errorRoot = exact(payload, ["schemaVersion", "error"]);
         if (errorRoot.schemaVersion !== 1) throw new Error("invalid");
+        // WP-2423 (guest-cart-503): one named line can't be sold now. Never asked again: the
+        // answer stays the same until the guest removes it.
+        const named = itemRefusal(response.status, errorRoot.error);
+        if (named !== null) throw named;
         const error = exact(errorRoot.error, ["code", "messageKey"]);
         text(error.messageKey, /^[a-z][a-z0-9_.-]{0,127}$/u);
         const known = {
@@ -382,6 +386,28 @@ export function createCheckoutClient(cartClient: CustomerCartClient): CheckoutCl
       }
     },
   });
+}
+
+/** The exact 409 item answer of the quote route, or null for any other answer. */
+function itemRefusal(status: number, value: unknown): CartClientError | null {
+  const code = (value as { code?: unknown } | null)?.code;
+  if (code !== "quote_item_unavailable" && code !== "quote_item_options_changed") return null;
+  const error = exact(value, ["code", "messageKey", "line"]);
+  const line = exact(error.line, ["cartItemReference"]);
+  if (
+    status !== 409 ||
+    error.messageKey !==
+      (code === "quote_item_unavailable"
+        ? "customer.quote.item_unavailable"
+        : "customer.quote.item_options_changed") ||
+    typeof line.cartItemReference !== "string" ||
+    !uuidV7.test(line.cartItemReference)
+  )
+    throw new Error("invalid");
+  return new CartClientError(
+    code === "quote_item_unavailable" ? "cart_item_unavailable" : "cart_item_options_changed",
+    { cartItemReference: line.cartItemReference },
+  );
 }
 
 export interface CheckoutController {
@@ -462,6 +488,24 @@ export function createCheckoutController(
         cart: current,
         retryAfterSeconds: (error as CartClientError).retryAfterSeconds,
         canRetry: true,
+      });
+      return;
+    }
+    if (
+      online &&
+      current !== null &&
+      (parsed === "cart_item_unavailable" || parsed === "cart_item_options_changed")
+    ) {
+      const cartItemReference = (error as CartClientError).cartItemReference;
+      publish({
+        status: "item-unavailable",
+        cart: current,
+        refusal: parsed === "cart_item_unavailable" ? "item_unavailable" : "item_options_changed",
+        line:
+          cartItemReference === null
+            ? null
+            : { cartItemReference, available: null, sharedStock: false },
+        canRetry: false,
       });
       return;
     }

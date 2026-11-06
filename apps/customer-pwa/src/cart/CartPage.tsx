@@ -102,6 +102,8 @@ function CartItem({
   readonly controller: CartStateController;
 }) {
   const foreign = item.warnings.includes("OTHER_PARTICIPANT_ITEM");
+  // WP-2423 (guest-cart-503): a line that can't be sold now may be removed by anyone at the table.
+  const unsellable = cartLineUnsellable(item);
   const ownershipDescription = `cart-item-ownership-${item.cartItemReference}`;
   const configuration = describeConfiguration(item);
   const updateQuantity = (quantity: number) =>
@@ -141,7 +143,9 @@ function CartItem({
       </div>
       {foreign ? (
         <p className="cart-warning" id={ownershipDescription}>
-          {cartText.line.addedByAnotherGuest}
+          {unsellable
+            ? cartText.line.addedByAnotherGuestRemovable
+            : cartText.line.addedByAnotherGuest}
         </p>
       ) : null}
       {warnings.map((warning) => (
@@ -178,7 +182,7 @@ function CartItem({
           className="cart-link-button"
           type="button"
           aria-describedby={foreign ? ownershipDescription : undefined}
-          disabled={readOnly || foreign || pending}
+          disabled={readOnly || (foreign && !unsellable) || pending}
           onClick={() => void controller.removeItem(item.cartItemReference)}
         >
           {cartText.line.remove}
@@ -187,6 +191,10 @@ function CartItem({
     </article>
   );
 }
+
+/** WP-2423 (guest-cart-503): the Store marked this line as not sellable now (stable fact). */
+const cartLineUnsellable = (item: CartView["cart"]["items"][number]) =>
+  item.warnings.includes("ITEM_UNAVAILABLE") || item.warnings.includes("ITEM_OPTIONS_CHANGED");
 
 function CartSummary({
   cart,
@@ -571,6 +579,8 @@ function CartContent({
   // was about may have just been emptied by it.
   const sending = round.status === "sending";
   const held = sending || (round.status === "unconfirmed" && round.mayBePlaced);
+  // WP-2423 (guest-cart-503): ordering waits until no line that can't be sold now is left.
+  const unsellableLines = cart.cart.items.some(cartLineUnsellable);
   const othersItems = cart.cart.items
     .filter((item) => item.warnings.includes("OTHER_PARTICIPANT_ITEM"))
     .reduce((total, item) => total + item.quantity, 0);
@@ -702,10 +712,12 @@ function CartContent({
               type="button"
               disabled={
                 held ||
+                unsellableLines ||
                 state.status !== "ready" ||
                 !menuSettled ||
                 cart.cart.warnings.includes("PROJECTION_STALE")
               }
+              aria-describedby={unsellableLines ? "cart-remove-unavailable" : undefined}
               onClick={() => onPlace(cart, cartLinesSubtotal(prices))}
             >
               {sending
@@ -714,6 +726,11 @@ function CartContent({
                   ? cartText.placeOrderWithTotal(formatCartMoney(round.total))
                   : cartText.placeOrder}
             </button>
+            {unsellableLines ? (
+              <p className="cart-next-actions__note" id="cart-remove-unavailable">
+                {cartText.line.removeUnavailableFirst}
+              </p>
+            ) : null}
             <SlowWaitNote active={sending}>{cartText.placedSlowly}</SlowWaitNote>
             <SendRoundMessage
               round={round}
@@ -722,6 +739,20 @@ function CartContent({
             />
             <p className="cart-next-actions__note">{checkoutText.sendToKitchenNote}</p>
           </div>
+        ) : unsellableLines ? (
+          <div className="cart-next-actions__place">
+            <button
+              className="cart-checkout-link"
+              type="button"
+              disabled
+              aria-describedby="cart-remove-unavailable"
+            >
+              {cartText.checkout}
+            </button>
+            <p className="cart-next-actions__note" id="cart-remove-unavailable">
+              {cartText.line.removeUnavailableBeforeCheckout}
+            </p>
+          </div>
         ) : (
           <Link className="cart-checkout-link" to="/checkout">
             {cartText.checkout}
@@ -729,6 +760,25 @@ function CartContent({
         )}
       </section>
     </>
+  );
+}
+
+/** WP-2423 (guest-cart-503): how often an open table cart re-reads while on screen. */
+export const cartPollIntervalMs = 15_000;
+/**
+ * Whether the open table cart re-reads now: only on screen, with the cart shown as it stands, and
+ * never while a change or a round is on its way (the cart holds still for those).
+ */
+export function cartPollShouldRead(
+  visibility: DocumentVisibilityState,
+  round: SendRoundState,
+  cart: CartState,
+): boolean {
+  return (
+    visibility === "visible" &&
+    cart.status === "ready" &&
+    round.status !== "sending" &&
+    !(round.status === "unconfirmed" && round.mayBePlaced)
   );
 }
 
@@ -818,6 +868,29 @@ export function CartPage({
     return () => window.clearTimeout(timer);
   }, []);
   const timing = useTablePaymentTiming(cart?.orderType === "DineIn", diningClient);
+  // WP-2423 (guest-cart-503): an open table cart re-reads while it is on screen, so it learns
+  // within one interval that staff started checkout, or that another phone changed it. Never
+  // while a change or a round is on its way; one read per interval per visible phone.
+  const dineIn = cart?.orderType === "DineIn";
+  useEffect(() => {
+    if (!dineIn) return;
+    const tick = () => {
+      if (
+        cartPollShouldRead(
+          typeof document === "undefined" ? "visible" : document.visibilityState,
+          round.getState(),
+          controller.getState(),
+        )
+      )
+        void controller.refresh();
+    };
+    const timer = window.setInterval(tick, cartPollIntervalMs);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [dineIn, controller, round]);
   // Leaving forgets a stop; a send that may have happened stays, to be finished when the guest is back.
   useEffect(
     () => () => {

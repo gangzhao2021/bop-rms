@@ -177,6 +177,17 @@ describe("WP-1205 in-memory Cart state", () => {
     expect(seen.slice(1)).toEqual(["loading", "unavailable"]);
   });
 
+  it.each([
+    ["cart_table_checking_out", "table-checking-out"],
+    ["cart_session_expired", "session-expired"],
+  ] as const)("WP-2423 guest-cart-503: a quiet read says %s at once", async (code, status) => {
+    const f = fixture();
+    await f.controller.load();
+    f.failLoad(new CartClientError(code));
+    await f.controller.refresh();
+    expect(f.controller.getState()).toMatchObject({ status });
+  });
+
   it("WP-2423 item 6: with nothing on screen yet a quiet read is a load", async () => {
     const f = fixture();
     f.failLoad(new CartClientError("cart_service_unavailable"));

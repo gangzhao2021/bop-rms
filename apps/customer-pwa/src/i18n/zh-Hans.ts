@@ -1100,6 +1100,21 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{item} quantity": "{item} 的数量",
   "{name} allows at most {value1}.": "{name} 最多可选 {value1} 份。",
   "{name} conflicts with another selected choice.": "{name} 与另一个已选项冲突。",
+  "Not available right now. Remove it to order the rest.": "现在不供应。删除它后才能点其他的菜。",
+  "The choices for this item have changed. Remove it, then add it again.":
+    "这道菜的选项已变化，请删除后重新选择加入。",
+  "Added by another guest. Anyone at the table can remove it now.":
+    "同桌其他客人添加。现在同桌任何人都可以删除它。",
+  "Remove the dishes that aren’t available right now, then order.":
+    "先删除现在不供应的菜，再下单。",
+  "Remove the dishes that aren’t available right now, then check out.":
+    "先删除现在不供应的菜，再结账。",
+  "The choices for {name} have changed, so this round hasn’t been sent. {value1}, then add it again with the new choices.":
+    "{name} 的选项已变化，这一轮还没有下单。请{value1}，再按新的选项加入。",
+  "The choices for {name} have changed. {notCharged} {value1}, then add it again with the new choices.":
+    "{name} 的选项已变化。{notCharged}请{value1}，再按新的选项加入。",
+  "{name} isn’t available right now, so this round hasn’t been sent. {value1}, then tap Place order.":
+    "{name} 现在不供应，这一轮还没有下单。请{value1}后再点“下单”。",
   "{name} isn’t available right now. {notCharged} {value1} from your cart, then try again.":
     "{name} 现在不供应。{notCharged}请从购物车{value1}后重试。",
   "{name} just sold out. {notCharged} {value1} from your cart, then try again.":

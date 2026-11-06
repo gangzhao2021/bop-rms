@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
-import { CartPage } from "./CartPage.js";
+import { CartPage, cartPollIntervalMs, cartPollShouldRead } from "./CartPage.js";
 import type { CartState, CartStateController } from "./cart-state.js";
 import { checkoutInProgressMessage, type CartView } from "./types.js";
 import type { SendRoundController, SendRoundState } from "../checkout/send-round.js";
@@ -733,6 +733,66 @@ describe("WP-2423 item 6: a table that pays at the end", () => {
     expect(
       page(ready, { status: "blocked", messages: ["This order can’t be paid yet."] }),
     ).toContain("This order can’t be paid yet.");
+  });
+
+  it("WP-2423 guest-cart-503: names the dish the Store can't sell now; the round wasn't sent", () => {
+    const item = tableCart().cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const ready = { status: "ready", cart: tableCart() } as const;
+    const line = { cartItemReference: item.cartItemReference, available: null, sharedStock: false };
+    const unavailable = page(ready, { status: "refused", refusal: "item_unavailable", line });
+    expect(unavailable).toContain(
+      "Synthetic tea (Synthetic size) isn’t available right now, so this round hasn’t been sent. Remove Synthetic tea (Synthetic size), then tap Place order.",
+    );
+    // Nothing is charged at a table that pays at the end: never "hasn't been charged".
+    expect(unavailable).not.toContain("hasn’t been charged");
+    expect(page(ready, { status: "refused", refusal: "item_options_changed", line })).toContain(
+      "The choices for Synthetic tea (Synthetic size) have changed, so this round hasn’t been sent.",
+    );
+  });
+
+  it("WP-2423 guest-cart-503: marks a dish not sold now, lets anyone remove it, and holds Order", () => {
+    const item = tableCart().cart.items[0];
+    if (item === undefined) throw new Error("synthetic item missing");
+    const marked = tableCart({
+      items: [{ ...item, warnings: ["OTHER_PARTICIPANT_ITEM", "ITEM_UNAVAILABLE"] }],
+    });
+    const html = page({ status: "ready", cart: marked });
+    expect(html).toContain("Not available right now. Remove it to order the rest.");
+    expect(html).toContain("Added by another guest. Anyone at the table can remove it now.");
+    expect(html).not.toContain("Only they can change this item.");
+    expect(html).not.toContain("ITEM_UNAVAILABLE");
+    // Remove is enabled for that line; the other controls stay the adder's.
+    expect(html).toMatch(/aria-describedby="cart-item-ownership-[^"]+">Remove/u);
+    expect(html).toContain('disabled="" aria-label="Increase Synthetic tea quantity"');
+    // Order waits until no such line is left, and says why.
+    expect(html).toMatch(/disabled="" aria-describedby="cart-remove-unavailable">Place order/u);
+    expect(html).toContain("Remove the dishes that aren’t available right now, then order.");
+    const options = page({
+      status: "ready",
+      cart: tableCart({ items: [{ ...item, warnings: ["ITEM_OPTIONS_CHANGED"] }] }),
+    });
+    expect(options).toContain(
+      "The choices for this item have changed. Remove it, then add it again.",
+    );
+    expect(page({ status: "ready", cart: tableCart() })).not.toContain("cart-remove-unavailable");
+  });
+
+  it("WP-2423 guest-cart-503: the open table cart re-reads only on screen and never mid-send", () => {
+    expect(cartPollIntervalMs).toBe(15_000);
+    const ready = { status: "ready", cart: tableCart() } as const;
+    expect(cartPollShouldRead("visible", { status: "idle" }, ready)).toBe(true);
+    expect(cartPollShouldRead("hidden", { status: "idle" }, ready)).toBe(false);
+    expect(cartPollShouldRead("visible", { status: "sending" }, ready)).toBe(false);
+    expect(cartPollShouldRead("visible", { status: "unconfirmed", mayBePlaced: true }, ready)).toBe(
+      false,
+    );
+    expect(
+      cartPollShouldRead("visible", { status: "idle" }, {
+        status: "command-pending",
+        cart: tableCart(),
+      } as never),
+    ).toBe(false);
   });
 
   it("another guest placing an order never reads as paying, in either language", () => {

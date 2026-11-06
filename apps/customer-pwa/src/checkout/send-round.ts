@@ -101,7 +101,7 @@ export type SendRoundState =
   | { readonly status: "blocked"; readonly messages: readonly string[] }
   | {
       readonly status: "refused";
-      readonly refusal: "item_short" | "item_unavailable";
+      readonly refusal: "item_short" | "item_unavailable" | "item_options_changed";
       readonly line: CheckoutRefusedLine | null;
     }
   | { readonly status: "store-closed" | "table-checking-out" | "session-ended" | "cart-changed" }
@@ -271,6 +271,21 @@ export function createSendRoundController(
         case "cart_request_invalid":
           plan = null;
           return { status: "needs-page" };
+        // WP-2423 (guest-cart-503): the Store names the line it can't sell now. Nothing was sent;
+        // the answer is final until the guest removes it (no retry, no background send).
+        case "cart_item_unavailable":
+        case "cart_item_options_changed": {
+          plan = null;
+          const cartItemReference = (error as CartClientError).cartItemReference;
+          return {
+            status: "refused",
+            refusal: code === "cart_item_unavailable" ? "item_unavailable" : "item_options_changed",
+            line:
+              cartItemReference === null
+                ? null
+                : { cartItemReference, available: null, sharedStock: false },
+          };
+        }
         default:
           return unconfirmed();
       }

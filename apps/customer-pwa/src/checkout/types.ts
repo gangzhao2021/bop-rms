@@ -1,3 +1,4 @@
+import type { CheckoutRefusedLine } from "./session-client.js";
 import type { CartMoney, CartView } from "../cart/types.js";
 
 export interface CheckoutQuote {
@@ -43,6 +44,17 @@ export type CheckoutState =
         | "table-checking-out";
       cart: CartView | null;
       canRetry: boolean;
+    }>
+  | Readonly<{
+      /**
+       * WP-2423 (guest-cart-503): the Store can't sell one named line now; nothing was charged or
+       * sent. Final until the guest removes it (never retried).
+       */
+      status: "item-unavailable";
+      cart: CartView;
+      refusal: "item_unavailable" | "item_options_changed";
+      line: CheckoutRefusedLine | null;
+      canRetry: false;
     }>
   | Readonly<{
       /**

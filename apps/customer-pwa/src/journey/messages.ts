@@ -15,8 +15,12 @@ const cartItemWarnings: Readonly<Record<string, string>> = Object.freeze({
   get SOLD_OUT() {
     return t("This item is sold out right now.");
   },
+  // WP-2423 (guest-cart-503): sold out, out of stock, hidden or off the menu: all are "not now".
   get ITEM_UNAVAILABLE() {
-    return t("This item is no longer on the menu.");
+    return t("Not available right now. Remove it to order the rest.");
+  },
+  get ITEM_OPTIONS_CHANGED() {
+    return t("The choices for this item have changed. Remove it, then add it again.");
   },
   get OPTION_UNAVAILABLE() {
     return t("One of the choices for this item is no longer available.");
@@ -312,6 +316,16 @@ export const cartText = Object.freeze({
   line: Object.freeze({
     get addedByAnotherGuest() {
       return t("Added by another guest. Only they can change this item.");
+    },
+    /** WP-2423 (guest-cart-503): another phone's line that can't be sold now blocks the table. */
+    get addedByAnotherGuestRemovable() {
+      return t("Added by another guest. Anyone at the table can remove it now.");
+    },
+    get removeUnavailableFirst() {
+      return t("Remove the dishes that aren’t available right now, then order.");
+    },
+    get removeUnavailableBeforeCheckout() {
+      return t("Remove the dishes that aren’t available right now, then check out.");
     },
     quantityGroupLabel: (item: string) => t("Quantity for {item}", { item }),
     decreaseLabel: (item: string) => t("Decrease {item} quantity", { item }),

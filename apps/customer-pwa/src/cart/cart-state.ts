@@ -118,9 +118,16 @@ export function createCartStateController({
       if (revision !== readRevision) return;
       if (!online) publish({ status: "offline-readonly", cart: priorCart });
       else if (pending !== null) mapError(new CartClientError("network_unknown"), priorCart, true);
-      else if (!keep) mapError(error, priorCart, false);
+      else if (!keep || quietlyShown(error)) mapError(error, priorCart, false);
     }
   };
+  // WP-2423 (guest-cart-503): a quiet re-read keeps a passing fault off the page, but the guest's
+  // own state is said at once: the table started checkout, or this phone is no longer at it.
+  const quietlyShown = (error: unknown) =>
+    error instanceof CartClientError &&
+    (error.code === "cart_table_checking_out" ||
+      error.code === "cart_session_expired" ||
+      error.code === "cart_replacement_forbidden");
   const load = () => read(false);
 
   const mapError = (
