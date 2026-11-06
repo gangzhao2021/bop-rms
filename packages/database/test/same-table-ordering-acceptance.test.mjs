@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import pg from "pg";
 import { it } from "vitest";
 import {
@@ -8,7 +8,12 @@ import {
 } from "../../bop/identity/src/index.ts";
 import { createCustomerCartAdderStanding } from "../../../apps/api/src/customer-cart-adder-standing.ts";
 import {
+  createDiningCartItemService,
+  createPostgresBoundCartItemOperationStore,
+  createPostgresCartItemCommandStore,
   createPostgresCartOrderLookup,
+  createPostgresCartQueryStore,
+  createPostgresDiningCartCommandQueryStore,
   createPostgresOrderCreationStore,
 } from "../../rms/ordering/src/index.ts";
 import { orderWriteFixture } from "../../rms/ordering/src/tests/order-creation-store.fixture.ts";
@@ -299,3 +304,236 @@ it("WP-2423 (same-table-ordering): a round sent from the cart is reported with i
     }
   });
 });
+
+/**
+ * WP-2423 (same-table-ordering): the remove of another phone's line, end to end against the real
+ * stores as the restricted pilot API role (rendered pilot ACL, NOBYPASSRLS): Identity's live
+ * Guest Sessions decide whether the adder is still at the table, and Ordering writes the next Cart
+ * version, the operation record and the Audit record in one transaction. While the adder's phone
+ * is still at the table the remove is refused as a stale view (nothing written); when the check
+ * cannot run it is refused as "try again" (nothing written, never "session expired"); once staff
+ * removed that phone (its session revoked) another guest's remove applies, attributed to the
+ * remover. The binding check and Dining's departures are stand-ins here (each is covered by its
+ * own restricted-role test); the Identity, Cart and Audit reads and writes are real.
+ */
+it("WP-2423 (same-table-ordering): another guest removes a removed phone's dish, attributed, and only then", async () => {
+  await withIsolatedDatabase({ caseId: "wp2423_sto_remove" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    const api = "wp2423_remove_" + context.runId;
+    try {
+      await admin.query(
+        "CREATE ROLE " + api + " NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE",
+      );
+      await grantPilotApiAcl(admin, api);
+      const runner = (readOnly = false) => ({
+        async run(action) {
+          const client = new Client(context.clientConfig);
+          await client.connect();
+          try {
+            await client.query(readOnly ? "BEGIN READ ONLY" : "BEGIN");
+            await client.query("SET LOCAL ROLE " + api);
+            const value = await action({ query: (sql, values) => client.query(sql, [...values]) });
+            await client.query("COMMIT");
+            return value;
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          } finally {
+            await client.end();
+          }
+        },
+      });
+      const now = await dbNow(admin);
+      const f = orderWriteFixture({ namespace: "01902423", at: now, dineIn: true });
+      await seedSubmissionCart(admin, f);
+      const scope = f.scope;
+      const cart = f.cart;
+      const diningSession = String(cart.diningSessionReference);
+      const adder = String(cart.items[0].addedByParticipantReference);
+      const line = String(cart.items[0].cartItemReference);
+      const remover = id(602),
+        removerSession = id(603);
+      // The adder's phone: one live Guest Session bound to it at this table.
+      const credentials = createGuestSessionCredentialProvider(randomBytes(32));
+      const adderSession = id(604);
+      await admin.query(
+        `INSERT INTO bop_identity.guest_session (guest_session_id,session_selector_hash,
+          csrf_selector_hash,operation_id,operation_intent_hash,brand_id,store_id,public_store_id,
+          public_table_id,channel,locale,qr_id,qr_revocation_version,dining_state,status,
+          created_at,last_seen_at,idle_expires_at,absolute_expires_at,version,dining_session_id,
+          dining_participant_id)
+         VALUES ($1,decode($2,'hex'),decode($3,'hex'),$4,decode($5,'hex'),$6,$7,$8,$9,'DineIn',
+          'zh-Hans',$10,2,'DiningBound','Active',$11::timestamptz - interval '10 minutes',$11,
+          $11::timestamptz + interval '4 hours',
+          $11::timestamptz - interval '10 minutes' + interval '24 hours',1,$12,$13)`,
+        [
+          adderSession,
+          credentials.hashCredential("Session", credentials.generateCredential("Session")),
+          credentials.hashCredential("Csrf", credentials.generateCredential("Csrf")),
+          id(605),
+          credentials.hashOperationIntent("adder"),
+          scope.brandReference,
+          scope.storeReference,
+          id(606),
+          id(607),
+          id(608),
+          now,
+          diningSession,
+          adder,
+        ],
+      );
+      let bindingCheck = "Current";
+      let departuresUp = true;
+      const adders = createCustomerCartAdderStanding({
+        scope,
+        sessions: createPostgresGuestParticipantSessionSource(runner(true), scope),
+        binding: {
+          validate: async () => {
+            if (bindingCheck === "Throws") throw new Error("synthetic Identity outage");
+            return bindingCheck;
+          },
+        },
+        departures: {
+          readDepartures: async () => {
+            if (!departuresUp) throw new Error("synthetic Dining outage");
+            return [];
+          },
+        },
+      });
+      const references = {
+        hashIntent: (value) => "sha256:" + createHash("sha256").update(value).digest("hex"),
+        equals: (a, b) => a === b,
+        generate: () => id(700 + ++generated),
+      };
+      let generated = 0;
+      const writer = createPostgresCartItemCommandStore(runner(), scope, references);
+      const service = createDiningCartItemService({
+        scope,
+        now: () => new Date().toISOString(),
+        sessions: {
+          authorize: async () => ({
+            sessionReference: removerSession,
+            status: "Active",
+            version: 1,
+            ...scope,
+            publicStoreReference: id(606),
+            publicTableReference: id(607),
+            channel: "DineIn",
+            locale: "zh-Hans",
+            qrReference: id(608),
+            qrRevocationVersion: 2,
+            diningState: "DiningBound",
+            diningSessionReference: diningSession,
+            diningParticipantReference: remover,
+            createdAt: now,
+            lastSeenAt: now,
+            idleExpiresAt: new Date(Date.parse(now) + 4 * 3600_000).toISOString(),
+            absoluteExpiresAt: new Date(Date.parse(now) + 24 * 3600_000).toISOString(),
+            orderClosedAt: null,
+            closureExpiresAt: null,
+            rotatedFromGuestSessionReference: null,
+            revocationReason: null,
+            revokedAt: null,
+          }),
+        },
+        participation: {
+          resolve: async () => ({
+            schemaVersion: 1,
+            ...scope,
+            diningSessionReference: diningSession,
+            participantReference: remover,
+            tableReference: id(609),
+            tableAssignmentVersion: 1,
+            diningSessionVersion: 1,
+            participantVersion: 1,
+            observedAt: new Date().toISOString(),
+          }),
+        },
+        catalog: { validateSelection: async () => assert.fail("no Catalog read on remove") },
+        adders,
+        references,
+        audit: (input) => ({
+          auditId: id(800 + ++generated),
+          brandId: scope.brandReference,
+          storeId: scope.storeReference,
+          actor: { type: "System" },
+          actionCode: "ORDERING_CART_ITEM_" + input.action.toUpperCase(),
+          targetType: "OrderingCart",
+          targetId: input.cartReference,
+          reasonCode: "AUTHORIZED_CART_MUTATION",
+          correlationId: input.operationReference,
+          occurredAt: input.observedAt,
+          sourceChannel: "CUSTOMER_PWA",
+          dataClassification: "Restricted",
+          retentionPolicyCode: "AUDIT_DEFAULT",
+          retentionPolicyVersion: 1,
+        }),
+        repository: (bound) => ({
+          load: createPostgresDiningCartCommandQueryStore(runner(true), bound).load,
+          resolveOperation: createPostgresBoundCartItemOperationStore(runner(true), bound)
+            .resolveOperation,
+          commit: writer.commit,
+        }),
+      });
+      const reader = createPostgresCartQueryStore(runner(true), scope);
+      const written = async () =>
+        (
+          await admin.query(
+            `SELECT (SELECT count(*)::int FROM rms_ordering.cart_operation_record WHERE cart_id=$1)
+               AS operations,
+             (SELECT count(*)::int FROM platform_audit.audit_record WHERE target_id=$1) AS audits`,
+            [cart.cartReference],
+          )
+        ).rows[0];
+      const remove = (operation) =>
+        service.remove({
+          sessionCredential: "a".repeat(43),
+          csrfCredential: "b".repeat(43),
+          cartReference: cart.cartReference,
+          expectedAggregateVersion: cart.aggregateVersion,
+          cartItemReference: line,
+          operationReference: id(operation),
+        });
+      const before = await written();
+
+      // The adder's phone is still at the table: a stale view, read the cart again.
+      await assert.rejects(remove(901), { code: "CART_VERSION_CONFLICT" });
+      // The check could not run (Identity's binding check and Dining both down): try again.
+      bindingCheck = "Throws";
+      departuresUp = false;
+      await assert.rejects(remove(902), { code: "CART_DEPENDENCY_UNAVAILABLE" });
+      // Its check failed but nothing records it left: still not removable, still "try again".
+      bindingCheck = "Unavailable";
+      departuresUp = true;
+      await assert.rejects(remove(903), { code: "CART_DEPENDENCY_UNAVAILABLE" });
+      assert.deepEqual(await written(), before);
+      assert.equal((await reader.load(cart.cartReference)).aggregateVersion, cart.aggregateVersion);
+
+      // Staff removed that phone: its session is revoked, so Identity lists none live.
+      await admin.query(
+        `UPDATE bop_identity.guest_session SET status='Revoked',revocation_reason='Rotated',
+           revoked_at=$2,version=2 WHERE guest_session_id=$1`,
+        [adderSession, now],
+      );
+      const applied = await remove(904);
+      assert.equal(applied.status, "Applied");
+      const after = await reader.load(cart.cartReference);
+      assert.equal(after.aggregateVersion, cart.aggregateVersion + 1);
+      assert.ok(!after.items.some((item) => String(item.cartItemReference) === line));
+      assert.deepEqual(await written(), {
+        operations: before.operations + 1,
+        audits: before.audits + 1,
+      });
+      // Attributed to the remover's own Guest Session, never the adder's.
+      const record = await admin.query(
+        `SELECT guest_session_id,action_code FROM rms_ordering.cart_operation_record
+         WHERE operation_id=$1`,
+        [id(904)],
+      );
+      assert.equal(record.rows[0].guest_session_id, removerSession);
+    } finally {
+      await admin.end();
+    }
+  });
+}, 120_000);
