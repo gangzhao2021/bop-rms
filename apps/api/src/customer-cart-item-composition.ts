@@ -5,7 +5,10 @@ import {
   withCartItemStockShortage,
   type CustomerCartSelectionInventoryOptions,
 } from "./customer-cart-selection-inventory.js";
-import { createPostgresCatalogSelectionService } from "@rms/catalog";
+import {
+  createPostgresCatalogLineStandingSource,
+  createPostgresCatalogSelectionService,
+} from "@rms/catalog";
 import {
   GuestSessionService,
   createPostgresGuestSessionEntryStore,
@@ -20,6 +23,7 @@ import {
   createPostgresCartItemOperationStore,
   createPostgresPickupCartBindingReader,
   parseOrderingReference,
+  readCartSelectionRejected,
   type PickupCartItemOptions,
   type PickupCartItemResult,
 } from "@rms/ordering";
@@ -94,6 +98,19 @@ export function createCustomerCartItemPort(options: {
       displayLocale,
     );
   async function failure(error: unknown, input: Add | Update): Promise<CustomerCartPortResult> {
+    // WP-2423 (cart-unsellable-dishes): which choice or dish is not available now (either copy).
+    const rejected = readCartSelectionRejected(error);
+    if (rejected !== null)
+      return {
+        status: "SelectionInvalid",
+        issueCodes: [
+          rejected === "OptionNotOffered"
+            ? "CATALOG_OPTION_NOT_OFFERED"
+            : rejected === "NotAvailable"
+              ? "CATALOG_ITEM_UNAVAILABLE"
+              : "CATALOG_SELECTION_REJECTED",
+        ],
+      };
     if (error instanceof CartCheckoutInProgressError)
       return { status: "CheckoutInProgress", heldUntil: error.heldUntil };
     if (!(error instanceof CartError)) {
@@ -284,22 +301,30 @@ export function createCustomerCartItemWithCatalogComposition(
             ...selectedInventory,
             authorize: createCustomerPickupCartInventoryAuthorization(cart.scope, cart.now),
           });
+  const ownerScope = {
+    ...catalogScope,
+    brandReference: cart.scope.brandReference,
+    storeReference: cart.scope.storeReference,
+    orderType: "Pickup" as const,
+  };
+  const ownerSafety = {
+    killSwitch: catalogSafety.killSwitch,
+    inventory: catalogSafety.inventory,
+    clock: { now: cart.now },
+  };
+  const selection = createCatalog(catalogTransactions, ownerScope, ownerSafety);
+  // WP-2423 (cart-unsellable-dishes): a refused add says which choice or dish is not available.
+  const standing = createPostgresCatalogLineStandingSource(
+    catalogTransactions,
+    ownerScope,
+    ownerSafety,
+  );
   const port = createCustomerCartItemComposition({
     ...cart,
-    catalog: createCatalog(
-      catalogTransactions,
-      {
-        ...catalogScope,
-        brandReference: cart.scope.brandReference,
-        storeReference: cart.scope.storeReference,
-        orderType: "Pickup",
-      },
-      {
-        killSwitch: catalogSafety.killSwitch,
-        inventory: catalogSafety.inventory,
-        clock: { now: cart.now },
-      },
-    ),
+    catalog: {
+      validateSelection: (input, context) => selection.validateSelection(input, context),
+      explainMany: (inputs) => standing.explainMany(inputs),
+    },
   });
   // WP-2423: a quantity the stock can't make tells the guest how many it can.
   return selectedInventory === undefined ? port : withCartItemStockShortage(port);

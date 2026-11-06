@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { CartError, type CustomerCartDisplayView, type PickupCartItemResult } from "@rms/ordering";
+import {
+  CartError,
+  CartSelectionRejectedError,
+  type CustomerCartDisplayView,
+  type PickupCartItemResult,
+} from "@rms/ordering";
 import { createCustomerCartItemPort } from "./customer-cart-item-composition.js";
 const credential = "a".repeat(43);
 const reference = "018f5500-0000-7000-8000-000000000001";
@@ -194,6 +199,33 @@ describe("Pickup add/update HTTP composition", () => {
       issueCodes: [issue],
     });
   });
+  it.each([
+    ["OptionNotOffered", "CATALOG_OPTION_NOT_OFFERED"],
+    ["NotAvailable", "CATALOG_ITEM_UNAVAILABLE"],
+    ["Other", "CATALOG_SELECTION_REJECTED"],
+  ] as const)(
+    "WP-2423 (cart-unsellable-dishes): names why the selection was refused (%s)",
+    async (reason, issue) => {
+      const f = setup();
+      f.add.mockRejectedValue(new CartSelectionRejectedError(reason));
+      expect(await f.port.addItem(addInput)).toEqual({
+        status: "SelectionInvalid",
+        issueCodes: [issue],
+      });
+      // The entry's second copy of the package: the same answer, matched by name.
+      f.update.mockRejectedValue(
+        Object.assign(new Error("copy"), {
+          name: "CartSelectionRejectedError",
+          code: "CART_SELECTION_INVALID",
+          reason,
+        }),
+      );
+      expect(await f.port.updateItem(input)).toEqual({
+        status: "SelectionInvalid",
+        issueCodes: [issue],
+      });
+    },
+  );
   it("reports version conflict only with a current authorized view", async () => {
     const f = setup();
     f.add.mockRejectedValue(new CartError("CART_VERSION_CONFLICT"));

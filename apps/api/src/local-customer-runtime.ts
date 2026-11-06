@@ -90,6 +90,7 @@ import {
 import {
   createCustomerMenuQueryService,
   createCatalogSelectionDisplayQuery,
+  createPostgresCatalogLineStandingSource,
   createPostgresPublishedMenuQueryStore,
   parseCatalogReference,
   type CustomerMenuQueryPorts,
@@ -453,6 +454,21 @@ export function createLocalCustomerRuntime(options: LocalCustomerRuntimeOptions)
       catalog,
       stores,
       quotes: createPostgresAnyCartQuoteReader(options.cartTransactions, scope),
+      // WP-2423 (cart-unsellable-dishes): the pickup cart marks a hidden or sold-out dish, as
+      // the table cart does (one read-only Catalog transaction per cart read; fail-open).
+      ...(options.catalogCartItems === undefined
+        ? {}
+        : {
+            availability: createPostgresCatalogLineStandingSource(
+              options.catalogCartItems.catalogTransactions,
+              {
+                ...options.catalogCartItems.catalogScope,
+                ...scope,
+                orderType: "Pickup" as const,
+              },
+              { ...options.catalogCartItems.catalogSafety, clock: { now } },
+            ),
+          }),
     });
     const fallback =
       options.cartRemoval === undefined
