@@ -64,6 +64,9 @@ export function orderDetailResponse(
           : view.pickupContact.status === "Removed"
             ? { status: "Removed", removedAt: view.pickupContact.removedAt }
             : { status: "NotGiven" },
+    // WP-2423 M61: who accepted, handed over, took payment, cancelled, refunded and approved
+    // (names as staff screens show them, never an identifier).
+    record: view.record,
   };
 }
 

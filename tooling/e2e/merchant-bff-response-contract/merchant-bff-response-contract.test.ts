@@ -607,6 +607,7 @@ const queueView = {
   lines: null,
   pickupContact: null,
   paymentPosition: null,
+  record: null,
   paidOrderWatch,
 } satisfies Queue;
 const line = (n: number, batch: string, canCancel: boolean) => ({
@@ -645,6 +646,7 @@ const detailView = {
   } as Queue["lines"],
   pickupContact: null,
   paymentPosition: { refundedMinor: "500", refundPendingMinor: "0" },
+  record: null,
   paidOrderWatch,
 } satisfies Queue;
 const pickupDetailView = {
@@ -673,6 +675,24 @@ const pickupDetailView = {
     detailsVersion: 1,
   },
   paymentPosition: null,
+  // WP-2423 M61: who did what (names only), every field the browser parses.
+  record: {
+    accepted: [{ round: 1, by: "Sam", at: at(5) }],
+    handedOver: [{ name: "Mia", at: at(20) }],
+    payments: [{ method: "CardMachine", part: null, round: null, by: "You", at: at(6) }],
+    cancellations: [{ what: "Items", by: "Mia", at: at(8) }],
+    refunds: [
+      {
+        method: "CardMachine",
+        amountMinor: "500",
+        by: "Mia",
+        approvedBy: "Store owner",
+        at: at(9),
+      },
+    ],
+    writeOff: null,
+    paidOnlineByGuest: false,
+  },
   paidOrderWatch,
 } satisfies Queue;
 

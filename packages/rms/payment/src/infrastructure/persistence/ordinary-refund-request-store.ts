@@ -990,3 +990,47 @@ export async function readOrdinaryRefundRequestNote(
   if (typeof note !== "string") return fail("ORDINARY_REFUND_HISTORY_UNAVAILABLE");
   return note;
 }
+
+/**
+ * WP-2423 M61: who asked for each ordinary refund of one Order, how much and when, for the order's
+ * record (oldest first). Payment's own append-only records; the caller authorizes and owns the
+ * transaction. Approvals are read apart ({@link listOrderOrdinaryRefundApprovers}).
+ */
+export async function listOrderOrdinaryRefundRequesters(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<
+  readonly {
+    readonly requestReference: string;
+    readonly actorReference: string;
+    readonly amountMinor: string;
+    readonly requestedAt: string;
+  }[]
+> {
+  const brand = String(parsePaymentReference(scope.brandReference));
+  const store = String(parsePaymentReference(scope.storeReference));
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const result = await tx.query(
+    "SELECT request_id::text AS request,actor_id::text AS actor,amount_minor::text AS amount,requested_at FROM rms_payment.ordinary_refund_request WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY requested_at,request_id LIMIT 101",
+    [brand, store, String(parsePaymentReference(orderReference))],
+  );
+  if (result.rows.length > 100) return fail("ORDINARY_REFUND_REQUEST_UNAVAILABLE");
+  return Object.freeze(
+    result.rows.map((row) =>
+      Object.freeze({
+        requestReference: String(parsePaymentReference(row.request)),
+        actorReference: String(parsePaymentReference(row.actor)),
+        amountMinor: String(BigInt(String(row.amount))),
+        requestedAt: String(
+          parsePaymentInstant(
+            row.requested_at instanceof Date ? row.requested_at.toISOString() : row.requested_at,
+          ),
+        ),
+      }),
+    ),
+  );
+}

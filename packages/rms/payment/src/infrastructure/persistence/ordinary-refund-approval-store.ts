@@ -724,3 +724,44 @@ export async function listOrdinaryRefundApprovalReferences(
   if (result.rows.length > 20) return fail();
   return Object.freeze(result.rows.map((row) => String(parsePaymentReference(row.approval))));
 }
+
+/**
+ * WP-2423 M61: who approved each ordinary refund request of one Order, and when, for the order's
+ * record. Payment's own append-only records; the caller authorizes and owns the transaction.
+ */
+export async function listOrderOrdinaryRefundApprovers(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<
+  readonly {
+    readonly requestReference: string;
+    readonly approverReference: string;
+    readonly approvedAt: string;
+  }[]
+> {
+  const brand = String(parsePaymentReference(scope.brandReference));
+  const store = String(parsePaymentReference(scope.storeReference));
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    brand,
+    store,
+  ]);
+  const result = await tx.query(
+    "SELECT request_id::text AS request,approver_id::text AS approver,approved_at FROM rms_payment.ordinary_refund_approval WHERE brand_id=$1 AND store_id=$2 AND order_id=$3 ORDER BY approved_at,approval_id LIMIT 101",
+    [brand, store, String(parsePaymentReference(orderReference))],
+  );
+  if (result.rows.length > 100) return fail();
+  return Object.freeze(
+    result.rows.map((row) =>
+      Object.freeze({
+        requestReference: String(parsePaymentReference(row.request)),
+        approverReference: String(parsePaymentReference(row.approver)),
+        approvedAt: String(
+          parsePaymentInstant(
+            row.approved_at instanceof Date ? row.approved_at.toISOString() : row.approved_at,
+          ),
+        ),
+      }),
+    ),
+  );
+}

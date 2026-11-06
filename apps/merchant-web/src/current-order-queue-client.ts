@@ -1379,16 +1379,149 @@ function parsePickupContact(value: unknown, orderType: string): OrderPickupConta
   if (name.length < 1) return fail();
   return Object.freeze({ status: "Available", name, channel: raw.channel, value: contact });
 }
+/** WP-2423 M61: who did what on one order (names as staff screens show them, never an id). */
+export interface OrderRecordPeople {
+  readonly accepted: readonly {
+    readonly round: number;
+    readonly by: string | null;
+    readonly at: string;
+  }[];
+  readonly handedOver: readonly { readonly name: string; readonly at: string }[];
+  readonly payments: readonly {
+    readonly method: "CardMachine" | "Cash" | "Online";
+    readonly part: number | null;
+    readonly round: number | null;
+    readonly by: string | null;
+    readonly at: string;
+  }[];
+  readonly cancellations: readonly {
+    readonly what: "Order" | "Round" | "Items";
+    readonly by: string;
+    readonly at: string;
+  }[];
+  readonly refunds: readonly {
+    readonly method: "CardMachine" | "Cash" | "Online";
+    readonly amountMinor: string;
+    readonly by: string;
+    readonly approvedBy: string | null;
+    readonly at: string;
+  }[];
+  readonly writeOff: {
+    readonly amountMinor: string;
+    readonly by: string;
+    readonly approvedBy: string;
+    readonly at: string;
+  } | null;
+  readonly paidOnlineByGuest: boolean;
+}
+const personName = (value: unknown) => {
+  const name = text(value, 120);
+  return name.trim().length === 0 ? fail() : name;
+};
+const optionalName = (value: unknown) => (value === null ? null : personName(value));
+const count = (value: unknown, max: number) =>
+  typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= max
+    ? value
+    : fail();
+const list = (value: unknown, max: number): readonly unknown[] =>
+  Array.isArray(value) && value.length <= max ? value : fail();
+const payMethod = (value: unknown) =>
+  value === "CardMachine" || value === "Cash" || value === "Online" ? value : fail();
+export function parseOrderRecordPeople(value: unknown): OrderRecordPeople | null {
+  if (value === null) return null;
+  const raw = exact(value, [
+    "accepted",
+    "handedOver",
+    "payments",
+    "cancellations",
+    "refunds",
+    "writeOff",
+    "paidOnlineByGuest",
+  ]);
+  if (typeof raw.paidOnlineByGuest !== "boolean") return fail();
+  const writeOff =
+    raw.writeOff === null
+      ? null
+      : (() => {
+          const w = exact(raw.writeOff, ["amountMinor", "by", "approvedBy", "at"]);
+          if (typeof w.amountMinor !== "string" || !minorAmount.test(w.amountMinor)) return fail();
+          return Object.freeze({
+            amountMinor: w.amountMinor,
+            by: personName(w.by),
+            approvedBy: personName(w.approvedBy),
+            at: instant(w.at),
+          });
+        })();
+  return Object.freeze({
+    accepted: Object.freeze(
+      list(raw.accepted, 500).map((entry) => {
+        const a = exact(entry, ["round", "by", "at"]);
+        return Object.freeze({
+          round: count(a.round, 500),
+          by: optionalName(a.by),
+          at: instant(a.at),
+        });
+      }),
+    ),
+    handedOver: Object.freeze(
+      list(raw.handedOver, 100).map((entry) => {
+        const h = exact(entry, ["name", "at"]);
+        return Object.freeze({ name: personName(h.name), at: instant(h.at) });
+      }),
+    ),
+    payments: Object.freeze(
+      list(raw.payments, 200).map((entry) => {
+        const p = exact(entry, ["method", "part", "round", "by", "at"]);
+        const method = payMethod(p.method);
+        const by = optionalName(p.by);
+        // A guest's own online payment names no staff member; a staff payment always does.
+        if ((method === "Online") !== (by === null)) return fail();
+        return Object.freeze({
+          method,
+          part: p.part === null ? null : count(p.part, 20),
+          round: p.round === null ? null : count(p.round, 500),
+          by,
+          at: instant(p.at),
+        });
+      }),
+    ),
+    cancellations: Object.freeze(
+      list(raw.cancellations, 200).map((entry) => {
+        const c = exact(entry, ["what", "by", "at"]);
+        if (c.what !== "Order" && c.what !== "Round" && c.what !== "Items") return fail();
+        return Object.freeze({ what: c.what, by: personName(c.by), at: instant(c.at) });
+      }),
+    ),
+    refunds: Object.freeze(
+      list(raw.refunds, 200).map((entry) => {
+        const r = exact(entry, ["method", "amountMinor", "by", "approvedBy", "at"]);
+        if (typeof r.amountMinor !== "string" || !minorAmount.test(r.amountMinor)) return fail();
+        return Object.freeze({
+          method: payMethod(r.method),
+          amountMinor: r.amountMinor,
+          by: personName(r.by),
+          approvedBy: optionalName(r.approvedBy),
+          at: instant(r.at),
+        });
+      }),
+    ),
+    writeOff,
+    paidOnlineByGuest: raw.paidOnlineByGuest,
+  });
+}
 export function parseCurrentOrderDetail(value: unknown, orderReference: string) {
   // WP-2423: refunds of the online payment (absent from an older server).
   const withPosition =
     value !== null && typeof value === "object" && Object.hasOwn(value, "paymentPosition");
+  // WP-2423 M61: who did what (absent from an older server).
+  const withRecord = value !== null && typeof value === "object" && Object.hasOwn(value, "record");
   const raw = exact(value, [
     "screenId",
     "order",
     "lines",
     "pickupContact",
     ...(withPosition ? ["paymentPosition"] : []),
+    ...(withRecord ? ["record"] : []),
   ]);
   if (raw.screenId !== "OPS-ORDER-DETAIL") return fail();
   const queue = parseCurrentOrderQueue({ items: [raw.order], nextAfterOrderReference: null });
@@ -1521,6 +1654,8 @@ export function parseCurrentOrderDetail(value: unknown, orderReference: string) 
     /** WP-2423: refunded and refunding amounts of the online payment (null when not read). */
     paymentPosition,
     pickupContact: parsePickupContact(raw.pickupContact, order.orderType),
+    /** WP-2423 M61: who did what (null when not read or from an older server). */
+    record: withRecord ? parseOrderRecordPeople(raw.record) : null,
     lines: Object.freeze({
       items: Object.freeze(items),
       totals: Object.freeze({

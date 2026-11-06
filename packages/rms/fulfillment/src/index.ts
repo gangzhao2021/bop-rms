@@ -76,6 +76,7 @@ export {
   type PickupNotCollectedRecord,
 } from "./domain/pickup-not-collected.js";
 export {
+  listOrderPickupHandoffActors,
   listStoreUncollectedPickupOrders,
   loadPickupNotCollected,
 } from "./infrastructure/persistence/pickup-handoff-history.js";

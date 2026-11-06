@@ -1946,6 +1946,132 @@ function roundCount(order: QueuedOrder): string | null {
 }
 
 /** Orders v2: everything one order says and offers — the side panel, or the order page itself. */
+/** The fixed names staff screens use for a person without a recorded name, in the UI language. */
+export function personLabel(name: string): string {
+  switch (name) {
+    case "You":
+      return t("You");
+    case "Store owner":
+      return t("Store owner");
+    case "Brand owner":
+      return t("Brand owner");
+    case "Store manager":
+      return t("Store manager");
+    case "Area manager":
+      return t("Area manager");
+    case "Staff member":
+      return t("Staff member");
+    default:
+      return name;
+  }
+}
+
+const recordMoney = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
+const recordMethod = (method: "CardMachine" | "Cash" | "Online") =>
+  method === "CardMachine" ? t("Card machine") : method === "Cash" ? t("Cash") : t("Online");
+
+/**
+ * WP-2423 M61: the order record's "who did what" rows — accepted (per round at a table), handed
+ * over, each payment, cancellations, refunds with who approved, a write-off. Names only.
+ */
+export function orderRecordRows(
+  record: NonNullable<CurrentOrderDetail["record"]>,
+  orderType: QueuedOrder["orderType"],
+  timeZone: string | undefined,
+  today: string | null,
+): readonly { readonly key: string; readonly label: string; readonly text: string }[] {
+  const when = (at: string) => orderWhen(at, timeZone, today);
+  const rows: { key: string; label: string; text: string }[] = [];
+  const table = orderType !== "Pickup";
+  for (const accepted of record.accepted)
+    rows.push({
+      key: "accepted-" + accepted.round,
+      label: table ? t("Round {round} accepted", { round: accepted.round }) : t("Accepted"),
+      text:
+        accepted.by === null
+          ? t("Automatically, when paid · {at}", { at: when(accepted.at) })
+          : t("{name} · {at}", { name: personLabel(accepted.by), at: when(accepted.at) }),
+    });
+  for (const [index, handoff] of record.handedOver.entries())
+    rows.push({
+      key: "handed-" + index,
+      label: t("Handed over"),
+      text: t("{name} · {at}", { name: personLabel(handoff.name), at: when(handoff.at) }),
+    });
+  if (record.paidOnlineByGuest && !record.payments.some((payment) => payment.method === "Online"))
+    rows.push({
+      key: "paid-online",
+      label: t("Payment taken"),
+      text: t("Paid online by the guest"),
+    });
+  for (const [index, payment] of record.payments.entries()) {
+    const label =
+      payment.part !== null
+        ? t("Part {part} paid", { part: payment.part })
+        : payment.round !== null && table
+          ? t("Round {round} paid", { round: payment.round })
+          : t("Payment taken");
+    rows.push({
+      key: "payment-" + index,
+      label,
+      text:
+        payment.by === null
+          ? t("Paid online by the guest · {at}", { at: when(payment.at) })
+          : t("{method} · {name} · {at}", {
+              method: recordMethod(payment.method),
+              name: personLabel(payment.by),
+              at: when(payment.at),
+            }),
+    });
+  }
+  for (const [index, cancellation] of record.cancellations.entries())
+    rows.push({
+      key: "cancelled-" + index,
+      label:
+        cancellation.what === "Items"
+          ? t("Items cancelled")
+          : cancellation.what === "Round"
+            ? t("Round cancelled")
+            : t("Cancelled"),
+      text: t("{name} · {at}", { name: personLabel(cancellation.by), at: when(cancellation.at) }),
+    });
+  for (const [index, refund] of record.refunds.entries())
+    rows.push({
+      key: "refund-" + index,
+      label: t("Refund {amount}", { amount: recordMoney(refund.amountMinor) }),
+      text:
+        refund.approvedBy === null || refund.approvedBy === refund.by
+          ? t("{method} · {name} · {at}", {
+              method: recordMethod(refund.method),
+              name: personLabel(refund.by),
+              at: when(refund.at),
+            })
+          : t("{method} · asked by {name}, approved by {approver} · {at}", {
+              method: recordMethod(refund.method),
+              name: personLabel(refund.by),
+              approver: personLabel(refund.approvedBy),
+              at: when(refund.at),
+            }),
+    });
+  if (record.writeOff !== null)
+    rows.push({
+      key: "write-off",
+      label: t("Written off {amount}", { amount: recordMoney(record.writeOff.amountMinor) }),
+      text:
+        record.writeOff.approvedBy === record.writeOff.by
+          ? t("{name} · {at}", {
+              name: personLabel(record.writeOff.by),
+              at: when(record.writeOff.at),
+            })
+          : t("Asked by {name}, approved by {approver} · {at}", {
+              name: personLabel(record.writeOff.by),
+              approver: personLabel(record.writeOff.approvedBy),
+              at: when(record.writeOff.at),
+            }),
+    });
+  return rows;
+}
+
 function OrderDetailBody({
   order,
   single,
@@ -1956,6 +2082,7 @@ function OrderDetailBody({
   today,
   position,
   refundedBatches,
+  record = null,
   detail,
   action,
 }: {
@@ -1969,6 +2096,8 @@ function OrderDetailBody({
   readonly position: CurrentOrderDetail["paymentPosition"] | undefined;
   /** WP-2423 live minor 11: this order's rounds with an item refunded from their own payment. */
   readonly refundedBatches?: ReadonlySet<string> | undefined;
+  /** WP-2423 M61: who did what on this order (null while not read). */
+  readonly record?: CurrentOrderDetail["record"];
   readonly detail?:
     | ((
         order: QueuedOrder,
@@ -2274,6 +2403,14 @@ function OrderDetailBody({
               </time>
             </dd>
           </div>
+          {record === null
+            ? null
+            : orderRecordRows(record, order.orderType, timeZone, today).map((row) => (
+                <div key={row.key}>
+                  <dt>{row.label}</dt>
+                  <dd>{row.text}</dd>
+                </div>
+              ))}
           {order.businessDate === null ? null : (
             <div>
               <dt>{t("Business day")}</dt>
@@ -2321,6 +2458,7 @@ export function CurrentOrderQueueRows({
   now,
   paymentPosition,
   paymentPositions,
+  records,
   itemRefunds,
   expanded,
   rowAction,
@@ -2340,6 +2478,8 @@ export function CurrentOrderQueueRows({
   readonly paymentPositions?: ReadonlyMap<string, CurrentOrderDetail["paymentPosition"]>;
   /** WP-2423 live minor 11: by order read, its rounds with an item refunded (`batchesRefundedEarlier`). */
   readonly itemRefunds?: ReadonlyMap<string, ReadonlySet<string>> | undefined;
+  /** WP-2423 M61: by order read, who did what on it (its detail's record). */
+  readonly records?: ReadonlyMap<string, CurrentOrderDetail["record"]> | undefined;
   /**
    * Orders v2: the order open in the panel, kept by the page so a refresh after an action (a
    * recorded card-machine refund) never closes it. Omitted: the rows keep it themselves.
@@ -2424,6 +2564,7 @@ export function CurrentOrderQueueRows({
           today={today}
           position={positionOf(selected)}
           refundedBatches={itemRefunds?.get(selected.orderReference)}
+          record={records?.get(selected.orderReference) ?? null}
           detail={detail}
           action={action}
         />
@@ -2627,6 +2768,7 @@ export function CurrentOrderQueueRows({
             today={today}
             position={positionOf(selected)}
             refundedBatches={itemRefunds?.get(selected.orderReference)}
+            record={records?.get(selected.orderReference) ?? null}
             detail={detail}
             action={action}
           />
@@ -3000,6 +3142,10 @@ export function CurrentOrderQueuePage({
     ReadonlyMap<string, CurrentOrderDetail["paymentPosition"]>
   >(new Map());
   const [itemRefunds, setItemRefunds] = useState<ReadonlyMap<string, ReadonlySet<string>>>(
+    new Map(),
+  );
+  // WP-2423 M61: who did what on each opened order, as its detail read it.
+  const [records, setRecords] = useState<ReadonlyMap<string, CurrentOrderDetail["record"]>>(
     new Map(),
   );
   const [linesRevision, setLinesRevision] = useState(0);
@@ -3546,6 +3692,11 @@ export function CurrentOrderQueuePage({
             now={now}
             paymentPosition={detail?.paymentPosition}
             paymentPositions={positions}
+            records={
+              detail === undefined
+                ? records
+                : new Map([[detail.order.orderReference, detail.record]])
+            }
             itemRefunds={
               detail === undefined
                 ? itemRefunds
@@ -3905,6 +4056,9 @@ export function CurrentOrderQueuePage({
                             current.get(order.orderReference) === read.paymentPosition
                               ? current
                               : new Map(current).set(order.orderReference, read.paymentPosition),
+                          );
+                          setRecords((current) =>
+                            new Map(current).set(order.orderReference, read.record),
                           );
                           const refunded = batchesRefundedEarlier(read);
                           setItemRefunds((current) =>

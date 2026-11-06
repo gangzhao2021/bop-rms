@@ -29,6 +29,7 @@ import {
   listOrderPriceReductions,
   orderPriceReductionPermission,
   listCounterUnpaidCancellations,
+  listOrderRoundAcceptances,
 } from "@rms/ordering";
 import {
   listStoreKitchenBatchReceivedAt,
@@ -42,6 +43,7 @@ import { listDiningGuestStartedSessions, listDiningSessionTableLabels } from "@r
 import {
   listStorePickupAcceptanceDeadlines,
   listStoreUncollectedPickupOrders,
+  listOrderPickupHandoffActors,
 } from "@rms/fulfillment";
 import {
   createPostgresCardMachinePaymentStore,
@@ -52,6 +54,8 @@ import {
   listStoreOrderOnlinePaidTotals,
   listStoreOrdersWithOnlineRefunds,
   readStoreOrderOnlinePaidTip,
+  listOrderOrdinaryRefundApprovers,
+  listOrderOrdinaryRefundRequesters,
 } from "@rms/payment";
 import { createPostgresCurrentBrowserSessionSource } from "@bop/identity";
 import { createHash, randomBytes } from "node:crypto";
@@ -92,6 +96,7 @@ import {
   type BatchPaymentOutcome,
 } from "./dining-batch-payment-due.js";
 import { listRoundsWaitingForStaff } from "./dining-waiting-rounds.js";
+import { emptyOrderRecordFacts, nameOrderRecord } from "./merchant-order-record-people.js";
 
 /** Read-only merchant intent; session identity and selected scope are resolved inside its transaction. */
 export function createPersistentMerchantOrderQueue(options: {
@@ -627,6 +632,8 @@ export function createPersistentMerchantOrderQueue(options: {
               byLabel: string | null;
             }[]
           >();
+          // WP-2423 M61: who did what, on the one-order read only (see merchant-order-record-people).
+          const recordFacts = input.orderReference === undefined ? null : emptyOrderRecordFacts();
           if (scoped !== null && orderReferences.length > 0) {
             for (const record of await createPostgresStaffOrderCancellationReader(
               scoped,
@@ -660,6 +667,11 @@ export function createPersistentMerchantOrderQueue(options: {
                     amountMinor: total > 0n ? total.toString() : null,
                   };
                 }
+              recordFacts?.cancellations.push({
+                what: record.orderType === "DineIn" ? "Round" : "Order",
+                actor: String(record.actorReference),
+                at: String(record.cancelledAt),
+              });
               cancellations.set(String(record.orderBatchReference), {
                 reasonCode: record.reasonCode,
                 cancelledAt: String(record.cancelledAt),
@@ -701,6 +713,23 @@ export function createPersistentMerchantOrderQueue(options: {
             for (const [order, entry] of entries) {
               const paid = counterPayments.get(order)?.[0];
               if (paid !== undefined) addCardMachineTip(paid.payment);
+              if (paid !== undefined && recordFacts !== null) {
+                recordFacts.payments.push({
+                  method: "CardMachine",
+                  part: null,
+                  batch: null,
+                  actor: String(paid.payment.actorReference),
+                  at: String(paid.payment.takenAt),
+                });
+                for (const refund of paid.refunds)
+                  recordFacts.refunds.push({
+                    method: "CardMachine",
+                    amountMinor: refund.amountMinor.toString(),
+                    actor: String(refund.actorReference),
+                    approver: null,
+                    at: String(refund.refundedAt),
+                  });
+              }
               // The amount is rebuilt from five owners' records (as the payment record checks it),
               // so only the one-order read builds it, like a staff round's amount below.
               let amountDueMinor: string | null = null;
@@ -775,6 +804,23 @@ export function createPersistentMerchantOrderQueue(options: {
             ).values())
               for (const { payment, refunds } of recorded) {
                 addCardMachineTip(payment);
+                if (recordFacts !== null) {
+                  recordFacts.payments.push({
+                    method: "CardMachine",
+                    part: null,
+                    batch: String(payment.orderBatchReference),
+                    actor: String(payment.actorReference),
+                    at: String(payment.takenAt),
+                  });
+                  for (const refund of refunds)
+                    recordFacts.refunds.push({
+                      method: "CardMachine",
+                      amountMinor: refund.amountMinor.toString(),
+                      actor: String(refund.actorReference),
+                      approver: null,
+                      at: String(refund.refundedAt),
+                    });
+                }
                 roundPayments.set(String(payment.orderBatchReference), {
                   payment,
                   refundedMinor: refunds.reduce((sum, refund) => sum + refund.amountMinor, 0n),
@@ -887,6 +933,11 @@ export function createPersistentMerchantOrderQueue(options: {
                       record,
                       stillAllowed,
                     );
+              recordFacts?.cancellations.push({
+                what: "Items",
+                actor: String(record.actorReference),
+                at: String(record.cancelledAt),
+              });
               for (const line of record.orderItemReferences)
                 itemCancellations.set(String(line), {
                   cancellationReference: String(record.cancellationReference),
@@ -941,8 +992,63 @@ export function createPersistentMerchantOrderQueue(options: {
                 businessTransaction,
                 payLaterOrders,
               );
+              if (recordFacts !== null)
+                for (const settlement of settlements)
+                  recordFacts.payments.push({
+                    method: settlement.method,
+                    part: settlement.part?.partNumber ?? null,
+                    batch: null,
+                    actor:
+                      settlement.method === "Online" ? null : String(settlement.actorReference),
+                    at: String(settlement.takenAt),
+                  });
+              const writeOffs = await tableStore.listWriteOffsByOrders(
+                businessTransaction,
+                payLaterOrders,
+              );
+              if (recordFacts !== null && payLaterOrders.length > 0) {
+                // A table's refunds are recorded by the manager who made them.
+                for (const [method, refunds] of [
+                  [
+                    "Cash",
+                    await tableStore.listCashRefundsByOrders(businessTransaction, payLaterOrders),
+                  ],
+                  [
+                    "CardMachine",
+                    await tableStore.listCardRefundsByOrders(businessTransaction, payLaterOrders),
+                  ],
+                ] as const)
+                  for (const refund of refunds)
+                    recordFacts.refunds.push({
+                      method,
+                      amountMinor: refund.amountMinor.toString(),
+                      actor: String(refund.approvedByActorReference),
+                      approver: null,
+                      at: String(refund.refundedAt),
+                    });
+                for (const refund of await tableStore.listOnlineRefundsByOrders(
+                  businessTransaction,
+                  payLaterOrders,
+                ))
+                  if (refund.outcome?.status !== "Failed")
+                    recordFacts.refunds.push({
+                      method: "Online",
+                      amountMinor: refund.amountMinor.toString(),
+                      actor: String(refund.approvedByActorReference),
+                      approver: null,
+                      at: String(refund.requestedAt),
+                    });
+              }
+              if (recordFacts !== null)
+                for (const entry of writeOffs)
+                  recordFacts.writeOff = {
+                    amountMinor: entry.writtenOffMinor.toString(),
+                    actor: String(entry.requestedByActorReference),
+                    approver: String(entry.approvedByActorReference),
+                    at: String(entry.decidedAt),
+                  };
               const writtenOff = new Map(
-                (await tableStore.listWriteOffsByOrders(businessTransaction, payLaterOrders)).map(
+                writeOffs.map(
                   (entry) =>
                     [String(entry.orderReference), entry.writtenOffMinor.toString()] as const,
                 ),
@@ -1492,9 +1598,77 @@ export function createPersistentMerchantOrderQueue(options: {
               ? { ...current, canCancelUnpaid: false }
               : current;
           };
+          // WP-2423 M61: who accepted, handed over, took payment, cancelled, refunded and approved.
+          const record =
+            recordFacts === null || only === undefined || scoped === null
+              ? null
+              : await (async () => {
+                  if (!(await authority.guard(businessTransaction))) return unavailable();
+                  const rounds = await listOrderRoundAcceptances(
+                    businessTransaction,
+                    scoped,
+                    only.orderReference,
+                  );
+                  for (const round of rounds)
+                    if (round.accepted !== null)
+                      recordFacts.accepted.push({
+                        round: round.roundNumber,
+                        actor: round.accepted.actorReference,
+                        at: round.accepted.acceptedAt,
+                      });
+                  if (only.orderType === "Pickup")
+                    for (const handoff of await listOrderPickupHandoffActors(
+                      businessTransaction,
+                      scoped,
+                      only.orderReference,
+                    ))
+                      recordFacts.handedOver.push({
+                        actor: handoff.actorReference,
+                        at: handoff.handedOverAt,
+                      });
+                  // Ordinary refunds: who asked, and who approved (a second person, or the sole
+                  // operator on their own under DEC-SOLE-OPERATOR).
+                  const approvals = new Map(
+                    (
+                      await listOrderOrdinaryRefundApprovers(
+                        businessTransaction,
+                        scoped,
+                        only.orderReference,
+                      )
+                    ).map((approval) => [approval.requestReference, approval] as const),
+                  );
+                  for (const request of await listOrderOrdinaryRefundRequesters(
+                    businessTransaction,
+                    scoped,
+                    only.orderReference,
+                  )) {
+                    const approval = approvals.get(request.requestReference);
+                    recordFacts.refunds.push({
+                      method: counter.has(only.orderReference) ? "CardMachine" : "Online",
+                      amountMinor: request.amountMinor,
+                      actor: request.actorReference,
+                      approver: approval?.approverReference ?? null,
+                      at: approval?.approvedAt ?? request.requestedAt,
+                    });
+                  }
+                  const named = await nameOrderRecord(businessTransaction, scoped, {
+                    viewer: String(resolved.actorReference),
+                    at: String(source.now()),
+                    facts: recordFacts,
+                    rounds: new Map(
+                      rounds.map((round) => [round.orderBatchReference, round.roundNumber]),
+                    ),
+                  });
+                  return Object.freeze({
+                    ...named,
+                    paidOnlineByGuest:
+                      paidOnline.has(only.orderReference) && !counter.has(only.orderReference),
+                  });
+                })();
           return Object.freeze({
             ...result,
             lines: detailLines,
+            record,
             pickupContact,
             paymentPosition,
             // DEC-PAID-ORDER-AUTO-ACCEPT: only at a Store that has it on or has orders from it.

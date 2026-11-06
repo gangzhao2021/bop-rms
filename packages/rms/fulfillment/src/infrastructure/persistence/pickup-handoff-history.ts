@@ -186,3 +186,36 @@ export async function loadPickupNotCollected(
   if (row.reason !== "NotCollected" && row.reason !== "StoreClosing") return unavailable();
   return Object.freeze({ closedAt, reason: row.reason });
 }
+
+/**
+ * WP-2423 M61: who handed one pickup Order over, and when (each recorded handoff, earliest first),
+ * for the order's record. Fulfillment's own append-only records; the caller authorizes and owns
+ * the transaction. No recipient details are returned.
+ */
+export async function listOrderPickupHandoffActors(
+  tx: ConsumerTransaction,
+  scope: { readonly brandReference: string; readonly storeReference: string },
+  orderReference: string,
+): Promise<readonly { readonly actorReference: string; readonly handedOverAt: string }[]> {
+  await tx.query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+    scope.brandReference,
+    scope.storeReference,
+  ]);
+  const rows = (
+    await tx.query(
+      "SELECT h.actor_id::text actor_id,h.handed_over_at FROM rms_fulfillment.pickup_handoff_record h " +
+        "JOIN rms_fulfillment.fulfillment f ON f.brand_id=h.brand_id AND f.store_id=h.store_id AND f.fulfillment_id=h.fulfillment_id " +
+        "WHERE h.brand_id=$1 AND h.store_id=$2 AND f.order_id=$3 ORDER BY h.handed_over_at,h.pickup_handoff_id LIMIT 101",
+      [scope.brandReference, scope.storeReference, orderReference],
+    )
+  ).rows;
+  if (rows.length > 100) return unavailable();
+  return Object.freeze(
+    rows.map((row) =>
+      Object.freeze({
+        actorReference: String(row.actor_id),
+        handedOverAt: String(at(row.handed_over_at)),
+      }),
+    ),
+  );
+}

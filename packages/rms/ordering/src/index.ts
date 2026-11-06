@@ -547,7 +547,9 @@ export {
 export {
   createPostgresOrderKitchenProgressFactStore,
   createPostgresOrderPickupNotCollectedFactStore,
+  listOrderRoundAcceptances,
   loadOrderCanonicalPhase,
+  type OrderRoundAcceptance,
 } from "./infrastructure/persistence/order-progress-store.js";
 // WP-2423 / DEC-PILOT-BATCH-PHASE-01: a pickup closed as not collected ends the Order phase.
 export {

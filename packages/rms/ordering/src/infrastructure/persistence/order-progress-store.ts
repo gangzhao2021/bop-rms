@@ -300,3 +300,67 @@ export async function loadOrderCanonicalPhase(
     delivered,
   );
 }
+
+export interface OrderRoundAcceptance {
+  readonly orderBatchReference: string;
+  /** 1 for the Order's first round, in the order the rounds were submitted. */
+  readonly roundNumber: number;
+  /** Null while the round has not been accepted. */
+  readonly accepted: {
+    /** "System": accepted automatically (DEC-PAID-ORDER-AUTO-ACCEPT); no staff actor. */
+    readonly actorType: "User" | "System";
+    readonly actorReference: string | null;
+    readonly acceptedAt: string;
+  } | null;
+}
+
+/**
+ * WP-2423 M61: each round of one Order with who accepted it and when (the earliest acceptance of
+ * each batch), so the order's record says who did what. Ordering's own append-only records; the
+ * caller authorizes and owns the transaction.
+ */
+export async function listOrderRoundAcceptances(
+  transaction: ConsumerTransaction,
+  scope: Scope,
+  orderReferenceValue: string,
+): Promise<readonly OrderRoundAcceptance[]> {
+  const { brand, store } = await scoped(transaction, scope);
+  const order = parseOrderingReference(orderReferenceValue);
+  const result = await transaction.query<{
+    order_batch_id: string;
+    round_number: string | number;
+    actor_type: string | null;
+    actor_id: string | null;
+    accepted_at: unknown;
+  }>(
+    "SELECT b.order_batch_id::text,b.round_number,a.actor_type,a.actor_id::text,a.accepted_at " +
+      "FROM (SELECT order_batch_id,row_number() OVER (ORDER BY submitted_at,order_batch_id) AS round_number " +
+      "FROM rms_ordering.order_batch WHERE brand_id=$1 AND store_id=$2 AND order_id=$3) b " +
+      "LEFT JOIN LATERAL (SELECT actor_type,actor_id,accepted_at FROM rms_ordering.order_acceptance_record r " +
+      "WHERE r.brand_id=$1 AND r.store_id=$2 AND r.order_id=$3 AND r.order_batch_id=b.order_batch_id " +
+      "ORDER BY accepted_at,acceptance_id LIMIT 1) a ON true ORDER BY b.round_number LIMIT 501",
+    [brand, store, order],
+  );
+  if (result.rows.length > 500) throw new Error("ORDER_ROUND_ACCEPTANCES_UNAVAILABLE");
+  return Object.freeze(
+    result.rows.map((row) => {
+      if (
+        (row.actor_type !== null && row.actor_type !== "User" && row.actor_type !== "System") ||
+        (row.actor_type === "User" && row.actor_id === null)
+      )
+        throw new Error("ORDER_ROUND_ACCEPTANCES_UNAVAILABLE");
+      return Object.freeze({
+        orderBatchReference: row.order_batch_id,
+        roundNumber: Number(row.round_number),
+        accepted:
+          row.actor_type === null
+            ? null
+            : Object.freeze({
+                actorType: row.actor_type as "User" | "System",
+                actorReference: row.actor_type === "User" ? row.actor_id : null,
+                acceptedAt: iso(row.accepted_at),
+              }),
+      });
+    }),
+  );
+}

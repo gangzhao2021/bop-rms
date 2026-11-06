@@ -214,6 +214,7 @@ export { createPostgresOrderSettledFinalityStore } from "./infrastructure/persis
 
 export {
   createPostgresOrdinaryRefundRequestContextSource,
+  listOrderOrdinaryRefundRequesters,
   observeOrdinaryRefundOrderAfterFence,
 } from "./infrastructure/persistence/ordinary-refund-request-store.js";
 
@@ -230,6 +231,7 @@ export {
   ordinaryRefundDeclineReasons,
   createPostgresSoleOperatorRefundSummaryReader,
   listOrdinaryRefundApprovalReferences,
+  listOrderOrdinaryRefundApprovers,
 } from "./infrastructure/persistence/ordinary-refund-approval-store.js";
 // WP-2423 Q19: how an approval satisfied the "another person" rule, and the sole-operator fact.
 export {

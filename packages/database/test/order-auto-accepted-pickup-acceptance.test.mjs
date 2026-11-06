@@ -391,6 +391,38 @@ it("nothing left to refund: Can't make it and the System close still end it, and
         (await cancellationOf(world, handGiven))[0].refund_disposition,
         "AlreadyRefunded",
       );
+      // WP-2423 M61: the order's record says who did what, by name and never an id: sent to the
+      // kitchen automatically when paid, paid and refunded on the card machine, cancelled by the
+      // person reading it ("You").
+      const recorded = (
+        await createPersistentMerchantOrderQueue({
+          persistence: { ...staff.persistence, now: world.now },
+          quoteVersion: 1,
+          acceptanceConfigured: true,
+        })({
+          sessionCookie: staff.sessionCookie,
+          afterOrderReference: null,
+          orderReference: handGiven.orderReference,
+        })
+      ).record;
+      assert.deepEqual(
+        recorded.accepted.map((entry) => [entry.round, entry.by]),
+        [[1, null]],
+      );
+      assert.deepEqual(recorded.handedOver, []);
+      assert.deepEqual(
+        recorded.payments.map((entry) => [entry.method, entry.part, typeof entry.by]),
+        [["CardMachine", null, "string"]],
+      );
+      assert.deepEqual(
+        recorded.cancellations.map((entry) => [entry.what, entry.by]),
+        [["Order", "You"]],
+      );
+      assert.ok(recorded.refunds.length >= 1);
+      assert.ok(recorded.refunds.every((entry) => entry.method === "CardMachine"));
+      assert.equal(recorded.paidOnlineByGuest, true);
+      const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-/u;
+      assert.doesNotMatch(JSON.stringify(recorded), uuid);
       assert.equal(
         await transactions().run((transaction) =>
           createPostgresStaffOrderCancellationReader(scope).loadCompensationByPaymentEvent({
