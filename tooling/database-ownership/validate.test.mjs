@@ -6106,6 +6106,8 @@ describe("Database Schema Ownership Architecture Test", () => {
       "dining_session",
       "dining_participant",
       "dining_identity_admission",
+      // WP-2423 table-move-payment: the binding follows the party's recorded Move.
+      "dining_session_move_operation",
     ]);
     const asset = join(
       context.moduleRoot,
@@ -6123,6 +6125,7 @@ describe("Database Schema Ownership Architecture Test", () => {
     "dining_session",
     "dining_participant",
     "dining_identity_admission",
+    "dining_session_move_operation",
   ])("rejects WP-2299 changed %s admission", async (changed) => {
     const root = await fixture();
     const context = await writeModule(
@@ -6130,9 +6133,13 @@ describe("Database Schema Ownership Architecture Test", () => {
       "RMS",
       changed === "owner" ? "other" : "dining",
       changed === "schema" ? "rms_other" : "rms_dining",
-      ["dining_table", "dining_session", "dining_participant", "dining_identity_admission"].filter(
-        (table) => table !== changed,
-      ),
+      [
+        "dining_table",
+        "dining_session",
+        "dining_participant",
+        "dining_identity_admission",
+        "dining_session_move_operation",
+      ].filter((table) => table !== changed),
     );
     await writeFile(
       join(context.moduleRoot, "src/infrastructure/persistence/dining-guest-binding-store.ts"),
