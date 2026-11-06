@@ -3349,6 +3349,30 @@ for about 30 minutes while they go through one by one (v15 2026-10-18: 10:00 to 
 handing orders over as the row says; the pilot operator brings the waiting updates forward as below.
 Never edit retry or outbox rows by hand to speed them up.
 
+#### A paid order did not reach the kitchen (WP-2423 M04)
+
+Staff accept a paid order and the payment worker sends it to the kitchen within seconds. Until
+then Orders and Tables say "Sending to the kitchen…" (正在发送到后厨…), and the guest's page says
+"Received by the store" (门店已接单), never "sent to the kitchen". A minute after acceptance a round
+still not there reads "Not in the kitchen yet" (还没进后厨) and Home lists "Paid orders that need
+you" (需要你处理的已付订单). A paid pickup past its acceptance time whose automatic refund did not go
+through reads "The automatic refund didn't go through" (自动退款没有完成) and is counted the same way.
+
+- Staff: make the round from the dishes listed with it on Orders (or the table's panel on Tables)
+  and tell the manager; never ask the guest to pay again. If its ticket arrives later, mark it done
+  on the kitchen board instead of making it twice. For the pickup, press "Refuse and refund"
+  (拒单并退款): the guest gets the full amount back. The kitchen search names such an order
+  "accepted but hasn't reached the kitchen yet", not "not accepted yet".
+- A table moved after a round was paid keeps that round: staff accept it at the new table as usual
+  and the kitchen ticket names the new table. A guest who was still paying when the table moved is
+  charged and sent normally; a payment not yet started for that round must be sent again from the
+  new table.
+- Pilot operator: the business worker's health is `paymentWait` `attention_required` while any paid
+  wait keeps failing; `business-worker.log` has one `INTERNAL_PAYMENT_WAIT_FAILED` line per attempt
+  with its safe `code`, `failures` and `stuckWaits` (a count, never which order). The failing order
+  is retried on its own every 5 s, doubling to 30 s, while every other paid order of the Store
+  carries on. Fix the cause; no restart is needed.
+
 #### Retrying waiting updates now (WP-2423)
 
 Once the cause is fixed and deployed, the pilot operator runs `consumer-retry-operations.mjs` in the
