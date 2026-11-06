@@ -295,6 +295,13 @@ export function placeErrorText(
       return t(
         "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.",
       );
+    // WP-2423 M03: these dishes went into an order already; never charge them a second time.
+    case "AlreadyOrdered":
+      return error.placedOrderNumber !== null
+        ? t("Already ordered as order {number}. Nothing was charged again. Open it in Orders.", {
+            number: error.placedOrderNumber,
+          })
+        : t("These items are already in an order. Nothing was charged again. Open it in Orders.");
     case "SystemProblem":
       return table !== null
         ? t(

@@ -3402,6 +3402,7 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
     ["COUNTER_ORDER_NOT_FINISHED", 409, "counter_order_not_finished"],
     ["COUNTER_ORDER_IDEMPOTENCY_CONFLICT", 409, "counter_order_conflict"],
     ["COUNTER_ORDER_NO_PICKUP_TIMES", 409, "counter_order_no_pickup_times"],
+    ["COUNTER_ORDER_ALREADY_ORDERED", 409, "counter_order_already_ordered"],
     ["COUNTER_ORDER_UNAVAILABLE", 503, "counter_order_unavailable"],
   ] as const) {
     counterOrder.mockRejectedValueOnce(new CounterOrderError(code));
@@ -3409,6 +3410,14 @@ it("WP-2423 Q7: protects counter order and card-machine transport and maps refus
     expect(refused.status).toBe(status);
     expect(await refused.json()).toEqual({ error });
   }
+  // WP-2423 M03: staff are told which Order already holds these dishes.
+  counterOrder.mockRejectedValueOnce(
+    new CounterOrderError("COUNTER_ORDER_ALREADY_ORDERED", null, null, false, "13"),
+  );
+  expect(await (await submit("/counter/orders")).json()).toEqual({
+    error: "counter_order_already_ordered",
+    orderNumber: "13",
+  });
   counterOrder.mockRejectedValueOnce(new CounterOrderError("COUNTER_ORDER_ITEM_UNAVAILABLE", 1));
   const soldOut = await submit("/counter/orders");
   expect(soldOut.status).toBe(409);

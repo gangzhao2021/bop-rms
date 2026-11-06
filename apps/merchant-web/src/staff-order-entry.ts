@@ -13,6 +13,8 @@ export class CounterOrderClientError extends Error {
    * items are in (staff add them to the round against it) and whether guests can still send.
    */
   tableCart: { readonly cartVersion: number; readonly guestsCanSend: boolean } | null = null;
+  /** WP-2423 M03 AlreadyOrdered: the store's number of the order that holds these dishes. */
+  placedOrderNumber: string | null = null;
   constructor(
     readonly code:
       | "PermissionDenied"
@@ -42,6 +44,8 @@ export class CounterOrderClientError extends Error {
       | "Conflict"
       /** WP-2423: no pickup time covers now (the schedule ran out); nothing was placed. */
       | "NoPickupTimes"
+      /** WP-2423 M03: these dishes are already in an order; nothing new was charged. */
+      | "AlreadyOrdered"
       /** WP-2423: the server answered that it could not place the order (its own fault). */
       | "SystemProblem"
       | "Unavailable"
@@ -574,6 +578,14 @@ export function createCounterOrderClient(csrf: string, fetcher: typeof fetch = f
       if (code === "counter_order_conflict") throw new CounterOrderClientError("Conflict");
       if (code === "counter_order_no_pickup_times")
         throw new CounterOrderClientError("NoPickupTimes");
+      if (code === "counter_order_already_ordered") {
+        const refused = new CounterOrderClientError("AlreadyOrdered");
+        refused.placedOrderNumber =
+          typeof body.orderNumber === "string" && /^[1-9][0-9]{0,18}$/u.test(body.orderNumber)
+            ? body.orderNumber
+            : null;
+        throw refused;
+      }
       if (code === "new_guests_paused") throw new CounterOrderClientError("NewGuestsPaused");
       if (code === "counter_ordering_turned_off")
         throw new CounterOrderClientError("CounterOrderingOff");

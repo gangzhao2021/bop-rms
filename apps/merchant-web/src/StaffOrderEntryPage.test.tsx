@@ -322,6 +322,7 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
       [409, { error: "store_not_taking_pickup_orders" }],
       [503, { error: "counter_order_unavailable" }],
       [409, { error: "counter_order_no_pickup_times" }],
+      [409, { error: "counter_order_already_ordered", orderNumber: "13" }],
       [502, {}],
     ];
     const fetcher = vi.fn(async () => {
@@ -351,6 +352,15 @@ describe("counter order (OPS-ORDER-ENTRY) — WP-2423 Q7", () => {
     // "no answer"; a gateway failure without the server's answer stays OutcomeUnknown.
     await expect(client.placeOrder(command)).rejects.toMatchObject({ code: "SystemProblem" });
     await expect(client.placeOrder(command)).rejects.toMatchObject({ code: "NoPickupTimes" });
+    // WP-2423 M03: these dishes are already in order 13; staff open it instead of charging again.
+    const already = await client.placeOrder(command).catch((error: unknown) => error);
+    expect(already).toMatchObject({ code: "AlreadyOrdered", placedOrderNumber: "13" });
+    expect(placeErrorText(already as CounterOrderClientError, [])).toBe(
+      "Already ordered as order 13. Nothing was charged again. Open it in Orders.",
+    );
+    expect(placeErrorText(new CounterOrderClientError("AlreadyOrdered"), [])).toBe(
+      "These items are already in an order. Nothing was charged again. Open it in Orders.",
+    );
     await expect(client.placeOrder(command)).rejects.toMatchObject({ code: "OutcomeUnknown" });
     expect(placeErrorText(new CounterOrderClientError("SystemProblem"), [])).toBe(
       "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",

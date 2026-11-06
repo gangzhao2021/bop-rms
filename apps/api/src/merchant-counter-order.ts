@@ -53,6 +53,11 @@ export const counterOrderErrorCodes = [
   "COUNTER_ORDER_TIPS_OFF",
   /** The tip percentage is not one the Store offers now: read the choices again. */
   "COUNTER_ORDER_TIP_CHOICES_CHANGED",
+  /**
+   * WP-2423 M03: these dishes are already in an Order (`orderNumber`); nothing new was placed or
+   * charged. Staff open that Order in Orders.
+   */
+  "COUNTER_ORDER_ALREADY_ORDERED",
   "COUNTER_ORDER_UNAVAILABLE",
 ] as const;
 export type CounterOrderErrorCode = (typeof counterOrderErrorCodes)[number];
@@ -70,11 +75,14 @@ export class CounterOrderError extends Error {
    * made on its own; it is short only because other items in the order use the same stock.
    */
   readonly sharedStock: boolean;
+  /** For COUNTER_ORDER_ALREADY_ORDERED: the Store's number of the Order, when known. */
+  readonly orderNumber: string | null;
   constructor(
     code: CounterOrderErrorCode,
     lineIndex: number | null = null,
     available: number | null = null,
     sharedStock = false,
+    orderNumber: string | null = null,
   ) {
     super("counter order is unavailable");
     this.name = "CounterOrderError";
@@ -82,6 +90,7 @@ export class CounterOrderError extends Error {
     this.lineIndex = lineIndex;
     this.available = available;
     this.sharedStock = sharedStock;
+    this.orderNumber = orderNumber;
   }
 }
 const fail = (
@@ -781,6 +790,19 @@ export function createMerchantCounterOrder(options: {
       if (code === "STORE_CLOSED") return fail("COUNTER_ORDER_STORE_NOT_TAKING_ORDERS");
       // WP-2423: stock ran out between checkout and submission; nothing was placed or charged.
       if (code === "ORDER_CREATE_STOCK_SHORT") return fail("COUNTER_ORDER_ITEM_UNAVAILABLE");
+      // WP-2423 M03: these dishes already went into an Order; nothing new placed or charged.
+      if (code === "ORDER_CREATE_ALREADY_ORDERED" || code === "ALREADY_ORDERED") {
+        const placed = (error as { placedOrder?: { orderNumber?: unknown } | null }).placedOrder;
+        throw new CounterOrderError(
+          "COUNTER_ORDER_ALREADY_ORDERED",
+          null,
+          null,
+          false,
+          typeof placed?.orderNumber === "string" && /^[1-9][0-9]{0,18}$/u.test(placed.orderNumber)
+            ? placed.orderNumber
+            : null,
+        );
+      }
       // An owner listed between checkout and submission; nothing was placed or charged.
       if (code === "CHECKOUT_REQUOTE_REQUIRED") return fail("COUNTER_ORDER_NOT_PRICED");
       // WP-2423: the pickup time schedule ran out; say so rather than "try again". A counter

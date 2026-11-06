@@ -440,6 +440,36 @@ describe("counter order command — WP-2423 Q7", () => {
       expect(onUnexpected).not.toHaveBeenCalled();
     });
 
+    it("WP-2423 M03: dishes already in an Order are refused with its number (nothing new charged)", async () => {
+      const { pipeline, send, onUnexpected } = setup();
+      pipeline.addItem.mockResolvedValue({
+        status: "Applied",
+        cartVersion: 3,
+        lines: [{ cartItemReference: id(40), quantity: 1 }],
+      } as never);
+      pipeline.preparePayment.mockRejectedValueOnce(
+        Object.assign(new Error("order creation is unavailable"), {
+          code: "ORDER_CREATE_ALREADY_ORDERED",
+          placedOrder: { orderReference: id(70), orderNumber: "13" },
+        }),
+      );
+      await expect(send()).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ALREADY_ORDERED",
+        orderNumber: "13",
+      });
+      pipeline.startCheckout.mockRejectedValueOnce(
+        Object.assign(new Error("checkout session is unavailable"), {
+          code: "ALREADY_ORDERED",
+          placedOrder: null,
+        }),
+      );
+      await expect(send({ operationReference: id(34) })).rejects.toMatchObject({
+        code: "COUNTER_ORDER_ALREADY_ORDERED",
+        orderNumber: null,
+      });
+      expect(onUnexpected).not.toHaveBeenCalled();
+    });
+
     it("WP-2423: an owner listing mid-order asks staff to send again (nothing placed or charged)", async () => {
       const { pipeline, send, onUnexpected } = setup();
       pipeline.addItem.mockResolvedValue({

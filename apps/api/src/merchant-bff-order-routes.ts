@@ -381,6 +381,7 @@ export function installMerchantOrderRoutes(
             COUNTER_ORDER_NEW_GUESTS_PAUSED: [409, "new_guests_paused"],
             COUNTER_ORDER_TIPS_OFF: [409, "tips_turned_off"],
             COUNTER_ORDER_TIP_CHOICES_CHANGED: [409, "tip_choices_changed"],
+            COUNTER_ORDER_ALREADY_ORDERED: [409, "counter_order_already_ordered"],
             COUNTER_ORDER_UNAVAILABLE: [503, "counter_order_unavailable"],
           } as const
         )[error.code];
@@ -397,7 +398,9 @@ export function installMerchantOrderRoutes(
                     available: error.available,
                     sharedStock: error.sharedStock,
                   }
-                : { error: code },
+                : error.code === "COUNTER_ORDER_ALREADY_ORDERED" && error.orderNumber !== null
+                  ? { error: code, orderNumber: error.orderNumber }
+                  : { error: code },
           );
       });
   });
