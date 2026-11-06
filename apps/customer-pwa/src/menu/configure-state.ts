@@ -28,6 +28,7 @@ export type ConfigureState =
         | "table-checking-out"
         | "not-seated"
         | "table-start-refused"
+        | "table-in-use"
         | "table-question"
         | "expired"
         | "abandoned"
@@ -142,10 +143,11 @@ export function createConfigureController({
     }
     // Coordinator 2026-10-30: a scan of a table no party is seated at started no visit; nothing
     // is sent until staff seat the party and the code is scanned again.
-    if (getCustomerCsrfCredential() === null && isUnseatedTableScan()) {
-      // WP-2423 DEC-DINING-GUEST-TABLE-START: where the guest may start this table, their tap on Add
-      // starts and joins it, then the dish they configured goes in. Only a tap reaches here.
-      const starter = getGuestTableStarter();
+    // WP-2423 DEC-DINING-GUEST-TABLE-START: where the guest may start this table, their tap on Add
+    // starts and joins it, then the dish they configured goes in. Only a tap reaches here. A start
+    // whose join was refused leaves a starter that only joins, though the visit already exists.
+    const starter = getGuestTableStarter();
+    if (starter !== null || (getCustomerCsrfCredential() === null && isUnseatedTableScan())) {
       // Asked whether they're with the people here: that answer comes first, not a trip to staff.
       if (starter === null && isGuestTableQuestion()) {
         publish({
@@ -164,7 +166,7 @@ export function createConfigureController({
       const answer = await starter().catch(() => "Refused" as const);
       if (answer !== "Started" || getCustomerCsrfCredential() === null) {
         publish({
-          status: "table-start-refused",
+          status: answer === "InUse" ? "table-in-use" : "table-start-refused",
           issueCodes: [],
           retryAfterSeconds: null,
           canRetry: false,

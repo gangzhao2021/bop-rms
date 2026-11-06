@@ -101,7 +101,11 @@ export function isUnseatedTableScan(): boolean {
  * on the menu runs this, which starts and joins the table, so the dish they configured is kept.
  * Refused: why, in the guest's terms. Memory only; a link preview never reaches it.
  */
-export type GuestTableStartAnswer = "Started" | "Refused";
+export type GuestTableStartAnswer =
+  | "Started"
+  | "Refused"
+  /** People are at this table now: the start page asks whether this phone is with them. */
+  | "InUse";
 let guestTableStarter: (() => Promise<GuestTableStartAnswer>) | null = null;
 
 export function setGuestTableStarter(value: (() => Promise<GuestTableStartAnswer>) | null): void {

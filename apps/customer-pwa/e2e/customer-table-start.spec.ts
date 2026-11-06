@@ -162,6 +162,54 @@ async function joining(page: Page, bodies: string[]) {
   );
 }
 
+/** The table's cart, empty until the guest adds a dish; records what was added. */
+async function tableCart(page: Page, added: { quantity: number }[]) {
+  const expiresAt = new Date(Date.now() + 600_000).toISOString();
+  const line = (quantity: number) => ({
+    cartItemReference: id(40),
+    sellableReference: id(3),
+    displayName: "Synthetic tea",
+    quantity,
+    configuration: [],
+    customerNote: null,
+    lineEstimate: { status: "Unavailable", reasonCode: "FINAL_QUOTE_REQUIRED" },
+    warnings: [],
+  });
+  const cart = (items: unknown[]) => ({
+    status: 200,
+    headers: noStore,
+    json: {
+      schemaVersion: 1,
+      cart: {
+        cartReference: id(1),
+        version: items.length + 1,
+        orderType: "DineIn",
+        serviceMode: "DineIn",
+        context: { brandName: "Synthetic Brand", storeName: "Synthetic Tea House" },
+        lifecycle: { status: "Active", idleExpiresAt: expiresAt, absoluteExpiresAt: expiresAt },
+        items,
+        quote: null,
+        warnings: [],
+      },
+    },
+  });
+  await page.route("**/bff/customer/cart", (route) =>
+    route.request().method() === "GET" && added.length === 0
+      ? route.fulfill({
+          status: 404,
+          headers: noStore,
+          json: { error: { code: "cart_not_found" } },
+        })
+      : route.fulfill(cart(added.map((item) => line(item.quantity)))),
+  );
+  await page.route("**/api/v1/carts**", (route) => {
+    const url = route.request().url();
+    if (route.request().method() !== "POST") return route.fulfill(cart([]));
+    if (url.includes("/items")) added.push(route.request().postDataJSON() as { quantity: number });
+    return route.fulfill({ ...cart(added.map((item) => line(item.quantity))), status: 201 });
+  });
+}
+
 test.describe("@production CUST-ENTRY guest starts a free table", () => {
   test.use({ serviceWorkers: "block", viewport: { width: 390, height: 844 } });
 
@@ -226,52 +274,8 @@ test.describe("@production CUST-ENTRY guest starts a free table", () => {
     const joins: string[] = [];
     await joining(page, joins);
     await menu(page);
-    const expiresAt = new Date(Date.now() + 600_000).toISOString();
-    const line = (quantity: number) => ({
-      cartItemReference: id(40),
-      sellableReference: id(3),
-      displayName: "Synthetic tea",
-      quantity,
-      configuration: [],
-      customerNote: null,
-      lineEstimate: { status: "Unavailable", reasonCode: "FINAL_QUOTE_REQUIRED" },
-      warnings: [],
-    });
-    const cart = (items: unknown[]) => ({
-      status: 200,
-      headers: noStore,
-      json: {
-        schemaVersion: 1,
-        cart: {
-          cartReference: id(1),
-          version: items.length + 1,
-          orderType: "DineIn",
-          serviceMode: "DineIn",
-          context: { brandName: "Synthetic Brand", storeName: "Synthetic Tea House" },
-          lifecycle: { status: "Active", idleExpiresAt: expiresAt, absoluteExpiresAt: expiresAt },
-          items,
-          quote: null,
-          warnings: [],
-        },
-      },
-    });
     const added: { quantity: number }[] = [];
-    await page.route("**/bff/customer/cart", (route) =>
-      route.request().method() === "GET" && added.length === 0
-        ? route.fulfill({
-            status: 404,
-            headers: noStore,
-            json: { error: { code: "cart_not_found" } },
-          })
-        : route.fulfill(cart(added.map((item) => line(item.quantity)))),
-    );
-    await page.route("**/api/v1/carts**", (route) => {
-      const url = route.request().url();
-      if (route.request().method() !== "POST") return route.fulfill(cart([]));
-      if (url.includes("/items"))
-        added.push(route.request().postDataJSON() as { quantity: number });
-      return route.fulfill({ ...cart(added.map((item) => line(item.quantity))), status: 201 });
-    });
+    await tableCart(page, added);
     await page.goto("/#qr=aaa.bbb.ccc");
     const main = page.getByRole("main");
     await main.getByRole("button", { name: "Look at the menu first" }).click();
@@ -289,6 +293,50 @@ test.describe("@production CUST-ENTRY guest starts a free table", () => {
     await expect(page.getByRole("status").getByText("Added to your cart.")).toBeVisible();
     await expect(page.getByText("You can order once staff seat you")).toHaveCount(0);
     await expect(page.getByText("Scan the location QR code again")).toHaveCount(0);
+    await expectNoInternalText(page);
+  });
+
+  test("a first dish whose start was refused is joined on the next Add, never sent to staff", async ({
+    page,
+  }) => {
+    await page.route("**/bff/customer/entry", (route) => {
+      const body = route.request().postDataJSON() as { intent?: string };
+      return route.fulfill(
+        body.intent === "Start"
+          ? established()
+          : offer("entry_table_may_start", "customer.entry.table_may_start", "StartTable"),
+      );
+    });
+    const joins: string[] = [];
+    await joining(page, joins);
+    // The table's joins are spent the first time (a party of five rescanning).
+    let busy = true;
+    await page.route("**/bff/customer/dining/qr-join", (route) => {
+      if (!busy) return route.fallback();
+      busy = false;
+      joins.push("refused");
+      return route.fulfill({
+        status: 429,
+        headers: noStore,
+        json: {
+          error: { code: "dining_join_table_busy", messageKey: "customer.dining.join_table_busy" },
+        },
+      });
+    });
+    await menu(page);
+    const added: { quantity: number }[] = [];
+    await tableCart(page, added);
+    await page.goto("/#qr=aaa.bbb.ccc");
+    await page.getByRole("main").getByRole("button", { name: "Look at the menu first" }).click();
+    await page.getByRole("link", { name: "View Synthetic tea", exact: true }).click();
+    await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("This table can’t be started just now.");
+    expect(added).toEqual([]);
+    await page.getByRole("button", { name: "Add to cart", exact: true }).click();
+    await expect.poll(() => joins).toEqual(["refused", "{}"]);
+    await expect.poll(() => added).toEqual([expect.objectContaining({ quantity: 1 })]);
+    await expect(page.getByRole("status").getByText("Added to your cart.")).toBeVisible();
+    await expect(page.getByText("You can order once staff seat you")).toHaveCount(0);
     await expectNoInternalText(page);
   });
 

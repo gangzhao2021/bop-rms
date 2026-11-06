@@ -1,7 +1,10 @@
 import {
+  getGuestTableStarter,
   setCustomerCsrfCredential,
   setGuestTableQuestion,
+  setGuestTableStarter,
   setUnseatedTableScan,
+  type GuestTableStartAnswer,
 } from "../session/customer-transaction-context.js";
 import { describe, expect, it } from "vitest";
 import type { CustomerCartClient } from "../cart/cart-client.js";
@@ -207,6 +210,60 @@ describe("WP-1702 in-memory Configurator state", () => {
       expect(state.calls).toEqual([]);
     } finally {
       setGuestTableQuestion(false);
+      setUnseatedTableScan(false);
+    }
+  });
+
+  it("DEC-DINING-GUEST-TABLE-START: a start whose join was refused is joined again on the next Add, never sent to staff", async () => {
+    setUnseatedTableScan(true);
+    setCustomerCsrfCredential(null);
+    let joinRefused = true;
+    const joins: string[] = [];
+    // As the start page does: the start lets this phone in (a new visit clears the starter), the
+    // table's joins are spent, so it leaves a starter that only joins.
+    const join = async (): Promise<GuestTableStartAnswer> => {
+      joins.push("join");
+      if (joinRefused) {
+        setGuestTableStarter(join);
+        return "Refused";
+      }
+      setCustomerCsrfCredential("csrf-joined");
+      return "Started";
+    };
+    setGuestTableStarter(async () => {
+      setCustomerCsrfCredential("csrf-started");
+      return join();
+    });
+    try {
+      const state = fixture(null);
+      await state.controller.submit(id(3), draft);
+      expect(state.controller.getState()).toMatchObject({ status: "table-start-refused" });
+      expect(state.calls).toEqual([]);
+      // The guest taps Add again a minute later: the join is tried, not the cart.
+      joinRefused = false;
+      await state.controller.submit(id(3), draft);
+      expect(joins).toEqual(["join", "join"]);
+      expect(state.controller.getState()).not.toMatchObject({ status: "not-seated" });
+      expect(state.calls.map((call) => call.name)).toEqual(["load", "create", "add"]);
+      expect(getGuestTableStarter()).toBeNull();
+    } finally {
+      setGuestTableStarter(null);
+      setCustomerCsrfCredential(null);
+      setUnseatedTableScan(false);
+    }
+  });
+
+  it("DEC-DINING-GUEST-TABLE-START: people sat down at the table first: the guest is sent back to join them", async () => {
+    setUnseatedTableScan(true);
+    setCustomerCsrfCredential(null);
+    setGuestTableStarter(async () => "InUse");
+    try {
+      const state = fixture(null);
+      await state.controller.submit(id(3), draft);
+      expect(state.controller.getState()).toMatchObject({ status: "table-in-use" });
+      expect(state.calls).toEqual([]);
+    } finally {
+      setGuestTableStarter(null);
       setUnseatedTableScan(false);
     }
   });

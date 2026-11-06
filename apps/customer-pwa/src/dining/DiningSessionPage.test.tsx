@@ -644,13 +644,13 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
   };
   it("says a finished dish is ready by its number: nobody is bringing it over", () => {
     const html = readyRound({ startedByGuest: true, orderNumber: "12" });
-    expect(html).toContain("Ready · Order 12");
+    expect(html).toContain("Ready · collect order 12 at the counter");
     expect(html).not.toContain("on its way to your table");
   });
   it("a staff-opened table reads as it always did", () => {
     const html = readyRound({ orderNumber: "12" });
     expect(html).toContain("on its way to your table");
-    expect(html).not.toContain("Ready · Order");
+    expect(html).not.toContain("collect order");
   });
   it("a dish being remade is called by its number too", () => {
     const remade = (changes: Partial<DiningSessionView>) => {
@@ -669,7 +669,7 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
       });
     };
     expect(remade({ startedByGuest: true, orderNumber: "12" })).toContain(
-      "Being remade · we&#x27;ll call order 12",
+      "Being remade · collect order 12 at the counter when it&#x27;s ready",
     );
     expect(remade({ startedByGuest: true, orderNumber: "12" })).not.toContain(
       "bring it to your table",

@@ -1,5 +1,9 @@
 import { listSeparator, t, saidTable } from "../i18n/i18n.js";
-import { DiningAdmissionPanel, type DiningAdmissionUi } from "../dining/DiningAdmissionPanel.js";
+import {
+  admissionStateForFailure,
+  DiningAdmissionPanel,
+  type DiningAdmissionUi,
+} from "../dining/DiningAdmissionPanel.js";
 import { CustomerPage, type CustomerStoreContext } from "../journey/CustomerPage.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
@@ -149,15 +153,30 @@ export function EntryContextPage({
     const enter = clientRef.current.enter;
     const admission = admissionRef.current;
     if (enter === undefined || admission === undefined) return;
+    // Joining the table this phone was just let into. Refused (the table's joins or starts are
+    // spent for a few minutes): the guest's next tap on Add tries the join again, never the server's
+    // "ask staff to seat you", because nobody seats anyone at these tables.
+    const join = async (): Promise<GuestTableStartAnswer> => {
+      try {
+        await admission.journey.start({
+          operationReference: admission.generateOperationReference(),
+          joinCredential: null,
+        });
+      } catch (error) {
+        setGuestTableStarter(join);
+        return admissionStateForFailure(error) === "TableInUse" ? "InUse" : "Refused";
+      }
+      setGuestTableStarter(null);
+      return "Started";
+    };
     setGuestTableStarter(async (): Promise<GuestTableStartAnswer> => {
       const next = await enter("Start");
+      // Someone else sat down first: the start page asks this phone whether it's with them.
+      if (next.kind === "TableAskNewParty") return "InUse";
       if (next.kind !== "Established") return "Refused";
+      // A new visit clears the starter; the join below puts one back if it's refused.
       established.current?.(next.context);
-      await admission.journey.start({
-        operationReference: admission.generateOperationReference(),
-        joinCredential: null,
-      });
-      return "Started";
+      return join();
     });
   }, [state.kind]);
 

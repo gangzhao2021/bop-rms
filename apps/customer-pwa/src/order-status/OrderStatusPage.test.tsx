@@ -561,12 +561,14 @@ describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
   it("says a finished order is ready by its number: nobody is bringing it over", () => {
     const html = dineIn("Ready");
     expect(html).toContain("Your order is ready");
-    expect(html).toContain("Ready · Order ");
+    expect(html).toContain("Ready · collect order ");
+    expect(html).toContain(" at the counter");
     expect(html).not.toContain("brought to your table");
   });
   it("a remake is called by its number too", () => {
     const html = dineIn("In Progress", true);
-    expect(html).toContain("We’ll call order ");
+    expect(html).toContain("Collect order ");
+    expect(html).toContain(" at the counter when it’s ready.");
     expect(html).not.toContain("brought to your table");
   });
 });

@@ -320,7 +320,7 @@ function RoundCard({
           <dt>{t("Status")}</dt>
           <dd>
             {round.status === "Ready" && collectOrderNumber !== null
-              ? t("Ready · Order {number}", { number: collectOrderNumber })
+              ? t("Ready · collect order {number} at the counter", { number: collectOrderNumber })
               : statusText[round.status]}
           </dd>
         </div>
@@ -347,7 +347,9 @@ function RoundCard({
             ) : item.beingRemade ? (
               <span className="order-status__item-remake">
                 {collectOrderNumber !== null
-                  ? t("Being remade · we'll call order {number}", { number: collectOrderNumber })
+                  ? t("Being remade · collect order {number} at the counter when it's ready", {
+                      number: collectOrderNumber,
+                    })
                   : t("Being remade · we'll bring it to your table shortly")}
               </span>
             ) : round.payment === "Paid" ? (

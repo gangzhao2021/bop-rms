@@ -275,15 +275,19 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Start this table first": "请先开始用这张桌",
   "Add a dish from the menu to start, or go back to start this table.":
     "从菜单加一道菜就可以开始，或者回到开始页开始用这张桌。",
-  "Being remade · we'll call order {number}": "正在重做 · 做好了会叫 {number} 号",
-  "We’re remaking an item for you. We’ll call order {number}.":
-    "我们正在为您重做一道菜，做好了会叫 {number} 号。",
+  "Being remade · collect order {number} at the counter when it's ready":
+    "正在重做 · 做好后请到柜台取 {number} 号",
+  "We’re remaking an item for you. Collect order {number} at the counter when it’s ready.":
+    "我们正在为您重做一道菜，做好后请到柜台取 {number} 号。",
+  "People have just sat down at this table. If you’re with them, go back and join them. Your choices are kept here.":
+    "这张桌刚有人坐下。如果是一起的，请回去加入他们。您选的内容还在这里。",
+  "Back to this table": "回到这张桌",
   "This table can’t be started just now. Pick another table or ask staff. Your choices are kept here.":
     "这张桌暂时不能开始。请换一张桌或找店员。您选的内容还在这里。",
   "Nothing in your cart yet": "购物车还是空的",
   "Add a dish from the menu and this table starts for you.": "从菜单加一道菜，就会开始用这张桌。",
   "Add a dish from the menu to start.": "从菜单加一道菜就可以开始。",
-  "Ready · Order {number}": "做好了 · {number} 号",
+  "Ready · collect order {number} at the counter": "做好了 · 请到柜台取 {number} 号",
   "This table isn’t open yet": "这桌还没开台",
   "Ask staff to seat you, then scan again.": "请让店员带位，开台后再扫一次码。",
   "New party? Ask staff to seat you, then scan again.":

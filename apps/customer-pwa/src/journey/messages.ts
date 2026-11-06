@@ -869,10 +869,13 @@ export const orderStatusText = Object.freeze({
     },
     /** DEC-DINING-GUEST-TABLE-START: nobody brings dishes to a table a guest started. */
     remakingByNumber(number: string) {
-      return t("We’re remaking an item for you. We’ll call order {number}.", { number });
+      return t(
+        "We’re remaking an item for you. Collect order {number} at the counter when it’s ready.",
+        { number },
+      );
     },
     readyByNumber(number: string) {
-      return t("Ready · Order {number}", { number });
+      return t("Ready · collect order {number} at the counter", { number });
     },
     get servedHeading() {
       return t("Items served");
