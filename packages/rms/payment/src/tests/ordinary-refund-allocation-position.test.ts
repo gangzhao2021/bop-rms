@@ -56,6 +56,7 @@ it("binds the fully confirmed payment to its immutable order and tip components"
   expect(await f.read()).toMatchObject({
     confirmedMinor: 6000n,
     pendingMinor: 0n,
+    unsentMinor: 0n,
     confirmedOrderAllocationMinor: 5500n,
     confirmedTipMinor: 500n,
     unallocatedConfirmedMinor: 0n,
@@ -83,12 +84,21 @@ it("does not proportionally infer components for a partial confirmation", async 
     unallocatedConfirmedMinor: 3000n,
   });
 });
-it("keeps an undispatched request entirely pending", async () => {
+it("keeps an undispatched request entirely pending, and names it not sent (M16)", async () => {
   const f = setup();
   f.readOutcome.mockResolvedValue(null);
+  const sent = setup();
+  sent.readOutcome.mockResolvedValue({
+    confirmedMinor: 0n,
+    pendingMinor: 6000n,
+    observationCount: 0,
+    historyDigest: "sha256:" + "c".repeat(64),
+  });
+  expect(await sent.read()).toMatchObject({ pendingMinor: 6000n, unsentMinor: 0n });
   expect(await f.read()).toMatchObject({
     confirmedMinor: 0n,
     pendingMinor: 6000n,
+    unsentMinor: 6000n,
     confirmedOrderAllocationMinor: 0n,
     confirmedTipMinor: 0n,
     unallocatedConfirmedMinor: 0n,

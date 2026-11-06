@@ -362,17 +362,36 @@ function parsePaidOnline(value: unknown) {
 /** WP-2423: how much of an Order's online payment Payment has refunded or is refunding. */
 function parsePaymentPosition(value: unknown) {
   if (value === null || value === undefined) return null;
-  const raw = exact(value, ["refundedMinor", "refundPendingMinor"]);
+  // WP-2423 M16: of the pending refund, what was never sent and what is still to be made on the
+  // card machine. A server from before them answers neither (nothing is called unsent).
+  const split =
+    value !== null && typeof value === "object" && Object.hasOwn(value, "refundNotSentMinor");
+  const raw = exact(value, [
+    "refundedMinor",
+    "refundPendingMinor",
+    ...(split ? ["refundNotSentMinor", "refundOnMachineMinor"] : []),
+  ]);
+  const notSent = split ? raw.refundNotSentMinor : "0",
+    onMachine = split ? raw.refundOnMachineMinor : "0";
   if (
     typeof raw.refundedMinor !== "string" ||
     !minorPattern.test(raw.refundedMinor) ||
     typeof raw.refundPendingMinor !== "string" ||
-    !minorPattern.test(raw.refundPendingMinor)
+    !minorPattern.test(raw.refundPendingMinor) ||
+    typeof notSent !== "string" ||
+    !minorPattern.test(notSent) ||
+    typeof onMachine !== "string" ||
+    !minorPattern.test(onMachine) ||
+    BigInt(notSent) + BigInt(onMachine) > BigInt(raw.refundPendingMinor)
   )
     return fail();
   return Object.freeze({
     refundedMinor: raw.refundedMinor,
     refundPendingMinor: raw.refundPendingMinor,
+    /** Recorded online refunds never sent to the card company. */
+    refundNotSentMinor: notSent,
+    /** Card-machine refunds still to be made on the machine and recorded. */
+    refundOnMachineMinor: onMachine,
   });
 }
 /**

@@ -12,6 +12,7 @@ import {
   orderMoney,
   CurrentOrderQueueRows,
   onlinePaymentText,
+  OnlineRefundNote,
   storeTime,
   filterCurrentOrderItems,
   ordersListSearch,
@@ -515,7 +516,14 @@ it("WP-2423: the list's filters survive in its address, and only what the page o
 it("WP-2423: a row's amount is what the Store kept, and says what went back at any width", () => {
   const accepted = currentOrderQueueFixture().items[2];
   if (accepted === undefined) throw new Error("fixture");
-  const row = (paymentPosition: { refundedMinor: string; refundPendingMinor: string } | null) =>
+  const row = (
+    paymentPosition: {
+      refundedMinor: string;
+      refundPendingMinor: string;
+      refundNotSentMinor?: string;
+      refundOnMachineMinor?: string;
+    } | null,
+  ) =>
     renderToStaticMarkup(
       <CurrentOrderQueueRows
         view={parseCurrentOrderQueue({
@@ -530,18 +538,70 @@ it("WP-2423: a row's amount is what the Store kept, and says what went back at a
         })}
       />,
     );
-  const partly = row({ refundedMinor: "1569", refundPendingMinor: "0" });
+  const partly = row({
+    refundedMinor: "1569",
+    refundPendingMinor: "0",
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
+  });
   expect(partly).toContain('<span class="order-row__money">$15.68</span>');
   expect(partly).toContain('<span class="order-row__refunded">$15.69 refunded</span>');
   expect(partly).not.toContain('<span class="order-row__paid">partly refunded');
-  const full = row({ refundedMinor: "3137", refundPendingMinor: "0" });
+  const full = row({
+    refundedMinor: "3137",
+    refundPendingMinor: "0",
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
+  });
   expect(full).toContain('<span class="order-row__money">$0.00</span>');
   expect(full).toContain('<span class="order-row__refunded">$31.37 refunded</span>');
   // Money still on its way back was not returned yet: the amount stands and the row says so.
-  const pending = row({ refundedMinor: "0", refundPendingMinor: "1569" });
+  const pending = row({
+    refundedMinor: "0",
+    refundPendingMinor: "1569",
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
+  });
   expect(pending).toContain('<span class="order-row__money">$31.37</span>');
-  expect(pending).toContain("refund in progress");
+  expect(pending).toContain("refund sent, waiting on the bank");
   expect(row(null)).toContain('<span class="order-row__money">$31.37</span>');
+});
+
+it("WP-2423 M16: a refund recorded but never sent is not called on its way", () => {
+  const accepted = currentOrderQueueFixture().items[2];
+  if (accepted === undefined) throw new Error("fixture");
+  const order = parseCurrentOrderQueue({
+    items: [{ ...accepted, paidOnline: { amountMinor: "3137", currencyCode: "CAD" } }],
+    nextAfterOrderReference: null,
+  }).items[0];
+  if (order === undefined) throw new Error("fixture");
+  const position = (pending: string, notSent: string, onMachine = "0") => ({
+    refundedMinor: "0",
+    refundPendingMinor: pending,
+    refundNotSentMinor: notSent,
+    refundOnMachineMinor: onMachine,
+  });
+  expect(onlinePaymentText(order, position("1569", "1569"))).toBe(
+    "Paid online $31.37 · refund not sent yet",
+  );
+  expect(onlinePaymentText(order, position("1569", "0"))).toBe(
+    "Paid online $31.37 · refund sent, waiting on the bank",
+  );
+  expect(
+    onlinePaymentText(order, { ...position("1569", "0"), refundedMinor: "3137" }),
+  ).not.toContain("refunded in full");
+  const note = (p: ReturnType<typeof position>) =>
+    renderToStaticMarkup(<OnlineRefundNote order={order} position={p} />);
+  expect(note(position("1569", "1569"))).toContain(
+    "A refund of $15.69 is recorded but not sent yet.",
+  );
+  expect(note(position("1569", "1569"))).not.toContain("on its way");
+  expect(note(position("1569", "0"))).toContain(
+    "A refund of $15.69 was sent and is waiting on the card company.",
+  );
+  expect(note(position("1569", "0", "1569"))).toContain(
+    "A refund of $15.69 is still to be made on the card machine.",
+  );
 });
 
 it("WP-2423 Q1: grades the acceptance window and shows it only while the order can be accepted", () => {
@@ -823,6 +883,74 @@ it("WP-2423 Q6: offers cancellation only where allowed and shows the Store's can
   expect(diningHtml).not.toContain("SOLD_OUT");
 });
 
+it("WP-2423 M16: a cancellation covered by earlier refunds still in flight is not called refunded in full", () => {
+  const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+  const order = {
+    orderReference: id(1),
+    orderNumber: "44",
+    orderType: "Pickup",
+    sourceChannel: "Qr",
+    submittedAt: "2026-10-11T12:00:00.000Z",
+    observedAt: "2026-10-11T12:10:00.000Z",
+    initialBatchReference: id(90),
+    batches: [
+      {
+        orderBatchReference: id(90),
+        sequence: 1,
+        acceptanceStatus: "Cancelled",
+        canRequestAcceptance: false,
+        canCancel: false,
+        canCancelItems: false,
+        staffCancellation: {
+          reasonCode: "SOLD_OUT",
+          cancelledAt: "2026-10-11T12:05:00.000Z",
+          refundStatus: "Refunded",
+          refundMethod: "Online",
+          refundAmountMinor: "0",
+        },
+      },
+    ],
+    canRequestAcceptance: false,
+    unfulfillable: null,
+    pickupNotCollected: false,
+    acceptBy: null,
+    awaitingPayment: false,
+    paidOnline: { amountMinor: "1130", currencyCode: "CAD" },
+    currentPhase: "Cancelled",
+    currentVersion: 4,
+  };
+  const html = (position: Record<string, string>) =>
+    renderToStaticMarkup(
+      <CurrentOrderQueueRows
+        view={parseCurrentOrderQueue({ items: [order], nextAfterOrderReference: null })}
+        paymentPositions={
+          new Map([
+            [
+              id(1),
+              {
+                refundedMinor: "0",
+                refundPendingMinor: "0",
+                refundNotSentMinor: "0",
+                refundOnMachineMinor: "0",
+                ...position,
+              },
+            ],
+          ])
+        }
+      />,
+    );
+  const unsent = html({ refundPendingMinor: "1130", refundNotSentMinor: "1130" });
+  expect(unsent).not.toContain("was refunded in full");
+  expect(unsent).toContain(
+    "Cancelled. Earlier refunds cover the whole payment; $11.30 of them is not sent yet.",
+  );
+  const sending = html({ refundPendingMinor: "1130" });
+  expect(sending).toContain(
+    "Cancelled. Earlier refunds cover the whole payment; $11.30 of them is on its way.",
+  );
+  expect(html({ refundedMinor: "1130" })).toContain("was refunded in full");
+});
+
 it("WP-2423 live minor 11: a round refunded in part before Can't make it is refunded the rest, not in full", () => {
   const id = (n: number) => `01909968-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
   const pending = {
@@ -865,7 +993,19 @@ it("WP-2423 live minor 11: a round refunded in part before Can't make it is refu
       return renderToStaticMarkup(
         <CurrentOrderQueueRows
           view={parseCurrentOrderQueue({ items: [order], nextAfterOrderReference: null })}
-          paymentPositions={new Map([[id(1), { refundedMinor: "890", refundPendingMinor: "0" }]])}
+          paymentPositions={
+            new Map([
+              [
+                id(1),
+                {
+                  refundedMinor: "890",
+                  refundPendingMinor: "0",
+                  refundNotSentMinor: "0",
+                  refundOnMachineMinor: "0",
+                },
+              ],
+            ])
+          }
           itemRefunds={new Map([[id(1), new Set(refunded)]])}
         />,
       );
@@ -1052,7 +1192,12 @@ it("46940b76 L2: lists every refund on the order so they add up to what was refu
       orderType,
       batches: [{ sequence: 1, staffCancellation }],
     }) as unknown as Parameters<typeof orderRefundRows>[0];
-  const position = { refundedMinor: "1785", refundPendingMinor: "0" };
+  const position = {
+    refundedMinor: "1785",
+    refundPendingMinor: "0",
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
+  };
   // Order 23 of the 46940b76 run: one item cancelled, then the rest of the order.
   expect(orderRefundRows(order(cancellation), lines, position)).toEqual([
     { label: "Cancelled items refund", amount: money("608") },
@@ -1648,13 +1793,17 @@ it("WP-2423: says an online order is paid, and what happened to the payment", ()
   const position = (refundedMinor: string, refundPendingMinor = "0") => ({
     refundedMinor,
     refundPendingMinor,
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
   });
   expect(text(order(), position("0"))).toBe("Paid online $11.30");
   expect(text(order(), position("500"))).toBe("Paid online $11.30 · partly refunded");
   expect(text(order(), position("1130"))).toBe("Paid online $11.30 · refunded in full");
-  expect(text(order(), position("0", "1130"))).toBe("Paid online $11.30 · refund in progress");
+  expect(text(order(), position("0", "1130"))).toBe(
+    "Paid online $11.30 · refund sent, waiting on the bank",
+  );
   expect(text(order(), position("500", "630"))).toBe(
-    "Paid online $11.30 · partly refunded, refund in progress",
+    "Paid online $11.30 · partly refunded · refund sent, waiting on the bank",
   );
   // On the list: refunds the queue itself shows.
   expect(
@@ -1809,13 +1958,30 @@ it("WP-2423 v15 DEMO-02: an order whose every round was cancelled and refunded r
   // Without Payment's totals, card-machine rounds are not part of the online payment.
   expect(onlinePaymentText(order)).toBe("Paid online $107.07 · refunded in full");
   // Payment's totals decide when known: everything paid online was refunded.
-  const full = { refundedMinor: "10707", refundPendingMinor: "0" };
+  const full = {
+    refundedMinor: "10707",
+    refundPendingMinor: "0",
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
+  };
   expect(onlinePaymentText(order, full)).toBe("Paid online $107.07 · refunded in full");
   // The list header uses the totals read for an opened order instead of the per-round guess.
   const listed = renderToStaticMarkup(
     <CurrentOrderQueueRows
       view={view}
-      paymentPositions={new Map([[id(1), { refundedMinor: "5000", refundPendingMinor: "0" }]])}
+      paymentPositions={
+        new Map([
+          [
+            id(1),
+            {
+              refundedMinor: "5000",
+              refundPendingMinor: "0",
+              refundNotSentMinor: "0",
+              refundOnMachineMinor: "0",
+            },
+          ],
+        ])
+      }
     />,
   );
   expect(listed).toContain("Paid online $107.07 · partly refunded");
@@ -1916,8 +2082,22 @@ it("WP-2423: a list row reads its refund position with the list, so it agrees wi
   const parse = (value: object) =>
     parseCurrentOrderQueue({ items: [value], nextAfterOrderReference: null });
   // An item cancelled and refunded online: no batch was cancelled, only Payment knows the refund.
-  const view = parse(order({ paymentPosition: { refundedMinor: "350", refundPendingMinor: "0" } }));
-  expect(view.items[0]?.paymentPosition).toEqual({ refundedMinor: "350", refundPendingMinor: "0" });
+  const view = parse(
+    order({
+      paymentPosition: {
+        refundedMinor: "350",
+        refundPendingMinor: "0",
+        refundNotSentMinor: "0",
+        refundOnMachineMinor: "0",
+      },
+    }),
+  );
+  expect(view.items[0]?.paymentPosition).toEqual({
+    refundedMinor: "350",
+    refundPendingMinor: "0",
+    refundNotSentMinor: "0",
+    refundOnMachineMinor: "0",
+  });
   const rows = renderToStaticMarkup(<CurrentOrderQueueRows view={view} timeZone="UTC" />);
   expect(rows).toContain("Paid online $11.30 · partly refunded");
   // The same row before the refund, and from an older server without the field.
@@ -1932,7 +2112,12 @@ it("WP-2423: a list row reads its refund position with the list, so it agrees wi
       single
       view={parse(order())}
       timeZone="UTC"
-      paymentPosition={{ refundedMinor: "1130", refundPendingMinor: "0" }}
+      paymentPosition={{
+        refundedMinor: "1130",
+        refundPendingMinor: "0",
+        refundNotSentMinor: "0",
+        refundOnMachineMinor: "0",
+      }}
     />,
   );
   expect(single).toContain("Paid online $11.30 · refunded in full");
@@ -1940,21 +2125,47 @@ it("WP-2423: a list row reads its refund position with the list, so it agrees wi
     <CurrentOrderQueueRows
       view={parse(order())}
       timeZone="UTC"
-      paymentPositions={new Map([[id(1), { refundedMinor: "0", refundPendingMinor: "350" }]])}
+      paymentPositions={
+        new Map([
+          [
+            id(1),
+            {
+              refundedMinor: "0",
+              refundPendingMinor: "350",
+              refundNotSentMinor: "0",
+              refundOnMachineMinor: "0",
+            },
+          ],
+        ])
+      }
     />,
   );
-  expect(opened).toContain("Paid online $11.30 · refund in progress");
+  expect(opened).toContain("Paid online $11.30 · refund sent, waiting on the bank");
   // A position needs an online payment and never exceeds it.
   expect(() =>
     parse(
       order({
         paidOnline: null,
-        paymentPosition: { refundedMinor: "1", refundPendingMinor: "0" },
+        paymentPosition: {
+          refundedMinor: "1",
+          refundPendingMinor: "0",
+          refundNotSentMinor: "0",
+          refundOnMachineMinor: "0",
+        },
       }),
     ),
   ).toThrow();
   expect(() =>
-    parse(order({ paymentPosition: { refundedMinor: "1000", refundPendingMinor: "131" } })),
+    parse(
+      order({
+        paymentPosition: {
+          refundedMinor: "1000",
+          refundPendingMinor: "131",
+          refundNotSentMinor: "0",
+          refundOnMachineMinor: "0",
+        },
+      }),
+    ),
   ).toThrow();
   expect(() =>
     parse(order({ paymentPosition: { refundedMinor: "1.5", refundPendingMinor: "0" } })),

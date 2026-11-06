@@ -280,7 +280,13 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   " · in use at this Store": " · 本门店使用中",
   " · paper order": " · 纸质订单",
   " · partly refunded": " · 部分退款",
-  " · partly refunded, refund in progress": " · 部分退款，退款处理中",
+  " · refund not sent yet": " · 退款未发出",
+  "Cancelled. Earlier refunds cover the whole payment; {value} of them is not sent yet.":
+    "已取消。之前的退款已覆盖全部付款，其中 {value} 还没发出。",
+  "Cancelled. Earlier refunds cover the whole payment; {value} of them is on its way.":
+    "已取消。之前的退款已覆盖全部付款，其中 {value} 正在退回。",
+  " · refund sent, waiting on the bank": " · 退款已发出，等银行处理",
+  " · refund to make on the card machine": " · 退款待在刷卡机上办理",
   " · refund in progress": " · 退款处理中",
   " · refund on card machine": " · 请在刷卡机上退款",
   " · refund pending": " · 退款处理中",
@@ -418,7 +424,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
     '{item}中使用的配方尚未发布。请在"配方"中发布，然后重新提交。',
   "A refund is still being made (online, or not yet recorded as refunded on the card machine). Record the card-machine refund on the Orders page, or check again in a few minutes.":
     "还有退款正在进行（在线退款，或尚未在刷卡机上记录退款）。请在订单页记录刷卡机退款，或几分钟后再查看。",
-  "A refund of {pending} is on its way to the customer.": "一笔 {pending} 的退款正在退给顾客。",
+  "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to send it.":
+    "一笔 {amount} 的退款已记录，还没发出。请在“付款与退款”里打开这笔付款去发送。",
+  "A refund of {amount} is still to be made on the card machine. Refund it on the machine, then record the slip under Payments and refunds.":
+    "一笔 {amount} 的退款还要在刷卡机上办理。请先在刷卡机上退款，再到“付款与退款”里登记小票。",
+  "A refund of {amount} was sent and is waiting on the card company.":
+    "一笔 {amount} 的退款已发出，正在等发卡银行处理。",
   "A refund on this order needs to be reconciled first. Check it on the Exceptions page.":
     "这笔订单的一笔退款需要先对账。请在异常页查看。",
   "A retired classification can’t be used again or brought back. Products and Store fees that use it must be moved to another classification before they are next published; menus and Store settings already published keep working.{value}":

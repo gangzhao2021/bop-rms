@@ -81,6 +81,12 @@ export function createPostgresOrderPaymentRefundPosition(options: Options) {
         ...query,
         confirmedMinor,
         pendingMinor,
+        /**
+         * WP-2423 M16: of `pendingMinor`, the ordinary refunds never handed to the Provider (or,
+         * for a card-machine payment, not yet recorded from the machine). Bound by the ordinary
+         * snapshot digest; a compensation refund is always sent by its own workload.
+         */
+        unsentMinor: ordinaryPosition.unsentMinor,
         confirmedOrderAllocationMinor,
         confirmedTipMinor,
         unallocatedConfirmedMinor,

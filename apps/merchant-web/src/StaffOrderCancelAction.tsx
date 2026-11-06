@@ -114,16 +114,25 @@ export function staffCancelRefundText(
 }
 
 /** "Cancelled by store · refund pending" (pickup) or "Batch 2 cancelled · refunded" (dine-in). */
-export function staffCancellationSummary(order: Order, batch: Batch) {
+export function staffCancellationSummary(
+  order: Order,
+  batch: Batch,
+  /** WP-2423 M16: the order's refunds still pending (not confirmed), when Payment was read. */
+  refundStillPendingMinor = 0n,
+) {
   if (batch.staffCancellation === null) return null;
   const machine = batch.staffCancellation.refundMethod === "CardMachine";
+  // WP-2423 M16: cancelled after earlier refunds covered the payment: refunded only once those
+  // earlier refunds are confirmed too.
+  const coveredInFlight =
+    !machine && batch.staffCancellation.refundAmountMinor === "0" && refundStillPendingMinor > 0n;
   return (
     (order.orderType === "Pickup"
       ? order.currentPhase === "Rejected"
         ? t("Refused by store")
         : t("Cancelled by store")
       : t("Round {sequence} cancelled", { sequence: batch.sequence })) +
-    (batch.staffCancellation.refundStatus === "Refunded"
+    (batch.staffCancellation.refundStatus === "Refunded" && !coveredInFlight
       ? machine
         ? t(" · refunded on card machine")
         : t(" · refunded")

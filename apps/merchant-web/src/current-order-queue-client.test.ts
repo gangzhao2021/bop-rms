@@ -994,10 +994,19 @@ it("WP-2423: reads what an online order was paid and its refund position on the 
   const paid = { ...detail(), order: { ...row(1), paidOnline } };
   expect(parseCurrentOrderDetail(paid, id(1)).paymentPosition).toBeNull();
   const position = { refundedMinor: "500", refundPendingMinor: "130" };
+  // WP-2423 M16: what of the pending refund was never sent, and what is still to be made on the
+  // card machine; an older server without them reads as nothing unsent.
+  const split = { ...position, refundNotSentMinor: "100", refundOnMachineMinor: "30" };
+  expect(
+    parseCurrentOrderDetail({ ...paid, paymentPosition: split }, id(1)).paymentPosition,
+  ).toEqual(split);
   expect(
     parseCurrentOrderDetail({ ...paid, paymentPosition: position }, id(1)).paymentPosition,
-  ).toEqual(position);
+  ).toEqual({ ...position, refundNotSentMinor: "0", refundOnMachineMinor: "0" });
   for (const bad of [
+    { ...position, refundNotSentMinor: "131", refundOnMachineMinor: "0" },
+    { ...position, refundNotSentMinor: "100", refundOnMachineMinor: "31" },
+    { ...position, refundNotSentMinor: "100" },
     { refundedMinor: "1000", refundPendingMinor: "131" },
     { refundedMinor: "-1", refundPendingMinor: "0" },
     { refundedMinor: "0" },

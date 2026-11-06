@@ -27,6 +27,8 @@ const position = {
     capturedTipMinor: 0n,
     confirmedRefundMinor: 100n,
     pendingRefundMinor: 600n,
+    unsentRefundMinor: 400n,
+    unrecordedMachineRefundMinor: 0n,
     refundAllocation: { orderMinor: 100n, tipMinor: 0n, unallocatedMinor: 0n },
   },
 };
@@ -50,6 +52,9 @@ it("uses exact scoped owner query and exposes only customer financial facts", as
     capturedMinor: 1667n,
     confirmedRefundMinor: 100n,
     pendingRefundMinor: 600n,
+    // WP-2423 M16: of the pending $6.00, $4.00 was recorded but never sent.
+    unsentRefundMinor: 400n,
+    unrecordedMachineRefundMinor: 0n,
     unresolvedAttemptCount: 0,
     paidOnlineMinor: 1130n,
     paidOnCardMachineMinor: 537n,

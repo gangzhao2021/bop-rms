@@ -1625,7 +1625,12 @@ export function createPersistentMerchantOrderQueue(options: {
                   })();
           const paymentPositions = new Map<
             string,
-            { readonly refundedMinor: string; readonly refundPendingMinor: string }
+            {
+              readonly refundedMinor: string;
+              readonly refundPendingMinor: string;
+              readonly refundNotSentMinor: string;
+              readonly refundOnMachineMinor: string;
+            }
           >();
           if (
             positionOrders.length > 0 &&
@@ -1650,6 +1655,10 @@ export function createPersistentMerchantOrderQueue(options: {
                   Object.freeze({
                     refundedMinor: onlineFinancial.confirmedRefundMinor.toString(),
                     refundPendingMinor: onlineFinancial.pendingRefundMinor.toString(),
+                    // WP-2423 M16: of the pending refunds, what was never sent (online) and what
+                    // is still to be made on the card machine and recorded.
+                    refundNotSentMinor: onlineFinancial.unsentRefundMinor.toString(),
+                    refundOnMachineMinor: onlineFinancial.unrecordedMachineRefundMinor.toString(),
                   }),
                 );
             }

@@ -863,11 +863,18 @@ export function onlinePaymentText(
   if (position !== undefined && position !== null) {
     const refunded = BigInt(position.refundedMinor),
       pending = BigInt(position.refundPendingMinor);
-    if (pending > 0n)
-      return (
-        base +
-        (refunded > 0n ? t(" · partly refunded, refund in progress") : t(" · refund in progress"))
-      );
+    if (pending > 0n) {
+      // WP-2423 M16: a refund recorded but never sent is not "in progress" at the bank.
+      const notSent = BigInt(position.refundNotSentMinor),
+        onMachine = BigInt(position.refundOnMachineMinor);
+      const state =
+        notSent > 0n
+          ? t(" · refund not sent yet")
+          : onMachine >= pending
+            ? t(" · refund to make on the card machine")
+            : t(" · refund sent, waiting on the bank");
+      return base + (refunded > 0n ? t(" · partly refunded") : "") + state;
+    }
     if (refunded >= BigInt(paid.amountMinor)) return base + t(" · refunded in full");
     return refunded > 0n ? base + t(" · partly refunded") : base;
   }
@@ -943,8 +950,11 @@ function CompRecordsNote({
 }
 const sameSet = (a: ReadonlySet<string> | undefined, b: ReadonlySet<string>) =>
   a !== undefined && a.size === b.size && [...a].every((value) => b.has(value));
+/** WP-2423 M16: what of the order's refunds Payment has not confirmed yet (0 when not read). */
+const refundStillPending = (position: CurrentOrderDetail["paymentPosition"] | undefined) =>
+  position == null ? 0n : BigInt(position.refundPendingMinor);
 /** WP-2423: the exact refunds of an online payment on the order detail, when Payment has any. */
-function OnlineRefundNote({
+export function OnlineRefundNote({
   order,
   position,
 }: {
@@ -953,7 +963,10 @@ function OnlineRefundNote({
 }) {
   if (order.paidOnline === null || position === null) return null;
   const refunded = BigInt(position.refundedMinor),
-    pending = BigInt(position.refundPendingMinor);
+    pending = BigInt(position.refundPendingMinor),
+    notSent = BigInt(position.refundNotSentMinor),
+    onMachine = BigInt(position.refundOnMachineMinor),
+    sending = pending - notSent - onMachine;
   if (refunded === 0n && pending === 0n) return null;
   const amount = (minor: bigint) =>
     orderMoney({
@@ -965,9 +978,26 @@ function OnlineRefundNote({
       {refunded > 0n
         ? t("Refunded {refunded} of the online payment.", { refunded: amount(refunded) })
         : ""}
-      {refunded > 0n && pending > 0n ? " " : ""}
-      {pending > 0n
-        ? t("A refund of {pending} is on its way to the customer.", { pending: amount(pending) })
+      {/* WP-2423 M16: never sent, sent and waiting, and to be made on the card machine, apart. */}
+      {notSent > 0n
+        ? " " +
+          t(
+            "A refund of {amount} is recorded but not sent yet. Open the payment under Payments and refunds to send it.",
+            { amount: amount(notSent) },
+          )
+        : ""}
+      {onMachine > 0n
+        ? " " +
+          t(
+            "A refund of {amount} is still to be made on the card machine. Refund it on the machine, then record the slip under Payments and refunds.",
+            { amount: amount(onMachine) },
+          )
+        : ""}
+      {sending > 0n
+        ? " " +
+          t("A refund of {amount} was sent and is waiting on the card company.", {
+            amount: amount(sending),
+          })
         : ""}
     </p>
   );
@@ -1726,10 +1756,12 @@ function OrderStatusNotes({
   order,
   now,
   timeZone,
+  position,
 }: {
   readonly order: QueuedOrder;
   readonly now?: number | undefined;
   readonly timeZone?: string | undefined;
+  readonly position?: CurrentOrderDetail["paymentPosition"] | undefined;
 }) {
   return (
     <>
@@ -1762,7 +1794,7 @@ function OrderStatusNotes({
       ) : null}
       {order.orderType === "Pickup" && order.batches[0]?.staffCancellation ? (
         <span className="order-staff-cancelled">
-          {staffCancellationSummary(order, order.batches[0])}
+          {staffCancellationSummary(order, order.batches[0], refundStillPending(position))}
         </span>
       ) : null}
       {cancelledUnpaid(order) ? (
@@ -2164,7 +2196,7 @@ function OrderDetailBody({
       ) : null}
       {batch.staffCancellation !== null ? (
         <p className="order-workbench-closed order-staff-cancellation" role="note">
-          {staffCancellationSummary(order, batch)}
+          {staffCancellationSummary(order, batch, refundStillPending(position))}
           <span>
             {t("Reason: {value} ·", {
               value: staffCancellationReasonLabel[batch.staffCancellation.reasonCode],
@@ -2197,14 +2229,36 @@ function OrderDetailBody({
                       currencyCode: "CAD",
                     }),
                   })
-                : batch.staffCancellation.refundStatus === "Refunded"
-                  ? t("The payment, including any tip, was refunded in full.")
-                  : refundedBatches?.has(batch.orderBatchReference) === true
-                    ? // WP-2423 live minor 11: part of this round's own payment was refunded
-                      // earlier (an item taken off), so what is refunded now is the rest; until
-                      // Payment opens the refund its amount is not known here.
-                      t("What is left of the payment, including any tip left, is being refunded.")
-                    : t("The payment, including any tip, is being refunded in full.")}
+                : batch.staffCancellation.refundStatus === "Refunded" &&
+                    refundStillPending(position) > 0n
+                  ? // WP-2423 M16: earlier refunds cover the payment but are not all back yet.
+                    BigInt(position?.refundNotSentMinor ?? "0") > 0n
+                    ? t(
+                        "Cancelled. Earlier refunds cover the whole payment; {value} of them is not sent yet.",
+                        {
+                          value: orderMoney({
+                            amountMinor: position?.refundNotSentMinor ?? "0",
+                            currencyCode: "CAD",
+                          }),
+                        },
+                      )
+                    : t(
+                        "Cancelled. Earlier refunds cover the whole payment; {value} of them is on its way.",
+                        {
+                          value: orderMoney({
+                            amountMinor: position?.refundPendingMinor ?? "0",
+                            currencyCode: "CAD",
+                          }),
+                        },
+                      )
+                  : batch.staffCancellation.refundStatus === "Refunded"
+                    ? t("The payment, including any tip, was refunded in full.")
+                    : refundedBatches?.has(batch.orderBatchReference) === true
+                      ? // WP-2423 live minor 11: part of this round's own payment was refunded
+                        // earlier (an item taken off), so what is refunded now is the rest; until
+                        // Payment opens the refund its amount is not known here.
+                        t("What is left of the payment, including any tip left, is being refunded.")
+                      : t("The payment, including any tip, is being refunded in full.")}
           </span>
         </p>
       ) : batch.acceptanceStatus === "Cancelled" ? (
@@ -2335,7 +2389,7 @@ function OrderDetailBody({
       )}
       <div className="order-panel__status">
         <OrderPhase order={order} now={now} inPanel={!single} />
-        <OrderStatusNotes order={order} now={now} timeZone={timeZone} />
+        <OrderStatusNotes order={order} now={now} timeZone={timeZone} position={position} />
       </div>
       {order.heldStock === null ? null : (
         <p className="order-panel__hint">
@@ -2744,7 +2798,12 @@ export function CurrentOrderQueueRows({
                       </span>
                       <span className="order-row__status">
                         <OrderPhase order={order} now={now} />
-                        <OrderStatusNotes order={order} now={now} timeZone={timeZone} />
+                        <OrderStatusNotes
+                          order={order}
+                          now={now}
+                          timeZone={timeZone}
+                          position={positionOf(order)}
+                        />
                       </span>
                       <span className="order-workbench-amount">
                         {amount === null ? (

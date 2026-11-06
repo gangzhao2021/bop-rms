@@ -63,6 +63,7 @@ export function createPostgresOrderFinancialPosition(options: {
       });
       let confirmedRefundMinor = 0n,
         pendingRefundMinor = 0n,
+        unsentRefundMinor = 0n,
         capturedMinor = 0n,
         capturedOrderAllocationMinor = 0n,
         capturedTipMinor = 0n,
@@ -95,6 +96,9 @@ export function createPostgresOrderFinancialPosition(options: {
           refund.confirmedMinor < 0n ||
           refund.pendingMinor < 0n ||
           refund.confirmedMinor + refund.pendingMinor > captureMinor ||
+          typeof refund.unsentMinor !== "bigint" ||
+          refund.unsentMinor < 0n ||
+          refund.unsentMinor > refund.pendingMinor ||
           !/^sha256:[a-f0-9]{64}$/u.test(refund.snapshotDigest)
         )
           return fail();
@@ -135,6 +139,7 @@ export function createPostgresOrderFinancialPosition(options: {
         capturedTipMinor += tipMinor;
         confirmedRefundMinor += refund.confirmedMinor;
         pendingRefundMinor += refund.pendingMinor;
+        unsentRefundMinor += refund.unsentMinor;
         captures.push(
           Object.freeze({
             paymentTransactionReference: attempt.terminalReference,
@@ -146,6 +151,8 @@ export function createPostgresOrderFinancialPosition(options: {
             tipMinor,
             confirmedRefundMinor: refund.confirmedMinor,
             pendingRefundMinor: refund.pendingMinor,
+            /** WP-2423 M16: of the pending refund, what was never sent to the Provider. */
+            unsentRefundMinor: refund.unsentMinor,
             refundedOrderMinor: orderRefund,
             refundedTipMinor: tipRefund,
             unallocatedRefundMinor: unallocated,
@@ -170,6 +177,7 @@ export function createPostgresOrderFinancialPosition(options: {
         machineTipMinor = 0n,
         machineConfirmedRefundMinor = 0n,
         machinePendingRefundMinor = 0n,
+        machineUnrecordedRefundMinor = 0n,
         machineRefundedOrderMinor = 0n,
         machineRefundedTipMinor = 0n,
         machineUnallocatedRefundMinor = 0n;
@@ -200,6 +208,9 @@ export function createPostgresOrderFinancialPosition(options: {
           typeof ordinary.pendingMinor !== "bigint" ||
           ordinary.confirmedMinor < 0n ||
           ordinary.pendingMinor < 0n ||
+          typeof ordinary.unsentMinor !== "bigint" ||
+          ordinary.unsentMinor < 0n ||
+          ordinary.unsentMinor > ordinary.pendingMinor ||
           !/^sha256:[a-f0-9]{64}$/u.test(ordinary.snapshotDigest)
         )
           return fail();
@@ -247,6 +258,7 @@ export function createPostgresOrderFinancialPosition(options: {
         machineTipMinor += tipMinor;
         machineConfirmedRefundMinor += confirmedMinor;
         machinePendingRefundMinor += pendingMinor;
+        machineUnrecordedRefundMinor += ordinary.unsentMinor;
         machineRefundedOrderMinor += orderRefund;
         machineRefundedTipMinor += tipRefund;
         machineUnallocatedRefundMinor += unallocated;
@@ -259,6 +271,11 @@ export function createPostgresOrderFinancialPosition(options: {
             tipMinor,
             confirmedRefundMinor: confirmedMinor,
             pendingRefundMinor: pendingMinor,
+            /**
+             * WP-2423 M16: of the pending refund, what is still to be refunded on the machine and
+             * recorded (a card-machine refund is never sent by the system).
+             */
+            unrecordedRefundMinor: ordinary.unsentMinor,
             refundedOrderMinor: orderRefund,
             refundedTipMinor: tipRefund,
             unallocatedRefundMinor: unallocated,
@@ -438,6 +455,11 @@ export function createPostgresOrderFinancialPosition(options: {
         capturedTipMinor,
         confirmedRefundMinor,
         pendingRefundMinor,
+        /**
+         * WP-2423 M16: of `pendingRefundMinor`, ordinary refunds recorded but never sent to the
+         * Provider. Derived from the refund snapshot digests bound below; not a digest input.
+         */
+        unsentRefundMinor,
         refundAllocation: Object.freeze({
           orderMinor: refundedOrderMinor,
           tipMinor: refundedTipMinor,
@@ -465,6 +487,13 @@ export function createPostgresOrderFinancialPosition(options: {
             confirmedRefundMinor + machineConfirmedRefundMinor + tableRefundedMinor,
           pendingRefundMinor:
             pendingRefundMinor + machinePendingRefundMinor + tablePendingRefundMinor,
+          /**
+           * WP-2423 M16: of the pending refunds, the online ones not sent yet and the card-machine
+           * ones still to be made on the machine and recorded. Table refunds are sent by their
+           * own workload and cash is immediate, so neither is ever unsent here.
+           */
+          unsentRefundMinor,
+          unrecordedMachineRefundMinor: machineUnrecordedRefundMinor,
           refundAllocation: Object.freeze({
             orderMinor: refundedOrderMinor + machineRefundedOrderMinor + tableRefundedOrderMinor,
             tipMinor: refundedTipMinor + machineRefundedTipMinor + tableRefundedTipMinor,

@@ -68,6 +68,7 @@ beforeEach(() => {
   mock.refund.mockReset().mockResolvedValue({
     confirmedMinor: 100n,
     pendingMinor: 50n,
+    unsentMinor: 20n,
     confirmedOrderAllocationMinor: 100n,
     confirmedTipMinor: 0n,
     unallocatedConfirmedMinor: 0n,
@@ -94,6 +95,10 @@ it("combines all captures and both-owner refund positions without losing pending
   expect(result.capturedTipMinor).toBe(100n);
   expect(result.confirmedRefundMinor).toBe(200n);
   expect(result.pendingRefundMinor).toBe(100n);
+  // WP-2423 M16: of what is pending, what was never sent, per capture and in all.
+  expect(result.unsentRefundMinor).toBe(40n);
+  expect(result.settlement.unsentRefundMinor).toBe(40n);
+  expect(result.captures[0]?.unsentRefundMinor).toBe(20n);
   expect(result.netCapturedMinor).toBe(3190n);
   expect(result.unresolvedAttemptCount).toBe(1);
   expect(mock.refund).toHaveBeenCalledTimes(2);
@@ -151,6 +156,7 @@ it("rejects refund tip allocations exceeding that payment even when another capt
   mock.refund.mockResolvedValue({
     confirmedMinor: 100n,
     pendingMinor: 0n,
+    unsentMinor: 0n,
     confirmedOrderAllocationMinor: 0n,
     confirmedTipMinor: 100n,
     unallocatedConfirmedMinor: 0n,
@@ -165,6 +171,7 @@ function fullCompensation(confirmedMinor = 1130n, unallocatedCompensationMinor =
   mock.refund.mockResolvedValue({
     confirmedMinor,
     pendingMinor: 0n,
+    unsentMinor: 0n,
     confirmedOrderAllocationMinor: 0n,
     confirmedTipMinor: 0n,
     unallocatedConfirmedMinor: confirmedMinor,
@@ -189,6 +196,7 @@ it("completes only residual compensation after fully bound ordinary refund compo
   mock.refund.mockResolvedValue({
     confirmedMinor: 1130n,
     pendingMinor: 0n,
+    unsentMinor: 0n,
     confirmedOrderAllocationMinor: 200n,
     confirmedTipMinor: 50n,
     unallocatedConfirmedMinor: 880n,
@@ -247,6 +255,7 @@ const machineRefund = (
 const noRefund = {
   confirmedMinor: 0n,
   pendingMinor: 0n,
+  unsentMinor: 0n,
   confirmedOrderAllocationMinor: 0n,
   confirmedTipMinor: 0n,
   unallocatedConfirmedMinor: 0n,
@@ -268,6 +277,8 @@ it("B759: counts a served card-machine round as paid (order and tip), online fie
     capturedTipMinor: 167n,
     confirmedRefundMinor: 0n,
     pendingRefundMinor: 0n,
+    unsentRefundMinor: 0n,
+    unrecordedMachineRefundMinor: 0n,
     refundAllocation: { orderMinor: 0n, tipMinor: 0n, unallocatedMinor: 0n },
   });
   expect(mock.refund.mock.calls[0]?.[1]).toMatchObject({
@@ -390,6 +401,16 @@ it("B759: ordinary refunds on the machine come from the ordinary owner, never tw
   const result = await setup().read();
   expect(result.settlement.confirmedRefundMinor).toBe(537n);
   expect(result.settlement.refundAllocation.orderMinor).toBe(537n);
+});
+it("WP-2423 M16: a card-machine refund not yet made on the machine is to record, never 'not sent'", async () => {
+  onlineOnlyRefunds();
+  mock.refund.mockResolvedValue({ ...noRefund, pendingMinor: 537n, unsentMinor: 537n });
+  mock.machine.mockResolvedValue([{ payment: machinePayment(60, 537n, 0n), refunds: [] }]);
+  const result = await setup().read();
+  expect(result.settlement.pendingRefundMinor).toBe(537n);
+  expect(result.settlement.unrecordedMachineRefundMinor).toBe(537n);
+  expect(result.settlement.unsentRefundMinor).toBe(0n);
+  expect(result.cardMachineCaptures[0]?.unrecordedRefundMinor).toBe(537n);
 });
 it("B759: item cancellation refunds are the order's; refunds recorded later are not yet counted", async () => {
   onlineOnlyRefunds();

@@ -11,6 +11,13 @@ export interface CustomerReceiptFinancialView {
   readonly capturedMinor: bigint;
   readonly confirmedRefundMinor: bigint;
   readonly pendingRefundMinor: bigint;
+  /**
+   * WP-2423 M16: of `pendingRefundMinor`, online refunds recorded but not sent to the Provider, and
+   * card-machine refunds still to be made on the machine and recorded. Staff screens only; guest
+   * receipts keep "refund pending".
+   */
+  readonly unsentRefundMinor: bigint;
+  readonly unrecordedMachineRefundMinor: bigint;
   readonly unresolvedAttemptCount: number;
   /**
    * WP-2423 (v15 3cd0f8dd H1): of `capturedMinor`, what was paid online and what staff took on the
@@ -48,6 +55,8 @@ export async function readCustomerReceiptFinancial(
       capturedMinor: position.settlement.capturedMinor,
       confirmedRefundMinor: position.settlement.confirmedRefundMinor,
       pendingRefundMinor: position.settlement.pendingRefundMinor,
+      unsentRefundMinor: position.settlement.unsentRefundMinor,
+      unrecordedMachineRefundMinor: position.settlement.unrecordedMachineRefundMinor,
       unresolvedAttemptCount: position.unresolvedAttemptCount,
       paidOnlineMinor: position.capturedMinor,
       paidOnCardMachineMinor: position.settlement.capturedMinor - position.capturedMinor,

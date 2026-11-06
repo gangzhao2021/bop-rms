@@ -372,6 +372,10 @@ export function createPostgresOrdinaryRefundRequestPositionSource(options: {
     // WP-2423 Q5: a declined request has no Provider effect and occupies nothing (RF-D04).
     const history = occupyingAt(fullHistory, positionDeclines, Infinity);
     let pendingMinor = 0n;
+    // WP-2423 M16: of the pending amount, what was never handed to the Provider (no dispatch; a
+    // card-machine request whose slip is not recorded). Derived from the history and outcomes the
+    // snapshot digest already binds, so the digest input is unchanged.
+    let unsentMinor = 0n;
     let confirmedMinor = 0n;
     let observationCount = 0;
     let confirmedOrderAllocationMinor = 0n;
@@ -401,6 +405,7 @@ export function createPostgresOrdinaryRefundRequestPositionSource(options: {
         });
         if (outcome === null) {
           pendingMinor += amount;
+          unsentMinor += amount;
           continue;
         }
         if (
@@ -432,6 +437,7 @@ export function createPostgresOrdinaryRefundRequestPositionSource(options: {
     return Object.freeze({
       confirmedMinor,
       pendingMinor,
+      unsentMinor,
       confirmedOrderAllocationMinor,
       confirmedTipMinor,
       unallocatedConfirmedMinor,
