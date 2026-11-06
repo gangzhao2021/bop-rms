@@ -78,10 +78,13 @@ function samePayment(left: CardMachinePaymentRecord, right: CardMachinePaymentRe
 
 /**
  * WP-2423 M160: whether the Store has a payment taken before an instant: an online payment
- * prepared, or a card-machine payment taken (one entered after an outage may carry an earlier
- * time than its recording). The sales reports and the settlement begin at the Store's first
- * business day; a payment before that day would fall outside every day, so the reads refuse
- * instead of leaving it out. Read in the caller's transaction, under its Store scope.
+ * prepared, a card-machine payment taken at the counter, or a table paid (card machine, cash, or
+ * a guest's phone payment once captured, which is recorded as the table's settlement). One
+ * entered after an outage carries the earlier time it was taken. The sales reports and the
+ * settlement begin at the Store's first business day; a payment before that day would fall
+ * outside every day, so the reads refuse instead of leaving it out. Staff entry refuses such a
+ * time (merchant card-machine payment, table checkout), so only a record made outside the
+ * product can trip this. Read in the caller's transaction, under its Store scope.
  */
 export async function readStorePaymentTakenBefore(
   tx: { query(sql: string, values: readonly unknown[]): Promise<unknown> },
@@ -95,10 +98,11 @@ export async function readStorePaymentTakenBefore(
     brandReference,
     storeReference,
   ]);
-  // A card-machine payment is recorded at most 72 hours after it was taken (table check).
+  // A card-machine or table payment is recorded at most 72 hours after it was taken (table
+  // checks), so each is found from its recorded time by index.
   const found = rows(
     await tx.query(
-      "SELECT EXISTS (SELECT 1 FROM rms_payment.payment_intent WHERE brand_id=$1 AND store_id=$2 AND prepared_at < $3) OR EXISTS (SELECT 1 FROM rms_payment.card_machine_payment WHERE brand_id=$1 AND store_id=$2 AND recorded_at < $3::timestamptz + interval '72 hours' AND taken_at < $3) AS found",
+      "SELECT EXISTS (SELECT 1 FROM rms_payment.payment_intent WHERE brand_id=$1 AND store_id=$2 AND prepared_at < $3) OR EXISTS (SELECT 1 FROM rms_payment.card_machine_payment WHERE brand_id=$1 AND store_id=$2 AND recorded_at < $3::timestamptz + interval '72 hours' AND taken_at < $3) OR EXISTS (SELECT 1 FROM rms_payment.dining_table_settlement WHERE brand_id=$1 AND store_id=$2 AND recorded_at < $3::timestamptz + interval '72 hours' AND taken_at < $3) AS found",
       [brandReference, storeReference, at],
     ),
   );

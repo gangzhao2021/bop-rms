@@ -380,6 +380,51 @@ it("reads the Store's first business day in reports and settlement, says where r
 
       // A payment entered after an outage with a time before the first day would be in no day:
       // reports and settlement refuse loudly instead of leaving it out (no sales suppression).
+      // Staff entry refuses such a time, so only a record made outside the product gets here:
+      // seeded as the owner with triggers off (TEST-ONLY), first a table paid in cash after an
+      // outage (v15: every Fireside Hotpot payment is a table settlement), then a counter one.
+      const tableSettlement = id(0x700);
+      await admin.query("SET session_replication_role = replica");
+      await admin.query(
+        `INSERT INTO rms_payment.dining_table_settlement (settlement_id,tenant_id,brand_id,store_id,
+         operation_id,intent_digest,dining_session_id,order_id,method,rounds_minor,tip_minor,
+         rounding_minor,total_minor,tendered_minor,change_minor,currency_code,payment_environment,
+         slip_reference,recording_reason,taken_at,recorded_at,actor_id,audit_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Cash',2000,0,0,2000,2000,0,'CAD','Test',NULL,
+         'RecordedAfterOutage',$9,$10,$11,$12)`,
+        [
+          tableSettlement,
+          ownerScope.tenantReference,
+          scope.brandReference,
+          scope.storeReference,
+          id(0x701),
+          sha,
+          id(0x702),
+          id(0x703),
+          new Date(startedAt - hours(25)).toISOString(),
+          new Date(base).toISOString(),
+          id(10),
+          id(0x704),
+        ],
+      );
+      await admin.query("SET session_replication_role = origin");
+      await assert.rejects(
+        reports.read({ sessionCookie: cookie, from: asked, to: today }),
+        /MERCHANT_PAYMENT_BEFORE_STORE_RECORDS/u,
+      );
+      await assert.rejects(
+        settlement({ sessionCookie: cookie, businessDate: first }),
+        /MERCHANT_PAYMENT_BEFORE_STORE_RECORDS/u,
+      );
+      await admin.query("SET session_replication_role = replica");
+      await admin.query("DELETE FROM rms_payment.dining_table_settlement WHERE settlement_id=$1", [
+        tableSettlement,
+      ]);
+      await admin.query("SET session_replication_role = origin");
+      assert.equal(
+        (await settlement({ sessionCookie: cookie, businessDate: first })).businessDate,
+        first,
+      );
       await pay(300, {
         total: 900,
         tip: 0,
@@ -395,7 +440,27 @@ it("reads the Store's first business day in reports and settlement, says where r
         settlement({ sessionCookie: cookie, businessDate: null }),
         /MERCHANT_PAYMENT_BEFORE_STORE_RECORDS/u,
       );
+
+      // The first configuration keeps the Store's first day when it is given an end (a version in
+      // force for a while still governed from its first instant), so the days it had sales on
+      // never read as before the records. Rewritten as the owner with triggers off (TEST-ONLY):
+      // versions are append-only in the product.
+      const governing = () =>
+        transactions.run((tx) => readStoreFirstConfigurationGoverningFrom(tx, scope));
+      const setUntil = async (until) => {
+        await admin.query("SET session_replication_role = replica");
+        await admin.query(
+          "UPDATE rms_store.store_configuration_version SET effective_until=$3 WHERE brand_id=$1 AND store_id=$2",
+          [scope.brandReference, scope.storeReference, until],
+        );
+        await admin.query("SET session_replication_role = origin");
+      };
+      await setUntil(new Date(Date.parse(opening) + hours(1)).toISOString());
+      assert.equal(await governing(), opening);
+      await setUntil(null);
+      assert.equal(await governing(), opening);
     } finally {
+      await admin.query("SET session_replication_role = origin").catch(() => undefined);
       await admin.query("RESET ROLE").catch(() => undefined);
       for (const name of [api, worker])
         await admin
