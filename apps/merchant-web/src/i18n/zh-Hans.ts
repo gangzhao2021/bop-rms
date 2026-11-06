@@ -6500,11 +6500,11 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Sizes of {item}": "{item} 的规格",
   "Back in stock: {item}": "恢复供应：{item}",
   "Sold out today: {item}": "今日售罄：{item}",
-  "Listing… New prices and choices go live first, then the menu, within these seconds; this can take up to a minute. Guests keep ordering throughout.":
-    "正在上架… 新价格和加价先生效，菜单随后生效，就在这几秒内，最多可能需要一分钟。客人可以一直点单。",
+  "Listing… New prices go live first, then the menu. This can take up to a minute. Guests keep ordering throughout.":
+    "正在上架… 新价格先生效，菜单随后生效，最多可能需要一分钟。客人可以一直点单。",
   "{seconds} s": "{seconds} 秒",
-  "A listing is under way or stopped part-way. Guests still see the menu as it was. If nothing changes in a minute, continue it.":
-    "上架正在进行或中途停止。客人仍看到原来的菜单。如果一分钟后仍没有变化，请继续上架。",
+  "A listing is under way or stopped part-way. New prices are already live; guests still see the rest of the menu as it was. If nothing changes in a minute, continue it.":
+    "上架正在进行或中途停止。新价格已经生效，菜单的其他部分客人仍看到原来的样子。如果一分钟后仍没有变化，请继续上架。",
   "Continue listing": "继续上架",
   "New choice group": "新建规格组",
   "Give the group a name and at least one choice, each with its own name.":

@@ -1121,7 +1121,10 @@ test("@production a listing in progress shows as such, also after a reload, unti
   await page.goto("/app/commerce/menus");
   await page.getByRole("button", { name: "List it" }).click();
   await expect(
-    page.getByText("Listing… New prices and choices go live first", { exact: false }),
+    page.getByText(
+      "Listing… New prices go live first, then the menu. This can take up to a minute.",
+      { exact: false },
+    ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
   // WP-2423: the kitchen runs out while the menu is listing: staff mark it at once, one iPad or not.
@@ -1129,12 +1132,18 @@ test("@production a listing in progress shows as such, also after a reload, unti
   await expect(page.getByText("is sold out for today.", { exact: false })).toBeVisible();
   expect(stockCommands.map((command) => command.action)).toEqual(["SoldOut"]);
   await expect(
-    page.getByText("Listing… New prices and choices go live first", { exact: false }),
+    page.getByText(
+      "Listing… New prices go live first, then the menu. This can take up to a minute.",
+      { exact: false },
+    ),
   ).toBeVisible();
   // A reload during the listing still shows it in progress, with no second "List it".
   await page.reload();
   await expect(
-    page.getByText("Listing… New prices and choices go live first", { exact: false }),
+    page.getByText(
+      "Listing… New prices go live first, then the menu. This can take up to a minute.",
+      { exact: false },
+    ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "List it" })).toHaveCount(0);
   await expect(
@@ -1153,6 +1162,15 @@ test("@production a listing in progress shows as such, also after a reload, unti
   await page.reload();
   await expect(
     page.getByText("A listing is under way or stopped part-way.", { exact: false }),
+  ).toBeVisible();
+  // Prices went live before the menu: the owner is told so, not that guests see the old menu.
+  await expect(
+    page.getByText(
+      "New prices are already live; guests still see the rest of the menu as it was.",
+      {
+        exact: false,
+      },
+    ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue listing" })).toBeVisible();
 });

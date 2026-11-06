@@ -841,7 +841,7 @@ export function OneStoreMenuPage({
         <div className="one-menu__pending" role="status">
           <p>
             {t(
-              "Listing… New prices and choices go live first, then the menu, within these seconds; this can take up to a minute. Guests keep ordering throughout.",
+              "Listing… New prices go live first, then the menu. This can take up to a minute. Guests keep ordering throughout.",
             )}{" "}
             {listingSince !== null
               ? t("{seconds} s", {
@@ -857,7 +857,7 @@ export function OneStoreMenuPage({
               ? t("You moved dishes. Save the new order; guests see it when the menu is listed.")
               : underway
                 ? t(
-                    "A listing is under way or stopped part-way. Guests still see the menu as it was. If nothing changes in a minute, continue it.",
+                    "A listing is under way or stopped part-way. New prices are already live; guests still see the rest of the menu as it was. If nothing changes in a minute, continue it.",
                   )
                 : view.latestRelease === null
                   ? t("This menu has not been listed yet. Guests do not see it.")
