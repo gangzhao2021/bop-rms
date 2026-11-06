@@ -53,6 +53,13 @@ async function session(page: Page) {
       },
     }),
   );
+  // WP-2423 role presets: no role change waits (Approvals and its badge read them too).
+  await page.route("**/merchant/organization/roles/waiting", (route) =>
+    route.fulfill({
+      headers,
+      json: { screenId: "APPROVAL-INBOX", sourceAsOf: minutesFromNow(0), changes: [] },
+    }),
+  );
   const stepUps: string[] = [];
   let validUntil: string | null = null;
   await page.route("**/merchant/identity/step-up", (route) => {

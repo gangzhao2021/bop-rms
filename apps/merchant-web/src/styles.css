@@ -10113,3 +10113,78 @@ tr[data-drop-target="true"] {
     justify-items: stretch;
   }
 }
+/* WP-2423 role presets: the Roles pages (brief section 2: white, no boxes, hairlines only between
+   rows, sizes 20/16/14 at 600/400, one accent for what can be clicked). */
+.role-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 56rem;
+}
+.role-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--bop-space-2) var(--bop-space-6);
+  align-items: baseline;
+  padding: var(--bop-space-4) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.role-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.role-kind {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+@media (max-width: 640px) {
+  .role-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .role-row > :nth-child(2) {
+    grid-column: 1;
+    color: var(--bop-color-text-muted);
+  }
+  .role-row > a {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+.role-permission {
+  padding: var(--bop-space-1) 0;
+}
+.role-permission-warning {
+  margin: var(--bop-space-1) 0 0 var(--bop-space-6);
+  color: var(--bop-color-warning);
+  font-size: 14px;
+}
+.role-summary {
+  display: grid;
+  gap: var(--bop-space-2);
+  margin: var(--bop-space-4) 0;
+}
+.role-summary p,
+.role-history,
+.role-permission-list {
+  margin: 0;
+}
+.role-permission-list > div {
+  padding: var(--bop-space-2) 0;
+  border-bottom: 1px solid var(--bop-color-border-default);
+}
+.role-permission-list dt {
+  font-weight: 600;
+}
+.role-permission-list dd {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+}
+.role-history {
+  padding-left: var(--bop-space-4);
+}
+.role-new,
+.role-copy {
+  display: grid;
+  gap: var(--bop-space-3);
+  max-width: 28rem;
+}

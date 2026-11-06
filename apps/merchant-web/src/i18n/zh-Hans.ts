@@ -8501,4 +8501,6 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Connected services": "已连接的服务",
   Photos: "图片",
   "Activity records": "操作记录",
+  "Written by you": "由你编写",
+  "Sent by you": "由你提交",
 });

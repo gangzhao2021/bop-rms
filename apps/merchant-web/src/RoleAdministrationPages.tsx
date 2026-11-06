@@ -373,8 +373,12 @@ function Editor({
           ) : null}
           <p>
             {change.status === "Draft"
-              ? t("Written by {by}", { by: change.by })
-              : t("Sent by {by}", { by: change.by })}{" "}
+              ? change.by === "You"
+                ? t("Written by you")
+                : t("Written by {by}", { by: change.by })
+              : change.by === "You"
+                ? t("Sent by you")
+                : t("Sent by {by}", { by: change.by })}{" "}
             · <StaffTime instant={change.at} />
           </p>
           {change.name !== role.name ? <p>{t("New name: {name}", { name: change.name })}</p> : null}
@@ -401,11 +405,7 @@ function Editor({
                 gate={change.approval.soleOperator}
                 csrf={csrf}
                 summary={
-                  <RoleSummary
-                    catalog={catalog}
-                    selected={change.permissions}
-                    memberCount={role.memberCount}
-                  />
+                  <RoleSummary catalog={catalog} selected={change.permissions} memberCount={0} />
                 }
                 what={t("this role change")}
                 permissionName={t("role approval")}
@@ -613,7 +613,8 @@ function Editor({
             {role.history.map((item, index) => (
               <li key={index}>
                 {roleDecisionLabels[item.decision] ?? t("Changed")} ·{" "}
-                {item.by === "BOP" ? t("BOP update") : item.by} · <StaffTime instant={item.at} />
+                {item.by === "BOP" ? t("BOP update") : item.by === "You" ? t("you") : item.by} ·{" "}
+                <StaffTime instant={item.at} />
               </li>
             ))}
           </ul>
