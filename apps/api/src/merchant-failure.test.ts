@@ -143,6 +143,19 @@ describe("what a failure means", () => {
     expect(merchantFailureKind(afterFailedQuery(new Error("X_CONFLICT"), "23505"))).toBe("Changed");
   });
 
+  it("a race written over a failed statement is a race only for a constraint or a conflict", () => {
+    for (const code of ["Conflict", "NotFound", "X_CONFLICT", "X_NOT_FOUND", "X_CHANGED"]) {
+      expect(merchantFailureKind(afterFailedQuery(coded(code), "23505"))).toBe("Changed");
+      expect(merchantFailureKind(afterFailedQuery(coded(code), "23P01"))).toBe("Changed");
+      expect(merchantFailureKind(afterFailedQuery(coded(code), "42501"))).toBe("Unexpected");
+      expect(merchantFailureKind(afterFailedQuery(coded(code), "42P01"))).toBe("Unexpected");
+      expect(merchantFailureKind(afterFailedQuery(coded(code), "22P02"))).toBe("Unexpected");
+      expect(merchantFailureKind(afterFailedQuery(coded(code), "57014"))).toBe("RetryLater");
+      expect(merchantFailureKind(afterFailedQuery(coded(code), "08006"))).toBe("RetryLater");
+      expect(merchantFailureKind(coded(code))).toBe("Changed");
+    }
+  });
+
   it("a rewrite around a refusal of the person stays a refusal", () => {
     const rewrite = (cause: unknown) =>
       withCause(new Error("MERCHANT_TASK_INBOX_UNAVAILABLE"), cause);
@@ -319,6 +332,17 @@ describe("a transaction host that keeps refusals honest", () => {
       });
     },
   );
+
+  it("a race code written over a missing grant becomes the failure, so it is not answered 409", async () => {
+    const said = afterFailedQuery(coded("Conflict"), "42501");
+    const host = refusalsStayReal(hostThrowing(said) as never) as unknown as {
+      run(work: () => Promise<unknown>): Promise<unknown>;
+    };
+    const thrown = await host.run(async () => undefined).catch((error: unknown) => error);
+    expect(merchantFailureCode(thrown)).toBe("TENANT_DATABASE_TRANSACTION_FAILED");
+    expect(merchantFailureKind(thrown)).toBe("Unexpected");
+    expect((thrown as Error).cause).toBe(said);
+  });
 
   it("leaves a real refusal, and a typed answer to a failed statement, as they are", async () => {
     const refused = coded("PermissionDenied");

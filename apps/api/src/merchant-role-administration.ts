@@ -19,7 +19,7 @@ import { withMerchantTransactionAuthorization } from "./merchant-transaction-aut
 import { retryTransactionConflict } from "./transaction-conflict-retry.js";
 import type { MerchantBffService } from "./merchant-bff.js";
 import type { PersistentMerchantBffOptions } from "./persistent-merchant-bff.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { merchantFailureCode, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423: Section 88 IAM-ROLE-LIST / IAM-ROLE-EDITOR for the selected Store. Reads need
@@ -401,7 +401,12 @@ export function createMerchantRoleAdministration(options: {
             const policyVersion = await ports.policy.currentVersion(current.brandReference);
             const now = options.persistence.now();
             const selections = (actions: readonly string[]) =>
-              buildRolePermissionSelections(asRoleTx(tx), actions).catch(() => fail("Conflict"));
+              buildRolePermissionSelections(asRoleTx(tx), actions).catch((error: unknown) => {
+                // A permission the catalog no longer offers: read the role again. A failed read
+                // carries on as itself and is logged.
+                if (merchantFailureCode(error) === "ROLE_ADMIN_NOT_FOUND") return fail("Conflict");
+                throw error;
+              });
             let next: RoleAdministrationVersionRecord;
             try {
               next = planRoleAdministrationChange({

@@ -10,6 +10,7 @@ import pg from "pg";
 import { afterEach, it, vi } from "vitest";
 import { createDiningTable } from "../../rms/dining/src/index.ts";
 import { createMerchantAllergens } from "../../../apps/api/src/merchant-allergens.ts";
+import { createMerchantAvailability } from "../../../apps/api/src/merchant-availability.ts";
 import { createMerchantDiningSessionStart } from "../../../apps/api/src/merchant-dining-session-start.ts";
 import { createMerchantDiningTables } from "../../../apps/api/src/merchant-dining-tables.ts";
 import { refusalsStayReal } from "../../../apps/api/src/merchant-failure.ts";
@@ -20,6 +21,8 @@ import { createMerchantRequestReporter } from "../../../tooling/environment/pilo
 import { createTenantTransactionRunner } from "../src/transaction-runner.ts";
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
 import { seedMerchantAcceptanceSession } from "../test-support/merchant-acceptance-session.mjs";
+import { syntheticMerchantBrandScope } from "../test-support/merchant-brand-scope.mjs";
+import { seedOrdinaryRefundStorePublication } from "../test-support/ordinary-refund-store-publication.mjs";
 
 const { Client, Pool } = pg;
 const express = createRequire(new URL("../../../apps/api/package.json", import.meta.url))(
@@ -499,6 +502,108 @@ it("WP-2423 item 10: two servers open one table: the second gets changed, and a 
       });
       assert.equal(read.status, 200);
       assert.notEqual(read.body.items[0].currentDiningSessionReference, null);
+    } finally {
+      await new Promise((resolve) => (listening ? listening.close(resolve) : resolve()));
+      await harness?.pool.end();
+      await admin.end();
+    }
+  });
+});
+
+/**
+ * A race code written over a fault is not a race. "Sold out until the end of the day" reads the
+ * Store's business day; when PostgreSQL refuses that read, the command used to answer 409 "it
+ * changed, try again", every time, with nothing logged. Now: 503 and one line naming the table.
+ */
+it("WP-2423 item 10: a business-day read PostgreSQL refuses answers try again and is logged, not changed", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  await withIsolatedDatabase({ caseId: "wp2423_business_day" }, async (context) => {
+    const admin = new Client(context.clientConfig);
+    await admin.connect();
+    let harness;
+    let listening;
+    try {
+      harness = await restricted(context, admin);
+      const { api } = harness;
+      const honest = refusalsStayReal(harness.runner);
+      const owner = id(4),
+        sku = id(12),
+        at = "2026-09-20T00:00:00.000Z";
+      await admin.query(
+        "INSERT INTO rms_catalog.product(product_id,brand_id,internal_code,product_type,lifecycle,aggregate_version,created_at,created_by_actor_id,updated_at) VALUES($1,$2,'MOCHA','PreparedFood','Active',1,$3,$4,$3)",
+        [id(10), brand, at, owner],
+      );
+      await admin.query(
+        "INSERT INTO rms_catalog.product_version(product_version_id,product_id,brand_id,status,default_locale,localized_names_json,created_at,updated_at) VALUES($1,$2,$3,'Draft','en-CA',$4::jsonb,$5,$5)",
+        [id(11), id(10), brand, JSON.stringify({ "en-CA": "Mocha" }), at],
+      );
+      await admin.query(
+        `INSERT INTO rms_catalog.sku(sku_id,product_id,brand_id,product_version_id,sku_code,lifecycle,localized_names_json,variant_selections_json,variant_digest,unit_of_sale,unit_quantity,created_at,created_by_actor_id) VALUES($1,$2,$3,$4,'MOCHA-REGULAR-12-OZ','Active','{"en-CA":"Regular (12 oz)"}'::jsonb,'[]'::jsonb,$5,'EACH',1,$6,$7)`,
+        [sku, id(10), brand, id(11), "sha256:" + "a".repeat(64), at, owner],
+      );
+      await seedOrdinaryRefundStorePublication({
+        client: admin,
+        scope,
+        firstCapturedAt: "2026-10-08T00:00:00.000Z",
+      });
+      let clock = Date.parse("2026-10-08T01:00:00.000Z");
+      let reference = 0x9000;
+      const next = () => "019a0000-0000-7000-8000-" + (++reference).toString(16).padStart(12, "0");
+      const brandScope = syntheticMerchantBrandScope({
+        ...scope,
+        policyReference: id(300),
+        grants: { [owner]: ["catalog.sku.read", "catalog.sku.availability.manage"] },
+      });
+      const availability = createMerchantAvailability({
+        persistence: {
+          now: () => new Date((clock += 1000)).toISOString(),
+          publication: {
+            configurationType: "STORE_CONFIGURATION",
+            purposeCode: "STORE_CONFIGURATION",
+            requiredLiveGateRequirementCodes: ["SYNTHETIC_STORE_READY"],
+          },
+          transactions: honest,
+        },
+        authentication: { authorize: async () => ({ sessionReference: id(7) }) },
+        references: { next },
+        locale: "en-CA",
+        resolveScope: brandScope.resolveScope,
+      });
+      const app = await serve({ availability });
+      listening = app.server;
+      const session = { sessionCookie: "s", csrf: "c" };
+      const command = (body) =>
+        app.post("/commerce/availability/command", session, {
+          operationReference: next(),
+          skuReference: sku,
+          ...body,
+        });
+      const lines = logLines();
+      assert.equal((await command({ action: "Offer" })).status, 200);
+      const soldOut = await command({ action: "SoldOut", until: "EndOfDay" });
+      assert.equal(soldOut.status, 200, JSON.stringify(soldOut.body));
+      assert.equal(soldOut.body.item.soldOutUntil, "2026-10-08T08:00:00.000Z");
+      assert.equal((await command({ action: "BackInStock" })).status, 200);
+      assert.deepEqual(lines.take(), []);
+
+      const table = "rms_store.store_configuration_version";
+      const held = await admin.query("SELECT has_table_privilege($1,$2,'SELECT') AS held", [
+        api,
+        table,
+      ]);
+      assert.equal(held.rows[0].held, true);
+      await admin.query("REVOKE SELECT ON " + table + " FROM " + api);
+      const failed = await command({ action: "SoldOut", until: "EndOfDay" });
+      assert.equal(failed.status, 503, "answered " + failed.status + JSON.stringify(failed.body));
+      assert.deepEqual(failed.body, { error: "retry_later" });
+      const logged = lines.take();
+      assert.equal(logged.length, 1, JSON.stringify(logged));
+      assert.equal(logged[0].event, "MERCHANT_REQUEST_UNEXPECTED");
+      assert.equal(logged[0].route, "/commerce/availability/command");
+      assert.equal(logged[0].sqlState, "42501", JSON.stringify(logged[0]));
+      assert.equal(logged[0].table, "store_configuration_version", JSON.stringify(logged[0]));
+      await admin.query("GRANT SELECT ON " + table + " TO " + api);
+      assert.equal((await command({ action: "SoldOut", until: "EndOfDay" })).status, 200);
     } finally {
       await new Promise((resolve) => (listening ? listening.close(resolve) : resolve()));
       await harness?.pool.end();

@@ -32,7 +32,7 @@ import type {
   createStaffStockShortageSource,
   StaffStockShortage,
 } from "./customer-menu-inventory-evidence.js";
-import { onlyRefusal } from "./merchant-failure.js";
+import { merchantFailureCode, onlyRefusal } from "./merchant-failure.js";
 
 /**
  * WP-2423 8.5: CAT-AVAILABILITY for the selected Store — which items this Store sells now. Offering
@@ -388,7 +388,16 @@ export function createMerchantAvailability(options: {
                         (await s.markDecision()) !== null ||
                         (await s.storeDecision()) !== null ||
                         (await s.brandDecision()) !== null,
-                    })(tx, at).catch(() => fail("Conflict"))
+                    })(tx, at).catch((error: unknown) => {
+                      // The Store's hours changed under the mark: read again. Anything else
+                      // (a failed read, a fault) carries on as itself and is logged.
+                      if (
+                        merchantFailureCode(error) ===
+                        "STORE_BUSINESS_DATE_CONFIGURATION_NOT_EFFECTIVE"
+                      )
+                        return fail("Conflict");
+                      throw error;
+                    })
                   ).endsAt,
                 )
               : null;

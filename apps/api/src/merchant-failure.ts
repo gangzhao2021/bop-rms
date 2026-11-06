@@ -107,6 +107,19 @@ function transientSqlState(sqlState: unknown): boolean {
 }
 
 /**
+ * A race code written after a statement of its transaction failed names that race only when the
+ * statement failed on a constraint (class 23) or a conflict: a unique key taken, a row that moved.
+ * A missing grant, a missing table or a bad value is a fault whatever the code says.
+ */
+function raceSqlState(sqlState: unknown): boolean {
+  return (
+    typeof sqlState === "string" &&
+    (sqlState.startsWith("23") || ["40001", "40P01", "55P03"].includes(sqlState))
+  );
+}
+const namesChange = (code: string) => changedCodes.has(code) || changedEnding.test(code);
+
+/**
  * The SQLSTATE of the statement that failed first: what follows it in an aborted transaction (a
  * scope restored in a finally block) only ever says 25P02.
  */
@@ -127,7 +140,11 @@ export function merchantFailureKind(error: unknown): MerchantFailureKind {
     if (failure === undefined) return "Refused";
     return transientSqlState(failure.sqlState) ? "RetryLater" : "Unexpected";
   }
-  if (changedCodes.has(code) || changedEnding.test(code)) return "Changed";
+  if (namesChange(code)) {
+    const failure = own(error, databaseFailureKey) as { sqlState?: unknown } | undefined;
+    if (failure === undefined || raceSqlState(failure.sqlState)) return "Changed";
+    return transientSqlState(failure.sqlState) ? "RetryLater" : "Unexpected";
+  }
   if (deniedBehindRewrite(error)) return "Refused";
   return code.endsWith("_UNAVAILABLE") ? "RetryLater" : "Unexpected";
 }
@@ -211,7 +228,9 @@ export function isExpectedContention(error: unknown): boolean {
 /**
  * A refusal thrown out of a transaction after one of its queries failed is not a refusal: a read
  * deep inside (a session, a membership, a Store, a policy) made its own of a database failure, and
- * a service's typed answer would say "no permission". Wraps the transaction host once, at
+ * a service's typed answer would say "no permission". Nor is a race code written over a failure
+ * that was not a constraint or a conflict: the typed "Conflict" would answer 409 "it changed" with
+ * nothing logged, every time. Wraps the transaction host once, at
  * composition, so everything run through it says what happened, whatever its inner catch blocks
  * wrote. Other rewrites keep their own error (a constraint failure answered as "code taken", a typed
  * "unavailable"), with the failure's SQLSTATE riding along.
@@ -225,7 +244,9 @@ export function refusalsStayReal<
   const honest = (error: unknown): unknown => {
     const failure = own(error, databaseFailureKey);
     const code = merchantFailureCode(error);
-    if (failure === undefined || code === null || !namesRefusal(code)) return error;
+    if (failure === undefined || code === null) return error;
+    const sqlState = (failure as { sqlState?: unknown }).sqlState;
+    if (!namesRefusal(code) && !(namesChange(code) && !raceSqlState(sqlState))) return error;
     return withCause(
       Object.assign(new Error("MERCHANT_REFUSAL_AFTER_DATABASE_FAILURE"), {
         code: "TENANT_DATABASE_TRANSACTION_FAILED",

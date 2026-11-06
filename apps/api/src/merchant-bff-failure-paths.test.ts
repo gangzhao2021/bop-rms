@@ -207,6 +207,36 @@ describe("service catch handlers", () => {
     expect(offenders).toEqual([]);
   });
 
+  /**
+   * A race answers 409 and reads again with nothing logged: a catch that calls whatever failed a
+   * race (a missing grant, a TypeError, a lost table) tells staff "it changed, try again" for ever.
+   */
+  const changedText =
+    /"(?:[A-Z0-9_]*_(?:CONFLICT|NOT_FOUND|CHANGED|EXPIRED)|Conflict|VersionConflict|NotFound|Stale|Changed)"/u;
+  it("no service turns any failure into a race", () => {
+    const offenders: string[] = [];
+    for (const name of services) {
+      if (refusalAllowed[name] !== undefined) continue;
+      const file = parse(name);
+      walk(file, (node) => {
+        if (ts.isCatchClause(node)) {
+          if (usesBinding(node.variableDeclaration?.name, node.block)) return;
+          if (!changedText.test(node.block.getText())) return;
+          if (!/\bawait\b|\.then\(|\.catch\(/u.test(node.parent.tryBlock.getText())) return;
+          offenders.push(at(file, node));
+          return;
+        }
+        const handler = promiseHandler(node);
+        if (handler === undefined) return;
+        if (!ts.isArrowFunction(handler) && !ts.isFunctionExpression(handler)) return;
+        if (usesBinding(handler.parameters[0]?.name, handler.body)) return;
+        if (!changedText.test(handler.body.getText())) return;
+        offenders.push(at(file, node));
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
   /** Sites whose rewrite has no failure worth keeping, or that answer on another surface. */
   const causeAllowed: Readonly<Record<string, string>> = {
     "merchant-catalog.ts":
