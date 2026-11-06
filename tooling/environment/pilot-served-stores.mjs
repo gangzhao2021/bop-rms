@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { copyFile, mkdir, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { planPilotConnections } from "./pilot-connection-budget.mjs";
@@ -170,4 +171,64 @@ export function reportConnectionBudget(
         roleLimit: limit,
       }) + "\n",
     );
+}
+
+/**
+ * WP-2423 M73: the installation's one product photo directory, for the installation's Store and
+ * every added Store (`stores/<name>`): the photos are public menu images named by the SHA-256 of
+ * their bytes, so Stores share them safely, and the one HTTPS entry serves them from here.
+ */
+export function installationMediaDirectory(directory) {
+  const root = /\/stores\/[a-z0-9][a-z0-9-]{0,62}\/?$/u.test(directory)
+    ? path.dirname(path.dirname(path.resolve(directory)))
+    : path.resolve(directory);
+  return path.join(root, "media", "product-images");
+}
+
+const photoName = /^([0-9a-f]{64})\.(?:jpg|webp)$/u;
+/**
+ * WP-2423 M73: photos an added Store stored in its own directory before they were shared are
+ * copied to the installation's (each checked against its name's digest first). Nothing is moved or
+ * deleted, so running it again copies nothing. Answers counts only.
+ */
+export async function gatherStorePhotos(directory) {
+  const target = installationMediaDirectory(directory);
+  const counts = { copied: 0, present: 0, refused: 0 };
+  let present;
+  try {
+    present = new Set(await readdir(target));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    present = new Set();
+  }
+  for (const relative of await loadServedStoreDirectories(directory)) {
+    const source = path.join(directory, relative, "media", "product-images");
+    let names;
+    try {
+      names = await readdir(source);
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    for (const name of names) {
+      const match = photoName.exec(name);
+      if (match === null) continue;
+      if (present.has(name)) {
+        counts.present += 1;
+        continue;
+      }
+      const bytes = await readFile(path.join(source, name));
+      if (createHash("sha256").update(bytes).digest("hex") !== match[1]) {
+        counts.refused += 1;
+        continue;
+      }
+      await mkdir(target, { recursive: true });
+      const temporary = path.join(target, "." + name + ".gather.tmp");
+      await copyFile(path.join(source, name), temporary);
+      await rename(temporary, path.join(target, name));
+      present.add(name);
+      counts.copied += 1;
+    }
+  }
+  return Object.freeze(counts);
 }

@@ -13,7 +13,11 @@ import { loadPilotHosting } from "./pilot-hosting.mjs";
 import { isPilotRuntime } from "./pilot-environment.mjs";
 export { loadServedStoreDirectories } from "./pilot-served-stores.mjs";
 import { loadAdmittedServedStores } from "./pilot-admitted-stores.mjs";
-import { loadServedStoreDirectories as configuredStoreDirectories } from "./pilot-served-stores.mjs";
+import {
+  gatherStorePhotos,
+  installationMediaDirectory,
+  loadServedStoreDirectories as configuredStoreDirectories,
+} from "./pilot-served-stores.mjs";
 import { reportUnexpected } from "./pilot-merchant-pickup.mjs";
 export function parsePilotHttpsArguments(args) {
   if (!Array.isArray(args) || args.length !== 1 || typeof args[0] !== "string")
@@ -139,6 +143,17 @@ export async function startConfiguredPilotHttps(
       reportUnexpected("PILOT_HTTPS_STORE_UNAVAILABLE", error, { store: relative });
     }
   }
+  // WP-2423 M73: photos an added Store kept in its own directory are served from the shared one.
+  // Counts only; a copy that fails leaves the photo where it is and never stops the service.
+  await gatherStorePhotos(directory).then(
+    (counts) => {
+      if (counts.copied > 0 || counts.refused > 0)
+        console.info(
+          `pilot photos: ${counts.copied} copied to the shared directory, ${counts.refused} not matching their name`,
+        );
+    },
+    (error) => console.warn("pilot photos: not gathered (" + (error?.code ?? "error") + ")"),
+  );
   return startServer({
     ...customer,
     additionalStores,
@@ -149,7 +164,7 @@ export async function startConfiguredPilotHttps(
     diningEntries,
     loadProfile: installation.loadProfile,
     // WP-2423 menu descriptions and photos: product photo sizes (pilot storage adapter).
-    productImageDirectory: path.join(directory, "media", "product-images"),
+    productImageDirectory: installationMediaDirectory(directory),
     keyFile: path.join(directory, "customer-tls-key.pem"),
     certificateFile: path.join(directory, "customer-tls-cert.pem"),
     createInternalTestResources: async () => {

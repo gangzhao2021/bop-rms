@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { installationMediaDirectory } from "./pilot-served-stores.mjs";
 import { createInternalRefundReconciliation } from "./pilot-refund-reconciliation.mjs";
 import { createInternalRefundSend } from "./pilot-refund-send.mjs";
 import { createInternalRefundPreparation } from "./pilot-refund-preparation.mjs";
@@ -176,7 +177,8 @@ export function composeMerchantDependencies(
     staffTotpVerifier: createInternalStaffTotpVerifier({ directory }),
     // WP-2423 menu descriptions and photos: pilot storage adapter for product photos (production
     // object storage is an external gate).
-    productImageDirectory: join(directory, "media", "product-images"),
+    // WP-2423 M73: one directory for the installation, so an added Store's photos are served.
+    productImageDirectory: installationMediaDirectory(directory),
     // WP-2423 P6: TEST-ONLY internal simulator for the unmatched capture refund.
     refundUnmatchedCapture: async (request) => {
       const simulator = await provider();
